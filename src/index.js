@@ -148,52 +148,91 @@ async function hashToken(token) {
    ========================================================= */
 
 async function ensureDatabase(env) {
-  await env.DB.exec(`
-    CREATE TABLE IF NOT EXISTS sessions (
-      id TEXT PRIMARY KEY,
-      user_id TEXT NOT NULL,
-      token_hash TEXT NOT NULL UNIQUE,
-      expires_at TEXT NOT NULL,
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY (user_id) REFERENCES users(id)
-    );
-
-    CREATE INDEX IF NOT EXISTS idx_sessions_token
-    ON sessions(token_hash);
-
-    CREATE INDEX IF NOT EXISTS idx_sessions_user
-    ON sessions(user_id);
-
-    CREATE INDEX IF NOT EXISTS idx_missions_client
-    ON missions(client_id);
-
-    CREATE INDEX IF NOT EXISTS idx_missions_intervenant
-    ON missions(intervenant_id);
-
-    CREATE INDEX IF NOT EXISTS idx_missions_date
-    ON missions(start_at);
-
-    CREATE INDEX IF NOT EXISTS idx_disponibilites_intervenant
-    ON disponibilites(intervenant_id);
-
-    CREATE INDEX IF NOT EXISTS idx_evaluations_target
-    ON evaluations(target_user_id);
-  `);
-
-  /*
-    Migration automatique pour les installations existantes.
-    Si la colonne existe déjà, l'erreur est simplement ignorée.
-  */
+  try {
+    await env.DB.prepare(`
+      CREATE TABLE IF NOT EXISTS sessions (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        token_hash TEXT NOT NULL UNIQUE,
+        expires_at TEXT NOT NULL,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+      )
+    `).run();
+  } catch (error) {
+    console.log("sessions:", error?.message);
+  }
 
   try {
-    await env.DB.exec(`
-      ALTER TABLE users ADD COLUMN password_hash TEXT;
-    `);
-  } catch (_) {
-    // Colonne déjà présente
+    await env.DB.prepare(`
+      CREATE INDEX IF NOT EXISTS idx_sessions_token
+      ON sessions(token_hash)
+    `).run();
+  } catch (error) {
+    console.log("idx_sessions_token:", error?.message);
+  }
+
+  try {
+    await env.DB.prepare(`
+      CREATE INDEX IF NOT EXISTS idx_sessions_user
+      ON sessions(user_id)
+    `).run();
+  } catch (error) {
+    console.log("idx_sessions_user:", error?.message);
+  }
+
+  try {
+    await env.DB.prepare(`
+      CREATE INDEX IF NOT EXISTS idx_missions_client
+      ON missions(client_id)
+    `).run();
+  } catch (error) {
+    console.log("idx_missions_client:", error?.message);
+  }
+
+  try {
+    await env.DB.prepare(`
+      CREATE INDEX IF NOT EXISTS idx_missions_intervenant
+      ON missions(intervenant_id)
+    `).run();
+  } catch (error) {
+    console.log("idx_missions_intervenant:", error?.message);
+  }
+
+  try {
+    await env.DB.prepare(`
+      CREATE INDEX IF NOT EXISTS idx_missions_date
+      ON missions(start_at)
+    `).run();
+  } catch (error) {
+    console.log("idx_missions_date:", error?.message);
+  }
+
+  try {
+    await env.DB.prepare(`
+      CREATE INDEX IF NOT EXISTS idx_disponibilites_intervenant
+      ON disponibilites(intervenant_id)
+    `).run();
+  } catch (error) {
+    console.log("idx_disponibilites_intervenant:", error?.message);
+  }
+
+  try {
+    await env.DB.prepare(`
+      CREATE INDEX IF NOT EXISTS idx_evaluations_target
+      ON evaluations(target_user_id)
+    `).run();
+  } catch (error) {
+    console.log("idx_evaluations_target:", error?.message);
+  }
+
+  try {
+    await env.DB.prepare(`
+      ALTER TABLE users ADD COLUMN password_hash TEXT
+    `).run();
+  } catch (error) {
+    // La colonne existe déjà.
   }
 }
-
 /* =========================================================
    AUTHENTIFICATION
    ========================================================= */
