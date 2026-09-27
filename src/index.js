@@ -339,6 +339,843 @@ async function logAction(
 }
 
 /* =========================================================
+   PROCHÉLIA V2 — MISSIONS / NOTIFICATIONS / SÉCURITÉ
+   À placer juste avant le bloc "ROUTEUR"
+   ========================================================= */
+
+async function ensureV2Tables(env) {
+
+  try {
+    await env.DB.prepare(`
+      CREATE TABLE IF NOT EXISTS notifications (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        type TEXT NOT NULL,
+        title TEXT NOT NULL,
+        message TEXT NOT NULL,
+        entity_type TEXT,
+        entity_id TEXT,
+        read_at TEXT,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+      )
+    `).run();
+  } catch (_) {}
+
+  try {
+    await env.DB.prepare(`
+      CREATE INDEX IF NOT EXISTS idx_notifications_user
+      ON notifications(user_id)
+    `).run();
+  } catch (_) {}
+
+  try {
+    await env.DB.prepare(`
+      CREATE INDEX IF NOT EXISTS idx_notifications_created
+      ON notifications(created_at)
+    `).run();
+  } catch (_) {}
+}
+
+/* =========================================================
+   NOTIFICATION INTERNE
+   ========================================================= */
+
+async function createNotification(
+  env,
+  userId,
+  type,
+  title,
+  message,
+  entityType = null,
+  entityId = null
+) {
+  if (!userId) return null;
+
+  const notificationId = id("notif");
+
+  await ensureV2Tables(env);
+
+  await env.DB.prepare(`
+    INSERT INTO notifications
+    (
+      id,
+      user_id,
+      type,
+      title,
+      message,
+      entity_type,
+      entity_id
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `)
+    .bind(
+      notificationId,
+      userId,
+      type,
+      title,
+      message,
+      entityType,
+      entityId
+    )
+    .run();
+
+  return notificationId;
+}
+
+/* =========================================================
+   V2 ROUTES
+   ========================================================= */
+
+async function handleV2Route(
+  request,
+  env,
+  path,
+  user
+) {
+
+  /* -------------------------------------------------------
+     INITIALISATION TABLES V2
+     ------------------------------------------------------- */
+
+  await ensureV2Tables(env);
+
+  /* -------------------------------------------------------
+     NOTIFICATIONS — LISTE
+     ------------------------------------------------------- */
+
+  if (
+    path === "/api/notifications" &&
+    request.method === "GET"
+  ) {
+
+    const denied = requireAuth(user);
+
+    if (denied) return denied;
+
+    const result = await env.DB.prepare(`
+      SELECT
+        id,
+        type,
+        title,
+        message,
+        entity_type,
+        entity_id,
+        read_at,
+        created_at
+      FROM notifications
+      WHERE user_id = ?
+      ORDER BY created_at DESC
+      LIMIT 100
+    `)
+      .bind(user.id)
+      .all();
+
+    return json({
+      ok: true,
+      notifications: result.results || []
+    });
+  }
+
+  /* -------------------------------------------------------
+     NOTIFICATION — MARQUER COMME LUE
+     ------------------------------------------------------- */
+
+  if (
+    path.startsWith("/api/notifications/") &&
+    path.endsWith("/read") &&
+    request.method === "POST"
+  ) {
+
+    const denied = requireAuth(user);
+
+    if (denied) return denied;
+
+    const parts = path.split("/");
+    const notificationId =
+      parts[parts.length - 2];
+
+    const result = await env.DB.prepare(`
+      UPDATE notifications
+      SET read_at = ?
+      WHERE id = ?
+        AND user_id = ?
+    `)
+      .bind(
+        now(),
+        notificationId,
+        user.id
+      )
+      .run();
+
+    return json({
+      ok: true,
+      updated: Number(result.meta?.changes || 0)
+    });
+  }
+
+  /* -------------------------------------------------------
+     MISSIONS — DÉTAIL
+     ------------------------------------------------------- */
+
+  if (
+    path.startsWith("/api/missions/") &&
+    !path.endsWith("/status") &&
+    request.method === "GET"
+  ) {
+
+    const denied = requireAuth(user);
+
+    if (denied) return denied;
+
+    const missionId =
+      path.split("/")[3];
+
+    const mission =
+      await env.DB.prepare(`
+        SELECT
+          m.*,
+          p.name AS prestation_name,
+          c.user_id AS client_user_id,
+          i.user_id AS intervenant_user_id
+        FROM missions m
+        JOIN prestations p
+          ON p.id = m.prestation_id
+        JOIN clients c
+          ON c.id = m.client_id
+        LEFT JOIN intervenants i
+          ON i.id = m.intervenant_id
+        WHERE m.id = ?
+        LIMIT 1
+      `)
+        .bind(missionId)
+        .first();
+
+    if (!mission) {
+      return json({
+        ok: false,
+        error: "Mission introuvable"
+      }, 404);
+    }
+
+    const allowed =
+      user.role === "gerante" ||
+      user.role === "admin" ||
+      mission.client_user_id === user.id ||
+      mission.intervenant_user_id === user.id;
+
+    if (!allowed) {
+      return json({
+        ok: false,
+        error: "Accès non autorisé"
+      }, 403);
+    }
+
+    return json({
+      ok: true,
+      mission
+    });
+  }
+
+  /* -------------------------------------------------------
+     MISSION — CHANGEMENT DE STATUT
+     ------------------------------------------------------- */
+
+  if (
+    path.startsWith("/api/missions/") &&
+    path.endsWith("/status") &&
+    request.method === "POST"
+  ) {
+
+    const denied = requireAuth(user);
+
+    if (denied) return denied;
+
+    const missionId =
+      path.split("/")[3];
+
+    const data =
+      await request.json();
+
+    const newStatus =
+      clean(data.status);
+
+    const allowedStatuses = [
+      "requested",
+      "proposed",
+      "confirmed",
+      "accepted",
+      "in_progress",
+      "completed",
+      "cancelled",
+      "rejected"
+    ];
+
+    if (!allowedStatuses.includes(newStatus)) {
+      return json({
+        ok: false,
+        error: "Statut de mission invalide"
+      }, 400);
+    }
+
+    const mission =
+      await env.DB.prepare(`
+        SELECT
+          m.*,
+          c.user_id AS client_user_id,
+          i.user_id AS intervenant_user_id
+        FROM missions m
+        JOIN clients c
+          ON c.id = m.client_id
+        LEFT JOIN intervenants i
+          ON i.id = m.intervenant_id
+        WHERE m.id = ?
+        LIMIT 1
+      `)
+        .bind(missionId)
+        .first();
+
+    if (!mission) {
+      return json({
+        ok: false,
+        error: "Mission introuvable"
+      }, 404);
+    }
+
+    const isManager =
+      user.role === "gerante" ||
+      user.role === "admin";
+
+    const isClient =
+      mission.client_user_id === user.id;
+
+    const isIntervenant =
+      mission.intervenant_user_id === user.id;
+
+    if (
+      !isManager &&
+      !isClient &&
+      !isIntervenant
+    ) {
+      return json({
+        ok: false,
+        error: "Accès non autorisé"
+      }, 403);
+    }
+
+    /* Une mission terminée ou annulée ne peut pas
+       être modifiée par un utilisateur normal. */
+
+    if (
+      !isManager &&
+      ["completed", "cancelled"].includes(
+        mission.status
+      )
+    ) {
+      return json({
+        ok: false,
+        error: "Cette mission est déjà clôturée"
+      }, 409);
+    }
+
+    /* Une mission ne peut pas être confirmée deux fois. */
+
+    if (
+      newStatus === "confirmed" &&
+      mission.status === "confirmed"
+    ) {
+      return json({
+        ok: false,
+        error: "Mission déjà confirmée"
+      }, 409);
+    }
+
+    await env.DB.prepare(`
+      UPDATE missions
+      SET
+        status = ?,
+        updated_at = ?
+      WHERE id = ?
+    `)
+      .bind(
+        newStatus,
+        now(),
+        missionId
+      )
+      .run();
+
+    await logAction(
+      env,
+      user.id,
+      "MISSION_STATUS_CHANGE",
+      "mission",
+      missionId,
+      {
+        old_status: mission.status,
+        new_status: newStatus
+      }
+    );
+
+    /* -----------------------------------------------------
+       NOTIFICATIONS
+       ----------------------------------------------------- */
+
+    const recipients = [];
+
+    if (
+      mission.client_user_id &&
+      mission.client_user_id !== user.id
+    ) {
+      recipients.push(
+        mission.client_user_id
+      );
+    }
+
+    if (
+      mission.intervenant_user_id &&
+      mission.intervenant_user_id !== user.id
+    ) {
+      recipients.push(
+        mission.intervenant_user_id
+      );
+    }
+
+    for (const recipient of recipients) {
+
+      await createNotification(
+        env,
+        recipient,
+        "MISSION_STATUS",
+        "Mise à jour de votre mission",
+        `La mission ${missionId} est maintenant au statut : ${newStatus}.`,
+        "mission",
+        missionId
+      );
+    }
+
+    return json({
+      ok: true,
+      mission_id: missionId,
+      old_status: mission.status,
+      status: newStatus
+    });
+  }
+
+  /* -------------------------------------------------------
+     MISSION — ATTRIBUTION INTERVENANT
+     ------------------------------------------------------- */
+
+  if (
+    path.startsWith("/api/missions/") &&
+    path.endsWith("/assign") &&
+    request.method === "POST"
+  ) {
+
+    const denied = requireRole(
+      user,
+      ["gerante", "admin"]
+    );
+
+    if (denied) return denied;
+
+    const missionId =
+      path.split("/")[3];
+
+    const data =
+      await request.json();
+
+    if (!data.intervenant_id) {
+      return json({
+        ok: false,
+        error: "Intervenant obligatoire"
+      }, 400);
+    }
+
+    const mission =
+      await env.DB.prepare(`
+        SELECT *
+        FROM missions
+        WHERE id = ?
+        LIMIT 1
+      `)
+        .bind(missionId)
+        .first();
+
+    if (!mission) {
+      return json({
+        ok: false,
+        error: "Mission introuvable"
+      }, 404);
+    }
+
+    if (
+      ["completed", "cancelled"].includes(
+        mission.status
+      )
+    ) {
+      return json({
+        ok: false,
+        error: "Mission déjà clôturée"
+      }, 409);
+    }
+
+    const intervenant =
+      await env.DB.prepare(`
+        SELECT
+          i.id,
+          i.user_id,
+          i.validation_status
+        FROM intervenants i
+        WHERE i.id = ?
+        LIMIT 1
+      `)
+        .bind(data.intervenant_id)
+        .first();
+
+    if (!intervenant) {
+      return json({
+        ok: false,
+        error: "Intervenant introuvable"
+      }, 404);
+    }
+
+    await env.DB.prepare(`
+      UPDATE missions
+      SET
+        intervenant_id = ?,
+        status = 'proposed',
+        updated_at = ?
+      WHERE id = ?
+    `)
+      .bind(
+        data.intervenant_id,
+        now(),
+        missionId
+      )
+      .run();
+
+    await createNotification(
+      env,
+      intervenant.user_id,
+      "MISSION_PROPOSED",
+      "Nouvelle mission proposée",
+      `Une nouvelle mission vous a été proposée : ${missionId}.`,
+      "mission",
+      missionId
+    );
+
+    await logAction(
+      env,
+      user.id,
+      "ASSIGN_INTERVENANT",
+      "mission",
+      missionId,
+      {
+        intervenant_id:
+          data.intervenant_id
+      }
+    );
+
+    return json({
+      ok: true,
+      mission_id: missionId,
+      intervenant_id:
+        data.intervenant_id,
+      status: "proposed"
+    });
+  }
+
+  /* -------------------------------------------------------
+     PAIEMENT — CRÉATION SÉCURISÉE / IDEMPOTENTE
+     ------------------------------------------------------- */
+
+  if (
+    path === "/api/paiements/create" &&
+    request.method === "POST"
+  ) {
+
+    const denied = requireAuth(user);
+
+    if (denied) return denied;
+
+    const data =
+      await request.json();
+
+    if (
+      !data.mission_id ||
+      data.amount === undefined
+    ) {
+      return json({
+        ok: false,
+        error: "Mission et montant obligatoires"
+      }, 400);
+    }
+
+    const amount =
+      Number(data.amount);
+
+    if (
+      !Number.isFinite(amount) ||
+      amount <= 0
+    ) {
+      return json({
+        ok: false,
+        error: "Montant invalide"
+      }, 400);
+    }
+
+    /* Clé d'idempotence fournie par le frontend. */
+
+    const idempotencyKey =
+      clean(
+        data.idempotency_key
+      );
+
+    if (!idempotencyKey) {
+      return json({
+        ok: false,
+        error: "Clé d'idempotence obligatoire"
+      }, 400);
+    }
+
+    const mission =
+      await env.DB.prepare(`
+        SELECT
+          m.*,
+          c.user_id AS client_user_id
+        FROM missions m
+        JOIN clients c
+          ON c.id = m.client_id
+        WHERE m.id = ?
+        LIMIT 1
+      `)
+        .bind(data.mission_id)
+        .first();
+
+    if (!mission) {
+      return json({
+        ok: false,
+        error: "Mission introuvable"
+      }, 404);
+    }
+
+    if (
+      user.role === "client" &&
+      mission.client_user_id !== user.id
+    ) {
+      return json({
+        ok: false,
+        error: "Accès non autorisé"
+      }, 403);
+    }
+
+    /* On utilise provider_reference comme clé
+       d'idempotence tant que le vrai prestataire
+       de paiement n'est pas branché. */
+
+    const existing =
+      await env.DB.prepare(`
+        SELECT *
+        FROM paiements
+        WHERE provider_reference = ?
+        LIMIT 1
+      `)
+        .bind(idempotencyKey)
+        .first();
+
+    if (existing) {
+      return json({
+        ok: true,
+        duplicate: true,
+        paiement: existing
+      });
+    }
+
+    const paiementId =
+      id("paiement");
+
+    await env.DB.prepare(`
+      INSERT INTO paiements
+      (
+        id,
+        mission_id,
+        amount,
+        status,
+        provider_reference
+      )
+      VALUES (?, ?, ?, 'pending', ?)
+    `)
+      .bind(
+        paiementId,
+        data.mission_id,
+        amount,
+        idempotencyKey
+      )
+      .run();
+
+    await logAction(
+      env,
+      user.id,
+      "PAYMENT_INTENT_CREATED",
+      "paiement",
+      paiementId
+    );
+
+    return json({
+      ok: true,
+      paiement_id: paiementId,
+      status: "pending",
+      provider: "pending_integration",
+      message:
+        "Paiement préparé. Le prestataire de paiement réel doit encore être connecté."
+    }, 201);
+  }
+
+  /* -------------------------------------------------------
+     DOCUMENT — MÉTADONNÉES SÉCURISÉES
+     ------------------------------------------------------- */
+
+  if (
+    path === "/api/documents/secure" &&
+    request.method === "POST"
+  ) {
+
+    const denied = requireAuth(user);
+
+    if (denied) return denied;
+
+    const data =
+      await request.json();
+
+    const ownerId =
+      (
+        user.role === "gerante" ||
+        user.role === "admin"
+      )
+        ? data.user_id
+        : user.id;
+
+    if (
+      !ownerId ||
+      !data.document_type
+    ) {
+      return json({
+        ok: false,
+        error: "Utilisateur et type de document obligatoires"
+      }, 400);
+    }
+
+    const documentId =
+      id("doc");
+
+    /* file_reference représente ici la future
+       référence R2. Aucun fichier sensible n'est
+       stocké directement dans D1. */
+
+    const fileReference =
+      clean(data.file_reference);
+
+    if (!fileReference) {
+      return json({
+        ok: false,
+        error:
+          "Référence de stockage sécurisée obligatoire"
+      }, 400);
+    }
+
+    await env.DB.prepare(`
+      INSERT INTO documents
+      (
+        id,
+        user_id,
+        document_type,
+        file_reference,
+        status,
+        expires_at
+      )
+      VALUES (?, ?, ?, ?, 'pending', ?)
+    `)
+      .bind(
+        documentId,
+        ownerId,
+        data.document_type,
+        fileReference,
+        data.expires_at || null
+      )
+      .run();
+
+    await logAction(
+      env,
+      user.id,
+      "SECURE_DOCUMENT_REGISTER",
+      "document",
+      documentId
+    );
+
+    return json({
+      ok: true,
+      document_id: documentId,
+      status: "pending",
+      storage: "R2_pending_integration"
+    }, 201);
+  }
+
+  /* -------------------------------------------------------
+     STATISTIQUES V2
+     ------------------------------------------------------- */
+
+  if (
+    path === "/api/stats/production" &&
+    request.method === "GET"
+  ) {
+
+    const denied = requireRole(
+      user,
+      ["gerante", "admin"]
+    );
+
+    if (denied) return denied;
+
+    const missions =
+      await env.DB.prepare(`
+        SELECT
+          status,
+          COUNT(*) AS total
+        FROM missions
+        GROUP BY status
+      `).all();
+
+    const payments =
+      await env.DB.prepare(`
+        SELECT
+          status,
+          COUNT(*) AS total,
+          COALESCE(SUM(amount), 0) AS amount
+        FROM paiements
+        GROUP BY status
+      `).all();
+
+    const notifications =
+      await env.DB.prepare(`
+        SELECT
+          COUNT(*) AS total
+        FROM notifications
+      `).first();
+
+    return json({
+      ok: true,
+      production: {
+        missions:
+          missions.results || [],
+        paiements:
+          payments.results || [],
+        notifications:
+          Number(notifications?.total || 0)
+      }
+    });
+  }
+
+  return null;
+}/* =========================================================
    ROUTEUR
    ========================================================= */
 
@@ -353,12 +1190,21 @@ export default {
       }
 
       await ensureDatabase(env);
-
+await ensureV2Tables(env);
       const url = new URL(request.url);
       const path = url.pathname;
 
       const user = await authenticate(request, env);
+const v2Response = await handleV2Route(
+  request,
+  env,
+  path,
+  user
+);
 
+if (v2Response) {
+  return v2Response;
+}
       /* =====================================================
          HEALTH
          ===================================================== */
