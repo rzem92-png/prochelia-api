@@ -1,5 +1,11 @@
 {
   "name": "prochelia-api",
   "main": "src/index.js",
-  "compatibility_date": "2026-09-25"
+  "compatibility_date": "2026-09-25",
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_id": "04f52830-ef5a-4f17-a640-42bbc2381bba"
+    }
+  ]
 }
