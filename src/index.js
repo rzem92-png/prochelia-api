@@ -21,7 +21,17 @@ export default {
       });
     }
 
-    return Response.json({
+   if (url.pathname === "/api/prestations") {
+  const { results } = await env.DB
+    .prepare("SELECT id, name, description, active FROM prestations WHERE active = 1 ORDER BY name")
+    .all();
+
+  return Response.json({
+    ok: true,
+    prestations: results
+  });
+
+   return Response.json({
       service: "PROCHÉLIA API",
       status: "ok"
     });
