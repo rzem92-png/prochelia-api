@@ -1,8 +1,18 @@
+/* =========================================================
+   PROCHÉLIA API
+   Cloudflare Workers + D1
+   Backend MVP opérationnel
+   ========================================================= */
+
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "GET,POST,PATCH,DELETE,OPTIONS",
+  "Access-Control-Allow-Methods": "GET,POST,PUT,PATCH,DELETE,OPTIONS",
   "Access-Control-Allow-Headers": "Content-Type, Authorization"
 };
+
+/* =========================================================
+   OUTILS
+   ========================================================= */
 
 function json(data, status = 200) {
   return new Response(JSON.stringify(data), {
@@ -18,488 +28,1163 @@ function id(prefix = "id") {
   return `${prefix}_${crypto.randomUUID()}`;
 }
 
-async function body(request) {
+function now() {
+  return new Date().toISOString();
+}
+
+function clean(value) {
+  return typeof value === "string" ? value.trim() : value;
+}
+
+function safeUser(user) {
+  if (!user) return null;
+
+  return {
+    id: user.id,
+    role: user.role,
+    email: user.email,
+    first_name: user.first_name,
+    last_name: user.last_name,
+    phone: user.phone,
+    status: user.status,
+    created_at: user.created_at,
+    updated_at: user.updated_at
+  };
+}
+
+function bearerToken(request) {
+  const header = request.headers.get("Authorization") || "";
+
+  if (!header.startsWith("Bearer ")) {
+    return null;
+  }
+
+  return header.slice(7).trim() || null;
+}
+
+/* =========================================================
+   HASH MOT DE PASSE
+   PBKDF2 + SHA-256
+   ========================================================= */
+
+function bytesToBase64(bytes) {
+  let binary = "";
+
+  for (const byte of bytes) {
+    binary += String.fromCharCode(byte);
+  }
+
+  return btoa(binary);
+}
+
+function base64ToBytes(value) {
+  const binary = atob(value);
+  const bytes = new Uint8Array(binary.length);
+
+  for (let i = 0; i < binary.length; i++) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+
+  return bytes;
+}
+
+async function hashPassword(password, saltBase64 = null) {
+  const encoder = new TextEncoder();
+
+  const salt = saltBase64
+    ? base64ToBytes(saltBase64)
+    : crypto.getRandomValues(new Uint8Array(16));
+
+  const keyMaterial = await crypto.subtle.importKey(
+    "raw",
+    encoder.encode(password),
+    "PBKDF2",
+    false,
+    ["deriveBits"]
+  );
+
+  const derived = await crypto.subtle.deriveBits(
+    {
+      name: "PBKDF2",
+      salt,
+      iterations: 100000,
+      hash: "SHA-256"
+    },
+    keyMaterial,
+    256
+  );
+
+  return {
+    salt: bytesToBase64(salt),
+    hash: bytesToBase64(new Uint8Array(derived))
+  };
+}
+
+async function verifyPassword(password, storedValue) {
+  if (!storedValue || !storedValue.includes(":")) {
+    return false;
+  }
+
+  const [salt, expectedHash] = storedValue.split(":");
+
+  const result = await hashPassword(password, salt);
+
+  return result.hash === expectedHash;
+}
+
+async function hashToken(token) {
+  const data = new TextEncoder().encode(token);
+
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    data
+  );
+
+  return bytesToBase64(new Uint8Array(digest));
+}
+
+/* =========================================================
+   BASE D1
+   ========================================================= */
+
+async function ensureDatabase(env) {
+  await env.DB.exec(`
+    CREATE TABLE IF NOT EXISTS sessions (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      token_hash TEXT NOT NULL UNIQUE,
+      expires_at TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (user_id) REFERENCES users(id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_sessions_token
+    ON sessions(token_hash);
+
+    CREATE INDEX IF NOT EXISTS idx_sessions_user
+    ON sessions(user_id);
+
+    CREATE INDEX IF NOT EXISTS idx_missions_client
+    ON missions(client_id);
+
+    CREATE INDEX IF NOT EXISTS idx_missions_intervenant
+    ON missions(intervenant_id);
+
+    CREATE INDEX IF NOT EXISTS idx_missions_date
+    ON missions(start_at);
+
+    CREATE INDEX IF NOT EXISTS idx_disponibilites_intervenant
+    ON disponibilites(intervenant_id);
+
+    CREATE INDEX IF NOT EXISTS idx_evaluations_target
+    ON evaluations(target_user_id);
+  `);
+
+  /*
+    Migration automatique pour les installations existantes.
+    Si la colonne existe déjà, l'erreur est simplement ignorée.
+  */
+
   try {
-    return await request.json();
-  } catch {
-    return {};
+    await env.DB.exec(`
+      ALTER TABLE users ADD COLUMN password_hash TEXT;
+    `);
+  } catch (_) {
+    // Colonne déjà présente
   }
 }
 
+/* =========================================================
+   AUTHENTIFICATION
+   ========================================================= */
+
+async function authenticate(request, env) {
+  const token = bearerToken(request);
+
+  if (!token) {
+    return null;
+  }
+
+  const tokenHash = await hashToken(token);
+
+  const result = await env.DB.prepare(`
+    SELECT
+      u.id,
+      u.role,
+      u.email,
+      u.first_name,
+      u.last_name,
+      u.phone,
+      u.status,
+      u.created_at,
+      u.updated_at
+    FROM sessions s
+    JOIN users u ON u.id = s.user_id
+    WHERE s.token_hash = ?
+      AND s.expires_at > ?
+      AND u.status != 'blocked'
+    LIMIT 1
+  `)
+    .bind(tokenHash, now())
+    .first();
+
+  return result || null;
+}
+
+function requireAuth(user) {
+  if (!user) {
+    return json({
+      ok: false,
+      error: "Authentification requise"
+    }, 401);
+  }
+
+  return null;
+}
+
+function requireRole(user, roles) {
+  if (!user) {
+    return json({
+      ok: false,
+      error: "Authentification requise"
+    }, 401);
+  }
+
+  if (!roles.includes(user.role)) {
+    return json({
+      ok: false,
+      error: "Accès non autorisé"
+    }, 403);
+  }
+
+  return null;
+}
+
+/* =========================================================
+   JOURNAL
+   ========================================================= */
+
+async function logAction(
+  env,
+  userId,
+  action,
+  entityType = null,
+  entityId = null,
+  details = null
+) {
+  try {
+    await env.DB.prepare(`
+      INSERT INTO journal
+      (
+        id,
+        user_id,
+        action,
+        entity_type,
+        entity_id,
+        details
+      )
+      VALUES (?, ?, ?, ?, ?, ?)
+    `)
+      .bind(
+        id("log"),
+        userId,
+        action,
+        entityType,
+        entityId,
+        details ? JSON.stringify(details) : null
+      )
+      .run();
+  } catch (_) {
+    // Le journal ne doit pas bloquer l'opération principale.
+  }
+}
+
+/* =========================================================
+   ROUTEUR
+   ========================================================= */
+
 export default {
   async fetch(request, env) {
-
-    if (request.method === "OPTIONS") {
-      return new Response(null, {
-        status: 204,
-        headers: corsHeaders
-      });
-    }
-
-    const url = new URL(request.url);
-    const path = url.pathname;
-
-    if (!env.DB) {
-      return json({
-        ok: false,
-        database: false,
-        message: "D1 non connectée"
-      }, 500);
-    }
-
     try {
-
-      /* =========================
-         SANTÉ API + D1
-      ========================= */
-
-      if (path === "/health") {
-        const result = await env.DB
-          .prepare("SELECT 1 AS ok")
-          .first();
-
-        return json({
-          ok: true,
-          database: result?.ok === 1,
-          service: "PROCHÉLIA API"
+      if (request.method === "OPTIONS") {
+        return new Response(null, {
+          status: 204,
+          headers: corsHeaders
         });
       }
 
+      await ensureDatabase(env);
 
-      /* =========================
-         PRESTATIONS
-      ========================= */
+      const url = new URL(request.url);
+      const path = url.pathname;
 
-      if (path === "/api/prestations" && request.method === "GET") {
+      const user = await authenticate(request, env);
 
-        const { results } = await env.DB
-          .prepare(`
-            SELECT id, name, description, active
-            FROM prestations
-            WHERE active = 1
-            ORDER BY name
-          `)
-          .all();
+      /* =====================================================
+         HEALTH
+         ===================================================== */
 
-        return json({
-          ok: true,
-          prestations: results
-        });
-      }
+      if (path === "/health" && request.method === "GET") {
+        let database = false;
 
-
-      if (path === "/api/prestations" && request.method === "POST") {
-
-        const data = await body(request);
-
-        if (!data.name) {
-          return json({
-            ok: false,
-            message: "Le nom de la prestation est obligatoire"
-          }, 400);
+        try {
+          await env.DB.prepare("SELECT 1 AS ok").first();
+          database = true;
+        } catch (_) {
+          database = false;
         }
+
+        return json({
+          ok: true,
+          database,
+          service: "PROCHÉLIA API",
+          version: "1.0.0",
+          timestamp: now()
+        });
+      }
+
+      if (path === "/" && request.method === "GET") {
+        return json({
+          ok: true,
+          service: "PROCHÉLIA API",
+          version: "1.0.0",
+          status: "online"
+        });
+      }
+
+      /* =====================================================
+         PRESTATIONS
+         ===================================================== */
+
+      if (
+        path === "/api/prestations" &&
+        request.method === "GET"
+      ) {
+        const result = await env.DB.prepare(`
+          SELECT
+            id,
+            name,
+            description,
+            active
+          FROM prestations
+          WHERE active = 1
+          ORDER BY name
+        `).all();
+
+        return json({
+          ok: true,
+          prestations: result.results || []
+        });
+      }
+
+      if (
+        path === "/api/prestations" &&
+        request.method === "POST"
+      ) {
+        const denied = requireRole(
+          user,
+          ["gerante", "admin"]
+        );
+
+        if (denied) return denied;
+
+        const data = await request.json();
 
         const prestationId = id("prest");
 
-        await env.DB
-          .prepare(`
-            INSERT INTO prestations
-            (id, name, description, active)
-            VALUES (?, ?, ?, 1)
-          `)
+        await env.DB.prepare(`
+          INSERT INTO prestations
+          (
+            id,
+            name,
+            description,
+            active
+          )
+          VALUES (?, ?, ?, ?)
+        `)
           .bind(
             prestationId,
-            data.name,
-            data.description || null
+            clean(data.name),
+            clean(data.description) || null,
+            data.active === false ? 0 : 1
           )
           .run();
+
+        await logAction(
+          env,
+          user.id,
+          "CREATE_PRESTATION",
+          "prestation",
+          prestationId,
+          data
+        );
 
         return json({
           ok: true,
-          id: prestationId
+          prestation_id: prestationId
         }, 201);
       }
 
+      /* =====================================================
+         INSCRIPTION
+         ===================================================== */
 
-      /* =========================
-         UTILISATEURS
-      ========================= */
+      if (
+        path === "/api/register" &&
+        request.method === "POST"
+      ) {
+        const data = await request.json();
 
-      if (path === "/api/users" && request.method === "POST") {
+        const email = clean(data.email)?.toLowerCase();
+        const password = data.password;
+        const firstName = clean(data.first_name);
+        const lastName = clean(data.last_name);
+        const phone = clean(data.phone) || null;
 
-        const data = await body(request);
-
-        if (!data.email || !data.first_name || !data.last_name || !data.role) {
+        if (
+          !email ||
+          !password ||
+          !firstName ||
+          !lastName
+        ) {
           return json({
             ok: false,
-            message: "Nom, prénom, email et rôle sont obligatoires"
+            error: "Champs obligatoires manquants"
           }, 400);
         }
 
+        if (password.length < 8) {
+          return json({
+            ok: false,
+            error: "Le mot de passe doit contenir au moins 8 caractères"
+          }, 400);
+        }
+
+        const role =
+          data.role === "intervenant"
+            ? "intervenant"
+            : "client";
+
+        const existing = await env.DB.prepare(`
+          SELECT id
+          FROM users
+          WHERE email = ?
+          LIMIT 1
+        `)
+          .bind(email)
+          .first();
+
+        if (existing) {
+          return json({
+            ok: false,
+            error: "Cette adresse e-mail est déjà utilisée"
+          }, 409);
+        }
+
+        const passwordData =
+          await hashPassword(password);
+
+        const passwordHash =
+          `${passwordData.salt}:${passwordData.hash}`;
+
         const userId = id("user");
 
-        await env.DB
-          .prepare(`
-            INSERT INTO users
-            (id, role, email, first_name, last_name, phone, status)
-            VALUES (?, ?, ?, ?, ?, ?, 'pending')
-          `)
+        await env.DB.prepare(`
+          INSERT INTO users
+          (
+            id,
+            role,
+            email,
+            first_name,
+            last_name,
+            phone,
+            status,
+            password_hash
+          )
+          VALUES (?, ?, ?, ?, ?, ?, 'active', ?)
+        `)
           .bind(
             userId,
-            data.role,
-            data.email,
-            data.first_name,
-            data.last_name,
-            data.phone || null
+            role,
+            email,
+            firstName,
+            lastName,
+            phone,
+            passwordHash
           )
           .run();
 
-        await env.DB
-          .prepare(`
-            INSERT INTO journal
-            (id, user_id, action, entity_type, entity_id, details)
-            VALUES (?, ?, ?, ?, ?, ?)
+        if (role === "client") {
+          await env.DB.prepare(`
+            INSERT INTO clients
+            (
+              id,
+              user_id
+            )
+            VALUES (?, ?)
           `)
-          .bind(
-            id("log"),
-            userId,
-            "CREATE_USER",
-            "users",
-            userId,
-            JSON.stringify({
-              role: data.role,
-              email: data.email
-            })
-          )
-          .run();
+            .bind(
+              id("client"),
+              userId
+            )
+            .run();
+        }
+
+        if (role === "intervenant") {
+          await env.DB.prepare(`
+            INSERT INTO intervenants
+            (
+              id,
+              user_id,
+              professional_status,
+              description,
+              service_area,
+              hourly_rate,
+              validation_status
+            )
+            VALUES (?, ?, ?, ?, ?, ?, 'pending')
+          `)
+            .bind(
+              id("intervenant"),
+              userId,
+              clean(data.professional_status) || null,
+              clean(data.description) || null,
+              clean(data.service_area) || null,
+              Number(data.hourly_rate) || 0
+            )
+            .run();
+        }
+
+        await logAction(
+          env,
+          userId,
+          "REGISTER",
+          "user",
+          userId,
+          {
+            role,
+            email
+          }
+        );
 
         return json({
           ok: true,
           user: {
             id: userId,
-            role: data.role,
-            email: data.email,
-            first_name: data.first_name,
-            last_name: data.last_name
+            role,
+            email,
+            first_name: firstName,
+            last_name: lastName
           }
         }, 201);
       }
 
+      /* =====================================================
+         CONNEXION
+         ===================================================== */
 
-      if (path === "/api/users" && request.method === "GET") {
+      if (
+        path === "/api/login" &&
+        request.method === "POST"
+      ) {
+        const data = await request.json();
 
-        const { results } = await env.DB
-          .prepare(`
-            SELECT id, role, email, first_name, last_name,
-                   phone, status, created_at
+        const email =
+          clean(data.email)?.toLowerCase();
+
+        const password =
+          data.password;
+
+        if (!email || !password) {
+          return json({
+            ok: false,
+            error: "E-mail et mot de passe obligatoires"
+          }, 400);
+        }
+
+        const account =
+          await env.DB.prepare(`
+            SELECT *
             FROM users
-            ORDER BY created_at DESC
+            WHERE email = ?
+            LIMIT 1
           `)
-          .all();
+            .bind(email)
+            .first();
+
+        if (!account) {
+          return json({
+            ok: false,
+            error: "Identifiants incorrects"
+          }, 401);
+        }
+
+        if (account.status === "blocked") {
+          return json({
+            ok: false,
+            error: "Compte bloqué"
+          }, 403);
+        }
+
+        const valid =
+          await verifyPassword(
+            password,
+            account.password_hash
+          );
+
+        if (!valid) {
+          return json({
+            ok: false,
+            error: "Identifiants incorrects"
+          }, 401);
+        }
+
+        const sessionToken =
+          `${crypto.randomUUID()}${crypto.randomUUID()}`;
+
+        const tokenHash =
+          await hashToken(sessionToken);
+
+        const sessionId =
+          id("session");
+
+        const expiresAt =
+          new Date(
+            Date.now() + 1000 * 60 * 60 * 24 * 30
+          ).toISOString();
+
+        await env.DB.prepare(`
+          INSERT INTO sessions
+          (
+            id,
+            user_id,
+            token_hash,
+            expires_at
+          )
+          VALUES (?, ?, ?, ?)
+        `)
+          .bind(
+            sessionId,
+            account.id,
+            tokenHash,
+            expiresAt
+          )
+          .run();
+
+        await logAction(
+          env,
+          account.id,
+          "LOGIN",
+          "user",
+          account.id
+        );
 
         return json({
           ok: true,
-          users: results
+          token: sessionToken,
+          expires_at: expiresAt,
+          user: safeUser(account)
         });
       }
 
+      /* =====================================================
+         ME
+         ===================================================== */
 
-      /* =========================
+      if (
+        path === "/api/me" &&
+        request.method === "GET"
+      ) {
+        const denied = requireAuth(user);
+
+        if (denied) return denied;
+
+        return json({
+          ok: true,
+          user: safeUser(user)
+        });
+      }
+
+      /* =====================================================
          CLIENTS
-      ========================= */
+         ===================================================== */
 
-      if (path === "/api/clients" && request.method === "POST") {
+      if (
+        path === "/api/clients" &&
+        request.method === "GET"
+      ) {
+        const denied = requireRole(
+          user,
+          ["gerante", "admin", "intervenant"]
+        );
 
-        const data = await body(request);
+        if (denied) return denied;
 
-        if (!data.user_id) {
-          return json({
-            ok: false,
-            message: "user_id obligatoire"
-          }, 400);
-        }
-
-        const clientId = id("client");
-
-        await env.DB
-          .prepare(`
-            INSERT INTO clients
-            (id, user_id, address, city, postal_code, notes)
-            VALUES (?, ?, ?, ?, ?, ?)
-          `)
-          .bind(
-            clientId,
-            data.user_id,
-            data.address || null,
-            data.city || null,
-            data.postal_code || null,
-            data.notes || null
-          )
-          .run();
+        const result = await env.DB.prepare(`
+          SELECT
+            c.id AS client_id,
+            c.user_id,
+            c.address,
+            c.city,
+            c.postal_code,
+            u.first_name,
+            u.last_name,
+            u.email,
+            u.phone,
+            u.status
+          FROM clients c
+          JOIN users u ON u.id = c.user_id
+          ORDER BY u.last_name, u.first_name
+        `).all();
 
         return json({
           ok: true,
-          client_id: clientId
-        }, 201);
+          clients: result.results || []
+        });
       }
 
-
-      /* =========================
+      /* =====================================================
          INTERVENANTS
-      ========================= */
+         ===================================================== */
 
-      if (path === "/api/intervenants" && request.method === "POST") {
-
-        const data = await body(request);
-
-        if (!data.user_id) {
-          return json({
-            ok: false,
-            message: "user_id obligatoire"
-          }, 400);
-        }
-
-        const intervenantId = id("inter");
-
-        await env.DB
-          .prepare(`
-            INSERT INTO intervenants
-            (id, user_id, professional_status, description,
-             service_area, hourly_rate, validation_status)
-            VALUES (?, ?, ?, ?, ?, ?, 'pending')
-          `)
-          .bind(
-            intervenantId,
-            data.user_id,
-            data.professional_status || null,
-            data.description || null,
-            data.service_area || null,
-            data.hourly_rate || null
-          )
-          .run();
+      if (
+        path === "/api/intervenants" &&
+        request.method === "GET"
+      ) {
+        const result = await env.DB.prepare(`
+          SELECT
+            i.id AS intervenant_id,
+            i.user_id,
+            i.professional_status,
+            i.description,
+            i.service_area,
+            i.hourly_rate,
+            i.validation_status,
+            u.first_name,
+            u.last_name,
+            u.email,
+            u.phone,
+            u.status
+          FROM intervenants i
+          JOIN users u ON u.id = i.user_id
+          WHERE u.status != 'blocked'
+          ORDER BY u.last_name, u.first_name
+        `).all();
 
         return json({
           ok: true,
-          intervenant_id: intervenantId
-        }, 201);
-      }
-
-
-      if (path === "/api/intervenants" && request.method === "GET") {
-
-        const { results } = await env.DB
-          .prepare(`
-            SELECT
-              i.id,
-              i.user_id,
-              u.first_name,
-              u.last_name,
-              u.email,
-              u.phone,
-              i.professional_status,
-              i.description,
-              i.service_area,
-              i.hourly_rate,
-              i.validation_status
-            FROM intervenants i
-            JOIN users u ON u.id = i.user_id
-            ORDER BY u.last_name, u.first_name
-          `)
-          .all();
-
-        return json({
-          ok: true,
-          intervenants: results
+          intervenants: result.results || []
         });
       }
 
+      /* =====================================================
+         MISSIONS - LISTE
+         ===================================================== */
 
-      /* =========================
-         TARIFS
-      ========================= */
+      if (
+        path === "/api/missions" &&
+        request.method === "GET"
+      ) {
+        const denied = requireAuth(user);
 
-      if (path === "/api/tarifs" && request.method === "GET") {
+        if (denied) return denied;
 
-        const { results } = await env.DB
-          .prepare(`
-            SELECT
-              t.*,
-              p.name AS prestation_name
-            FROM tarifs t
-            JOIN prestations p ON p.id = t.prestation_id
-            WHERE t.active = 1
-            ORDER BY p.name, t.type
-          `)
-          .all();
+        let query = `
+          SELECT
+            m.*,
+            p.name AS prestation_name
+          FROM missions m
+          JOIN prestations p
+            ON p.id = m.prestation_id
+        `;
+
+        let params = [];
+
+        if (user.role === "client") {
+          query += `
+            WHERE m.client_id = (
+              SELECT id
+              FROM clients
+              WHERE user_id = ?
+            )
+          `;
+
+          params.push(user.id);
+        }
+
+        if (user.role === "intervenant") {
+          query += `
+            WHERE m.intervenant_id = (
+              SELECT id
+              FROM intervenants
+              WHERE user_id = ?
+            )
+          `;
+
+          params.push(user.id);
+        }
+
+        query += `
+          ORDER BY m.start_at DESC
+        `;
+
+        const result =
+          await env.DB.prepare(query)
+            .bind(...params)
+            .all();
 
         return json({
           ok: true,
-          tarifs: results
+          missions: result.results || []
         });
       }
 
+      /* =====================================================
+         MISSIONS - CREATION
+         ===================================================== */
 
-      if (path === "/api/tarifs" && request.method === "POST") {
+      if (
+        path === "/api/missions" &&
+        request.method === "POST"
+      ) {
+        const denied = requireRole(
+          user,
+          ["client", "gerante", "admin"]
+        );
 
-        const data = await body(request);
+        if (denied) return denied;
 
-        if (
-          !data.prestation_id ||
-          !data.type ||
-          data.client_price === undefined ||
-          data.intervenant_price === undefined
-        ) {
-          return json({
-            ok: false,
-            message: "Données tarifaires incomplètes"
-          }, 400);
+        const data = await request.json();
+
+        let clientId = data.client_id;
+
+        if (user.role === "client") {
+          const client =
+            await env.DB.prepare(`
+              SELECT id
+              FROM clients
+              WHERE user_id = ?
+              LIMIT 1
+            `)
+              .bind(user.id)
+              .first();
+
+          if (!client) {
+            return json({
+              ok: false,
+              error: "Profil client introuvable"
+            }, 404);
+          }
+
+          clientId = client.id;
         }
 
-        const tarifId = id("tarif");
-
-        const commission =
-          Number(data.client_price) -
-          Number(data.intervenant_price);
-
-        await env.DB
-          .prepare(`
-            INSERT INTO tarifs
-            (id, prestation_id, type, client_price,
-             intervenant_price, commission, active)
-            VALUES (?, ?, ?, ?, ?, ?, 1)
-          `)
-          .bind(
-            tarifId,
-            data.prestation_id,
-            data.type,
-            Number(data.client_price),
-            Number(data.intervenant_price),
-            commission
-          )
-          .run();
-
-        return json({
-          ok: true,
-          tarif_id: tarifId,
-          commission
-        }, 201);
-      }
-
-
-      /* =========================
-         MISSIONS
-      ========================= */
-
-      if (path === "/api/missions" && request.method === "POST") {
-
-        const data = await body(request);
-
         if (
-          !data.client_id ||
+          !clientId ||
           !data.prestation_id ||
           !data.start_at
         ) {
           return json({
             ok: false,
-            message: "Client, prestation et date/heure obligatoires"
+            error: "Client, prestation et date de mission obligatoires"
           }, 400);
         }
 
-        const missionId = id("mission");
+        const missionId =
+          id("mission");
 
-        await env.DB
-          .prepare(`
-            INSERT INTO missions
-            (
-              id,
-              client_id,
-              intervenant_id,
-              prestation_id,
-              start_at,
-              end_at,
-              address,
-              price_client,
-              price_intervenant,
-              commission,
-              status
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'requested')
-          `)
+        const priceClient =
+          Number(data.price_client) || 0;
+
+        const priceIntervenant =
+          Number(data.price_intervenant) || 0;
+
+        const commission =
+          data.commission !== undefined
+            ? Number(data.commission)
+            : Math.max(
+                0,
+                priceClient - priceIntervenant
+              );
+
+        await env.DB.prepare(`
+          INSERT INTO missions
+          (
+            id,
+            client_id,
+            intervenant_id,
+            prestation_id,
+            start_at,
+            end_at,
+            address,
+            price_client,
+            price_intervenant,
+            commission,
+            status
+          )
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `)
           .bind(
             missionId,
-            data.client_id,
+            clientId,
             data.intervenant_id || null,
             data.prestation_id,
             data.start_at,
             data.end_at || null,
-            data.address || null,
-            Number(data.price_client || 0),
-            Number(data.price_intervenant || 0),
-            Number(data.commission || 0)
+            clean(data.address) || null,
+            priceClient,
+            priceIntervenant,
+            commission,
+            data.status || "requested"
           )
           .run();
+
+        await logAction(
+          env,
+          user.id,
+          "CREATE_MISSION",
+          "mission",
+          missionId,
+          data
+        );
 
         return json({
           ok: true,
           mission_id: missionId,
-          status: "requested"
+          status: data.status || "requested"
         }, 201);
       }
 
+      /* =====================================================
+         TARIFS
+         ===================================================== */
 
-      if (path === "/api/missions" && request.method === "GET") {
-
-        const { results } = await env.DB
-          .prepare(`
-            SELECT
-              m.*,
-              p.name AS prestation_name
-            FROM missions m
-            JOIN prestations p
-              ON p.id = m.prestation_id
-            ORDER BY m.start_at DESC
-          `)
-          .all();
+      if (
+        path === "/api/tarifs" &&
+        request.method === "GET"
+      ) {
+        const result = await env.DB.prepare(`
+          SELECT
+            t.*,
+            p.name AS prestation_name
+          FROM tarifs t
+          JOIN prestations p
+            ON p.id = t.prestation_id
+          WHERE t.active = 1
+          ORDER BY p.name, t.type
+        `).all();
 
         return json({
           ok: true,
-          missions: results
+          tarifs: result.results || []
         });
       }
 
+      if (
+        path === "/api/tarifs" &&
+        request.method === "POST"
+      ) {
+        const denied = requireRole(
+          user,
+          ["gerante", "admin"]
+        );
 
-      /* =========================
-         DISPONIBILITÉS
-      ========================= */
+        if (denied) return denied;
 
-      if (path === "/api/disponibilites" && request.method === "POST") {
-
-        const data = await body(request);
+        const data = await request.json();
 
         if (
-          !data.intervenant_id ||
+          !data.prestation_id ||
+          !data.type
+        ) {
+          return json({
+            ok: false,
+            error: "Prestation et type de tarif obligatoires"
+          }, 400);
+        }
+
+        if (
+          !["habituel", "fidelite", "negocie"]
+            .includes(data.type)
+        ) {
+          return json({
+            ok: false,
+            error: "Type de tarif invalide"
+          }, 400);
+        }
+
+        const tarifId =
+          id("tarif");
+
+        await env.DB.prepare(`
+          INSERT INTO tarifs
+          (
+            id,
+            prestation_id,
+            type,
+            client_price,
+            intervenant_price,
+            commission,
+            active
+          )
+          VALUES (?, ?, ?, ?, ?, ?, 1)
+        `)
+          .bind(
+            tarifId,
+            data.prestation_id,
+            data.type,
+            Number(data.client_price) || 0,
+            Number(data.intervenant_price) || 0,
+            Number(data.commission) || 0
+          )
+          .run();
+
+        await logAction(
+          env,
+          user.id,
+          "CREATE_TARIF",
+          "tarif",
+          tarifId,
+          data
+        );
+
+        return json({
+          ok: true,
+          tarif_id: tarifId
+        }, 201);
+      }
+
+      /* =====================================================
+         DISPONIBILITES
+         ===================================================== */
+
+      if (
+        path === "/api/disponibilites" &&
+        request.method === "GET"
+      ) {
+        const denied = requireAuth(user);
+
+        if (denied) return denied;
+
+        let intervenantId =
+          new URL(request.url)
+            .searchParams
+            .get("intervenant_id");
+
+        if (user.role === "intervenant") {
+          const intervenant =
+            await env.DB.prepare(`
+              SELECT id
+              FROM intervenants
+              WHERE user_id = ?
+              LIMIT 1
+            `)
+              .bind(user.id)
+              .first();
+
+          if (!intervenant) {
+            return json({
+              ok: false,
+              error: "Profil intervenant introuvable"
+            }, 404);
+          }
+
+          intervenantId = intervenant.id;
+        }
+
+        let result;
+
+        if (intervenantId) {
+          result = await env.DB.prepare(`
+            SELECT *
+            FROM disponibilites
+            WHERE intervenant_id = ?
+            ORDER BY start_at
+          `)
+            .bind(intervenantId)
+            .all();
+        } else {
+          result = await env.DB.prepare(`
+            SELECT *
+            FROM disponibilites
+            ORDER BY start_at
+          `).all();
+        }
+
+        return json({
+          ok: true,
+          disponibilites: result.results || []
+        });
+      }
+
+      if (
+        path === "/api/disponibilites" &&
+        request.method === "POST"
+      ) {
+        const denied = requireRole(
+          user,
+          ["intervenant", "gerante", "admin"]
+        );
+
+        if (denied) return denied;
+
+        const data = await request.json();
+
+        let intervenantId =
+          data.intervenant_id;
+
+        if (user.role === "intervenant") {
+          const intervenant =
+            await env.DB.prepare(`
+              SELECT id
+              FROM intervenants
+              WHERE user_id = ?
+              LIMIT 1
+            `)
+              .bind(user.id)
+              .first();
+
+          if (!intervenant) {
+            return json({
+              ok: false,
+              error: "Profil intervenant introuvable"
+            }, 404);
+          }
+
+          intervenantId = intervenant.id;
+        }
+
+        if (
+          !intervenantId ||
           !data.start_at ||
           !data.end_at
         ) {
           return json({
             ok: false,
-            message: "Intervenant, début et fin obligatoires"
+            error: "Intervenant, début et fin obligatoires"
           }, 400);
         }
 
-        const availabilityId = id("disp");
+        const availabilityId =
+          id("disp");
 
-        await env.DB
-          .prepare(`
-            INSERT INTO disponibilites
-            (id, intervenant_id, start_at, end_at, status)
-            VALUES (?, ?, ?, ?, 'available')
-          `)
+        await env.DB.prepare(`
+          INSERT INTO disponibilites
+          (
+            id,
+            intervenant_id,
+            start_at,
+            end_at,
+            status
+          )
+          VALUES (?, ?, ?, ?, ?)
+        `)
           .bind(
             availabilityId,
-            data.intervenant_id,
+            intervenantId,
             data.start_at,
-            data.end_at
+            data.end_at,
+            data.status || "available"
           )
           .run();
 
@@ -509,51 +1194,85 @@ export default {
         }, 201);
       }
 
+      /* =====================================================
+         EVALUATIONS
+         ===================================================== */
 
-      /* =========================
-         ÉVALUATIONS
-      ========================= */
+      if (
+        path === "/api/evaluations" &&
+        request.method === "POST"
+      ) {
+        const denied = requireAuth(user);
 
-      if (path === "/api/evaluations" && request.method === "POST") {
+        if (denied) return denied;
 
-        const data = await body(request);
+        const data = await request.json();
+
+        const rating =
+          Number(data.rating);
 
         if (
           !data.mission_id ||
-          !data.author_user_id ||
           !data.target_user_id ||
-          !data.rating
+          !rating ||
+          rating < 1 ||
+          rating > 5
         ) {
           return json({
             ok: false,
-            message: "Évaluation incomplète"
+            error: "Mission, destinataire et note de 1 à 5 obligatoires"
           }, 400);
         }
 
-        const evaluationId = id("eval");
-
-        await env.DB
-          .prepare(`
-            INSERT INTO evaluations
-            (
-              id,
-              mission_id,
-              author_user_id,
-              target_user_id,
-              rating,
-              comment
-            )
-            VALUES (?, ?, ?, ?, ?, ?)
+        const mission =
+          await env.DB.prepare(`
+            SELECT *
+            FROM missions
+            WHERE id = ?
+            LIMIT 1
           `)
+            .bind(data.mission_id)
+            .first();
+
+        if (!mission) {
+          return json({
+            ok: false,
+            error: "Mission introuvable"
+          }, 404);
+        }
+
+        const evaluationId =
+          id("eval");
+
+        await env.DB.prepare(`
+          INSERT INTO evaluations
+          (
+            id,
+            mission_id,
+            author_user_id,
+            target_user_id,
+            rating,
+            comment
+          )
+          VALUES (?, ?, ?, ?, ?, ?)
+        `)
           .bind(
             evaluationId,
             data.mission_id,
-            data.author_user_id,
+            user.id,
             data.target_user_id,
-            Number(data.rating),
-            data.comment || null
+            rating,
+            clean(data.comment) || null
           )
           .run();
+
+        await logAction(
+          env,
+          user.id,
+          "CREATE_EVALUATION",
+          "evaluation",
+          evaluationId
+        );
 
         return json({
           ok: true,
@@ -561,75 +1280,73 @@ export default {
         }, 201);
       }
 
-
-      /* =========================
-         CONFLITS
-      ========================= */
-
-      if (path === "/api/conflits" && request.method === "POST") {
-
-        const data = await body(request);
-
-        if (!data.mission_id || !data.type) {
-          return json({
-            ok: false,
-            message: "Mission et type de conflit obligatoires"
-          }, 400);
-        }
-
-        const conflitId = id("conflict");
-
-        await env.DB
-          .prepare(`
-            INSERT INTO conflits
-            (id, mission_id, type, description, status)
-            VALUES (?, ?, ?, ?, 'open')
-          `)
-          .bind(
-            conflitId,
-            data.mission_id,
-            data.type,
-            data.description || null
-          )
-          .run();
-
-        return json({
-          ok: true,
-          conflit_id: conflitId,
-          status: "open"
-        }, 201);
-      }
-
-
-      /* =========================
+      /* =====================================================
          PAIEMENTS
-      ========================= */
+         ===================================================== */
 
-      if (path === "/api/paiements" && request.method === "POST") {
+      if (
+        path === "/api/paiements" &&
+        request.method === "POST"
+      ) {
+        const denied = requireAuth(user);
 
-        const data = await body(request);
+        if (denied) return denied;
+
+        const data = await request.json();
 
         if (!data.mission_id || data.amount === undefined) {
           return json({
             ok: false,
-            message: "Mission et montant obligatoires"
+            error: "Mission et montant obligatoires"
           }, 400);
         }
 
-        const paiementId = id("pay");
-
-        await env.DB
-          .prepare(`
-            INSERT INTO paiements
-            (id, mission_id, amount, status)
-            VALUES (?, ?, ?, 'pending')
+        const mission =
+          await env.DB.prepare(`
+            SELECT *
+            FROM missions
+            WHERE id = ?
+            LIMIT 1
           `)
+            .bind(data.mission_id)
+            .first();
+
+        if (!mission) {
+          return json({
+            ok: false,
+            error: "Mission introuvable"
+          }, 404);
+        }
+
+        const paiementId =
+          id("paiement");
+
+        await env.DB.prepare(`
+          INSERT INTO paiements
+          (
+            id,
+            mission_id,
+            amount,
+            status,
+            provider_reference
+          )
+          VALUES (?, ?, ?, 'pending', ?)
+        `)
           .bind(
             paiementId,
             data.mission_id,
-            Number(data.amount)
+            Number(data.amount),
+            data.provider_reference || null
           )
           .run();
+
+        await logAction(
+          env,
+          user.id,
+          "CREATE_PAYMENT",
+          "paiement",
+          paiementId
+        );
 
         return json({
           ok: true,
@@ -638,19 +1355,318 @@ export default {
         }, 201);
       }
 
+      /* =====================================================
+         DOCUMENTS
+         ===================================================== */
 
-      /* =========================
+      if (
+        path === "/api/documents" &&
+        request.method === "GET"
+      ) {
+        const denied = requireAuth(user);
+
+        if (denied) return denied;
+
+        let userId =
+          new URL(request.url)
+            .searchParams
+            .get("user_id");
+
+        if (
+          user.role !== "gerante" &&
+          user.role !== "admin"
+        ) {
+          userId = user.id;
+        }
+
+        const result =
+          await env.DB.prepare(`
+            SELECT
+              id,
+              user_id,
+              document_type,
+              file_reference,
+              status,
+              expires_at,
+              created_at
+            FROM documents
+            WHERE user_id = ?
+            ORDER BY created_at DESC
+          `)
+            .bind(userId)
+            .all();
+
+        return json({
+          ok: true,
+          documents: result.results || []
+        });
+      }
+
+      if (
+        path === "/api/documents" &&
+        request.method === "POST"
+      ) {
+        const denied = requireAuth(user);
+
+        if (denied) return denied;
+
+        const data = await request.json();
+
+        const documentId =
+          id("doc");
+
+        const userId =
+          (
+            user.role === "gerante" ||
+            user.role === "admin"
+          )
+            ? data.user_id
+            : user.id;
+
+        if (
+          !userId ||
+          !data.document_type ||
+          !data.file_reference
+        ) {
+          return json({
+            ok: false,
+            error: "Utilisateur, type et référence du document obligatoires"
+          }, 400);
+        }
+
+        await env.DB.prepare(`
+          INSERT INTO documents
+          (
+            id,
+            user_id,
+            document_type,
+            file_reference,
+            status,
+            expires_at
+          )
+          VALUES (?, ?, ?, ?, 'pending', ?)
+        `)
+          .bind(
+            documentId,
+            userId,
+            data.document_type,
+            data.file_reference,
+            data.expires_at || null
+          )
+          .run();
+
+        await logAction(
+          env,
+          user.id,
+          "CREATE_DOCUMENT",
+          "document",
+          documentId
+        );
+
+        return json({
+          ok: true,
+          document_id: documentId
+        }, 201);
+      }
+
+      /* =====================================================
+         CONFLITS
+         ===================================================== */
+
+      if (
+        path === "/api/conflits" &&
+        request.method === "GET"
+      ) {
+        const denied = requireRole(
+          user,
+          ["gerante", "admin"]
+        );
+
+        if (denied) return denied;
+
+        const result =
+          await env.DB.prepare(`
+            SELECT
+              c.*,
+              m.start_at,
+              m.status AS mission_status
+            FROM conflits c
+            JOIN missions m
+              ON m.id = c.mission_id
+            ORDER BY c.created_at DESC
+          `).all();
+
+        return json({
+          ok: true,
+          conflits: result.results || []
+        });
+      }
+
+      if (
+        path === "/api/conflits" &&
+        request.method === "POST"
+      ) {
+        const denied = requireAuth(user);
+
+        if (denied) return denied;
+
+        const data = await request.json();
+
+        if (
+          !data.mission_id ||
+          !data.type
+        ) {
+          return json({
+            ok: false,
+            error: "Mission et type de conflit obligatoires"
+          }, 400);
+        }
+
+        const conflitId =
+          id("conflit");
+
+        await env.DB.prepare(`
+          INSERT INTO conflits
+          (
+            id,
+            mission_id,
+            type,
+            description,
+            status
+          )
+          VALUES (?, ?, ?, ?, 'open')
+        `)
+          .bind(
+            conflitId,
+            data.mission_id,
+            data.type,
+            clean(data.description) || null
+          )
+          .run();
+
+        await logAction(
+          env,
+          user.id,
+          "CREATE_CONFLICT",
+          "conflit",
+          conflitId
+        );
+
+        return json({
+          ok: true,
+          conflit_id: conflitId
+        }, 201);
+      }
+
+      /* =====================================================
+         STATISTIQUES
+         ===================================================== */
+
+      if (
+        path === "/api/stats" &&
+        request.method === "GET"
+      ) {
+        const denied = requireRole(
+          user,
+          ["gerante", "admin"]
+        );
+
+        if (denied) return denied;
+
+        const users =
+          await env.DB.prepare(`
+            SELECT
+              COUNT(*) AS total
+            FROM users
+          `).first();
+
+        const clients =
+          await env.DB.prepare(`
+            SELECT
+              COUNT(*) AS total
+            FROM clients
+          `).first();
+
+        const intervenants =
+          await env.DB.prepare(`
+            SELECT
+              COUNT(*) AS total
+            FROM intervenants
+          `).first();
+
+        const missions =
+          await env.DB.prepare(`
+            SELECT
+              COUNT(*) AS total
+            FROM missions
+          `).first();
+
+        const missionsPending =
+          await env.DB.prepare(`
+            SELECT
+              COUNT(*) AS total
+            FROM missions
+            WHERE status = 'requested'
+          `).first();
+
+        const missionsConfirmed =
+          await env.DB.prepare(`
+            SELECT
+              COUNT(*) AS total
+            FROM missions
+            WHERE status IN ('confirmed', 'completed')
+          `).first();
+
+        const revenue =
+          await env.DB.prepare(`
+            SELECT
+              COALESCE(SUM(price_client), 0) AS total
+            FROM missions
+            WHERE status != 'cancelled'
+          `).first();
+
+        const commissions =
+          await env.DB.prepare(`
+            SELECT
+              COALESCE(SUM(commission), 0) AS total
+            FROM missions
+            WHERE status != 'cancelled'
+          `).first();
+
+        return json({
+          ok: true,
+          stats: {
+            users: Number(users?.total || 0),
+            clients: Number(clients?.total || 0),
+            intervenants: Number(intervenants?.total || 0),
+            missions: Number(missions?.total || 0),
+            missions_pending: Number(
+              missionsPending?.total || 0
+            ),
+            missions_confirmed: Number(
+              missionsConfirmed?.total || 0
+            ),
+            chiffre_affaires: Number(
+              revenue?.total || 0
+            ),
+            commissions: Number(
+              commissions?.total || 0
+            )
+          }
+        });
+      }
+
+      /* =====================================================
          ROUTE INCONNUE
-      ========================= */
+         ===================================================== */
 
       return json({
         ok: false,
-        message: "Route API inconnue",
+        error: "Route API inconnue",
         path
       }, 404);
 
     } catch (error) {
-
       return json({
         ok: false,
         error: error?.message || "Erreur serveur"
