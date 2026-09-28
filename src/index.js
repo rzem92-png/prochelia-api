@@ -576,15 +576,15 @@ async function handleV2Route(
     });
   }
 
-  /* -------------------------------------------------------
-     MISSION — CHANGEMENT DE STATUT
-     ------------------------------------------------------- */
+/* -------------------------------------------------------
+   MISSION — CHANGEMENT DE STATUT
+   ------------------------------------------------------- */
 
-  if (
-    path.startsWith("/api/missions/") &&
-    path.endsWith("/status") &&
-    request.method === "POST"
-  ) {
+if (
+  path.startsWith("/api/missions/") &&
+  path.endsWith("/status") &&
+  request.method === "POST"
+) {
 
     const denied = requireAuth(user);
 
