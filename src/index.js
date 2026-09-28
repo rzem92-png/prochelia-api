@@ -2540,6 +2540,44 @@ if (v2Response) {
           }
         });
       }
+/* =========================================================
+   HEALTH CHECK — PROCHÉLIA API
+   ========================================================= */
+
+if (path === "/health" && request.method === "GET") {
+  if (!env.DB) {
+    return json({
+      ok: false,
+      database: false,
+      service: "PROCHÉLIA API",
+      version: "1.0.0",
+      error: "D1 non connectée",
+      timestamp: new Date().toISOString()
+    });
+  }
+
+  try {
+    const result = await env.DB.prepare("SELECT 1 AS ok").first();
+
+    return json({
+      ok: true,
+      database: result?.ok === 1,
+      service: "PROCHÉLIA API",
+      version: "1.0.0",
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    return json({
+      ok: false,
+      database: false,
+      service: "PROCHÉLIA API",
+      version: "1.0.0",
+      error: error?.message || "D1 inaccessible",
+      timestamp: new Date().toISOString()
+    }, 500);
+  }
+}
+
 if (path.startsWith("/api/v7/")) {
   return await handleV7Route(request, env, path);
 }
