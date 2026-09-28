@@ -2540,7 +2540,9 @@ if (v2Response) {
           }
         });
       }
-
+if (path.startsWith("/api/v7/")) {
+  return await handleV7Route(request, env, path);
+}
       /* =====================================================
          ROUTE INCONNUE
          ===================================================== */
