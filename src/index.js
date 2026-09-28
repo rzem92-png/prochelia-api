@@ -3,7 +3,7 @@
    Cloudflare Workers + D1
    Backend MVP opérationnel
    ========================================================= */
-
+import { handleV7Route } from "./v7-routes.js";
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET,POST,PUT,PATCH,DELETE,OPTIONS",
