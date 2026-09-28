@@ -258,22 +258,19 @@ function v7CheckPayment(payment) {
   });
 }
 
-function v7CheckPermissions({
-  role,
-  permission,
-  permissions = {}
-} = {}) {
-  if (
-    role === "Gérante" ||
-    role === "Administrateur"
-  ) {
-    return v7Result(true);
-  }
+if (
+  role === "Gérante" ||
+  role === "Administrateur" ||
+  role === "gerante" ||
+  role === "admin"
+) {
+  return v7Result(true);
+}
 
-  if (
-    permissions &&
-    permissions[permission] === true
-  ) {
+if (
+  permissions &&
+  permissions[permission] === true
+) {
     return v7Result(true);
   }
 
