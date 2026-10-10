@@ -1193,7 +1193,17 @@ export default {
 await ensureV2Tables(env);
       const url = new URL(request.url);
       const path = url.pathname;
-
+if (
+  path === "/api/auth/status" &&
+  request.method === "GET"
+) {
+  return json({
+    ok: true,
+    authenticated: Boolean(
+      await authenticate(request, env)
+    )
+  });
+}
       const user = await authenticate(request, env);
 const v2Response = await handleV2Route(
   request,
