@@ -1468,10 +1468,11 @@ if (v2Response) {
          CONNEXION
          ===================================================== */
 
-      if (
-        path === "/api/login" &&
-        request.method === "POST"
-      ) {
+     if (
+  (path === "/api/login" ||
+   path === "/api/auth/login") &&
+  request.method === "POST"
+) {
         const data = await request.json();
 
         const email =
@@ -1577,9 +1578,10 @@ if (v2Response) {
          ===================================================== */
 
       if (
-        path === "/api/me" &&
-        request.method === "GET"
-      ) {
+  (path === "/api/me" ||
+   path === "/api/auth/me") &&
+  request.method === "GET"
+) {
         const denied = requireAuth(user);
 
         if (denied) return denied;
