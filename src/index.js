@@ -1273,12 +1273,12 @@ if (v2Response) {
   }
 
   return json({
-    ok: true,
-    database,
-    service: "PROCHÉLIA API",
-    version: "1.0.0",
-    timestamp: now()
-  });
+  ok: true,
+  service: "PROCHÉLIA API",
+  version: "1.0.0",
+  status: "online",
+  timestamp: now()
+});
 }
 
       if (path === "/" && request.method === "GET") {
