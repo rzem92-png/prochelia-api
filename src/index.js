@@ -30,16 +30,20 @@ function getCorsHeaders(request) {
    ========================================================= */
 
 function json(data, status = 200, request = null) {
+  const corsHeaders = request
+    ? getCorsHeaders(request)
+    : {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "GET,POST,PUT,PATCH,DELETE,OPTIONS",
+        "Access-Control-Allow-Headers": "Content-Type, Authorization",
+        "Vary": "Origin"
+      };
+
   return new Response(JSON.stringify(data), {
     status,
     headers: {
       "Content-Type": "application/json; charset=utf-8",
-      ...(request
-        ? getCorsHeaders(request)
-        : {
-            "Access-Control-Allow-Origin": "null",
-            "Vary": "Origin"
-          })
+      ...corsHeaders
     }
   });
 }
