@@ -4,11 +4,26 @@
    Backend MVP opérationnel
    ========================================================= */
 import { handleV7Route } from "./v7-routes.js";
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "GET,POST,PUT,PATCH,DELETE,OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type, Authorization"
-};
+const ALLOWED_ORIGINS = [
+  "https://prochelia.rzem92.workers.dev",
+  "https://56b01f85.prochelia.pages.dev"
+];
+
+function getCorsHeaders(request) {
+  const origin = request.headers.get("Origin") || "";
+  const headers = {
+    "Vary": "Origin",
+    "Access-Control-Allow-Methods": "GET,POST,PUT,PATCH,DELETE,OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type, Authorization",
+    "Access-Control-Allow-Credentials": "true"
+  };
+
+  if (ALLOWED_ORIGINS.includes(origin)) {
+    headers["Access-Control-Allow-Origin"] = origin;
+  }
+
+  return headers;
+}
 
 /* =========================================================
    OUTILS
@@ -1185,7 +1200,7 @@ export default {
       if (request.method === "OPTIONS") {
         return new Response(null, {
           status: 204,
-          headers: corsHeaders
+          headers: getCorsHeaders(request)
         });
       }
 
