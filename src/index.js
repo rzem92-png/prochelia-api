@@ -29,12 +29,17 @@ function getCorsHeaders(request) {
    OUTILS
    ========================================================= */
 
-function json(data, status = 200) {
+function json(data, status = 200, request = null) {
   return new Response(JSON.stringify(data), {
     status,
     headers: {
       "Content-Type": "application/json; charset=utf-8",
-      ...corsHeaders
+      ...(request
+        ? getCorsHeaders(request)
+        : {
+            "Access-Control-Allow-Origin": "null",
+            "Vary": "Origin"
+          })
     }
   });
 }
@@ -1256,11 +1261,23 @@ if (v2Response) {
       if (path === "/" && request.method === "GET") {
         return json({
           ok: true,
+          database,
+          service: "PROCHÉLIA API",
+          version: "1.0.0",
+          timestamp: now()
+        });
+      }
+
+      if (path === "/" && request.method === "GET") {
+        return json({
+          ok: true,
           service: "PROCHÉLIA API",
           version: "1.0.0",
           status: "online"
         });
       }
+
+      /*
 
       /* =====================================================
          PRESTATIONS
