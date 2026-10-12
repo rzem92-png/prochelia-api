@@ -1263,14 +1263,23 @@ if (v2Response) {
       }
 
       if (path === "/" && request.method === "GET") {
-        return json({
-          ok: true,
-          database,
-          service: "PROCHÉLIA API",
-          version: "1.0.0",
-          timestamp: now()
-        });
-      }
+  let database = false;
+
+  try {
+    await env.DB.prepare("SELECT 1 AS ok").first();
+    database = true;
+  } catch (error) {
+    console.error("Vérification D1 :", error?.message);
+  }
+
+  return json({
+    ok: true,
+    database,
+    service: "PROCHÉLIA API",
+    version: "1.0.0",
+    timestamp: now()
+  });
+}
 
       if (path === "/" && request.method === "GET") {
         return json({
