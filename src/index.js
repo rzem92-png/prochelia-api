@@ -6,7 +6,8 @@
 import { handleV7Route } from "./v7-routes.js";
 const ALLOWED_ORIGINS = [
   "https://prochelia.rzem92.workers.dev",
-  "https://56b01f85.prochelia.pages.dev"
+  "https://56b01f85.prochelia.pages.dev",
+  "https://prochelia.pages.dev"
 ];
 
 function getCorsHeaders(request) {
