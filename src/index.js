@@ -130,31 +130,86 @@ async function hashPassword(password, saltBase64 = null) {
 
   const derived = await crypto.subtle.deriveBits(
     {
-      name: "PBKDF2",
-      salt,
-      iterations: 100000,
-      hash: "SHA-256"
-    },
-    keyMaterial,
-    256
-  );
 
   return {
     salt: bytesToBase64(salt),
     hash: bytesToBase64(new Uint8Array(derived))
   };
 }
+function fromBase64url(value) {
+  const base64 = value
+    .replace(/-/g, "+")
+    .replace(/_/g, "/");
 
-async function verifyPassword(password, storedValue) {
-  if (!storedValue || !storedValue.includes(":")) {
-    return false;
+  const padded = base64 + "=".repeat((4 - base64.length % 4) % 4);
+
+  const binary = atob(padded);
+  const bytes = new Uint8Array(binary.length);
+
+  for (let i = 0; i < binary.length; i++) {
+    bytes[i] = binary.charCodeAt(i);
   }
 
-  const [salt, expectedHash] = storedValue.split(":");
+  return bytes;
+}
+async function verifyPassword(password, storedValue) {
+  try 
+  {
+    
+    const parts = String(storedValue || "").split("$");
 
-  const result = await hashPassword(password, salt);
+    if (parts.length !== 4 || parts[0] !== "pbkdf2") {
+      return false;
+    }
 
-  return result.hash === expectedHash;
+    const iterations = Number(parts[1]);
+
+    if (
+      !Number.isInteger(iterations) ||
+      iterations < 100000 ||
+      iterations > 1000000
+    ) {
+      return false;
+    }
+
+    const salt = fromBase64url(parts[2]);
+    const expected = fromBase64url(parts[3]);
+
+    const key = await crypto.subtle.importKey(
+      "raw",
+      new TextEncoder().encode(password),
+      { name: "PBKDF2" },
+      false,
+      ["deriveBits"]
+    );
+
+    const bits = await crypto.subtle.deriveBits(
+      {
+        name: "PBKDF2",
+        salt,
+        iterations,
+        hash: "SHA-256"
+      },
+      key,
+      expected.length * 8
+    );
+
+    const actual = new Uint8Array(bits);
+
+    if (actual.length !== expected.length) {
+      return false;
+    }
+
+    let diff = 0;
+
+    for (let i = 0; i < actual.length; i++) {
+      diff |= actual[i] ^ expected[i];
+    }
+
+    return diff === 0;
+  } catch {
+    return false;
+  }
 }
 
 async function hashToken(token) {
