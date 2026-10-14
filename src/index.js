@@ -183,7 +183,12 @@ async function verifyPassword(password, storedValue) {
 
     const salt = fromBase64url(parts[2]);
     const expected = fromBase64url(parts[3]);
-
+console.log("DIAGNOSTIC PASSWORD", {
+  parts: parts.length,
+  iterations,
+  saltLength: salt.length,
+  expectedLength: expected.length
+});
     const key = await crypto.subtle.importKey(
       "raw",
       new TextEncoder().encode(password),
