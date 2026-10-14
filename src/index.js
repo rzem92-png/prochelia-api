@@ -114,7 +114,7 @@ function base64ToBytes(value) {
 }
 
 async function hashPassword(password, saltBase64 = null) {
-  const encoder = new TextEncoder();
+  const iterations = 100000;
 
   const salt = saltBase64
     ? base64ToBytes(saltBase64)
@@ -122,7 +122,7 @@ async function hashPassword(password, saltBase64 = null) {
 
   const keyMaterial = await crypto.subtle.importKey(
     "raw",
-    encoder.encode(password),
+    new TextEncoder().encode(password),
     "PBKDF2",
     false,
     ["deriveBits"]
@@ -130,8 +130,17 @@ async function hashPassword(password, saltBase64 = null) {
 
   const derived = await crypto.subtle.deriveBits(
     {
+      name: "PBKDF2",
+      salt,
+      iterations,
+      hash: "SHA-256"
+    },
+    keyMaterial,
+    256
+  );
 
   return {
+    iterations,
     salt: bytesToBase64(salt),
     hash: bytesToBase64(new Uint8Array(derived))
   };
