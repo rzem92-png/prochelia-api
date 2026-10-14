@@ -1624,11 +1624,23 @@ if (v2Response) {
             .first();
 
         if (!account) {
-          return json({
-            ok: false,
-            error: "Identifiants incorrects"
-          }, 401);
-        }
+  console.log("LOGIN DIAGNOSTIC", {
+    accountFound: false
+  });
+
+  return json({
+    ok: false,
+    error: "Identifiants incorrects"
+  }, 401);
+}
+
+console.log("LOGIN DIAGNOSTIC", {
+  accountFound: true,
+  status: account.status,
+  passwordHashPresent: Boolean(account.password_hash),
+  passwordHashFormat: String(account.password_hash || "").split("$")[0],
+  passwordHashParts: String(account.password_hash || "").split("$").length
+});
 
         if (account.status === "blocked") {
           return json({
