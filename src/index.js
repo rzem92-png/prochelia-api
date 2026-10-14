@@ -1490,7 +1490,7 @@ if (v2Response) {
           await hashPassword(password);
 
         const passwordHash =
-          `${passwordData.salt}:${passwordData.hash}`;
+  `pbkdf2$${passwordData.iterations}$${passwordData.salt}$${passwordData.hash}`;
 
         const userId = id("user");
 
