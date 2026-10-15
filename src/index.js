@@ -1650,10 +1650,12 @@ console.log("LOGIN DIAGNOSTIC", {
         }
 
         const valid =
-          await verifyPassword(
-            password,
-            account.password_hash
-          );
+  await verifyPassword(
+    password,
+    account.password_hash
+  );
+
+console.log("LOGIN PASSWORD RESULT", { valid });
 
         if (!valid) {
           return json({
