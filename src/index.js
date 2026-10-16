@@ -1650,10 +1650,10 @@ console.log("LOGIN DIAGNOSTIC", {
         }
 
         const valid =
-  await verifyPassword(
-    password,
-    account.password_hash
-  );
+  const valid = await verifyPassword(
+  password,
+  account.password_hash
+);
 
 console.log("LOGIN PASSWORD RESULT", {
   accountFound: Boolean(account),
