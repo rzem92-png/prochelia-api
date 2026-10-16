@@ -1652,6 +1652,11 @@ console.log("LOGIN DIAGNOSTIC", {
                 const valid = await verifyPassword(
   password,
   account.password_hash
+console.log("LOGIN PASSWORD RESULT", {
+  valid,
+  hashPresent: Boolean(account.password_hash),
+  hashFormat: String(account.password_hash || "").split("$")[0],
+  hashParts: String(account.password_hash || "").split("$").length
 );
         if (!valid) {
   return json({
