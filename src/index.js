@@ -1655,8 +1655,14 @@ console.log("LOGIN DIAGNOSTIC", {
     account.password_hash
   );
 
-console.log("LOGIN PASSWORD RESULT", { valid });
-
+console.log("LOGIN PASSWORD RESULT", {
+  accountFound: Boolean(account),
+  status: account?.status,
+  hashPresent: Boolean(account?.password_hash),
+  hashFormat: String(account?.password_hash || "").split("$")[0],
+  hashParts: String(account?.password_hash || "").split("$").length,
+  valid
+});
         if (!valid) {
           return json({
             ok: false,
