@@ -181,8 +181,8 @@ async function verifyPassword(password, storedValue) {
       return false;
     }
 
-    const salt = base64ToBytes(parts[2]);
-const expected = base64ToBytes(parts[3]);
+    const salt = fromBase64url(parts[2]);
+const expected = fromBase64url(parts[3]);
 console.log("DIAGNOSTIC PASSWORD", {
   parts: parts.length,
   iterations,
