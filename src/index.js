@@ -1434,7 +1434,107 @@ if (v2Response) {
           prestation_id: prestationId
         }, 201);
       }
+/* =====================================================
+   RÉINITIALISATION TEMPORAIRE DU MOT DE PASSE GÉRANTE
+   ===================================================== */
 
+if (
+  path === "/api/auth/reset-gerante-password" &&
+  request.method === "POST"
+) {
+  const resetSecret = env.PROC_HELIA_RESET_SECRET;
+  const providedSecret = request.headers.get(
+    "X-Prochelia-Reset-Secret"
+  );
+
+  if (
+    typeof resetSecret !== "string" ||
+    resetSecret.length < 32 ||
+    typeof providedSecret !== "string" ||
+    providedSecret !== resetSecret
+  ) {
+    return json({
+      ok: false,
+      error: "Accès non autorisé"
+    }, 401);
+  }
+
+  let data;
+
+  try {
+    data = await request.json();
+  } catch {
+    return json({
+      ok: false,
+      error: "Requête JSON invalide"
+    }, 400);
+  }
+
+  const email = clean(data.email)?.toLowerCase();
+  const newPassword = data.newPassword;
+
+  if (
+    !email ||
+    typeof newPassword !== "string" ||
+    newPassword.length < 12 ||
+    newPassword.length > 128
+  ) {
+    return json({
+      ok: false,
+      error: "E-mail invalide ou mot de passe non conforme"
+    }, 400);
+  }
+
+  const account = await env.DB.prepare(`
+    SELECT id, role, status
+    FROM users
+    WHERE email = ?
+    LIMIT 1
+  `)
+    .bind(email)
+    .first();
+
+  if (!account || account.role !== "gerante") {
+    return json({
+      ok: false,
+      error: "Compte Gérante introuvable"
+    }, 404);
+  }
+
+  if (account.status !== "active") {
+    return json({
+      ok: false,
+      error: "Le compte Gérante n'est pas actif"
+    }, 403);
+  }
+
+  const passwordData = await hashPassword(newPassword);
+
+  const passwordHash =
+    `pbkdf2$${passwordData.iterations}$${passwordData.salt}$${passwordData.hash}`;
+
+  const result = await env.DB.prepare(`
+    UPDATE users
+    SET password_hash = ?
+    WHERE id = ?
+      AND role = 'gerante'
+      AND status = 'active'
+  `)
+    .bind(passwordHash, account.id)
+    .run();
+
+  if (!result.meta || result.meta.changes !== 1) {
+    return json({
+      ok: false,
+      error: "La mise à jour du mot de passe a échoué"
+    }, 500);
+  }
+
+  return json({
+    ok: true,
+    message: "Mot de passe Gérante réinitialisé"
+  });
+} 
       /* =====================================================
          INSCRIPTION
          ===================================================== */
