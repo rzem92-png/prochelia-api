@@ -1649,24 +1649,24 @@ console.log("LOGIN DIAGNOSTIC", {
           }, 403);
         }
 
-                        const valid = await verifyPassword(
-          password,
-          account.password_hash
-        );
+                       const valid = await verifyPassword(
+  password,
+  account.password_hash
+);
 
-        console.log("LOGIN PASSWORD RESULT", {
-          valid,
-          hashPresent: Boolean(account.password_hash),
-          hashFormat: String(account.password_hash || "").split("$")[0],
-          hashParts: String(account.password_hash || "").split("$").length
-        });
+console.log("LOGIN PASSWORD RESULT", {
+  valid,
+  hashPresent: Boolean(account.password_hash),
+  hashFormat: String(account.password_hash || "").split("$")[0],
+  hashParts: String(account.password_hash || "").split("$").length
+});
 
-        if (!valid) {
-          return json({
-            ok: false,
-            error: "Identifiants incorrects"
-          }, 401);
-        }
+if (!valid) {
+  return json({
+    ok: false,
+    error: "Identifiants incorrects"
+  }, 401);
+}
 
         const sessionToken =
           `${crypto.randomUUID()}${crypto.randomUUID()}`;
