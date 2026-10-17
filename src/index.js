@@ -1667,7 +1667,6 @@ if (!valid) {
     error: "Identifiants incorrects"
   }, 401);
 }
-
         const sessionToken =
           `${crypto.randomUUID()}${crypto.randomUUID()}`;
 
