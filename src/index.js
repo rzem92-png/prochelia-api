@@ -2785,6 +2785,7 @@ if (!valid) {
         });
       }
 
+
 /* =========================================================
    HEALTH CHECK — PROCHÉLIA API
    ========================================================= */
@@ -2794,18 +2795,23 @@ if (
   request.method === "GET"
 ) {
   if (!env.DB) {
-    return json({
-      ok: false,
-      database: false,
-      service: "PROCHÉLIA API",
-      version: "1.0.0",
-      error: "D1 non connectée",
-      timestamp: new Date().toISOString()
-    }, 500);
+    return json(
+      {
+        ok: false,
+        database: false,
+        service: "PROCHÉLIA API",
+        version: "1.0.0",
+        error: "D1 non connectée",
+        timestamp: new Date().toISOString()
+      },
+      500
+    );
   }
 
   try {
-    const result = await env.DB.prepare("SELECT 1 AS ok").first();
+    const result = await env.DB
+      .prepare("SELECT 1 AS ok")
+      .first();
 
     return json({
       ok: true,
@@ -2815,25 +2821,27 @@ if (
       timestamp: new Date().toISOString()
     });
   } catch (error) {
-    return json({
-      ok: false,
-      database: false,
-      service: "PROCHÉLIA API",
-      version: "1.0.0",
-      error: error?.message || "D1 inaccessible",
-      timestamp: new Date().toISOString()
-    }, 500);
+    return json(
+      {
+        ok: false,
+        database: false,
+        service: "PROCHÉLIA API",
+        version: "1.0.0",
+        error: error?.message || "D1 inaccessible",
+        timestamp: new Date().toISOString()
+      },
+      500
+    );
   }
 }
+
+/* =========================================================
+   ROUTES V7
+   ========================================================= */
 
 if (path.startsWith("/api/v7/")) {
   return await handleV7Route(request, env, path);
 }
-
-      /* =====================================================
-         ROUTE INCONNUE
-         ===================================================== */
-
       return json({
         ok: false,
         error: "Route API inconnue",
