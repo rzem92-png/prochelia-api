@@ -2784,11 +2784,15 @@ if (!valid) {
           }
         });
       }
+
 /* =========================================================
    HEALTH CHECK — PROCHÉLIA API
    ========================================================= */
 
-if ((path === "/health" || path === "/api/health") && request.method === "GET")
+if (
+  (path === "/health" || path === "/api/health") &&
+  request.method === "GET"
+) {
   if (!env.DB) {
     return json({
       ok: false,
@@ -2797,7 +2801,7 @@ if ((path === "/health" || path === "/api/health") && request.method === "GET")
       version: "1.0.0",
       error: "D1 non connectée",
       timestamp: new Date().toISOString()
-    });
+    }, 500);
   }
 
   try {
@@ -2825,6 +2829,7 @@ if ((path === "/health" || path === "/api/health") && request.method === "GET")
 if (path.startsWith("/api/v7/")) {
   return await handleV7Route(request, env, path);
 }
+
       /* =====================================================
          ROUTE INCONNUE
          ===================================================== */
