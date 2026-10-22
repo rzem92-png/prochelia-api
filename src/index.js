@@ -2788,7 +2788,7 @@ if (!valid) {
    HEALTH CHECK — PROCHÉLIA API
    ========================================================= */
 
-if (path === "/health" && request.method === "GET") {
+if ((path === "/health" || path === "/api/health") && request.method === "GET")
   if (!env.DB) {
     return json({
       ok: false,
