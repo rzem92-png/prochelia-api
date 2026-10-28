@@ -1,19 +1,21 @@
 
 {
-  "name": "prochelia-api",
+  "name": "prochelia-api-staging",
   "main": "src/index.js",
   "compatibility_date": "2026-09-25",
   "d1_databases": [
     {
       "binding": "DB",
-      "database_id": "04f52830-ef5a-4f17-a640-42bbc2381bba"
+      "database_name": "prochelia-preview-db",
+      "database_id": "6adb95e5-e542-4bec-9008-fbea01042305"
     }
   ],
   "previews": {
     "d1_databases": [
       {
         "binding": "DB",
-        "database_id": "04f52830-ef5a-4f17-a640-42bbc2381bba"
+        "database_name": "prochelia-preview-db",
+        "database_id": "6adb95e5-e542-4bec-9008-fbea01042305"
       }
     ]
   },
