@@ -685,7 +685,7 @@ async function securityPrepareMission(request, env) {
   await ensureSecuritySchema(env);
   const body=await readJson(request), missionId=clean(body?.mission_id), clientId=clean(body?.client_id), intervenantId=clean(body?.intervenant_id);
   if(!missionId||!clientId||!intervenantId) return json({ok:false,error:'MISSION_SECURITY_FIELDS_REQUIRED',version:VERSION},400);
-  const mission=await env.DB.prepare('SELECT id,client_id,intervenant_id,start_at,end_at FROM missions WHERE id=? LIMIT 1').bind(missionId).first();
+  const mission=await env.DB.prepare('SELECT id,client_id,intervenant_id,prestation_id,start_at,end_at FROM missions WHERE id=? LIMIT 1').bind(missionId).first();
   if(!mission) return json({ok:false,error:'MISSION_NOT_FOUND',version:VERSION},404);
   if(String(mission.client_id)!==clientId||String(mission.intervenant_id||'')!==intervenantId) return json({ok:false,error:'MISSION_ASSIGNMENT_MISMATCH',version:VERSION},409);
   const profile=await env.DB.prepare('SELECT id,user_id FROM intervenants WHERE id=? LIMIT 1').bind(intervenantId).first().catch(()=>null);
