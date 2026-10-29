@@ -3694,6 +3694,26 @@ function copilotScenarioFor(text) {
   return 'GENERAL_OPERATIONS';
 }
 
+
+async function copilotHealth(request,env) {
+  const gate=await supportAuth(request,env); if(gate.response)return gate.response;
+  const checks=[
+    {code:'AUTHENTICATION',status:'OK'},
+    {code:'DATABASE',status:env.DB?'CONFIGURED':'MISSING'},
+    {code:'AI_PROVIDER_SECRET',status:env.OPENAI_API_KEY?'CONFIGURED':'MISSING'},
+    {code:'MODEL_SETTING',status:clean(env.OPENAI_MODEL)?'CUSTOM':'DEFAULT'},
+    {code:'SCENARIO_CATALOG',status:COPILOT_SCENARIOS.length>0?'OK':'EMPTY',count:COPILOT_SCENARIOS.length}
+  ];
+  const blocking=checks.filter(x=>['DATABASE','AI_PROVIDER_SECRET'].includes(x.code)&&x.status!=='CONFIGURED');
+  return json({
+    ok:true,version:VERSION,assistant:'PROCHÉLIA Copilote transversal',
+    status:blocking.length?'PARTIALLY_CONFIGURED':'CONFIGURED',
+    checks,blocking: blocking.map(x=>x.code),
+    endpoints:{ask:'/api/copilot/ask',scenarios:'/api/copilot/scenarios',health:'/api/copilot/health'},
+    limitations:['Aucun accès direct de l’IA aux données D1, Stripe ou documents','Aucune mutation métier exécutée directement par la sortie du modèle','Les intégrations réelles et les parcours de bout en bout doivent être testés en préproduction']
+  });
+}
+
 async function copilotScenarios(request,env) {
   const gate=await supportAuth(request,env); if(gate.response)return gate.response;
   return json({ok:true,version:VERSION,assistant:'PROCHÉLIA Copilote transversal',mode:'PLAN_AND_VERIFY',scenarios:COPILOT_SCENARIOS.map(({key,label,domains,severity,steps})=>({key,label,domains,severity,steps,automatic_execution:false,approval_required:severity==='HIGH'||severity==='CRITICAL'})),policy:{financial_mutations:'approval_and_reconciliation_required',legal_gdpr_security:'human_escalation_required',model_output:'never_executed_as_code_or_SQL'}});
@@ -3889,6 +3909,7 @@ handle = async function(request,env){
     const rate=await productionRateLimit(request,env);
     if(!rate.ok) return rate.response;
     const u=new URL(request.url);
+    if(u.pathname==='/api/copilot/health' && request.method==='GET') return copilotHealth(request,env);
     if(u.pathname==='/api/copilot/scenarios' && request.method==='GET') return copilotScenarios(request,env);
     if(u.pathname==='/api/copilot/ask' && request.method==='POST') return copilotAsk(request,env);
     if(u.pathname.startsWith('/api/copilot/')) return json({ok:false,error:'METHOD_NOT_ALLOWED',version:VERSION},405,{'allow':'GET, POST'});
