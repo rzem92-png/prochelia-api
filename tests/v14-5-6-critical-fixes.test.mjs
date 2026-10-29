@@ -134,3 +134,30 @@ test('Free ClamAV gateway requires authentication, checks hashes, and fails clos
   assert.match(scanner, /verdict: scan\.verdict/);
   assert.match(scanner, /MAX_SCAN_BYTES/);
 });
+
+
+test('Document administrative review requires a CLEAN antivirus result for the exact stored SHA-256', () => {
+  assert.match(source, /SELECT id,status,sha256_hex FROM document_records WHERE id=\? LIMIT 1/);
+  assert.match(source, /scan\.result!=='CLEAN' \|\| String\(scan\.file_sha256\|\|''\)\.toLowerCase\(\)!==String\(doc\.sha256_hex\|\|''\)\.toLowerCase\(\)/);
+});
+
+test('Legal source-of-truth drafts cover B2C, B2B, intervenant, GDPR, payments, cookies and preproduction checks', () => {
+  const legalFiles = [
+    '../legal/README.md',
+    '../legal/01-charte-client-b2c.md',
+    '../legal/02-conditions-client-b2b.md',
+    '../legal/03-charte-intervenant.md',
+    '../legal/04-notice-confidentialite-rgpd.md',
+    '../legal/05-annexe-sous-traitance-rgpd-article-28.md',
+    '../legal/06-politique-paiements-remboursements.md',
+    '../legal/07-cookies-traceurs.md',
+    '../legal/08-checklist-conformite-avant-production.md'
+  ].map(path => readFileSync(new URL(path, import.meta.url), 'utf8'));
+  assert.equal(legalFiles.length, 9);
+  assert.ok(legalFiles.slice(1).every(content => /BROUILLON/i.test(content)));
+  assert.match(legalFiles[0], /Source de vérité et gouvernance sans doublon/);
+  assert.match(legalFiles[1], /Client B2C/);
+  assert.match(legalFiles[2], /Client B2B/);
+  assert.match(legalFiles[4], /RGPD/);
+  assert.match(legalFiles[8], /avant production/i);
+});
