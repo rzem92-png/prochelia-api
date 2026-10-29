@@ -51,3 +51,28 @@ test('Stripe disputes are persisted idempotently for investigation', () => {
 test('security and payment hardening is explicitly versioned', () => {
   assert.match(source, /V14\.5\.6-EXPERT-PREPRODUCTION/);
 });
+
+
+test('transversal Copilot is authenticated, role-aware, and exposes scenario catalog', () => {
+  assert.match(source, /async function copilotScenarios\(request,env\)/);
+  assert.match(source, /supportAuth\(request,env\)/);
+  assert.match(source, /\/api\/copilot\/scenarios/);
+  assert.match(source, /MISSION_CONFLICT/);
+  assert.match(source, /PAYMENT_RECONCILIATION/);
+  assert.match(source, /GDPR_REQUEST/);
+  assert.match(source, /SECURITY_INCIDENT/);
+});
+
+test('Copilot AI is server-side, bounded, privacy-minimizing, and never executes model output', () => {
+  assert.match(source, /env\.OPENAI_API_KEY/);
+  assert.match(source, /COPILOT_PROVIDER_NOT_CONFIGURED/);
+  assert.match(source, /prompt\.length>6000/);
+  assert.match(source, /await sha256Hex\(prompt\)/);
+  assert.match(source, /MODE?L/);
+  assert.match(source, /MODE?L/);
+  assert.match(source, /PLAN_ONLY_NO_MUTATION/);
+  assert.match(source, /Aucune action métier n’est exécutée par la sortie du modèle/);
+  assert.match(source, /human|Validation humaine obligatoire/);
+  assert.match(source, /api\/copilot\/ask/);
+  assert.match(source, /Ne demande pas de données personnelles ou de santé inutiles/);
+});
