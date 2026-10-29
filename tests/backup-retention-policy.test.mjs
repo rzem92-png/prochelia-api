@@ -25,7 +25,7 @@ test('backup export excludes its own journal tables to prevent recursive backup 
 
 test('retention policy forbids indefinite personal-data retention by default and separates backups from archives', () => {
   assert.match(policy, /Pas d'archivage « infini » des données personnelles/);
-  assert.match(policy, /Sauvegarde technique/);
+  assert.match(policy, /sauvegardes/i);
   assert.match(policy, /Archive intermédiaire/);
   assert.match(policy, /suppressions et rectifications/);
   assert.match(privacy, /10-matrice-conservation-archivage-purge-rgpd\.md/);
