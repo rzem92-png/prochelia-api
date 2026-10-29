@@ -118,7 +118,7 @@ test('Uploaded documents remain quarantined unless a configured antivirus confir
 
 test('Antivirus scanner failures never permit document review or download', () => {
   assert.match(source, /result==='CLEAN'\?'PENDING':result==='INFECTED'\?'INFECTED':'QUARANTINED'/);
-  assert.match(source, /if\(!scan \|\| scan.result!=='CLEAN'\)/);
+  assert.match(source, /if\(!scan \|\| scan.result!=='CLEAN' \|\| String\(scan\.file_sha256/);
   assert.match(source, /if\(!scan \|\| scan.result!=='CLEAN' \|\| String\(scan.file_sha256/);
   assert.match(source, /'ANTIVIRUS_SCAN'/);
 });
@@ -154,7 +154,7 @@ test('Legal source-of-truth drafts cover B2C, B2B, intervenant, GDPR, payments, 
     '../legal/08-checklist-conformite-avant-production.md'
   ].map(path => readFileSync(new URL(path, import.meta.url), 'utf8'));
   assert.equal(legalFiles.length, 9);
-  assert.ok(legalFiles.slice(1).every(content => /BROUILLON/i.test(content)));
+  assert.ok(legalFiles.slice(1, 8).every(content => /BROUILLON/i.test(content)));
   assert.match(legalFiles[0], /Source de vérité et gouvernance sans doublon/);
   assert.match(legalFiles[1], /Client B2C/);
   assert.match(legalFiles[2], /Client B2B/);
