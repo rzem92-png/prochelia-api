@@ -163,3 +163,13 @@ test('Legal source-of-truth drafts cover B2C, B2B, intervenant, GDPR, payments, 
   assert.match(legalFiles[8], /avant production/i);
   assert.match(legalFiles[9], /responsabilités/i);
 });
+
+
+test('Mission creation and payment checkout remain fail-closed before acceptance', () => {
+  assert.match(source, /write_enabled:\s*false/);
+  assert.match(source, /WRITE_GATE_NOT_ACTIVATED/);
+  assert.match(source, /MISSION_API_NOT_ACTIVATED/);
+  assert.match(source, /AUTHENTICATED_VALIDATION_REQUIRED/);
+  assert.match(source, /PAYMENTS_DISABLED_UNTIL_ACCEPTANCE/);
+  assert.match(source, /PAYMENT_PROVIDER.*STRIPE_NOT_CONFIGURED/s);
+});
