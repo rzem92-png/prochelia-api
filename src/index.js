@@ -3137,9 +3137,11 @@ async function stripeWebhook(request, env) {
       const objectPaymentIntent=typeof obj?.payment_intent==='string'?obj.payment_intent:obj?.payment_intent?.id;
       if(sessionId&&(String(event.type).startsWith('checkout.session.')||String(event.type)==='payment_intent.succeeded'||String(event.type)==='payment_intent.payment_failed'||String(event.type)==='charge.refunded'||String(event.type)==='charge.dispute.created')){const type=String(event.type).startsWith('checkout.session.')?'checkout_session':String(event.type).startsWith('payment_intent.')?'payment_intent':'charge';await env.DB.prepare(`INSERT OR IGNORE INTO payment_provider_references(id,provider,external_id,transaction_id,reference_type) VALUES(?,'stripe',?,?,?)`).bind(crypto.randomUUID(),sessionId,tx.id,type).run();}
       if(objectPaymentIntent)await env.DB.prepare(`INSERT OR IGNORE INTO payment_provider_references(id,provider,external_id,transaction_id,reference_type) VALUES(?,'stripe',?,?,'payment_intent')`).bind(crypto.randomUUID(),String(objectPaymentIntent),tx.id).run();
-      const amount=Number(obj?.amount_total ?? obj?.amount_received ?? obj?.amount ?? -1);
       const currency=String(obj?.currency||'').toLowerCase();
       const isCheckout=String(event.type).startsWith('checkout.session.');
+      const isFailure=failedEvent.has(event.type);
+      const isDispute=disputeEvent.has(event.type);
+      const amount=Number(isCheckout ? (obj?.amount_total ?? -1) : isFailure ? (obj?.amount ?? -1) : isDispute ? -1 : (obj?.amount_received ?? obj?.amount ?? -1));
       const sessionMatches=!isCheckout || !tx.provider_payment_id || String(tx.provider_payment_id)===sessionId;
       const amountMatches=amount<0 || (amount===Number(tx.gross_cents) && currency===String(tx.currency||'EUR').toLowerCase());
       if(!sessionMatches || !amountMatches) {
@@ -3147,7 +3149,7 @@ async function stripeWebhook(request, env) {
         result='MISMATCH_BLOCKED';
       } else if(paidEvent.has(event.type) && (!isCheckout || obj.payment_status==='paid')) {
         if(tx.status!=='paid' && tx.status!=='refunded') {
-          await env.DB.prepare(`UPDATE payment_transactions SET status='paid',provider='stripe',provider_payment_id=COALESCE(?,provider_payment_id),updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(sessionId||null,tx.id).run();
+          await env.DB.prepare(`UPDATE payment_transactions SET status='paid',provider='stripe',provider_payment_id=COALESCE(?,provider_payment_id),updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(isCheckout ? (sessionId||null) : null,tx.id).run();
           if(tx.intervenant_id) {
             await env.DB.prepare(`INSERT OR IGNORE INTO wallets(id,user_id,currency,available_cents,pending_cents,paid_cents,reserved_cents) VALUES(?,?,?,0,0,0,0)`).bind(crypto.randomUUID(),tx.intervenant_id,tx.currency||'EUR').run();
             await env.DB.prepare(`UPDATE wallets SET available_cents=available_cents+?,updated_at=CURRENT_TIMESTAMP WHERE user_id=?`).bind(Number(tx.net_intervenant_cents||0),tx.intervenant_id).run();
