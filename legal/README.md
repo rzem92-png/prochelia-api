@@ -18,6 +18,7 @@
 7. `07-cookies-traceurs.md` — à compléter après inventaire réel.
 8. `08-checklist-conformite-avant-production.md` — contrôles bloquants et responsabilités.
 9. `09-cadre-repartition-responsabilites.md` — clauses de répartition des rôles et responsabilités, sans exonération générale.
+10. `10-matrice-conservation-archivage-purge-rgpd.md` — matrice de conservation, archivage intermédiaire, purge et restauration des sauvegardes.
 
 ## Informations obligatoires à renseigner
 Identité de l'exploitant, forme juridique, adresse, SIREN/SIRET, immatriculation, TVA si applicable, contact, assurance, rôle exact de PROCHÉLIA selon chaque flux, tarifs et frais, prestataire de paiement, médiateur de la consommation lorsque requis, procédure de rétractation et exceptions applicables, coordonnées RGPD, durées de conservation, sous-traitants, transferts, gestion des incidents et recours.
@@ -28,6 +29,7 @@ Une clause indiquant que PROCHÉLIA est un intermédiaire ne suffit pas à étab
 ## Parcours de mise en œuvre
 1. Compléter l'identité de l'exploitant, les coordonnées, assurances, tarifs, frais et coordonnées de réclamation.
 2. Établir la matrice « service / rôle contractuel / personne qui contracte / qui facture / qui encaisse / qui contrôle / assurance / autorisation requise ».
-3. Aligner chaque document sur cette matrice et sur le fonctionnement effectif de l'application.
-4. Publier une version datée uniquement après les contrôles, puis conserver la version exacte, son empreinte, l'utilisateur, l'horodatage et la preuve d'acceptation.
-5. Ne jamais afficher une acceptation contractuelle pour un brouillon ou un document qui n'a pas été rendu accessible avant la commande.
+3. Valider la matrice de conservation en fonction des finalités, bases légales, schémas réels et obligations applicables.
+4. Aligner chaque document sur cette matrice et sur le fonctionnement effectif de l'application.
+5. Publier une version datée uniquement après les contrôles, puis conserver la version exacte, son empreinte, l'utilisateur, l'horodatage et la preuve d'acceptation.
+6. Ne jamais afficher une acceptation contractuelle pour un brouillon ou un document qui n'a pas été rendu accessible avant la commande.
