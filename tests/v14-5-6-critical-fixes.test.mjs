@@ -82,3 +82,11 @@ test('support automation never trusts a client-supplied execution_verified flag'
   assert.match(source, /Never trust execution_verified supplied in a public request body/);
   assert.match(source, /NO_VERIFIED_DOWNSTREAM_ACTION/);
 });
+
+
+test('Copilot readiness diagnostics are authenticated and never expose secret values', () => {
+  assert.match(source, /async function copilotHealth\(request,env\)/);
+  assert.match(source, /\/api\/copilot\/health/);
+  assert.match(source, /AI_PROVIDER_SECRET/);
+  assert.match(source, /Aucun accès direct de l’IA aux données D1, Stripe ou documents/);
+});
