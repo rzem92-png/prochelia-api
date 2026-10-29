@@ -3483,8 +3483,21 @@ async function backupDecrypt(envelope,secret){
   }catch{throw new Error('BACKUP_DECRYPTION_FAILED')}
 }
 async function backupTables(env){
-  const r=await env.DB.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT IN ('backup_runs','backup_objects') ORDER BY name`).all();
+  // Les tables internes de continuité ne font jamais partie des données applicatives.
+  const r=await env.DB.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT IN ('backup_runs','backup_objects','backup_verifications') ORDER BY name`).all();
   return (r.results||[]).map(x=>String(x.name));
+}
+async function backupSchema(env){
+  // Capture le DDL pour rendre une restauration logique possible dans une D1 vide.
+  // L'ordre tables -> index -> triggers -> vues respecte les dépendances usuelles.
+  const r=await env.DB.prepare(`SELECT type,name,tbl_name,sql FROM sqlite_master
+    WHERE type IN ('table','index','trigger','view')
+      AND name NOT LIKE 'sqlite_%'
+      AND name NOT IN ('backup_runs','backup_objects','backup_verifications')
+      AND tbl_name NOT IN ('backup_runs','backup_objects','backup_verifications')
+      AND sql IS NOT NULL
+    ORDER BY CASE type WHEN 'table' THEN 0 WHEN 'index' THEN 1 WHEN 'trigger' THEN 2 ELSE 3 END, name`).all();
+  return (r.results||[]).map(x=>({type:String(x.type),name:String(x.name),table:String(x.tbl_name||''),sql:String(x.sql)}));
 }
 async function runNationalBackup(env,trigger='MANUAL'){
   await ensureNationalContinuitySchema(env);
@@ -3522,7 +3535,8 @@ async function runNationalBackup(env,trigger='MANUAL'){
       }
     }
     const manifestKey=`prochelia/backups/${day}/${runId}/manifest.json.enc`;
-    const manifestPlain=JSON.stringify({format:'PROCHELIA_BACKUP_MANIFEST_V1',runId,createdAt:new Date().toISOString(),version:VERSION,rowCount:rowsTotal,entries:manifestEntries});
+    const schema=await backupSchema(env);
+    const manifestPlain=JSON.stringify({format:'PROCHELIA_BACKUP_MANIFEST_V1',runId,createdAt:new Date().toISOString(),version:VERSION,rowCount:rowsTotal,schema,entries:manifestEntries});
     const manifestEncrypted=await backupEncrypt(manifestPlain,secret);
     const manifestChecksum=await backupHash(manifestEncrypted),manifestBytes=new TextEncoder().encode(manifestEncrypted).byteLength;
     await env.BACKUP_BUCKET.put(manifestKey,manifestEncrypted,{httpMetadata:{contentType:'application/octet-stream'}});
