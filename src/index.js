@@ -3153,11 +3153,33 @@ async function stripeWebhook(request, env) {
         if(!['paid','refunded'].includes(tx.status)) await env.DB.prepare(`UPDATE payment_transactions SET status='failed',updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(tx.id).run();
         result='PAYMENT_FAILED';
       } else if(refundEvent.has(event.type)) {
-        const refundCents=Math.max(0,Math.min(Number(tx.gross_cents||0),Number(obj?.amount_refunded??0)));
-        if(!Number.isSafeInteger(refundCents)||refundCents<Number(tx.refund_cents||0)){await paymentAudit(env,'STRIPE_REFUND_AMOUNT_INVALID',{transaction_id:tx.id,mission_id:tx.mission_id,metadata:{event_id:event.id,refund_cents:refundCents,previous_refund_cents:Number(tx.refund_cents||0),gross_cents:Number(tx.gross_cents||0)}},'BLOCKED');result='REFUND_AMOUNT_INVALID';}
-        else{const fullRefund=refundCents>=Number(tx.gross_cents||0);await env.DB.prepare(`UPDATE payment_transactions SET status=?,refund_cents=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(fullRefund?'refunded':'partially_refunded',refundCents,tx.id).run();result=fullRefund?'REFUND_RECORDED_FULL':'REFUND_RECORDED_PARTIAL';}
+        const grossCents=Number(tx.gross_cents||0);
+        const previousRefundCents=Number(tx.refund_cents||0);
+        const rawRefundCents=Number(obj?.amount_refunded??0);
+        const refundCents=Math.max(0,Math.min(grossCents,rawRefundCents));
+        if(!Number.isSafeInteger(refundCents)||refundCents<previousRefundCents||refundCents>grossCents){
+          await paymentAudit(env,'STRIPE_REFUND_AMOUNT_INVALID',{transaction_id:tx.id,mission_id:tx.mission_id,metadata:{event_id:event.id,refund_cents:refundCents,previous_refund_cents:previousRefundCents,gross_cents:grossCents}},'BLOCKED');
+          result='REFUND_AMOUNT_INVALID';
+        } else {
+          const deltaRefundCents=refundCents-previousRefundCents;
+          const previousReversal=Math.round(Number(tx.net_intervenant_cents||0)*previousRefundCents/Math.max(1,grossCents));
+          const totalReversal=Math.round(Number(tx.net_intervenant_cents||0)*refundCents/Math.max(1,grossCents));
+          const walletReversal=Math.max(0,totalReversal-previousReversal);
+          if(walletReversal>0&&tx.intervenant_id){
+            await env.DB.prepare(`INSERT OR IGNORE INTO wallets(id,user_id,currency,available_cents,pending_cents,paid_cents,reserved_cents) VALUES(?,?,?,0,0,0,0)`).bind(crypto.randomUUID(),tx.intervenant_id,tx.currency||'EUR').run();
+            await env.DB.prepare(`UPDATE wallets SET available_cents=available_cents-?,updated_at=CURRENT_TIMESTAMP WHERE user_id=?`).bind(walletReversal,tx.intervenant_id).run();
+          }
+          const fullRefund=grossCents>0&&refundCents>=grossCents;
+          await env.DB.prepare(`UPDATE payment_transactions SET status=?,refund_cents=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(fullRefund?'refunded':'partially_refunded',refundCents,tx.id).run();
+          await paymentAudit(env,'STRIPE_REFUND_WALLET_ADJUSTED',{transaction_id:tx.id,mission_id:tx.mission_id,metadata:{event_id:event.id,delta_refund_cents:deltaRefundCents,refund_total_cents:refundCents,wallet_reversal_cents:walletReversal}},'OK');
+          result=fullRefund?'REFUND_RECORDED_FULL':'REFUND_RECORDED_PARTIAL';
+        }
       } else if(disputeEvent.has(event.type)) {
+        const disputeId=String(obj?.id||event.id);
+        await env.DB.prepare(`INSERT OR IGNORE INTO payment_disputes(id,mission_id,transaction_id,client_id,intervenant_id,status,reason,amount_cents,created_at,updated_at) VALUES(?,?,?,?,?,'open',?,?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`)
+          .bind('stripe:'+disputeId,tx.mission_id,tx.id,tx.client_id,tx.intervenant_id,clean(obj?.reason)||'stripe_dispute',Math.max(0,Number(obj?.amount||0))).run();
         if(tx.status==='paid') await env.DB.prepare(`UPDATE payment_transactions SET status='held',updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(tx.id).run();
+        await paymentAudit(env,'STRIPE_DISPUTE_RECORDED',{transaction_id:tx.id,mission_id:tx.mission_id,metadata:{event_id:event.id,dispute_id:disputeId,amount_cents:Number(obj?.amount||0),reason:clean(obj?.reason)||null}},'OK');
         result='DISPUTE_HELD';
       }
       await paymentAudit(env,'STRIPE_WEBHOOK_PROCESSED',{transaction_id:tx.id,mission_id:tx.mission_id,metadata:{event_id:event.id,event_type:event.type,result}},'OK');
