@@ -3037,11 +3037,62 @@ async function documentsMine(request, env) {
   const r=await env.DB.prepare(`SELECT id,document_type,original_filename,mime_type,size_bytes,status,expires_at,created_at,updated_at FROM document_records WHERE owner_user_id=? ORDER BY created_at DESC LIMIT 100`).bind(auth.user.id).all();
   return json({ok:true,documents:r.results||[],version:VERSION});
 }
+async function ensureDocumentSecuritySchema(env){
+  if(!env.DB) throw new Error('DATABASE_REQUIRED');
+  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS document_security_scans(
+    id TEXT PRIMARY KEY, document_id TEXT NOT NULL, scanner TEXT NOT NULL,
+    result TEXT NOT NULL, signature_version TEXT, file_sha256 TEXT NOT NULL,
+    threat_name TEXT, scanner_reference TEXT, scanned_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    metadata_json TEXT NOT NULL DEFAULT '{}'
+  )`).run();
+  await env.DB.prepare(`CREATE INDEX IF NOT EXISTS idx_document_scans_latest ON document_security_scans(document_id,scanned_at DESC)`).run();
+}
+async function scanDocumentBytes(env,doc,bytes,actorId){
+  await ensureDocumentSecuritySchema(env);
+  const hash=String(doc.sha256_hex||'').toLowerCase();
+  const scannerUrl=String(env.DOCUMENT_SCAN_URL||'').trim();
+  const token=String(env.DOCUMENT_SCAN_TOKEN||'');
+  let result='NOT_CONFIGURED',threat=null,reference=null,signatureVersion=null,meta={};
+  if(scannerUrl && token && /^https:\/\//i.test(scannerUrl)){
+    try{
+      const response=await fetch(scannerUrl,{
+        method:'POST',
+        headers:{'authorization':`Bearer ${token}`,'content-type':'application/octet-stream','x-prochelia-document-id':String(doc.id),'x-prochelia-sha256':hash,'x-prochelia-filename':String(doc.original_filename||'document').replace(/[\\r\\n]/g,'').slice(0,120)},
+        body:bytes,
+        signal:AbortSignal.timeout(20000)
+      });
+      let payload={}; try{payload=await response.json()}catch{}
+      const verdict=String(payload?.verdict||payload?.status||'').toUpperCase();
+      if(response.ok && ['CLEAN','INFECTED'].includes(verdict)){
+        result=verdict;
+        threat=verdict==='INFECTED'?(clean(payload?.threat_name)||'THREAT_DETECTED'):null;
+        reference=clean(payload?.scan_id||payload?.id)||null;
+        signatureVersion=clean(payload?.signature_version)||null;
+        meta={engine:clean(payload?.engine)||null,checked_sha256:clean(payload?.sha256)||null};
+        if(meta.checked_sha256 && meta.checked_sha256.toLowerCase()!==hash) result='ERROR';
+        if(result==='CLEAN'&&!meta.checked_sha256) { result='ERROR'; meta.reason='SCANNER_DID_NOT_CONFIRM_FILE_HASH'; }
+      }else{
+        result='ERROR'; meta={http_status:response.status,reason:'INVALID_OR_UNSUCCESSFUL_SCANNER_RESPONSE'};
+      }
+    }catch{result='ERROR';meta={reason:'SCANNER_UNREACHABLE_OR_TIMEOUT'};}
+  }
+  await env.DB.prepare(`INSERT INTO document_security_scans(id,document_id,scanner,result,signature_version,file_sha256,threat_name,scanner_reference,metadata_json) VALUES(?,?,?,?,?,?,?,?,?)`)
+    .bind(crypto.randomUUID(),doc.id,scannerUrl?'CLAMAV_GATEWAY':'NOT_CONFIGURED',result,signatureVersion,hash,threat,reference,JSON.stringify(meta)).run();
+  const nextStatus=result==='CLEAN'?'PENDING':result==='INFECTED'?'INFECTED':'QUARANTINED';
+  await env.DB.prepare(`UPDATE document_records SET status=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(nextStatus,doc.id).run();
+  await documentAudit(env,doc.id,actorId,'ANTIVIRUS_SCAN',result,result==='INFECTED'?'THREAT_DETECTED':result==='CLEAN'?null:'SCAN_NOT_CONFIRMED');
+  return {result,status:nextStatus,scanner_configured:!!scannerUrl&&!!token,threat_detected:result==='INFECTED'};
+}
+async function latestDocumentScan(env,documentId){
+  await ensureDocumentSecuritySchema(env);
+  return env.DB.prepare(`SELECT result,file_sha256,scanned_at FROM document_security_scans WHERE document_id=? ORDER BY scanned_at DESC LIMIT 1`).bind(documentId).first();
+}
 async function documentUpload(request, env) {
   const auth=await getSessionUser(request,env);
   if(!requireRole(auth,['intervenant','gerante','admin'])) return json({ok:false,error:auth?.user?'FORBIDDEN':'UNAUTHENTICATED',version:VERSION},auth?.user?403:401);
   if(!env.DOCUMENTS_BUCKET) return json({ok:false,error:'DOCUMENT_STORAGE_NOT_CONFIGURED',version:VERSION},503);
   if(!await documentTablesReady(env)) return json({ok:false,error:'DOCUMENT_SCHEMA_REQUIRED',version:VERSION},503);
+  await ensureDocumentSecuritySchema(env);
   const length=Number(request.headers.get('content-length')||0);
   if(length>10*1024*1024) return json({ok:false,error:'DOCUMENT_TOO_LARGE',max_bytes:10485760,version:VERSION},413);
   let form; try { form=await request.formData(); } catch { return json({ok:false,error:'MULTIPART_REQUIRED',version:VERSION},400); }
@@ -3059,26 +3110,32 @@ async function documentUpload(request, env) {
   const digest=new Uint8Array(await crypto.subtle.digest('SHA-256',bytes));
   const hash=[...digest].map(x=>x.toString(16).padStart(2,'0')).join('');
   const id=crypto.randomUUID(), key=`private/${auth.user.id}/${id}.${ext}`;
+  const originalFilename=String(file.name||`document.${ext}`).replace(/[\\r\\n]/g,'').slice(0,180);
   await env.DOCUMENTS_BUCKET.put(key,bytes,{httpMetadata:{contentType:actualMime,cacheControl:'private, no-store'},customMetadata:{ownerUserId:String(auth.user.id),documentId:id,sha256:hash}});
   try {
-    await env.DB.prepare(`INSERT INTO document_records(id,owner_user_id,document_type,object_key,original_filename,mime_type,size_bytes,sha256_hex,status) VALUES(?,?,?,?,?,?,?,?, 'PENDING')`)
-      .bind(id,auth.user.id,type,String(file.name||`document.${ext}`).replace(/[\r\n]/g,'').slice(0,180),actualMime,bytes.byteLength,hash).run();
+    await env.DB.prepare(`INSERT INTO document_records(id,owner_user_id,document_type,object_key,original_filename,mime_type,size_bytes,sha256_hex,status) VALUES(?,?,?,?,?,?,?,?, 'QUARANTINED')`)
+      .bind(id,auth.user.id,type,key,originalFilename,actualMime,bytes.byteLength,hash).run();
     await documentAudit(env,id,auth.user.id,'UPLOAD','OK');
   } catch(e) {
     await env.DOCUMENTS_BUCKET.delete(key).catch(()=>{});
     throw e;
   }
-  return json({ok:true,version:VERSION,document:{id,document_type:type,status:'PENDING',size_bytes:bytes.byteLength,sha256:hash}},201);
+  const scan=await scanDocumentBytes(env,{id,sha256_hex:hash,original_filename:originalFilename},bytes,auth.user.id);
+  return json({ok:true,version:VERSION,document:{id,document_type:type,status:scan.status,antivirus:scan.result,size_bytes:bytes.byteLength,sha256:hash},message:scan.result==='CLEAN'?'Analyse antivirus confirmée; la vérification administrative reste nécessaire.':'Document conservé en quarantaine : aucune validation ni consultation n’est autorisée avant une analyse antivirus concluante.'},201);
 }
+
 async function documentReview(request, env) {
   const auth=await getSessionUser(request,env);
   if(!requireRole(auth,['gerante','admin'])) return json({ok:false,error:auth?.user?'FORBIDDEN':'UNAUTHENTICATED',version:VERSION},auth?.user?403:401);
   if(!await documentTablesReady(env)) return json({ok:false,error:'DOCUMENT_SCHEMA_REQUIRED',version:VERSION},503);
   const b=await readJson(request), id=clean(b?.document_id), status=String(b?.status||'').toUpperCase(), reason=clean(b?.reason_code)||null;
   if(!id || !['UNDER_REVIEW','VERIFIED','REJECTED'].includes(status) || (status==='REJECTED'&&!reason)) return json({ok:false,error:'INVALID_DOCUMENT_REVIEW',version:VERSION},400);
+  await ensureDocumentSecuritySchema(env);
   const doc=await env.DB.prepare('SELECT id,status FROM document_records WHERE id=? LIMIT 1').bind(id).first();
   if(!doc) return json({ok:false,error:'DOCUMENT_NOT_FOUND',version:VERSION},404);
-  if(['WITHDRAWN','EXPIRED'].includes(doc.status)) return json({ok:false,error:'DOCUMENT_NOT_REVIEWABLE',version:VERSION},409);
+  if(['WITHDRAWN','EXPIRED','INFECTED','QUARANTINED'].includes(doc.status)) return json({ok:false,error:'DOCUMENT_NOT_REVIEWABLE',version:VERSION},409);
+  const scan=await latestDocumentScan(env,id);
+  if(!scan || scan.result!=='CLEAN') return json({ok:false,error:'ANTIVIRUS_SCAN_NOT_CLEAN',version:VERSION,document_id:id},409);
   await env.DB.prepare(`UPDATE document_records SET status=?,reviewed_by_user_id=?,reviewed_at=CURRENT_TIMESTAMP,rejection_reason_code=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(status,auth.user.id,status==='REJECTED'?reason:null,id).run();
   await documentAudit(env,id,auth.user.id,'REVIEW',status,status==='REJECTED'?reason:null);
   return json({ok:true,version:VERSION,document_id:id,status},200);
@@ -3090,6 +3147,8 @@ async function documentDownload(request, env, id) {
   const doc=await env.DB.prepare('SELECT * FROM document_records WHERE id=? LIMIT 1').bind(id).first();
   if(!doc) return json({ok:false,error:'DOCUMENT_NOT_FOUND',version:VERSION},404);
   if(String(auth.user.id)!==String(doc.owner_user_id) && !requireRole(auth,['gerante','admin'])) return json({ok:false,error:'FORBIDDEN',version:VERSION},403);
+  const scan=await latestDocumentScan(env,id);
+  if(!scan || scan.result!=='CLEAN' || String(scan.file_sha256||'').toLowerCase()!==String(doc.sha256_hex||'').toLowerCase()) return json({ok:false,error:'DOCUMENT_QUARANTINED_ANTIVIRUS_REQUIRED',version:VERSION},423);
   const object=await env.DOCUMENTS_BUCKET.get(doc.object_key);
   if(!object) return json({ok:false,error:'DOCUMENT_OBJECT_MISSING',version:VERSION},404);
   const headers=new Headers({'content-type':doc.mime_type,'cache-control':'private, no-store, max-age=0','x-content-type-options':'nosniff','content-disposition':`attachment; filename="document-${doc.id}.${doc.mime_type==='application/pdf'?'pdf':doc.mime_type==='image/png'?'png':'jpg'}"`});
