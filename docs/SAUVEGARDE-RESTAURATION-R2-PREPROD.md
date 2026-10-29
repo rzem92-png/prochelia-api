@@ -21,11 +21,12 @@ Après déploiement autorisé de la préproduction, s'authentifier comme Gérant
 
 - Contrôle d'état : `GET /api/system/backups`
 - Lancement manuel : `POST /api/system/backup/run`
+- Vérification cryptographique d'un run : `POST /api/system/backups/{runId}/verify` (Gérante uniquement). La route contrôle le checksum SHA-256, déchiffre les objets, valide le manifeste et enregistre un rapport dans `backup_verifications`.
 - Vérifier `configured: true`, un résultat `COMPLETED`, un nombre de lignes/objets cohérent et les objets présents dans le bucket R2.
 - Vérifier le Cron dans les déclencheurs/observabilité Cloudflare après le prochain 03:00 UTC. Un champ `automatic: true` dans une réponse ne constitue pas une preuve d'exécution.
 - Alerter sur chaque statut `FAILED`, absence de sauvegarde quotidienne, incohérence du nombre d'objets ou erreur de clé.
 
-Le code de sauvegarde exporte les tables applicatives en lots de 500 lignes, chiffre les données avec AES-GCM et conserve une empreinte SHA-256 des objets. Les tables de journal de sauvegarde ne doivent pas être exportées dans le même flux : cela éviterait une exportation récursive des objets de sauvegarde.
+Le code de sauvegarde exporte les tables applicatives en lots de 500 lignes, chiffre les données avec AES-GCM, conserve une empreinte SHA-256 et écrit un manifeste chiffré dans R2 pour pouvoir vérifier les objets même si le journal D1 est indisponible. Les tables de journal de sauvegarde ne doivent pas être exportées dans le même flux : cela éviterait une exportation récursive des objets de sauvegarde.
 
 ## 3. Restauration — exercice isolé obligatoire
 
