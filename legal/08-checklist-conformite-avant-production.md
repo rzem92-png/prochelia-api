@@ -2,8 +2,8 @@
 
 ## Identité et contrats
 - [ ] Identité juridique complète et mentions légales vérifiées.
-- [ ] Rôle réel de PROCHÉLIA déterminé par service; revue droit des plateformes/travail/consommation.
-- [ ] Conditions B2C, conditions B2B, charte intervenant, annulation/rétractation et médiation si requise validées par un juriste.
+- [ ] Rôle réel de PROCHÉLIA déterminé par service et documenté (qui contracte, fixe le prix, choisit/contrôle l'intervenant, facture, encaisse et traite les réclamations).
+- [ ] Conditions B2C, conditions B2B, charte intervenant, annulation/rétractation et médiation si requise complétées et contrôlées. Une validation par avocat n'est pas une obligation générale pour chaque document, mais une revue ciblée est fortement recommandée sur les risques de qualification, consommation, travail/plateformes et services à la personne.
 - [ ] Assurances, qualifications et limites de prestation confirmées.
 - [ ] Tarifs, frais, TVA, factures et remboursements alignés sur le fonctionnement réel.
 - [ ] Version exacte des documents, empreinte, signataire et preuve d'acceptation testés.
