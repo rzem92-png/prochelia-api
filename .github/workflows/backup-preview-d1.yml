@@ -41,6 +41,19 @@ jobs:
             echo "::error::Garde-fou : la cible n'est pas la D1 de préproduction attendue."
             exit 1
           fi
+          # Tester le jeton seul avant l’appel D1 pour isoler l’authentification.
+          verify_file="$RUNNER_TEMP/cloudflare-token-verify.json"
+          verify_status="$(curl --silent --show-error --output "$verify_file" --write-out '%{http_code}' -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "https://api.cloudflare.com/client/v4/user/tokens/verify")"
+          verify_response="$(cat "$verify_file")"
+          verify_success="$(printf '%s' "$verify_response" | jq -r '.success // false')"
+          verify_token_status="$(printf '%s' "$verify_response" | jq -r '.result.status // "inconnu"')"
+          if [[ "$verify_status" != "200" || "$verify_success" != "true" || "$verify_token_status" != "active" ]]; then
+            verify_codes="$(printf '%s' "$verify_response" | jq -r '[.errors[]?.code // empty] | join(",")')"
+            verify_messages="$(printf '%s' "$verify_response" | jq -r '[.errors[]?.message // empty] | join(" | ")')"
+            echo "::error::Jeton Cloudflare refusé par /user/tokens/verify (HTTP $verify_status, statut=$verify_token_status, codes=${verify_codes:-aucun}). ${verify_messages:-Vérifier le secret du jeton.}"
+            exit 1
+          fi
+          echo "Jeton Cloudflare valide et actif ; secret masqué."
           response_file="$RUNNER_TEMP/cloudflare-d1-check.json"
           # Liste D1 documentée par Cloudflare ; valider ensuite nom et UUID exacts.
           http_status="$(curl --silent --show-error \
