@@ -1,0 +1,32 @@
+name: PROCHÉLIA V14.5.6 critical checks
+
+on:
+  pull_request:
+    branches:
+      - staging-prochelia-v14
+  push:
+    branches:
+      - fix/v14.5.6-security-stripe-hardening
+
+permissions:
+  contents: read
+
+jobs:
+  syntax-and-regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Syntax check Worker modules
+        run: |
+          node --experimental-default-type=module --check src/index.js
+          node --experimental-default-type=module --check src/v7.js
+          node --experimental-default-type=module --check src/v7-routes.js
+          node --experimental-default-type=module --check src/stripe-adapter.js
+      - name: Run critical regression checks
+        run: node --test tests/v14-5-6-critical-fixes.test.mjs
