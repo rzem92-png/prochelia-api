@@ -3131,11 +3131,11 @@ async function documentReview(request, env) {
   const b=await readJson(request), id=clean(b?.document_id), status=String(b?.status||'').toUpperCase(), reason=clean(b?.reason_code)||null;
   if(!id || !['UNDER_REVIEW','VERIFIED','REJECTED'].includes(status) || (status==='REJECTED'&&!reason)) return json({ok:false,error:'INVALID_DOCUMENT_REVIEW',version:VERSION},400);
   await ensureDocumentSecuritySchema(env);
-  const doc=await env.DB.prepare('SELECT id,status FROM document_records WHERE id=? LIMIT 1').bind(id).first();
+  const doc=await env.DB.prepare('SELECT id,status,sha256_hex FROM document_records WHERE id=? LIMIT 1').bind(id).first();
   if(!doc) return json({ok:false,error:'DOCUMENT_NOT_FOUND',version:VERSION},404);
   if(['WITHDRAWN','EXPIRED','INFECTED','QUARANTINED'].includes(doc.status)) return json({ok:false,error:'DOCUMENT_NOT_REVIEWABLE',version:VERSION},409);
   const scan=await latestDocumentScan(env,id);
-  if(!scan || scan.result!=='CLEAN') return json({ok:false,error:'ANTIVIRUS_SCAN_NOT_CLEAN',version:VERSION,document_id:id},409);
+  if(!scan || scan.result!=='CLEAN' || String(scan.file_sha256||'').toLowerCase()!==String(doc.sha256_hex||'').toLowerCase()) return json({ok:false,error:'ANTIVIRUS_SCAN_NOT_CLEAN',version:VERSION,document_id:id},409);
   await env.DB.prepare(`UPDATE document_records SET status=?,reviewed_by_user_id=?,reviewed_at=CURRENT_TIMESTAMP,rejection_reason_code=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(status,auth.user.id,status==='REJECTED'?reason:null,id).run();
   await documentAudit(env,id,auth.user.id,'REVIEW',status,status==='REJECTED'?reason:null);
   return json({ok:true,version:VERSION,document_id:id,status},200);
