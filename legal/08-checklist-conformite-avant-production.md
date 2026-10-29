@@ -10,11 +10,15 @@
 
 ## RGPD
 - [ ] Registre des traitements et bases légales par finalité.
-- [ ] Notice de confidentialité complète; durées de conservation définies.
+- [ ] Notice de confidentialité complète; durées de conservation définies et expliquées aux personnes.
+- [ ] Matrice `10-matrice-conservation-archivage-purge-rgpd.md` validée catégorie par catégorie par le responsable de traitement.
 - [ ] Rôles responsable/sous-traitant définis traitement par traitement.
 - [ ] Annexe article 28 et liste des sous-traitants si applicables.
 - [ ] Transferts hors EEE documentés et garanties vérifiées.
 - [ ] Procédures de droits, suppression, export et réponse aux violations testées.
+- [ ] Purge sélective testée en dry-run puis en préproduction; preuve de suppression conservée sans recopier les données supprimées.
+- [ ] Procédure de restauration réappliquant les suppressions/rectifications postérieures à la sauvegarde testée.
+- [ ] Archivage intermédiaire limité aux données nécessaires, justifié, séparé et à accès restreint; aucune conservation personnelle indéfinie par défaut.
 - [ ] AIPD évaluée si le traitement présente un risque élevé.
 - [ ] Minimisation des données sensibles, particulièrement les informations de santé et bénéficiaires vulnérables.
 
@@ -24,7 +28,9 @@
 - [ ] Antivirus en quarantaine si absent, erreur, délai dépassé, fichier non scannable ou hash différent.
 - [ ] Mises à jour de dépendances et images, scans de vulnérabilités, procédure de correction.
 - [ ] WAF/rate limit, CORS, protection contre abus, journaux sans secrets ni données inutiles.
-- [ ] Sauvegardes chiffrées, test de restauration et contrôle d'accès.
+- [ ] Binding R2, secrets de chiffrement et Cron de sauvegarde configurés dans l'environnement cible.
+- [ ] Expiration/rotation R2 vérifiée, sauvegardes chiffrées et restauration testée de bout en bout.
+- [ ] Reprise après sinistre testée sans réintroduire les données supprimées.
 - [ ] Gestion d'incident et notification RGPD exercées.
 
 ## Paiements
