@@ -14,6 +14,12 @@ test('mission security checks assigned mission and canonical intervenant profile
   assert.match(source, /const arrival=securityCode\(\),end=securityCode\(\)/);
 });
 
+test('Mission security codes are consumed atomically to prevent concurrent double use', () => {
+  assert.match(source, /arrival_used_at IS NULL AND status='prepared'/);
+  assert.match(source, /end_used_at IS NULL AND status='in_progress'/);
+  assert.match(source, /SECURITY_CODE_ALREADY_USED_OR_STATE_CHANGED/);
+});
+
 test('Stripe charge webhooks resolve through persisted provider references', () => {
   assert.match(source, /CREATE TABLE IF NOT EXISTS payment_provider_references/);
   assert.match(source, /SELECT transaction_id FROM payment_provider_references WHERE provider='stripe' AND external_id=\?/);
