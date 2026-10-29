@@ -6,7 +6,7 @@ import { verifyStripeSignature, stripeCheckoutPayload } from "./stripe-adapter.j
 // Les écritures de missions restent volontairement désactivées tant que la chaîne
 // authentification/RBAC/idempotence/contrôles métier n'a pas été validée.
 
-const VERSION = 'V14.5.1-EXPERT-PREPRODUCTION';
+const VERSION = 'V14.5.6-EXPERT-PREPRODUCTION';
 const SECURITY_CODE_TTL_SECONDS = 15 * 60;
 const SECURITY_MAX_ATTEMPTS = 5;
 const SECURITY_LOCK_SECONDS = 15 * 60;
@@ -531,6 +531,11 @@ async function requireVerifiedIntervenant(env, userId) {
   return row || null;
 }
 
+async function getIntervenantProfileByUser(env, userId) {
+  if (!userId) return null;
+  try { return await env.DB.prepare('SELECT id,user_id FROM intervenants WHERE user_id=? LIMIT 1').bind(String(userId)).first(); } catch { return null; }
+}
+
 async function deviceHash(request, userId) {
   const raw = [userId, request.headers.get('user-agent') || '', request.headers.get('sec-ch-ua') || ''].join('|');
   return sha256Base64url(raw);
@@ -596,37 +601,28 @@ async function deliverSecurityCodes(env, payload) {
 }
 
 async function securityPrepareMission(request, env) {
-  const auth = await getSessionUser(request, env);
-  if (!requireRole(auth, ['gerante'])) return json({ok:false,error:auth?.user?'FORBIDDEN':'UNAUTHENTICATED',version:VERSION}, auth?.user?403:401);
+  const auth=await getSessionUser(request,env);
+  if(!requireRole(auth,['gerante'])) return json({ok:false,error:auth?.user?'FORBIDDEN':'UNAUTHENTICATED',version:VERSION},auth?.user?403:401);
   await ensureSecuritySchema(env);
-  const body = await readJson(request);
-  const missionId=clean(body?.mission_id), clientId=clean(body?.client_id), intervenantId=clean(body?.intervenant_id);
+  const body=await readJson(request), missionId=clean(body?.mission_id), clientId=clean(body?.client_id), intervenantId=clean(body?.intervenant_id);
   if(!missionId||!clientId||!intervenantId) return json({ok:false,error:'MISSION_SECURITY_FIELDS_REQUIRED',version:VERSION},400);
-  const verified = await requireVerifiedIntervenant(env,intervenantId);
-  if(!verified) return json({ok:false,error:'INTERVENANT_IDENTITY_NOT_VERIFIED',version:VERSION},409);
+  const mission=await env.DB.prepare('SELECT id,client_id,intervenant_id,start_at,end_at FROM missions WHERE id=? LIMIT 1').bind(missionId).first();
+  if(!mission) return json({ok:false,error:'MISSION_NOT_FOUND',version:VERSION},404);
+  if(String(mission.client_id)!==clientId||String(mission.intervenant_id||'')!==intervenantId) return json({ok:false,error:'MISSION_ASSIGNMENT_MISMATCH',version:VERSION},409);
+  const profile=await env.DB.prepare('SELECT id,user_id FROM intervenants WHERE id=? LIMIT 1').bind(intervenantId).first().catch(()=>null);
+  if(!profile?.id||!profile?.user_id) return json({ok:false,error:'INTERVENANT_PROFILE_NOT_LINKED',version:VERSION},409);
+  if(!await requireVerifiedIntervenant(env,String(profile.user_id))) return json({ok:false,error:'INTERVENANT_IDENTITY_NOT_VERIFIED',version:VERSION},409);
   const existing=await env.DB.prepare('SELECT id,status FROM mission_security WHERE mission_id=? LIMIT 1').bind(missionId).first();
   if(existing) return json({ok:false,error:'MISSION_SECURITY_ALREADY_PREPARED',version:VERSION,status:existing.status},409);
-  const arrival=securityCode(), end=securityCode();
-  const now=Date.now(), arrivalExpiry=new Date(now+SECURITY_CODE_TTL_SECONDS*1000).toISOString(), endExpiry=new Date(now+SECURITY_CODE_TTL_SECONDS*1000).toISOString();
-  const id=crypto.randomUUID();
-  await env.DB.prepare(
-    `INSERT INTO mission_security (id,mission_id,client_id,intervenant_id,risk_level,arrival_code_hash,arrival_expires_at,end_code_hash,end_expires_at)
-     VALUES (?,?,?,?,?,?,?,?,?)`
-  ).bind(id,missionId,clientId,intervenantId,clean(body?.risk_level)||'standard',await sha256Base64url(arrival),arrivalExpiry,await sha256Base64url(end),endExpiry).run();
-  await securityAudit(env,'MISSION_SECURITY_PREPARED',missionId,auth.user.id,auth.user.role,'OK',{intervenant_id:intervenantId,risk_level:clean(body?.risk_level)||'standard'});
-  const delivery = await deliverSecurityCodes(env, {
-    mission_id: missionId,
-    client_id: clientId,
-    arrival_code: arrival,
-    arrival_expires_at: arrivalExpiry,
-    end_code: end,
-    end_expires_at: endExpiry
-  });
-  if (!delivery.ok) {
-    await env.DB.prepare('DELETE FROM mission_security WHERE id=?').bind(id).run();
-    await securityAudit(env,'MISSION_SECURITY_PREPARE_DELIVERY_FAILED',missionId,auth.user.id,auth.user.role,'DENIED',{reason:delivery.error});
-    return json({ok:false,error:'SECURITY_CODE_DELIVERY_FAILED',version:VERSION,details:delivery.error},503);
-  }
+  const startMs=Date.parse(String(mission.start_at||'')),endMs=Date.parse(String(mission.end_at||mission.start_at||'')),now=Date.now();
+  if(!Number.isFinite(startMs)||!Number.isFinite(endMs)||endMs<startMs) return json({ok:false,error:'MISSION_SCHEDULE_INVALID',version:VERSION},409);
+  if(startMs<now-4*60*60*1000||startMs>now+30*24*60*60*1000) return json({ok:false,error:'MISSION_SCHEDULE_OUT_OF_RANGE',version:VERSION},409);
+  const arrivalExpiry=new Date(startMs+4*60*60*1000).toISOString(),endExpiry=new Date(Math.max(endMs+12*60*60*1000,startMs+4*60*60*1000)).toISOString(),id=crypto.randomUUID();
+  await env.DB.prepare(`INSERT INTO mission_security (id,mission_id,client_id,intervenant_id,risk_level,arrival_code_hash,arrival_expires_at,end_code_hash,end_expires_at) VALUES (?,?,?,?,?,?,?,?,?)`)
+    .bind(id,missionId,clientId,intervenantId,clean(body?.risk_level)||'standard',await sha256Base64url(arrival),arrivalExpiry,await sha256Base64url(end),endExpiry).run();
+  await securityAudit(env,'MISSION_SECURITY_PREPARED',missionId,auth.user.id,auth.user.role,'OK',{intervenant_id:intervenantId,code_expiry_policy:'mission_schedule'});
+  const delivery=await deliverSecurityCodes(env,{mission_id:missionId,client_id:clientId,arrival_code:arrival,arrival_expires_at:arrivalExpiry,end_code:end,end_expires_at:endExpiry});
+  if(!delivery.ok){await env.DB.prepare('DELETE FROM mission_security WHERE id=?').bind(id).run();await securityAudit(env,'MISSION_SECURITY_PREPARE_DELIVERY_FAILED',missionId,auth.user.id,auth.user.role,'DENIED',{reason:delivery.error});return json({ok:false,error:'SECURITY_CODE_DELIVERY_FAILED',version:VERSION,details:delivery.error},503);}
   await securityAudit(env,'SECURITY_CODES_DELIVERED',missionId,auth.user.id,auth.user.role,'OK',{channel:delivery.channel});
   return json({ok:true,version:VERSION,mission_id:missionId,status:'prepared',arrival:{expires_at:arrivalExpiry},end:{expires_at:endExpiry},delivery:{channel:delivery.channel,delivered:true},security_note:'Les codes en clair ne sont jamais renvoyés par l’API.'},201);
 }
@@ -635,11 +631,13 @@ async function securityPresence(request, env) {
   const auth=await getSessionUser(request,env);
   if(!requireRole(auth,['intervenant'])) return json({ok:false,error:auth?.user?'FORBIDDEN':'UNAUTHENTICATED',version:VERSION},auth?.user?403:401);
   await ensureSecuritySchema(env);
+  const profile=await getIntervenantProfileByUser(env,auth.user.id);
+  if(!profile?.id) return json({ok:false,error:'INTERVENANT_PROFILE_NOT_LINKED',version:VERSION},403);
   const identity = await requireVerifiedIntervenant(env, auth.user.id);
   if(!identity) return json({ok:false,error:'INTERVENANT_IDENTITY_NOT_VERIFIED',version:VERSION},403);
   const body=await readJson(request), missionId=clean(body?.mission_id);
   if(!missionId) return json({ok:false,error:'MISSION_ID_REQUIRED',version:VERSION},400);
-  const sec=await env.DB.prepare('SELECT * FROM mission_security WHERE mission_id=? AND intervenant_id=? LIMIT 1').bind(missionId,auth.user.id).first();
+  const sec=await env.DB.prepare('SELECT * FROM mission_security WHERE mission_id=? AND intervenant_id=? LIMIT 1').bind(missionId,profile.id).first();
   if(!sec) return json({ok:false,error:'MISSION_NOT_ASSIGNED_OR_NOT_PREPARED',version:VERSION},404);
   const device=await deviceHash(request,auth.user.id);
   await env.DB.prepare(`INSERT INTO trusted_devices (id,user_id,device_hash,expires_at) VALUES (?,?,?,datetime('now',?)) ON CONFLICT(user_id,device_hash) DO UPDATE SET last_seen_at=CURRENT_TIMESTAMP,expires_at=excluded.expires_at,status='active'`)
@@ -655,7 +653,9 @@ async function securityVerifyCode(request, env) {
   await ensureSecuritySchema(env);
   const body=await readJson(request), missionId=clean(body?.mission_id), purpose=clean(body?.purpose), code=clean(body?.code);
   if(!missionId||!['ARRIVAL','END'].includes(purpose)||!/^[0-9]{6}$/.test(code)) return json({ok:false,error:'INVALID_SECURITY_CODE_REQUEST',version:VERSION},400);
-  const sec=await env.DB.prepare('SELECT * FROM mission_security WHERE mission_id=? AND intervenant_id=? LIMIT 1').bind(missionId,auth.user.id).first();
+  const profile=await getIntervenantProfileByUser(env,auth.user.id);
+  if(!profile?.id) return json({ok:false,error:'INTERVENANT_PROFILE_NOT_LINKED',version:VERSION},403);
+  const sec=await env.DB.prepare('SELECT * FROM mission_security WHERE mission_id=? AND intervenant_id=? LIMIT 1').bind(missionId,profile.id).first();
   if(!sec) return json({ok:false,error:'MISSION_NOT_ASSIGNED_OR_NOT_PREPARED',version:VERSION},404);
   const identity = await requireVerifiedIntervenant(env, auth.user.id);
   if(!identity) {
@@ -785,6 +785,12 @@ async function ensurePaymentSchema(env) {
       processed INTEGER NOT NULL DEFAULT 0, payload_hash TEXT, received_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       processed_at TEXT, UNIQUE(provider, event_id)
     )`,
+    `CREATE TABLE IF NOT EXISTS payment_provider_references (
+      id TEXT PRIMARY KEY, provider TEXT NOT NULL, external_id TEXT NOT NULL,
+      transaction_id TEXT NOT NULL, reference_type TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, UNIQUE(provider, external_id)
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_payment_provider_references_tx ON payment_provider_references(transaction_id, provider)`,
     `CREATE TABLE IF NOT EXISTS payment_disputes (
       id TEXT PRIMARY KEY, mission_id TEXT, transaction_id TEXT, client_id TEXT, intervenant_id TEXT,
       status TEXT NOT NULL DEFAULT 'open', reason TEXT, amount_cents INTEGER NOT NULL DEFAULT 0,
@@ -3109,16 +3115,22 @@ async function stripeWebhook(request, env) {
     .bind(String(event.id)).run();
   if(!claim.meta?.changes) return json({ok:true,version:VERSION,processing:true,event_id:event.id,retry_after_seconds:300},202);
   const obj=event.data.object;
-  const txId=clean(obj?.metadata?.prochelia_transaction_id)||clean(obj?.client_reference_id);
+  let txId=clean(obj?.metadata?.prochelia_transaction_id)||clean(obj?.client_reference_id);
   const paidEvent=new Set(['checkout.session.completed','checkout.session.async_payment_succeeded','payment_intent.succeeded']);
   const failedEvent=new Set(['checkout.session.async_payment_failed','payment_intent.payment_failed']);
   const refundEvent=new Set(['charge.refunded']);
   const disputeEvent=new Set(['charge.dispute.created']);
-  let result='IGNORED';
-  if(txId && (paidEvent.has(event.type)||failedEvent.has(event.type)||refundEvent.has(event.type)||disputeEvent.has(event.type))) {
+  const supportedEvent=paidEvent.has(event.type)||failedEvent.has(event.type)||refundEvent.has(event.type)||disputeEvent.has(event.type);
+  if(!txId&&supportedEvent){const ids=[clean(obj?.id),clean(typeof obj?.payment_intent==='string'?obj.payment_intent:obj?.payment_intent?.id)].filter(Boolean);for(const externalId of ids){const ref=await env.DB.prepare(`SELECT transaction_id FROM payment_provider_references WHERE provider='stripe' AND external_id=? LIMIT 1`).bind(externalId).first();if(ref?.transaction_id){txId=String(ref.transaction_id);break;}}}
+  let result='IGNORED'; let transactionResolved=false;
+  if(txId&&supportedEvent) {
     const tx=await env.DB.prepare('SELECT * FROM payment_transactions WHERE id=? LIMIT 1').bind(txId).first();
     if(tx && String(tx.provider||'').toLowerCase()==='stripe') {
+      transactionResolved=true;
       const sessionId=String(obj?.id||'');
+      const objectPaymentIntent=typeof obj?.payment_intent==='string'?obj.payment_intent:obj?.payment_intent?.id;
+      if(sessionId&&(String(event.type).startsWith('checkout.session.')||String(event.type)==='payment_intent.succeeded'||String(event.type)==='payment_intent.payment_failed'||String(event.type)==='charge.refunded'||String(event.type)==='charge.dispute.created')){const type=String(event.type).startsWith('checkout.session.')?'checkout_session':String(event.type).startsWith('payment_intent.')?'payment_intent':'charge';await env.DB.prepare(`INSERT OR IGNORE INTO payment_provider_references(id,provider,external_id,transaction_id,reference_type) VALUES(?,'stripe',?,?,?)`).bind(crypto.randomUUID(),sessionId,tx.id,type).run();}
+      if(objectPaymentIntent)await env.DB.prepare(`INSERT OR IGNORE INTO payment_provider_references(id,provider,external_id,transaction_id,reference_type) VALUES(?,'stripe',?,?,'payment_intent')`).bind(crypto.randomUUID(),String(objectPaymentIntent),tx.id).run();
       const amount=Number(obj?.amount_total ?? obj?.amount_received ?? obj?.amount ?? -1);
       const currency=String(obj?.currency||'').toLowerCase();
       const isCheckout=String(event.type).startsWith('checkout.session.');
@@ -3140,8 +3152,9 @@ async function stripeWebhook(request, env) {
         if(!['paid','refunded'].includes(tx.status)) await env.DB.prepare(`UPDATE payment_transactions SET status='failed',updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(tx.id).run();
         result='PAYMENT_FAILED';
       } else if(refundEvent.has(event.type)) {
-        await env.DB.prepare(`UPDATE payment_transactions SET status='refunded',refund_cents=MAX(refund_cents,?),updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(Math.max(0,Number(obj?.amount_refunded ?? amount)),tx.id).run();
-        result='REFUND_RECORDED';
+        const refundCents=Math.max(0,Math.min(Number(tx.gross_cents||0),Number(obj?.amount_refunded??0)));
+        if(!Number.isSafeInteger(refundCents)||refundCents<Number(tx.refund_cents||0)){await paymentAudit(env,'STRIPE_REFUND_AMOUNT_INVALID',{transaction_id:tx.id,mission_id:tx.mission_id,metadata:{event_id:event.id,refund_cents:refundCents,previous_refund_cents:Number(tx.refund_cents||0),gross_cents:Number(tx.gross_cents||0)}},'BLOCKED');result='REFUND_AMOUNT_INVALID';}
+        else{const fullRefund=refundCents>=Number(tx.gross_cents||0);await env.DB.prepare(`UPDATE payment_transactions SET status=?,refund_cents=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(fullRefund?'refunded':'partially_refunded',refundCents,tx.id).run();result=fullRefund?'REFUND_RECORDED_FULL':'REFUND_RECORDED_PARTIAL';}
       } else if(disputeEvent.has(event.type)) {
         if(tx.status==='paid') await env.DB.prepare(`UPDATE payment_transactions SET status='held',updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(tx.id).run();
         result='DISPUTE_HELD';
@@ -3149,6 +3162,7 @@ async function stripeWebhook(request, env) {
       await paymentAudit(env,'STRIPE_WEBHOOK_PROCESSED',{transaction_id:tx.id,mission_id:tx.mission_id,metadata:{event_id:event.id,event_type:event.type,result}},'OK');
     }
   }
+  if(supportedEvent&&(!txId||!transactionResolved)){await env.DB.prepare(`UPDATE payment_webhook_events SET processed=0,processed_at=NULL WHERE provider='stripe' AND event_id=?`).bind(String(event.id)).run();return json({ok:false,error:'STRIPE_TRANSACTION_REFERENCE_NOT_READY',version:VERSION,event_id:event.id,retry:true},503);}
   await env.DB.prepare(`UPDATE payment_webhook_events SET processed=1,processed_at=CURRENT_TIMESTAMP WHERE provider='stripe' AND event_id=?`).bind(String(event.id)).run();
   return json({ok:true,version:VERSION,event_id:event.id,processed:true,result},200);
 }
@@ -3175,6 +3189,7 @@ async function stripeCheckout(request, env) {
   catch { return json({ok:false,error:'STRIPE_UNAVAILABLE',version:VERSION},502); }
   if(!response.ok || !data?.id || !data?.url) return json({ok:false,error:'STRIPE_CHECKOUT_CREATION_FAILED',version:VERSION,stripe_status:response.status},502);
   await env.DB.prepare(`UPDATE payment_transactions SET provider_payment_id=?,provider='stripe',updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='pending'`).bind(data.id,tx.id).run();
+  await env.DB.prepare(`INSERT OR IGNORE INTO payment_provider_references(id,provider,external_id,transaction_id,reference_type) VALUES(?,'stripe',?,?,'checkout_session')`).bind(crypto.randomUUID(),data.id,tx.id).run();
   await paymentAudit(env,'STRIPE_CHECKOUT_CREATED',{transaction_id:tx.id,mission_id:tx.mission_id,user_id:auth.user.id,metadata:{checkout_session_id:data.id}},'OK');
   return json({ok:true,version:VERSION,checkout_url:data.url,checkout_session_id:data.id},201);
 }
