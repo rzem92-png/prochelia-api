@@ -1,0 +1,124 @@
+name: PROCHÉLIA — test de restauration D1 isolé
+
+on:
+  workflow_dispatch:
+    inputs:
+      backup_run_id:
+        description: "ID numérique de l’exécution de sauvegarde réussie (ex. 123456789)"
+        required: true
+        type: string
+      restore_test_db_id:
+        description: "UUID de la base D1 de TEST nommée prochelia-restore-test-db"
+        required: true
+        type: string
+      confirm_isolated_test:
+        description: "Confirmer que la cible est une base de TEST vide, distincte de préproduction et production"
+        required: true
+        type: boolean
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: prochelia-d1-restore-test
+  cancel-in-progress: false
+
+jobs:
+  restore-test:
+    name: Restaurer l’archive dans la base de test isolée
+    if: ${{ inputs.confirm_isolated_test == true }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      CLOUDFLARE_ACCOUNT_ID: f2a79e9fa41566a8ec80fb24c02c60eb
+      RESTORE_DB_NAME: prochelia-restore-test-db
+      RESTORE_DB_ID: ${{ inputs.restore_test_db_id }}
+      BACKUP_RUN_ID: ${{ inputs.backup_run_id }}
+    steps:
+      - name: Vérifier les entrées et les secrets
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          BACKUP_ENCRYPTION_KEY: ${{ secrets.BACKUP_ENCRYPTION_KEY }}
+        run: |
+          set -euo pipefail
+          [[ "$BACKUP_RUN_ID" =~ ^[0-9]+$ ]] || { echo "::error::L’ID d’exécution doit être numérique."; exit 1; }
+          [[ "$RESTORE_DB_ID" =~ ^[0-9a-fA-F-]{36}$ ]] || { echo "::error::UUID de base de test invalide."; exit 1; }
+          [[ "$RESTORE_DB_NAME" == "prochelia-restore-test-db" ]] || { echo "::error::Garde-fou : seule la base de test dédiée est autorisée."; exit 1; }
+          [[ -n "${CLOUDFLARE_API_TOKEN:-}" && -n "${BACKUP_ENCRYPTION_KEY:-}" ]] || { echo "::error::Secret requis manquant."; exit 1; }
+          token="$CLOUDFLARE_API_TOKEN"
+          token="${token#Bearer }"
+          token="${token#bearer }"
+          token="$(printf '%s' "$token" | tr -d '\r\n')"
+          [[ -n "$token" ]] || { echo "::error::Jeton Cloudflare vide."; exit 1; }
+          printf 'CLOUDFLARE_API_TOKEN=%s\n' "$token" >> "$GITHUB_ENV"
+          status="$(curl --silent --show-error --output "$RUNNER_TEMP/token-check.json" --write-out '%{http_code}' -H "Authorization: Bearer $token" "https://api.cloudflare.com/client/v4/user/tokens/verify")"
+          success="$(jq -r '.success // false' "$RUNNER_TEMP/token-check.json")"
+          token_status="$(jq -r '.result.status // "inconnu"' "$RUNNER_TEMP/token-check.json")"
+          if [[ "$status" != "200" || "$success" != "true" || "$token_status" != "active" ]]; then
+            codes="$(jq -r '[.errors[]?.code // empty] | join(",")' "$RUNNER_TEMP/token-check.json")"
+            echo "::error::Jeton Cloudflare invalide ou inactif (HTTP $status, codes ${codes:-aucun})."
+            exit 1
+          fi
+          # Refuser explicitement les bases preview/production et valider nom + UUID côté API.
+          [[ "$RESTORE_DB_NAME" != "prochelia-preview-db" ]] || { echo "::error::La base de préproduction est interdite comme cible de restauration."; exit 1; }
+          http="$(curl --silent --show-error --output "$RUNNER_TEMP/d1-list.json" --write-out '%{http_code}' -H "Authorization: Bearer $token" "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/d1/database?name=$RESTORE_DB_NAME")"
+          [[ "$http" == "200" ]] || { echo "::error::Impossible de vérifier la base de test dans Cloudflare (HTTP $http)."; exit 1; }
+          count="$(jq --arg n "$RESTORE_DB_NAME" --arg id "$RESTORE_DB_ID" '[.result[]? | select(.name == $n and .uuid == $id)] | length' "$RUNNER_TEMP/d1-list.json")"
+          [[ "$count" == "1" ]] || { echo "::error::La base de test n’existe pas ou le nom/UUID ne correspondent pas. Aucune restauration effectuée."; exit 1; }
+          echo "Secrets présents, jeton actif et cible de test exacte confirmée."
+
+      - name: Télécharger l’archive de sauvegarde réussie
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/prochelia-restore"
+          gh run download "$BACKUP_RUN_ID" --repo "$GITHUB_REPOSITORY" --name "prochelia-preview-d1-encrypted-$BACKUP_RUN_ID" --dir "$RUNNER_TEMP/prochelia-restore"
+          test -s "$RUNNER_TEMP/prochelia-restore/prochelia-preview.sql.gpg"
+          test -s "$RUNNER_TEMP/prochelia-restore/README.txt"
+          grep -Fx 'database=prochelia-preview-db' "$RUNNER_TEMP/prochelia-restore/README.txt"
+          echo "Archive trouvée ; export SQL en clair non téléchargé."
+
+      - name: Déchiffrer et vérifier le fichier SQL
+        shell: bash
+        env:
+          BACKUP_ENCRYPTION_KEY: ${{ secrets.BACKUP_ENCRYPTION_KEY }}
+        run: |
+          set -euo pipefail
+          encrypted="$RUNNER_TEMP/prochelia-restore/prochelia-preview.sql.gpg"
+          sql="$RUNNER_TEMP/prochelia-restore/prochelia-preview.sql"
+          printf '%s' "$BACKUP_ENCRYPTION_KEY" | gpg --batch --yes --pinentry-mode loopback --passphrase-fd 0 --decrypt "$encrypted" > "$sql"
+          test -s "$sql"
+          grep -Eiq 'CREATE TABLE|INSERT INTO|CREATE INDEX|PRAGMA' "$sql" || { echo "::error::Le fichier déchiffré ne ressemble pas à un export SQL D1."; exit 1; }
+          chmod 600 "$sql"
+          echo "Déchiffrement réussi ; export SQL non affiché dans les journaux."
+
+      - name: Installer Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Restaurer uniquement dans la base de test dédiée
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          [[ "$RESTORE_DB_NAME" == "prochelia-restore-test-db" ]] || exit 1
+          [[ "$RESTORE_DB_ID" != "6adb95e5-e542-4bec-9008-fbea01042305" ]] || { echo "::error::La cible est la base de préproduction ; refus de continuer."; exit 1; }
+          npx --yes wrangler@4 d1 execute "$RESTORE_DB_NAME" --remote --file="$RUNNER_TEMP/prochelia-restore/prochelia-preview.sql" --yes
+          echo "Commande de restauration exécutée sur la base de test isolée."
+
+      - name: Vérifier les tables restaurées
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          result="$RUNNER_TEMP/prochelia-restore/verification.json"
+          npx --yes wrangler@4 d1 execute "$RESTORE_DB_NAME" --remote --command="SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name;" --json > "$result"
+          jq -e 'type == "array" or type == "object"' "$result" >/dev/null
+          echo "Requête de vérification exécutée. Consulter le résultat de cette étape pour confirmer les tables présentes."
