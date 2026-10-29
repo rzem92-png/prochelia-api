@@ -27,6 +27,13 @@ test('Stripe charge webhooks resolve through persisted provider references', () 
   assert.match(adapter, /payment_intent_data\[metadata\]\[prochelia_transaction_id\]/);
 });
 
+test('Stripe event-specific amounts avoid false failure and dispute mismatches', () => {
+  assert.match(source, /isFailure=failedEvent\.has\(event\.type\)/);
+  assert.match(source, /isDispute=disputeEvent\.has\(event\.type\)/);
+  assert.match(source, /obj\?\.amount_received \?\? obj\?\.amount/);
+  assert.match(source, /isCheckout \? \(sessionId\|\|null\) : null/);
+});
+
 test('Stripe refunds are bounded, adjust wallet balances, and distinguish partial refunds', () => {
   assert.match(source, /refundCents>grossCents/);
   assert.match(source, /'partially_refunded'/);
