@@ -23,6 +23,7 @@ test('Mission security preparation and arrival-code consumption both enforce Tru
   assert.match(source, /TRUST_PASSPORT_MISSION_PREPARE_BLOCKED/);
   assert.match(source, /TRUST_PASSPORT_MISSION_START_BLOCKED/);
   assert.match(source, /trustPassportCheckMission\(env,intervenantId,mission\.prestation_id,mission\.start_at\)/);
+  assert.match(source, /SELECT id,client_id,intervenant_id,prestation_id,start_at,end_at FROM missions WHERE id=\? LIMIT 1/);
   assert.match(source, /trustPassportCheckMission\(env,profile\.id,mission\.prestation_id,mission\.start_at\)/);
   assert.match(source, /TRUST_SERVICE_NOT_CONFIGURED/);
 });
