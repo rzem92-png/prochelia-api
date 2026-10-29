@@ -108,7 +108,7 @@ jobs:
         run: |
           set -euo pipefail
           result="$RUNNER_TEMP/prochelia-restore/pre-restore-check.json"
-          npx --yes wrangler@4 d1 execute "$RESTORE_DB_NAME" --remote --command="SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name;" --json > "$result"
+          npx --yes wrangler@4 d1 execute "$RESTORE_DB_NAME" --remote --command="SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT GLOB '_cf_*' ORDER BY name;" --json > "$result"
           # Wrangler renvoie un tableau de résultats : chaque élément contient results[].
           # Afficher uniquement les noms de tables, jamais le contenu des données.
           jq -e . "$result" >/dev/null || { echo "::error::La sortie JSON de Wrangler est invalide ; restauration bloquée."; exit 1; }
@@ -145,6 +145,6 @@ jobs:
         run: |
           set -euo pipefail
           result="$RUNNER_TEMP/prochelia-restore/verification.json"
-          npx --yes wrangler@4 d1 execute "$RESTORE_DB_NAME" --remote --command="SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name;" --json > "$result"
+          npx --yes wrangler@4 d1 execute "$RESTORE_DB_NAME" --remote --command="SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT GLOB '_cf_*' ORDER BY name;" --json > "$result"
           jq -e 'type == "array" or type == "object"' "$result" >/dev/null
           echo "Requête de vérification exécutée. Consulter le résultat de cette étape pour confirmer les tables présentes."
