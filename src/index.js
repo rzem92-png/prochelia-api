@@ -3156,8 +3156,8 @@ async function stripeWebhook(request, env) {
         const grossCents=Number(tx.gross_cents||0);
         const previousRefundCents=Number(tx.refund_cents||0);
         const rawRefundCents=Number(obj?.amount_refunded??0);
-        const refundCents=Math.max(0,Math.min(grossCents,rawRefundCents));
-        if(!Number.isSafeInteger(refundCents)||refundCents<previousRefundCents||refundCents>grossCents){
+        const refundCents=rawRefundCents;
+        if(!Number.isSafeInteger(grossCents)||grossCents<=0||!Number.isSafeInteger(refundCents)||refundCents<0||refundCents<previousRefundCents||refundCents>grossCents){
           await paymentAudit(env,'STRIPE_REFUND_AMOUNT_INVALID',{transaction_id:tx.id,mission_id:tx.mission_id,metadata:{event_id:event.id,refund_cents:refundCents,previous_refund_cents:previousRefundCents,gross_cents:grossCents}},'BLOCKED');
           result='REFUND_AMOUNT_INVALID';
         } else {
