@@ -3274,7 +3274,7 @@ async function stripeCheckout(request, env) {
   if(tx.provider_payment_id && String(tx.provider_payment_id).startsWith('cs_')) return json({ok:false,error:'CHECKOUT_ALREADY_CREATED',version:VERSION,checkout_session_id:tx.provider_payment_id},409);
   const payload=stripeCheckoutPayload({transactionId:tx.id,amountCents:Number(tx.gross_cents),currency:tx.currency||'EUR',successUrl:`${base.replace(/\/$/,'')}/?payment=success&session_id={CHECKOUT_SESSION_ID}`,cancelUrl:`${base.replace(/\/$/,'')}/?payment=cancel`,productName:'Prestation PROCHÉLIA',clientReferenceId:auth.user.id});
   let response,data;
-  try { response=await fetch('https://api.stripe.com/v1/checkout/sessions',{method:'POST',headers:{'authorization':`Bearer ${env.STRIPE_SECRET_KEY}`,'content-type':'application/x-www-form-urlencoded','idempotency-key':String(request.headers.get('idempotency-key')||`prochelia-checkout-${tx.id}`)},body:payload.toString()}); data=await response.json(); }
+  try { response=await fetch('https://api.stripe.com/v1/checkout/sessions',{method:'POST',headers:{'authorization':`Bearer ${env.STRIPE_SECRET_KEY}`,'content-type':'application/x-www-form-urlencoded','idempotency-key':`prochelia-checkout-${tx.id}`},body:payload.toString()}); data=await response.json(); }
   catch { return json({ok:false,error:'STRIPE_UNAVAILABLE',version:VERSION},502); }
   if(!response.ok || !data?.id || !data?.url) return json({ok:false,error:'STRIPE_CHECKOUT_CREATION_FAILED',version:VERSION,stripe_status:response.status},502);
   await env.DB.prepare(`UPDATE payment_transactions SET provider_payment_id=?,provider='stripe',updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='pending'`).bind(data.id,tx.id).run();
