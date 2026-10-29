@@ -52,7 +52,7 @@ jobs:
           set -euo pipefail
           umask 077
           mkdir -p "$RUNNER_TEMP/prochelia-backup"
-          npx --yes wrangler@4 d1 export "$DB_NAME" --remote --output="$RUNNER_TEMP/prochelia-backup/prochelia-preview.sql"
+          npx --yes wrangler@4 d1 export "$DB_NAME" --remote --skip-confirmation --output="$RUNNER_TEMP/prochelia-backup/prochelia-preview.sql"
           test -s "$RUNNER_TEMP/prochelia-backup/prochelia-preview.sql"
 
       - name: Chiffrer l'export avant toute conservation
