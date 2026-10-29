@@ -68,8 +68,7 @@ test('Copilot AI is server-side, bounded, privacy-minimizing, and never executes
   assert.match(source, /COPILOT_PROVIDER_NOT_CONFIGURED/);
   assert.match(source, /prompt\.length>6000/);
   assert.match(source, /await sha256Hex\(prompt\)/);
-  assert.match(source, /MODE?L/);
-  assert.match(source, /MODE?L/);
+  assert.match(source, /OPENAI_MODEL/);
   assert.match(source, /PLAN_ONLY_NO_MUTATION/);
   assert.match(source, /Aucune action métier n’est exécutée par la sortie du modèle/);
   assert.match(source, /human|Validation humaine obligatoire/);
