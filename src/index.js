@@ -3274,7 +3274,7 @@ async function backupHash(text){
 }
 async function backupTables(env){
   const r=await env.DB.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name`).all();
-  return (r.results||[]).map(x=>String(x.name)).filter(name=>!['backup_runs','backup_objects'].includes(name));
+  return (r.results||[]).map(x=>String(x.name));
 }
 async function runNationalBackup(env,trigger='MANUAL'){
   await ensureNationalContinuitySchema(env);
