@@ -3469,6 +3469,19 @@ async function backupHash(text){
   const d=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(text));
   return [...new Uint8Array(d)].map(x=>x.toString(16).padStart(2,'0')).join('');
 }
+async function backupDecrypt(envelope,secret){
+  if(!secret) throw new Error('BACKUP_ENCRYPTION_KEY_REQUIRED');
+  let parsed;
+  try{parsed=JSON.parse(envelope)}catch{throw new Error('BACKUP_ENVELOPE_INVALID')}
+  if(parsed?.v!==1||parsed?.alg!=='AES-256-GCM'||!parsed?.iv||!parsed?.data) throw new Error('BACKUP_ENVELOPE_INVALID');
+  const fromB64=(value)=>Uint8Array.from(atob(value),c=>c.charCodeAt(0));
+  const h=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(secret));
+  const key=await crypto.subtle.importKey('raw',h,{name:'AES-GCM'},false,['decrypt']);
+  try{
+    const data=await crypto.subtle.decrypt({name:'AES-GCM',iv:fromB64(parsed.iv)},key,fromB64(parsed.data));
+    return new TextDecoder().decode(data);
+  }catch{throw new Error('BACKUP_DECRYPTION_FAILED')}
+}
 async function backupTables(env){
   const r=await env.DB.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT IN ('backup_runs','backup_objects') ORDER BY name`).all();
   return (r.results||[]).map(x=>String(x.name));
@@ -3534,6 +3547,43 @@ async function backupStatus(env){
   return {ok:true,configured:!!env.BACKUP_BUCKET&&!!env.BACKUP_ENCRYPTION_KEY,automatic:true,frequency:'DAILY',retentionDays:90,runs:r.results||[]};
 }
 
+async function verifyNationalBackup(env,runId){
+  await ensureNationalContinuitySchema(env);
+  if(!env.BACKUP_BUCKET) throw new Error('BACKUP_R2_NOT_CONFIGURED');
+  const secret=env.BACKUP_ENCRYPTION_KEY;
+  if(!secret) throw new Error('BACKUP_ENCRYPTION_KEY_REQUIRED');
+  const run=await env.DB.prepare(`SELECT id,status,object_count,row_count FROM backup_runs WHERE id=? LIMIT 1`).bind(runId).first();
+  if(!run||run.status!=='COMPLETED') throw new Error('BACKUP_RUN_NOT_COMPLETED');
+  const stored=await env.DB.prepare(`SELECT object_key,table_name,row_count,byte_size,checksum FROM backup_objects WHERE backup_run_id=? ORDER BY table_name,object_key`).bind(runId).all();
+  const records=stored.results||[];
+  const manifestRecord=records.find(x=>x.table_name==='__manifest__');
+  if(!manifestRecord) throw new Error('BACKUP_MANIFEST_MISSING');
+  const manifestObject=await env.BACKUP_BUCKET.get(manifestRecord.object_key);
+  if(!manifestObject) throw new Error('BACKUP_MANIFEST_OBJECT_MISSING');
+  const manifestText=await manifestObject.text();
+  if(await backupHash(manifestText)!==manifestRecord.checksum) throw new Error('BACKUP_MANIFEST_CHECKSUM_MISMATCH');
+  const manifest=JSON.parse(await backupDecrypt(manifestText,secret));
+  if(manifest?.format!=='PROCHELIA_BACKUP_MANIFEST_V1'||manifest.runId!==runId||!Array.isArray(manifest.entries)) throw new Error('BACKUP_MANIFEST_INVALID');
+  let verified=0,failed=0;
+  const errors=[];
+  for(const entry of manifest.entries){
+    try{
+      const object=await env.BACKUP_BUCKET.get(entry.object_key);
+      if(!object) throw new Error('OBJECT_MISSING');
+      const body=await object.text();
+      const checksum=await backupHash(body);
+      const byteSize=new TextEncoder().encode(body).byteLength;
+      if(checksum!==entry.checksum||byteSize!==entry.byte_size) throw new Error('OBJECT_INTEGRITY_MISMATCH');
+      await backupDecrypt(body,secret);
+      verified++;
+    }catch(e){failed++;errors.push({object_key:entry.object_key,error:String(e.message||e)});}
+  }
+  const result={ok:failed===0,status:failed===0?'VERIFIED':'FAILED',runId,verifiedObjects:verified,failedObjects:failed,manifestChecksum:manifestRecord.checksum,errors};
+  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS backup_verifications(id TEXT PRIMARY KEY,backup_run_id TEXT NOT NULL,status TEXT NOT NULL,verified_objects INTEGER NOT NULL,failed_objects INTEGER NOT NULL,report_json TEXT NOT NULL,checked_at TEXT DEFAULT CURRENT_TIMESTAMP)`).run();
+  await env.DB.prepare(`INSERT INTO backup_verifications(id,backup_run_id,status,verified_objects,failed_objects,report_json) VALUES(?,?,?,?,?,?)`).bind(crypto.randomUUID(),runId,result.status,verified,failed,JSON.stringify(result)).run();
+  return result;
+}
+
 const __procheliaNationalHandle = handle;
 handle = async function(request,env){
   const url=new URL(request.url);
@@ -3549,6 +3599,11 @@ handle = async function(request,env){
     if(request.method==='POST'&&url.pathname==='/api/system/backup/run'){
       const a=await getAuth(request,env).catch(()=>null); if(!a||a.role!=='GERANTE') return json({ok:false,error:'FORBIDDEN'},403);
       return json(await runNationalBackup(env,'MANUAL'));
+    }
+    const verifyMatch=request.method==='POST'&&url.pathname.match(/^\/api\/system\/backups\/([a-f0-9-]+)\/verify$/i);
+    if(verifyMatch){
+      const a=await getAuth(request,env).catch(()=>null); if(!a||a.role!=='GERANTE') return json({ok:false,error:'FORBIDDEN'},403);
+      return json(await verifyNationalBackup(env,verifyMatch[1]));
     }
     return __procheliaNationalHandle(request,env);
   }catch(e){return json({ok:false,error:'NATIONAL_CONTINUITY_ERROR',message:String(e.message||e)},500)}
