@@ -1,0 +1,35 @@
+services:
+  clamav:
+    image: clamav/clamav:stable
+    restart: unless-stopped
+    expose:
+      - "3310"
+    networks:
+      - scanner_internal
+    healthcheck:
+      test: ["CMD-SHELL", "clamdscan --ping 3"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 120s
+    # Do not publish clamd's port to the host or the Internet.
+  scanner:
+    build: .
+    restart: unless-stopped
+    environment:
+      PORT: "8080"
+      CLAMD_HOST: clamav
+      CLAMD_PORT: "3310"
+      MAX_SCAN_BYTES: "10485760"
+      SCAN_TIMEOUT_MS: "25000"
+      DOCUMENT_SCAN_TOKEN: ${DOCUMENT_SCAN_TOKEN:?Set a long random DOCUMENT_SCAN_TOKEN in the environment}
+    ports:
+      - "127.0.0.1:8080:8080"
+    depends_on:
+      clamav:
+        condition: service_healthy
+    networks:
+      - scanner_internal
+networks:
+  scanner_internal:
+    internal: true
