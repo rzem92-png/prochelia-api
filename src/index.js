@@ -3481,6 +3481,7 @@ async function runNationalBackup(env,trigger='MANUAL'){
   const runId=crypto.randomUUID(), day=new Date().toISOString().slice(0,10);
   await env.DB.prepare(`INSERT INTO backup_runs(id,status,trigger_type,storage_provider,metadata_json) VALUES(?,?,?,?,?)`).bind(runId,'RUNNING',trigger,'R2',JSON.stringify({version:VERSION,scope:'FULL_LOGICAL_DB'})).run();
   let objects=0,rowsTotal=0;
+  const manifestEntries=[];
   try{
     for(const table of await backupTables(env)){
       let offset=0, tableRows=0;
@@ -3492,19 +3493,30 @@ async function runNationalBackup(env,trigger='MANUAL'){
         const enc=await backupEncrypt(plain,secret);
         const key=`prochelia/backups/${day}/${runId}/${table}/part-${String(offset/500).padStart(8,'0')}.json.enc`;
         await env.BACKUP_BUCKET.put(key,enc,{httpMetadata:{contentType:'application/octet-stream'}});
-        await env.DB.prepare(`INSERT INTO backup_objects(id,backup_run_id,object_key,table_name,row_count,byte_size,checksum,encrypted) VALUES(?,?,?,?,?,?,?,1)`).bind(crypto.randomUUID(),runId,key,table,rows.length,new TextEncoder().encode(enc).byteLength,await backupHash(enc)).run();
+        const checksum=await backupHash(enc),byteSize=new TextEncoder().encode(enc).byteLength;
+        await env.DB.prepare(`INSERT INTO backup_objects(id,backup_run_id,object_key,table_name,row_count,byte_size,checksum,encrypted) VALUES(?,?,?,?,?,?,?,1)`).bind(crypto.randomUUID(),runId,key,table,rows.length,byteSize,checksum).run();
+        manifestEntries.push({object_key:key,table_name:table,row_count:rows.length,byte_size:byteSize,checksum,encrypted:true});
         objects++; rowsTotal+=rows.length; tableRows+=rows.length; offset+=rows.length;
         if(rows.length<500) break;
       }
       if(!tableRows){
         const key=`prochelia/backups/${day}/${runId}/${table}/empty.json.enc`,enc=await backupEncrypt('',secret);
+        const checksum=await backupHash(enc),byteSize=new TextEncoder().encode(enc).byteLength;
         await env.BACKUP_BUCKET.put(key,enc,{httpMetadata:{contentType:'application/octet-stream'}});
-        await env.DB.prepare(`INSERT INTO backup_objects(id,backup_run_id,object_key,table_name,row_count,byte_size,checksum,encrypted) VALUES(?,?,?,?,?,?,?,1)`).bind(crypto.randomUUID(),runId,key,table,0,new TextEncoder().encode(enc).byteLength,await backupHash(enc)).run();
+        await env.DB.prepare(`INSERT INTO backup_objects(id,backup_run_id,object_key,table_name,row_count,byte_size,checksum,encrypted) VALUES(?,?,?,?,?,?,?,1)`).bind(crypto.randomUUID(),runId,key,table,0,byteSize,checksum).run();
+        manifestEntries.push({object_key:key,table_name:table,row_count:0,byte_size:byteSize,checksum,encrypted:true});
         objects++;
       }
     }
+    const manifestKey=`prochelia/backups/${day}/${runId}/manifest.json.enc`;
+    const manifestPlain=JSON.stringify({format:'PROCHELIA_BACKUP_MANIFEST_V1',runId,createdAt:new Date().toISOString(),version:VERSION,rowCount:rowsTotal,entries:manifestEntries});
+    const manifestEncrypted=await backupEncrypt(manifestPlain,secret);
+    const manifestChecksum=await backupHash(manifestEncrypted),manifestBytes=new TextEncoder().encode(manifestEncrypted).byteLength;
+    await env.BACKUP_BUCKET.put(manifestKey,manifestEncrypted,{httpMetadata:{contentType:'application/octet-stream'}});
+    await env.DB.prepare(`INSERT INTO backup_objects(id,backup_run_id,object_key,table_name,row_count,byte_size,checksum,encrypted) VALUES(?,?,?,?,?,?,?,1)`).bind(crypto.randomUUID(),runId,manifestKey,'__manifest__',manifestEntries.length,manifestBytes,manifestChecksum).run();
+    objects++;
     await env.DB.prepare(`UPDATE backup_runs SET status='COMPLETED',completed_at=CURRENT_TIMESTAMP,object_count=?,row_count=? WHERE id=?`).bind(objects,rowsTotal,runId).run();
-    return {ok:true,runId,status:'COMPLETED',objectCount:objects,rowCount:rowsTotal,storage:'R2',encrypted:true};
+    return {ok:true,runId,status:'COMPLETED',objectCount:objects,rowCount:rowsTotal,storage:'R2',encrypted:true,manifestKey,manifestChecksum};
   }catch(e){
     await env.DB.prepare(`UPDATE backup_runs SET status='FAILED',completed_at=CURRENT_TIMESTAMP,object_count=?,row_count=?,error_message=? WHERE id=?`).bind(objects,rowsTotal,String(e.message||e),runId).run();
     throw e;
