@@ -16,13 +16,16 @@ test('staging config declares daily UTC backup Cron and private R2 binding', () 
   assert.equal(config.name, 'prochelia-api-staging');
 });
 
-test('backup export excludes its own journal tables to prevent recursive backup growth', () => {
-  assert.match(source, /name NOT IN \('backup_runs','backup_objects'\)/);
+test('backup export excludes its own journal tables and captures schema metadata', () => {
+  assert.match(source, /name NOT IN \('backup_runs','backup_objects','backup_verifications'\)/);
   assert.match(source, /BACKUP_R2_NOT_CONFIGURED/);
   assert.match(source, /BACKUP_ENCRYPTION_KEY_REQUIRED/);
   assert.match(source, /AES-GCM/);
   assert.match(source, /await backupHash\(enc\)/);
-  assert.match(source, /PROCHELIA_BACKUP_MANIFEST_V1/);\n  assert.match(source, /async function backupSchema\\(env\\)/);\n  assert.match(source, /rowCount:rowsTotal,schema,entries:manifestEntries/);\n  assert.match(source, /type IN \\('table','index','trigger','view'\\)/);
+  assert.match(source, /PROCHELIA_BACKUP_MANIFEST_V1/);
+  assert.match(source, /async function backupSchema\(env\)/);
+  assert.match(source, /rowCount:rowsTotal,schema,entries:manifestEntries/);
+  assert.match(source, /type IN \('table','index','trigger','view'\)/);
   assert.match(source, /async function verifyNationalBackup\(env,runId\)/);
   assert.match(source, /backup_verifications/);
   assert.match(source, /BACKUP_MANIFEST_CHECKSUM_MISMATCH/);
