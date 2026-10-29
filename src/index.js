@@ -3578,8 +3578,14 @@ async function supportAutoResolve(env,caseId,actorId,actorRole,scenario,context=
   // Sécurité de production : le Copilote ne doit jamais déclarer une résolution
   // simplement parce qu'il a généré une proposition. Une résolution automatique
   // n'est clôturée que lorsqu'une action downstream vérifiable a confirmé son succès.
-  const verified=String(context?.execution_verified||'').toLowerCase()==='true' || context?.execution_verified===true;
-  const resolution={scenario,actions:['verify_context','apply_only_reversible_or_preapproved_action','notify_requester','journal'],context:context||{}};
+  // Never trust execution_verified supplied in a public request body. This
+  // function currently has no trusted downstream-action receipt, so automatic
+  // closure remains disabled until a server-side action adapter returns proof.
+  const trustedActionReceipt = null;
+  const verified = !!trustedActionReceipt && trustedActionReceipt.verified === true
+    && trustedActionReceipt.case_id === caseId
+    && trustedActionReceipt.actor_id === actorId;
+  const resolution={scenario,actions:['verify_context','apply_only_reversible_or_preapproved_action','notify_requester','journal'],context:{source:'server_verified_metadata_only'}};
   if(!verified){
     await env.DB.prepare(`UPDATE support_cases SET status='WAITING_ACTION',resolution=?,resolved_at=NULL WHERE id=?`).bind(JSON.stringify({...resolution,status:'ACTION_REQUIRED'}),caseId).run();
     await supportEvent(env,caseId,actorRole,actorId,'AUTO_CHECKED_WAITING_ACTION',resolution);
