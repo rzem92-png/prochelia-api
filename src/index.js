@@ -617,6 +617,7 @@ async function securityPrepareMission(request, env) {
   const startMs=Date.parse(String(mission.start_at||'')),endMs=Date.parse(String(mission.end_at||mission.start_at||'')),now=Date.now();
   if(!Number.isFinite(startMs)||!Number.isFinite(endMs)||endMs<startMs) return json({ok:false,error:'MISSION_SCHEDULE_INVALID',version:VERSION},409);
   if(startMs<now-4*60*60*1000||startMs>now+30*24*60*60*1000) return json({ok:false,error:'MISSION_SCHEDULE_OUT_OF_RANGE',version:VERSION},409);
+  const arrival=securityCode(),end=securityCode();
   const arrivalExpiry=new Date(startMs+4*60*60*1000).toISOString(),endExpiry=new Date(Math.max(endMs+12*60*60*1000,startMs+4*60*60*1000)).toISOString(),id=crypto.randomUUID();
   await env.DB.prepare(`INSERT INTO mission_security (id,mission_id,client_id,intervenant_id,risk_level,arrival_code_hash,arrival_expires_at,end_code_hash,end_expires_at) VALUES (?,?,?,?,?,?,?,?,?)`)
     .bind(id,missionId,clientId,intervenantId,clean(body?.risk_level)||'standard',await sha256Base64url(arrival),arrivalExpiry,await sha256Base64url(end),endExpiry).run();
