@@ -3,7 +3,9 @@
   "main": "src/index.js",
   "compatibility_date": "2026-09-25",
   "triggers": {
-    "crons": ["0 3 * * *"]
+    "crons": [
+      "0 3 * * *"
+    ]
   },
   "d1_databases": [
     {
@@ -24,12 +26,6 @@
         "binding": "DB",
         "database_name": "prochelia-preview-db",
         "database_id": "6adb95e5-e542-4bec-9008-fbea01042305"
-      }
-    ],
-    "r2_buckets": [
-      {
-        "binding": "BACKUP_BUCKET",
-        "bucket_name": "prochelia-preview-backups"
       }
     ]
   },
