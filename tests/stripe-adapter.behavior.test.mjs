@@ -1,6 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHmac } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+
+const workerSource = readFileSync(new URL('../src/index.js', import.meta.url), 'utf8');
 import { verifyStripeSignature, stripeCheckoutPayload } from '../src/stripe-adapter.js';
 
 function signature(rawBody, secret, timestamp) {
@@ -68,4 +71,10 @@ test('Stripe checkout payload rejects unsafe URLs, invalid amounts, and missing 
     transactionId: '', amountCents: 100,
     successUrl: 'https://example.test/success', cancelUrl: 'https://example.test/cancel'
   }), /INVALID_CHECKOUT_INPUT/);
+});
+
+
+test('Stripe checkout idempotency key is server-derived from the internal transaction', () => {
+  assert.match(workerSource, /'idempotency-key':`prochelia-checkout-\$\{tx\.id\}`/);
+  assert.doesNotMatch(workerSource, /'idempotency-key':String\(request\.headers\.get\('idempotency-key'\)/);
 });
