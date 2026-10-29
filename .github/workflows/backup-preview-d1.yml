@@ -65,9 +65,12 @@ jobs:
           # La clé passe par l'environnement et stdin, pas comme argument de processus.
           printf '%s' "$BACKUP_ENCRYPTION_KEY" | gpg --batch --yes --pinentry-mode loopback --passphrase-fd 0 --symmetric --cipher-algo AES256 --output "$encrypted" "$plaintext"
           test -s "$encrypted"
-          # Vérifier que GPG peut déchiffrer dans un fichier temporaire, puis supprimer immédiatement le clair.
-          printf '%s' "$BACKUP_ENCRYPTION_KEY" | gpg --batch --yes --pinentry-mode loopback --passphrase-fd 0 --decrypt "$encrypted" | sha256sum > "$RUNNER_TEMP/prochelia-backup/verification.sha256"
-          rm -f "$plaintext"
+          # Vérifier le déchiffrement et comparer les empreintes avant de supprimer les fichiers clairs.
+          expected="$(sha256sum "$plaintext" | cut -d ' ' -f 1)"
+          printf '%s' "$BACKUP_ENCRYPTION_KEY" | gpg --batch --yes --pinentry-mode loopback --passphrase-fd 0 --decrypt "$encrypted" > "$RUNNER_TEMP/prochelia-backup/decrypted-check.sql"
+          actual="$(sha256sum "$RUNNER_TEMP/prochelia-backup/decrypted-check.sql" | cut -d ' ' -f 1)"
+          test "$expected" = "$actual"
+          rm -f "$plaintext" "$RUNNER_TEMP/prochelia-backup/decrypted-check.sql"
           # Le manifeste de contrôle ne contient ni données ni secret.
           printf 'database=%s\ncreated_utc=%s\nencrypted_file=prochelia-preview.sql.gpg\n' "$DB_NAME" "$(date -u +%FT%TZ)" > "$RUNNER_TEMP/prochelia-backup/README.txt"
 
