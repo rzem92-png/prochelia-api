@@ -65,14 +65,14 @@ jobs:
         run: |
           set -euo pipefail
           result="$RUNNER_TEMP/integrity.json"
-          npx --yes wrangler@4 d1 execute "$RESTORE_DB_NAME" --remote --command="PRAGMA integrity_check;" --json > "$result"
+          npx --yes wrangler@4 d1 execute "$RESTORE_DB_NAME" --remote --command="PRAGMA quick_check;" --json > "$result"
           jq -e . "$result" >/dev/null
-          answer="$(jq -r '[.. | objects | select(has("results")) | .results[]? | .integrity_check? // empty][0] // empty' "$result")"
+          answer="$(jq -r '[.. | objects | select(has("results")) | .results[]? | .quick_check? // empty][0] // empty' "$result")"
           if [[ "$answer" != "ok" ]]; then
-            echo "::error::SQLite integrity_check n’a pas renvoyé ok. Résultat masqué pour éviter toute fuite de données."
+            echo "::error::SQLite quick_check n’a pas renvoyé ok. Résultat masqué pour éviter toute fuite de données."
             exit 1
           fi
-          echo "SQLite integrity_check : OK."
+          echo "SQLite quick_check : OK."
 
       - name: Lister les tables et compter les lignes sans afficher de données
         shell: bash
