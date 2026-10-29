@@ -109,23 +109,20 @@ jobs:
           set -euo pipefail
           result="$RUNNER_TEMP/prochelia-restore/pre-restore-check.json"
           npx --yes wrangler@4 d1 execute "$RESTORE_DB_NAME" --remote --command="SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT GLOB '_cf_*' ORDER BY name;" --json > "$result"
-          # Wrangler renvoie un tableau de résultats : chaque élément contient results[].
-          # Afficher uniquement les noms de tables, jamais le contenu des données.
           jq -e . "$result" >/dev/null || { echo "::error::La sortie JSON de Wrangler est invalide ; restauration bloquée."; exit 1; }
-          # Extraction tolérante à la forme exacte du JSON Wrangler, sans exposer de données applicatives.
-          jq -r '[.. | objects | .name? // empty] | map(select(type == "string")) | unique | .[]' "$result" > "$RUNNER_TEMP/prochelia-restore/table-names.txt"
-          echo "Tables présentes dans la base de test (noms uniquement) :"
+          # N'extraire que les noms retournés dans les lignes SQL (résultats de la requête).
+          jq -r '[.. | objects | select(has("results")) | .results[]? | .name? // empty] | map(select(type == "string")) | unique | .[]' "$result" > "$RUNNER_TEMP/prochelia-restore/table-names.txt"
+          echo "Tables applicatives présentes dans la base de test :"
           if [[ -s "$RUNNER_TEMP/prochelia-restore/table-names.txt" ]]; then
             sed 's/^/ - /' "$RUNNER_TEMP/prochelia-restore/table-names.txt"
-            echo "::error::La base de test contient déjà des tables. Aucune restauration effectuée. Vérifier les noms affichés et recréer une base de test dédiée vide si nécessaire."
+            echo "::error::La base de test contient déjà des tables applicatives. Aucune restauration effectuée. Créer une nouvelle base D1 dédiée et vide, puis utiliser son nom/UUID après mise à jour du garde-fou."
             exit 1
           fi
-          # Échec fermé : si Wrangler ne renvoie pas une structure identifiable, ne pas restaurer.
           if ! jq -e '[.. | objects | has("results")] | any' "$result" >/dev/null; then
             echo "::error::Structure JSON de Wrangler non reconnue ; restauration bloquée par sécurité."
             exit 1
           fi
-          echo "Aucune table utilisateur détectée ; restauration autorisée."
+          echo "Aucune table applicative détectée ; restauration autorisée."
 
       - name: Restaurer uniquement dans la base de test dédiée
         shell: bash
