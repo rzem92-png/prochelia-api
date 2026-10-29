@@ -1,0 +1,96 @@
+name: PROCHÉLIA — sauvegarde D1 préproduction chiffrée
+
+on:
+  workflow_dispatch:
+  schedule:
+    # UTC; décalé après l'heure pleine pour réduire les retards de planification.
+    - cron: "17 3 * * *"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: prochelia-preview-d1-backup
+  cancel-in-progress: false
+
+jobs:
+  backup-preview:
+    name: Exporter et chiffrer la D1 de préproduction
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      DB_NAME: prochelia-preview-db
+      DB_ID: 6adb95e5-e542-4bec-9008-fbea01042305
+    steps:
+      - name: Vérifier les secrets requis et la cible Cloudflare
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          BACKUP_ENCRYPTION_KEY: ${{ secrets.BACKUP_ENCRYPTION_KEY }}
+        run: |
+          set -euo pipefail
+          for name in CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID BACKUP_ENCRYPTION_KEY; do
+            if [[ -z "${!name:-}" ]]; then
+              echo "::error::Secret requis manquant : $name"
+              exit 1
+            fi
+          done
+          if [[ "$DB_NAME" != "prochelia-preview-db" || "$DB_ID" != "6adb95e5-e542-4bec-9008-fbea01042305" ]]; then
+            echo "::error::Garde-fou : la cible n'est pas la D1 de préproduction attendue."
+            exit 1
+          fi
+          response="$(curl --fail --silent --show-error \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/d1/database/$DB_ID")"
+          actual_name="$(printf '%s' "$response" | jq -r '.result.name // empty')"
+          success="$(printf '%s' "$response" | jq -r '.success // false')"
+          if [[ "$success" != "true" || "$actual_name" != "$DB_NAME" ]]; then
+            echo "::error::La D1 indiquée ne correspond pas exactement à la base de préproduction attendue."
+            exit 1
+          fi
+
+      - name: Installer Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Exporter uniquement la D1 de préproduction
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          umask 077
+          mkdir -p "$RUNNER_TEMP/prochelia-backup"
+          npx --yes wrangler@4 d1 export "$DB_NAME" --remote --skip-confirmation --output="$RUNNER_TEMP/prochelia-backup/prochelia-preview.sql"
+          test -s "$RUNNER_TEMP/prochelia-backup/prochelia-preview.sql"
+
+      - name: Chiffrer et vérifier l'export
+        shell: bash
+        env:
+          BACKUP_ENCRYPTION_KEY: ${{ secrets.BACKUP_ENCRYPTION_KEY }}
+        run: |
+          set -euo pipefail
+          umask 077
+          plaintext="$RUNNER_TEMP/prochelia-backup/prochelia-preview.sql"
+          encrypted="$RUNNER_TEMP/prochelia-backup/prochelia-preview.sql.gpg"
+          printf '%s' "$BACKUP_ENCRYPTION_KEY" | gpg --batch --yes --pinentry-mode loopback --passphrase-fd 0 --symmetric --cipher-algo AES256 --output "$encrypted" "$plaintext"
+          test -s "$encrypted"
+          expected="$(sha256sum "$plaintext" | cut -d ' ' -f 1)"
+          printf '%s' "$BACKUP_ENCRYPTION_KEY" | gpg --batch --yes --pinentry-mode loopback --passphrase-fd 0 --decrypt "$encrypted" > "$RUNNER_TEMP/prochelia-backup/decrypted-check.sql"
+          actual="$(sha256sum "$RUNNER_TEMP/prochelia-backup/decrypted-check.sql" | cut -d ' ' -f 1)"
+          test "$expected" = "$actual"
+          rm -f "$plaintext" "$RUNNER_TEMP/prochelia-backup/decrypted-check.sql"
+          printf 'database=%s\ncreated_utc=%s\nencrypted_file=prochelia-preview.sql.gpg\n' "$DB_NAME" "$(date -u +%FT%TZ)" > "$RUNNER_TEMP/prochelia-backup/README.txt"
+
+      - name: Publier uniquement l'archive chiffrée
+        uses: actions/upload-artifact@v4
+        with:
+          name: prochelia-preview-d1-encrypted-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/prochelia-backup/prochelia-preview.sql.gpg
+            ${{ runner.temp }}/prochelia-backup/README.txt
+          if-no-files-found: error
+          retention-days: 7
