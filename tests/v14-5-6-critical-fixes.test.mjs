@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 
 const source = readFileSync(new URL('../src/index.js', import.meta.url), 'utf8');
 const adapter = readFileSync(new URL('../src/stripe-adapter.js', import.meta.url), 'utf8');
+const scanner = readFileSync(new URL('../security/clamav-gateway/server.mjs', import.meta.url), 'utf8');
 
 test('mission security checks assigned mission and canonical intervenant profile mapping', () => {
   assert.match(source, /MISSION_ASSIGNMENT_MISMATCH/);
@@ -120,4 +121,16 @@ test('Antivirus scanner failures never permit document review or download', () =
   assert.match(source, /if\(!scan \|\| scan.result!=='CLEAN'\)/);
   assert.match(source, /if\(!scan \|\| scan.result!=='CLEAN' \|\| String\(scan.file_sha256/);
   assert.match(source, /'ANTIVIRUS_SCAN'/);
+});
+
+
+test('Free ClamAV gateway requires authentication, checks hashes, and fails closed on scanner errors', () => {
+  assert.match(scanner, /DOCUMENT_SCAN_TOKEN/);
+  assert.match(scanner, /timingSafeEqual/);
+  assert.match(scanner, /CLAMD_HOST/);
+  assert.match(scanner, /zINSTREAM/);
+  assert.match(scanner, /SHA256_MISMATCH/);
+  assert.match(scanner, /SCANNER_UNAVAILABLE/);
+  assert.match(scanner, /verdict: scan\.verdict/);
+  assert.match(scanner, /MAX_SCAN_BYTES/);
 });
