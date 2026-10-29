@@ -101,20 +101,24 @@ jobs:
         with:
           node-version: "22"
 
-      - name: Refuser une base de test qui contient déjà des tables
+      - name: Vérifier que la base de test est vide
         shell: bash
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         run: |
           set -euo pipefail
           result="$RUNNER_TEMP/prochelia-restore/pre-restore-check.json"
-          npx --yes wrangler@4 d1 execute "$RESTORE_DB_NAME" --remote --command="SELECT COUNT(*) AS user_tables FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%';" --json > "$result"
-          count="$(jq -r '[.. | objects | .user_tables? // empty] | first // "unknown"' "$result")"
-          if [[ "$count" != "0" ]]; then
-            echo "::error::La base de test n’est pas vide ou le résultat ne peut pas être interprété (tables=$count). Aucune restauration effectuée."
+          npx --yes wrangler@4 d1 execute "$RESTORE_DB_NAME" --remote --command="SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name;" --json > "$result"
+          # Wrangler renvoie un tableau de résultats : chaque élément contient results[].
+          # Afficher uniquement les noms de tables, jamais le contenu des données.
+          jq -r '[.[]? | .results[]? | .name? // empty] | unique | .[]' "$result" > "$RUNNER_TEMP/prochelia-restore/table-names.txt"
+          echo "Tables présentes dans la base de test (noms uniquement) :"
+          if [[ -s "$RUNNER_TEMP/prochelia-restore/table-names.txt" ]]; then
+            sed 's/^/ - /' "$RUNNER_TEMP/prochelia-restore/table-names.txt"
+            echo "::error::La base de test contient déjà des tables. Aucune restauration effectuée. Vérifier les noms affichés et recréer une base de test dédiée vide si nécessaire."
             exit 1
           fi
-          echo "La base de test est vide ; restauration autorisée."
+          echo "Aucune table utilisateur détectée ; restauration autorisée."
 
       - name: Restaurer uniquement dans la base de test dédiée
         shell: bash
