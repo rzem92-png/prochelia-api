@@ -21,6 +21,10 @@ test('backup export excludes its own journal tables to prevent recursive backup 
   assert.match(source, /BACKUP_ENCRYPTION_KEY_REQUIRED/);
   assert.match(source, /AES-GCM/);
   assert.match(source, /await backupHash\(enc\)/);
+  assert.match(source, /PROCHELIA_BACKUP_MANIFEST_V1/);
+  assert.match(source, /async function verifyNationalBackup\(env,runId\)/);
+  assert.match(source, /backup_verifications/);
+  assert.match(source, /BACKUP_MANIFEST_CHECKSUM_MISMATCH/);
 });
 
 test('retention policy forbids indefinite personal-data retention by default and separates backups from archives', () => {
