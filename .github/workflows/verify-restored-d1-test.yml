@@ -1,0 +1,101 @@
+name: PROCHÉLIA — vérifier la restauration D1 de test
+
+on:
+  workflow_dispatch:
+    inputs:
+      restore_test_db_id:
+        description: "UUID de la base D1 restaurée de TEST"
+        required: true
+        type: string
+      confirm_read_only:
+        description: "Confirmer que ce contrôle est en lecture seule et vise uniquement la base de test"
+        required: true
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: prochelia-d1-restore-verification
+  cancel-in-progress: false
+
+jobs:
+  verify-restored-test:
+    name: Vérifier intégrité, tables et volumes sans modifier les données
+    if: ${{ inputs.confirm_read_only == true }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CLOUDFLARE_ACCOUNT_ID: f2a79e9fa41566a8ec80fb24c02c60eb
+      RESTORE_DB_NAME: prochelia-restore-test-db
+      RESTORE_DB_ID: ${{ inputs.restore_test_db_id }}
+    steps:
+      - name: Vérifier le jeton et la cible exacte
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          [[ "$RESTORE_DB_ID" =~ ^[0-9a-fA-F-]{36}$ ]] || { echo "::error::UUID invalide."; exit 1; }
+          [[ -n "${CLOUDFLARE_API_TOKEN:-}" ]] || { echo "::error::Secret CLOUDFLARE_API_TOKEN manquant."; exit 1; }
+          token="$CLOUDFLARE_API_TOKEN"
+          token="${token#Bearer }"
+          token="${token#bearer }"
+          token="$(printf '%s' "$token" | tr -d '\r\n')"
+          status="$(curl --silent --show-error --output "$RUNNER_TEMP/token-check.json" --write-out '%{http_code}' -H "Authorization: Bearer $token" "https://api.cloudflare.com/client/v4/user/tokens/verify")"
+          [[ "$status" == "200" ]] || { echo "::error::Vérification du jeton échouée (HTTP $status)."; exit 1; }
+          [[ "$(jq -r '.success // false' "$RUNNER_TEMP/token-check.json")" == "true" && "$(jq -r '.result.status // ""' "$RUNNER_TEMP/token-check.json")" == "active" ]] || { echo "::error::Jeton Cloudflare inactif."; exit 1; }
+          printf 'CLOUDFLARE_API_TOKEN=%s\n' "$token" >> "$GITHUB_ENV"
+          http="$(curl --silent --show-error --output "$RUNNER_TEMP/d1-list.json" --write-out '%{http_code}' -H "Authorization: Bearer $token" "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/d1/database?name=$RESTORE_DB_NAME")"
+          [[ "$http" == "200" ]] || { echo "::error::Impossible de lister les bases D1 (HTTP $http)."; exit 1; }
+          matches="$(jq --arg n "$RESTORE_DB_NAME" --arg id "$RESTORE_DB_ID" '[.result[]? | select(.name == $n and .uuid == $id)] | length' "$RUNNER_TEMP/d1-list.json")"
+          [[ "$matches" == "1" ]] || { echo "::error::Nom et UUID ne correspondent pas à la base de test attendue ; arrêt."; exit 1; }
+          [[ "$RESTORE_DB_ID" != "6adb95e5-e542-4bec-9008-fbea01042305" ]] || { echo "::error::La base de préproduction est interdite pour ce contrôle."; exit 1; }
+          echo "Cible confirmée : base de test dédiée. Les prochaines requêtes sont en lecture seule."
+
+      - name: Installer Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Contrôler l’intégrité SQLite
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          result="$RUNNER_TEMP/integrity.json"
+          npx --yes wrangler@4 d1 execute "$RESTORE_DB_NAME" --remote --command="PRAGMA integrity_check;" --json > "$result"
+          jq -e . "$result" >/dev/null
+          answer="$(jq -r '[.. | objects | select(has("results")) | .results[]? | .integrity_check? // empty][0] // empty' "$result")"
+          if [[ "$answer" != "ok" ]]; then
+            echo "::error::SQLite integrity_check n’a pas renvoyé ok. Résultat masqué pour éviter toute fuite de données."
+            exit 1
+          fi
+          echo "SQLite integrity_check : OK."
+
+      - name: Lister les tables et compter les lignes sans afficher de données
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          base="$RUNNER_TEMP/d1-verify"
+          mkdir -p "$base"
+          tables_json="$base/tables.json"
+          npx --yes wrangler@4 d1 execute "$RESTORE_DB_NAME" --remote --command="SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT GLOB '_cf_*' ORDER BY name;" --json > "$tables_json"
+          jq -e . "$tables_json" >/dev/null
+          jq -r '[.. | objects | select(has("results")) | .results[]? | .name? // empty] | map(select(type == "string")) | unique | .[]' "$tables_json" > "$base/tables.txt"
+          [[ -s "$base/tables.txt" ]] || { echo "::error::Aucune table applicative trouvée après restauration."; exit 1; }
+          printf 'table,row_count\n' > "$base/row-counts.csv"
+          while IFS= read -r table; do
+            [[ "$table" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || { echo "::error::Nom de table inattendu ; arrêt sécurisé."; exit 1; }
+            count_json="$base/count.json"
+            npx --yes wrangler@4 d1 execute "$RESTORE_DB_NAME" --remote --command="SELECT COUNT(*) AS row_count FROM \"$table\";" --json > "$count_json"
+            rows="$(jq -r '[.. | objects | select(has("results")) | .results[]? | .row_count? // empty][0] // empty' "$count_json")"
+            [[ "$rows" =~ ^[0-9]+$ ]] || { echo "::error::Comptage non interprétable pour la table $table."; exit 1; }
+            printf '"%s",%s\n' "$table" "$rows" >> "$base/row-counts.csv"
+          done < "$base/tables.txt"
+          echo "Tables restaurées et nombre de lignes (aucune donnée personnelle affichée) :"
+          cat "$base/row-counts.csv"
+          echo "VERIFICATION_REPORT=$base/row-counts.csv" >> "$GITHUB_ENV"
