@@ -75,3 +75,10 @@ test('Copilot AI is server-side, bounded, privacy-minimizing, and never executes
   assert.match(source, /api\/copilot\/ask/);
   assert.match(source, /Ne demande pas de données personnelles ou de santé inutiles/);
 });
+
+
+test('support automation never trusts a client-supplied execution_verified flag', () => {
+  assert.match(source, /const trustedActionReceipt = null/);
+  assert.match(source, /Never trust execution_verified supplied in a public request body/);
+  assert.match(source, /NO_VERIFIED_DOWNSTREAM_ACTION/);
+});
