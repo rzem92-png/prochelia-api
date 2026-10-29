@@ -26,7 +26,7 @@ Après déploiement autorisé de la préproduction, s'authentifier comme Gérant
 - Vérifier le Cron dans les déclencheurs/observabilité Cloudflare après le prochain 03:00 UTC. Un champ `automatic: true` dans une réponse ne constitue pas une preuve d'exécution.
 - Alerter sur chaque statut `FAILED`, absence de sauvegarde quotidienne, incohérence du nombre d'objets ou erreur de clé.
 
-Le code de sauvegarde exporte les tables applicatives en lots de 500 lignes, chiffre les données avec AES-GCM, conserve une empreinte SHA-256 et écrit un manifeste chiffré dans R2 pour pouvoir vérifier les objets même si le journal D1 est indisponible. Les tables de journal de sauvegarde ne doivent pas être exportées dans le même flux : cela éviterait une exportation récursive des objets de sauvegarde.
+Le code de sauvegarde exporte les tables applicatives en lots de 500 lignes, chiffre les données avec AES-GCM, conserve une empreinte SHA-256 et écrit un manifeste chiffré dans R2 avec les entrées de données et le DDL (tables, index, triggers et vues) capturé depuis `sqlite_master`. Les tables internes `backup_runs`, `backup_objects` et `backup_verifications` sont exclues des données et du DDL pour éviter de réimporter les journaux de sauvegarde.
 
 ## 3. Restauration — exercice isolé obligatoire
 
