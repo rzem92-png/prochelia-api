@@ -21,16 +21,17 @@ jobs:
     env:
       DB_NAME: prochelia-preview-db
       DB_ID: 6adb95e5-e542-4bec-9008-fbea01042305
+      # Identifiant de compte confirmé depuis le tableau de bord Cloudflare fourni.
+      CLOUDFLARE_ACCOUNT_ID: f2a79e9fa41566a8ec80fb24c02c60eb
     steps:
       - name: Vérifier les secrets requis et la cible Cloudflare
         shell: bash
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           BACKUP_ENCRYPTION_KEY: ${{ secrets.BACKUP_ENCRYPTION_KEY }}
         run: |
           set -euo pipefail
-          for name in CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID BACKUP_ENCRYPTION_KEY; do
+          for name in CLOUDFLARE_API_TOKEN BACKUP_ENCRYPTION_KEY; do
             if [[ -z "${!name:-}" ]]; then
               echo "::error::Secret requis manquant : $name"
               exit 1
@@ -74,7 +75,6 @@ jobs:
         shell: bash
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
           set -euo pipefail
           umask 077
