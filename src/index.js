@@ -3470,7 +3470,7 @@ async function backupHash(text){
   return [...new Uint8Array(d)].map(x=>x.toString(16).padStart(2,'0')).join('');
 }
 async function backupTables(env){
-  const r=await env.DB.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name`).all();
+  const r=await env.DB.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT IN ('backup_runs','backup_objects') ORDER BY name`).all();
   return (r.results||[]).map(x=>String(x.name));
 }
 async function runNationalBackup(env,trigger='MANUAL'){
