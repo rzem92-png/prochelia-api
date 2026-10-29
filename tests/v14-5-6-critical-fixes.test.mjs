@@ -21,10 +21,18 @@ test('Stripe charge webhooks resolve through persisted provider references', () 
   assert.match(adapter, /payment_intent_data\[metadata\]\[prochelia_transaction_id\]/);
 });
 
-test('Stripe refunds are bounded and partial refunds remain distinguishable', () => {
-  assert.match(source, /Math\.min\(Number\(tx\.gross_cents\|\|0\),Number\(obj\?\.amount_refunded\?\?0\)\)/);
+test('Stripe refunds are bounded, adjust wallet balances, and distinguish partial refunds', () => {
+  assert.match(source, /refundCents>grossCents/);
   assert.match(source, /'partially_refunded'/);
   assert.match(source, /STRIPE_REFUND_AMOUNT_INVALID/);
+  assert.match(source, /walletReversal/);
+  assert.match(source, /STRIPE_REFUND_WALLET_ADJUSTED/);
+});
+
+test('Stripe disputes are persisted idempotently for investigation', () => {
+  assert.match(source, /INSERT OR IGNORE INTO payment_disputes/);
+  assert.match(source, /STRIPE_DISPUTE_RECORDED/);
+  assert.match(source, /'held'/);
 });
 
 test('security and payment hardening is explicitly versioned', () => {
