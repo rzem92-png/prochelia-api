@@ -111,11 +111,18 @@ jobs:
           npx --yes wrangler@4 d1 execute "$RESTORE_DB_NAME" --remote --command="SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name;" --json > "$result"
           # Wrangler renvoie un tableau de résultats : chaque élément contient results[].
           # Afficher uniquement les noms de tables, jamais le contenu des données.
-          jq -r '[.[]? | .results[]? | .name? // empty] | unique | .[]' "$result" > "$RUNNER_TEMP/prochelia-restore/table-names.txt"
+          jq -e . "$result" >/dev/null || { echo "::error::La sortie JSON de Wrangler est invalide ; restauration bloquée."; exit 1; }
+          # Extraction tolérante à la forme exacte du JSON Wrangler, sans exposer de données applicatives.
+          jq -r '[.. | objects | .name? // empty] | map(select(type == "string")) | unique | .[]' "$result" > "$RUNNER_TEMP/prochelia-restore/table-names.txt"
           echo "Tables présentes dans la base de test (noms uniquement) :"
           if [[ -s "$RUNNER_TEMP/prochelia-restore/table-names.txt" ]]; then
             sed 's/^/ - /' "$RUNNER_TEMP/prochelia-restore/table-names.txt"
             echo "::error::La base de test contient déjà des tables. Aucune restauration effectuée. Vérifier les noms affichés et recréer une base de test dédiée vide si nécessaire."
+            exit 1
+          fi
+          # Échec fermé : si Wrangler ne renvoie pas une structure identifiable, ne pas restaurer.
+          if ! jq -e '[.. | objects | has("results")] | any' "$result" >/dev/null; then
+            echo "::error::Structure JSON de Wrangler non reconnue ; restauration bloquée par sécurité."
             exit 1
           fi
           echo "Aucune table utilisateur détectée ; restauration autorisée."
