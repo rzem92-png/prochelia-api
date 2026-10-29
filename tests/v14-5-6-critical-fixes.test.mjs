@@ -151,13 +151,15 @@ test('Legal source-of-truth drafts cover B2C, B2B, intervenant, GDPR, payments, 
     '../legal/05-annexe-sous-traitance-rgpd-article-28.md',
     '../legal/06-politique-paiements-remboursements.md',
     '../legal/07-cookies-traceurs.md',
-    '../legal/08-checklist-conformite-avant-production.md'
+    '../legal/08-checklist-conformite-avant-production.md',
+    '../legal/09-cadre-repartition-responsabilites.md'
   ].map(path => readFileSync(new URL(path, import.meta.url), 'utf8'));
-  assert.equal(legalFiles.length, 9);
+  assert.equal(legalFiles.length, 10);
   assert.ok(legalFiles.slice(1, 8).every(content => /BROUILLON/i.test(content)));
   assert.match(legalFiles[0], /Source de vérité et gouvernance sans doublon/);
   assert.match(legalFiles[1], /Client B2C/);
   assert.match(legalFiles[2], /Client B2B/);
   assert.match(legalFiles[4], /RGPD/);
   assert.match(legalFiles[8], /avant production/i);
+  assert.match(legalFiles[9], /responsabilités/i);
 });
