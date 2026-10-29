@@ -28,6 +28,7 @@ jobs:
           node --experimental-default-type=module --check src/v7.js
           node --experimental-default-type=module --check src/v7-routes.js
           node --experimental-default-type=module --check src/stripe-adapter.js
+          node --experimental-default-type=module --check src/trust-passport.js
           node --check security/clamav-gateway/server.mjs
       - name: Run critical regression checks
-        run: node --experimental-default-type=module --test tests/v14-5-6-critical-fixes.test.mjs tests/stripe-adapter.behavior.test.mjs
+        run: node --experimental-default-type=module --test tests/v14-5-6-critical-fixes.test.mjs tests/stripe-adapter.behavior.test.mjs tests/trust-passport.test.mjs
