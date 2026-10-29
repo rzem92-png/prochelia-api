@@ -41,21 +41,27 @@ jobs:
             exit 1
           fi
           response_file="$RUNNER_TEMP/cloudflare-d1-check.json"
+          # Liste D1 documentée par Cloudflare ; valider ensuite nom et UUID exacts.
           http_status="$(curl --silent --show-error \
             --output "$response_file" --write-out '%{http_code}' \
             -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
-            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/d1/database/$DB_ID")"
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/d1/database?name=$DB_NAME")"
           response="$(cat "$response_file")"
           if [[ "$http_status" != "200" ]]; then
             error_codes="$(printf '%s' "$response" | jq -r '[.errors[]?.code // empty] | join(",")')"
             error_messages="$(printf '%s' "$response" | jq -r '[.errors[]?.message // empty] | join(" | ")')"
-            echo "::error::Échec API Cloudflare HTTP $http_status. Codes: ${error_codes:-non fournis}. Détails: ${error_messages:-aucun détail retourné}. Vérifier l'identifiant du compte et les autorisations du jeton D1."
+            echo "::error::Échec de la liste D1 Cloudflare HTTP $http_status. Codes: ${error_codes:-non fournis}. Détails: ${error_messages:-aucun détail retourné}. Vérifier CLOUDFLARE_ACCOUNT_ID et les autorisations D1 Read du jeton."
             exit 1
           fi
-          actual_name="$(printf '%s' "$response" | jq -r '.result.name // empty')"
           success="$(printf '%s' "$response" | jq -r '.success // false')"
-          if [[ "$success" != "true" || "$actual_name" != "$DB_NAME" ]]; then
-            echo "::error::La D1 indiquée ne correspond pas exactement à la base de préproduction attendue."
+          if [[ "$success" != "true" ]]; then
+            echo "::error::Cloudflare n'a pas confirmé la liste des bases D1."
+            exit 1
+          fi
+          match_count="$(printf '%s' "$response" | jq --arg name "$DB_NAME" --arg id "$DB_ID" '[.result[]? | select(.name == $name and .uuid == $id)] | length')"
+          if [[ "$match_count" != "1" ]]; then
+            actual_ids="$(printf '%s' "$response" | jq -r --arg name "$DB_NAME" '[.result[]? | select(.name == $name) | .uuid] | join(",")')"
+            echo "::error::La liste D1 est accessible, mais la correspondance exacte nom/UUID est absente. Base attendue: $DB_NAME ; UUID configuré: $DB_ID ; UUID trouvé pour ce nom: ${actual_ids:-aucun}. Vérifier DB_ID avant de poursuivre."
             exit 1
           fi
 
