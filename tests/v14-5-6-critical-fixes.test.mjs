@@ -173,3 +173,12 @@ test('Mission creation and payment checkout remain fail-closed before acceptance
   assert.match(source, /PAYMENTS_DISABLED_UNTIL_ACCEPTANCE/);
   assert.match(source, /PAYMENT_PROVIDER.*STRIPE_NOT_CONFIGURED/s);
 });
+
+
+test('Stripe webhook refuses processing until native signature adapter is connected', () => {
+  // Deliberate fail-closed behavior: a valid helper alone is not enough until the
+  // native Stripe signature, event mapping, idempotency and reconciliation are wired.
+  assert.match(source, /STRIPE_WEBHOOK_ADAPTER_NOT_IMPLEMENTED/);
+  assert.match(source, /if\(String\(provider\)\.toLowerCase\(\)==='stripe'\) return json\(/);
+  assert.match(adapter, /verifyStripeSignature/);
+});
