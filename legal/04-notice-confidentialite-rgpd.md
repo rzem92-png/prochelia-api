@@ -14,8 +14,10 @@ La base légale doit être déterminée pour chaque finalité : exécution du co
 ## Destinataires et transferts
 Accès limité aux personnes habilitées et prestataires nécessaires : hébergement, stockage, paiement, notification, vérification et assistance. L'inventaire doit identifier les entités, sous-traitants, lieux d'hébergement et transferts hors EEE; les garanties appropriées doivent être en place avant transfert.
 
-## Conservation et sécurité
-Une matrice de conservation précise les durées par catégorie, point de départ, archivage intermédiaire et suppression. Les données ne sont pas conservées indéfiniment. Les contrôles incluent moindre privilège, authentification, chiffrement adapté, stockage privé, journalisation, sauvegarde/restauration testée, gestion des secrets, mises à jour et réponse aux incidents.
+## Conservation, archivage et sécurité
+Les durées varient selon la finalité et la catégorie; elles ne sont pas illimitées. La matrice de travail est documentée dans `10-matrice-conservation-archivage-purge-rgpd.md` et doit être validée par le responsable de traitement avant publication. Les données actives sont supprimées ou anonymisées lorsqu'elles ne sont plus nécessaires. L'archivage intermédiaire est limité aux éléments nécessaires à une obligation ou à un besoin probatoire précis, avec accès restreint et échéance. Les sauvegardes chiffrées sont distinctes des archives métier et ont une rotation bornée. Après restauration, les suppressions et rectifications postérieures à la sauvegarde doivent être réappliquées avant remise en service. La politique d'expiration R2 et la restauration doivent être effectivement configurées et testées.
+
+Les contrôles incluent moindre privilège, authentification, chiffrement adapté, stockage privé, journalisation limitée, sauvegarde/restauration testée, gestion des secrets, mises à jour et réponse aux incidents.
 
 ## Droits
 Selon le traitement, les personnes peuvent exercer les droits d'accès, rectification, effacement, limitation, opposition, portabilité et retrait du consentement. Une vérification d'identité ne doit être demandée que si elle est nécessaire et proportionnée. Les demandes sont tracées et traitées dans les délais légaux. Les personnes peuvent introduire une réclamation auprès de la CNIL.
