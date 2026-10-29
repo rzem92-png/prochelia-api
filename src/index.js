@@ -1,5 +1,6 @@
 import { handleV7Route } from "./v7-routes.js";
 import { verifyStripeSignature, stripeCheckoutPayload } from "./stripe-adapter.js";
+import { evaluateTaskEligibility } from "./trust-passport.js";
 // PROCHÉLIA — INDEX BACKEND CONSOLIDÉ UNIQUE
 // Référence de consolidation : V14.1 Finance + sécurité/RBAC existants.
 // Généré le 19/10/2026. À déployer uniquement après recette avec la vraie base D1.
@@ -600,6 +601,84 @@ async function deliverSecurityCodes(env, payload) {
   return {ok:true,channel:'authenticated_notification_webhook'};
 }
 
+async function ensureTrustPassportSchema(env) {
+  if (!env.DB) throw new Error('DATABASE_REQUIRED');
+  const sql = [
+    `CREATE TABLE IF NOT EXISTS trust_service_catalog (service_code TEXT PRIMARY KEY, prestation_id TEXT NOT NULL UNIQUE, label TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'DRAFT', require_identity INTEGER NOT NULL DEFAULT 1, requirements_json TEXT NOT NULL DEFAULT '[]', allow_global_scope INTEGER NOT NULL DEFAULT 0, version INTEGER NOT NULL DEFAULT 1, updated_by_user_id TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`,
+    `CREATE TABLE IF NOT EXISTS trust_verifications (id TEXT PRIMARY KEY, intervenant_id TEXT NOT NULL, category TEXT NOT NULL, status TEXT NOT NULL, service_code TEXT NOT NULL, valid_from TEXT, expires_at TEXT, requires_expiry INTEGER NOT NULL DEFAULT 0, proof_document_id TEXT NOT NULL, verified_by_user_id TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, UNIQUE(intervenant_id,category,service_code,proof_document_id))`,
+    `CREATE INDEX IF NOT EXISTS idx_trust_verifications_lookup ON trust_verifications(intervenant_id,service_code,category,status,expires_at)`
+  ];
+  for (const q of sql) await env.DB.prepare(q).run();
+}
+
+async function trustPassportSaveCatalog(request, env) {
+  const auth = await getSessionUser(request, env);
+  if (!requireRole(auth, ['gerante'])) return json({ok:false,error:auth?.user?'FORBIDDEN':'UNAUTHENTICATED',version:VERSION},auth?.user?403:401);
+  await ensureTrustPassportSchema(env);
+  const b = await readJson(request) || {};
+  const prestationId = clean(b.prestation_id), serviceCode = clean(b.service_code), label = clean(b.label);
+  const status = String(b.status || 'DRAFT').toUpperCase();
+  const allowedCategories = new Set(['QUALIFICATION','DOCUMENT','INSURANCE','AUTHORIZATION']);
+  if (!prestationId || !serviceCode || !label || !['DRAFT','ACTIVE','SUSPENDED'].includes(status) || !Array.isArray(b.requirements) || b.requirements.length > 12) return json({ok:false,error:'INVALID_TRUST_CATALOG_INPUT',version:VERSION},400);
+  const requirements = [];
+  for (const item of b.requirements) {
+    const category = String(item?.category || '').trim().toUpperCase();
+    if (!allowedCategories.has(category)) return json({ok:false,error:'INVALID_TRUST_REQUIREMENT_CATEGORY',version:VERSION},400);
+    requirements.push({category,required:item?.required !== false});
+  }
+  const exists = await env.DB.prepare('SELECT id FROM prestations WHERE id=? LIMIT 1').bind(String(prestationId)).first().catch(()=>null);
+  if (!exists) return json({ok:false,error:'PRESTATION_NOT_FOUND',version:VERSION},404);
+  await env.DB.prepare(`INSERT INTO trust_service_catalog (service_code,prestation_id,label,status,require_identity,requirements_json,allow_global_scope,version,updated_by_user_id,updated_at) VALUES (?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP) ON CONFLICT(service_code) DO UPDATE SET prestation_id=excluded.prestation_id,label=excluded.label,status=excluded.status,require_identity=excluded.require_identity,requirements_json=excluded.requirements_json,allow_global_scope=excluded.allow_global_scope,version=trust_service_catalog.version+1,updated_by_user_id=excluded.updated_by_user_id,updated_at=CURRENT_TIMESTAMP`)
+    .bind(String(serviceCode),String(prestationId),String(label).slice(0,120),status,b.require_identity===false?0:1,JSON.stringify(requirements),b.allow_global_scope===true?1:0,1,auth.user.id).run();
+  await securityAudit(env,'TRUST_CATALOG_UPDATED',null,auth.user.id,auth.user.role,'OK',{service_code:serviceCode,prestation_id:prestationId,status,requirements:requirements.length});
+  return json({ok:true,version:VERSION,service_code:serviceCode,prestation_id:prestationId,status,requirements},200);
+}
+
+async function trustPassportVerifyEvidence(request, env) {
+  const auth = await getSessionUser(request, env);
+  if (!requireRole(auth, ['gerante','admin'])) return json({ok:false,error:auth?.user?'FORBIDDEN':'UNAUTHENTICATED',version:VERSION},auth?.user?403:401);
+  await ensureTrustPassportSchema(env);
+  const b = await readJson(request) || {};
+  const intervenantId = clean(b.intervenant_id), serviceCode = clean(b.service_code), documentId = clean(b.proof_document_id);
+  const category = String(b.category || '').trim().toUpperCase();
+  if (!intervenantId || !serviceCode || !documentId || !['QUALIFICATION','DOCUMENT','INSURANCE','AUTHORIZATION'].includes(category)) return json({ok:false,error:'INVALID_TRUST_EVIDENCE_INPUT',version:VERSION},400);
+  const service = await env.DB.prepare(`SELECT service_code,status FROM trust_service_catalog WHERE service_code=? LIMIT 1`).bind(serviceCode).first();
+  if (!service || service.status !== 'ACTIVE') return json({ok:false,error:'TRUST_SERVICE_NOT_ACTIVE',version:VERSION},409);
+  const profile = await env.DB.prepare('SELECT id,user_id FROM intervenants WHERE id=? LIMIT 1').bind(intervenantId).first();
+  if (!profile?.id || !profile?.user_id) return json({ok:false,error:'INTERVENANT_PROFILE_NOT_LINKED',version:VERSION},409);
+  const doc = await env.DB.prepare('SELECT id,owner_user_id,document_type,status FROM document_records WHERE id=? LIMIT 1').bind(documentId).first();
+  const expectedType = category==='QUALIFICATION'?'PROFESSIONAL_QUALIFICATION':category==='INSURANCE'?'INSURANCE':null;
+  if (!doc || doc.owner_user_id !== profile.user_id || doc.status !== 'VERIFIED' || (expectedType && doc.document_type !== expectedType)) return json({ok:false,error:'TRUST_EVIDENCE_DOCUMENT_NOT_VERIFIED_OR_MISMATCHED',version:VERSION},409);
+  const validFrom = clean(b.valid_from) || null, expiresAt = clean(b.expires_at) || null;
+  if (validFrom && !Number.isFinite(Date.parse(validFrom))) return json({ok:false,error:'INVALID_VALID_FROM',version:VERSION},400);
+  if (expiresAt && !Number.isFinite(Date.parse(expiresAt))) return json({ok:false,error:'INVALID_EXPIRY',version:VERSION},400);
+  if (validFrom && expiresAt && Date.parse(expiresAt) <= Date.parse(validFrom)) return json({ok:false,error:'INVALID_VALIDITY_RANGE',version:VERSION},400);
+  const requiresExpiry = ['QUALIFICATION','INSURANCE','AUTHORIZATION'].includes(category);
+  if (requiresExpiry && !expiresAt) return json({ok:false,error:'EXPIRY_REQUIRED_FOR_EVIDENCE',version:VERSION},400);
+  const status = category==='QUALIFICATION'?'QUALIFICATION_VERIFIED':'DOCUMENT_VERIFIED';
+  const id = crypto.randomUUID();
+  await env.DB.prepare(`INSERT INTO trust_verifications (id,intervenant_id,category,status,service_code,valid_from,expires_at,requires_expiry,proof_document_id,verified_by_user_id) VALUES (?,?,?,?,?,?,?,?,?,?) ON CONFLICT(intervenant_id,category,service_code,proof_document_id) DO UPDATE SET status=excluded.status,valid_from=excluded.valid_from,expires_at=excluded.expires_at,requires_expiry=excluded.requires_expiry,verified_by_user_id=excluded.verified_by_user_id,updated_at=CURRENT_TIMESTAMP`)
+    .bind(id,intervenantId,category,status,serviceCode,validFrom,expiresAt,requiresExpiry?1:0,documentId,auth.user.id).run();
+  await securityAudit(env,'TRUST_EVIDENCE_VERIFIED',null,auth.user.id,auth.user.role,'OK',{intervenant_id:intervenantId,service_code:serviceCode,category,proof_document_id:documentId});
+  return json({ok:true,version:VERSION,intervenant_id:intervenantId,service_code:serviceCode,category,status,expires_at:expiresAt},201);
+}
+
+async function trustPassportCheckMission(env, intervenantId, prestationId, missionAt) {
+  await ensureTrustPassportSchema(env);
+  const service = await env.DB.prepare('SELECT * FROM trust_service_catalog WHERE prestation_id=? LIMIT 1').bind(String(prestationId)).first();
+  if (!service) return {decision:'BLOCKED',reasons:['TRUST_SERVICE_NOT_CONFIGURED']};
+  let requirements;
+  try { requirements = JSON.parse(service.requirements_json || '[]'); } catch { return {decision:'BLOCKED',reasons:['TRUST_CATALOG_INVALID']}; }
+  const profileRow = await env.DB.prepare('SELECT * FROM intervenants WHERE id=? LIMIT 1').bind(String(intervenantId)).first();
+  if (!profileRow) return {decision:'BLOCKED',reasons:['INTERVENANT_PROFILE_NOT_FOUND']};
+  const profile = {status:String(profileRow.status || profileRow.statut || '').toUpperCase(),suspended:String(profileRow.status || profileRow.statut || '').toUpperCase()==='SUSPENDED'};
+  const evidence = await env.DB.prepare(`SELECT category,status,service_code,valid_from,expires_at,requires_expiry FROM trust_verifications WHERE intervenant_id=? AND (service_code=? OR service_code='*')`).bind(String(intervenantId),String(service.service_code)).all();
+  const identity = await env.DB.prepare(`SELECT verified_at,expires_at FROM identity_verifications WHERE user_id=? AND status='verified' AND (expires_at IS NULL OR expires_at>CURRENT_TIMESTAMP) ORDER BY verified_at DESC LIMIT 1`).bind(String(profileRow.user_id)).first();
+  const records = (evidence.results || []).map(v=>({...v,requires_expiry:!!v.requires_expiry}));
+  if (identity) records.push({category:'IDENTITY',status:'IDENTITY_VERIFIED',service_code:String(service.service_code),valid_from:identity.verified_at||null,expires_at:identity.expires_at||null,requires_expiry:false});
+  const result = evaluateTaskEligibility({service:{service_code:service.service_code,status:service.status,require_identity:!!service.require_identity,allow_global_scope:!!service.allow_global_scope,requirements},profile,verifications:records,missionAt});
+  return result;
+}
 async function securityPrepareMission(request, env) {
   const auth=await getSessionUser(request,env);
   if(!requireRole(auth,['gerante'])) return json({ok:false,error:auth?.user?'FORBIDDEN':'UNAUTHENTICATED',version:VERSION},auth?.user?403:401);
@@ -612,6 +691,11 @@ async function securityPrepareMission(request, env) {
   const profile=await env.DB.prepare('SELECT id,user_id FROM intervenants WHERE id=? LIMIT 1').bind(intervenantId).first().catch(()=>null);
   if(!profile?.id||!profile?.user_id) return json({ok:false,error:'INTERVENANT_PROFILE_NOT_LINKED',version:VERSION},409);
   if(!await requireVerifiedIntervenant(env,String(profile.user_id))) return json({ok:false,error:'INTERVENANT_IDENTITY_NOT_VERIFIED',version:VERSION},409);
+  const admissibility = await trustPassportCheckMission(env,intervenantId,mission.prestation_id,mission.start_at);
+  if(admissibility.decision!=='ELIGIBLE') {
+    await securityAudit(env,'TRUST_PASSPORT_MISSION_PREPARE_BLOCKED',missionId,auth.user.id,auth.user.role,'DENIED',{reasons:admissibility.reasons});
+    return json({ok:false,error:'TRUST_PASSPORT_ADMISSIBILITY_BLOCKED',version:VERSION,decision:admissibility.decision,reasons:admissibility.reasons},409);
+  }
   const existing=await env.DB.prepare('SELECT id,status FROM mission_security WHERE mission_id=? LIMIT 1').bind(missionId).first();
   if(existing) return json({ok:false,error:'MISSION_SECURITY_ALREADY_PREPARED',version:VERSION,status:existing.status},409);
   const startMs=Date.parse(String(mission.start_at||'')),endMs=Date.parse(String(mission.end_at||mission.start_at||'')),now=Date.now();
@@ -662,6 +746,15 @@ async function securityVerifyCode(request, env) {
   if(!identity) {
     await securityAudit(env,'SECURITY_IDENTITY_RECHECK_FAILED',missionId,auth.user.id,auth.user.role,'DENIED',{});
     return json({ok:false,error:'INTERVENANT_IDENTITY_NOT_VERIFIED',version:VERSION},403);
+  }
+  if(purpose==='ARRIVAL') {
+    const mission = await env.DB.prepare('SELECT prestation_id,start_at FROM missions WHERE id=? LIMIT 1').bind(missionId).first();
+    if(!mission) return json({ok:false,error:'MISSION_NOT_FOUND',version:VERSION},404);
+    const admissibility = await trustPassportCheckMission(env,profile.id,mission.prestation_id,mission.start_at);
+    if(admissibility.decision!=='ELIGIBLE') {
+      await securityAudit(env,'TRUST_PASSPORT_MISSION_START_BLOCKED',missionId,auth.user.id,auth.user.role,'DENIED',{reasons:admissibility.reasons});
+      return json({ok:false,error:'TRUST_PASSPORT_ADMISSIBILITY_BLOCKED',version:VERSION,decision:admissibility.decision,reasons:admissibility.reasons},409);
+    }
   }
   if(!sec.last_presence_at) {
     await securityAudit(env,'SECURITY_PRESENCE_REQUIRED',missionId,auth.user.id,auth.user.role,'DENIED',{purpose});
@@ -4033,6 +4126,8 @@ handle = async function(request,env){
     if(u.pathname==='/api/copilot/scenarios' && request.method==='GET') return copilotScenarios(request,env);
     if(u.pathname==='/api/copilot/ask' && request.method==='POST') return copilotAsk(request,env);
     if(u.pathname.startsWith('/api/copilot/')) return json({ok:false,error:'METHOD_NOT_ALLOWED',version:VERSION},405,{'allow':'GET, POST'});
+    if(u.pathname==='/api/trust-passport/catalog' && request.method==='POST') return trustPassportSaveCatalog(request,env);
+    if(u.pathname==='/api/trust-passport/verifications' && request.method==='POST') return trustPassportVerifyEvidence(request,env);
     if(u.pathname==='/api/documents/scan' && request.method==='POST') return rescanDocumentEndpoint(request,env);
     if(u.pathname==='/api/system/final-audit' && request.method==='GET') return strictProductionAudit(request,env);
     if(u.pathname==='/api/system/production-check' && request.method==='GET') return strictProductionAudit(request,env);
