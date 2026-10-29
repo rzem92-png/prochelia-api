@@ -3972,6 +3972,25 @@ async function strictProductionAudit(request,env){
   return json({ok:true,version:VERSION,production_gate:overall?'OPEN':'CLOSED',ready_for_real_traffic:overall,checks,blocking:blocking.map(x=>x.code),note:overall?'Configuration gate passed. A real production launch still requires sandbox/acceptance tests for PSP, notifications, identity/security, backups/restore and critical user journeys.':'Production traffic remains blocked until the listed blocking controls are configured and tested.'});
 }
 
+
+async function rescanDocumentEndpoint(request,env){
+  const auth=await getSessionUser(request,env);
+  if(!requireRole(auth,['gerante','admin'])) return json({ok:false,error:auth?.user?'FORBIDDEN':'UNAUTHENTICATED',version:VERSION},auth?.user?403:401);
+  if(!env.DOCUMENTS_BUCKET||!await documentTablesReady(env))return json({ok:false,error:'DOCUMENT_STORAGE_NOT_READY',version:VERSION},503);
+  const b=await readJson(request)||{},id=clean(b.document_id);
+  if(!id)return json({ok:false,error:'DOCUMENT_ID_REQUIRED',version:VERSION},400);
+  const doc=await env.DB.prepare(`SELECT id,object_key,sha256_hex,original_filename,status FROM document_records WHERE id=? LIMIT 1`).bind(id).first();
+  if(!doc)return json({ok:false,error:'DOCUMENT_NOT_FOUND',version:VERSION},404);
+  const object=await env.DOCUMENTS_BUCKET.get(doc.object_key);
+  if(!object)return json({ok:false,error:'DOCUMENT_OBJECT_MISSING',version:VERSION},404);
+  const bytes=new Uint8Array(await object.arrayBuffer());
+  const digest=new Uint8Array(await crypto.subtle.digest('SHA-256',bytes));
+  const actual=[...digest].map(x=>x.toString(16).padStart(2,'0')).join('');
+  if(actual.toLowerCase()!==String(doc.sha256_hex||'').toLowerCase())return json({ok:false,error:'DOCUMENT_HASH_MISMATCH',version:VERSION},423);
+  const scan=await scanDocumentBytes(env,doc,bytes,auth.user.id);
+  return json({ok:scan.result==='CLEAN',version:VERSION,document_id:id,status:scan.status,antivirus:scan.result,scanner_configured:scan.scanner_configured},scan.result==='CLEAN'?200:423);
+}
+
 const __procheliaProductionSafetyHandle = handle;
 handle = async function(request,env){
   try{
@@ -4014,6 +4033,7 @@ handle = async function(request,env){
     if(u.pathname==='/api/copilot/scenarios' && request.method==='GET') return copilotScenarios(request,env);
     if(u.pathname==='/api/copilot/ask' && request.method==='POST') return copilotAsk(request,env);
     if(u.pathname.startsWith('/api/copilot/')) return json({ok:false,error:'METHOD_NOT_ALLOWED',version:VERSION},405,{'allow':'GET, POST'});
+    if(u.pathname==='/api/documents/scan' && request.method==='POST') return rescanDocumentEndpoint(request,env);
     if(u.pathname==='/api/system/final-audit' && request.method==='GET') return strictProductionAudit(request,env);
     if(u.pathname==='/api/system/production-check' && request.method==='GET') return strictProductionAudit(request,env);
     return __procheliaProductionSafetyHandle(request,env);
