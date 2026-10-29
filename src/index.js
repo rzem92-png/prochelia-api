@@ -3680,6 +3680,14 @@ async function ensureCopilotSchema(env) {
   )`).run();
   await env.DB.prepare(`CREATE INDEX IF NOT EXISTS idx_copilot_interactions_user_date
     ON copilot_interactions(user_id,created_at DESC)`).run();
+  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS copilot_action_plans (
+    id TEXT PRIMARY KEY, interaction_id TEXT NOT NULL UNIQUE, user_id TEXT NOT NULL,
+    role TEXT NOT NULL, scenario_key TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'PROPOSED',
+    approval_required INTEGER NOT NULL DEFAULT 0, plan_json TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  )`).run();
+  await env.DB.prepare(`CREATE INDEX IF NOT EXISTS idx_copilot_plans_user_date
+    ON copilot_action_plans(user_id,created_at DESC)`).run();
 }
 
 function copilotScenarioFor(text) {
@@ -3694,6 +3702,33 @@ function copilotScenarioFor(text) {
   return 'GENERAL_OPERATIONS';
 }
 
+
+
+async function copilotListPlans(request,env) {
+  const gate=await supportAuth(request,env); if(gate.response)return gate.response;
+  if(!env.DB) return json({ok:false,error:'DATABASE_REQUIRED',version:VERSION},503);
+  await ensureCopilotSchema(env);
+  const role=String(gate.role||'').toUpperCase();
+  const isManager=['GERANTE','ADMIN'].includes(role);
+  const rows=isManager
+    ? await env.DB.prepare(`SELECT id,interaction_id,user_id,role,scenario_key,status,approval_required,created_at,updated_at FROM copilot_action_plans ORDER BY created_at DESC LIMIT 50`).all()
+    : await env.DB.prepare(`SELECT id,interaction_id,user_id,role,scenario_key,status,approval_required,created_at,updated_at FROM copilot_action_plans WHERE user_id=? ORDER BY created_at DESC LIMIT 50`).bind(gate.auth.user.id).all();
+  return json({ok:true,version:VERSION,plans:rows.results||[],limit:50});
+}
+
+async function copilotGetPlan(request,env,id) {
+  const gate=await supportAuth(request,env); if(gate.response)return gate.response;
+  if(!env.DB) return json({ok:false,error:'DATABASE_REQUIRED',version:VERSION},503);
+  await ensureCopilotSchema(env);
+  const role=String(gate.role||'').toUpperCase();
+  const isManager=['GERANTE','ADMIN'].includes(role);
+  const row=isManager
+    ? await env.DB.prepare(`SELECT id,interaction_id,user_id,role,scenario_key,status,approval_required,plan_json,created_at,updated_at FROM copilot_action_plans WHERE id=? LIMIT 1`).bind(id).first()
+    : await env.DB.prepare(`SELECT id,interaction_id,user_id,role,scenario_key,status,approval_required,plan_json,created_at,updated_at FROM copilot_action_plans WHERE id=? AND user_id=? LIMIT 1`).bind(id,gate.auth.user.id).first();
+  if(!row) return json({ok:false,error:'PLAN_NOT_FOUND',version:VERSION},404);
+  let plan; try { plan=JSON.parse(row.plan_json); } catch { return json({ok:false,error:'PLAN_DATA_INVALID',version:VERSION},500); }
+  return json({ok:true,version:VERSION,plan:{id:row.id,interaction_id:row.interaction_id,scenario_key:row.scenario_key,status:row.status,approval_required:!!row.approval_required,created_at:row.created_at,updated_at:row.updated_at,answer:plan,execution_performed:false}});
+}
 
 async function copilotHealth(request,env) {
   const gate=await supportAuth(request,env); if(gate.response)return gate.response;
@@ -3788,7 +3823,12 @@ async function copilotAsk(request,env) {
   const id=crypto.randomUUID();
   await env.DB.prepare(`INSERT INTO copilot_interactions(id,user_id,role,prompt_hash,scenario_key,model,status,latency_ms)
     VALUES(?,?,?,?,?,?,?,?)`).bind(id,gate.auth.user.id,gate.role,await sha256Hex(prompt),scenario.key,model,'PLAN_GENERATED',Date.now()-started).run();
+  await env.DB.prepare(`INSERT INTO copilot_action_plans(id,interaction_id,user_id,role,scenario_key,status,approval_required,plan_json)
+    VALUES(?,?,?,?,?,?,?,?)`).bind(id,id,gate.auth.user.id,gate.role,scenario.key,
+      safeAnswer.approval_required?'AWAITING_HUMAN_REVIEW':'PROPOSED',
+      safeAnswer.approval_required?1:0,JSON.stringify(safeAnswer)).run();
   await journal(env,gate.role,gate.auth.user.id,'COPILOT_PLAN_GENERATED','copilot_interaction',id,'OK',{scenario:scenario.key,approval_required:safeAnswer.approval_required,latency_ms:Date.now()-started});
+  await journal(env,gate.role,gate.auth.user.id,'COPILOT_PLAN_STORED','copilot_action_plan',id,'OK',{scenario:scenario.key,status:safeAnswer.approval_required?'AWAITING_HUMAN_REVIEW':'PROPOSED'});
   return json({ok:true,version:VERSION,assistant:'PROCHÉLIA Copilote transversal',interaction_id:id,scenario:{key:scenario.key,label:scenario.label,severity:scenario.severity},mode:'PLAN_ONLY_NO_MUTATION',answer:safeAnswer,execution:{performed:false,reason:'Aucune action métier n’est exécutée par la sortie du modèle; les actions doivent passer par les routes métier autorisées et leurs contrôles.'}});
 }
 
@@ -3910,6 +3950,8 @@ handle = async function(request,env){
     if(!rate.ok) return rate.response;
     const u=new URL(request.url);
     if(u.pathname==='/api/copilot/health' && request.method==='GET') return copilotHealth(request,env);
+    if(u.pathname==='/api/copilot/plans' && request.method==='GET') return copilotListPlans(request,env);
+    if(/^\/api\/copilot\/plans\/[^/]+$/.test(u.pathname) && request.method==='GET') return copilotGetPlan(request,env,u.pathname.split('/').pop());
     if(u.pathname==='/api/copilot/scenarios' && request.method==='GET') return copilotScenarios(request,env);
     if(u.pathname==='/api/copilot/ask' && request.method==='POST') return copilotAsk(request,env);
     if(u.pathname.startsWith('/api/copilot/')) return json({ok:false,error:'METHOD_NOT_ALLOWED',version:VERSION},405,{'allow':'GET, POST'});
