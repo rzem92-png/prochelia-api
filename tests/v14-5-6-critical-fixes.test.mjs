@@ -101,3 +101,23 @@ test('Copilot plans are persisted with review status and owner-scoped retrieval'
   assert.match(source, /\/api\/copilot\/plans/);
   assert.match(source, /execution_performed:false/);
 });
+
+
+test('Uploaded documents remain quarantined unless a configured antivirus confirms the exact hash is clean', () => {
+  assert.match(source, /CREATE TABLE IF NOT EXISTS document_security_scans/);
+  assert.match(source, /DOCUMENT_SCAN_URL/);
+  assert.match(source, /DOCUMENT_SCAN_TOKEN/);
+  assert.match(source, /SCANNER_DID_NOT_CONFIRM_FILE_HASH/);
+  assert.match(source, /'QUARANTINED'/);
+  assert.match(source, /ANTIVIRUS_SCAN_NOT_CLEAN/);
+  assert.match(source, /DOCUMENT_QUARANTINED_ANTIVIRUS_REQUIRED/);
+  assert.match(source, /async function rescanDocumentEndpoint\(request,env\)/);
+  assert.match(source, /\/api\/documents\/scan/);
+});
+
+test('Antivirus scanner failures never permit document review or download', () => {
+  assert.match(source, /result==='CLEAN'\?'PENDING':result==='INFECTED'\?'INFECTED':'QUARANTINED'/);
+  assert.match(source, /if\(!scan \|\| scan.result!=='CLEAN'\)/);
+  assert.match(source, /if\(!scan \|\| scan.result!=='CLEAN' \|\| String\(scan.file_sha256/);
+  assert.match(source, /'ANTIVIRUS_SCAN'/);
+});
