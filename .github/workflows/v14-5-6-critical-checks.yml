@@ -28,5 +28,6 @@ jobs:
           node --experimental-default-type=module --check src/v7.js
           node --experimental-default-type=module --check src/v7-routes.js
           node --experimental-default-type=module --check src/stripe-adapter.js
+          node --check security/clamav-gateway/server.mjs
       - name: Run critical regression checks
         run: node --test tests/v14-5-6-critical-fixes.test.mjs
