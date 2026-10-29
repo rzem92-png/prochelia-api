@@ -132,3 +132,55 @@ Cette spécification ne doit être déclarée opérationnelle qu'après :
 - vérification que l'interface n'affiche aucune promesse supérieure aux contrôles réels.
 
 Aucune fusion ni aucun déploiement ne découle de ce document.
+
+
+## 11. État d'implémentation dans la branche de préproduction
+
+Le moteur déterministe et son raccordement au backend ont été ajoutés dans la branche `fix/v14.5.6-security-stripe-hardening`. Les contrôles sont appelés lors de la préparation de la sécurité d'une mission et à nouveau avant la validation du code d'arrivée. L'absence de configuration active bloque par défaut.
+
+### Routes administratives disponibles
+
+Ces routes nécessitent une session authentifiée et un rôle autorisé. Elles ne doivent pas être exposées à un compte client.
+
+- `POST /api/trust-passport/catalog` — rôle Gérante. Crée ou met à jour le référentiel d'une prestation.
+- `POST /api/trust-passport/verifications` — rôle Gérante/Admin. Associe une preuve documentaire déjà vérifiée à un intervenant, une catégorie et une prestation.
+
+Exemple de corps pour le catalogue :
+
+```json
+{
+  "prestation_id": "ID_D1_DE_LA_PRESTATION",
+  "service_code": "ACCOMPAGNEMENT_NON_MEDICAL",
+  "label": "Accompagnement non médical",
+  "status": "DRAFT",
+  "require_identity": true,
+  "requirements": [
+    { "category": "QUALIFICATION", "required": true }
+  ],
+  "allow_global_scope": false
+}
+```
+
+Le statut `DRAFT` est volontairement non admissible. Le passage à `ACTIVE` doit intervenir après revue humaine du périmètre, des justificatifs attendus et des obligations applicables.
+
+Exemple d'association d'une preuve :
+
+```json
+{
+  "intervenant_id": "ID_D1_DE_L_INTERVENANT",
+  "service_code": "ACCOMPAGNEMENT_NON_MEDICAL",
+  "category": "QUALIFICATION",
+  "proof_document_id": "ID_D1_DU_DOCUMENT_VERIFIE",
+  "valid_from": "2026-10-29T00:00:00.000Z",
+  "expires_at": "2027-10-29T00:00:00.000Z"
+}
+```
+
+Le backend vérifie que le document appartient au compte lié à l'intervenant et qu'il est déjà au statut `VERIFIED`. Les qualifications, assurances et autorisations soumises à expiration doivent avoir une date de fin. La décision de statut n'est pas acceptée depuis le navigateur : elle est déterminée par le serveur.
+
+### Limites restant à valider
+
+- La suite GitHub Actions de préproduction vérifie la syntaxe et les tests de régression; le run `40915666610` a réussi.
+- Les migrations créées à la demande par le Worker doivent encore être testées sur une copie de la vraie base D1 et les valeurs réelles de statut de `intervenants` doivent être confirmées.
+- Les parcours client, l'affichage du passeport, la revue des pièces et la création de mission restent soumis à la recette complète.
+- Les écritures de création de mission restent désactivées. Le contrôle de préparation des codes de mission ne les réactive pas.
