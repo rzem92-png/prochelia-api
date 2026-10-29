@@ -90,3 +90,14 @@ test('Copilot readiness diagnostics are authenticated and never expose secret va
   assert.match(source, /AI_PROVIDER_SECRET/);
   assert.match(source, /Aucun accès direct de l’IA aux données D1, Stripe ou documents/);
 });
+
+
+test('Copilot plans are persisted with review status and owner-scoped retrieval', () => {
+  assert.match(source, /CREATE TABLE IF NOT EXISTS copilot_action_plans/);
+  assert.match(source, /AWAITING_HUMAN_REVIEW/);
+  assert.match(source, /async function copilotListPlans\(request,env\)/);
+  assert.match(source, /async function copilotGetPlan\(request,env,id\)/);
+  assert.match(source, /WHERE id=\? AND user_id=\?/);
+  assert.match(source, /\/api\/copilot\/plans/);
+  assert.match(source, /execution_performed:false/);
+});
