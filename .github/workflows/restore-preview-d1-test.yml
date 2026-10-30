@@ -97,9 +97,10 @@ jobs:
           echo "Déchiffrement réussi ; export SQL non affiché dans les journaux."
 
       - name: Installer Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: "22"
+          package-manager-cache: false
 
       - name: Vérifier que la base de test est vide
         shell: bash
