@@ -268,6 +268,21 @@ test('Travel fee and operating cost use server policy and a persisted route esti
 });
 
 
+test('Route estimates are calculated server-side and retain only hashed address provenance', () => {
+  const route = source.slice(source.indexOf('async function pricingRouteEstimate'), source.indexOf('async function pricingQuote'));
+  assert.match(route, /MAPS_PROVIDER/);
+  assert.match(route, /MAPS_API_KEY/);
+  assert.match(route, /routes\.googleapis\.com\/directions\/v2:computeRoutes/);
+  assert.match(route, /X-Goog-FieldMask/);
+  assert.match(route, /distanceMeters/);
+  assert.match(route, /pricing_route_estimates/);
+  assert.match(route, /pricing_route_estimate_audit/);
+  assert.match(route, /origin_sha256/);
+  assert.match(route, /destination_sha256/);
+  assert.doesNotMatch(route, /INSERT INTO pricing_route_estimates[^;]*b\.distance_km/s);
+  assert.match(source, /\/api\/pricing\/route-estimate/);
+});
+
 test('Pricing quotes reject every client-supplied price, discount, distance and pricing modifier', () => {
   const quote = source.slice(source.indexOf('async function pricingQuote'), source.indexOf('async function financeSummary'));
   assert.match(quote, /CLIENT_PRICING_INPUT_FORBIDDEN/);
