@@ -266,28 +266,68 @@ test('Strategic pricing forwards the configured fuel price into the travel cost 
 });
 
 
-test('Pricing quote blocks financial policy overrides from non-manager roles', () => {
-  assert.match(source, /financialOverrides=\['phase','platform_fee_percent','intervenant_floor_cents','psp_percent','psp_fixed_cents','software_cost_cents','target_margin_percent','regulated_max_cents','fuel_price_cents_per_litre','fuel_cost_per_km_cents'\]/);
-  assert.match(source, /attemptedOverrides\.length && gate\.auth\?\.user\?\.role!=='gerante'/);
-  assert.match(source, /FINANCIAL_POLICY_OVERRIDE_FORBIDDEN/);
+test('Pricing quotes reject every client-supplied price, discount, distance and pricing modifier', () => {
+  const quote = source.slice(source.indexOf('async function pricingQuote'), source.indexOf('async function financeSummary'));
+  assert.match(quote, /CLIENT_PRICING_INPUT_FORBIDDEN/);
+  assert.match(quote, /base_price_cents/);
+  assert.match(quote, /discount_cents/);
+  assert.match(quote, /distance_km/);
+  assert.match(quote, /evening.*night.*saturday.*sunday.*holiday/s);
+  assert.doesNotMatch(quote, /Number\(b\.base_price_cents/);
+  assert.doesNotMatch(quote, /Number\(b\.discount_cents/);
+  assert.doesNotMatch(quote, /Number\(b\.distance_km/);
 });
 
-
-test('Pricing quote validates bounded inputs and refuses unknown phases/client types', () => {
-  assert.match(source, /PRICING_PHASE_INVALID/);
-  assert.match(source, /PRICING_INPUT_INVALID/);
-  assert.match(source, /CLIENT_TYPE_INVALID/);
-  assert.match(source, /DISCOUNT_EXCEEDS_BASE_PRICE/);
-  assert.match(source, /distance_km',distance,0,500/);
-  assert.match(source, /duration_minutes',duration,1,1440/);
-  assert.match(source, /base_price_cents',base,1,5000000/);
+test('Every quote requires an active D1 prestation and its active server tariff', () => {
+  const quote = source.slice(source.indexOf('async function pricingQuote'), source.indexOf('async function financeSummary'));
+  assert.match(source, /CREATE TABLE IF NOT EXISTS pricing_service_rates/);
+  assert.match(quote, /JOIN prestations p ON p\.id=r\.prestation_id/);
+  assert.match(quote, /p\.active=1/);
+  assert.match(quote, /ACTIVE_PRESTATION_TARIFF_NOT_FOUND/);
+  assert.match(quote, /VALIDATED_ROUTE_ESTIMATE_REQUIRED/);
+  assert.match(quote, /pricing_route_estimates/);
 });
 
-test('Pricing policy database failures fail closed instead of silently using fallback policy', () => {
-  assert.match(source, /PRICING_POLICY_UNAVAILABLE/);
-  assert.match(source, /catch \(_\) \{\s*return json\(\{ok:false,error:'PRICING_POLICY_UNAVAILABLE'/);
+test('Date modifiers and public holidays are calculated from mission timestamps server-side', () => {
+  const quote = source.slice(source.indexOf('async function pricingQuote'), source.indexOf('async function financeSummary'));
+  assert.match(quote, /timeZone:'Europe\/Paris'/);
+  assert.match(quote, /pricing_holidays/);
+  assert.match(quote, /holiday_date BETWEEN/);
+  assert.match(quote, /isSaturday=.*localEnd\.weekday/);
+  assert.match(quote, /isEvening=.*endHour/);
+  assert.match(quote, /isNight=.*endHour/);
 });
 
+test('Only active, date-valid and matching promotions can reduce the service price', () => {
+  const quote = source.slice(source.indexOf('async function pricingQuote'), source.indexOf('async function financeSummary'));
+  assert.match(quote, /FROM promotions WHERE code=\? AND status='ACTIVE'/);
+  assert.match(quote, /datetime\(starts_at\)<=datetime\(\?\)/);
+  assert.match(quote, /datetime\(ends_at\)>datetime\(\?\)/);
+  assert.match(quote, /PROMOTION_NOT_APPROVED_OR_NOT_ELIGIBLE/);
+  assert.match(quote, /approved_promotion_discount_cents/);
+});
+
+test('Financial decomposition reconciles service, travel, provider, commission, PSP and margin', () => {
+  const quote = source.slice(source.indexOf('async function pricingQuote'), source.indexOf('async function financeSummary'));
+  assert.match(quote, /platform_fee_fixed_cents/);
+  assert.match(quote, /platform_fee_percent/);
+  assert.match(quote, /platform_commission_fixed_cents/);
+  assert.match(quote, /platform_commission_variable_cents/);
+  assert.match(quote, /travel_fee_cents/);
+  assert.match(quote, /travel_operating_cost_cents/);
+  assert.match(quote, /psp_cost_cents/);
+  assert.match(quote, /platform_margin_cents/);
+  assert.match(quote, /reconciliation_delta_cents/);
+  assert.match(quote, /QUOTE_ACCOUNTING_RECONCILIATION_FAILED/);
+});
+
+test('Pricing reference and policy failures fail closed', () => {
+  const quote = source.slice(source.indexOf('async function pricingQuote'), source.indexOf('async function financeSummary'));
+  assert.match(quote, /PRICING_REFERENCE_DATA_UNAVAILABLE/);
+  assert.match(quote, /PRICING_POLICY_UNAVAILABLE/);
+  assert.match(quote, /HOLIDAY_CALENDAR_UNAVAILABLE/);
+  assert.match(quote, /FINANCIAL_POLICY_INVALID/);
+});
 
 test('Pricing quote rejects invalid or out-of-range financial policy values', () => {
   assert.match(source, /FINANCIAL_POLICY_INVALID/);
