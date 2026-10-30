@@ -92,7 +92,7 @@ jobs:
           expected = {
             "clients", "intervenants", "prestations", "missions", "tarifs",
             "paiements", "disponibilites", "evaluations", "documents",
-            "conflits", "journal", "pricing_policies", "pricing_service_rates",
+            "conflits", "journal", "pricing_policies", "pricing_travel_policies",
             "pricing_route_estimates", "pricing_holidays", "pricing_quotes"
           }
           actual = {
