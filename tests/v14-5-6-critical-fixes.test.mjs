@@ -72,6 +72,13 @@ test('transversal Copilot is authenticated, role-aware, and exposes scenario cat
   assert.match(source, /PAYMENT_RECONCILIATION/);
   assert.match(source, /GDPR_REQUEST/);
   assert.match(source, /SECURITY_INCIDENT/);
+  assert.match(source, /COMMERCIAL_GROWTH/);
+  assert.match(source, /RECRUITMENT_RETENTION/);
+  assert.match(source, /LEGAL_COMPLIANCE/);
+  assert.match(source, /copilotScenarioFor/);
+  assert.match(source, /fidélisation clients/);
+  assert.match(source, /fidélisation des intervenants/);
+  assert.match(source, /ne te substitue jamais à un juriste ou avocat/);
 });
 
 test('Copilot AI is server-side, bounded, privacy-minimizing, and never executes model output', () => {
