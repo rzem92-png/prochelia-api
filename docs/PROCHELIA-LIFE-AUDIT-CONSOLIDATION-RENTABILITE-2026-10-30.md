@@ -227,4 +227,31 @@ Tableau de bord par pays, catégorie et canal : demandes qualifiées, taux de mi
 
 Ne pas ouvrir une nouvelle zone si la marge contributive, la qualité, la sécurité ou le support ne sont pas démontrés. Ne pas confondre GMV, chiffre d'affaires de la plateforme et fonds dus aux vendeurs/prestataires.
 
+
+### 9.7 Gouvernance d'innovation continue — PROCHÉLIA RADAR
+
+Le leadership doit être piloté par des preuves, pas par une course permanente aux fonctionnalités. Mettre en place une boucle trimestrielle et un registre d'expériences :
+
+1. **RADAR marché :** suivre les évolutions de marketplaces, services à la demande, commerce agentique, paiements, logistique, réglementation et attentes locales. Chaque signal doit comporter source, date, pays, niveau de confiance et impact potentiel.
+2. **Détection des besoins :** agréger uniquement des signaux autorisés et suffisamment regroupés ; ne pas profiler les personnes ni déduire des données sensibles. NEXUS propose des hypothèses de besoins non couverts, jamais des obligations pour les professionnels.
+3. **Laboratoire d'expériences :** pour chaque idée, écrire problème, segment, hypothèse, coût complet, risques, métrique principale, seuil d'arrêt et durée. Tester d'abord en mode manuel ou simulation, puis sur un petit périmètre avec consentement et validation humaine.
+4. **Comité de lancement :** Produit, opérations, sécurité, juridique, finance et représentants des professionnels valident le passage d'un test à une offre. Les décisions sont horodatées et révocables.
+5. **Déploiement progressif :** feature flags, canary limité, journalisation, surveillance des erreurs, plan de retour arrière et désactivation immédiate si sécurité, conformité ou économie unitaire se dégrade.
+6. **Capitalisation défendable :** conserver les spécifications, preuves d'antériorité, dépôts, contrats, licences, décisions, métriques agrégées et apprentissages. Ne jamais confondre secret commercial, droit d'auteur, brevetabilité et marque.
+
+### 9.8 Priorités de différenciation — ordre d'exécution
+
+- **Priorité A — fondations rentables :** fiabilité des parcours, catalogue structuré, tarifs versionnés, devis et commandes traçables, paiements PSP, remboursements rapprochés, support et vérification professionnelle.
+- **Priorité B — réseau local difficile à reproduire :** outils commerçants, offres multi-vendeurs, fidélité inter-commerces, récurrence, réservation et logistique mutualisée lorsque les contraintes opérationnelles le permettent.
+- **Priorité C — intelligence NEXUS :** matching explicable, composition de prestations, prévision de demande agrégée, détection de zones sous-desservies et simulation de marge.
+- **Priorité D — commerce agentique :** rendre les offres lisibles par des assistants externes via des interfaces documentées, prix et disponibilités datés, conditions, identité du vendeur et confirmation humaine avant engagement. Ne pas dépendre d'un seul fournisseur d'IA.
+- **Priorité E — international :** registre pays × catégorie, devise et règles fiscales locales, langues, moyens de paiement, retours, assistance et partenaires locaux. Aucun déploiement automatique par traduction.
+
+### 9.9 Seuils de décision pour toute nouvelle activité
+
+Avant d'investir, le Copilote prépare un dossier avec demande observée, concurrents directs/indirects, alternatives existantes, coût d'acquisition, fréquence d'achat, panier, commission réalisable, coûts PSP/logistique/support/fraude, marge contributive, capacité disponible et risques réglementaires. Il propose trois scénarios et un seuil d'arrêt. La gérante décide explicitement.
+
+Une activité n'est pas considérée comme prometteuse parce que son marché total est important. Elle doit démontrer une demande accessible, une différenciation utile, une marge positive après coûts variables, une qualité acceptable et une capacité opérationnelle.
+
+
 **Statut :** stratégie et helper de préproduction uniquement. Aucun pays supplémentaire n'est approuvé, aucun front-end n'est déclaré terminé, aucune base D1 n'a été migrée, aucun PSP n'a été testé en réel et aucun déploiement de production n'a été effectué.
