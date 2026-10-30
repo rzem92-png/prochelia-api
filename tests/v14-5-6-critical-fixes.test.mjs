@@ -335,9 +335,10 @@ test('Date modifiers and public holidays are calculated from mission timestamps 
   assert.match(source, /2026-04-06/);
   assert.match(source, /2030-12-25/);
   assert.match(quote, /holiday_date BETWEEN/);
-  assert.match(quote, /isSaturday=.*localEnd\.weekday/);
-  assert.match(quote, /isEvening=.*endHour/);
-  assert.match(quote, /isNight=.*endHour/);
+  assert.match(quote, /for\(let t=startMs;t<endMs;t\+=30\*60\*1000\)/);
+  assert.match(quote, /localSamples\.some\(p=>p\.weekday==='Sat'\)/);
+  assert.match(quote, /localSamples\.some\(p=>Number\(p\.hour\)>=18/);
+  assert.match(quote, /localSamples\.some\(p=>Number\(p\.hour\)>=22/);
 });
 
 test('Only active, date-valid and matching promotions can reduce the service price', () => {
