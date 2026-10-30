@@ -48,6 +48,17 @@ CREATE TABLE IF NOT EXISTS pricing_route_estimates (
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS pricing_route_estimate_audit (
+  estimate_id TEXT PRIMARY KEY,
+  provider TEXT NOT NULL,
+  origin_sha256 TEXT NOT NULL,
+  destination_sha256 TEXT NOT NULL,
+  distance_meters INTEGER NOT NULL,
+  duration_seconds INTEGER,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (estimate_id) REFERENCES pricing_route_estimates(id)
+);
+
 CREATE TABLE IF NOT EXISTS pricing_holidays (
   holiday_date TEXT NOT NULL,
   region_code TEXT NOT NULL DEFAULT 'FR',
