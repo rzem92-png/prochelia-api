@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - fix/v14.5.6-security-stripe-hardening
+      - prelaunch/v14.5.7-consolidation-audit
     paths:
       - "migrations/**"
       - ".github/workflows/d1-core-migration-tests.yml"
