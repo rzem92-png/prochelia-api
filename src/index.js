@@ -1833,13 +1833,13 @@ async function pricingRouteEstimate(request, env) {
     const client=await env.DB.prepare(`SELECT address,city,postal_code FROM clients
       WHERE user_id=? LIMIT 1`).bind(gate.auth.user.id).first();
     if(!client)return json({ok:false,error:'CLIENT_PROFILE_NOT_FOUND',version:VERSION},409);
-    const intervenant=await env.DB.prepare(`SELECT i.id,i.validation_status,a.address,a.city,a.postal_code,a.status AS address_status
+    const intervenant=await env.DB.prepare(`SELECT i.id,i.validation_status,a.address,a.city,a.postal_code,a.status AS address_status,a.verified_at,a.verified_by
       FROM intervenants i LEFT JOIN intervenant_route_origins a ON a.intervenant_id=i.id
       WHERE i.id=? LIMIT 1`).bind(intervenantId).first();
     if(!intervenant)return json({ok:false,error:'INTERVENANT_NOT_FOUND',version:VERSION},404);
     const approved=['ACTIVE','APPROVED','VALIDATED','VERIFIED'].includes(String(intervenant.validation_status||'').toUpperCase());
     if(!approved)return json({ok:false,error:'INTERVENANT_NOT_VALIDATED',version:VERSION},409);
-    if(String(intervenant.address_status||'').toUpperCase()!=='VERIFIED')
+    if(String(intervenant.address_status||'').toUpperCase()!=='VERIFIED'||!intervenant.verified_at||!intervenant.verified_by)
       return json({ok:false,error:'INTERVENANT_ROUTE_ADDRESS_NOT_VERIFIED',version:VERSION},409);
     const destination=[client.address,client.postal_code,client.city].map(clean).filter(Boolean).join(', ');
     const origin=[intervenant.address,intervenant.postal_code,intervenant.city].map(clean).filter(Boolean).join(', ');
