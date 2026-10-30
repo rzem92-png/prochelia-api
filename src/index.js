@@ -1471,6 +1471,14 @@ async function ensureConsolidatedSchema(env) {
     `CREATE TABLE IF NOT EXISTS compliance_events (id TEXT PRIMARY KEY, type TEXT NOT NULL, severity TEXT NOT NULL, entity_type TEXT, entity_id TEXT, status TEXT NOT NULL DEFAULT 'OPEN', details_json TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, closed_at TEXT)`
   ];
   for (const sql of statements) await env.DB.prepare(sql).run();
+  const holidaySeeds = [
+    '2026-01-01','2026-04-06','2026-05-01','2026-05-08','2026-05-14','2026-05-25','2026-07-14','2026-08-15','2026-11-01','2026-11-11','2026-12-25',
+    '2027-01-01','2027-03-29','2027-05-01','2027-05-06','2027-05-08','2027-05-17','2027-07-14','2027-08-15','2027-11-01','2027-11-11','2027-12-25',
+    '2028-01-01','2028-04-17','2028-05-01','2028-05-08','2028-05-25','2028-06-05','2028-07-14','2028-08-15','2028-11-01','2028-11-11','2028-12-25',
+    '2029-01-01','2029-04-02','2029-05-01','2029-05-08','2029-05-10','2029-05-21','2029-07-14','2029-08-15','2029-11-01','2029-11-11','2029-12-25',
+    '2030-01-01','2030-04-22','2030-05-01','2030-05-08','2030-05-30','2030-06-10','2030-07-14','2030-08-15','2030-11-01','2030-11-11','2030-12-25'
+  ];
+  for (const date of holidaySeeds) await env.DB.prepare(`INSERT OR IGNORE INTO pricing_holidays(holiday_date,region_code,label,active) VALUES(?,'FR','Jour férié national',1)`).bind(date).run();
   const defaults = {
     project_phase:'TEST',
     fuel_cost_per_km_cents:'20',
@@ -1808,7 +1816,7 @@ async function pricingQuote(request, env) {
 
   // Les seules données de prix proviennent de D1. La requête ne peut fournir
   // ni prix, ni remise, ni distance, ni multiplicateur, ni frais financiers.
-  const forbidden=['base_price_cents','price','client_price_cents','discount_cents',
+  const forbidden=['base_price_cents','price','client_price_cents','discount_cents','client_type','service_code',
     'platform_fee_percent','platform_fee_fixed_cents','intervenant_floor_cents',
     'psp_percent','psp_fixed_cents','software_cost_cents','regulated_max_cents',
     'distance_km','fuel_cost_per_km_cents','fuel_price_cents_per_litre',
@@ -1817,10 +1825,8 @@ async function pricingQuote(request, env) {
   if(supplied.length)return json({ok:false,error:'CLIENT_PRICING_INPUT_FORBIDDEN',fields:supplied,version:VERSION},400);
 
   const prestationId=clean(b.prestation_id);
-  const serviceCode=clean(b.service_code);
-  const clientType=String(b.client_type||'B2C').toUpperCase();
-  if(!prestationId&&!serviceCode)return json({ok:false,error:'PRESTATION_REQUIRED',version:VERSION},400);
-  if(!['B2C','B2B'].includes(clientType))return json({ok:false,error:'CLIENT_TYPE_INVALID',version:VERSION},400);
+  const clientType=gate.auth.user.role==='entreprise'?'B2B':'B2C';
+  if(!prestationId)return json({ok:false,error:'PRESTATION_REQUIRED',version:VERSION},400);
   if(prestationId&&prestationId.length>100)return json({ok:false,error:'PRESTATION_INVALID',version:VERSION},400);
   if(serviceCode&&(!/^[A-Za-z0-9_-]{1,80}$/.test(serviceCode)))return json({ok:false,error:'SERVICE_CODE_INVALID',version:VERSION},400);
 
@@ -1836,19 +1842,11 @@ async function pricingQuote(request, env) {
 
   let rate=null, policy=null, route=null;
   try {
-    if(prestationId){
-      rate=await env.DB.prepare(`SELECT r.* FROM pricing_service_rates r JOIN prestations p ON p.id=r.prestation_id
-        WHERE p.active=1 AND r.prestation_id=? AND r.client_type=? AND r.active=1
-        AND (valid_from IS NULL OR datetime(valid_from)<=datetime(?))
-        AND (valid_until IS NULL OR datetime(valid_until)>datetime(?))
-        LIMIT 1`).bind(prestationId,clientType,new Date(startMs).toISOString(),new Date(startMs).toISOString()).first();
-    } else {
-      rate=await env.DB.prepare(`SELECT r.* FROM pricing_service_rates r JOIN prestations p ON p.id=r.prestation_id
-        WHERE p.active=1 AND r.service_code=? AND r.client_type=? AND r.active=1
-        AND (valid_from IS NULL OR datetime(valid_from)<=datetime(?))
-        AND (valid_until IS NULL OR datetime(valid_until)>datetime(?))
-        LIMIT 1`).bind(serviceCode,clientType,new Date(startMs).toISOString(),new Date(startMs).toISOString()).first();
-    }
+    rate=await env.DB.prepare(`SELECT r.* FROM pricing_service_rates r JOIN prestations p ON p.id=r.prestation_id
+      WHERE p.active=1 AND r.prestation_id=? AND r.client_type=? AND r.active=1
+      AND (r.valid_from IS NULL OR datetime(r.valid_from)<=datetime(?))
+      AND (r.valid_until IS NULL OR datetime(r.valid_until)>datetime(?))
+      LIMIT 1`).bind(prestationId,clientType,new Date(startMs).toISOString(),new Date(startMs).toISOString()).first();
     if(!rate)return json({ok:false,error:'ACTIVE_PRESTATION_TARIFF_NOT_FOUND',version:VERSION},409);
     if(serviceCode&&String(rate.service_code)!==serviceCode)return json({ok:false,error:'PRESTATION_SERVICE_MISMATCH',version:VERSION},409);
     policy=await env.DB.prepare(`SELECT * FROM pricing_policies
@@ -1858,8 +1856,8 @@ async function pricingQuote(request, env) {
       .bind(phase,clientType,rate.service_code,rate.service_code).first();
     if(!policy)return json({ok:false,error:'PRICING_POLICY_UNAVAILABLE',version:VERSION},503);
     route=await env.DB.prepare(`SELECT id,distance_km,status,expires_at FROM pricing_route_estimates
-      WHERE id=? AND status='VALID' AND datetime(expires_at)>datetime('now') LIMIT 1`)
-      .bind(clean(b.route_estimate_id)||'').first();
+      WHERE id=? AND owner_user_id=? AND status='VALID' AND datetime(expires_at)>datetime('now') LIMIT 1`)
+      .bind(clean(b.route_estimate_id)||'',gate.auth.user.id).first();
   } catch (_) {
     return json({ok:false,error:'PRICING_REFERENCE_DATA_UNAVAILABLE',version:VERSION},503);
   }
