@@ -440,7 +440,7 @@ test('Only active, date-valid and matching promotions can reduce the service pri
   const quote = source.slice(source.indexOf('async function pricingQuote'), source.indexOf('async function financeSummary'));
   assert.match(quote, /FROM promotions WHERE code=\? AND status='ACTIVE'/);
   assert.match(quote, /datetime\(starts_at\)<=datetime\(\?\)/);
-  assert.match(quote, /datetime\(ends_at\)>datetime\(\?\)/);
+  assert.match(quote, /datetime\(ends_at\)>=datetime\(\?\)/);
   assert.match(quote, /PROMOTION_NOT_APPROVED_OR_NOT_ELIGIBLE/);
   assert.match(quote, /approved_promotion_discount_cents/);
 });
