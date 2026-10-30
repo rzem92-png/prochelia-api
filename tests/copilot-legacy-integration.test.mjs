@@ -9,6 +9,6 @@ const implementation = source.slice(start, end);
 
 test('legacy Copilot recommendation is wired to the central fail-closed policy', () => {
   assert.ok(start >= 0 && end > start, 'copilotRecommend implementation must exist');
-  assert.match(implementation, /canAutoResolveSupportScenario\\(caseType, impact, false\\)/);
-  assert.doesNotMatch(implementation, /SIMPLE_CASES\\.has\\(caseType\\)/);
+  assert.match(implementation, /canAutoResolveSupportScenario\(caseType, impact, false\)/);
+  assert.doesNotMatch(implementation, /SIMPLE_CASES\.has\(caseType\)/);
 });
