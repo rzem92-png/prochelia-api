@@ -1365,7 +1365,7 @@ async function handleBase(request, env) {
         '/api/payments/onboard','/api/payments/status','/api/payments/mission/create','/api/payments/mission/finalize',
         '/api/payments/payout','/api/payments/webhook','/api/payments/checkout','/api/payments/dispute','/api/payments/dispute/resolve',
         '/api/consolidated/info','/api/ops/dashboard','/api/ops/case/execute','/api/ops/outbox/process',
-        '/api/journal','/api/cases','/api/cases/approve','/api/metiers','/api/metiers/suggest','/api/pricing/quote',
+        '/api/journal','/api/cases','/api/cases/approve','/api/metiers','/api/metiers/suggest','/api/pricing/route-estimate','/api/pricing/quote',
         '/api/finance/summary','/api/finance/dashboard','/api/finance/export','/api/finance/entry','/api/finance/problem','/api/finance/problem/resolve','/api/finance/forecast',
         '/api/complaints','/api/settings/phase','/api/strategic/dashboard','/api/strategic/promotions','/api/strategic/promotions/recommend','/api/strategic/promotions/activate',
         '/api/clients/score','/api/loyalty/update','/api/copilot/briefing','/api/copilot/next-actions','/api/copilot/growth-dashboard',
@@ -1442,6 +1442,16 @@ async function ensureConsolidatedSchema(env) {
       status TEXT NOT NULL DEFAULT 'VALID',
       expires_at TEXT NOT NULL,
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )`,
+    `CREATE TABLE IF NOT EXISTS pricing_route_estimate_audit (
+      estimate_id TEXT PRIMARY KEY,
+      provider TEXT NOT NULL,
+      origin_sha256 TEXT NOT NULL,
+      destination_sha256 TEXT NOT NULL,
+      distance_meters INTEGER NOT NULL,
+      duration_seconds INTEGER,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (estimate_id) REFERENCES pricing_route_estimates(id)
     )`,
     `CREATE TABLE IF NOT EXISTS pricing_holidays (
       holiday_date TEXT NOT NULL,
@@ -1801,6 +1811,67 @@ function financeStrategicQuote({basePriceCents=0,phaseFactor=1,urgency='normal',
   };
 }
 
+async function pricingRouteEstimate(request, env) {
+  const gate=await requireAuthRole(request,env,['gerante','client','entreprise','intervenant']);
+  if(gate.error)return gate.error;
+  if(!env.DB)return json({ok:false,error:'DATABASE_UNAVAILABLE',version:VERSION},503);
+  const provider=String(env.MAPS_PROVIDER||'').toLowerCase();
+  if(provider!=='google'||!finalSecretConfigured(env,'MAPS_API_KEY'))
+    return json({ok:false,error:'ROUTE_PROVIDER_NOT_CONFIGURED',version:VERSION},503);
+  const b=await readJson(request)||{};
+  const origin=clean(b.origin_address),destination=clean(b.destination_address);
+  if(!origin||!destination||origin.length>300||destination.length>300||origin===destination)
+    return json({ok:false,error:'ROUTE_ADDRESSES_INVALID',version:VERSION},400);
+  try {
+    const response=await fetch('https://routes.googleapis.com/directions/v2:computeRoutes',{
+      method:'POST',
+      headers:{
+        'Content-Type':'application/json',
+        'X-Goog-Api-Key':env.MAPS_API_KEY,
+        'X-Goog-FieldMask':'routes.distanceMeters,routes.duration'
+      },
+      body:JSON.stringify({
+        origin:{address:origin},
+        destination:{address:destination},
+        travelMode:'DRIVE',
+        routingPreference:'TRAFFIC_UNAWARE',
+        computeAlternativeRoutes:false,
+        languageCode:'fr-FR',
+        units:'METRIC'
+      })
+    });
+    if(!response.ok)return json({ok:false,error:'ROUTE_PROVIDER_REQUEST_FAILED',provider_status:response.status,version:VERSION},502);
+    const payload=await response.json();
+    const route=payload?.routes?.[0];
+    const meters=Number(route?.distanceMeters);
+    if(!Number.isFinite(meters)||meters<0||meters>500000)
+      return json({ok:false,error:'ROUTE_PROVIDER_RESULT_INVALID',version:VERSION},502);
+    await ensureConsolidatedSchema(env);
+    await ensureStrategicSchema(env);
+    const estimateId=crypto.randomUUID();
+    const expiresAt=new Date(Date.now()+15*60*1000).toISOString();
+    const digest=async value=>{
+      const bytes=new TextEncoder().encode(value.trim().toLowerCase());
+      const hash=await crypto.subtle.digest('SHA-256',bytes);
+      return [...new Uint8Array(hash)].map(x=>x.toString(16).padStart(2,'0')).join('');
+    };
+    const originHash=await digest(origin),destinationHash=await digest(destination);
+    await env.DB.prepare(`INSERT INTO pricing_route_estimates(id,owner_user_id,distance_km,status,expires_at)
+      VALUES(?,?,?,'VALID',?)`).bind(estimateId,gate.auth.user.id,Number((meters/1000).toFixed(3)),expiresAt).run();
+    await env.DB.prepare(`INSERT INTO pricing_route_estimate_audit
+      (estimate_id,provider,origin_sha256,destination_sha256,distance_meters,duration_seconds)
+      VALUES(?,?,?,?,?,?)`).bind(estimateId,'google',originHash,destinationHash,meters,
+        Number.parseInt(String(route.duration||'').replace('s',''),10)||null).run();
+    return json({ok:true,version:VERSION,route_estimate:{
+      id:estimateId,distance_km:Number((meters/1000).toFixed(3)),
+      duration_seconds:Number.parseInt(String(route.duration||'').replace('s',''),10)||null,
+      provider:'google',expires_at:expiresAt
+    }},200);
+  } catch (_) {
+    return json({ok:false,error:'ROUTE_ESTIMATE_UNAVAILABLE',version:VERSION},503);
+  }
+}
+
 async function pricingQuote(request, env) {
   const gate=await requireAuthRole(request,env,['gerante','client','entreprise','intervenant']);
   if(gate.error)return gate.error;
@@ -2042,6 +2113,7 @@ async function handleConsolidated(request, env) {
   if(url.pathname==='/api/cases/approve' && request.method==='POST') return approveOperationalCase(request,env);
   if(url.pathname==='/api/metiers' && request.method==='GET') return metiers(request,env);
   if(url.pathname==='/api/metiers/suggest' && request.method==='POST') return suggestMetier(request,env);
+  if(url.pathname==='/api/pricing/route-estimate' && request.method==='POST') return pricingRouteEstimate(request,env);
   if(url.pathname==='/api/pricing/quote' && request.method==='POST') return pricingQuote(request,env);
   if(url.pathname==='/api/finance/summary' && request.method==='GET') return financeSummary(request,env);
   if(url.pathname==='/api/complaints' && request.method==='POST') return complaintCreate(request,env);
