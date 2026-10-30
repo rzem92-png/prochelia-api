@@ -4295,7 +4295,7 @@ async function ensureCopilotSchema(env) {
 function copilotScenarioFor(text) {
   const q=String(text||'').toLowerCase();
   if(/avocat|juriste|juridique|contrat|responsabilité|droit du travail|services à la personne|médiateur|consommation|conformité légale|qualification juridique/.test(q)) return 'LEGAL_COMPLIANCE';
-  if(/fidélis|fidélis|rétention|désengagement|turnover|départ intervenant|satisfaction intervenant|motivation intervenant/.test(q)) return 'RECRUITMENT_RETENTION';
+  if(/fidélis|rétention|désengagement|turnover|départ intervenant|satisfaction intervenant|motivation intervenant/.test(q)) return 'RECRUITMENT_RETENTION';
   if(/recrut|candidat|sourcing|intégration intervenant|onboarding intervenant|besoin de personnel/.test(q)) return 'INTERVENANT_ONBOARDING';
   if(/commercial|prospect|prospection|client b2b|client b2c|acquisition|conversion|réachat|campagne|développement commercial/.test(q)) return 'COMMERCIAL_GROWTH';
   if(/rgpd|droit d.accès|effacement|suppression des données|données personnelles/.test(q)) return 'GDPR_REQUEST';
