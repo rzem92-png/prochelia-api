@@ -54,9 +54,10 @@ jobs:
           echo "Cible confirmée : base de test dédiée. Les prochaines requêtes sont en lecture seule."
 
       - name: Installer Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: "22"
+          package-manager-cache: false
 
       - name: Contrôler l’intégrité SQLite
         shell: bash
