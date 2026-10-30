@@ -48,7 +48,7 @@ export function simulateNexusUnitEconomics(input = {}) {
   const contributionMarginCents = input.platformRevenueCents - platformCosts;
   const contributionMarginBps = input.platformRevenueCents === 0
     ? null
-    : Math.floor(contributionMarginCents * 10000 / input.platformRevenueCents);
+    : Number((BigInt(contributionMarginCents) * 10000n) / BigInt(input.platformRevenueCents));
 
   return Object.freeze({
     grossCollectedCents: input.grossCollectedCents,
