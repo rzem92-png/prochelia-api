@@ -1834,7 +1834,7 @@ async function pricingQuote(request, env) {
   if(!Object.prototype.hasOwnProperty.call(PROJECT_PHASES,phase))
     return json({ok:false,error:'PRICING_PHASE_INVALID',version:VERSION},503);
 
-  let rate=null, policy=null, route=null;
+  let rate=null, policy=null, route=null, travelPolicy=null;
   try {
     const tariffRows=await env.DB.prepare(`SELECT t.id AS tariff_id,t.prestation_id,
       ROUND(t.client_price*100) AS base_price_cents,
@@ -1853,7 +1853,7 @@ async function pricingQuote(request, env) {
       ORDER BY CASE WHEN service_code=? THEN 0 ELSE 1 END LIMIT 1`)
       .bind(phase,clientType,rate.service_code,rate.service_code).first();
     if(!policy)return json({ok:false,error:'PRICING_POLICY_UNAVAILABLE',version:VERSION},503);
-    const travelPolicy=await env.DB.prepare(`SELECT travel_fee_per_km_cents FROM pricing_travel_policies
+    travelPolicy=await env.DB.prepare(`SELECT travel_fee_per_km_cents FROM pricing_travel_policies
       WHERE active=1 AND phase=? AND client_type=? LIMIT 1`).bind(phase,clientType).first();
     if(!travelPolicy)return json({ok:false,error:'TRAVEL_PRICING_POLICY_UNAVAILABLE',version:VERSION},503);
     route=await env.DB.prepare(`SELECT id,distance_km,status,expires_at FROM pricing_route_estimates
