@@ -1424,23 +1424,17 @@ async function ensureConsolidatedSchema(env) {
     `CREATE TABLE IF NOT EXISTS métier_catalog (id TEXT PRIMARY KEY, code TEXT NOT NULL UNIQUE, label TEXT NOT NULL, category TEXT, active INTEGER NOT NULL DEFAULT 1, rules_json TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`,
     `CREATE TABLE IF NOT EXISTS metier_suggestions (id TEXT PRIMARY KEY, label TEXT NOT NULL, reason TEXT, source TEXT NOT NULL DEFAULT 'copilot', status TEXT NOT NULL DEFAULT 'proposed', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, decided_at TEXT)`,
     `CREATE TABLE IF NOT EXISTS pricing_policies (id TEXT PRIMARY KEY, phase TEXT NOT NULL, service_code TEXT, client_type TEXT NOT NULL, intervenant_floor_cents INTEGER NOT NULL DEFAULT 0, client_ceiling_cents INTEGER NOT NULL DEFAULT 0, platform_fee_fixed_cents INTEGER NOT NULL DEFAULT 0, platform_fee_percent REAL NOT NULL DEFAULT 0, psp_percent REAL NOT NULL DEFAULT 0, psp_fixed_cents INTEGER NOT NULL DEFAULT 0, software_cost_cents INTEGER NOT NULL DEFAULT 0, fuel_cost_per_km_cents INTEGER NOT NULL DEFAULT 0, target_margin_percent REAL NOT NULL DEFAULT 0, market_min_cents INTEGER, market_max_cents INTEGER, active INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`,
-    `CREATE TABLE IF NOT EXISTS pricing_service_rates (
+    `CREATE TABLE IF NOT EXISTS pricing_travel_policies (
       id TEXT PRIMARY KEY,
-      prestation_id TEXT NOT NULL,
-      service_code TEXT NOT NULL,
+      phase TEXT NOT NULL,
       client_type TEXT NOT NULL CHECK (client_type IN ('B2C','B2B')),
-      base_price_cents INTEGER NOT NULL CHECK (base_price_cents > 0),
-      intervenant_floor_cents INTEGER NOT NULL CHECK (intervenant_floor_cents >= 0),
       travel_fee_per_km_cents INTEGER NOT NULL DEFAULT 0 CHECK (travel_fee_per_km_cents >= 0),
-      regulated_max_cents INTEGER,
-      active INTEGER NOT NULL DEFAULT 1,
-      valid_from TEXT,
-      valid_until TEXT,
+      active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0,1)),
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     )`,
-    `CREATE UNIQUE INDEX IF NOT EXISTS idx_pricing_service_rate_active
-      ON pricing_service_rates(prestation_id, client_type, active)`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS idx_pricing_travel_policy_active
+      ON pricing_travel_policies(phase, client_type, active)`,
     `CREATE TABLE IF NOT EXISTS pricing_route_estimates (
       id TEXT PRIMARY KEY,
       owner_user_id TEXT NOT NULL,
@@ -1811,7 +1805,7 @@ async function pricingQuote(request, env) {
   const gate=await requireAuthRole(request,env,['gerante','client','entreprise','intervenant']);
   if(gate.error)return gate.error;
   if(!env.DB)return json({ok:false,error:'DATABASE_UNAVAILABLE',version:VERSION},503);
-  try { await ensureConsolidatedSchema(env); await ensureStrategicSchema(env); }
+  try { await ensureConsolidatedSchema(env); await ensureStrategicSchema(env); await ensureTrustPassportSchema(env); }
   catch (_) { return json({ok:false,error:'PRICING_REFERENCE_DATA_UNAVAILABLE',version:VERSION},503); }
   const b=await readJson(request)||{};
 
@@ -1842,18 +1836,26 @@ async function pricingQuote(request, env) {
 
   let rate=null, policy=null, route=null;
   try {
-    rate=await env.DB.prepare(`SELECT r.* FROM pricing_service_rates r JOIN prestations p ON p.id=r.prestation_id
-      WHERE p.active=1 AND r.prestation_id=? AND r.client_type=? AND r.active=1
-      AND (r.valid_from IS NULL OR datetime(r.valid_from)<=datetime(?))
-      AND (r.valid_until IS NULL OR datetime(r.valid_until)>datetime(?))
-      LIMIT 1`).bind(prestationId,clientType,new Date(startMs).toISOString(),new Date(startMs).toISOString()).first();
-    if(!rate)return json({ok:false,error:'ACTIVE_PRESTATION_TARIFF_NOT_FOUND',version:VERSION},409);
+    const tariffRows=await env.DB.prepare(`SELECT t.id AS tariff_id,t.prestation_id,
+      ROUND(t.client_price*100) AS base_price_cents,
+      ROUND(t.intervenant_price*100) AS intervenant_floor_cents,
+      COALESCE((SELECT service_code FROM trust_service_catalog
+        WHERE prestation_id=p.id AND status='ACTIVE' LIMIT 1),p.id) AS service_code
+      FROM tarifs t JOIN prestations p ON p.id=t.prestation_id
+      WHERE p.active=1 AND t.prestation_id=? AND t.type='habituel' AND t.active=1`)
+      .bind(prestationId).all();
+    if(!tariffRows.results?.length)return json({ok:false,error:'ACTIVE_PRESTATION_TARIFF_NOT_FOUND',version:VERSION},409);
+    if(tariffRows.results.length!==1)return json({ok:false,error:'ACTIVE_PRESTATION_TARIFF_AMBIGUOUS',version:VERSION},409);
+    rate=tariffRows.results[0];
     policy=await env.DB.prepare(`SELECT * FROM pricing_policies
       WHERE active=1 AND phase=? AND client_type=?
       AND (service_code=? OR service_code IS NULL)
       ORDER BY CASE WHEN service_code=? THEN 0 ELSE 1 END LIMIT 1`)
       .bind(phase,clientType,rate.service_code,rate.service_code).first();
     if(!policy)return json({ok:false,error:'PRICING_POLICY_UNAVAILABLE',version:VERSION},503);
+    const travelPolicy=await env.DB.prepare(`SELECT travel_fee_per_km_cents FROM pricing_travel_policies
+      WHERE active=1 AND phase=? AND client_type=? LIMIT 1`).bind(phase,clientType).first();
+    if(!travelPolicy)return json({ok:false,error:'TRAVEL_PRICING_POLICY_UNAVAILABLE',version:VERSION},503);
     route=await env.DB.prepare(`SELECT id,distance_km,status,expires_at FROM pricing_route_estimates
       WHERE id=? AND owner_user_id=? AND status='VALID' AND datetime(expires_at)>datetime('now') LIMIT 1`)
       .bind(clean(b.route_estimate_id)||'',gate.auth.user.id).first();
@@ -1895,8 +1897,8 @@ async function pricingQuote(request, env) {
   const pspFixed=Number(policy.psp_fixed_cents||0);
   const software=Number(policy.software_cost_cents||0);
   const fuelCostPerKm=Number(policy.fuel_cost_per_km_cents||0);
-  const travelFeePerKm=Number(rate.travel_fee_per_km_cents||0);
-  const ceiling=rate.regulated_max_cents==null?null:Number(rate.regulated_max_cents);
+  const travelFeePerKm=Number(travelPolicy.travel_fee_per_km_cents||0);
+  const ceiling=Number(policy.client_ceiling_cents||0)>0?Number(policy.client_ceiling_cents):null;
   const policyValues=[base,providerFloor,fixedFee,feePercent,pspPercent,pspFixed,software,fuelCostPerKm,travelFeePerKm];
   if(policyValues.some(v=>!Number.isFinite(v)||v<0)||base<1||feePercent>100||pspPercent>100||
      (ceiling!==null&&(!Number.isFinite(ceiling)||ceiling<1)))
@@ -1948,7 +1950,7 @@ async function pricingQuote(request, env) {
   const margin=platformRevenue+travelFee-travelCost-pspCost-software;
   const quote={
     currency:'EUR',finance_version:FINANCE_STRATEGIC_VERSION,
-    prestation_id:rate.prestation_id,service_code:rate.service_code,client_type:clientType,
+    prestation_id:rate.prestation_id,tariff_id:rate.tariff_id,service_code:rate.service_code,client_type:clientType,
     phase,starts_at:new Date(startMs).toISOString(),ends_at:new Date(endMs).toISOString(),
     duration_minutes:durationMinutes,
     breakdown:{
@@ -1984,7 +1986,7 @@ async function pricingQuote(request, env) {
     VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
     .bind(crypto.randomUUID(),phase,clientType,rate.service_code,distance,durationMinutes,clientTotal,
       intervenantAmount,commission,pspCost,software,travelCost,margin,JSON.stringify({
-        source:'SERVER_D1_ONLY',prestation_id:rate.prestation_id,route_estimate_id:route.id,
+        source:'SERVER_D1_ONLY',prestation_id:rate.prestation_id,tariff_id:rate.tariff_id,route_estimate_id:route.id,
         promotion_id:promotion?.id||null,starts_at:quote.starts_at,ends_at:quote.ends_at,
         accounting:quote.accounting,modifiers:quote.modifiers
       })).run();
