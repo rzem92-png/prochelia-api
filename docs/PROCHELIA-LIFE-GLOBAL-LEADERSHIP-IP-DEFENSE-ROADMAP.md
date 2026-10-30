@@ -258,3 +258,164 @@ Aucune dépense ou action irréversible ne doit être engagée automatiquement. 
 - La conformité des activités dans chaque pays.
 
 **Principe directeur :** préserver la maîtrise personnelle des actifs dont la fondatrice détient effectivement les droits, permettre une exploitation commerciale solide et construire un avantage concurrentiel durable par la preuve, la qualité et l'exécution — sans prétendre rendre le concept impossible à copier ni garantir une position de leader.
+
+
+---
+
+# ADDENDUM 2 — Rentabilité globale, résilience financière et croissance saine
+
+**Objectif :** concevoir PROCHÉLIA LIFE pour rechercher une rentabilité durable à chaque niveau, sans sacrifier la valeur client, le revenu net des professionnels, la conformité, la qualité ou la trésorerie.
+
+La rentabilité n'est pas garantie par une architecture ou un document. Elle doit être démontrée par des données réelles, une comptabilité fiable et des tests commerciaux. Les objectifs chiffrés ci-dessous sont des indicateurs à définir et à valider, pas des résultats acquis.
+
+## 18. Les cinq rentabilités à piloter
+
+1. **Rentabilité de la plateforme** : chaque activité, transaction, abonnement et partenariat doit contribuer aux coûts communs et à la marge.
+2. **Rentabilité des professionnels** : mesurer le revenu net après commissions, frais, coûts directs, temps, charges et obligations propres à leur activité, sans promettre un revenu.
+3. **Rentabilité client** : démontrer le rapport qualité/prix, la fiabilité, le gain de temps et la résolution effective du besoin.
+4. **Rentabilité des partenaires et créateurs** : mesurer les ventes réellement attribuées, les coûts de collaboration et la rémunération nette.
+5. **Rentabilité territoriale et internationale** : ne développer un territoire que si la demande, les coûts, la conformité et l'économie unitaire sont suffisamment validés.
+
+## 19. Modèle économique multi-revenus, sans dépendance excessive
+
+Sources à évaluer, selon le droit applicable et les usages réels :
+- commissions de transaction clairement annoncées ;
+- abonnements professionnels facultatifs pour des outils avancés ;
+- offres B2B et espaces de gestion en marque blanche ;
+- licences de logiciels ou d'outils aux organisations ;
+- services premium réellement utiles (gestion, reporting, automatisations) ;
+- frais de mise en relation ou d'apport d'affaires lorsque licites, transparents et contractualisés ;
+- frais logistiques ou opérationnels distincts lorsqu'ils correspondent à un service réel ;
+- prestations de formation ou d'accompagnement, si autorisées et correctement encadrées ;
+- monétisation créateur, affiliation et sponsoring clairement identifiés ;
+- partenariats commerciaux avec rémunération déclarée et attribution vérifiable.
+
+Ne pas ajouter des frais cachés, facturer deux fois une même valeur, vendre des données personnelles, monétiser des avis ou rendre artificiellement indispensables des options payantes. Aucun revenu publicitaire n'est nécessaire au lancement si l'acquisition organique fonctionne ; la publicité payante pourra rester facultative et soumise à un calcul de rentabilité.
+
+## 20. Économie unitaire obligatoire avant toute activation
+
+Pour chaque catégorie, calculer séparément :
+
+**Valeur de commande HT/TTC et traitement fiscal** selon le rôle réel de PROCHÉLIA et le régime applicable.
+
+**Revenu net de plateforme =** commissions et frais de services acquis légalement  
+**– frais PSP**  
+**– remises financées par PROCHÉLIA**  
+**– coûts variables de support et opérations**  
+**– fraude, remboursements et litiges attendus**  
+**– coûts variables techniques et partenaires**  
+**– autres coûts directement attribuables.
+
+La marge contributive doit être calculée sans confondre :
+- volume d'affaires/GMV ;
+- chiffre d'affaires comptable de PROCHÉLIA ;
+- sommes encaissées pour compte de tiers ;
+- commissions acquises ;
+- trésorerie disponible ;
+- bénéfice après coûts fixes, impôts et charges.
+
+Les montants dus aux professionnels ou aux clients ne sont jamais une trésorerie libre de la plateforme.
+
+Chaque modèle doit également intégrer la TVA, les taxes, les frais de paiement, les remboursements, les chargebacks, les délais de versement, les réserves et les exigences du prestataire de paiement.
+
+## 21. Tarification intelligente et équitable
+
+- Prix de référence détenus côté serveur et versionnés.
+- Devis détaillé avant engagement.
+- Commission, frais PSP, taxes, remises, déplacement et majorations présentés distinctement.
+- Aucun tarif inventé par l'IA ni aucune modification silencieuse.
+- Prix minimum viable calculé à partir des coûts et contraintes de la catégorie, sans imposer de prix illicite ou de coordination anticoncurrentielle.
+- Promotions financées par une partie identifiée, avec budget, période, plafond et approbation.
+- Tarification dynamique uniquement selon des critères explicables, non discriminatoires et conformes.
+- Tests de sensibilité pour mesurer les effets d'une variation de commission sur conversion, revenu professionnel, rétention et marge de plateforme.
+
+## 22. Contrôle de rentabilité des campagnes et de l'acquisition
+
+Pour chaque canal, campagne, parrainage, partenariat ou créateur, suivre :
+- dépenses monétaires et coûts humains estimés ;
+- prospects qualifiés ;
+- clients réellement acquis ;
+- premières transactions finalisées ;
+- marge contributive issue de ces transactions ;
+- annulations, remboursements et fraude ;
+- réachat et rétention par cohorte ;
+- délai de récupération du coût d'acquisition ;
+- part organique et part payante.
+
+**Règle :** ne pas déclarer un canal rentable sur les clics, vues, inscriptions ou chiffre d'affaires brut. Le critère est la contribution nette après coûts et risques, sur une période d'observation suffisante.
+
+Le parrainage doit récompenser des actions authentiques et vérifiables, avec plafonds, contrôles antifraude et conditions publiées. Pas de rémunération pyramidale, de récompense pour simple recrutement ni de promesse de gains.
+
+## 23. Budget, trésorerie et discipline d'investissement
+
+Créer un budget glissant avec :
+- prévision de trésorerie sur 13 semaines ;
+- compte de résultat prévisionnel par activité ;
+- scénarios prudent, central et favorable ;
+- seuil de rentabilité et volume minimum de transactions ;
+- coût fixe et coût variable ;
+- réserve pour remboursements, litiges et incidents ;
+- besoin en fonds de roulement ;
+- plan de financement et calendrier des dépenses ;
+- suivi des factures, taxes et échéances.
+
+Aucun engagement financier automatique. Chaque investissement doit être présenté avec coût total, bénéfice attendu, hypothèses, risque, alternative, responsable et condition d'arrêt.
+
+## 24. Règles de décision : lancer, corriger ou arrêter
+
+Pour chaque nouveau module ou territoire, établir avant le pilote :
+- hypothèse commerciale ;
+- segment client et problème traité ;
+- offre et prix testés ;
+- seuil minimal de qualité ;
+- marge contributive cible ;
+- budget et durée du test ;
+- métriques de réussite ;
+- seuils d'alerte et critères d'arrêt ;
+- exigences juridiques, sécurité et support.
+
+Décisions :
+- **Lancer** si la demande est démontrée, la conformité validée, la qualité acceptable et l'économie unitaire viable.
+- **Corriger** si l'usage existe mais que le parcours, le prix, le coût ou la qualité doivent être améliorés.
+- **Suspendre** si le risque légal, financier, sécurité ou réputation est trop élevé.
+- **Arrêter** si les hypothèses essentielles sont invalidées ou si la contribution ne peut pas devenir durablement positive.
+
+## 25. Tableau de bord de rentabilité consolidé
+
+Par activité, catégorie, territoire, canal et cohorte :
+- GMV et nombre de transactions finalisées ;
+- chiffre d'affaires comptable reconnu ;
+- commissions et revenus acquis ;
+- frais PSP et autres coûts variables ;
+- marge contributive et taux de contribution ;
+- coût d'acquisition complet ;
+- délai de récupération du CAC ;
+- rétention, fréquence et valeur client ;
+- revenu net professionnel estimé avec hypothèses explicites ;
+- remboursements, litiges, fraude et pertes ;
+- coût support par commande ;
+- coût technique par utilisateur actif et transaction ;
+- trésorerie, dettes, créances et sommes dues aux tiers ;
+- concentration du revenu par client, partenaire, canal et territoire.
+
+Les tableaux de bord doivent afficher la période, la devise, les règles de calcul et la date de mise à jour. Les données manquantes ne doivent jamais être remplacées par des estimations présentées comme des faits.
+
+## 26. Risques économiques et dépendances à contrôler
+
+- dépendance à un PSP, réseau social, moteur de recherche ou fournisseur cloud ;
+- hausse des frais d'API, de stockage, de vidéo et d'IA ;
+- concentration du chiffre d'affaires sur quelques partenaires ;
+- fraude, faux parrainages, commandes artificielles et abus de promotions ;
+- marges insuffisantes après support, remboursements et litiges ;
+- saisonnalité et demande trop faible dans une zone ;
+- défaillance d'un partenaire ou prestataire ;
+- change, fiscalité et transferts internationaux ;
+- coût du support multilingue et de la conformité locale.
+
+Prévoir des alternatives raisonnables, des plafonds de dépendance, des procédures de sortie et une réversibilité des données et services lorsque possible.
+
+## 27. Principe final de rentabilité responsable
+
+PROCHÉLIA ne doit pas chercher à maximiser ses revenus en transférant tous les coûts ou risques aux professionnels et aux clients. Sa rentabilité durable doit venir d'une meilleure coordination, d'une baisse des frictions, d'une meilleure conversion, de la fidélisation, de services utiles et d'une exécution efficace.
+
+**La règle de décision : aucune croissance ne doit être considérée comme une réussite si elle détruit la marge, la confiance, la qualité, la conformité ou la viabilité économique des membres du réseau.**
