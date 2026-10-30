@@ -1133,6 +1133,51 @@ function v7CalculateFinance({
   }
 }
 
+function v7ValidatePromotionActivation(promotion, {
+  now = new Date(),
+  allowedPhases = []
+} = {}) {
+  const fail = error => v7Result(false, {}, error);
+  if (!promotion || !promotion.id) return fail('PROMOTION_NOT_FOUND');
+  const status = String(promotion.status || '').toUpperCase();
+  if (status === 'ACTIVE') return fail('PROMOTION_ALREADY_ACTIVE');
+  if (!['DRAFT', 'PAUSED'].includes(status)) return fail('PROMOTION_STATUS_NOT_ACTIVATABLE');
+  if (!String(promotion.code || '').trim() || !String(promotion.name || '').trim()) return fail('PROMOTION_IDENTITY_INVALID');
+  if (!allowedPhases.includes(String(promotion.phase || '').toUpperCase())) return fail('PROMOTION_PHASE_INVALID');
+  if (!['ALL', 'B2C', 'B2B'].includes(String(promotion.client_type || 'ALL').toUpperCase())) return fail('PROMOTION_CLIENT_TYPE_INVALID');
+  const type = String(promotion.discount_type || '').toUpperCase();
+  const value = Number(promotion.discount_value);
+  if (!['PERCENT', 'FIXED'].includes(type) || !Number.isFinite(value) || value <= 0 || (type === 'PERCENT' && value > 100)) {
+    return fail('PROMOTION_DISCOUNT_INVALID');
+  }
+  const minAmount = Number(promotion.min_amount_cents ?? 0);
+  const maxDiscount = promotion.max_discount_cents == null ? null : Number(promotion.max_discount_cents);
+  const budget = promotion.budget_cents == null ? null : Number(promotion.budget_cents);
+  const used = Number(promotion.used_cents ?? 0);
+  const targetMargin = Number(promotion.target_margin_percent ?? 0);
+  const protection = Number(promotion.intervenant_protection_cents ?? 0);
+  if (![minAmount, used, targetMargin, protection].every(Number.isFinite) ||
+      minAmount < 0 || used < 0 || targetMargin < 0 || targetMargin > 100 || protection < 0 ||
+      (maxDiscount !== null && (!Number.isFinite(maxDiscount) || maxDiscount < 0)) ||
+      (budget !== null && (!Number.isFinite(budget) || budget <= 0 || used > budget))) {
+    return fail('PROMOTION_FINANCIAL_RULES_INVALID');
+  }
+  const start = Date.parse(String(promotion.starts_at || ''));
+  const end = Date.parse(String(promotion.ends_at || ''));
+  const nowMs = now instanceof Date ? now.getTime() : Date.parse(String(now));
+  if (!Number.isFinite(start) || !Number.isFinite(end) || !Number.isFinite(nowMs) || end <= start) {
+    return fail('PROMOTION_DATES_INVALID');
+  }
+  if (end <= nowMs) return fail('PROMOTION_EXPIRED');
+  return v7Result(true, {
+    promotionId: String(promotion.id),
+    status: 'READY_FOR_MANAGER_ACTIVATION',
+    startsAt: new Date(start).toISOString(),
+    endsAt: new Date(end).toISOString()
+  });
+}
+
+
 
 // =====================================================
 // IDEMPOTENCE
@@ -1549,6 +1594,9 @@ export const procheliaV7 = {
 
   calculateFinance:
     v7CalculateFinance,
+
+  validatePromotionActivation:
+    v7ValidatePromotionActivation,
 
   // Sécurité
   checkIdempotency:
