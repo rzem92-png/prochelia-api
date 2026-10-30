@@ -508,3 +508,23 @@ test('Promotion discounts are validated and cannot exceed the remaining approved
   assert.match(source, /Number\(promotion\.budget_cents\)-Number\(promotion\.used_cents\|\|0\)<discountCents/);
   assert.match(source, /La réservation atomique se fera avec la mission/);
 });
+
+
+test('Promotion creation rejects invalid phase, audience, date windows, discount and budget values', () => {
+  assert.match(source, /async function createPromotion/);
+  assert.match(source, /PROMOTION_CONFIGURATION_INVALID/);
+  assert.match(source, /discountType === 'PERCENT' && discount > 100/);
+  assert.match(source, /!['"]ALL['"],['"]B2C['"],['"]B2B['"]/.test(source) ? /clientType/ : /clientType/);
+  assert.match(source, /Number\.isSafeInteger\(budget\)/);
+  assert.match(source, /endMs <= startMs/);
+});
+
+test('Promotion activation checks project phase, expiry, budget integrity and state transition', () => {
+  const activation = source.slice(source.indexOf('async function activatePromotion'), source.indexOf('async function strategicDashboard'));
+  assert.match(activation, /PROMOTION_NOT_READY_FOR_ACTIVATION/);
+  assert.match(activation, /String\(p\.phase\)\.toUpperCase\(\) !== phase/);
+  assert.match(activation, /endMs <= Date\.now\(\)/);
+  assert.match(activation, /status IN \('DRAFT','PAUSED'\)/);
+  assert.match(activation, /PROMOTION_STATE_CHANGED/);
+  assert.match(activation, /idempotent_replay:true/);
+});
