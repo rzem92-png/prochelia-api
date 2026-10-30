@@ -1,6 +1,20 @@
 -- PROCHÉLIA V14.5.7 — ledger portefeuille idempotent et application atomique
 -- Chaque mouvement financier est append-only. Le trigger applique les deltas au portefeuille
 -- dans la même transaction SQLite que l'insertion du mouvement.
+-- The wallet table is part of the migration contract, not an implicit runtime prerequisite.
+-- Keep this definition aligned with ensurePaymentSchema() in src/index.js.
+CREATE TABLE IF NOT EXISTS wallets (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL UNIQUE,
+  currency TEXT NOT NULL DEFAULT 'EUR',
+  available_cents INTEGER NOT NULL DEFAULT 0,
+  pending_cents INTEGER NOT NULL DEFAULT 0,
+  paid_cents INTEGER NOT NULL DEFAULT 0,
+  reserved_cents INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE IF NOT EXISTS payment_wallet_ledger (
   id TEXT PRIMARY KEY,
   idempotency_key TEXT NOT NULL UNIQUE,
