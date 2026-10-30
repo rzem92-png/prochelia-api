@@ -16,8 +16,13 @@ const clamp = (n, min = 0, max = 10000) => Math.max(min, Math.min(max, n));
 
 function validateRequest(request) {
   if (!request || typeof request !== "object") throw new TypeError("request is required");
-  if (!Array.isArray(request.requiredSkills) || request.requiredSkills.length === 0) {
-    throw new TypeError("request.requiredSkills must be a non-empty array");
+  if (!Array.isArray(request.requiredSkills) || request.requiredSkills.length === 0 ||
+      request.requiredSkills.some((skill) => typeof skill !== "string" || !skill.trim()) ||
+      new Set(request.requiredSkills).size !== request.requiredSkills.length) {
+    throw new TypeError("request.requiredSkills must contain unique non-empty strings");
+  }
+  if (request.slot !== undefined && (typeof request.slot !== "string" || !request.slot.trim())) {
+    throw new TypeError("request.slot must be a non-empty string when provided");
   }
   if (request.budgetCents !== undefined &&
       (!isInt(request.budgetCents) || request.budgetCents < 0)) {
@@ -33,7 +38,10 @@ function validateCandidate(candidate) {
   if (!candidate || typeof candidate.id !== "string" || !candidate.id.trim()) {
     throw new TypeError("each candidate needs a non-empty id");
   }
-  if (!Array.isArray(candidate.skills)) throw new TypeError("candidate.skills must be an array");
+  if (!Array.isArray(candidate.skills) || candidate.skills.some((skill) => typeof skill !== "string" || !skill.trim()) ||
+      new Set(candidate.skills).size !== candidate.skills.length) {
+    throw new TypeError("candidate.skills must contain unique non-empty strings");
+  }
   if (!isInt(candidate.priceCents) || candidate.priceCents < 0) {
     throw new TypeError("candidate.priceCents must be a non-negative safe integer");
   }
