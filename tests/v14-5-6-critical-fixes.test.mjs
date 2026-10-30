@@ -282,9 +282,10 @@ test('Pricing quotes reject every client-supplied price, discount, distance and 
 
 test('Every quote requires an active D1 prestation and its active server tariff', () => {
   const quote = source.slice(source.indexOf('async function pricingQuote'), source.indexOf('async function financeSummary'));
-  assert.match(source, /CREATE TABLE IF NOT EXISTS pricing_service_rates/);
-  assert.match(quote, /JOIN prestations p ON p\.id=r\.prestation_id/);
-  assert.match(quote, /p\.active=1/);
+  assert.match(source, /CREATE TABLE IF NOT EXISTS pricing_travel_policies/);
+  assert.match(quote, /FROM tarifs t JOIN prestations p ON p\.id=t\.prestation_id/);
+  assert.match(quote, /p\.active=1 AND t\.prestation_id=\? AND t\.type='habituel' AND t\.active=1/);
+  assert.match(quote, /ACTIVE_PRESTATION_TARIFF_AMBIGUOUS/);
   assert.match(quote, /ACTIVE_PRESTATION_TARIFF_NOT_FOUND/);
   assert.match(quote, /VALIDATED_ROUTE_ESTIMATE_REQUIRED/);
   assert.match(quote, /pricing_route_estimates/);
@@ -343,5 +344,6 @@ test('Pricing quote rejects invalid or out-of-range server financial policy valu
   assert.match(quote, /psp_percent/);
   assert.match(quote, /target_margin_percent/);
   assert.match(quote, /regulated_max_cents/);
+  assert.match(quote, /pricing_travel_policies/);
   assert.match(quote, /travel_fee_per_km_cents/);
 });
