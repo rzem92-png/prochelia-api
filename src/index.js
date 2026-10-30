@@ -2889,10 +2889,10 @@ async function financeForecast(request, env) {
   const months=Math.max(1,Math.min(12,Number((await readJson(request)||{}).months||3)));
   const tx=await env.DB.prepare(`SELECT
     COALESCE(SUM(commission_cents),0) commission,
-    COALESCE(SUM(ROUND(commission_cents*1.0*(gross_cents-MIN(gross_cents,refund_cents))/NULLIF(gross_cents,0)),0),0) retained_commission,
+    COALESCE(SUM(ROUND(commission_cents*1.0*(gross_cents-MIN(gross_cents,refund_cents))/NULLIF(gross_cents,0),0)),0) retained_commission,
     COALESCE(SUM(provider_fee_cents),0) provider_fee,
     COALESCE(SUM(refund_cents),0) refunds,
-    COALESCE(SUM(ROUND(net_intervenant_cents*1.0*(gross_cents-MIN(gross_cents,refund_cents))/NULLIF(gross_cents,0)),0),0) intervenant
+    COALESCE(SUM(ROUND(net_intervenant_cents*1.0*(gross_cents-MIN(gross_cents,refund_cents))/NULLIF(gross_cents,0),0)),0) intervenant
     FROM payment_transactions
     WHERE created_at>=datetime('now','-90 day') AND status IN ('paid','partially_refunded','refunded','held')`).first();
   const commissionBase=Number(tx?.commission||0)/3;
