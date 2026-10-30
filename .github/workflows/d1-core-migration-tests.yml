@@ -106,6 +106,23 @@ jobs:
           assert db.execute("SELECT COUNT(*) FROM sessions WHERE id='s-existing'").fetchone()[0] == 1
           assert db.execute("SELECT COUNT(*) FROM notifications WHERE id='n-existing'").fetchone()[0] == 1
 
+          # Runtime authentication compatibility against the exact exported core schema.
+          users_info = {row[1]: row for row in db.execute("PRAGMA table_info(users)")}
+          assert users_info["phone"][3] == 1, "users.phone must remain NOT NULL"
+          session_columns = {row[1] for row in db.execute("PRAGMA table_info(sessions)")}
+          assert {"id", "user_id", "token_hash", "expires_at", "created_at"} <= session_columns
+          notification_columns = {row[1] for row in db.execute("PRAGMA table_info(notifications)")}
+          assert {"id", "user_id", "type", "title", "message", "entity_type", "entity_id", "read_at", "created_at"} <= notification_columns
+          auth_user = db.execute("""
+            SELECT u.id, u.role, u.email, u.first_name, u.last_name, u.phone,
+                   u.status, u.created_at, u.updated_at, s.id AS session_id
+              FROM sessions s JOIN users u ON u.id = s.user_id
+             WHERE s.token_hash = ? AND s.expires_at > CURRENT_TIMESTAMP LIMIT 1
+          """, ("hash-existing",)).fetchone()
+          assert auth_user is not None and auth_user[0] == "u-existing"
+          print("PASS: users.phone NOT NULL and session authentication JOIN compatible")
+          print("PASS: existing notifications table columns preserved")
+
           # Validate valid FK path and reject invalid mission references.
           db.execute(
             "INSERT INTO users(id, role, phone) VALUES(?,?,?)",
