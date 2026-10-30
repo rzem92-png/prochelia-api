@@ -184,9 +184,9 @@ test('Stripe webhook refuses processing until native signature adapter is connec
 });
 
 test('Initial manager bootstrap validates the NOT NULL phone field from the real D1 schema', () => {
-  assert.match(source, /const phoneInput = clean\(body\?\.phone\)/);
-  assert.match(source, /const normalizedPhone = phone\.replace\(\/\[\\\\s\(\)\.\-\]\/g, ''\)/);
-  assert.match(source, /\^\\\+\?\[1-9\]\\d\{7,14\}\$/);
-  assert.match(source, /required_fields: \['email', 'first_name', 'last_name', 'phone', 'password'\]/);
-  assert.match(source, /INSERT INTO users \(id, role, email, first_name, last_name, phone, status, password_hash\)/);
+  assert.ok(source.includes('const phoneInput = clean(body?.phone)'));
+  assert.ok(source.includes("const normalizedPhone = phone.replace(/[\\s().-]/g, '')"));
+  assert.ok(source.includes("/^\\+?[1-9]\\d{7,14}$/"));
+  assert.ok(source.includes("required_fields: ['email', 'first_name', 'last_name', 'phone', 'password']"));
+  assert.ok(source.includes('INSERT INTO users (id, role, email, first_name, last_name, phone, status, password_hash)'));
 });
