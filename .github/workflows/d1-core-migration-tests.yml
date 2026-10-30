@@ -184,7 +184,18 @@ jobs:
           assert db.execute("SELECT available_cents FROM wallets WHERE user_id='provider-1'").fetchone()[0] == 12500
           db.execute("""INSERT INTO payment_wallet_ledger(id,idempotency_key,transaction_id,user_id,entry_type,available_delta_cents,currency) VALUES('l3','payment:tx1:refund:2500','tx1','provider-1','REFUND_REVERSAL',-2500,'EUR')""")
           assert db.execute("SELECT available_cents FROM wallets WHERE user_id='provider-1'").fetchone()[0] == 10000
-          print("PASS: ledger trigger applies credits/refunds once and idempotency prevents duplicate wallet credits")
+          try:
+            db.execute("UPDATE payment_wallet_ledger SET available_delta_cents=0 WHERE id='l1'")
+            raise AssertionError("Wallet ledger update unexpectedly succeeded")
+          except sqlite3.IntegrityError:
+            pass
+          try:
+            db.execute("DELETE FROM payment_wallet_ledger WHERE id='l1'")
+            raise AssertionError("Wallet ledger delete unexpectedly succeeded")
+          except sqlite3.IntegrityError:
+            pass
+          print("PASS: ledger trigger applies credits/refunds once; duplicate credit does not change wallet")
+          print("PASS: wallet ledger rejects UPDATE and DELETE")
           print("PASS: migration is idempotent")
           print("PASS: valid client/prestation/mission inserts")
           print("PASS: invalid foreign key rejected")
