@@ -1,0 +1,86 @@
+name: PROCHÉLIA — appliquer migrations D1 préproduction
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_preview:
+        description: "Saisir exactement APPLY_PREVIEW_ONLY pour autoriser la migration de préproduction"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: prochelia-preview-d1-migrations
+  cancel-in-progress: false
+
+jobs:
+  migrate-preview:
+    if: ${{ github.event.inputs.confirm_preview == 'APPLY_PREVIEW_ONLY' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      EXPECTED_DB_NAME: prochelia-preview-db
+      EXPECTED_DB_ID: 6adb95e5-e542-4bec-9008-fbea01042305
+    steps:
+      - name: Checkout preproduction branch
+        uses: actions/checkout@v4
+        with:
+          ref: prelaunch/v14.5.7-consolidation-audit
+
+      - name: Verify credentials, target and migration files
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${CLOUDFLARE_API_TOKEN:-}" || { echo "::error::CLOUDFLARE_API_TOKEN missing"; exit 1; }
+          test -n "${CLOUDFLARE_ACCOUNT_ID:-}" || { echo "::error::CLOUDFLARE_ACCOUNT_ID missing"; exit 1; }
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          config = json.loads(Path("wrangler.jsonc").read_text())
+          assert config["name"] == "prochelia-api-staging", "Unexpected Worker name"
+          db = next(x for x in config["d1_databases"] if x["binding"] == "DB")
+          assert db["database_name"] == "prochelia-preview-db", "Unexpected D1 name"
+          assert db["database_id"] == "6adb95e5-e542-4bec-9008-fbea01042305", "Unexpected D1 UUID"
+          for name in (
+            "0001_core_business_schema.sql",
+            "0002_server_pricing.sql",
+            "0003_route_address_provenance.sql",
+            "0004_atomic_wallet_ledger.sql",
+          ):
+            p = Path("migrations") / name
+            assert p.is_file() and p.stat().st_size > 0, f"Missing migration: {name}"
+          print("PASS: exact preview Worker/D1 target and four migration files verified")
+          PY
+          test "$EXPECTED_DB_NAME" = "prochelia-preview-db"
+          test "$EXPECTED_DB_ID" = "6adb95e5-e542-4bec-9008-fbea01042305"
+
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install Wrangler
+        run: npm install --no-save wrangler@4
+
+      - name: Show pending migrations before applying
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx wrangler d1 migrations list "$EXPECTED_DB_NAME" --remote --config wrangler.jsonc
+
+      - name: Apply migrations to preview D1 only
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx wrangler d1 migrations apply "$EXPECTED_DB_NAME" --remote --config wrangler.jsonc
+
+      - name: Verify migration status after applying
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx wrangler d1 migrations list "$EXPECTED_DB_NAME" --remote --config wrangler.jsonc
+          echo "Migration command completed for the hard-pinned preview D1 target."
