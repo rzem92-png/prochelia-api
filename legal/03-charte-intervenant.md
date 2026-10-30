@@ -25,3 +25,13 @@ L'intervenant communique les assurances, autorisations, qualifications ou immatr
 
 ## 8. À finaliser
 Statut contractuel, identité de l'opérateur, obligations, rémunération, commissions, frais, assurance, annulation, procédure de suspension/recours, données et signatures doivent être adaptés au modèle réel et validés juridiquement.
+
+
+## 9. Activités internationales et paiement
+L'accès aux missions dans un autre pays est conditionné à une vérification distincte des droits d'exercer, du statut professionnel, des assurances, des qualifications, des obligations fiscales/sociales et des exigences locales. Un profil validé en France n'est pas automatiquement admissible dans un autre pays. Avant acceptation, l'intervenant voit la devise, le montant brut, les frais éventuels, la commission contractuelle, le montant estimé net, les conditions de conversion et le délai indicatif de versement. Le versement effectif dépend de l'éligibilité du pays, du PSP, du KYC et des contrôles requis.
+
+## 10. Copilote et décisions équitables
+Le Copilote peut proposer des missions, aider à compléter un dossier, expliquer un paiement ou suggérer une formation. Il ne décide pas seul d'un rejet, d'une suspension, d'une baisse de visibilité punitive ou d'une modification de rémunération. Toute décision défavorable importante doit être motivée, vérifiable, proportionnée et assortie d'une voie de contestation. Les recommandations algorithmiques doivent éviter les critères sensibles et être contrôlées contre les biais.
+
+## 11. Respect, protection et limites
+L'intervenant peut refuser une tâche dangereuse, illégale, non prévue ou excédant ses compétences. Il signale immédiatement un danger ou incident selon le protocole fourni. Une confirmation numérique de présence n'est pas une preuve absolue de qualité ou de sécurité de la prestation.
