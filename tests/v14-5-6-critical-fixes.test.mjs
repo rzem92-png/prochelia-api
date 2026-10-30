@@ -240,3 +240,12 @@ test('Operational conflict resolution never directly reassigns or reschedules a 
   assert.doesNotMatch(source, /UPDATE missions SET intervenant_id=\? WHERE id=\?/);
   assert.doesNotMatch(source, /UPDATE missions SET \$\{target\}=\? WHERE id=\?/);
 });
+
+
+test('Operational cases remain open until downstream actions are verified', () => {
+  assert.match(source, /completion_requires_verified_receipt:true/);
+  assert.match(source, /const finalStatus = verifiedComplete \? 'RESOLVED' : \(failed \? 'ACTION_FAILED' : 'WAITING_ACTION'\)/);
+  assert.match(source, /CASE_ACTIONS_PENDING/);
+  assert.match(source, /resolved_at=\?/);
+  assert.doesNotMatch(source, /status='RESOLVED',resolution_json=\?,requires_manager=0/);
+});
