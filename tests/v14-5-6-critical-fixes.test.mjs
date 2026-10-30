@@ -278,9 +278,10 @@ test('Route estimates use profile-owned addresses and never trust browser-suppli
   const route = source.slice(source.indexOf('async function pricingRouteEstimate'), source.indexOf('async function pricingQuote'));
   assert.match(route, /requireAuthRole\(request,env,\['client','entreprise'\]\)/);
   assert.match(route, /WHERE user_id=\? LIMIT 1/);
-  assert.match(route, /base_address,base_city,base_postal_code/);
+  assert.match(route, /intervenant_route_origins/);
   assert.match(route, /validation_status/);
   assert.match(route, /INTERVENANT_NOT_VALIDATED/);
+  assert.match(route, /INTERVENANT_ROUTE_ADDRESS_NOT_VERIFIED/);
   assert.match(route, /ROUTE_PROFILE_ADDRESS_INCOMPLETE/);
   assert.doesNotMatch(route, /clean\(b\.origin_address\)/);
   assert.doesNotMatch(route, /clean\(b\.destination_address\)/);
