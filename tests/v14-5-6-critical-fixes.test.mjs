@@ -38,6 +38,34 @@ test('Stripe checkout linking and wallet transitions are safe under webhook race
   assert.match(webhook, /refundTransition\?\.meta\?\.changes/);
 });
 
+test('Wallet balance mutations are driven by an append-only idempotent ledger trigger', () => {
+  assert.match(source, /CREATE TABLE IF NOT EXISTS payment_wallet_ledger/);
+  assert.match(source, /idempotency_key TEXT NOT NULL UNIQUE/);
+  assert.match(source, /CREATE TRIGGER IF NOT EXISTS trg_payment_wallet_ledger_apply/);
+  assert.match(source, /available_cents=available_cents\+NEW\.available_delta_cents/);
+  assert.match(source, /pending_cents=pending_cents\+NEW\.pending_delta_cents/);
+  assert.match(source, /reserved_cents=reserved_cents\+NEW\.reserved_delta_cents/);
+  assert.match(source, /paid_cents=paid_cents\+NEW\.paid_delta_cents/);
+});
+
+test('Stripe payment and refund webhooks use atomic batches and deterministic ledger keys', () => {
+  const webhook = source.slice(source.indexOf('async function stripeWebhook'), source.indexOf('async function stripeCheckout'));
+  assert.match(webhook, /const paidBatch=await env\.DB\.batch\(/);
+  assert.match(webhook, /payment:\$\{tx\.id\}:credit/);
+  assert.match(webhook, /const refundBatch=await env\.DB\.batch\(/);
+  assert.match(webhook, /payment:\$\{tx\.id\}:refund:/);
+  assert.match(webhook, /REFUND_REVERSAL/);
+  assert.match(webhook, /out_of_order_refund_reconciliation/);
+});
+
+test('Payout reservation and settlement use idempotent wallet ledger entries', () => {
+  assert.match(source, /PAYOUT_RESERVED/);
+  assert.match(source, /PAYOUT_\$\{newStatus\.toUpperCase\(\)\}/);
+  assert.match(source, /const payoutBatch=await env\.DB\.batch\(/);
+  assert.match(source, /changes\(\)=1/);
+  assert.match(source, /payout:\$\{payoutId\}:\$\{newStatus\}/);
+});
+
 test('Stripe event-specific amounts avoid false failure and dispute mismatches', () => {
   assert.match(source, /isFailure=failedEvent\.has\(event\.type\)/);
   assert.match(source, /isDispute=disputeEvent\.has\(event\.type\)/);
