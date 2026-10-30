@@ -84,8 +84,9 @@ function scoreCandidate(candidate, request, weights) {
     ? 5000
     : request.budgetCents === 0 ? 10000
     : clamp(10000 - Math.floor(candidate.priceCents * 10000 / request.budgetCents));
-  const proximity = request.maxDistanceKm === undefined || request.maxDistanceKm === 0
+  const proximity = request.maxDistanceKm === undefined
     ? 5000
+    : request.maxDistanceKm === 0 ? 10000
     : clamp(10000 - Math.floor(candidate.distanceKm * 10000 / request.maxDistanceKm));
   const trust = Math.floor((candidate.ratingBps + candidate.reliabilityBps) / 2);
   const score = Math.floor((
@@ -128,7 +129,12 @@ export function composeNexusScenarios({ request, candidates, maxActors = 2 } = {
   validateRequest(request);
   if (!Array.isArray(candidates)) throw new TypeError("candidates must be an array");
   if (maxActors !== 2) throw new RangeError("V1 supports exactly two actors for composed scenarios");
-  for (const candidate of candidates) validateCandidate(candidate);
+  const ids = new Set();
+  for (const candidate of candidates) {
+    validateCandidate(candidate);
+    if (ids.has(candidate.id)) throw new TypeError("candidate ids must be unique");
+    ids.add(candidate.id);
+  }
   const eligible = candidates.filter((c) => eligibility(c, request, { partial: true }));
   const scenarios = [];
   for (let i = 0; i < eligible.length; i++) {
