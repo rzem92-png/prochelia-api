@@ -130,6 +130,18 @@ jobs:
           assert users_info["phone"][3] == 0, "users.phone must remain nullable"
           email_indexes = list(db.execute("PRAGMA index_list(users)"))
           assert any(row[2] == 1 for row in email_indexes), "users.email UNIQUE index missing"
+          db.execute(
+            "INSERT INTO users(id, role, email, first_name, last_name, phone, password_hash) VALUES(?,?,?,?,?,?,?)",
+            ("u-phone-null", "client", "phone-null@example.test", "Phone", "Optional", None, "test-hash")
+          )
+          try:
+            db.execute(
+              "INSERT INTO users(id, role, email, first_name, last_name, phone, password_hash) VALUES(?,?,?,?,?,?,?)",
+              ("u-duplicate-email", "client", "existing@example.test", "Duplicate", "Email", None, "test-hash")
+            )
+            raise AssertionError("Duplicate users.email unexpectedly accepted")
+          except sqlite3.IntegrityError:
+            pass
           session_columns = {row[1] for row in db.execute("PRAGMA table_info(sessions)")}
           assert {"id", "user_id", "token_hash", "expires_at", "created_at"} <= session_columns
           notification_columns = {row[1] for row in db.execute("PRAGMA table_info(notifications)")}
