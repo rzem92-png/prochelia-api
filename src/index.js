@@ -3715,7 +3715,8 @@ async function stripeWebhook(request, env) {
         result='MISMATCH_BLOCKED';
       } else if(paidEvent.has(event.type) && (!isCheckout || obj.payment_status==='paid')) {
         const paidBatch=await env.DB.batch([
-          env.DB.prepare(`INSERT OR IGNORE INTO wallets(id,user_id,currency,available_cents,pending_cents,paid_cents,reserved_cents) VALUES(?,?,?,0,0,0,0)`).bind(crypto.randomUUID(),tx.intervenant_id||'',tx.currency||'EUR'),
+          env.DB.prepare(`INSERT OR IGNORE INTO wallets(id,user_id,currency,available_cents,pending_cents,paid_cents,reserved_cents)
+            SELECT ?,intervenant_id,currency,0,0,0,0 FROM payment_transactions WHERE id=? AND intervenant_id IS NOT NULL`).bind(crypto.randomUUID(),tx.id),
           env.DB.prepare(`UPDATE payment_transactions SET status='paid',provider='stripe',provider_payment_id=COALESCE(?,provider_payment_id),updated_at=CURRENT_TIMESTAMP WHERE id=? AND status NOT IN ('paid','refunded','held','partially_refunded')`).bind(isCheckout ? (sessionId||null) : null,tx.id),
           env.DB.prepare(`INSERT OR IGNORE INTO payment_wallet_ledger
             (id,idempotency_key,transaction_id,user_id,entry_type,available_delta_cents,currency,metadata_json)
