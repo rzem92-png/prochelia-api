@@ -1443,6 +1443,7 @@ async function ensureConsolidatedSchema(env) {
       ON pricing_service_rates(prestation_id, client_type, active)`,
     `CREATE TABLE IF NOT EXISTS pricing_route_estimates (
       id TEXT PRIMARY KEY,
+      owner_user_id TEXT NOT NULL,
       distance_km REAL NOT NULL CHECK (distance_km >= 0 AND distance_km <= 500),
       status TEXT NOT NULL DEFAULT 'VALID',
       expires_at TEXT NOT NULL,
@@ -1828,7 +1829,6 @@ async function pricingQuote(request, env) {
   const clientType=gate.auth.user.role==='entreprise'?'B2B':'B2C';
   if(!prestationId)return json({ok:false,error:'PRESTATION_REQUIRED',version:VERSION},400);
   if(prestationId&&prestationId.length>100)return json({ok:false,error:'PRESTATION_INVALID',version:VERSION},400);
-  if(serviceCode&&(!/^[A-Za-z0-9_-]{1,80}$/.test(serviceCode)))return json({ok:false,error:'SERVICE_CODE_INVALID',version:VERSION},400);
 
   const startMs=Date.parse(String(b.start_at||''));
   const endMs=Date.parse(String(b.end_at||''));
@@ -1848,7 +1848,6 @@ async function pricingQuote(request, env) {
       AND (r.valid_until IS NULL OR datetime(r.valid_until)>datetime(?))
       LIMIT 1`).bind(prestationId,clientType,new Date(startMs).toISOString(),new Date(startMs).toISOString()).first();
     if(!rate)return json({ok:false,error:'ACTIVE_PRESTATION_TARIFF_NOT_FOUND',version:VERSION},409);
-    if(serviceCode&&String(rate.service_code)!==serviceCode)return json({ok:false,error:'PRESTATION_SERVICE_MISMATCH',version:VERSION},409);
     policy=await env.DB.prepare(`SELECT * FROM pricing_policies
       WHERE active=1 AND phase=? AND client_type=?
       AND (service_code=? OR service_code IS NULL)
