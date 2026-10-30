@@ -259,10 +259,12 @@ test('Trust Passport reads the actual D1 intervenants.validation_status field fa
 });
 
 
-test('Strategic pricing forwards the configured fuel price into the travel cost engine', () => {
-  assert.ok(source.includes("fuelMode='normal',fuelPriceCentsPerLitre=null,commissionRate=0.20"));
-  assert.match(source, /financeStrategicTravel\(\{distanceKm,fuelMode,fuelPriceCentsPerLitre\}\)/);
-  assert.match(source, /distanceKm:distance,fuelMode,fuelPriceCentsPerLitre,commissionRate/);
+test('Travel fee and operating cost use server policy and a persisted route estimate', () => {
+  const quote = source.slice(source.indexOf('async function pricingQuote'), source.indexOf('async function financeSummary'));
+  assert.match(quote, /Number\(route\.distance_km\)/);
+  assert.match(quote, /Number\(policy\.fuel_cost_per_km_cents/);
+  assert.match(quote, /Number\(rate\.travel_fee_per_km_cents/);
+  assert.match(quote, /travel_operating_cost_cents/);
 });
 
 
