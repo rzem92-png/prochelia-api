@@ -260,8 +260,20 @@ function validatePayload(body) {
   if (!clean(body.prestation_id)) errors.push('prestation_id_required');
   if (!clean(body.start_at)) errors.push('start_at_required');
   if (body.end_at != null && !clean(body.end_at)) errors.push('end_at_invalid');
+  const startMs = Date.parse(String(body.start_at || ''));
+  if (!Number.isFinite(startMs)) errors.push('start_at_invalid');
+  if (body.end_at != null) {
+    const endMs = Date.parse(String(body.end_at));
+    if (!Number.isFinite(endMs) || !Number.isFinite(startMs) || endMs <= startMs) errors.push('end_at_must_follow_start_at');
+  }
   for (const field of ['price_client', 'price_intervenant', 'commission']) {
     if (body[field] != null && (!Number.isFinite(Number(body[field])) || Number(body[field]) < 0)) errors.push(field + '_invalid');
+  }
+  if (body.price_client != null && body.price_intervenant != null && body.commission != null) {
+    const clientCents = Math.round(Number(body.price_client) * 100);
+    const intervenantCents = Math.round(Number(body.price_intervenant) * 100);
+    const commissionCents = Math.round(Number(body.commission) * 100);
+    if (Math.abs(clientCents - intervenantCents - commissionCents) > 1) errors.push('price_commission_mismatch');
   }
   return errors;
 }
