@@ -938,6 +938,29 @@ async function ensurePaymentSchema(env) {
       paid_cents INTEGER NOT NULL DEFAULT 0, reserved_cents INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     )`,
+    `CREATE TABLE IF NOT EXISTS payment_wallet_ledger (
+      id TEXT PRIMARY KEY, idempotency_key TEXT NOT NULL UNIQUE, transaction_id TEXT,
+      payout_id TEXT, user_id TEXT NOT NULL, entry_type TEXT NOT NULL,
+      available_delta_cents INTEGER NOT NULL DEFAULT 0,
+      pending_delta_cents INTEGER NOT NULL DEFAULT 0,
+      reserved_delta_cents INTEGER NOT NULL DEFAULT 0,
+      paid_delta_cents INTEGER NOT NULL DEFAULT 0,
+      currency TEXT NOT NULL DEFAULT 'EUR', metadata_json TEXT NOT NULL DEFAULT '{}',
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_wallet_ledger_user_date ON payment_wallet_ledger(user_id,created_at)`,
+    `CREATE INDEX IF NOT EXISTS idx_wallet_ledger_tx ON payment_wallet_ledger(transaction_id,entry_type)`,
+    `CREATE TRIGGER IF NOT EXISTS trg_payment_wallet_ledger_apply
+      AFTER INSERT ON payment_wallet_ledger
+      BEGIN
+        UPDATE wallets SET
+          available_cents=available_cents+NEW.available_delta_cents,
+          pending_cents=pending_cents+NEW.pending_delta_cents,
+          reserved_cents=reserved_cents+NEW.reserved_delta_cents,
+          paid_cents=paid_cents+NEW.paid_delta_cents,
+          updated_at=CURRENT_TIMESTAMP
+        WHERE user_id=NEW.user_id;
+      END`,
     `CREATE TABLE IF NOT EXISTS payment_transactions (
       id TEXT PRIMARY KEY, idempotency_key TEXT NOT NULL UNIQUE, mission_id TEXT,
       client_id TEXT, intervenant_id TEXT, type TEXT NOT NULL, status TEXT NOT NULL,
@@ -1106,8 +1129,23 @@ async function payoutRequest(request, env) {
   const wallet=await env.DB.prepare('SELECT * FROM wallets WHERE user_id=? LIMIT 1').bind(auth.user.id).first();
   if(!wallet||Number(wallet.available_cents)<amount) return json({ok:false,error:'INSUFFICIENT_AVAILABLE_BALANCE',version:VERSION,available_cents:Number(wallet?.available_cents||0)},409);
   const payoutId=crypto.randomUUID();
-  await env.DB.prepare(`UPDATE wallets SET available_cents=available_cents-?,reserved_cents=reserved_cents+?,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(amount,amount,wallet.id).run();
-  await env.DB.prepare(`INSERT INTO payout_requests (id,idempotency_key,wallet_id,user_id,amount_cents,mode,provider,status) VALUES (?,?,?,?,?,?,?,'requested')`).bind(payoutId,idem,wallet.id,auth.user.id,amount,mode,paymentProvider(env)).run();
+  const batch=await env.DB.batch([
+    env.DB.prepare(`INSERT INTO payout_requests (id,idempotency_key,wallet_id,user_id,amount_cents,mode,provider,status)
+      SELECT ?,?,?,?,?,?,?,'requested' FROM wallets WHERE id=? AND available_cents>=?
+      AND NOT EXISTS(SELECT 1 FROM payout_requests WHERE idempotency_key=?)`)
+      .bind(payoutId,idem,wallet.id,auth.user.id,amount,mode,paymentProvider(env),wallet.id,amount,idem),
+    env.DB.prepare(`INSERT INTO payment_wallet_ledger
+      (id,idempotency_key,payout_id,user_id,entry_type,available_delta_cents,reserved_delta_cents,currency,metadata_json)
+      SELECT ?,? ,id,user_id,'PAYOUT_RESERVED',-amount_cents,amount_cents,currency,?
+      FROM payout_requests WHERE idempotency_key=? AND status='requested'
+      AND NOT EXISTS(SELECT 1 FROM payment_wallet_ledger WHERE idempotency_key=?)`)
+      .bind(crypto.randomUUID(),`payout:${idem}:reserved`,JSON.stringify({mode}),idem,`payout:${idem}:reserved`)
+  ]);
+  if(Number(batch?.[0]?.meta?.changes||0)!==1){
+    const replay=await env.DB.prepare('SELECT * FROM payout_requests WHERE idempotency_key=? LIMIT 1').bind(idem).first();
+    if(replay)return json({ok:true,version:VERSION,idempotent_replay:true,payout:replay},200);
+    return json({ok:false,error:'PAYOUT_RESERVATION_RACE_OR_INSUFFICIENT_BALANCE',version:VERSION},409);
+  }
   await paymentAudit(env,'PAYOUT_REQUESTED',{payout_id:payoutId,user_id:auth.user.id,metadata:{amount_cents:amount,mode}},'OK');
   return json({ok:true,version:VERSION,payout_id:payoutId,status:'requested',amount_cents:amount,mode,provider:paymentProvider(env),next:paymentsConfigured(env)?'PSP_PAYOUT_REQUIRED':'PAYMENT_PROVIDER_NOT_CONFIGURED'},201);
 }
@@ -1161,9 +1199,21 @@ async function paymentWebhook(request, env) {
     if(payout&&newStatus){
       const alreadyFinal=['completed','failed','canceled'].includes(payout.status);
       if(!alreadyFinal){
-        if(newStatus==='completed') await env.DB.prepare(`UPDATE wallets SET reserved_cents=MAX(0,reserved_cents-?),paid_cents=paid_cents+?,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(payout.amount_cents,payout.amount_cents,payout.wallet_id).run();
-        if(['failed','canceled'].includes(newStatus)) await env.DB.prepare(`UPDATE wallets SET reserved_cents=MAX(0,reserved_cents-?),available_cents=available_cents+?,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(payout.amount_cents,payout.amount_cents,payout.wallet_id).run();
-        await env.DB.prepare(`UPDATE payout_requests SET status=?,provider_payout_id=COALESCE(?,provider_payout_id),failure_code=?,failure_message=?,completed_at=CASE WHEN ?='completed' THEN CURRENT_TIMESTAMP ELSE completed_at END,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(newStatus,clean(event?.data?.provider_payout_id)||null,clean(event?.data?.failure_code)||null,clean(event?.data?.failure_message)||null,newStatus,payoutId).run();
+        const payoutLedgerKey=`payout:${payoutId}:${newStatus}`;
+        const payoutBatch=await env.DB.batch([
+          env.DB.prepare(`UPDATE payout_requests SET status=?,provider_payout_id=COALESCE(?,provider_payout_id),failure_code=?,failure_message=?,completed_at=CASE WHEN ?='completed' THEN CURRENT_TIMESTAMP ELSE completed_at END,updated_at=CURRENT_TIMESTAMP WHERE id=? AND status IN ('requested','processing')`).bind(newStatus,clean(event?.data?.provider_payout_id)||null,clean(event?.data?.failure_code)||null,clean(event?.data?.failure_message)||null,newStatus,payoutId),
+          env.DB.prepare(`INSERT OR IGNORE INTO payment_wallet_ledger
+            (id,idempotency_key,payout_id,user_id,entry_type,available_delta_cents,reserved_delta_cents,paid_delta_cents,currency,metadata_json)
+            SELECT ?,?,p.id,p.user_id,?,
+              CASE WHEN ? IN ('failed','canceled') THEN p.amount_cents ELSE 0 END,
+              -p.amount_cents,
+              CASE WHEN ?='completed' THEN p.amount_cents ELSE 0 END,
+              p.currency,?
+            FROM payout_requests p WHERE p.id=? AND p.status=?
+              AND NOT EXISTS(SELECT 1 FROM payment_wallet_ledger WHERE idempotency_key=?)`)
+            .bind(crypto.randomUUID(),payoutLedgerKey,`PAYOUT_${newStatus.toUpperCase()}`,newStatus,newStatus,JSON.stringify({stripe_event_id:event.id}),payoutId,newStatus,payoutLedgerKey)
+        ]);
+        if(Number(payoutBatch?.[0]?.meta?.changes||0)===1) result='PAYOUT_'+newStatus.toUpperCase();
       }
     }
   }
@@ -3664,14 +3714,29 @@ async function stripeWebhook(request, env) {
         await paymentAudit(env,'STRIPE_WEBHOOK_MISMATCH',{transaction_id:tx.id,mission_id:tx.mission_id,metadata:{event_id:event.id,event_type:event.type}},'BLOCKED');
         result='MISMATCH_BLOCKED';
       } else if(paidEvent.has(event.type) && (!isCheckout || obj.payment_status==='paid')) {
-        const paidTransition=await env.DB.prepare(`UPDATE payment_transactions SET status='paid',provider='stripe',provider_payment_id=COALESCE(?,provider_payment_id),updated_at=CURRENT_TIMESTAMP WHERE id=? AND status NOT IN ('paid','refunded','held')`).bind(isCheckout ? (sessionId||null) : null,tx.id).run();
-        // Créditer le portefeuille uniquement si cette livraison a gagné la transition
-        // atomique pending -> paid. Deux événements Stripe distincts ne peuvent créditer deux fois.
-        if(Number(paidTransition?.meta?.changes||0)===1&&tx.intervenant_id) {
-          await env.DB.prepare(`INSERT OR IGNORE INTO wallets(id,user_id,currency,available_cents,pending_cents,paid_cents,reserved_cents) VALUES(?,?,?,0,0,0,0)`).bind(crypto.randomUUID(),tx.intervenant_id,tx.currency||'EUR').run();
-          await env.DB.prepare(`UPDATE wallets SET available_cents=available_cents+?,updated_at=CURRENT_TIMESTAMP WHERE user_id=?`).bind(Number(tx.net_intervenant_cents||0),tx.intervenant_id).run();
-        }
-        result=Number(paidTransition?.meta?.changes||0)===1?'PAYMENT_CONFIRMED':'PAYMENT_ALREADY_FINAL';
+        const paidBatch=await env.DB.batch([
+          env.DB.prepare(`INSERT OR IGNORE INTO wallets(id,user_id,currency,available_cents,pending_cents,paid_cents,reserved_cents) VALUES(?,?,?,0,0,0,0)`).bind(crypto.randomUUID(),tx.intervenant_id||'',tx.currency||'EUR'),
+          env.DB.prepare(`UPDATE payment_transactions SET status='paid',provider='stripe',provider_payment_id=COALESCE(?,provider_payment_id),updated_at=CURRENT_TIMESTAMP WHERE id=? AND status NOT IN ('paid','refunded','held','partially_refunded')`).bind(isCheckout ? (sessionId||null) : null,tx.id),
+          env.DB.prepare(`INSERT OR IGNORE INTO payment_wallet_ledger
+            (id,idempotency_key,transaction_id,user_id,entry_type,available_delta_cents,currency,metadata_json)
+            SELECT ?,?,id,intervenant_id,'PAYMENT_CREDIT',net_intervenant_cents,currency,?
+            FROM payment_transactions WHERE id=? AND status IN ('paid','partially_refunded','refunded')
+            AND intervenant_id IS NOT NULL AND net_intervenant_cents>0`)
+            .bind(crypto.randomUUID(),`payment:${tx.id}:credit`,JSON.stringify({stripe_event_id:event.id}),tx.id),
+          env.DB.prepare(`INSERT OR IGNORE INTO payment_wallet_ledger
+            (id,idempotency_key,transaction_id,user_id,entry_type,available_delta_cents,currency,metadata_json)
+            SELECT ?,?,t.id,t.intervenant_id,'REFUND_REVERSAL',
+              -MAX(0,ROUND(t.net_intervenant_cents*1.0*t.refund_cents/NULLIF(t.gross_cents,0))-
+                COALESCE((SELECT SUM(-available_delta_cents) FROM payment_wallet_ledger l WHERE l.transaction_id=t.id AND l.entry_type='REFUND_REVERSAL'),0)),
+              t.currency,?
+            FROM payment_transactions t
+            WHERE t.id=? AND t.refund_cents>0 AND t.gross_cents>0
+              AND EXISTS(SELECT 1 FROM payment_wallet_ledger c WHERE c.transaction_id=t.id AND c.entry_type='PAYMENT_CREDIT')
+              AND NOT EXISTS(SELECT 1 FROM payment_wallet_ledger l WHERE l.idempotency_key=?)`)
+            .bind(crypto.randomUUID(),`payment:${tx.id}:refund-reconcile:${Number(tx.refund_cents||0)}`,JSON.stringify({stripe_event_id:event.id,source:'out_of_order_refund_reconciliation'}),tx.id,`payment:${tx.id}:refund-reconcile:${Number(tx.refund_cents||0)}`)
+        ]);
+        const creditCreated=Number(paidBatch?.[2]?.meta?.changes||0)===1;
+        result=creditCreated?'PAYMENT_CREDIT_LEDGERED': 'PAYMENT_ALREADY_LEDGERED_OR_HELD';
       } else if(failedEvent.has(event.type)) {
         if(!['paid','refunded'].includes(tx.status)) await env.DB.prepare(`UPDATE payment_transactions SET status='failed',updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(tx.id).run();
         result='PAYMENT_FAILED';
@@ -3689,15 +3754,26 @@ async function stripeWebhook(request, env) {
           const totalReversal=Math.round(Number(tx.net_intervenant_cents||0)*refundCents/Math.max(1,grossCents));
           const walletReversal=Math.max(0,totalReversal-previousReversal);
           const fullRefund=grossCents>0&&refundCents>=grossCents;
-          const refundTransition=await env.DB.prepare(`UPDATE payment_transactions SET status=?,refund_cents=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND COALESCE(refund_cents,0) < ?`).bind(fullRefund?'refunded':'partially_refunded',refundCents,tx.id,refundCents).run();
-          if(Number(refundTransition?.meta?.changes||0)===1&&walletReversal>0&&tx.intervenant_id){
-            await env.DB.prepare(`INSERT OR IGNORE INTO wallets(id,user_id,currency,available_cents,pending_cents,paid_cents,reserved_cents) VALUES(?,?,?,0,0,0,0)`).bind(crypto.randomUUID(),tx.intervenant_id,tx.currency||'EUR').run();
-            await env.DB.prepare(`UPDATE wallets SET available_cents=available_cents-?,updated_at=CURRENT_TIMESTAMP WHERE user_id=?`).bind(walletReversal,tx.intervenant_id).run();
+          const refundBatch=await env.DB.batch([
+            env.DB.prepare(`UPDATE payment_transactions SET status=?,refund_cents=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND COALESCE(refund_cents,0) < ?`).bind(fullRefund?'refunded':'partially_refunded',refundCents,tx.id,refundCents),
+            env.DB.prepare(`INSERT OR IGNORE INTO payment_wallet_ledger
+              (id,idempotency_key,transaction_id,user_id,entry_type,available_delta_cents,currency,metadata_json)
+              SELECT ?,?,t.id,t.intervenant_id,'REFUND_REVERSAL',
+                -MAX(0,ROUND(t.net_intervenant_cents*1.0*t.refund_cents/NULLIF(t.gross_cents,0))-
+                  COALESCE((SELECT SUM(-available_delta_cents) FROM payment_wallet_ledger l WHERE l.transaction_id=t.id AND l.entry_type='REFUND_REVERSAL'),0)),
+                t.currency,?
+              FROM payment_transactions t
+              WHERE t.id=? AND t.refund_cents=? AND t.gross_cents>0 AND t.intervenant_id IS NOT NULL
+                AND EXISTS(SELECT 1 FROM payment_wallet_ledger c WHERE c.transaction_id=t.id AND c.entry_type='PAYMENT_CREDIT')
+                AND NOT EXISTS(SELECT 1 FROM payment_wallet_ledger l WHERE l.idempotency_key=?)`)
+              .bind(crypto.randomUUID(),`payment:${tx.id}:refund:${refundCents}`,JSON.stringify({stripe_event_id:event.id,refund_total_cents:refundCents}),tx.id,refundCents,`payment:${tx.id}:refund:${refundCents}`)
+          ]);
+          const refundApplied=Number(refundBatch?.[0]?.meta?.changes||0)===1;
+          const reversalCreated=Number(refundBatch?.[1]?.meta?.changes||0)===1;
+          if(refundApplied){
+            await paymentAudit(env,'STRIPE_REFUND_WALLET_ADJUSTED',{transaction_id:tx.id,mission_id:tx.mission_id,metadata:{event_id:event.id,delta_refund_cents:deltaRefundCents,refund_total_cents:refundCents,wallet_reversal_cents:walletReversal,ledger_reversal_created:reversalCreated}},'OK');
           }
-          if(Number(refundTransition?.meta?.changes||0)===1){
-            await paymentAudit(env,'STRIPE_REFUND_WALLET_ADJUSTED',{transaction_id:tx.id,mission_id:tx.mission_id,metadata:{event_id:event.id,delta_refund_cents:deltaRefundCents,refund_total_cents:refundCents,wallet_reversal_cents:walletReversal}},'OK');
-          }
-          result=Number(refundTransition?.meta?.changes||0)===1?(fullRefund?'REFUND_RECORDED_FULL':'REFUND_RECORDED_PARTIAL'):'REFUND_ALREADY_RECONCILED';
+          result=refundApplied?(fullRefund?'REFUND_RECORDED_FULL':'REFUND_RECORDED_PARTIAL'):'REFUND_ALREADY_RECONCILED';
         }
       } else if(disputeEvent.has(event.type)) {
         const disputeId=String(obj?.id||event.id);
