@@ -1770,6 +1770,13 @@ function financeStrategicQuote({basePriceCents=0,phaseFactor=1,urgency='normal',
 async function pricingQuote(request, env) {
   const gate=await requireAuthRole(request,env,['gerante','client','entreprise','intervenant']); if(gate.error)return gate.error;
   const b=await readJson(request)||{};
+  // Les paramètres qui modifient la rémunération, les frais PSP ou la marge
+  // sont des paramètres de politique financière, jamais des entrées client.
+  const financialOverrides=['phase','platform_fee_percent','intervenant_floor_cents','psp_percent','psp_fixed_cents','software_cost_cents','target_margin_percent','regulated_max_cents','fuel_price_cents_per_litre','fuel_cost_per_km_cents'];
+  const attemptedOverrides=financialOverrides.filter(key=>Object.prototype.hasOwnProperty.call(b,key));
+  if(attemptedOverrides.length && gate.auth?.user?.role!=='gerante'){
+    return json({ok:false,error:'FINANCIAL_POLICY_OVERRIDE_FORBIDDEN',version:VERSION,fields:attemptedOverrides},403);
+  }
   const phase=String(b.phase||await getSetting(env,'project_phase','TEST')).toUpperCase();
   const cfg=PROJECT_PHASES[phase]||PROJECT_PHASES.TEST;
   const distance=Number(b.distance_km||0);const duration=Number(b.duration_minutes||60);
