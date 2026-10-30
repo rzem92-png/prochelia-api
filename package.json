@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test:prelaunch": "node --test tests/v14-5-6-critical-fixes.test.mjs tests/stripe-adapter.behavior.test.mjs tests/trust-passport.test.mjs tests/trust-passport-runtime.test.mjs tests/backup-retention-policy.test.mjs tests/marketplace-core.test.mjs",
+    "test:prelaunch": "node --test tests/v14-5-6-critical-fixes.test.mjs tests/stripe-adapter.behavior.test.mjs tests/trust-passport.test.mjs tests/trust-passport-runtime.test.mjs tests/backup-retention-policy.test.mjs tests/marketplace-core.test.mjs tests/nexus-engine.test.mjs",
     "test:nexus": "node --test tests/nexus-engine.test.mjs"
   }
 }
