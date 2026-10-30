@@ -132,3 +132,19 @@ test("composition rejects duplicate candidate identities", () => {
     candidates: [provider("duplicate", { skills: ["cleaning"] }), provider("duplicate", { skills: ["shopping"] })]
   }), /unique/);
 });
+
+test("scoring rejects unknown dimensions instead of silently ignoring them", () => {
+  assert.throws(() => rankNexusOpportunities({
+    request, candidates: [provider("x")],
+    weights: { skills: 4000, affordability: 2500, proximity: 1500, trust: 2000, popularity: 1 }
+  }), /unsupported dimensions/);
+});
+
+test("candidate workload limits prevent unbounded quadratic composition", () => {
+  assert.throws(() => composeNexusScenarios({
+    request, candidates: Array.from({ length: 501 }, (_, i) => provider(String(i)))
+  }), /candidate limit exceeded/);
+  assert.throws(() => rankNexusOpportunities({
+    request, candidates: Array.from({ length: 10001 }, (_, i) => provider(String(i)))
+  }), /candidate limit exceeded/);
+});
