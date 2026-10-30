@@ -204,3 +204,20 @@ test('Mission payload validation rejects invalid dates and inconsistent price sp
   assert.ok(source.includes("errors.push('price_commission_mismatch')"));
   assert.ok(source.includes("Math.abs(clientCents - intervenantCents - commissionCents) > 1"));
 });
+
+
+test('Mission preparation blocks when full-interval availability is missing', () => {
+  assert.match(source, /async function checkMissionSchedulingConflicts\(env, mission\)/);
+  assert.match(source, /INTERVENANT_NOT_AVAILABLE_FOR_FULL_INTERVAL/);
+  assert.match(source, /datetime\(start_at\)<=datetime\(\?\) AND datetime\(end_at\)>=datetime\(\?\)/);
+  assert.match(source, /MISSION_SCHEDULING_CONFLICT_BLOCKED/);
+});
+
+test('Mission preparation detects overlapping assigned missions and fails closed on unknown statuses', () => {
+  assert.match(source, /INTERVENANT_MISSION_OVERLAP/);
+  assert.match(source, /datetime\(start_at\)<datetime\(\?\)/);
+  assert.match(source, /datetime\(COALESCE\(NULLIF\(end_at,''\),start_at\)\)>datetime\(\?\)/);
+  assert.match(source, /NOT IN \('cancelled','canceled','completed','rejected','refused'\)/);
+  assert.match(source, /MISSION_SCHEDULE_INVALID/);
+  assert.match(source, /error:'MISSION_SCHEDULING_CONFLICT'/);
+});
