@@ -182,3 +182,11 @@ test('Stripe webhook refuses processing until native signature adapter is connec
   assert.match(source, /if\(String\(provider\)\.toLowerCase\(\)==='stripe'\) return json\(/);
   assert.match(adapter, /verifyStripeSignature/);
 });
+
+test('Initial manager bootstrap validates the NOT NULL phone field from the real D1 schema', () => {
+  assert.match(source, /const phoneInput = clean\(body\?\.phone\)/);
+  assert.match(source, /const normalizedPhone = phone\.replace\(\/\[\\\\s\(\)\.\-\]\/g, ''\)/);
+  assert.match(source, /\^\\\+\?\[1-9\]\\d\{7,14\}\$/);
+  assert.match(source, /required_fields: \['email', 'first_name', 'last_name', 'phone', 'password'\]/);
+  assert.match(source, /INSERT INTO users \(id, role, email, first_name, last_name, phone, status, password_hash\)/);
+});
