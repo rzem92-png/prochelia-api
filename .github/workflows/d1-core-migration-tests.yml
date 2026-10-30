@@ -95,7 +95,12 @@ jobs:
           db.executescript(route_origin_migration)
           db.executescript(route_origin_migration)
           # The existing wallet table is created by the runtime payment schema.
-          db.executescript("""CREATE TABLE wallets (id TEXT PRIMARY KEY,user_id TEXT NOT NULL UNIQUE,currency TEXT NOT NULL DEFAULT 'EUR',available_cents INTEGER NOT NULL DEFAULT 0,pending_cents INTEGER NOT NULL DEFAULT 0,paid_cents INTEGER NOT NULL DEFAULT 0,reserved_cents INTEGER NOT NULL DEFAULT 0,created_at TEXT DEFAULT CURRENT_TIMESTAMP,updated_at TEXT DEFAULT CURRENT_TIMESTAMP);""")
+          db.executescript("""CREATE TABLE wallets (
+            id TEXT PRIMARY KEY, user_id TEXT NOT NULL UNIQUE, currency TEXT NOT NULL DEFAULT 'EUR',
+            available_cents INTEGER NOT NULL DEFAULT 0, pending_cents INTEGER NOT NULL DEFAULT 0,
+            paid_cents INTEGER NOT NULL DEFAULT 0, reserved_cents INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+          );""")
           db.executescript(wallet_ledger_migration)
           db.executescript(wallet_ledger_migration)
 
@@ -206,6 +211,12 @@ jobs:
             pass
           assert db.execute("SELECT COUNT(*) FROM payment_wallet_ledger WHERE id='l-no-wallet'").fetchone()[0] == 0
           db.execute("INSERT INTO wallets(id,user_id,currency) VALUES('w1','provider-1','EUR')")
+          try:
+            db.execute("""INSERT INTO payment_wallet_ledger(id,idempotency_key,user_id,entry_type,available_delta_cents,currency) VALUES('l-wrong-currency','wrong-currency:key','provider-1','PAYMENT_CREDIT',500,'USD')""")
+            raise AssertionError("Ledger accepted a wallet currency mismatch")
+          except sqlite3.IntegrityError:
+            pass
+          assert db.execute("SELECT COUNT(*) FROM payment_wallet_ledger WHERE id='l-wrong-currency'").fetchone()[0] == 0
           db.execute("""INSERT INTO payment_wallet_ledger(id,idempotency_key,transaction_id,user_id,entry_type,available_delta_cents,currency) VALUES('l1','payment:tx1:credit','tx1','provider-1','PAYMENT_CREDIT',12500,'EUR')""")
           db.execute("""INSERT OR IGNORE INTO payment_wallet_ledger(id,idempotency_key,transaction_id,user_id,entry_type,available_delta_cents,currency) VALUES('l2','payment:tx1:credit','tx1','provider-1','PAYMENT_CREDIT',12500,'EUR')""")
           assert db.execute("SELECT available_cents FROM wallets WHERE user_id='provider-1'").fetchone()[0] == 12500
