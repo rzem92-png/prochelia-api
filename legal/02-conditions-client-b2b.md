@@ -28,3 +28,13 @@ Le système doit conserver le document exact accepté, sa version, son empreinte
 
 ## 9. Annexes obligatoires à finaliser
 Annexe tarifaire et facturation; SLA; sécurité; RGPD article 28 si applicable; liste des sous-traitants; assurances; procédure d'incident; résiliation; propriété intellectuelle; confidentialité; durée et renouvellement; loi applicable et juridiction lorsque valides. Faire valider avant signature.
+
+
+## 10. Bénéficiaires, délégations et protection
+Le Client B2B documente son habilitation à commander et à transmettre les informations strictement nécessaires sur les bénéficiaires. Les rôles des familles, représentants, tuteurs, établissements et donneurs d'ordre sont distingués. Les droits d'accès et de partage sont limités à chaque mission et révisables. Les prestations touchant des personnes vulnérables font l'objet de procédures d'incident, de continuité, d'escalade et de consentement adaptées.
+
+## 11. Déploiement international et devise
+Chaque territoire doit faire l'objet d'une annexe pays validée précisant l'entité contractante, la loi impérative applicable, les prestations permises, les exigences de qualification et d'assurance, les règles sociales et fiscales, les paiements, la devise, les taxes, la protection des données, les langues et le support. Aucun pays, devise ou mode de paiement n'est activé sur la seule décision du Copilote. Le taux de change, son horodatage, les frais et la règle de remboursement sont affichés avant commande.
+
+## 12. IA, automatisation et niveaux de service
+Le Copilote peut produire des analyses, plans, traductions et propositions. Toute action sur les prix publiés, les paiements, les remboursements, les contrats, l'accès d'un intervenant ou les données personnelles sensibles nécessite le niveau d'autorisation défini au contrat et dans la matrice de gouvernance. Les engagements de disponibilité et de continuité ne sont opposables que s'ils figurent dans un SLA accepté et mesuré.
