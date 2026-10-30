@@ -93,7 +93,7 @@ jobs:
             "clients", "intervenants", "prestations", "missions", "tarifs",
             "paiements", "disponibilites", "evaluations", "documents",
             "conflits", "journal", "pricing_policies", "pricing_travel_policies",
-            "pricing_route_estimates", "pricing_holidays", "pricing_quotes"
+            "pricing_route_estimates", "pricing_route_estimate_audit", "pricing_holidays", "pricing_quotes"
           }
           actual = {
             row[0] for row in db.execute(
