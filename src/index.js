@@ -1833,13 +1833,16 @@ async function pricingRouteEstimate(request, env) {
     const client=await env.DB.prepare(`SELECT address,city,postal_code FROM clients
       WHERE user_id=? LIMIT 1`).bind(gate.auth.user.id).first();
     if(!client)return json({ok:false,error:'CLIENT_PROFILE_NOT_FOUND',version:VERSION},409);
-    const intervenant=await env.DB.prepare(`SELECT id,base_address,base_city,base_postal_code,validation_status
-      FROM intervenants WHERE id=? LIMIT 1`).bind(intervenantId).first();
+    const intervenant=await env.DB.prepare(`SELECT i.id,i.validation_status,a.address,a.city,a.postal_code,a.status AS address_status
+      FROM intervenants i LEFT JOIN intervenant_route_origins a ON a.intervenant_id=i.id
+      WHERE i.id=? LIMIT 1`).bind(intervenantId).first();
     if(!intervenant)return json({ok:false,error:'INTERVENANT_NOT_FOUND',version:VERSION},404);
     const approved=['ACTIVE','APPROVED','VALIDATED','VERIFIED'].includes(String(intervenant.validation_status||'').toUpperCase());
     if(!approved)return json({ok:false,error:'INTERVENANT_NOT_VALIDATED',version:VERSION},409);
+    if(String(intervenant.address_status||'').toUpperCase()!=='VERIFIED')
+      return json({ok:false,error:'INTERVENANT_ROUTE_ADDRESS_NOT_VERIFIED',version:VERSION},409);
     const destination=[client.address,client.postal_code,client.city].map(clean).filter(Boolean).join(', ');
-    const origin=[intervenant.base_address,intervenant.base_postal_code,intervenant.base_city].map(clean).filter(Boolean).join(', ');
+    const origin=[intervenant.address,intervenant.postal_code,intervenant.city].map(clean).filter(Boolean).join(', ');
     if(!origin||!destination)return json({ok:false,error:'ROUTE_PROFILE_ADDRESS_INCOMPLETE',version:VERSION},409);
     if(origin.toLowerCase()===destination.toLowerCase())
       return json({ok:false,error:'ROUTE_ADDRESSES_INVALID',version:VERSION},400);
