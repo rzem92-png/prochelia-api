@@ -28,3 +28,16 @@ Aucune clause ne limite les droits que la loi rend impératifs ni n'exclut une r
 
 ## 9. Champs de publication bloquants
 Compléter l'identité de l'opérateur, les prix/frais, les conditions de rétractation et exceptions, l'assurance, le médiateur si requis, les coordonnées de contact, les modalités de réclamation et la qualification exacte de chaque service. Faire valider le document par un professionnel du droit français avant de le publier ou de recueillir un consentement.
+
+
+## 10. Accompagnement des personnes fragiles et cercle familial
+PROCHÉLIA doit préserver la dignité, l'autonomie, le consentement et la vie privée du bénéficiaire. Un proche peut organiser ou suivre une prestation uniquement dans le cadre d'une délégation ou d'une autorisation adaptée et vérifiable. Le compte familial ne donne pas automatiquement accès à toutes les informations du bénéficiaire. Le bénéficiaire conserve, dans la mesure prévue par le droit applicable, la possibilité de connaître les informations partagées, de limiter les accès et de retirer une délégation. Les alertes de sécurité ne remplacent jamais les services d'urgence ni une surveillance médicale.
+
+## 11. Langues, pays et prix internationaux
+L'interface peut être proposée dans plusieurs langues. La langue affichée ne modifie pas le contrat applicable : avant toute commande transfrontalière, le Client doit connaître l'entité contractante, le pays d'exécution, la devise, le montant total, les taxes et frais éventuels, le taux de change ou la règle de conversion, les modalités de remboursement et le droit applicable. Une traduction automatique ne prévaut pas sur la version contractuelle désignée comme faisant foi, sous réserve des règles impératives locales.
+
+## 12. Transparence et usage de l'intelligence artificielle
+Le Copilote peut aider à rechercher une prestation, préparer une demande, expliquer un tarif et suivre une réclamation. Il ne remplace pas un professionnel de santé, un service d'urgence, un juriste ou un décideur humain. Aucune décision importante concernant le Client ou un bénéficiaire ne doit reposer exclusivement sur une décision automatisée lorsque le droit impose des garanties. Le Client peut demander une intervention humaine et signaler une erreur.
+
+## 13. Accessibilité et continuité
+Les parcours doivent être conçus pour être compréhensibles, accessibles sur mobile et utilisables avec des besoins d'accessibilité variés. En cas d'indisponibilité de la plateforme, le Client doit disposer d'un canal de contact clairement communiqué. Les fonctions de suivi affichent leur état réel : une notification envoyée, reçue, lue ou confirmée ne doit pas être confondue avec une intervention effectivement réalisée.
