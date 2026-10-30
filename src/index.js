@@ -1244,11 +1244,12 @@ async function paymentWebhook(request, env) {
             AND NOT EXISTS(SELECT 1 FROM payment_wallet_ledger WHERE idempotency_key=?)`)
             .bind(crypto.randomUUID(),`payment:${txId}:credit`,JSON.stringify({provider,event_id:eventId}),txId,`payment:${txId}:credit`),
           env.DB.prepare(`INSERT OR IGNORE INTO payment_wallet_ledger(id,idempotency_key,transaction_id,user_id,entry_type,available_delta_cents,currency,metadata_json)
-            SELECT ?,?,t.id,t.intervenant_id,'REFUND_REVERSAL',-t.net_intervenant_cents,t.currency,?
-            FROM payment_transactions t WHERE t.id=? AND t.refund_cents>=t.gross_cents AND t.gross_cents>0
+            SELECT ?,?,t.id,t.intervenant_id,'REFUND_REVERSAL',
+              -MAX(0,ROUND(t.net_intervenant_cents*1.0*t.refund_cents/NULLIF(t.gross_cents,0))),t.currency,?
+            FROM payment_transactions t WHERE t.id=? AND t.refund_cents>0 AND t.gross_cents>0
             AND EXISTS(SELECT 1 FROM payment_wallet_ledger c WHERE c.transaction_id=t.id AND c.entry_type='PAYMENT_CREDIT')
             AND NOT EXISTS(SELECT 1 FROM payment_wallet_ledger l WHERE l.idempotency_key=?)`)
-            .bind(crypto.randomUUID(),`payment:${txId}:refund:${tx.gross_cents}`,JSON.stringify({provider,event_id:eventId,source:'out_of_order_refund_reconciliation'}),txId,`payment:${txId}:refund:${tx.gross_cents}`)
+            .bind(crypto.randomUUID(),`payment:${txId}:refund:${tx.refund_cents}`,JSON.stringify({provider,event_id:eventId,source:'out_of_order_refund_reconciliation'}),txId,`payment:${txId}:refund:${tx.refund_cents}`)
         ]);
       } else if(newStatus==='refunded'){
         const rawRefund=event?.data?.refund_cents??event?.data?.amount_refunded??tx.gross_cents;
