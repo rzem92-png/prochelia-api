@@ -221,3 +221,11 @@ test('Mission preparation detects overlapping assigned missions and fails closed
   assert.match(source, /MISSION_SCHEDULE_INVALID/);
   assert.match(source, /error:'MISSION_SCHEDULING_CONFLICT'/);
 });
+
+test('Mission preparation checks complete availability and detects overlapping active missions', () => {
+  assert.match(source, /async function checkMissionSchedulingConflicts\(env, mission\)/);
+  assert.match(source, /INTERVENANT_NOT_AVAILABLE_FOR_FULL_INTERVAL/);
+  assert.match(source, /INTERVENANT_MISSION_OVERLAP/);
+  assert.match(source, /MISSION_SCHEDULING_CONFLICT_BLOCKED/);
+  assert.match(source, /MISSION_SCHEDULE_INVALID/);
+});
