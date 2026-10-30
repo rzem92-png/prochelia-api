@@ -199,6 +199,49 @@ async function getPrestations(env) {
   return json({ ok: true, source: 'D1', total: result.results?.length || 0, prestations: result.results || [] });
 }
 
+async function listProfiles(request, env, kind) {
+  const roles = kind === 'clients'
+    ? ['gerante','admin','client']
+    : ['gerante','admin','intervenant'];
+  const gate = await requireAuthRole(request, env, roles);
+  if (gate.error) return gate.error;
+
+  const user = gate.auth.user;
+  const manager = ['gerante','admin'].includes(user.role);
+  const url = new URL(request.url);
+  const limitRaw = Number(url.searchParams.get('limit') || 50);
+  const offsetRaw = Number(url.searchParams.get('offset') || 0);
+  const limit = Number.isFinite(limitRaw) ? Math.min(100, Math.max(1, Math.floor(limitRaw))) : 50;
+  const offset = Number.isFinite(offsetRaw) ? Math.max(0, Math.floor(offsetRaw)) : 0;
+  const table = kind === 'clients' ? 'clients' : 'intervenants';
+
+  try {
+    const where = manager ? '' : 'WHERE p.user_id = ?';
+    const countSql = `SELECT COUNT(*) AS total FROM ${table} p ${where}`;
+    const countStmt = env.DB.prepare(countSql);
+    const countRow = manager ? await countStmt.first() : await countStmt.bind(user.id).first();
+
+    const columns = kind === 'clients'
+      ? 'p.id, u.first_name, u.status AS account_status, p.city, p.created_at, p.updated_at'
+      : 'p.id, u.first_name, u.status AS account_status, p.professional_status, p.description, p.service_area, p.validation_status, p.hourly_rate, p.created_at, p.updated_at';
+    const sql = `SELECT ${columns} FROM ${table} p JOIN users u ON u.id = p.user_id ${where} ORDER BY p.created_at DESC LIMIT ? OFFSET ?`;
+    const stmt = env.DB.prepare(sql);
+    const result = manager
+      ? await stmt.bind(limit, offset).all()
+      : await stmt.bind(user.id, limit, offset).all();
+
+    return json({
+      ok: true,
+      source: 'D1',
+      kind,
+      items: result.results || [],
+      pagination: { limit, offset, total: Number(countRow?.total || 0) }
+    });
+  } catch {
+    return json({ ok: false, error: 'PROFILE_SCHEMA_NOT_READY', version: VERSION }, 503);
+  }
+}
+
 async function health(env) {
   // Liveness/readiness probe: ne renvoyer ok=true que si D1 répond réellement.
   if (!env?.DB) {
@@ -1369,6 +1412,16 @@ async function handleBase(request, env) {
   if (url.pathname === '/api/prestations') {
     if (request.method !== 'GET') return json({ ok: false, error: 'METHOD_NOT_ALLOWED', version: VERSION }, 405);
     return getPrestations(env);
+  }
+
+  if (url.pathname === '/api/clients') {
+    if (request.method !== 'GET') return json({ ok: false, error: 'METHOD_NOT_ALLOWED', version: VERSION }, 405, {'allow':'GET'});
+    return listProfiles(request, env, 'clients');
+  }
+
+  if (url.pathname === '/api/intervenants') {
+    if (request.method !== 'GET') return json({ ok: false, error: 'METHOD_NOT_ALLOWED', version: VERSION }, 405, {'allow':'GET'});
+    return listProfiles(request, env, 'intervenants');
   }
 
   if (url.pathname === '/api/core/schema') {
