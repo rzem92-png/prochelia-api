@@ -121,3 +121,18 @@ Phase 5: extension géographique après validation des règles locales.
 Le module réussit s'il révèle des besoins réels qui seraient restés invisibles, augmente les mises en relation consenties et les missions effectivement réalisées, tout en préservant la liberté des intervenants, la confidentialité des clients, la qualité des services et la rentabilité de PROCHÉLIA.
 
 Il ne doit jamais devenir un système de dispatch qui dirige le travail des indépendants sous couvert d'une simple place de marché.
+
+
+## 11. Précaution spécifique sur l'IA et l'accès aux opportunités
+
+Le service officiel AI Act de la Commission européenne donne comme exemple de système à haut risque un outil de plateforme qui classe des prestataires indépendants et détermine lesquels sont présentés aux consommateurs. Par conséquent, le fait que les personnes soient indépendantes ne permet pas d'écarter automatiquement les règles relatives aux systèmes d'IA à haut risque.
+
+Avant toute fonction de matching, de classement, de recommandation ou de présélection susceptible d'influencer l'accès aux missions:
+- obtenir une analyse juridique documentée de la qualification au titre du règlement européen sur l'IA;
+- cartographier les obligations applicables, notamment gestion des risques, gouvernance des données, documentation, journalisation, transparence, supervision humaine, robustesse et cybersécurité;
+- ne pas lancer de score individuel, de classement algorithmique ou de présélection automatisée en production avant cette analyse et la satisfaction des obligations applicables;
+- privilégier pour le prototype un affichage neutre, des filtres choisis par le client, des critères objectifs vérifiables et une présentation non hiérarchisée;
+- permettre à l'intervenant de contrôler les informations publiées, corriger ses données et contester une erreur;
+- vérifier périodiquement que les filtres ne produisent pas d'exclusion indirecte ou discriminatoire.
+
+Le recours à une validation humaine ne suffit pas, à lui seul, à faire sortir un système du champ des systèmes à haut risque.
