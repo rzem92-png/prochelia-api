@@ -2887,22 +2887,34 @@ async function capacityDashboard(request, env) {
 async function financeForecast(request, env) {
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
   const months=Math.max(1,Math.min(12,Number((await readJson(request)||{}).months||3)));
-  const tx=await env.DB.prepare(`SELECT COALESCE(SUM(gross_cents),0) gross,COALESCE(SUM(commission_cents),0) commission,COALESCE(SUM(provider_fee_cents),0) provider_fee,COALESCE(SUM(refund_cents),0) refunds,COALESCE(SUM(net_intervenant_cents),0) intervenant FROM payment_transactions WHERE created_at>=datetime('now','-90 day')`).first();
-  const base=Number(tx?.gross||0)/3;
+  const tx=await env.DB.prepare(`SELECT
+    COALESCE(SUM(commission_cents),0) commission,
+    COALESCE(SUM(ROUND(commission_cents*1.0*(gross_cents-MIN(gross_cents,refund_cents))/NULLIF(gross_cents,0)),0),0) retained_commission,
+    COALESCE(SUM(provider_fee_cents),0) provider_fee,
+    COALESCE(SUM(refund_cents),0) refunds,
+    COALESCE(SUM(ROUND(net_intervenant_cents*1.0*(gross_cents-MIN(gross_cents,refund_cents))/NULLIF(gross_cents,0)),0),0) intervenant
+    FROM payment_transactions
+    WHERE created_at>=datetime('now','-90 day') AND status IN ('paid','partially_refunded','refunded','held')`).first();
+  const commissionBase=Number(tx?.commission||0)/3;
+  const revenueBase=Number(tx?.retained_commission||0)/3;
+  const payoutBase=Number(tx?.intervenant||0)/3;
+  const providerBase=Number(tx?.provider_fee||0)/3;
+  const refundBase=Number(tx?.refunds||0)/3;
   const rows=[];
   for(let i=1;i<=months;i++){
-    const revenue=Math.round(base*(1+0.03*i));
-    const commission=Math.round(Number(tx?.commission||0)/3*(1+0.03*i));
-    const payout=Math.round(Number(tx?.intervenant||0)/3*(1+0.03*i));
-    const provider=Math.round(Number(tx?.provider_fee||0)/3*(1+0.03*i));
-    const refunds=Math.round(Number(tx?.refunds||0)/3*(1+0.03*i));
-    const margin=revenue-commission*0+payout*-1+commission-provider-refunds;
+    // Baseline intentionally assumes zero growth: no artificial 3% optimism.
+    const revenue=Math.round(revenueBase);
+    const commission=Math.round(commissionBase);
+    const payout=Math.round(payoutBase);
+    const provider=Math.round(providerBase);
+    const refunds=Math.round(refundBase);
+    const margin=revenue-provider;
     const period=new Date(); period.setMonth(period.getMonth()+i); const key=period.toISOString().slice(0,7);
     await env.DB.prepare(`INSERT INTO finance_forecasts(id,period,scenario,revenue_cents,commission_cents,payout_cents,provider_fee_cents,refund_cents,estimated_margin_cents,confidence) VALUES(?,?,?,?,?,?,?,?,?,?)`)
-      .bind(crypto.randomUUID(),key,'BASE',revenue,commission,payout,provider,refunds,margin,0.55).run();
-    rows.push({period:key,revenue_cents:revenue,commission_cents:commission,payout_cents:payout,provider_fee_cents:provider,refund_cents:refunds,estimated_margin_cents:margin,confidence:0.55});
+      .bind(crypto.randomUUID(),key,'BASELINE_NO_GROWTH',revenue,commission,payout,provider,refunds,margin,0.45).run();
+    rows.push({period:key,scenario:'BASELINE_NO_GROWTH',platform_revenue_cents:revenue,commission_cents:commission,provider_payout_cents:payout,provider_fee_cents:provider,gross_refunds_cents:refunds,estimated_contribution_before_fixed_costs_cents:margin,confidence:0.45});
   }
-  return json({ok:true,version:VERSION,method:'rolling_90_day_projection',rows});
+  return json({ok:true,version:VERSION,method:'rolling_90_day_settled_platform_commission_less_refund_share_and_psp_fees; zero_growth_baseline; fixed_costs_and_tax_excluded',rows});
 }
 
 async function copilotBriefing(request, env) {
