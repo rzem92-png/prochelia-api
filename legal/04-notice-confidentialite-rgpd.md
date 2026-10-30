@@ -27,3 +27,16 @@ Tout incident suspecté est escaladé au responsable désigné, contenu et docum
 
 ## À compléter avant publication
 Registre des traitements; bases légales; durées; destinataires et sous-traitants; transferts; mesures de sécurité; contact; procédure de demande de droits; procédure d'incident; AIPD si nécessaire; information des bénéficiaires et des intervenants.
+
+
+## Familles, délégations et bénéficiaires
+Lorsque la plateforme permet à un proche ou à une organisation de suivre une prestation pour un bénéficiaire, les comptes, habilitations et droits d'accès doivent être séparés. La relation familiale ne suffit pas à autoriser l'accès aux données. Documenter l'autorisation ou le fondement juridique, les informations visibles, la durée de délégation, sa révocation et les traces d'accès. Les données de santé et de vulnérabilité ne sont pas collectées par défaut et ne sont pas transmises au modèle d'IA sans nécessité, base légale et garanties spécifiques.
+
+## IA, traduction et transferts internationaux
+Les messages traduits peuvent contenir des erreurs : conserver, lorsque cela est nécessaire et licite, la version originale et signaler la traduction automatisée. Documenter les fournisseurs IA, catégories de données transmises, lieux de traitement, durées, sous-traitants et garanties de transfert hors EEE. Les prompts ne doivent pas contenir de secrets, données de paiement complètes ou données sensibles non nécessaires. La traduction de documents contractuels doit être revue avant de leur donner une valeur juridique.
+
+## Profilage et décisions automatisées
+Documenter toute segmentation, recommandation ou notation utilisée pour le matching, la prévention de fraude, le recrutement ou la fidélisation. Vérifier nécessité, proportionnalité, biais et effets sur les personnes. Prévoir information, contestation et intervention humaine lorsque requis. Ne pas utiliser de données sensibles ou de proxys discriminatoires pour classer clients ou intervenants.
+
+## Internationalisation des données
+Avant l'ouverture d'un territoire, cartographier responsables de traitement, sous-traitants, transferts, hébergements, autorités compétentes, durées et mécanismes d'exercice des droits. La disponibilité d'une langue ou d'un moyen de paiement ne constitue pas une autorisation de traiter des données dans un pays.
