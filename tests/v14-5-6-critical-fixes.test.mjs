@@ -185,11 +185,14 @@ test('Mission creation and payment checkout remain fail-closed before acceptance
 });
 
 
-test('Stripe webhook refuses processing until native signature adapter is connected', () => {
-  // Deliberate fail-closed behavior: a valid helper alone is not enough until the
-  // native Stripe signature, event mapping, idempotency and reconciliation are wired.
-  assert.match(source, /STRIPE_WEBHOOK_ADAPTER_NOT_IMPLEMENTED/);
-  assert.match(source, /if\(String\(provider\)\.toLowerCase\(\)==='stripe'\) return json\(/);
+test('Stripe native webhook is the only Stripe event entry point and verifies native signatures', () => {
+  const webhook = source.slice(source.indexOf('async function stripeWebhook'), source.indexOf('async function stripeCheckout'));
+  const router = source.slice(source.indexOf('async function handle(request,env)'));
+  assert.match(webhook, /verifyStripeSignature\(raw,request\.headers\.get\('stripe-signature'\),env\.STRIPE_WEBHOOK_SECRET\)/);
+  assert.match(webhook, /payment_webhook_events/);
+  assert.match(webhook, /STRIPE_TRANSACTION_REFERENCE_NOT_READY/);
+  assert.match(router, /url\.pathname==='\/api\/payments\/webhook'\) return stripeWebhook\(request,env\)/);
+  assert.match(source, /STRIPE_WEBHOOK_ADAPTER_NOT_IMPLEMENTED/); // legacy generic adapter remains fail-closed for Stripe
   assert.match(adapter, /verifyStripeSignature/);
 });
 
