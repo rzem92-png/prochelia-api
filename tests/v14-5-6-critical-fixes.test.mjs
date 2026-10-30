@@ -93,6 +93,13 @@ test('Stripe event-specific amounts avoid false failure and dispute mismatches',
   assert.match(source, /isCheckout \? \(sessionId\|\|null\) : null/);
 });
 
+test('Generic PSP success creates the wallet before the ledger trigger credits it', () => {
+  const webhook = source.slice(source.indexOf('async function paymentWebhook'), source.indexOf('async function openPaymentDispute'));
+  const successBranch = webhook.slice(webhook.indexOf("if(newStatus==='paid'&&tx.intervenant_id)"), webhook.indexOf("} else if(newStatus==='refunded')"));
+  assert.match(successBranch, /INSERT OR IGNORE INTO wallets\(id,user_id,currency,available_cents,pending_cents,paid_cents,reserved_cents\)/);
+  assert.ok(successBranch.indexOf('INSERT OR IGNORE INTO wallets') < successBranch.indexOf('INSERT OR IGNORE INTO payment_wallet_ledger'));
+});
+
 test('Generic PSP refund events distinguish partial refunds from full refunds', () => {
   const webhook = source.slice(source.indexOf('async function paymentWebhook'), source.indexOf('async function openPaymentDispute'));
   assert.match(webhook, /const refundStatus=refundCents>=Number\(tx\.gross_cents\|\|0\)\?'refunded':'partially_refunded'/);
