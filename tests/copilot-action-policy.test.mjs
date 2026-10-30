@@ -24,3 +24,13 @@ test('unknown, elevated severity, or database-disabled rules fail closed', () =>
   assert.equal(canAutoResolveSupportScenario('DELAY_LIGHT', 'LOW', false), false);
   assert.equal(canAutoResolveSupportScenario('DELAY_LIGHT', 'LOW', 1), false);
 });
+test('legacy French operational case names cannot bypass the central auto-resolution allowlist', () => {
+  for (const scenario of [
+    'retard_leger', 'notification_non_envoyee', 'document_expire_non_critique',
+    'facture_non_envoyee', 'rappel_commercial', 'rappel_document',
+    'absence_confirmation', 'petit_ecart_tarifaire',
+    'reclamation_information', 'incident_technique_recoverable'
+  ]) {
+    assert.equal(canAutoResolveSupportScenario(scenario, 'LOW', true), false, scenario);
+  }
+});
