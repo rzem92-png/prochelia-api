@@ -194,3 +194,148 @@ Le moteur doit commencer par des règles déterministes testables. Un modèle d'
 Cette spécification n'autorise ni collecte nouvelle, ni dépense, ni activation IA payante, ni modification de classement en production. Le développement se fait sur la branche de préproduction, avec données fictives et tests automatisés. Tout déploiement, migration, nouveau service payant ou traitement de données réelles nécessitera une validation distincte.
 
 Le succès ne sera pas déclaré sur la base d'une promesse. Il sera démontré par des résultats mesurés, reproductibles et auditables.
+
+
+---
+
+## 14. PROCHÉLIA NEXUS — moteur de création d'opportunités composées
+
+### 14.1 Principe distinctif
+
+NEXUS ne cherche pas uniquement à prédire quel contenu intéressera une personne. Il cherche à résoudre un objectif et à découvrir si plusieurs ressources, compétences, disponibilités et demandes peuvent être assemblées pour créer une solution nouvelle.
+
+Un résultat NEXUS n'est donc pas seulement une recommandation individuelle. Il peut être :
+- une mise en relation directe ;
+- une combinaison de plusieurs professionnels ;
+- un nouveau service construit à partir de besoins récurrents ;
+- une collaboration entre un créateur, un artisan et un commerce ;
+- une proposition d'atelier, de tournée ou de service groupé ;
+- une alerte de demande non satisfaite destinée à un opérateur local.
+
+La nouveauté revendiquée est cette boucle intégrée « intention → ressources → combinaison → simulation → test → résultat → apprentissage ». Elle doit être comparée à l'état de l'art et validée par des résultats ; ce document ne prétend pas établir une supériorité mondiale ni une brevetabilité.
+
+### 14.2 Les sept mécanismes de NEXUS
+
+**1. Intentions en réseau.** Au lieu d'enregistrer uniquement des clics, structurer les objectifs explicitement exprimés, leurs contraintes, leur échéance et leur degré de certitude. Les demandes semblables peuvent être agrégées sous forme de tendances anonymisées lorsque les seuils de confidentialité le permettent.
+
+**2. Détecteur de besoins orphelins.** Identifier les demandes sans offre éligible, les devis sans réponse, les délais excessifs et les besoins récurrents. Chaque signal comporte sa période, son volume, sa représentativité et ses limites. Un signal faible reste une hypothèse, pas une vérité.
+
+**3. Graphe de capacités composables.** Relier des capacités vérifiées, des disponibilités, des zones, des équipements et des autorisations nécessaires. Le moteur peut rechercher une combinaison de plusieurs acteurs, mais ne peut jamais supposer qu'une compétence, une assurance ou une autorisation existe.
+
+**4. Compositeur de solutions.** Générer plusieurs scénarios réalisables : solution simple, solution multi-professionnels, solution locale groupée, atelier ou offre récurrente. Chaque scénario doit préciser les acteurs nécessaires, l'ordre des tâches, les dépendances, le délai, le prix estimé, les risques et les validations manquantes.
+
+**5. Simulateur contrefactuel.** Comparer « si nous ne faisons rien », « si nous proposons une mise en relation », « si nous assemblons deux compétences » et « si nous testons une offre locale ». Estimer les résultats avec des hypothèses visibles, des intervalles d'incertitude et des coûts complets. Ne pas présenter une prévision comme une garantie.
+
+**6. Marché d'opportunités à consentement réciproque.** Les personnes éligibles reçoivent une proposition claire et peuvent accepter, refuser ou se retirer. Aucun professionnel n'est engagé avant son accord ; aucune demande client n'est transmise à un tiers sans base légale et information appropriée. Les rémunérations, commissions et frais sont visibles avant acceptation.
+
+**7. Boucle d'apprentissage à double résultat.** Apprendre à partir du résultat côté demandeur et côté fournisseur : besoin résolu, qualité, rémunération nette, temps mobilisé, coût, marge, litige et volonté de recommencer. Une transaction rentable mais insatisfaisante ne constitue pas un succès.
+
+### 14.3 Fonction objectif multi-parties
+
+NEXUS ne doit pas optimiser une métrique unique telle que le clic, le temps d'écran, le volume de commandes ou la commission.
+
+Pour chaque scénario, il mesure séparément :
+- utilité et satisfaction du demandeur ;
+- revenu net et qualité de l'opportunité pour le professionnel ;
+- marge contributive et risque opérationnel pour PROCHÉLIA ;
+- respect des règles, de la confidentialité et de l'équité d'accès.
+
+Les contraintes de sécurité, de consentement, de légalité, d'éligibilité et de capacité sont des conditions bloquantes, jamais des variables que le score peut compenser. Parmi les scénarios conformes, le moteur compare les compromis et expose les gagnants et perdants potentiels. Il peut proposer plusieurs options au lieu de masquer les arbitrages derrière un score opaque.
+
+### 14.4 Exemple de fonctionnement
+
+Hypothèse fictive : dans une zone donnée, plusieurs familles demandent un accompagnement à domicile et des repas préparés, tandis que des professionnels locaux ont des disponibilités complémentaires.
+
+NEXUS pourrait :
+1. détecter la répétition de besoins suffisamment documentés ;
+2. vérifier que les demandes sont réellement compatibles et que les données peuvent être agrégées sans réidentifier les personnes ;
+3. identifier des professionnels dont les compétences, disponibilités et autorisations sont vérifiées ;
+4. proposer séparément une solution d'accompagnement et une offre de repas, ou un partenariat si les règles le permettent ;
+5. calculer prix total, rémunérations, frais, risques et marge ;
+6. solliciter l'accord des professionnels et des clients ;
+7. lancer un pilote limité, puis comparer satisfaction, délais, coût et réachat.
+
+Aucune donnée de santé ou situation personnelle sensible n'est nécessaire à la recommandation commerciale. Si une activité implique des informations sensibles ou réglementées, elle doit suivre une analyse dédiée et des contrôles renforcés.
+
+### 14.5 Algorithme de génération de scénarios
+
+Pseudo-pipeline :
+1. prendre une intention confirmée et ses contraintes explicites ;
+2. récupérer uniquement les ressources autorisées et à jour ;
+3. appliquer les règles bloquantes d'éligibilité ;
+4. construire un ensemble limité de combinaisons réalisables ;
+5. éliminer les combinaisons redondantes, surchargées ou économiquement incohérentes ;
+6. calculer coût complet, bénéfices attendus, incertitude et risques ;
+7. conserver des scénarios diversifiés et expliquer leurs différences ;
+8. demander les accords requis ;
+9. lancer un test limité ;
+10. comparer les résultats observés aux hypothèses et mettre à jour les modèles.
+
+Le moteur doit imposer des limites de calcul, une profondeur maximale de combinaison et des quotas par demande afin d'éviter les explosions combinatoires et les coûts cachés.
+
+### 14.6 Défenses contre les effets pervers
+
+- Pas de fausse rareté, de pression artificielle, de dark patterns ou de notifications manipulatrices.
+- Pas de vente de priorité organique cachée.
+- Pas d'exclusion automatique des nouveaux acteurs faute d'historique : un parcours de découverte contrôlé doit leur être accessible.
+- Pas de sur-optimisation des professionnels les plus disponibles au détriment de leur rémunération ou de leur bien-être.
+- Pas de création de demande artificielle pour gonfler le GMV.
+- Pas de révélation de demandes individuelles aux autres utilisateurs.
+- Pas de coordination de prix entre concurrents ni d'échange d'informations commerciales confidentielles.
+- Pas de proposition multi-acteurs sans vérifier responsabilités, assurances, contrats et autorisations.
+- Un bouton de refus, de retrait et de contestation doit être disponible.
+
+### 14.7 Première version technique sans coût logiciel additionnel obligatoire
+
+Construire d'abord NEXUS comme moteur déterministe local au Worker :
+- fonctions pures de génération et de validation des scénarios ;
+- données fictives dans les tests ;
+- règles et poids versionnés dans le code ou une configuration contrôlée ;
+- recherche bornée sur les offres déjà disponibles ;
+- calculs en centimes entiers ;
+- journal d'explication et identifiant de version ;
+- aucune API IA externe nécessaire pour la première version.
+
+Ne pas créer une nouvelle base vectorielle, un service d'IA payant ou un moteur de graphe spécialisé tant qu'un test ne démontre pas que les solutions déjà disponibles sont insuffisantes. Le graphe peut commencer sous forme de relations structurées dans les tables existantes, après audit du schéma.
+
+### 14.8 Tests d'acceptation NEXUS
+
+Le moteur ne peut être activé qu'après des tests démontrant :
+- aucune combinaison contenant un acteur non éligible ;
+- aucune disponibilité dépassée ou périmée ;
+- aucune proposition dépassant le budget sans avertissement et accord ;
+- aucune rémunération ou marge calculée avec des nombres flottants non contrôlés ;
+- aucun engagement sans consentement des parties ;
+- aucune fuite d'informations entre demandes ;
+- aucune recommandation pay-to-win cachée ;
+- résultats reproductibles pour une même version et les mêmes entrées ;
+- scénarios alternatifs, limites de calcul et cas sans solution ;
+- audit des biais, concentration et taux de faux positifs ;
+- tests de sécurité, charge, confidentialité et reprise.
+
+Les tests unitaires ne remplacent pas les tests d'intégration, la revue juridique, les tests utilisateurs ni la validation de l'environnement de production.
+
+### 14.9 Mesure de supériorité réelle
+
+Toute affirmation « plus puissant qu'un autre algorithme » doit être testée sur une tâche et une population définies. Comparer NEXUS à :
+- une recherche classique par filtres ;
+- un classement simple par pertinence ;
+- le moteur ORIGIN sans composition multi-acteurs ;
+- NEXUS avec génération de scénarios.
+
+Comparer à données et périodes comparables : taux de besoin résolu, délai, satisfaction des deux côtés, marge contributive, distribution des opportunités, incidents et coût d'exploitation. Pré-enregistrer les métriques principales, utiliser un groupe témoin lorsque c'est éthique et faisable, publier les résultats négatifs et ne pas généraliser au-delà de l'échantillon.
+
+Le critère de réussite est une amélioration robuste de la résolution des besoins et de la valeur créée pour plusieurs parties, sans dégradation des garde-fous. La durée d'écran et les clics ne sont pas des critères de victoire.
+
+### 14.10 Frontière entre suggestion et action
+
+NEXUS peut analyser et proposer automatiquement. Il ne peut pas, sans approbation appropriée :
+- publier une nouvelle offre ou modifier un tarif ;
+- réserver un professionnel ou confirmer un engagement ;
+- contracter avec un partenaire ;
+- lancer une publicité ou engager une dépense ;
+- transférer de l'argent ou modifier un portefeuille ;
+- décider seul d'une suspension ou d'une sanction ;
+- lancer un pays, une catégorie réglementée ou une activité nouvelle.
+
+Chaque action autorisée est traçable, révocable et limitée à son périmètre.
