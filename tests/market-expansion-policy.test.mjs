@@ -35,6 +35,7 @@ test("invalid country, category, status and check shapes are rejected", () => {
   const base = { countryCode: "FR", categoryCode: "local_goods", status: "APPROVED_FOR_PILOT", checks: allChecks() };
   assert.throws(() => evaluateMarketActivation({ ...base, countryCode: "France" }), /countryCode/);
   assert.throws(() => evaluateMarketActivation({ ...base, categoryCode: "Local Goods" }), /categoryCode/);
+  assert.throws(() => evaluateMarketActivation({ ...base, categoryCode: "unreviewed_new_sector" }), /categoryCode/);
   assert.throws(() => evaluateMarketActivation({ ...base, status: "AUTO_APPROVED" }), /status/);
   assert.throws(() => evaluateMarketActivation({ ...base, checks: [] }), /checks/);
 });
