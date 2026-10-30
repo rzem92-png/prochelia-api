@@ -1,4 +1,5 @@
 import { handleV7Route } from "./v7-routes.js";
+import { procheliaV7 } from "./v7.js";
 import { verifyStripeSignature, stripeCheckoutPayload } from "./stripe-adapter.js";
 import { evaluateTaskEligibility } from "./trust-passport.js";
 // PROCHÉLIA — INDEX BACKEND CONSOLIDÉ UNIQUE
@@ -2573,18 +2574,45 @@ async function activatePromotion(request, env) {
   if (gate.error) return gate.error;
   await ensureStrategicSchema(env);
   const b = await readJson(request) || {};
-  if (!b.promotion_id) return json({ok:false,error:'PROMOTION_ID_REQUIRED',version:VERSION},400);
+  const promotionId = clean(b.promotion_id);
+  if (!promotionId) return json({ok:false,error:'PROMOTION_ID_REQUIRED',version:VERSION},400);
 
-  const p = await env.DB.prepare('SELECT * FROM promotions WHERE id=? LIMIT 1').bind(b.promotion_id).first();
-  if (!p) return json({ok:false,error:'PROMOTION_NOT_FOUND',version:VERSION},404);
+  const promotion = await env.DB.prepare(
+    'SELECT * FROM promotions WHERE id=? LIMIT 1'
+  ).bind(promotionId).first();
+  if (!promotion) return json({ok:false,error:'PROMOTION_NOT_FOUND',version:VERSION},404);
 
-  if (p.requires_manager && !gate.auth.user.id) {
-    return json({ok:false,error:'MANAGER_APPROVAL_REQUIRED',version:VERSION},403);
+  // L'approbation est une décision explicite de la Gérante, précédée
+  // d'une validation stricte des dates, du budget, du plafond et du type de remise.
+  const validation = procheliaV7.validatePromotionActivation(promotion, {
+    allowedPhases: Object.keys(PROJECT_PHASES)
+  });
+  if (!validation.ok) {
+    await journal(env,'gerante',gate.auth.user.id,'PROMOTION_ACTIVATION_BLOCKED',
+      'promotion',promotion.id,'DENIED',{reason:validation.error});
+    return json({ok:false,error:validation.error,version:VERSION},409);
   }
 
-  await env.DB.prepare(`UPDATE promotions SET status='ACTIVE',updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(p.id).run();
-  await journal(env,'gerante',gate.auth.user.id,'PROMOTION_ACTIVATED','promotion',p.id,'OK',{code:p.code});
-  return json({ok:true,version:VERSION,promotion_id:p.id,status:'ACTIVE'},200);
+  // Mise à jour conditionnelle : deux clics concurrents ne peuvent pas
+  // activer deux fois la même promotion depuis un état devenu obsolète.
+  const updated = await env.DB.prepare(
+    `UPDATE promotions SET status='ACTIVE',updated_at=CURRENT_TIMESTAMP
+      WHERE id=? AND status IN ('DRAFT','PAUSED')`
+  ).bind(promotion.id).run();
+  if (Number(updated?.meta?.changes || 0) !== 1) {
+    return json({ok:false,error:'PROMOTION_STATE_CHANGED_RELOAD_REQUIRED',version:VERSION},409);
+  }
+
+  await journal(env,'gerante',gate.auth.user.id,'PROMOTION_ACTIVATED',
+    'promotion',promotion.id,'OK',{
+      code:promotion.code,
+      discount_type:promotion.discount_type,
+      discount_value:promotion.discount_value,
+      starts_at:promotion.starts_at,
+      ends_at:promotion.ends_at,
+      approval:'EXPLICIT_MANAGER_ACTION'
+    });
+  return json({ok:true,version:VERSION,promotion_id:promotion.id,status:'ACTIVE',approved_by:gate.auth.user.id},200);
 }
 
 async function strategicDashboard(request, env) {
