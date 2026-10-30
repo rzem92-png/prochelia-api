@@ -229,3 +229,14 @@ test('Mission preparation checks complete availability and detects overlapping a
   assert.match(source, /MISSION_SCHEDULING_CONFLICT_BLOCKED/);
   assert.match(source, /MISSION_SCHEDULE_INVALID/);
 });
+
+
+test('Operational conflict resolution never directly reassigns or reschedules a mission', () => {
+  assert.match(source, /ASSIGN_REPLACEMENT_REVIEW/);
+  assert.match(source, /RESCHEDULE_MISSION_REVIEW/);
+  assert.match(source, /requires_revalidation:true/);
+  assert.match(source, /requires_availability_recheck:true/);
+  assert.match(source, /requires_client_consent:true/);
+  assert.doesNotMatch(source, /UPDATE missions SET intervenant_id=\? WHERE id=\?/);
+  assert.doesNotMatch(source, /UPDATE missions SET \$\{target\}=\? WHERE id=\?/);
+});
