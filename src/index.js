@@ -1802,6 +1802,8 @@ async function pricingQuote(request, env) {
   const gate=await requireAuthRole(request,env,['gerante','client','entreprise','intervenant']);
   if(gate.error)return gate.error;
   if(!env.DB)return json({ok:false,error:'DATABASE_UNAVAILABLE',version:VERSION},503);
+  try { await ensureConsolidatedSchema(env); await ensureStrategicSchema(env); }
+  catch (_) { return json({ok:false,error:'PRICING_REFERENCE_DATA_UNAVAILABLE',version:VERSION},503); }
   const b=await readJson(request)||{};
 
   // Les seules données de prix proviennent de D1. La requête ne peut fournir
