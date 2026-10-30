@@ -262,5 +262,5 @@ test('Trust Passport reads the actual D1 intervenants.validation_status field fa
 test('Strategic pricing forwards the configured fuel price into the travel cost engine', () => {
   assert.ok(source.includes("fuelMode='normal',fuelPriceCentsPerLitre=null,commissionRate=0.20"));
   assert.match(source, /financeStrategicTravel\(\{distanceKm,fuelMode,fuelPriceCentsPerLitre\}\)/);
-  assert.match(source, /distance:distance,fuelMode,fuelPriceCentsPerLitre,commissionRate/);
+  assert.match(source, /distanceKm:distance,fuelMode,fuelPriceCentsPerLitre,commissionRate/);
 });
