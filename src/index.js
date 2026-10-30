@@ -1720,7 +1720,7 @@ function financeStrategicTravel({distanceKm=0,fuelMode='normal',fuelPriceCentsPe
   };
 }
 
-function financeStrategicQuote({basePriceCents=0,phaseFactor=1,urgency='normal',evening=false,night=false,saturday=false,sunday=false,holiday=false,lastMinute=false,distanceKm=0,fuelMode='normal',commissionRate=0.20,discountCents=0,regulatedMaxCents=null,intervenantFloorCents=0,pspPercent=0,pspFixedCents=0,softwareCostCents=0,targetMarginPercent=12}={}) {
+function financeStrategicQuote({basePriceCents=0,phaseFactor=1,urgency='normal',evening=false,night=false,saturday=false,sunday=false,holiday=false,lastMinute=false,distanceKm=0,fuelMode='normal',fuelPriceCentsPerLitre=null,commissionRate=0.20,discountCents=0,regulatedMaxCents=null,intervenantFloorCents=0,pspPercent=0,pspFixedCents=0,softwareCostCents=0,targetMarginPercent=12}={}) {
   let service=Math.max(0,Math.round((Number(basePriceCents)||0)*(Number(phaseFactor)||1)));
   const u=String(urgency||'normal').toLowerCase();
   service=Math.round(service*(FINANCE_STRATEGIC.multipliers.urgency[u] ?? 1));
@@ -1732,7 +1732,7 @@ function financeStrategicQuote({basePriceCents=0,phaseFactor=1,urgency='normal',
   if(lastMinute)service=Math.round(service*FINANCE_STRATEGIC.multipliers.last_minute);
   service=Math.max(0,service-Math.max(0,Math.round(Number(discountCents)||0)));
   if(regulatedMaxCents!=null)service=Math.min(service,Math.max(0,Math.round(Number(regulatedMaxCents)||0)));
-  const travel=financeStrategicTravel({distanceKm,fuelMode});
+  const travel=financeStrategicTravel({distanceKm,fuelMode,fuelPriceCentsPerLitre});
   const rate=Math.max(0,Number(commissionRate)||0);
   const commission=Math.round(service*rate);
   let clientPrice=service+travel.total_cost_cents;
