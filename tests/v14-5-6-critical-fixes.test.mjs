@@ -288,12 +288,16 @@ test('Every quote requires an active D1 prestation and its active server tariff'
   assert.match(quote, /ACTIVE_PRESTATION_TARIFF_NOT_FOUND/);
   assert.match(quote, /VALIDATED_ROUTE_ESTIMATE_REQUIRED/);
   assert.match(quote, /pricing_route_estimates/);
+  assert.match(quote, /owner_user_id=\?/);
+  assert.match(quote, /gate\.auth\.user\.role==='entreprise'\?'B2B':'B2C'/);
 });
 
 test('Date modifiers and public holidays are calculated from mission timestamps server-side', () => {
   const quote = source.slice(source.indexOf('async function pricingQuote'), source.indexOf('async function financeSummary'));
   assert.match(quote, /timeZone:'Europe\/Paris'/);
   assert.match(quote, /pricing_holidays/);
+  assert.match(source, /2026-04-06/);
+  assert.match(source, /2030-12-25/);
   assert.match(quote, /holiday_date BETWEEN/);
   assert.match(quote, /isSaturday=.*localEnd\.weekday/);
   assert.match(quote, /isEvening=.*endHour/);
