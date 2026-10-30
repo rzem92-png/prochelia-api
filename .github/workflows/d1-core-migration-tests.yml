@@ -33,6 +33,7 @@ jobs:
           from pathlib import Path
 
           migration = Path("migrations/0001_core_business_schema.sql").read_text(encoding="utf-8")
+          pricing_migration = Path("migrations/0002_server_pricing.sql").read_text(encoding="utf-8")
           db = sqlite3.connect(":memory:")
           db.execute("PRAGMA foreign_keys = ON")
 
@@ -85,11 +86,14 @@ jobs:
           # Idempotence: applying twice must not duplicate or damage the baseline.
           db.executescript(migration)
           db.executescript(migration)
+          db.executescript(pricing_migration)
+          db.executescript(pricing_migration)
 
           expected = {
             "clients", "intervenants", "prestations", "missions", "tarifs",
             "paiements", "disponibilites", "evaluations", "documents",
-            "conflits", "journal"
+            "conflits", "journal", "pricing_policies", "pricing_service_rates",
+            "pricing_route_estimates", "pricing_holidays", "pricing_quotes"
           }
           actual = {
             row[0] for row in db.execute(
@@ -163,6 +167,7 @@ jobs:
           print("PASS: exported users/sessions/notifications baseline accepted")
           print("PASS: all 3 existing tables and seed rows preserved")
           print("PASS: 11 business tables created")
+          print("PASS: server pricing reference tables created and migration 0002 is idempotent")
           print("PASS: migration is idempotent")
           print("PASS: valid client/prestation/mission inserts")
           print("PASS: invalid foreign key rejected")
