@@ -82,7 +82,7 @@ export function simulateNexusGrowthOffer({ offer } = {}) {
   const breakEvenOrders = offer.priceCents <= offer.directCostPerOrderCents
     ? null
     : safeNumber(
-      (BigInt(offer.monthlyFixedCostCents + offer.monthlyAcquisitionCostCents) +
+      (BigInt(offer.monthlyFixedCostCents) + BigInt(offer.monthlyAcquisitionCostCents) +
         BigInt(offer.priceCents - offer.directCostPerOrderCents) - 1n) /
         BigInt(offer.priceCents - offer.directCostPerOrderCents),
       "breakEvenOrders"
