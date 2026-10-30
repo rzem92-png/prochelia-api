@@ -1178,8 +1178,13 @@ async function paymentWebhook(request, env) {
   // Stripe-Signature/timestamp verification. Never accept it as a Stripe webhook.
   if(String(provider).toLowerCase()==='stripe') return json({ok:false,error:'STRIPE_WEBHOOK_ADAPTER_NOT_IMPLEMENTED',version:VERSION,message:'Le vérificateur Stripe officiel doit être raccordé avant d’accepter les événements Stripe.'},503);
   const payloadHash=await sha256Base64url(raw);
-  const inserted=await env.DB.prepare(`INSERT OR IGNORE INTO payment_webhook_events (id,provider,event_id,event_type,signature_valid,payload_hash) VALUES (?,?,?,?,1,?)`).bind(crypto.randomUUID(),provider,eventId,type,payloadHash).run();
-  if(!inserted.meta?.changes) return json({ok:true,version:VERSION,duplicate:true,event_id:eventId},200);
+  await env.DB.prepare(`INSERT OR IGNORE INTO payment_webhook_events (id,provider,event_id,event_type,signature_valid,processed,payload_hash) VALUES (?,?,?,?,1,0,?)`).bind(crypto.randomUUID(),provider,eventId,type,payloadHash).run();
+  const priorEvent=await env.DB.prepare(`SELECT processed,payload_hash,processed_at FROM payment_webhook_events WHERE provider=? AND event_id=? LIMIT 1`).bind(provider,eventId).first();
+  if(!priorEvent) return json({ok:false,error:'WEBHOOK_EVENT_PERSISTENCE_FAILED',version:VERSION},503);
+  if(priorEvent.payload_hash&&priorEvent.payload_hash!==payloadHash) return json({ok:false,error:'WEBHOOK_EVENT_PAYLOAD_MISMATCH',version:VERSION},409);
+  if(Number(priorEvent.processed)===1) return json({ok:true,version:VERSION,duplicate:true,event_id:eventId},200);
+  const claim=await env.DB.prepare(`UPDATE payment_webhook_events SET processed=2,processed_at=CURRENT_TIMESTAMP WHERE provider=? AND event_id=? AND (processed=0 OR (processed=2 AND processed_at<datetime('now','-5 minutes')))`).bind(provider,eventId).run();
+  if(!claim.meta?.changes) return json({ok:true,version:VERSION,processing:true,event_id:eventId,retry_after_seconds:300},202);
   const txId=clean(event?.data?.transaction_id), payoutId=clean(event?.data?.payout_id);
   if(txId){
     const tx=await env.DB.prepare('SELECT * FROM payment_transactions WHERE id=? LIMIT 1').bind(txId).first();
