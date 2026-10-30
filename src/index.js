@@ -3994,35 +3994,6 @@ async function stripeCheckout(request, env) {
 }
 
 
-/* Read-only profile directories for the manager console. */
-async function listManagedProfiles(request,env,kind){
-  const gate=await requireAuthRole(request,env,['gerante']);
-  if(gate.error)return gate.error;
-  if(!env.DB)return json({ok:false,error:'DATABASE_UNAVAILABLE',version:VERSION},503);
-  const isClients=kind==='clients';
-  const table=isClients?'clients':'intervenants';
-  const role=isClients?'client':'intervenant';
-  const exists=await env.DB.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name=? LIMIT 1").bind(table).first();
-  const users=await env.DB.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='users' LIMIT 1").first();
-  if(!exists||!users)return json({ok:false,error:'PROFILE_SCHEMA_NOT_APPLIED',version:VERSION,required_migration:'0001_core_business_schema.sql'},503);
-  const url=new URL(request.url);
-  const n=Number.parseInt(url.searchParams.get('limit')||'50',10);
-  const p=Number.parseInt(url.searchParams.get('page')||'1',10);
-  const limit=Number.isFinite(n)?Math.max(1,Math.min(100,n)):50;
-  const page=Number.isFinite(p)?Math.max(1,Math.min(10001,p)):1;
-  const offset=(page-1)*limit;
-  const q=String(clean(url.searchParams.get('q')||'')).slice(0,100);
-  const filter=q?" AND (instr(lower(COALESCE(u.first_name,'')),lower(?))>0 OR instr(lower(COALESCE(u.last_name,'')),lower(?))>0 OR instr(lower(COALESCE(u.email,'')),lower(?))>0 OR instr(lower(COALESCE(u.phone,'')),lower(?))>0)":'';
-  const params=q?[role,q,q,q,q]:[role];
-  const count=await env.DB.prepare('SELECT COUNT(*) AS total FROM '+table+' p JOIN users u ON u.id=p.user_id WHERE u.role=?'+filter).bind(...params).first();
-  const sql=isClients
-    ? 'SELECT p.id,u.id AS user_id,u.first_name,u.last_name,u.email,u.phone,u.status,p.city,p.postal_code,p.created_at FROM clients p JOIN users u ON u.id=p.user_id WHERE u.role=?'+filter+' ORDER BY p.created_at DESC,p.id LIMIT ? OFFSET ?'
-    : 'SELECT p.id,u.id AS user_id,u.first_name,u.last_name,u.email,u.phone,u.status,p.professional_status,p.description,p.service_area,p.hourly_rate,p.validation_status,p.created_at FROM intervenants p JOIN users u ON u.id=p.user_id WHERE u.role=?'+filter+' ORDER BY p.created_at DESC,p.id LIMIT ? OFFSET ?';
-  const result=await env.DB.prepare(sql).bind(...params,limit,offset).all();
-  const items=result.results||[];
-  return json({ok:true,version:VERSION,source:'D1',items,pagination:{page,limit,total:Number(count&&count.total||0),has_more:offset+items.length<Number(count&&count.total||0)},read_only:true},200);
-}
-
 async function handle(request,env){
   try {')+'%';
   const filter=search?" AND (u.first_name LIKE ? ESCAPE '\\\\' OR u.last_name LIKE ? ESCAPE '\\\\' OR u.email LIKE ? ESCAPE '\\\\' OR u.phone LIKE ? ESCAPE '\\\\')":'';
@@ -4047,8 +4018,6 @@ async function handle(request,env){
   try {
     if(isMutatingMethod(request.method) && new URL(request.url).pathname!=='/api/payments/webhook' && !securityOriginAllowed(request,env)) return json({ok:false,error:'ORIGIN_NOT_ALLOWED',version:VERSION},403);
     const url=new URL(request.url);
-    if(url.pathname==='/api/clients' && request.method==='GET') return listManagedProfiles(request,env,'clients');
-    if(url.pathname==='/api/intervenants' && request.method==='GET') return listManagedProfiles(request,env,'intervenants');
     // Native provider webhook has no browser Origin; its Stripe signature is the authority.
     if(url.pathname==='/api/payments/webhook') return stripeWebhook(request,env);
     if(url.pathname==='/api/payments/checkout') { if(request.method!=='POST') return json({ok:false,error:'METHOD_NOT_ALLOWED',version:VERSION},405,{'allow':'POST'}); return stripeCheckout(request,env); }
