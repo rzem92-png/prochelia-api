@@ -69,6 +69,15 @@ function validateOpportunity(opportunity) {
 }
 
 function gateReport(approvals = {}) {
+  if (!approvals || typeof approvals !== "object" || Array.isArray(approvals)) {
+    throw new TypeError("approvals must be an object");
+  }
+  if (Object.keys(approvals).some((key) => !REQUIRED_GATES.includes(key))) {
+    throw new TypeError("approvals contain unsupported gates");
+  }
+  if (Object.values(approvals).some((value) => typeof value !== "boolean")) {
+    throw new TypeError("approval gate values must be boolean");
+  }
   const gates = REQUIRED_GATES.map((name) => ({
     name,
     passed: approvals[name] === true
@@ -102,8 +111,9 @@ export function evaluateNexusEnterpriseOpportunity({ company, opportunity } = {}
     : Math.floor(objectiveMatches.length * 10000 / opportunity.targetOutcomes.length);
   const capacityBps = opportunity.requiredCapacityUnits === 0
     ? 10000
-    : Math.min(10000, Math.floor(company.capacityUnits * 10000 /
-      opportunity.requiredCapacityUnits));
+    : Number((BigInt(company.capacityUnits) * 10000n /
+      BigInt(opportunity.requiredCapacityUnits)) > 10000n ? 10000n :
+      BigInt(company.capacityUnits) * 10000n / BigInt(opportunity.requiredCapacityUnits));
 
   const budgetFits = company.availableBudgetCents >= opportunity.estimatedInvestmentCents;
   const capacityFits = company.capacityUnits >= opportunity.requiredCapacityUnits;
