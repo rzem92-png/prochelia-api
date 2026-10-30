@@ -368,3 +368,13 @@ test('Pricing quote rejects invalid or out-of-range server financial policy valu
   assert.match(quote, /pricing_travel_policies/);
   assert.match(quote, /travel_fee_per_km_cents/);
 });
+
+
+test('Pricing policy selection is deterministic and blocks duplicate active rules', () => {
+  const quote = source.slice(source.indexOf('async function pricingQuote'), source.indexOf('async function financeSummary'));
+  assert.match(quote, /const policyRows=await env\.DB\.prepare/);
+  assert.match(quote, /const exactPolicies=/);
+  assert.match(quote, /const fallbackPolicies=/);
+  assert.match(quote, /PRICING_POLICY_AMBIGUOUS/);
+  assert.match(quote, /const providerFloor=Math\.max\(Number\(rate\.intervenant_floor_cents\),Number\(policy\.intervenant_floor_cents\|\|0\)\)/);
+});
