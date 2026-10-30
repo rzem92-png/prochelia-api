@@ -7,7 +7,7 @@ import { evaluateTaskEligibility } from "./trust-passport.js";
 // Les écritures de missions restent volontairement désactivées tant que la chaîne
 // authentification/RBAC/idempotence/contrôles métier n'a pas été validée.
 
-const VERSION = 'V14.5.6-EXPERT-PREPRODUCTION';
+const VERSION = 'V14.5.7-EXPERT-PREPRODUCTION';
 const SECURITY_CODE_TTL_SECONDS = 15 * 60;
 const SECURITY_MAX_ATTEMPTS = 5;
 const SECURITY_LOCK_SECONDS = 15 * 60;
