@@ -1876,7 +1876,8 @@ async function pricingRouteEstimate(request, env) {
 }
 
 async function pricingQuote(request, env) {
-  const gate=await requireAuthRole(request,env,['gerante','client','entreprise','intervenant']);
+  // Un intervenant ne peut pas générer un devis client en étant requalifié B2C.
+  const gate=await requireAuthRole(request,env,['gerante','client','entreprise']);
   if(gate.error)return gate.error;
   if(!env.DB)return json({ok:false,error:'DATABASE_UNAVAILABLE',version:VERSION},503);
   try { await ensureConsolidatedSchema(env); await ensureStrategicSchema(env); await ensureTrustPassportSchema(env); }
