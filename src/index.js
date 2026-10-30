@@ -1137,7 +1137,7 @@ async function payoutRequest(request, env) {
     env.DB.prepare(`INSERT INTO payment_wallet_ledger
       (id,idempotency_key,payout_id,user_id,entry_type,available_delta_cents,reserved_delta_cents,currency,metadata_json)
       SELECT ?,? ,id,user_id,'PAYOUT_RESERVED',-amount_cents,amount_cents,currency,?
-      FROM payout_requests WHERE idempotency_key=? AND status='requested'
+      FROM payout_requests WHERE idempotency_key=? AND status='requested' AND changes()=1
       AND NOT EXISTS(SELECT 1 FROM payment_wallet_ledger WHERE idempotency_key=?)`)
       .bind(crypto.randomUUID(),`payout:${idem}:reserved`,JSON.stringify({mode}),idem,`payout:${idem}:reserved`)
   ]);
