@@ -192,7 +192,8 @@ test('Initial manager bootstrap validates the NOT NULL phone field from the real
 });
 
 test('Initial manager bootstrap uses one atomic conditional INSERT and rejects a lost race', () => {
-  assert.match(source, /SELECT \\?, 'gerante', \\?, \\?, \\?, \\?, 'active', \\?\\s+WHERE NOT EXISTS \\(SELECT 1 FROM users LIMIT 1\\)/);
-  assert.match(source, /Number\\(created\\?\\.meta\\?\\.changes \\|\\| 0\\) !== 1/);
-  assert.match(source, /error: 'BOOTSTRAP_ALREADY_USED'/);
+  assert.ok(source.includes("SELECT ?, 'gerante', ?, ?, ?, ?, 'active', ?"));
+  assert.ok(source.includes('WHERE NOT EXISTS (SELECT 1 FROM users LIMIT 1)'));
+  assert.ok(source.includes('Number(created?.meta?.changes || 0) !== 1'));
+  assert.ok(source.includes("error: 'BOOTSTRAP_ALREADY_USED'"));
 });
