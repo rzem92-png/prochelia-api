@@ -1424,6 +1424,37 @@ async function ensureConsolidatedSchema(env) {
     `CREATE TABLE IF NOT EXISTS métier_catalog (id TEXT PRIMARY KEY, code TEXT NOT NULL UNIQUE, label TEXT NOT NULL, category TEXT, active INTEGER NOT NULL DEFAULT 1, rules_json TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`,
     `CREATE TABLE IF NOT EXISTS metier_suggestions (id TEXT PRIMARY KEY, label TEXT NOT NULL, reason TEXT, source TEXT NOT NULL DEFAULT 'copilot', status TEXT NOT NULL DEFAULT 'proposed', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, decided_at TEXT)`,
     `CREATE TABLE IF NOT EXISTS pricing_policies (id TEXT PRIMARY KEY, phase TEXT NOT NULL, service_code TEXT, client_type TEXT NOT NULL, intervenant_floor_cents INTEGER NOT NULL DEFAULT 0, client_ceiling_cents INTEGER NOT NULL DEFAULT 0, platform_fee_fixed_cents INTEGER NOT NULL DEFAULT 0, platform_fee_percent REAL NOT NULL DEFAULT 0, psp_percent REAL NOT NULL DEFAULT 0, psp_fixed_cents INTEGER NOT NULL DEFAULT 0, software_cost_cents INTEGER NOT NULL DEFAULT 0, fuel_cost_per_km_cents INTEGER NOT NULL DEFAULT 0, target_margin_percent REAL NOT NULL DEFAULT 0, market_min_cents INTEGER, market_max_cents INTEGER, active INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`,
+    `CREATE TABLE IF NOT EXISTS pricing_service_rates (
+      id TEXT PRIMARY KEY,
+      prestation_id TEXT NOT NULL,
+      service_code TEXT NOT NULL,
+      client_type TEXT NOT NULL CHECK (client_type IN ('B2C','B2B')),
+      base_price_cents INTEGER NOT NULL CHECK (base_price_cents > 0),
+      intervenant_floor_cents INTEGER NOT NULL CHECK (intervenant_floor_cents >= 0),
+      travel_fee_per_km_cents INTEGER NOT NULL DEFAULT 0 CHECK (travel_fee_per_km_cents >= 0),
+      regulated_max_cents INTEGER,
+      active INTEGER NOT NULL DEFAULT 1,
+      valid_from TEXT,
+      valid_until TEXT,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS idx_pricing_service_rate_active
+      ON pricing_service_rates(prestation_id, client_type, active)`,
+    `CREATE TABLE IF NOT EXISTS pricing_route_estimates (
+      id TEXT PRIMARY KEY,
+      distance_km REAL NOT NULL CHECK (distance_km >= 0 AND distance_km <= 500),
+      status TEXT NOT NULL DEFAULT 'VALID',
+      expires_at TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )`,
+    `CREATE TABLE IF NOT EXISTS pricing_holidays (
+      holiday_date TEXT NOT NULL,
+      region_code TEXT NOT NULL DEFAULT 'FR',
+      label TEXT,
+      active INTEGER NOT NULL DEFAULT 1,
+      PRIMARY KEY (holiday_date, region_code)
+    )`,
     `CREATE TABLE IF NOT EXISTS pricing_quotes (id TEXT PRIMARY KEY, phase TEXT NOT NULL, client_type TEXT NOT NULL, service_code TEXT, distance_km REAL NOT NULL DEFAULT 0, duration_minutes INTEGER NOT NULL DEFAULT 0, client_price_cents INTEGER NOT NULL DEFAULT 0, intervenant_amount_cents INTEGER NOT NULL DEFAULT 0, platform_commission_cents INTEGER NOT NULL DEFAULT 0, psp_cost_cents INTEGER NOT NULL DEFAULT 0, software_cost_cents INTEGER NOT NULL DEFAULT 0, fuel_cost_cents INTEGER NOT NULL DEFAULT 0, estimated_margin_cents INTEGER NOT NULL DEFAULT 0, assumptions_json TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`,
     `CREATE TABLE IF NOT EXISTS operational_cases (id TEXT PRIMARY KEY, case_type TEXT NOT NULL, source TEXT NOT NULL, phase TEXT NOT NULL, priority INTEGER NOT NULL DEFAULT 10, status TEXT NOT NULL DEFAULT 'OPEN', auto_mode TEXT NOT NULL DEFAULT 'PROPOSE', client_id TEXT, company_id TEXT, intervenant_id TEXT, mission_id TEXT, impact_level TEXT NOT NULL DEFAULT 'LOW', description TEXT, context_json TEXT NOT NULL DEFAULT '{}', proposed_solution_json TEXT, resolution_json TEXT, requires_manager INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, resolved_at TEXT)`,
     `CREATE INDEX IF NOT EXISTS idx_cases_status ON operational_cases(status, priority, created_at)`,
@@ -1768,93 +1799,195 @@ function financeStrategicQuote({basePriceCents=0,phaseFactor=1,urgency='normal',
 }
 
 async function pricingQuote(request, env) {
-  const gate=await requireAuthRole(request,env,['gerante','client','entreprise','intervenant']); if(gate.error)return gate.error;
+  const gate=await requireAuthRole(request,env,['gerante','client','entreprise','intervenant']);
+  if(gate.error)return gate.error;
+  if(!env.DB)return json({ok:false,error:'DATABASE_UNAVAILABLE',version:VERSION},503);
   const b=await readJson(request)||{};
-  // Les paramètres qui modifient la rémunération, les frais PSP ou la marge
-  // sont des paramètres de politique financière, jamais des entrées client.
-  const financialOverrides=['phase','platform_fee_percent','intervenant_floor_cents','psp_percent','psp_fixed_cents','software_cost_cents','target_margin_percent','regulated_max_cents','fuel_price_cents_per_litre','fuel_cost_per_km_cents'];
-  const attemptedOverrides=financialOverrides.filter(key=>Object.prototype.hasOwnProperty.call(b,key));
-  if(attemptedOverrides.length && gate.auth?.user?.role!=='gerante'){
-    return json({ok:false,error:'FINANCIAL_POLICY_OVERRIDE_FORBIDDEN',version:VERSION,fields:attemptedOverrides},403);
-  }
-  if(!env.DB) return json({ok:false,error:'DATABASE_UNAVAILABLE',version:VERSION},503);
-  const phase=String(b.phase||await getSetting(env,'project_phase','TEST')).toUpperCase();
-  if(!Object.prototype.hasOwnProperty.call(PROJECT_PHASES,phase)) return json({ok:false,error:'PRICING_PHASE_INVALID',version:VERSION},400);
-  const cfg=PROJECT_PHASES[phase];
-  const distance=Number(b.distance_km??0);
-  const duration=Number(b.duration_minutes??60);
-  const base=Number(b.base_price_cents??0);
+
+  // Les seules données de prix proviennent de D1. La requête ne peut fournir
+  // ni prix, ni remise, ni distance, ni multiplicateur, ni frais financiers.
+  const forbidden=['base_price_cents','price','client_price_cents','discount_cents',
+    'platform_fee_percent','platform_fee_fixed_cents','intervenant_floor_cents',
+    'psp_percent','psp_fixed_cents','software_cost_cents','regulated_max_cents',
+    'distance_km','fuel_cost_per_km_cents','fuel_price_cents_per_litre',
+    'evening','night','saturday','sunday','holiday','last_minute','urgency','phase'];
+  const supplied=forbidden.filter(k=>Object.prototype.hasOwnProperty.call(b,k));
+  if(supplied.length)return json({ok:false,error:'CLIENT_PRICING_INPUT_FORBIDDEN',fields:supplied,version:VERSION},400);
+
+  const prestationId=clean(b.prestation_id);
+  const serviceCode=clean(b.service_code);
   const clientType=String(b.client_type||'B2C').toUpperCase();
-  const serviceCode=clean(b.service_code)||null;
-  const discount=Number(b.discount_cents??0);
-  const numericInputs=[
-    ['distance_km',distance,0,500],
-    ['duration_minutes',duration,1,1440],
-    ['base_price_cents',base,1,5000000],
-    ['discount_cents',discount,0,5000000]
-  ];
-  const invalidInputs=numericInputs.filter(([,value,min,max])=>!Number.isFinite(value)||value<min||value>max);
-  if(invalidInputs.length) return json({ok:false,error:'PRICING_INPUT_INVALID',version:VERSION,fields:invalidInputs.map(([field])=>field)},400);
-  if(!['B2C','B2B'].includes(clientType)) return json({ok:false,error:'CLIENT_TYPE_INVALID',version:VERSION},400);
-  if(discount>base) return json({ok:false,error:'DISCOUNT_EXCEEDS_BASE_PRICE',version:VERSION},400);
-  if(serviceCode && (typeof serviceCode!=='string'||serviceCode.length>80||!/^[A-Za-z0-9_-]+$/.test(serviceCode))) return json({ok:false,error:'SERVICE_CODE_INVALID',version:VERSION},400);
+  if(!prestationId&&!serviceCode)return json({ok:false,error:'PRESTATION_REQUIRED',version:VERSION},400);
+  if(!['B2C','B2B'].includes(clientType))return json({ok:false,error:'CLIENT_TYPE_INVALID',version:VERSION},400);
+  if(prestationId&&prestationId.length>100)return json({ok:false,error:'PRESTATION_INVALID',version:VERSION},400);
+  if(serviceCode&&(!/^[A-Za-z0-9_-]{1,80}$/.test(serviceCode)))return json({ok:false,error:'SERVICE_CODE_INVALID',version:VERSION},400);
 
-  let policy=null;
+  const startMs=Date.parse(String(b.start_at||''));
+  const endMs=Date.parse(String(b.end_at||''));
+  if(!Number.isFinite(startMs)||!Number.isFinite(endMs)||endMs<=startMs||endMs-startMs>24*60*60*1000)
+    return json({ok:false,error:'MISSION_DATES_INVALID',version:VERSION},400);
+  const now=new Date();
+  if(startMs<now.getTime()-60*1000)return json({ok:false,error:'MISSION_START_IN_PAST',version:VERSION},400);
+  const phase=String(await getSetting(env,'project_phase','TEST')).toUpperCase();
+  if(!Object.prototype.hasOwnProperty.call(PROJECT_PHASES,phase))
+    return json({ok:false,error:'PRICING_PHASE_INVALID',version:VERSION},503);
+
+  let rate=null, policy=null, route=null;
   try {
-    policy=await env.DB.prepare(`SELECT * FROM pricing_policies WHERE active=1 AND phase=? AND client_type=? AND (service_code=? OR service_code IS NULL) ORDER BY CASE WHEN service_code=? THEN 0 ELSE 1 END LIMIT 1`)
-      .bind(phase,clientType,serviceCode,serviceCode).first();
+    if(prestationId){
+      rate=await env.DB.prepare(`SELECT * FROM pricing_service_rates
+        WHERE prestation_id=? AND client_type=? AND active=1
+        AND (valid_from IS NULL OR datetime(valid_from)<=datetime(?))
+        AND (valid_until IS NULL OR datetime(valid_until)>datetime(?))
+        LIMIT 1`).bind(prestationId,clientType,new Date(startMs).toISOString(),new Date(startMs).toISOString()).first();
+    } else {
+      rate=await env.DB.prepare(`SELECT * FROM pricing_service_rates
+        WHERE service_code=? AND client_type=? AND active=1
+        AND (valid_from IS NULL OR datetime(valid_from)<=datetime(?))
+        AND (valid_until IS NULL OR datetime(valid_until)>datetime(?))
+        LIMIT 1`).bind(serviceCode,clientType,new Date(startMs).toISOString(),new Date(startMs).toISOString()).first();
+    }
+    if(!rate)return json({ok:false,error:'ACTIVE_PRESTATION_TARIFF_NOT_FOUND',version:VERSION},409);
+    if(serviceCode&&String(rate.service_code)!==serviceCode)return json({ok:false,error:'PRESTATION_SERVICE_MISMATCH',version:VERSION},409);
+    policy=await env.DB.prepare(`SELECT * FROM pricing_policies
+      WHERE active=1 AND phase=? AND client_type=?
+      AND (service_code=? OR service_code IS NULL)
+      ORDER BY CASE WHEN service_code=? THEN 0 ELSE 1 END LIMIT 1`)
+      .bind(phase,clientType,rate.service_code,rate.service_code).first();
+    if(!policy)return json({ok:false,error:'PRICING_POLICY_UNAVAILABLE',version:VERSION},503);
+    route=await env.DB.prepare(`SELECT id,distance_km,status,expires_at FROM pricing_route_estimates
+      WHERE id=? AND status='VALID' AND datetime(expires_at)>datetime('now') LIMIT 1`)
+      .bind(clean(b.route_estimate_id)||'').first();
   } catch (_) {
-    return json({ok:false,error:'PRICING_POLICY_UNAVAILABLE',version:VERSION},503);
+    return json({ok:false,error:'PRICING_REFERENCE_DATA_UNAVAILABLE',version:VERSION},503);
   }
+  if(!route)return json({ok:false,error:'VALIDATED_ROUTE_ESTIMATE_REQUIRED',version:VERSION},409);
 
-  const fuelMode=String(b.fuel_mode||'normal').toLowerCase()==='high'?'high':'normal';
-  const fuelRateLegacy=Number(b.fuel_cost_per_km_cents??await getSetting(env,'fuel_cost_per_km_cents',20));
-  const fuelPriceCentsPerLitre=Number(b.fuel_price_cents_per_litre??await getSetting(env,fuelMode==='high'?'fuel_reference_price_cents_litre_high':'fuel_reference_price_cents_litre_normal',fuelMode==='high'?200:175));
-  const software=Number(b.software_cost_cents??policy?.software_cost_cents??await getSetting(env,'software_monthly_cost_cents',0));
-  const pspPercent=Number(b.psp_percent??policy?.psp_percent??0);
-  const pspFixed=Number(b.psp_fixed_cents??policy?.psp_fixed_cents??0);
-  const targetMargin=Number(b.target_margin_percent??policy?.target_margin_percent??await getSetting(env,'default_margin_percent',FINANCE_STRATEGIC.marginFloorPercent));
-  const commissionRate=Number(b.platform_fee_percent!=null?b.platform_fee_percent/100:(policy?.platform_fee_percent!=null?policy.platform_fee_percent/100:FINANCE_STRATEGIC.commissionDefaultPercent/100));
-  const intervenantFloor=Math.max(0,Math.round(Number(b.intervenant_floor_cents??policy?.intervenant_floor_cents??(base*0.70))));
-  const regulatedMax=b.regulated_max_cents!=null?Number(b.regulated_max_cents):(policy?.client_ceiling_cents>0?Number(policy.client_ceiling_cents):null);
-  const policyNumbers=[
-    ['fuel_price_cents_per_litre',fuelPriceCentsPerLitre,1,2000],
-    ['fuel_cost_per_km_cents',fuelRateLegacy,0,10000],
-    ['software_cost_cents',software,0,10000000],
-    ['psp_percent',pspPercent,0,100],
-    ['psp_fixed_cents',pspFixed,0,100000],
-    ['target_margin_percent',targetMargin,0,100],
-    ['platform_fee_percent',commissionRate*100,0,100],
-    ['intervenant_floor_cents',intervenantFloor,0,5000000]
-  ];
-  const invalidPolicy=policyNumbers.filter(([,value,min,max])=>!Number.isFinite(value)||value<min||value>max);
-  if(invalidPolicy.length || (regulatedMax!==null&&(!Number.isFinite(regulatedMax)||regulatedMax<1||regulatedMax>5000000))) {
-    return json({ok:false,error:'FINANCIAL_POLICY_INVALID',version:VERSION,fields:[...invalidPolicy.map(([field])=>field),...(regulatedMax!==null&&(!Number.isFinite(regulatedMax)||regulatedMax<1||regulatedMax>5000000)?['regulated_max_cents']:[])]},503);
+  const distance=Number(route.distance_km);
+  const durationMinutes=Math.round((endMs-startMs)/60000);
+  if(!Number.isFinite(distance)||distance<0||distance>500)
+    return json({ok:false,error:'ROUTE_ESTIMATE_INVALID',version:VERSION},503);
+
+  // Horaires et jours sont dérivés du créneau demandé, jamais de drapeaux client.
+  const parisParts=(ms)=>Object.fromEntries(new Intl.DateTimeFormat('en-GB',{
+    timeZone:'Europe/Paris',weekday:'short',hour:'2-digit',hourCycle:'h23'
+  }).formatToParts(new Date(ms)).filter(p=>p.type!=='literal').map(p=>[p.type,p.value]));
+  const localStart=parisParts(startMs), localEnd=parisParts(Math.max(startMs,endMs-1));
+  const startHour=Number(localStart.hour), endHour=Number(localEnd.hour);
+  const weekday=localStart.weekday;
+  const isSaturday=weekday==='Sat', isSunday=weekday==='Sun';
+  const isEvening=startHour>=18&&startHour<22;
+  const isNight=startHour>=22||startHour<6||endHour>=22;
+  const holidayDate=new Intl.DateTimeFormat('en-CA',{timeZone:'Europe/Paris',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date(startMs));
+  let holiday=false;
+  try {
+    const h=await env.DB.prepare(`SELECT 1 AS yes FROM pricing_holidays
+      WHERE holiday_date=? AND region_code IN ('FR','IDF') AND active=1 LIMIT 1`).bind(holidayDate).first();
+    holiday=!!h;
+  } catch (_) { return json({ok:false,error:'HOLIDAY_CALENDAR_UNAVAILABLE',version:VERSION},503); }
+
+  const cfg=PROJECT_PHASES[phase];
+  const base=Number(rate.base_price_cents);
+  const providerFloor=Number(rate.intervenant_floor_cents);
+  const fixedFee=Number(policy.platform_fee_fixed_cents||0);
+  const feePercent=Number(policy.platform_fee_percent||0);
+  const pspPercent=Number(policy.psp_percent||0);
+  const pspFixed=Number(policy.psp_fixed_cents||0);
+  const software=Number(policy.software_cost_cents||0);
+  const fuelCostPerKm=Number(policy.fuel_cost_per_km_cents||0);
+  const travelFeePerKm=Number(rate.travel_fee_per_km_cents||0);
+  const ceiling=rate.regulated_max_cents==null?null:Number(rate.regulated_max_cents);
+  const policyValues=[base,providerFloor,fixedFee,feePercent,pspPercent,pspFixed,software,fuelCostPerKm,travelFeePerKm];
+  if(policyValues.some(v=>!Number.isFinite(v)||v<0)||base<1||feePercent>100||pspPercent>100||
+     (ceiling!==null&&(!Number.isFinite(ceiling)||ceiling<1)))
+    return json({ok:false,error:'FINANCIAL_POLICY_INVALID',version:VERSION},503);
+
+  const multipliers=FINANCE_STRATEGIC.multipliers;
+  let serviceGross=Math.round(base*cfg.pricingFactor);
+  if(isEvening)serviceGross=Math.round(serviceGross*multipliers.evening);
+  if(isNight)serviceGross=Math.round(serviceGross*multipliers.night);
+  if(isSaturday)serviceGross=Math.round(serviceGross*multipliers.saturday);
+  if(isSunday)serviceGross=Math.round(serviceGross*multipliers.sunday);
+  if(holiday)serviceGross=Math.round(serviceGross*multipliers.holiday);
+
+  let promotion=null, discountCents=0;
+  const promotionCode=clean(b.promotion_code);
+  if(promotionCode){
+    try {
+      promotion=await env.DB.prepare(`SELECT id,code,discount_type,discount_value,min_amount_cents,
+        max_discount_cents,budget_cents,used_cents,service_code,client_type,starts_at,ends_at
+        FROM promotions WHERE code=? AND status='ACTIVE' AND phase=?
+        AND client_type IN (?, 'ALL') AND (service_code IS NULL OR service_code=?)
+        AND datetime(starts_at)<=datetime(?) AND datetime(ends_at)>datetime(?)
+        AND (budget_cents IS NULL OR used_cents<budget_cents)
+        LIMIT 1`).bind(promotionCode,phase,clientType,rate.service_code,new Date().toISOString(),new Date().toISOString()).first();
+    } catch (_) { return json({ok:false,error:'PROMOTION_REFERENCE_UNAVAILABLE',version:VERSION},503); }
+    if(!promotion)return json({ok:false,error:'PROMOTION_NOT_APPROVED_OR_NOT_ELIGIBLE',version:VERSION},409);
+    if(serviceGross<Number(promotion.min_amount_cents||0))
+      return json({ok:false,error:'PROMOTION_MINIMUM_NOT_REACHED',version:VERSION},409);
+    discountCents=String(promotion.discount_type).toUpperCase()==='PERCENT'
+      ? Math.round(serviceGross*Math.min(100,Math.max(0,Number(promotion.discount_value)||0))/100)
+      : Math.round(Math.max(0,Number(promotion.discount_value)||0));
+    if(promotion.max_discount_cents!=null)discountCents=Math.min(discountCents,Number(promotion.max_discount_cents));
+    discountCents=Math.min(serviceGross,Math.max(0,discountCents));
   }
-  const strategic=financeStrategicQuote({
-    basePriceCents:base,
-    phaseFactor:cfg.pricingFactor,
-    urgency:b.urgency||'normal',
-    evening:Boolean(b.evening),night:Boolean(b.night),saturday:Boolean(b.saturday),sunday:Boolean(b.sunday),holiday:Boolean(b.holiday),lastMinute:Boolean(b.last_minute||b.lastMinute),
-    distanceKm:distance,fuelMode,fuelPriceCentsPerLitre,commissionRate,discountCents:discount,regulatedMaxCents:regulatedMax,
-    intervenantFloorCents:intervenantFloor,pspPercent,pspFixedCents:pspFixed,softwareCostCents:software,targetMarginPercent:targetMargin
-  });
-  /* Compatibilité avec l'ancien contrat : fuel_cost_cents reste disponible. */
-  const legacyFuel=Math.max(0,Math.round(distance*fuelRateLegacy));
+  const discountedService=Math.max(0,serviceGross-discountCents);
+  // Le plafond s'applique au prix de la prestation uniquement. Le déplacement
+  // reste une ligne distincte et s'ajoute ensuite au total client.
+  const servicePrice=ceiling===null?discountedService:Math.min(discountedService,ceiling);
+  const commission=Math.round(fixedFee+servicePrice*feePercent/100);
+  if(commission>servicePrice)return json({ok:false,error:'PLATFORM_FEE_EXCEEDS_SERVICE_PRICE',version:VERSION},503);
+  const intervenantAmount=servicePrice-commission;
+  if(intervenantAmount<providerFloor)
+    return json({ok:false,error:'INTERVENANT_FLOOR_NOT_MET',version:VERSION},409);
+  const travelFee=Math.round(distance*travelFeePerKm);
+  const travelCost=Math.round(distance*fuelCostPerKm);
+  const clientTotal=servicePrice+travelFee;
+  const pspCost=Math.round(clientTotal*pspPercent/100)+pspFixed;
+  const platformRevenue=commission;
+  const margin=platformRevenue+travelFee-travelCost-pspCost-software;
   const quote={
-    phase,clientType,distance,duration,
-    client_price_cents:strategic.client_price_cents,
-    intervenant_amount_cents:strategic.intervenant_amount_cents,
-    platform_commission_cents:strategic.commission_cents,
-    psp_cost_cents:strategic.psp_cost_cents,
-    software_cost_cents:strategic.software_cost_cents,
-    fuel_cost_cents:strategic.travel.total_cost_cents,
-    estimated_margin_cents:strategic.estimated_margin_cents,
-    strategic_finance:strategic,
-    assumptions:{market_position:'strategic',fuel_included:true,fuel_mode:fuelMode,fuel_reference_price_cents_per_litre:fuelPriceCentsPerLitre,legacy_fuel_cost_per_km_cents:legacyFuel,software_included:true,target_margin_percent:targetMargin,commission_rate_percent:commissionRate*100,b2b_rule:'company_pays_intervenant_platform_bills_commission',single_finance_engine:true}
+    currency:'EUR',finance_version:FINANCE_STRATEGIC_VERSION,
+    prestation_id:rate.prestation_id,service_code:rate.service_code,client_type:clientType,
+    phase,starts_at:new Date(startMs).toISOString(),ends_at:new Date(endMs).toISOString(),
+    duration_minutes:durationMinutes,
+    breakdown:{
+      prestation_before_discount_cents:serviceGross,approved_promotion_discount_cents:discountCents,
+      prestation_price_cents:servicePrice,regulated_ceiling_cents:ceiling,
+      travel_distance_km:Number(distance.toFixed(2)),travel_fee_cents:travelFee,
+      client_total_cents:clientTotal,intervenant_amount_cents:intervenantAmount,
+      platform_commission_fixed_cents:fixedFee,
+      platform_commission_variable_cents:Math.round(servicePrice*feePercent/100),
+      platform_commission_total_cents:commission,psp_percent:pspPercent,
+      psp_fixed_cents:pspFixed,psp_cost_cents:pspCost,
+      travel_operating_cost_cents:travelCost,software_cost_cents:software,
+      platform_margin_cents:margin
+    },
+    modifiers:{evening:isEvening,night:isNight,saturday:isSaturday,sunday:isSunday,public_holiday:holiday},
+    promotion:promotion?{id:promotion.id,code:promotion.code}:null,
+    accounting:{
+      customer_debit_cents:clientTotal,
+      provider_credit_cents:intervenantAmount,
+      platform_commission_revenue_cents:commission,
+      travel_fee_revenue_cents:travelFee,
+      psp_expense_cents:pspCost,travel_expense_cents:travelCost,
+      software_allocation_cents:software,platform_margin_cents:margin,
+      reconciliation_delta_cents:clientTotal-intervenantAmount-commission-travelFee
+    },
+    profitability_status:margin<0?'DEFICITAIRE':margin<Math.max(200,Math.round(clientTotal*Number(policy.target_margin_percent||0)/100))?'MARGE_FAIBLE':'RENTABLE'
   };
-  await env.DB.prepare(`INSERT INTO pricing_quotes(id,phase,client_type,service_code,distance_km,duration_minutes,client_price_cents,intervenant_amount_cents,platform_commission_cents,psp_cost_cents,software_cost_cents,fuel_cost_cents,estimated_margin_cents,assumptions_json) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
-    .bind(crypto.randomUUID(),phase,clientType,serviceCode,distance,duration,quote.client_price_cents,quote.intervenant_amount_cents,quote.platform_commission_cents,quote.psp_cost_cents,quote.software_cost_cents,quote.fuel_cost_cents,quote.estimated_margin_cents,JSON.stringify(quote.assumptions)).run();
+  if(quote.accounting.reconciliation_delta_cents!==0)
+    return json({ok:false,error:'QUOTE_ACCOUNTING_RECONCILIATION_FAILED',version:VERSION},503);
+  await env.DB.prepare(`INSERT INTO pricing_quotes(id,phase,client_type,service_code,distance_km,duration_minutes,
+    client_price_cents,intervenant_amount_cents,platform_commission_cents,psp_cost_cents,software_cost_cents,
+    fuel_cost_cents,estimated_margin_cents,assumptions_json)
+    VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+    .bind(crypto.randomUUID(),phase,clientType,rate.service_code,distance,durationMinutes,clientTotal,
+      intervenantAmount,commission,pspCost,software,travelCost,margin,JSON.stringify({
+        source:'SERVER_D1_ONLY',prestation_id:rate.prestation_id,route_estimate_id:route.id,
+        promotion_id:promotion?.id||null,starts_at:quote.starts_at,ends_at:quote.ends_at,
+        accounting:quote.accounting,modifiers:quote.modifiers
+      })).run();
   return json({ok:true,version:VERSION,quote},200);
 }
 
