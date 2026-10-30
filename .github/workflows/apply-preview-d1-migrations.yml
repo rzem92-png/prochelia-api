@@ -1,0 +1,134 @@
+name: PROCHÉLIA — appliquer migrations D1 préproduction
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_preview:
+        description: "Saisir exactement APPLY_PREVIEW_ONLY pour autoriser la migration de préproduction"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: prochelia-preview-d1-migrations
+  cancel-in-progress: false
+
+jobs:
+  migrate-preview:
+    if: ${{ github.event.inputs.confirm_preview == 'APPLY_PREVIEW_ONLY' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      BACKUP_ENCRYPTION_KEY: ${{ secrets.BACKUP_ENCRYPTION_KEY }}
+      EXPECTED_DB_NAME: prochelia-preview-db
+      EXPECTED_DB_ID: 6adb95e5-e542-4bec-9008-fbea01042305
+      EXPECTED_ACCOUNT_ID: f2a79e9fa41566a8ec80fb24c02c60eb
+    steps:
+      - name: Checkout preproduction branch
+        uses: actions/checkout@v4
+        with:
+          ref: prelaunch/v14.5.7-consolidation-audit
+
+      - name: Verify credentials, exact target and migration files
+        shell: bash
+        run: |
+          set -euo pipefail
+          for name in CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID BACKUP_ENCRYPTION_KEY; do
+            test -n "${!name:-}" || { echo "::error::Required secret missing: $name"; exit 1; }
+          done
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          config = json.loads(Path("wrangler.jsonc").read_text())
+          assert config["name"] == "prochelia-api-staging", "Unexpected Worker name"
+          db = next(x for x in config["d1_databases"] if x["binding"] == "DB")
+          assert db["database_name"] == "prochelia-preview-db", "Unexpected D1 name"
+          assert db["database_id"] == "6adb95e5-e542-4bec-9008-fbea01042305", "Unexpected D1 UUID"
+          assert len(config["d1_databases"]) == 1, "Unexpected additional D1 binding"
+          for name in (
+            "0001_core_business_schema.sql",
+            "0002_server_pricing.sql",
+            "0003_route_address_provenance.sql",
+            "0004_atomic_wallet_ledger.sql",
+          ):
+            p = Path("migrations") / name
+            assert p.is_file() and p.stat().st_size > 0, f"Missing migration: {name}"
+          print("PASS: staging Worker, exact preview D1 and four migration files verified")
+          PY
+          test "$EXPECTED_DB_NAME" = "prochelia-preview-db"
+          test "$EXPECTED_DB_ID" = "6adb95e5-e542-4bec-9008-fbea01042305"
+          test "$EXPECTED_ACCOUNT_ID" = "f2a79e9fa41566a8ec80fb24c02c60eb"
+
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Verify Cloudflare account identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          identity="$(npx --yes wrangler@4 whoami 2>&1)"
+          printf '%s\\n' "$identity"
+          printf '%s' "$identity" | grep -Fq "$EXPECTED_ACCOUNT_ID" || {
+            echo "::error::Cloudflare account ID does not match the expected account."
+            exit 1
+          }
+
+      - name: Export only Preview D1 before migration
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          mkdir -p "$RUNNER_TEMP/prochelia-backup"
+          npx --yes wrangler@4 d1 export "$EXPECTED_DB_NAME" --remote --config wrangler.jsonc --skip-confirmation --output="$RUNNER_TEMP/prochelia-backup/prochelia-preview.sql"
+          test -s "$RUNNER_TEMP/prochelia-backup/prochelia-preview.sql"
+
+      - name: Encrypt and verify fresh backup
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          plaintext="$RUNNER_TEMP/prochelia-backup/prochelia-preview.sql"
+          encrypted="$RUNNER_TEMP/prochelia-backup/prochelia-preview.sql.gpg"
+          printf '%s' "$BACKUP_ENCRYPTION_KEY" | gpg --batch --yes --pinentry-mode loopback --passphrase-fd 0 --symmetric --cipher-algo AES256 --output "$encrypted" "$plaintext"
+          test -s "$encrypted"
+          expected="$(sha256sum "$plaintext" | cut -d ' ' -f 1)"
+          printf '%s' "$BACKUP_ENCRYPTION_KEY" | gpg --batch --yes --pinentry-mode loopback --passphrase-fd 0 --decrypt "$encrypted" > "$RUNNER_TEMP/prochelia-backup/decrypted-check.sql"
+          actual="$(sha256sum "$RUNNER_TEMP/prochelia-backup/decrypted-check.sql" | cut -d ' ' -f 1)"
+          test "$expected" = "$actual"
+          rm -f "$plaintext" "$RUNNER_TEMP/prochelia-backup/decrypted-check.sql"
+          printf 'database=%s\ncreated_utc=%s\nencrypted_file=prochelia-preview.sql.gpg\n' "$EXPECTED_DB_NAME" "$(date -u +%FT%TZ)" > "$RUNNER_TEMP/prochelia-backup/README.txt"
+
+      - name: Publish encrypted backup before any schema write
+        uses: actions/upload-artifact@v4
+        with:
+          name: prochelia-preview-pre-migration-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/prochelia-backup/prochelia-preview.sql.gpg
+            ${{ runner.temp }}/prochelia-backup/README.txt
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Show pending migrations
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx --yes wrangler@4 d1 migrations list "$EXPECTED_DB_NAME" --remote --config wrangler.jsonc
+
+      - name: Apply migrations to Preview D1 only
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx --yes wrangler@4 d1 migrations apply "$EXPECTED_DB_NAME" --remote --config wrangler.jsonc
+
+      - name: Verify migration status after applying
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx --yes wrangler@4 d1 migrations list "$EXPECTED_DB_NAME" --remote --config wrangler.jsonc
+          echo "Migration command completed for the hard-pinned Preview D1 target."
