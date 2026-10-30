@@ -1433,8 +1433,11 @@ async function ensureConsolidatedSchema(env) {
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     )`,
+    `DROP INDEX IF EXISTS idx_pricing_travel_policy_active`,
     `CREATE UNIQUE INDEX IF NOT EXISTS idx_pricing_travel_policy_active
-      ON pricing_travel_policies(phase, client_type, active)`,
+      ON pricing_travel_policies(phase, client_type) WHERE active=1`,
+    `CREATE INDEX IF NOT EXISTS idx_pricing_route_owner_expiry
+      ON pricing_route_estimates(owner_user_id,status,expires_at)`,
     `CREATE TABLE IF NOT EXISTS pricing_route_estimates (
       id TEXT PRIMARY KEY,
       owner_user_id TEXT NOT NULL,
