@@ -42,6 +42,8 @@ test('Wallet balance mutations are driven by an append-only idempotent ledger tr
   assert.match(source, /CREATE TABLE IF NOT EXISTS payment_wallet_ledger/);
   assert.match(source, /idempotency_key TEXT NOT NULL UNIQUE/);
   assert.match(source, /CREATE TRIGGER IF NOT EXISTS trg_payment_wallet_ledger_apply/);
+  assert.match(source, /trg_payment_wallet_ledger_no_update/);
+  assert.match(source, /trg_payment_wallet_ledger_no_delete/);
   assert.match(source, /available_cents=available_cents\+NEW\.available_delta_cents/);
   assert.match(source, /pending_cents=pending_cents\+NEW\.pending_delta_cents/);
   assert.match(source, /reserved_cents=reserved_cents\+NEW\.reserved_delta_cents/);
@@ -56,6 +58,15 @@ test('Stripe payment and refund webhooks use atomic batches and deterministic le
   assert.match(webhook, /payment:\$\{tx\.id\}:refund:/);
   assert.match(webhook, /REFUND_REVERSAL/);
   assert.match(webhook, /out_of_order_refund_reconciliation/);
+});
+
+test('Non-Stripe provider webhook credits and refunds through the same atomic ledger', () => {
+  const webhook = source.slice(source.indexOf('async function paymentWebhook'), source.indexOf('async function openPaymentDispute'));
+  assert.match(webhook, /await env\.DB\.batch\(/);
+  assert.match(webhook, /payment:\$\{txId\}:credit/);
+  assert.match(webhook, /payment:\$\{txId\}:refund:/);
+  assert.match(webhook, /REFUND_REVERSAL/);
+  assert.match(webhook, /STRIPE_WEBHOOK_ADAPTER_NOT_IMPLEMENTED/);
 });
 
 test('Payout reservation and settlement use idempotent wallet ledger entries', () => {
