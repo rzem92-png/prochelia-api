@@ -3995,26 +3995,6 @@ async function stripeCheckout(request, env) {
 
 
 async function handle(request,env){
-  try {')+'%';
-  const filter=search?" AND (u.first_name LIKE ? ESCAPE '\\\\' OR u.last_name LIKE ? ESCAPE '\\\\' OR u.email LIKE ? ESCAPE '\\\\' OR u.phone LIKE ? ESCAPE '\\\\')":'';
-  const params=search?[profileRole,like,like,like,like]:[profileRole];
-  const count=await env.DB.prepare(`SELECT COUNT(*) AS total FROM ${table} p JOIN users u ON u.id=p.user_id WHERE u.role=?${filter}`).bind(...params).first();
-  let query;
-  if(kind==='clients'){
-    query=`SELECT p.id,u.id AS user_id,u.first_name,u.last_name,u.email,u.phone,u.status,p.city,p.postal_code,p.created_at
-      FROM clients p JOIN users u ON u.id=p.user_id WHERE u.role=?${filter}
-      ORDER BY p.created_at DESC,p.id LIMIT ? OFFSET ?`;
-  }else{
-    query=`SELECT p.id,u.id AS user_id,u.first_name,u.last_name,u.email,u.phone,u.status,
-      p.professional_status,p.description,p.service_area,p.hourly_rate,p.validation_status,p.created_at
-      FROM intervenants p JOIN users u ON u.id=p.user_id WHERE u.role=?${filter}
-      ORDER BY p.created_at DESC,p.id LIMIT ? OFFSET ?`;
-  }
-  const result=await env.DB.prepare(query).bind(...params,limit,offset).all();
-  return json({ok:true,version:VERSION,source:'D1',items:result.results||[],pagination:{page,limit,total:Number(count?.total||0),has_more:offset+((result.results||[]).length)<Number(count?.total||0)},read_only:true},200);
-}
-
-async function handle(request,env){
   try {
     if(isMutatingMethod(request.method) && new URL(request.url).pathname!=='/api/payments/webhook' && !securityOriginAllowed(request,env)) return json({ok:false,error:'ORIGIN_NOT_ALLOWED',version:VERSION},403);
     const url=new URL(request.url);
