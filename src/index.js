@@ -1599,12 +1599,20 @@ async function executeOperationalCase(env, caseId, approverId=null, automatic=fa
   const rec=c.proposed_solution_json?JSON.parse(c.proposed_solution_json):{};
   if(c.requires_manager && !automatic && !approverId) return {ok:false,error:'MANAGER_APPROVAL_REQUIRED'};
   const businessResults = await executeCaseBusinessAction(env,c,rec,approverId,automatic);
-  const resolution={executed:true,automatic,action:rec.action||'RESOLVE',steps:rec.solution?.steps||[],business_results:businessResults,executed_at:new Date().toISOString()};
-  await env.DB.prepare(`INSERT INTO case_actions(id,case_id,action_code,mode,status,payload_json,result_json,completed_at) VALUES(?,?,?,?,?,?,?,CURRENT_TIMESTAMP)`)
-    .bind(crypto.randomUUID(),caseId,rec.action||'RESOLVE',automatic?'AUTO':'MANAGER','COMPLETED',JSON.stringify(rec),JSON.stringify(resolution)).run();
-  await env.DB.prepare(`UPDATE operational_cases SET status='RESOLVED',resolution_json=?,requires_manager=0,updated_at=CURRENT_TIMESTAMP,resolved_at=CURRENT_TIMESTAMP WHERE id=?`).bind(JSON.stringify(resolution),caseId).run();
+  // Enqueuing an action is not proof that it ran. Keep the case open until a
+  // trusted downstream adapter returns a verified receipt and all required work
+  // is complete. This prevents false "resolved" statuses in dashboards/SLAs.
+  const pending = businessResults.some(x => ['PENDING','WAITING_PROVIDER','WAITING_MANAGER'].includes(String(x.status||'').toUpperCase()) || x.created===true);
+  const failed = businessResults.some(x => String(x.status||'').toUpperCase()==='FAILED');
+  const verifiedComplete = businessResults.length===0 && rec.action==='ANALYZE_AND_PROPOSE';
+  const finalStatus = verifiedComplete ? 'RESOLVED' : (failed ? 'ACTION_FAILED' : 'WAITING_ACTION');
+  const resolution={executed:false,automatic,action:rec.action||'RESOLVE',steps:rec.solution?.steps||[],business_results:businessResults,status:finalStatus,completion_requires_verified_receipt:true,updated_at:new Date().toISOString()};
+  await env.DB.prepare(`INSERT INTO case_actions(id,case_id,action_code,mode,status,payload_json,result_json,completed_at) VALUES(?,?,?,?,?,?,?,?)`)
+    .bind(crypto.randomUUID(),caseId,rec.action||'RESOLVE',automatic?'AUTO':'MANAGER',finalStatus,JSON.stringify(rec),JSON.stringify(resolution),verifiedComplete?new Date().toISOString():null).run();
+  await env.DB.prepare(`UPDATE operational_cases SET status=?,resolution_json=?,requires_manager=?,updated_at=CURRENT_TIMESTAMP,resolved_at=? WHERE id=?`)
+    .bind(finalStatus,JSON.stringify(resolution),verifiedComplete?0:1,verifiedComplete?new Date().toISOString():null,caseId).run();
   await env.DB.prepare(`UPDATE copilot_log SET approved_by=COALESCE(?,approved_by),result=? WHERE case_id=? AND id=(SELECT id FROM copilot_log WHERE case_id=? ORDER BY created_at DESC LIMIT 1)`).bind(approverId,JSON.stringify(resolution),caseId,caseId).run();
-  await journal(env,automatic?'copilot':'gerante',approverId,automatic?'AUTO_CASE_RESOLVED':'CASE_RESOLVED','operational_case',caseId,'OK',resolution);
+  await journal(env,automatic?'copilot':'gerante',approverId,verifiedComplete?'CASE_RESOLVED_VERIFIED':'CASE_ACTIONS_PENDING','operational_case',caseId,finalStatus,resolution);
   return {ok:true,case_id:caseId,resolution};
 }
 
