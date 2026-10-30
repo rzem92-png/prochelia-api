@@ -40,6 +40,9 @@ export function calculateMarketplaceEconomics(input = {}) {
     - pspFeeCents
     - platformFundedDiscountCents
     - variableCostCents;
+  if (!Number.isSafeInteger(platformContributionCents)) {
+    throw new RangeError('PLATFORM_CONTRIBUTION_OVERFLOW');
+  }
 
   return Object.freeze({
     currency: String(input.currency || 'EUR').toUpperCase(),
