@@ -1032,73 +1032,151 @@ function v7CheckPayment(
 // =====================================================
 
 function v7CalculateFinance({
+  // Backward-compatible public inputs (amounts in EUR).
   clientAmount = 0,
   commissionRate = 0,
   paymentFees = 0,
-  otherFees = 0
+  otherFees = 0,
+  // Explicit, auditable components (amounts in EUR unless *_Cents).
+  clientAmountCents,
+  commissionFixed = 0,
+  commissionFixedCents,
+  commissionVariableRate,
+  paymentFeeFixed = 0,
+  paymentFeeFixedCents,
+  paymentFeeRate = 0
 } = {}) {
-
-  const client =
-    Number(
-      clientAmount
-    ) || 0;
-
-  const rate =
-    Number(
-      commissionRate
-    ) || 0;
-
-  const payment =
-    Number(
-      paymentFees
-    ) || 0;
-
-  const other =
-    Number(
-      otherFees
-    ) || 0;
-
-  const commission =
-    client *
-    rate /
-    100;
-
-  const intervenant =
-    client -
-    commission;
-
-  const margin =
-    commission -
-    payment -
-    other;
-
-  return v7Result(
-    true,
-    {
-
-      clientAmount:
-        client,
-
-      commissionRate:
-        rate,
-
-      commissionAmount:
-        commission,
-
-      intervenantAmount:
-        intervenant,
-
-      paymentFees:
-        payment,
-
-      otherFees:
-        other,
-
-      grossMargin:
-        margin
+  const toCents = (value, name) => {
+    const n = Number(value);
+    if (!Number.isFinite(n) || n < 0) throw new Error(name + '_INVALID');
+    const cents = Math.round(n * 100);
+    if (!Number.isSafeInteger(cents)) throw new Error(name + '_OUT_OF_RANGE');
+    return cents;
+  };
+  try {
+    const grossCents = clientAmountCents === undefined
+      ? toCents(clientAmount, 'CLIENT_AMOUNT')
+      : Number(clientAmountCents);
+    if (!Number.isSafeInteger(grossCents) || grossCents < 0) {
+      throw new Error('CLIENT_AMOUNT_CENTS_INVALID');
     }
-  );
+
+    const variableRate = commissionVariableRate === undefined
+      ? Number(commissionRate)
+      : Number(commissionVariableRate);
+    const pspRate = Number(paymentFeeRate);
+    if (!Number.isFinite(variableRate) || variableRate < 0 || variableRate > 100) {
+      throw new Error('COMMISSION_RATE_INVALID');
+    }
+    if (!Number.isFinite(pspRate) || pspRate < 0 || pspRate > 100) {
+      throw new Error('PAYMENT_FEE_RATE_INVALID');
+    }
+
+    const fixedCommissionCents = commissionFixedCents === undefined
+      ? toCents(commissionFixed, 'COMMISSION_FIXED')
+      : Number(commissionFixedCents);
+    const fixedPspCents = paymentFeeFixedCents === undefined
+      ? toCents(paymentFeeFixed, 'PAYMENT_FEE_FIXED')
+      : Number(paymentFeeFixedCents);
+    const legacyPspCents = toCents(paymentFees, 'PAYMENT_FEES');
+    const otherCents = toCents(otherFees, 'OTHER_FEES');
+    if (!Number.isSafeInteger(fixedCommissionCents) || fixedCommissionCents < 0 ||
+        !Number.isSafeInteger(fixedPspCents) || fixedPspCents < 0) {
+      throw new Error('FIXED_AMOUNT_CENTS_INVALID');
+    }
+
+    const variableCommissionCents = Math.round(grossCents * variableRate / 100);
+    const commissionCents = fixedCommissionCents + variableCommissionCents;
+    if (commissionCents > grossCents) throw new Error('COMMISSION_EXCEEDS_CLIENT_AMOUNT');
+
+    // paymentFees remains the legacy all-in PSP fee. When new PSP fee
+    // components are supplied, calculate them once from fixed + percentage.
+    const hasExplicitPspComponents = paymentFeeFixedCents !== undefined ||
+      Number(paymentFeeFixed) !== 0 || Number(paymentFeeRate) !== 0;
+    const pspFeeCents = hasExplicitPspComponents
+      ? fixedPspCents + Math.round(grossCents * pspRate / 100)
+      : legacyPspCents;
+    const intervenantNetCents = grossCents - commissionCents;
+    const platformNetMarginCents = commissionCents - pspFeeCents - otherCents;
+
+    return v7Result(true, {
+      currency: 'EUR',
+      clientAmountCents: grossCents,
+      commissionFixedCents: fixedCommissionCents,
+      commissionVariableRate: variableRate,
+      commissionVariableCents: variableCommissionCents,
+      commissionAmountCents: commissionCents,
+      intervenantAmountCents: intervenantNetCents,
+      paymentFeesCents: pspFeeCents,
+      otherFeesCents: otherCents,
+      platformGrossCommissionCents: commissionCents,
+      platformNetMarginCents,
+      // Legacy decimal fields retained for existing consumers.
+      clientAmount: grossCents / 100,
+      commissionRate: variableRate,
+      commissionAmount: commissionCents / 100,
+      intervenantAmount: intervenantNetCents / 100,
+      paymentFees: pspFeeCents / 100,
+      otherFees: otherCents / 100,
+      grossMargin: platformNetMarginCents / 100,
+      accounting: {
+        clientGrossCents: grossCents,
+        intervenantNetCents,
+        platformCommissionCents: commissionCents,
+        pspFeesCents: pspFeeCents,
+        otherCostsCents: otherCents,
+        reconciled: grossCents === intervenantNetCents + commissionCents
+      }
+    });
+  } catch (error) {
+    return v7Result(false, {}, String(error?.message || 'FINANCE_CALCULATION_INVALID'));
+  }
 }
+
+function v7ValidatePromotionActivation(promotion, {
+  now = new Date(),
+  allowedPhases = []
+} = {}) {
+  const fail = error => v7Result(false, {}, error);
+  if (!promotion || !promotion.id) return fail('PROMOTION_NOT_FOUND');
+  const status = String(promotion.status || '').toUpperCase();
+  if (status === 'ACTIVE') return fail('PROMOTION_ALREADY_ACTIVE');
+  if (!['DRAFT', 'PAUSED'].includes(status)) return fail('PROMOTION_STATUS_NOT_ACTIVATABLE');
+  if (!String(promotion.code || '').trim() || !String(promotion.name || '').trim()) return fail('PROMOTION_IDENTITY_INVALID');
+  if (!allowedPhases.includes(String(promotion.phase || '').toUpperCase())) return fail('PROMOTION_PHASE_INVALID');
+  if (!['ALL', 'B2C', 'B2B'].includes(String(promotion.client_type || 'ALL').toUpperCase())) return fail('PROMOTION_CLIENT_TYPE_INVALID');
+  const type = String(promotion.discount_type || '').toUpperCase();
+  const value = Number(promotion.discount_value);
+  if (!['PERCENT', 'FIXED'].includes(type) || !Number.isFinite(value) || value <= 0 || (type === 'PERCENT' && value > 100)) {
+    return fail('PROMOTION_DISCOUNT_INVALID');
+  }
+  const minAmount = Number(promotion.min_amount_cents ?? 0);
+  const maxDiscount = promotion.max_discount_cents == null ? null : Number(promotion.max_discount_cents);
+  const budget = promotion.budget_cents == null ? null : Number(promotion.budget_cents);
+  const used = Number(promotion.used_cents ?? 0);
+  const targetMargin = Number(promotion.target_margin_percent ?? 0);
+  const protection = Number(promotion.intervenant_protection_cents ?? 0);
+  if (![minAmount, used, targetMargin, protection].every(Number.isFinite) ||
+      minAmount < 0 || used < 0 || targetMargin < 0 || targetMargin > 100 || protection < 0 ||
+      (maxDiscount !== null && (!Number.isFinite(maxDiscount) || maxDiscount < 0)) ||
+      (budget !== null && (!Number.isFinite(budget) || budget <= 0 || used > budget))) {
+    return fail('PROMOTION_FINANCIAL_RULES_INVALID');
+  }
+  const start = Date.parse(String(promotion.starts_at || ''));
+  const end = Date.parse(String(promotion.ends_at || ''));
+  const nowMs = now instanceof Date ? now.getTime() : Date.parse(String(now));
+  if (!Number.isFinite(start) || !Number.isFinite(end) || !Number.isFinite(nowMs) || end <= start) {
+    return fail('PROMOTION_DATES_INVALID');
+  }
+  if (end <= nowMs) return fail('PROMOTION_EXPIRED');
+  return v7Result(true, {
+    promotionId: String(promotion.id),
+    status: 'READY_FOR_MANAGER_ACTIVATION',
+    startsAt: new Date(start).toISOString(),
+    endsAt: new Date(end).toISOString()
+  });
+}
+
 
 
 // =====================================================
@@ -1516,6 +1594,9 @@ export const procheliaV7 = {
 
   calculateFinance:
     v7CalculateFinance,
+
+  validatePromotionActivation:
+    v7ValidatePromotionActivation,
 
   // Sécurité
   checkIdempotency:
