@@ -28,6 +28,16 @@ test('Stripe charge webhooks resolve through persisted provider references', () 
   assert.match(adapter, /payment_intent_data\[metadata\]\[prochelia_transaction_id\]/);
 });
 
+test('Stripe checkout linking and wallet transitions are safe under webhook races', () => {
+  const webhook = source.slice(source.indexOf('async function stripeWebhook'), source.indexOf('async function stripeCheckout'));
+  assert.match(webhook, /STRIPE_CHECKOUT_SESSION_NOT_LINKED/);
+  assert.match(webhook, /String\(tx\.provider_payment_id\|\|''\)===sessionId/);
+  assert.match(webhook, /status NOT IN \('paid','refunded','held'\)/);
+  assert.match(webhook, /paidTransition\?\.meta\?\.changes/);
+  assert.match(webhook, /COALESCE\(refund_cents,0\) < \?/);
+  assert.match(webhook, /refundTransition\?\.meta\?\.changes/);
+});
+
 test('Stripe event-specific amounts avoid false failure and dispute mismatches', () => {
   assert.match(source, /isFailure=failedEvent\.has\(event\.type\)/);
   assert.match(source, /isDispute=disputeEvent\.has\(event\.type\)/);
