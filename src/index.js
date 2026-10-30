@@ -1253,9 +1253,10 @@ async function paymentWebhook(request, env) {
       } else if(newStatus==='refunded'){
         const rawRefund=event?.data?.refund_cents??event?.data?.amount_refunded??tx.gross_cents;
         const refundCents=Math.max(Number(tx.refund_cents||0),Math.min(Number(tx.gross_cents||0),Number(rawRefund||0)));
+        const refundStatus=refundCents>=Number(tx.gross_cents||0)?'refunded':'partially_refunded';
         const refundKey=`payment:${txId}:refund:${refundCents}`;
         await env.DB.batch([
-          env.DB.prepare(`UPDATE payment_transactions SET status='refunded',refund_cents=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND COALESCE(refund_cents,0)<?`).bind(refundCents,txId,refundCents),
+          env.DB.prepare(`UPDATE payment_transactions SET status=?,refund_cents=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND COALESCE(refund_cents,0)<?`).bind(refundStatus,refundCents,txId,refundCents),
           env.DB.prepare(`INSERT OR IGNORE INTO payment_wallet_ledger(id,idempotency_key,transaction_id,user_id,entry_type,available_delta_cents,currency,metadata_json)
             SELECT ?,?,t.id,t.intervenant_id,'REFUND_REVERSAL',
               -MAX(0,ROUND(t.net_intervenant_cents*1.0*t.refund_cents/NULLIF(t.gross_cents,0))-
