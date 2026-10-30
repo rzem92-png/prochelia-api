@@ -1664,7 +1664,10 @@ async function journal(env, actorType, actorId, action, entityType=null, entityI
 async function copilotRecommend(env, input) {
   const { caseType, impact='LOW', phase='TEST', context={} } = input;
   const sensitive = SENSITIVE_CASES.has(caseType) || impact === 'CRITICAL' || impact === 'HIGH';
-  const simple = SIMPLE_CASES.has(caseType) && !sensitive;
+  // Legacy operational cases are deliberately fail-closed. They must not
+  // auto-execute until each scenario is mapped to the central allowlist and
+  // a trusted downstream receipt is available.
+  const simple = canAutoResolveSupportScenario(caseType, impact, false);
   let action = 'ANALYZE_AND_PROPOSE';
   let solution = { steps:['qualify','simulate','notify','audit'], automatic:false };
   if (simple) {
