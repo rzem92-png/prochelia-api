@@ -381,11 +381,22 @@ async function bootstrap(request, env) {
   const email = normalizeEmail(body?.email);
   const firstName = clean(body?.first_name);
   const lastName = clean(body?.last_name);
-  const phone = clean(body?.phone) || null;
+  const phoneInput = clean(body?.phone);
+  const phone = typeof phoneInput === 'string' ? phoneInput : '';
+  const normalizedPhone = phone.replace(/[\\s().-]/g, '');
   const password = body?.password;
 
-  if (!validEmail(email) || !firstName || !lastName || !validPassword(password)) {
-    return json({ ok: false, error: 'INVALID_BOOTSTRAP_DATA', version: VERSION, password_min_length: 10 }, 400);
+  // The existing staging D1 schema declares users.phone as NOT NULL.
+  // Validate it before hashing or attempting the INSERT to avoid a runtime D1 constraint error.
+  if (!validEmail(email) || !firstName || !lastName || !/^\\+?[1-9]\\d{7,14}$/.test(normalizedPhone) || !validPassword(password)) {
+    return json({
+      ok: false,
+      error: 'INVALID_BOOTSTRAP_DATA',
+      version: VERSION,
+      required_fields: ['email', 'first_name', 'last_name', 'phone', 'password'],
+      phone_format: '8 to 15 digits, optional leading +',
+      password_min_length: 10
+    }, 400);
   }
 
   const passwordHash = await hashPassword(password);
