@@ -535,7 +535,7 @@ test('Client and intervenant profile reads are authenticated, role-scoped, pagin
   assert.match(source, /\['gerante','admin','intervenant'\]/);
   assert.match(source, /WHERE p\.user_id = \?/);
   assert.match(source, /Math\.min\(100, Math\.max\(1, Math\.floor\(limitRaw\)\)\)/);
-  assert.match(source, /SELECT p\.id, u\.first_name, u\.status AS account_status, p\.city/);
+  assert.match(source, /p\\.id, u\\.first_name, u\\.status AS account_status, p\\.city, p\\.created_at/);
   assert.match(source, /p\.validation_status, p\.hourly_rate/);
   assert.match(source, /PROFILE_SCHEMA_NOT_READY/);
   assert.match(source, /url\.pathname === '\/api\/clients'/);
