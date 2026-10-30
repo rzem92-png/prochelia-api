@@ -1810,12 +1810,27 @@ async function pricingQuote(request, env) {
   const fuelMode=String(b.fuel_mode||'normal').toLowerCase()==='high'?'high':'normal';
   const fuelRateLegacy=Number(b.fuel_cost_per_km_cents??await getSetting(env,'fuel_cost_per_km_cents',20));
   const fuelPriceCentsPerLitre=Number(b.fuel_price_cents_per_litre??await getSetting(env,fuelMode==='high'?'fuel_reference_price_cents_litre_high':'fuel_reference_price_cents_litre_normal',fuelMode==='high'?200:175));
-  const software=Number(b.software_cost_cents||await getSetting(env,'software_monthly_cost_cents',0));
-  const pspPercent=Number(b.psp_percent||0);const pspFixed=Number(b.psp_fixed_cents||0);
+  const software=Number(b.software_cost_cents??policy?.software_cost_cents??await getSetting(env,'software_monthly_cost_cents',0));
+  const pspPercent=Number(b.psp_percent??policy?.psp_percent??0);
+  const pspFixed=Number(b.psp_fixed_cents??policy?.psp_fixed_cents??0);
   const targetMargin=Number(b.target_margin_percent??policy?.target_margin_percent??await getSetting(env,'default_margin_percent',FINANCE_STRATEGIC.marginFloorPercent));
   const commissionRate=Number(b.platform_fee_percent!=null?b.platform_fee_percent/100:(policy?.platform_fee_percent!=null?policy.platform_fee_percent/100:FINANCE_STRATEGIC.commissionDefaultPercent/100));
   const intervenantFloor=Math.max(0,Math.round(Number(b.intervenant_floor_cents??policy?.intervenant_floor_cents??(base*0.70))));
   const regulatedMax=b.regulated_max_cents!=null?Number(b.regulated_max_cents):(policy?.client_ceiling_cents>0?Number(policy.client_ceiling_cents):null);
+  const policyNumbers=[
+    ['fuel_price_cents_per_litre',fuelPriceCentsPerLitre,1,2000],
+    ['fuel_cost_per_km_cents',fuelRateLegacy,0,10000],
+    ['software_cost_cents',software,0,10000000],
+    ['psp_percent',pspPercent,0,100],
+    ['psp_fixed_cents',pspFixed,0,100000],
+    ['target_margin_percent',targetMargin,0,100],
+    ['platform_fee_percent',commissionRate*100,0,100],
+    ['intervenant_floor_cents',intervenantFloor,0,5000000]
+  ];
+  const invalidPolicy=policyNumbers.filter(([,value,min,max])=>!Number.isFinite(value)||value<min||value>max);
+  if(invalidPolicy.length || (regulatedMax!==null&&(!Number.isFinite(regulatedMax)||regulatedMax<1||regulatedMax>5000000))) {
+    return json({ok:false,error:'FINANCIAL_POLICY_INVALID',version:VERSION,fields:[...invalidPolicy.map(([field])=>field),...(regulatedMax!==null&&(!Number.isFinite(regulatedMax)||regulatedMax<1||regulatedMax>5000000)?['regulated_max_cents']:[])]},503);
+  }
   const strategic=financeStrategicQuote({
     basePriceCents:base,
     phaseFactor:cfg.pricingFactor,
