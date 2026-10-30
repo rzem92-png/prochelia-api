@@ -12,6 +12,8 @@ const DEFAULT_WEIGHTS = Object.freeze({
 });
 
 const isInt = (n) => Number.isSafeInteger(n);
+const MAX_RANK_CANDIDATES = 10000;
+const MAX_COMPOSITION_CANDIDATES = 500;
 const clamp = (n, min = 0, max = 10000) => Math.max(min, Math.min(max, n));
 
 function validateRequest(request) {
@@ -56,8 +58,14 @@ function validateCandidate(candidate) {
 }
 
 function getWeights(weights = DEFAULT_WEIGHTS) {
-  const result = { ...weights };
+  if (!weights || typeof weights !== "object" || Array.isArray(weights)) {
+    throw new TypeError("weights must be an object");
+  }
   const keys = Object.keys(DEFAULT_WEIGHTS);
+  if (Object.keys(weights).some((key) => !keys.includes(key))) {
+    throw new TypeError("weights contain unsupported dimensions");
+  }
+  const result = { ...weights };
   if (keys.some((key) => !isInt(result[key]) || result[key] < 0) ||
       keys.reduce((sum, key) => sum + result[key], 0) !== 10000) {
     throw new TypeError("weights must be non-negative integer basis points totaling 10000");
@@ -107,6 +115,7 @@ function scoreCandidate(candidate, request, weights) {
 export function rankNexusOpportunities({ request, candidates, weights } = {}) {
   validateRequest(request);
   if (!Array.isArray(candidates)) throw new TypeError("candidates must be an array");
+  if (candidates.length > MAX_RANK_CANDIDATES) throw new RangeError("candidate limit exceeded");
   const w = getWeights(weights);
   const seen = new Set();
   const ranked = [];
@@ -128,6 +137,7 @@ export function rankNexusOpportunities({ request, candidates, weights } = {}) {
 export function composeNexusScenarios({ request, candidates, maxActors = 2 } = {}) {
   validateRequest(request);
   if (!Array.isArray(candidates)) throw new TypeError("candidates must be an array");
+  if (candidates.length > MAX_COMPOSITION_CANDIDATES) throw new RangeError("composition candidate limit exceeded");
   if (maxActors !== 2) throw new RangeError("V1 supports exactly two actors for composed scenarios");
   const ids = new Set();
   for (const candidate of candidates) {
