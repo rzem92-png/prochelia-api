@@ -287,3 +287,13 @@ test('Pricing policy database failures fail closed instead of silently using fal
   assert.match(source, /PRICING_POLICY_UNAVAILABLE/);
   assert.match(source, /catch \(_\) \{\s*return json\(\{ok:false,error:'PRICING_POLICY_UNAVAILABLE'/);
 });
+
+
+test('Pricing quote rejects invalid or out-of-range financial policy values', () => {
+  assert.match(source, /FINANCIAL_POLICY_INVALID/);
+  assert.match(source, /platform_fee_percent',commissionRate\*100,0,100/);
+  assert.match(source, /psp_percent',pspPercent,0,100/);
+  assert.match(source, /target_margin_percent',targetMargin,0,100/);
+  assert.match(source, /fuel_price_cents_per_litre',fuelPriceCentsPerLitre,1,2000/);
+  assert.match(source, /regulated_max_cents/);
+});
