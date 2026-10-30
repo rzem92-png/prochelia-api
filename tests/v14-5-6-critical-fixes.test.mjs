@@ -329,11 +329,13 @@ test('Pricing reference and policy failures fail closed', () => {
   assert.match(quote, /FINANCIAL_POLICY_INVALID/);
 });
 
-test('Pricing quote rejects invalid or out-of-range financial policy values', () => {
-  assert.match(source, /FINANCIAL_POLICY_INVALID/);
-  assert.match(source, /platform_fee_percent',commissionRate\*100,0,100/);
-  assert.match(source, /psp_percent',pspPercent,0,100/);
-  assert.match(source, /target_margin_percent',targetMargin,0,100/);
-  assert.match(source, /fuel_price_cents_per_litre',fuelPriceCentsPerLitre,1,2000/);
-  assert.match(source, /regulated_max_cents/);
+test('Pricing quote rejects invalid or out-of-range server financial policy values', () => {
+  const quote = source.slice(source.indexOf('async function pricingQuote'), source.indexOf('async function financeSummary'));
+  assert.match(quote, /FINANCIAL_POLICY_INVALID/);
+  assert.match(quote, /platform_fee_fixed_cents/);
+  assert.match(quote, /platform_fee_percent/);
+  assert.match(quote, /psp_percent/);
+  assert.match(quote, /target_margin_percent/);
+  assert.match(quote, /regulated_max_cents/);
+  assert.match(quote, /travel_fee_per_km_cents/);
 });
