@@ -542,3 +542,13 @@ test('Client and intervenant profile reads are authenticated, role-scoped, pagin
   assert.match(source, /url\.pathname === '\/api\/intervenants'/);
   assert.doesNotMatch(source, /SELECT p\.\*, u\.email, u\.phone/);
 });
+
+test('Credentialed CORS is allowlist-bound and session cookies support cross-site Pages-to-Worker auth', () => {
+  assert.match(source, /SameSite=None/);
+  assert.match(source, /const __procheliaCorsHandle = handle/);
+  assert.match(source, /access-control-allow-origin/);
+  assert.match(source, /access-control-allow-credentials','true'/);
+  assert.match(source, /CORS_PREFLIGHT_REJECTED/);
+  assert.match(source, /securityOriginAllowed\(request,env\)/);
+  assert.match(source, /allowedHeaders = new Set\(\['content-type','x-idempotency-key','x-csrf-token'\]\)/);
+});
