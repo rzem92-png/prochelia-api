@@ -709,6 +709,44 @@ async function trustPassportCheckMission(env, intervenantId, prestationId, missi
   const result = evaluateTaskEligibility({service:{service_code:service.service_code,status:service.status,require_identity:!!service.require_identity,allow_global_scope:!!service.allow_global_scope,requirements},profile,verifications:records,missionAt});
   return result;
 }
+async function checkMissionSchedulingConflicts(env, mission) {
+  const startMs = Date.parse(String(mission?.start_at || ''));
+  const endMs = Date.parse(String(mission?.end_at || ''));
+  if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs) {
+    return { ok:false, reasons:['MISSION_SCHEDULE_INVALID'], conflicts:[] };
+  }
+  const start = new Date(startMs).toISOString();
+  const end = new Date(endMs).toISOString();
+  // Availability must cover the complete requested interval, not merely its start.
+  const availability = await env.DB.prepare(
+    `SELECT id FROM disponibilites
+      WHERE intervenant_id=? AND status='available'
+        AND datetime(start_at)<=datetime(?) AND datetime(end_at)>=datetime(?)
+      ORDER BY datetime(start_at) LIMIT 1`
+  ).bind(String(mission.intervenant_id), start, end).first();
+  const reasons = [];
+  if (!availability) reasons.push('INTERVENANT_NOT_AVAILABLE_FOR_FULL_INTERVAL');
+
+  // Unknown mission states are treated as blocking. Only explicit terminal states
+  // are excluded; this prevents an unfamiliar status from silently allowing overlap.
+  const overlap = await env.DB.prepare(
+    `SELECT id,status,start_at,end_at FROM missions
+      WHERE intervenant_id=? AND id<>?
+        AND datetime(start_at)<datetime(?)
+        AND datetime(COALESCE(NULLIF(end_at,''),start_at))>datetime(?)
+        AND lower(COALESCE(status,'')) NOT IN ('cancelled','canceled','completed','rejected','refused')
+      ORDER BY datetime(start_at) LIMIT 10`
+  ).bind(String(mission.intervenant_id), String(mission.id), end, start).all();
+  const conflicts = (overlap.results || []).map(row => ({
+    mission_id: row.id,
+    status: row.status,
+    start_at: row.start_at,
+    end_at: row.end_at || row.start_at
+  }));
+  if (conflicts.length) reasons.push('INTERVENANT_MISSION_OVERLAP');
+  return { ok:reasons.length===0, reasons, conflicts, availability_id:availability?.id || null };
+}
+
 async function securityPrepareMission(request, env) {
   const auth=await getSessionUser(request,env);
   if(!requireRole(auth,['gerante'])) return json({ok:false,error:auth?.user?'FORBIDDEN':'UNAUTHENTICATED',version:VERSION},auth?.user?403:401);
@@ -718,6 +756,11 @@ async function securityPrepareMission(request, env) {
   const mission=await env.DB.prepare('SELECT id,client_id,intervenant_id,prestation_id,start_at,end_at FROM missions WHERE id=? LIMIT 1').bind(missionId).first();
   if(!mission) return json({ok:false,error:'MISSION_NOT_FOUND',version:VERSION},404);
   if(String(mission.client_id)!==clientId||String(mission.intervenant_id||'')!==intervenantId) return json({ok:false,error:'MISSION_ASSIGNMENT_MISMATCH',version:VERSION},409);
+  const scheduling = await checkMissionSchedulingConflicts(env,{...mission,id:missionId,intervenant_id:intervenantId});
+  if(!scheduling.ok) {
+    await securityAudit(env,'MISSION_SCHEDULING_CONFLICT_BLOCKED',missionId,auth.user.id,auth.user.role,'DENIED',{reasons:scheduling.reasons,conflicting_mission_ids:scheduling.conflicts.map(x=>x.mission_id)});
+    return json({ok:false,error:'MISSION_SCHEDULING_CONFLICT',version:VERSION,reasons:scheduling.reasons,conflicts:scheduling.conflicts,write_enabled:false},409);
+  }
   const profile=await env.DB.prepare('SELECT id,user_id FROM intervenants WHERE id=? LIMIT 1').bind(intervenantId).first().catch(()=>null);
   if(!profile?.id||!profile?.user_id) return json({ok:false,error:'INTERVENANT_PROFILE_NOT_LINKED',version:VERSION},409);
   if(!await requireVerifiedIntervenant(env,String(profile.user_id))) return json({ok:false,error:'INTERVENANT_IDENTITY_NOT_VERIFIED',version:VERSION},409);
