@@ -46,6 +46,18 @@ test('marketplace economics rejects floats, negatives and unsafe integers', () =
   }), /CUSTOMER_PAID_CENTS_MUST_BE_NON_NEGATIVE_SAFE_INTEGER/);
 });
 
+
+test('marketplace economics rejects platform contribution overflow instead of returning an imprecise margin', () => {
+  assert.throws(() => calculateMarketplaceEconomics({
+    customerPaidCents: 100,
+    providerPayoutCents: 0,
+    platformFeeCents: 1,
+    pspFeeCents: Number.MAX_SAFE_INTEGER,
+    platformFundedDiscountCents: Number.MAX_SAFE_INTEGER,
+    variableCostCents: Number.MAX_SAFE_INTEGER
+  }), /PLATFORM_CONTRIBUTION_OVERFLOW/);
+});
+
 test('order state machine allows the normal paid fulfilment path', () => {
   assert.deepEqual(canTransitionOrder('DRAFT', 'QUOTED'), { ok: true, from: 'DRAFT', to: 'QUOTED' });
   assert.equal(assertOrderTransition('QUOTED', 'AWAITING_PAYMENT').to, 'AWAITING_PAYMENT');
