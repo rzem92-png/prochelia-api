@@ -271,3 +271,19 @@ test('Pricing quote blocks financial policy overrides from non-manager roles', (
   assert.match(source, /attemptedOverrides\.length && gate\.auth\?\.user\?\.role!=='gerante'/);
   assert.match(source, /FINANCIAL_POLICY_OVERRIDE_FORBIDDEN/);
 });
+
+
+test('Pricing quote validates bounded inputs and refuses unknown phases/client types', () => {
+  assert.match(source, /PRICING_PHASE_INVALID/);
+  assert.match(source, /PRICING_INPUT_INVALID/);
+  assert.match(source, /CLIENT_TYPE_INVALID/);
+  assert.match(source, /DISCOUNT_EXCEEDS_BASE_PRICE/);
+  assert.match(source, /distance_km',distance,0,500/);
+  assert.match(source, /duration_minutes',duration,1,1440/);
+  assert.match(source, /base_price_cents',base,1,5000000/);
+});
+
+test('Pricing policy database failures fail closed instead of silently using fallback policy', () => {
+  assert.match(source, /PRICING_POLICY_UNAVAILABLE/);
+  assert.match(source, /catch \(_\) \{\s*return json\(\{ok:false,error:'PRICING_POLICY_UNAVAILABLE'/);
+});
