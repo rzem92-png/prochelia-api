@@ -264,3 +264,10 @@ test('Strategic pricing forwards the configured fuel price into the travel cost 
   assert.match(source, /financeStrategicTravel\(\{distanceKm,fuelMode,fuelPriceCentsPerLitre\}\)/);
   assert.match(source, /distanceKm:distance,fuelMode,fuelPriceCentsPerLitre,commissionRate/);
 });
+
+
+test('Pricing quote blocks financial policy overrides from non-manager roles', () => {
+  assert.match(source, /financialOverrides=\['phase','platform_fee_percent','intervenant_floor_cents','psp_percent','psp_fixed_cents','software_cost_cents','target_margin_percent','regulated_max_cents','fuel_price_cents_per_litre','fuel_cost_per_km_cents'\]/);
+  assert.match(source, /attemptedOverrides\.length && gate\.auth\?\.user\?\.role!=='gerante'/);
+  assert.match(source, /FINANCIAL_POLICY_OVERRIDE_FORBIDDEN/);
+});
