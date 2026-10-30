@@ -26,25 +26,18 @@ CREATE TABLE IF NOT EXISTS pricing_policies (
 CREATE INDEX IF NOT EXISTS idx_pricing_policy_lookup
   ON pricing_policies(active, phase, client_type, service_code);
 
-CREATE TABLE IF NOT EXISTS pricing_service_rates (
+CREATE TABLE IF NOT EXISTS pricing_travel_policies (
   id TEXT PRIMARY KEY,
-  prestation_id TEXT NOT NULL,
-  service_code TEXT NOT NULL,
+  phase TEXT NOT NULL,
   client_type TEXT NOT NULL CHECK (client_type IN ('B2C','B2B')),
-  base_price_cents INTEGER NOT NULL CHECK (base_price_cents > 0),
-  intervenant_floor_cents INTEGER NOT NULL CHECK (intervenant_floor_cents >= 0),
   travel_fee_per_km_cents INTEGER NOT NULL DEFAULT 0 CHECK (travel_fee_per_km_cents >= 0),
-  regulated_max_cents INTEGER CHECK (regulated_max_cents IS NULL OR regulated_max_cents > 0),
   active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0,1)),
-  valid_from TEXT,
-  valid_until TEXT,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  FOREIGN KEY (prestation_id) REFERENCES prestations(id)
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS idx_pricing_service_rate_active
-  ON pricing_service_rates(prestation_id, client_type, active);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_pricing_travel_policy_active
+  ON pricing_travel_policies(phase, client_type, active);
 
 CREATE TABLE IF NOT EXISTS pricing_route_estimates (
   id TEXT PRIMARY KEY,
