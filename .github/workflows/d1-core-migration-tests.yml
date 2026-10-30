@@ -108,6 +108,7 @@ jobs:
               "SELECT name FROM sqlite_master WHERE type='table'"
             )
           }
+          assert "payment_wallet_ledger" in actual, "Missing atomic wallet ledger table"
           missing = expected - actual
           assert not missing, f"Missing business tables: {sorted(missing)}"
 
