@@ -11,6 +11,9 @@ on:
         description: "Confirmer que ce contrôle est en lecture seule et vise uniquement la base de test"
         required: true
         type: boolean
+  schedule:
+    # Contrôle hebdomadaire en lecture seule, le dimanche à 04:47 UTC.
+    - cron: "47 4 * * 0"
 
 permissions:
   contents: read
@@ -22,13 +25,13 @@ concurrency:
 jobs:
   verify-restored-test:
     name: Vérifier intégrité, tables et volumes sans modifier les données
-    if: ${{ inputs.confirm_read_only == true }}
+    if: ${{ github.event_name == 'schedule' || inputs.confirm_read_only == true }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
       CLOUDFLARE_ACCOUNT_ID: f2a79e9fa41566a8ec80fb24c02c60eb
       RESTORE_DB_NAME: prochelia-restore-test-db
-      RESTORE_DB_ID: ${{ inputs.restore_test_db_id }}
+      RESTORE_DB_ID: ${{ inputs.restore_test_db_id || 'bb35b09c-03de-4adb-9fa0-381e8487a6bf' }}
     steps:
       - name: Vérifier le jeton et la cible exacte
         shell: bash
@@ -100,3 +103,11 @@ jobs:
           echo "Tables restaurées et nombre de lignes (aucune donnée personnelle affichée) :"
           cat "$base/row-counts.csv"
           echo "VERIFICATION_REPORT=$base/row-counts.csv" >> "$GITHUB_ENV"
+
+      - name: Publier le rapport technique sans données personnelles
+        uses: actions/upload-artifact@v6
+        with:
+          name: prochelia-restore-test-verification-${{ github.run_id }}
+          path: ${{ runner.temp }}/d1-verify/row-counts.csv
+          if-no-files-found: error
+          retention-days: 30
