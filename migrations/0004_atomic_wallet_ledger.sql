@@ -29,3 +29,14 @@ BEGIN
     updated_at=CURRENT_TIMESTAMP
   WHERE user_id=NEW.user_id;
 END;
+
+CREATE TRIGGER IF NOT EXISTS trg_payment_wallet_ledger_no_update
+BEFORE UPDATE ON payment_wallet_ledger
+BEGIN
+  SELECT RAISE(ABORT,'PAYMENT_WALLET_LEDGER_IMMUTABLE');
+END;
+CREATE TRIGGER IF NOT EXISTS trg_payment_wallet_ledger_no_delete
+BEFORE DELETE ON payment_wallet_ledger
+BEGIN
+  SELECT RAISE(ABORT,'PAYMENT_WALLET_LEDGER_IMMUTABLE');
+END;
