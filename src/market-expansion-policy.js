@@ -18,6 +18,7 @@ const CATEGORY_CHECKS = Object.freeze({
   b2b: ["businessContractReview"]
 });
 const ALLOWED_STATUSES = new Set(["DRAFT", "REVIEW_REQUIRED", "APPROVED_FOR_PILOT", "ACTIVE", "SUSPENDED"]);
+const ALLOWED_CATEGORIES = new Set(Object.keys(CATEGORY_CHECKS));
 const COUNTRY_CODE = /^[A-Z]{2}$/;
 const CATEGORY_CODE = /^[a-z][a-z0-9_]{1,39}$/;
 function isRecord(value) {
@@ -33,8 +34,8 @@ export function evaluateMarketActivation(input = {}) {
   if (typeof countryCode !== "string" || !COUNTRY_CODE.test(countryCode)) {
     throw new TypeError("countryCode must be an uppercase ISO alpha-2 code");
   }
-  if (typeof categoryCode !== "string" || !CATEGORY_CODE.test(categoryCode)) {
-    throw new TypeError("categoryCode must be a lowercase category code");
+  if (typeof categoryCode !== "string" || !CATEGORY_CODE.test(categoryCode) || !ALLOWED_CATEGORIES.has(categoryCode)) {
+    throw new TypeError("categoryCode must be a supported lowercase category code");
   }
   if (!ALLOWED_STATUSES.has(status)) throw new TypeError("status is not a supported market activation state");
   if (!isRecord(checks)) throw new TypeError("checks must be an object");
