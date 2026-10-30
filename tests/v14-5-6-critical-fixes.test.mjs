@@ -141,6 +141,31 @@ test('support automation never trusts a client-supplied execution_verified flag'
 });
 
 
+test('Copilot receives only role-scoped read-only business aggregates', () => {
+  assert.match(source, /async function copilotReadOnlyContext\(env,role,userId\)/);
+  assert.match(source, /scope:manager\?'PLATFORM_AGGREGATES':'OWN_ACCOUNT_ONLY'/);
+  assert.match(source, /WHERE client_id=\?/);
+  assert.match(source, /WHERE user_id=\? LIMIT 1/);
+  assert.match(source, /read_only_context:contextSnapshot/);
+  assert.match(source, /PLAN_ONLY_WITH_READ_ONLY_CONTEXT_NO_MUTATION/);
+  assert.match(source, /photographie D1 agrégée et en lecture seule/);
+});
+
+test('Profitability reporting uses retained commission, settled transactions and recorded PSP costs', () => {
+  assert.match(source, /retained_commission_cents/);
+  assert.match(source, /platform_contribution_before_operating_expenses_cents/);
+  assert.match(source, /platform_contribution_after_recorded_expenses_cents/);
+  assert.match(source, /status IN \('paid','partially_refunded','refunded','held'\)/);
+  assert.match(source, /platform_net=retainedCommission-psp/);
+});
+
+test('Forecast uses settled platform commission net of PSP costs and does not assume growth', () => {
+  assert.match(source, /BASELINE_NO_GROWTH/);
+  assert.match(source, /const margin=revenue-provider/);
+  assert.match(source, /zero_growth_baseline/);
+  assert.match(source, /retained_commission/);
+});
+
 test('Copilot readiness diagnostics are authenticated and never expose secret values', () => {
   assert.match(source, /async function copilotHealth\(request,env\)/);
   assert.match(source, /\/api\/copilot\/health/);
