@@ -32,7 +32,7 @@ test('Stripe checkout linking and wallet transitions are safe under webhook race
   const webhook = source.slice(source.indexOf('async function stripeWebhook'), source.indexOf('async function stripeCheckout'));
   assert.match(webhook, /STRIPE_CHECKOUT_SESSION_NOT_LINKED/);
   assert.match(webhook, /String\(tx\.provider_payment_id\|\|''\)===sessionId/);
-  assert.match(webhook, /status NOT IN \\('paid','refunded','held','partially_refunded'\\)/);
+  assert.match(webhook, /status NOT IN \('paid','refunded','held','partially_refunded'\)/);
   assert.match(webhook, /const paidBatch=await env\.DB\.batch\(/);
   assert.match(webhook, /COALESCE\(refund_cents,0\) < \?/);
   assert.match(webhook, /const refundBatch=await env\.DB\.batch\(/);
