@@ -156,7 +156,7 @@ test('Profitability reporting uses retained commission, settled transactions and
   assert.match(source, /platform_contribution_before_operating_expenses_cents/);
   assert.match(source, /platform_contribution_after_recorded_expenses_cents/);
   assert.match(source, /status IN \('paid','partially_refunded','refunded','held'\)/);
-  assert.match(source, /platform_net=retainedCommission-psp/);
+  assert.match(source, /const platformNet=retainedCommission-psp/);
 });
 
 test('Forecast uses settled platform commission net of PSP costs and does not assume growth', () => {
