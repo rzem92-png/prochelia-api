@@ -2181,14 +2181,33 @@ async function pricingQuote(request, env) {
 
 async function financeSummary(request, env) {
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
-  const tx=await env.DB.prepare(`SELECT COALESCE(SUM(gross_cents),0) gross,COALESCE(SUM(commission_cents),0) commission,COALESCE(SUM(provider_fee_cents),0) provider_fee,COALESCE(SUM(refund_cents),0) refunds,COALESCE(SUM(net_intervenant_cents),0) intervenant FROM payment_transactions`).first();
+  const tx=await env.DB.prepare(`SELECT
+    COALESCE(SUM(CASE WHEN status IN ('paid','partially_refunded','refunded','held') THEN gross_cents ELSE 0 END),0) gross,
+    COALESCE(SUM(CASE WHEN status IN ('paid','partially_refunded','refunded','held') THEN commission_cents ELSE 0 END),0) commission,
+    COALESCE(SUM(CASE WHEN status IN ('paid','partially_refunded','refunded','held') THEN ROUND(commission_cents*1.0*(gross_cents-MIN(gross_cents,refund_cents))/NULLIF(gross_cents,0)) ELSE 0 END),0) retained_commission,
+    COALESCE(SUM(CASE WHEN status IN ('paid','partially_refunded','refunded','held') THEN provider_fee_cents ELSE 0 END),0) provider_fee,
+    COALESCE(SUM(CASE WHEN status IN ('paid','partially_refunded','refunded','held') THEN refund_cents ELSE 0 END),0) refunds,
+    COALESCE(SUM(CASE WHEN status IN ('paid','partially_refunded','refunded','held') THEN ROUND(net_intervenant_cents*1.0*(gross_cents-MIN(gross_cents,refund_cents))/NULLIF(gross_cents,0)) ELSE 0 END),0) intervenant
+    FROM payment_transactions`).first();
   const ledger=await env.DB.prepare(`SELECT COALESCE(SUM(CASE WHEN direction='CREDIT' THEN amount_cents ELSE -amount_cents END),0) balance FROM accounting_ledger`).first();
   const expenses=await env.DB.prepare(`SELECT COALESCE(SUM(amount_cents),0) total FROM business_expenses`).first();
-  const pending=await env.DB.prepare(`SELECT COALESCE(SUM(gross_cents),0) total,COUNT(*) n FROM payment_transactions WHERE status IN ('pending','processing','held')`).first();
-  const paid=await env.DB.prepare(`SELECT COALESCE(SUM(gross_cents),0) total,COUNT(*) n FROM payment_transactions WHERE status='paid'`).first();
+  const pending=await env.DB.prepare(`SELECT COALESCE(SUM(gross_cents),0) total,COUNT(*) n FROM payment_transactions WHERE status IN ('pending','processing')`).first();
+  const paid=await env.DB.prepare(`SELECT COALESCE(SUM(gross_cents),0) total,COUNT(*) n FROM payment_transactions WHERE status IN ('paid','partially_refunded','refunded')`).first();
   const payouts=await env.DB.prepare(`SELECT COALESCE(SUM(amount_cents),0) total,COUNT(*) n FROM payout_requests WHERE status IN ('requested','processing')`).first();
   const disputed=await env.DB.prepare(`SELECT COALESCE(SUM(amount_cents),0) total,COUNT(*) n FROM payment_disputes WHERE status IN ('open','pending')`).first().catch(()=>null);
-  return json({ok:true,version:VERSION,finance:{gross_cents:Number(tx?.gross||0),commission_cents:Number(tx?.commission||0),provider_fee_cents:Number(tx?.provider_fee||0),refund_cents:Number(tx?.refunds||0),intervenant_cents:Number(tx?.intervenant||0),ledger_balance_cents:Number(ledger?.balance||0),expenses_cents:Number(expenses?.total||0),net_estimate_cents:Number(ledger?.balance||0)-Number(expenses?.total||0),pending_cents:Number(pending?.total||0),pending_transactions:Number(pending?.n||0),paid_cents:Number(paid?.total||0),paid_transactions:Number(paid?.n||0),payouts_pending_cents:Number(payouts?.total||0),payouts_pending:Number(payouts?.n||0),disputed_cents:Number(disputed?.total||0),disputes_pending:Number(disputed?.n||0)},models:{B2C:'client -> PROCHÉLIA -> intervenant',B2B:'société -> intervenant ; PROCHÉLIA facture sa commission/service'},finance_core_version:FINANCE_STRATEGIC_VERSION});
+  const retainedCommission=Number(tx?.retained_commission||0), psp=Number(tx?.provider_fee||0), operatingExpenses=Number(expenses?.total||0);
+  const contribution=retainedCommission-psp;
+  return json({ok:true,version:VERSION,finance:{
+    gross_cents:Number(tx?.gross||0),commission_cents:Number(tx?.commission||0),retained_commission_cents:retainedCommission,
+    provider_fee_cents:psp,refund_cents:Number(tx?.refunds||0),intervenant_cents:Number(tx?.intervenant||0),
+    platform_contribution_before_operating_expenses_cents:contribution,
+    expenses_cents:operatingExpenses,platform_contribution_after_recorded_expenses_cents:contribution-operatingExpenses,
+    ledger_balance_cents:Number(ledger?.balance||0),accounting_ledger_net_postings_cents:Number(ledger?.balance||0),
+    net_estimate_cents:contribution-operatingExpenses,pending_cents:Number(pending?.total||0),pending_transactions:Number(pending?.n||0),
+    paid_cents:Number(paid?.total||0),paid_transactions:Number(paid?.n||0),payouts_pending_cents:Number(payouts?.total||0),
+    payouts_pending:Number(payouts?.n||0),disputed_cents:Number(disputed?.total||0),disputes_pending:Number(disputed?.n||0),
+    margin_definition:'commission retained after proportional refunds minus recorded PSP fees; then recorded business expenses are deducted. Excludes unrecorded costs and taxes.'
+  },models:{B2C:'client -> PROCHÉLIA -> intervenant',B2B:'société -> intervenant ; PROCHÉLIA facture sa commission/service'},finance_core_version:FINANCE_STRATEGIC_VERSION});
 }
 
 async function complaintCreate(request, env) {
@@ -3392,14 +3411,21 @@ async function financeRowsForUser(env, user) {
 
 function financeSummaryFromRows(rows,user) {
   const role=String(user.role||'').toUpperCase();
-  let gross=0, refunds=0, commission=0, psp=0, netIntervenant=0, count=0;
+  let gross=0, refunds=0, commission=0, retainedCommission=0, psp=0, netIntervenant=0, count=0, pendingGross=0, pendingCount=0;
+  const settled=new Set(['paid','partially_refunded','refunded','held']);
   for(const x of rows.payments){
-    if(String(x.status||'').toLowerCase()==='failed') continue;
-    gross += Number(x.gross_cents||0);
-    refunds += Number(x.refund_cents||0);
-    commission += Number(x.commission_cents||0);
-    psp += Number(x.provider_fee_cents||0);
-    netIntervenant += Number(x.net_intervenant_cents||0);
+    const status=String(x.status||'').toLowerCase();
+    const txGross=Math.max(0,Number(x.gross_cents||0));
+    if(['pending','processing'].includes(status)){pendingGross+=txGross;pendingCount++;continue;}
+    if(!settled.has(status)) continue;
+    const refund=Math.min(txGross,Math.max(0,Number(x.refund_cents||0)));
+    const remainingRatio=txGross>0?(txGross-refund)/txGross:0;
+    gross += txGross;
+    refunds += refund;
+    commission += Math.max(0,Number(x.commission_cents||0));
+    retainedCommission += Math.round(Math.max(0,Number(x.commission_cents||0))*remainingRatio);
+    psp += Math.max(0,Number(x.provider_fee_cents||0));
+    netIntervenant += Math.round(Math.max(0,Number(x.net_intervenant_cents||0))*remainingRatio);
     count++;
   }
   let ledgerIn=0, ledgerOut=0;
@@ -3407,20 +3433,19 @@ function financeSummaryFromRows(rows,user) {
     const n=Number(x.amount_cents||0);
     if(String(x.direction).toUpperCase()==='OUT') ledgerOut+=n; else ledgerIn+=n;
   }
-  const clientNet = gross-refunds;
-  const platformNet = gross-refunds-commission-psp;
+  const clientNet=gross-refunds;
+  const platformNet=retainedCommission-psp;
   return {
-    role,
-    transactions:count,
-    gross_cents:gross, gross_eur:financeMoney(gross),
-    refunds_cents:refunds, refunds_eur:financeMoney(refunds),
-    commission_cents:commission, commission_eur:financeMoney(commission),
-    provider_fees_cents:psp, provider_fees_eur:financeMoney(psp),
-    net_intervenant_cents:netIntervenant, net_intervenant_eur:financeMoney(netIntervenant),
-    client_net_cents:clientNet, client_net_eur:financeMoney(clientNet),
-    platform_net_cents:platformNet, platform_net_eur:financeMoney(platformNet),
-    manual_ledger_in_cents:ledgerIn, manual_ledger_out_cents:ledgerOut,
-    manual_ledger_balance_cents:ledgerIn-ledgerOut
+    role,transactions:count,pending_transactions:pendingCount,pending_gross_cents:pendingGross,
+    gross_cents:gross,gross_eur:financeMoney(gross),refunds_cents:refunds,refunds_eur:financeMoney(refunds),
+    commission_cents:commission,commission_eur:financeMoney(commission),
+    retained_commission_cents:retainedCommission,retained_commission_eur:financeMoney(retainedCommission),
+    provider_fees_cents:psp,provider_fees_eur:financeMoney(psp),
+    net_intervenant_cents:netIntervenant,net_intervenant_eur:financeMoney(netIntervenant),
+    client_net_cents:clientNet,client_net_eur:financeMoney(clientNet),
+    platform_net_cents:platformNet,platform_net_eur:financeMoney(platformNet),
+    platform_net_definition:'commission retained after proportional refunds minus PSP fees; excludes unrecorded operating costs and taxes',
+    manual_ledger_in_cents:ledgerIn,manual_ledger_out_cents:ledgerOut,manual_ledger_balance_cents:ledgerIn-ledgerOut
   };
 }
 
