@@ -1835,14 +1835,14 @@ async function pricingQuote(request, env) {
   let rate=null, policy=null, route=null;
   try {
     if(prestationId){
-      rate=await env.DB.prepare(`SELECT * FROM pricing_service_rates
-        WHERE prestation_id=? AND client_type=? AND active=1
+      rate=await env.DB.prepare(`SELECT r.* FROM pricing_service_rates r JOIN prestations p ON p.id=r.prestation_id
+        WHERE p.active=1 AND r.prestation_id=? AND r.client_type=? AND r.active=1
         AND (valid_from IS NULL OR datetime(valid_from)<=datetime(?))
         AND (valid_until IS NULL OR datetime(valid_until)>datetime(?))
         LIMIT 1`).bind(prestationId,clientType,new Date(startMs).toISOString(),new Date(startMs).toISOString()).first();
     } else {
-      rate=await env.DB.prepare(`SELECT * FROM pricing_service_rates
-        WHERE service_code=? AND client_type=? AND active=1
+      rate=await env.DB.prepare(`SELECT r.* FROM pricing_service_rates r JOIN prestations p ON p.id=r.prestation_id
+        WHERE p.active=1 AND r.service_code=? AND r.client_type=? AND r.active=1
         AND (valid_from IS NULL OR datetime(valid_from)<=datetime(?))
         AND (valid_until IS NULL OR datetime(valid_until)>datetime(?))
         LIMIT 1`).bind(serviceCode,clientType,new Date(startMs).toISOString(),new Date(startMs).toISOString()).first();
@@ -1875,14 +1875,15 @@ async function pricingQuote(request, env) {
   const localStart=parisParts(startMs), localEnd=parisParts(Math.max(startMs,endMs-1));
   const startHour=Number(localStart.hour), endHour=Number(localEnd.hour);
   const weekday=localStart.weekday;
-  const isSaturday=weekday==='Sat', isSunday=weekday==='Sun';
-  const isEvening=startHour>=18&&startHour<22;
-  const isNight=startHour>=22||startHour<6||endHour>=22;
-  const holidayDate=new Intl.DateTimeFormat('en-CA',{timeZone:'Europe/Paris',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date(startMs));
+  const isSaturday=weekday==='Sat'||localEnd.weekday==='Sat', isSunday=weekday==='Sun'||localEnd.weekday==='Sun';
+  const isEvening=(startHour>=18&&startHour<22)||(endHour>=18&&endHour<22);
+  const isNight=startHour>=22||startHour<6||endHour>=22||endHour<6;
+  const dateFmt=new Intl.DateTimeFormat('en-CA',{timeZone:'Europe/Paris',year:'numeric',month:'2-digit',day:'2-digit'});
+  const firstDate=dateFmt.format(new Date(startMs)), lastDate=dateFmt.format(new Date(Math.max(startMs,endMs-1)));
   let holiday=false;
   try {
     const h=await env.DB.prepare(`SELECT 1 AS yes FROM pricing_holidays
-      WHERE holiday_date=? AND region_code IN ('FR','IDF') AND active=1 LIMIT 1`).bind(holidayDate).first();
+      WHERE holiday_date BETWEEN ? AND ? AND region_code IN ('FR','IDF') AND active=1 LIMIT 1`).bind(firstDate,lastDate).first();
     holiday=!!h;
   } catch (_) { return json({ok:false,error:'HOLIDAY_CALENDAR_UNAVAILABLE',version:VERSION},503); }
 
