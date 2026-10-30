@@ -48,6 +48,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_pricing_service_rate_active
 
 CREATE TABLE IF NOT EXISTS pricing_route_estimates (
   id TEXT PRIMARY KEY,
+  owner_user_id TEXT NOT NULL,
   distance_km REAL NOT NULL CHECK (distance_km >= 0 AND distance_km <= 500),
   status TEXT NOT NULL DEFAULT 'VALID' CHECK (status IN ('VALID','EXPIRED','REVOKED')),
   expires_at TEXT NOT NULL,
@@ -61,6 +62,12 @@ CREATE TABLE IF NOT EXISTS pricing_holidays (
   active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0,1)),
   PRIMARY KEY (holiday_date, region_code)
 );
+INSERT OR IGNORE INTO pricing_holidays(holiday_date,region_code,label,active) VALUES
+('2026-01-01','FR','Jour férié national',1),('2026-04-06','FR','Lundi de Pâques',1),('2026-05-01','FR','Fête du Travail',1),('2026-05-08','FR','Victoire 1945',1),('2026-05-14','FR','Ascension',1),('2026-05-25','FR','Lundi de Pentecôte',1),('2026-07-14','FR','Fête nationale',1),('2026-08-15','FR','Assomption',1),('2026-11-01','FR','Toussaint',1),('2026-11-11','FR','Armistice',1),('2026-12-25','FR','Noël',1),
+('2027-01-01','FR','Jour férié national',1),('2027-03-29','FR','Lundi de Pâques',1),('2027-05-01','FR','Fête du Travail',1),('2027-05-06','FR','Ascension',1),('2027-05-08','FR','Victoire 1945',1),('2027-05-17','FR','Lundi de Pentecôte',1),('2027-07-14','FR','Fête nationale',1),('2027-08-15','FR','Assomption',1),('2027-11-01','FR','Toussaint',1),('2027-11-11','FR','Armistice',1),('2027-12-25','FR','Noël',1),
+('2028-01-01','FR','Jour férié national',1),('2028-04-17','FR','Lundi de Pâques',1),('2028-05-01','FR','Fête du Travail',1),('2028-05-08','FR','Victoire 1945',1),('2028-05-25','FR','Ascension',1),('2028-06-05','FR','Lundi de Pentecôte',1),('2028-07-14','FR','Fête nationale',1),('2028-08-15','FR','Assomption',1),('2028-11-01','FR','Toussaint',1),('2028-11-11','FR','Armistice',1),('2028-12-25','FR','Noël',1),
+('2029-01-01','FR','Jour férié national',1),('2029-04-02','FR','Lundi de Pâques',1),('2029-05-01','FR','Fête du Travail',1),('2029-05-08','FR','Victoire 1945',1),('2029-05-10','FR','Ascension',1),('2029-05-21','FR','Lundi de Pentecôte',1),('2029-07-14','FR','Fête nationale',1),('2029-08-15','FR','Assomption',1),('2029-11-01','FR','Toussaint',1),('2029-11-11','FR','Armistice',1),('2029-12-25','FR','Noël',1),
+('2030-01-01','FR','Jour férié national',1),('2030-04-22','FR','Lundi de Pâques',1),('2030-05-01','FR','Fête du Travail',1),('2030-05-08','FR','Victoire 1945',1),('2030-05-30','FR','Ascension',1),('2030-06-10','FR','Lundi de Pentecôte',1),('2030-07-14','FR','Fête nationale',1),('2030-08-15','FR','Assomption',1),('2030-11-01','FR','Toussaint',1),('2030-11-11','FR','Armistice',1),('2030-12-25','FR','Noël',1);
 
 CREATE TABLE IF NOT EXISTS pricing_quotes (
   id TEXT PRIMARY KEY,
