@@ -268,6 +268,12 @@ test('Travel fee and operating cost use server policy and a persisted route esti
 });
 
 
+test('Travel policy history is retained while only one active policy is permitted', () => {
+  assert.match(source, /DROP INDEX IF EXISTS idx_pricing_travel_policy_active/);
+  assert.match(source, /ON pricing_travel_policies\(phase, client_type\) WHERE active=1/);
+  assert.match(source, /idx_pricing_route_owner_expiry/);
+});
+
 test('Route estimates are calculated server-side and retain only hashed address provenance', () => {
   const route = source.slice(source.indexOf('async function pricingRouteEstimate'), source.indexOf('async function pricingQuote'));
   assert.match(route, /MAPS_PROVIDER/);
