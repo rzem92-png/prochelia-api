@@ -2537,9 +2537,29 @@ async function createPromotion(request, env) {
   }
 
   const phase = String(b.phase || await getSetting(env, 'project_phase', 'TEST')).toUpperCase();
-  const discount = Number(b.discount_value || 0);
-  if (!Number.isFinite(discount) || discount < 0) {
-    return json({ok:false,error:'INVALID_DISCOUNT',version:VERSION},400);
+  const discountType = String(b.discount_type || 'PERCENT').toUpperCase();
+  const discount = Number(b.discount_value);
+  const clientType = String(b.client_type || 'ALL').toUpperCase();
+  const startsAt = clean(b.starts_at) || new Date().toISOString();
+  const endsAt = clean(b.ends_at) || new Date(Date.now()+86400000).toISOString();
+  const startMs = Date.parse(startsAt), endMs = Date.parse(endsAt);
+  const minAmount = Number(b.min_amount_cents ?? 0);
+  const maxDiscount = b.max_discount_cents == null ? null : Number(b.max_discount_cents);
+  const budget = b.budget_cents == null ? null : Number(b.budget_cents);
+  const targetMargin = Number(b.target_margin_percent ?? 15);
+  const providerProtection = Number(b.intervenant_protection_cents ?? 0);
+  if (!Object.prototype.hasOwnProperty.call(PROJECT_PHASES, phase) ||
+      !['PERCENT','FIXED'].includes(discountType) ||
+      !Number.isFinite(discount) || discount <= 0 ||
+      (discountType === 'PERCENT' && discount > 100) ||
+      !['ALL','B2C','B2B'].includes(clientType) ||
+      !Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs ||
+      !Number.isSafeInteger(minAmount) || minAmount < 0 ||
+      (maxDiscount !== null && (!Number.isSafeInteger(maxDiscount) || maxDiscount < 0)) ||
+      (budget !== null && (!Number.isSafeInteger(budget) || budget <= 0)) ||
+      !Number.isFinite(targetMargin) || targetMargin < 0 || targetMargin > 100 ||
+      !Number.isSafeInteger(providerProtection) || providerProtection < 0) {
+    return json({ok:false,error:'PROMOTION_CONFIGURATION_INVALID',version:VERSION},400);
   }
 
   const id = crypto.randomUUID();
@@ -2553,13 +2573,13 @@ async function createPromotion(request, env) {
      rationale,rules_json,created_by)
     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
     .bind(
-      id, code, name, type, phase, String(b.client_type || 'ALL').toUpperCase(),
+      id, code, name, type, phase, clientType,
       clean(b.service_code)||null, clean(b.zone_code)||null,
-      String(b.discount_type || 'PERCENT').toUpperCase(), discount,
-      Number(b.min_amount_cents || 0), b.max_discount_cents == null ? null : Number(b.max_discount_cents),
-      b.budget_cents == null ? null : Number(b.budget_cents),
-      Number(b.target_margin_percent || 15), Number(b.intervenant_protection_cents || 0),
-      clean(b.starts_at) || new Date().toISOString(), clean(b.ends_at) || new Date(Date.now()+86400000).toISOString(),
+      discountType, discount,
+      minAmount, maxDiscount,
+      budget,
+      targetMargin, providerProtection,
+      startsAt, endsAt,
       'DRAFT', autoApply, requiresManager, clean(b.rationale)||null,
       JSON.stringify(b.rules || {}), gate.auth.user.id
     ).run();
@@ -2590,12 +2610,28 @@ async function activatePromotion(request, env) {
   const p = await env.DB.prepare('SELECT * FROM promotions WHERE id=? LIMIT 1').bind(b.promotion_id).first();
   if (!p) return json({ok:false,error:'PROMOTION_NOT_FOUND',version:VERSION},404);
 
-  if (p.requires_manager && !gate.auth.user.id) {
-    return json({ok:false,error:'MANAGER_APPROVAL_REQUIRED',version:VERSION},403);
+  const phase = String(await getSetting(env,'project_phase','TEST')).toUpperCase();
+  const startMs = Date.parse(String(p.starts_at||''));
+  const endMs = Date.parse(String(p.ends_at||''));
+  const discountType = String(p.discount_type||'').toUpperCase();
+  const discountValue = Number(p.discount_value);
+  const budget = p.budget_cents == null ? null : Number(p.budget_cents);
+  const used = Number(p.used_cents||0);
+  if (!Object.prototype.hasOwnProperty.call(PROJECT_PHASES, String(p.phase||'').toUpperCase()) ||
+      String(p.phase).toUpperCase() !== phase ||
+      !Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs || endMs <= Date.now() ||
+      !['PERCENT','FIXED'].includes(discountType) || !Number.isFinite(discountValue) || discountValue <= 0 ||
+      (discountType === 'PERCENT' && discountValue > 100) ||
+      (budget !== null && (!Number.isSafeInteger(budget) || budget <= 0 || !Number.isSafeInteger(used) || used < 0 || used > budget))) {
+    return json({ok:false,error:'PROMOTION_NOT_READY_FOR_ACTIVATION',version:VERSION},409);
   }
-
-  await env.DB.prepare(`UPDATE promotions SET status='ACTIVE',updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(p.id).run();
-  await journal(env,'gerante',gate.auth.user.id,'PROMOTION_ACTIVATED','promotion',p.id,'OK',{code:p.code});
+  const activated = await env.DB.prepare("UPDATE promotions SET status='ACTIVE',updated_at=CURRENT_TIMESTAMP WHERE id=? AND status IN ('DRAFT','PAUSED') AND phase=? AND datetime(ends_at)>datetime('now')").bind(p.id,phase).run();
+  if (Number(activated?.meta?.changes||0)!==1) {
+    const current = await env.DB.prepare('SELECT status FROM promotions WHERE id=? LIMIT 1').bind(p.id).first();
+    if (current?.status === 'ACTIVE') return json({ok:true,version:VERSION,promotion_id:p.id,status:'ACTIVE',idempotent_replay:true},200);
+    return json({ok:false,error:'PROMOTION_STATE_CHANGED',version:VERSION},409);
+  }
+  await journal(env,'gerante',gate.auth.user.id,'PROMOTION_ACTIVATED','promotion',p.id,'OK',{code:p.code,phase});
   return json({ok:true,version:VERSION,promotion_id:p.id,status:'ACTIVE'},200);
 }
 
