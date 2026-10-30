@@ -528,3 +528,17 @@ test('Promotion activation checks project phase, expiry, budget integrity and st
   assert.match(activation, /PROMOTION_STATE_CHANGED/);
   assert.match(activation, /idempotent_replay:true/);
 });
+
+test('Client and intervenant profile reads are authenticated, role-scoped, paginated and privacy-minimized', () => {
+  assert.match(source, /async function listProfiles\(request, env, kind\)/);
+  assert.match(source, /\['gerante','admin','client'\]/);
+  assert.match(source, /\['gerante','admin','intervenant'\]/);
+  assert.match(source, /WHERE p\.user_id = \?/);
+  assert.match(source, /Math\.min\(100, Math\.max\(1, Math\.floor\(limitRaw\)\)\)/);
+  assert.match(source, /SELECT p\.id, u\.first_name, u\.status AS account_status, p\.city/);
+  assert.match(source, /p\.validation_status, p\.hourly_rate/);
+  assert.match(source, /PROFILE_SCHEMA_NOT_READY/);
+  assert.match(source, /url\.pathname === '\/api\/clients'/);
+  assert.match(source, /url\.pathname === '\/api\/intervenants'/);
+  assert.doesNotMatch(source, /SELECT p\.\*, u\.email, u\.phone/);
+});
