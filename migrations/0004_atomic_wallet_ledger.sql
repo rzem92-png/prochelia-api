@@ -18,6 +18,18 @@ CREATE TABLE IF NOT EXISTS payment_wallet_ledger (
 );
 CREATE INDEX IF NOT EXISTS idx_wallet_ledger_user_date ON payment_wallet_ledger(user_id,created_at);
 CREATE INDEX IF NOT EXISTS idx_wallet_ledger_tx ON payment_wallet_ledger(transaction_id,entry_type);
+CREATE TRIGGER IF NOT EXISTS trg_payment_wallet_ledger_require_wallet
+BEFORE INSERT ON payment_wallet_ledger
+BEGIN
+  SELECT CASE
+    WHEN NOT EXISTS (
+      SELECT 1 FROM wallets
+       WHERE user_id=NEW.user_id AND currency=NEW.currency
+    )
+    THEN RAISE(ABORT,'PAYMENT_WALLET_NOT_FOUND_OR_CURRENCY_MISMATCH')
+  END;
+END;
+
 CREATE TRIGGER IF NOT EXISTS trg_payment_wallet_ledger_apply
 AFTER INSERT ON payment_wallet_ledger
 BEGIN
