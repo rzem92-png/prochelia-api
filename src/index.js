@@ -1967,18 +1967,25 @@ async function pricingQuote(request, env) {
   if(!Number.isFinite(distance)||distance<0||distance>500)
     return json({ok:false,error:'ROUTE_ESTIMATE_INVALID',version:VERSION},503);
 
-  // Horaires et jours sont dérivés du créneau demandé, jamais de drapeaux client.
+  // Balayage du créneau complet en heure de Paris : un créneau qui traverse
+  // minuit, le samedi/dimanche ou une tranche soir/nuit ne perd aucune majoration.
   const parisParts=(ms)=>Object.fromEntries(new Intl.DateTimeFormat('en-GB',{
-    timeZone:'Europe/Paris',weekday:'short',hour:'2-digit',hourCycle:'h23'
+    timeZone:'Europe/Paris',weekday:'short',hour:'2-digit',hourCycle:'h23',
+    year:'numeric',month:'2-digit',day:'2-digit'
   }).formatToParts(new Date(ms)).filter(p=>p.type!=='literal').map(p=>[p.type,p.value]));
-  const localStart=parisParts(startMs), localEnd=parisParts(Math.max(startMs,endMs-1));
-  const startHour=Number(localStart.hour), endHour=Number(localEnd.hour);
-  const weekday=localStart.weekday;
-  const isSaturday=weekday==='Sat'||localEnd.weekday==='Sat', isSunday=weekday==='Sun'||localEnd.weekday==='Sun';
-  const isEvening=(startHour>=18&&startHour<22)||(endHour>=18&&endHour<22);
-  const isNight=startHour>=22||startHour<6||endHour>=22||endHour<6;
   const dateFmt=new Intl.DateTimeFormat('en-CA',{timeZone:'Europe/Paris',year:'numeric',month:'2-digit',day:'2-digit'});
-  const firstDate=dateFmt.format(new Date(startMs)), lastDate=dateFmt.format(new Date(Math.max(startMs,endMs-1)));
+  const sampledTimes=[];
+  for(let t=startMs;t<endMs;t+=30*60*1000)sampledTimes.push(t);
+  sampledTimes.push(endMs-1);
+  const localSamples=sampledTimes.map(parisParts);
+  const isSaturday=localSamples.some(p=>p.weekday==='Sat');
+  const isSunday=localSamples.some(p=>p.weekday==='Sun');
+  const isEvening=localSamples.some(p=>Number(p.hour)>=18&&Number(p.hour)<22);
+  const isNight=localSamples.some(p=>Number(p.hour)>=22||Number(p.hour)<6);
+  const localDates=[...new Set(localSamples.map(p=>dateFmt.format(new Date(
+    Date.UTC(Number(p.year),Number(p.month)-1,Number(p.day),12)
+  ))))].sort();
+  const firstDate=localDates[0], lastDate=localDates[localDates.length-1];
   let holiday=false;
   try {
     const h=await env.DB.prepare(`SELECT 1 AS yes FROM pricing_holidays
