@@ -60,6 +60,15 @@ test('Stripe payment and refund webhooks use atomic batches and deterministic le
   assert.match(webhook, /out_of_order_refund_reconciliation/);
 });
 
+test('Generic PSP webhook safely retries interrupted events and rejects payload identity changes', () => {
+  const webhook = source.slice(source.indexOf('async function paymentWebhook'), source.indexOf('async function openPaymentDispute'));
+  assert.match(webhook, /WEBHOOK_EVENT_PERSISTENCE_FAILED/);
+  assert.match(webhook, /WEBHOOK_EVENT_PAYLOAD_MISMATCH/);
+  assert.match(webhook, /processed=2/);
+  assert.match(webhook, /processed=0 OR \(processed=2 AND processed_at<datetime/);
+  assert.match(webhook, /retry_after_seconds:300/);
+});
+
 test('Non-Stripe provider webhook credits and refunds through the same atomic ledger', () => {
   const webhook = source.slice(source.indexOf('async function paymentWebhook'), source.indexOf('async function openPaymentDispute'));
   assert.match(webhook, /await env\.DB\.batch\(/);
