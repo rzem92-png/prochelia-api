@@ -701,7 +701,15 @@ async function trustPassportCheckMission(env, intervenantId, prestationId, missi
   try { requirements = JSON.parse(service.requirements_json || '[]'); } catch { return {decision:'BLOCKED',reasons:['TRUST_CATALOG_INVALID']}; }
   const profileRow = await env.DB.prepare('SELECT * FROM intervenants WHERE id=? LIMIT 1').bind(String(intervenantId)).first();
   if (!profileRow) return {decision:'BLOCKED',reasons:['INTERVENANT_PROFILE_NOT_FOUND']};
-  const profile = {status:String(profileRow.status || profileRow.statut || '').toUpperCase(),suspended:String(profileRow.status || profileRow.statut || '').toUpperCase()==='SUSPENDED'};
+  // The core D1 schema names this field validation_status (not status).
+  // Only explicit positive validation states are normalized to ACTIVE; pending,
+  // rejected, suspended and unknown values remain blocked by the Trust Passport.
+  const rawProfileStatus=String(profileRow.status || profileRow.statut || profileRow.validation_status || '').trim().toUpperCase();
+  const profile = {
+    status:['ACTIVE','APPROVED','VALIDATED','VERIFIED'].includes(rawProfileStatus)?'ACTIVE':rawProfileStatus,
+    suspended:rawProfileStatus==='SUSPENDED' || String(profileRow.suspension_status||'').toUpperCase()==='SUSPENDED',
+    suspension_status:profileRow.suspension_status||null
+  };
   const evidence = await env.DB.prepare(`SELECT category,status,service_code,valid_from,expires_at,requires_expiry FROM trust_verifications WHERE intervenant_id=? AND (service_code=? OR service_code='*')`).bind(String(intervenantId),String(service.service_code)).all();
   const identity = await env.DB.prepare(`SELECT verified_at,expires_at FROM identity_verifications WHERE user_id=? AND status='verified' AND (expires_at IS NULL OR expires_at>CURRENT_TIMESTAMP) ORDER BY verified_at DESC LIMIT 1`).bind(String(profileRow.user_id)).first();
   const records = (evidence.results || []).map(v=>({...v,requires_expiry:!!v.requires_expiry}));
