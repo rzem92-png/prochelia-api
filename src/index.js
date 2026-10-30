@@ -2111,18 +2111,30 @@ async function pricingQuote(request, env) {
         max_discount_cents,budget_cents,used_cents,service_code,client_type,starts_at,ends_at
         FROM promotions WHERE code=? AND status='ACTIVE' AND phase=?
         AND client_type IN (?, 'ALL') AND (service_code IS NULL OR service_code=?)
-        AND datetime(starts_at)<=datetime(?) AND datetime(ends_at)>datetime(?)
+        AND datetime(starts_at)<=datetime(?) AND datetime(ends_at)>=datetime(?)
         AND (budget_cents IS NULL OR used_cents<budget_cents)
-        LIMIT 1`).bind(promotionCode,phase,clientType,rate.service_code,new Date().toISOString(),new Date().toISOString()).first();
+        LIMIT 1`).bind(promotionCode,phase,clientType,rate.service_code,new Date(startMs).toISOString(),new Date(endMs).toISOString()).first();
     } catch (_) { return json({ok:false,error:'PROMOTION_REFERENCE_UNAVAILABLE',version:VERSION},503); }
     if(!promotion)return json({ok:false,error:'PROMOTION_NOT_APPROVED_OR_NOT_ELIGIBLE',version:VERSION},409);
     if(serviceGross<Number(promotion.min_amount_cents||0))
       return json({ok:false,error:'PROMOTION_MINIMUM_NOT_REACHED',version:VERSION},409);
-    discountCents=String(promotion.discount_type).toUpperCase()==='PERCENT'
-      ? Math.round(serviceGross*Math.min(100,Math.max(0,Number(promotion.discount_value)||0))/100)
-      : Math.round(Math.max(0,Number(promotion.discount_value)||0));
-    if(promotion.max_discount_cents!=null)discountCents=Math.min(discountCents,Number(promotion.max_discount_cents));
+    const promotionType=String(promotion.discount_type||'').toUpperCase();
+    const promotionValue=Number(promotion.discount_value);
+    const promotionCap=promotion.max_discount_cents==null?null:Number(promotion.max_discount_cents);
+    if(!['PERCENT','FIXED'].includes(promotionType)||!Number.isFinite(promotionValue)||promotionValue<=0||
+       (promotionType==='PERCENT'&&promotionValue>100)||
+       (promotionCap!==null&&(!Number.isFinite(promotionCap)||promotionCap<0)))
+      return json({ok:false,error:'PROMOTION_CONFIGURATION_INVALID',version:VERSION},503);
+    discountCents=promotionType==='PERCENT'
+      ? Math.round(serviceGross*promotionValue/100)
+      : Math.round(promotionValue);
+    if(promotionCap!==null)discountCents=Math.min(discountCents,promotionCap);
     discountCents=Math.min(serviceGross,Math.max(0,discountCents));
+    // Le devis ne réserve pas le budget : il vérifie seulement que la remise
+    // entière est encore finançable. La réservation atomique se fera avec la mission.
+    if(promotion.budget_cents!==null&&promotion.budget_cents!==undefined&&
+       Number(promotion.budget_cents)-Number(promotion.used_cents||0)<discountCents)
+      return json({ok:false,error:'PROMOTION_BUDGET_INSUFFICIENT_FOR_DISCOUNT',version:VERSION},409);
   }
   const discountedService=Math.max(0,serviceGross-discountCents);
   // Le plafond s'applique au prix de la prestation uniquement. Le déplacement
