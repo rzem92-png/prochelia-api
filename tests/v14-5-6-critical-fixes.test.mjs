@@ -249,3 +249,11 @@ test('Operational cases remain open until downstream actions are verified', () =
   assert.match(source, /resolved_at=\?/);
   assert.doesNotMatch(source, /status='RESOLVED',resolution_json=\?,requires_manager=0/);
 });
+
+
+test('Trust Passport reads the actual D1 intervenants.validation_status field fail-closed', () => {
+  assert.match(source, /profileRow\.validation_status/);
+  assert.match(source, /\['ACTIVE','APPROVED','VALIDATED','VERIFIED'\]\.includes\(rawProfileStatus\)/);
+  assert.match(source, /suspended:rawProfileStatus==='SUSPENDED'/);
+  assert.match(source, /status:\['ACTIVE','APPROVED','VALIDATED','VERIFIED'\]\.includes\(rawProfileStatus\)\?'ACTIVE':rawProfileStatus/);
+});
