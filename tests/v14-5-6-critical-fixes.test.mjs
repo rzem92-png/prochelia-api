@@ -263,7 +263,7 @@ test('Travel fee and operating cost use server policy and a persisted route esti
   const quote = source.slice(source.indexOf('async function pricingQuote'), source.indexOf('async function financeSummary'));
   assert.match(quote, /Number\(route\.distance_km\)/);
   assert.match(quote, /Number\(policy\.fuel_cost_per_km_cents/);
-  assert.match(quote, /Number\(rate\.travel_fee_per_km_cents/);
+  assert.match(quote, /Number\(travelPolicy\.travel_fee_per_km_cents/);
   assert.match(quote, /travel_operating_cost_cents/);
 });
 
