@@ -1032,72 +1032,105 @@ function v7CheckPayment(
 // =====================================================
 
 function v7CalculateFinance({
+  // Backward-compatible public inputs (amounts in EUR).
   clientAmount = 0,
   commissionRate = 0,
   paymentFees = 0,
-  otherFees = 0
+  otherFees = 0,
+  // Explicit, auditable components (amounts in EUR unless *_Cents).
+  clientAmountCents,
+  commissionFixed = 0,
+  commissionFixedCents,
+  commissionVariableRate,
+  paymentFeeFixed = 0,
+  paymentFeeFixedCents,
+  paymentFeeRate = 0
 } = {}) {
-
-  const client =
-    Number(
-      clientAmount
-    ) || 0;
-
-  const rate =
-    Number(
-      commissionRate
-    ) || 0;
-
-  const payment =
-    Number(
-      paymentFees
-    ) || 0;
-
-  const other =
-    Number(
-      otherFees
-    ) || 0;
-
-  const commission =
-    client *
-    rate /
-    100;
-
-  const intervenant =
-    client -
-    commission;
-
-  const margin =
-    commission -
-    payment -
-    other;
-
-  return v7Result(
-    true,
-    {
-
-      clientAmount:
-        client,
-
-      commissionRate:
-        rate,
-
-      commissionAmount:
-        commission,
-
-      intervenantAmount:
-        intervenant,
-
-      paymentFees:
-        payment,
-
-      otherFees:
-        other,
-
-      grossMargin:
-        margin
+  const toCents = (value, name) => {
+    const n = Number(value);
+    if (!Number.isFinite(n) || n < 0) throw new Error(name + '_INVALID');
+    const cents = Math.round(n * 100);
+    if (!Number.isSafeInteger(cents)) throw new Error(name + '_OUT_OF_RANGE');
+    return cents;
+  };
+  try {
+    const grossCents = clientAmountCents === undefined
+      ? toCents(clientAmount, 'CLIENT_AMOUNT')
+      : Number(clientAmountCents);
+    if (!Number.isSafeInteger(grossCents) || grossCents < 0) {
+      throw new Error('CLIENT_AMOUNT_CENTS_INVALID');
     }
-  );
+
+    const variableRate = commissionVariableRate === undefined
+      ? Number(commissionRate)
+      : Number(commissionVariableRate);
+    const pspRate = Number(paymentFeeRate);
+    if (!Number.isFinite(variableRate) || variableRate < 0 || variableRate > 100) {
+      throw new Error('COMMISSION_RATE_INVALID');
+    }
+    if (!Number.isFinite(pspRate) || pspRate < 0 || pspRate > 100) {
+      throw new Error('PAYMENT_FEE_RATE_INVALID');
+    }
+
+    const fixedCommissionCents = commissionFixedCents === undefined
+      ? toCents(commissionFixed, 'COMMISSION_FIXED')
+      : Number(commissionFixedCents);
+    const fixedPspCents = paymentFeeFixedCents === undefined
+      ? toCents(paymentFeeFixed, 'PAYMENT_FEE_FIXED')
+      : Number(paymentFeeFixedCents);
+    const legacyPspCents = toCents(paymentFees, 'PAYMENT_FEES');
+    const otherCents = toCents(otherFees, 'OTHER_FEES');
+    if (!Number.isSafeInteger(fixedCommissionCents) || fixedCommissionCents < 0 ||
+        !Number.isSafeInteger(fixedPspCents) || fixedPspCents < 0) {
+      throw new Error('FIXED_AMOUNT_CENTS_INVALID');
+    }
+
+    const variableCommissionCents = Math.round(grossCents * variableRate / 100);
+    const commissionCents = fixedCommissionCents + variableCommissionCents;
+    if (commissionCents > grossCents) throw new Error('COMMISSION_EXCEEDS_CLIENT_AMOUNT');
+
+    // paymentFees remains the legacy all-in PSP fee. When new PSP fee
+    // components are supplied, calculate them once from fixed + percentage.
+    const hasExplicitPspComponents = paymentFeeFixedCents !== undefined ||
+      Number(paymentFeeFixed) !== 0 || Number(paymentFeeRate) !== 0;
+    const pspFeeCents = hasExplicitPspComponents
+      ? fixedPspCents + Math.round(grossCents * pspRate / 100)
+      : legacyPspCents;
+    const intervenantNetCents = grossCents - commissionCents;
+    const platformNetMarginCents = commissionCents - pspFeeCents - otherCents;
+
+    return v7Result(true, {
+      currency: 'EUR',
+      clientAmountCents: grossCents,
+      commissionFixedCents: fixedCommissionCents,
+      commissionVariableRate: variableRate,
+      commissionVariableCents: variableCommissionCents,
+      commissionAmountCents: commissionCents,
+      intervenantAmountCents: intervenantNetCents,
+      paymentFeesCents: pspFeeCents,
+      otherFeesCents: otherCents,
+      platformGrossCommissionCents: commissionCents,
+      platformNetMarginCents,
+      // Legacy decimal fields retained for existing consumers.
+      clientAmount: grossCents / 100,
+      commissionRate: variableRate,
+      commissionAmount: commissionCents / 100,
+      intervenantAmount: intervenantNetCents / 100,
+      paymentFees: pspFeeCents / 100,
+      otherFees: otherCents / 100,
+      grossMargin: platformNetMarginCents / 100,
+      accounting: {
+        clientGrossCents: grossCents,
+        intervenantNetCents,
+        platformCommissionCents: commissionCents,
+        pspFeesCents: pspFeeCents,
+        otherCostsCents: otherCents,
+        reconciled: grossCents === intervenantNetCents + commissionCents
+      }
+    });
+  } catch (error) {
+    return v7Result(false, {}, String(error?.message || 'FINANCE_CALCULATION_INVALID'));
+  }
 }
 
 
