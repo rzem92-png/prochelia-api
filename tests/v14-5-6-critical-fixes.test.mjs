@@ -108,7 +108,7 @@ test('Stripe disputes are persisted idempotently for investigation', () => {
 });
 
 test('security and payment hardening is explicitly versioned', () => {
-  assert.match(source, /V14\.5\.6-EXPERT-PREPRODUCTION/);
+  assert.match(source, /V14\.5\.7-EXPERT-PREPRODUCTION/);
 });
 
 
@@ -494,4 +494,17 @@ test('Client quote endpoint cannot classify an intervenant account as B2C', () =
   const quote = source.slice(source.indexOf('async function pricingQuote'), source.indexOf('async function financeSummary'));
   assert.match(quote, /requireAuthRole\(request,env,\['gerante','client','entreprise'\]\)/);
   assert.doesNotMatch(quote.slice(0,250), /'intervenant'/);
+});
+
+
+test('Promotion validity covers the complete mission window, not quote creation time', () => {
+  assert.match(source, /datetime\(starts_at\)<=datetime\(\?\) AND datetime\(ends_at\)>=datetime\(\?\)/);
+  assert.match(source, /new Date\(startMs\)\.toISOString\(\),new Date\(endMs\)\.toISOString\(\)/);
+});
+
+test('Promotion discounts are validated and cannot exceed the remaining approved budget', () => {
+  assert.match(source, /PROMOTION_CONFIGURATION_INVALID/);
+  assert.match(source, /PROMOTION_BUDGET_INSUFFICIENT_FOR_DISCOUNT/);
+  assert.match(source, /Number\(promotion\.budget_cents\)-Number\(promotion\.used_cents\|\|0\)<discountCents/);
+  assert.match(source, /La réservation atomique se fera avec la mission/);
 });
