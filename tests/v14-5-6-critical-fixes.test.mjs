@@ -282,6 +282,8 @@ test('Route estimates use profile-owned addresses and never trust browser-suppli
   assert.match(route, /validation_status/);
   assert.match(route, /INTERVENANT_NOT_VALIDATED/);
   assert.match(route, /INTERVENANT_ROUTE_ADDRESS_NOT_VERIFIED/);
+  assert.match(route, /a\.verified_at,a\.verified_by/);
+  assert.match(route, /!intervenant\.verified_at\|\|!intervenant\.verified_by/);
   assert.match(route, /ROUTE_PROFILE_ADDRESS_INCOMPLETE/);
   assert.doesNotMatch(route, /clean\(b\.origin_address\)/);
   assert.doesNotMatch(route, /clean\(b\.destination_address\)/);
