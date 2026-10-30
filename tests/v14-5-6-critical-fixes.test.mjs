@@ -103,7 +103,7 @@ test('Generic PSP success creates the wallet before the ledger trigger credits i
 test('Generic PSP refund events distinguish partial refunds from full refunds', () => {
   const webhook = source.slice(source.indexOf('async function paymentWebhook'), source.indexOf('async function openPaymentDispute'));
   assert.match(webhook, /const refundStatus=refundCents>=Number\(tx\.gross_cents\|\|0\)\?'refunded':'partially_refunded'/);
-  assert.match(webhook, /SET status=\?,refund_cents=\?,updated_at=CURRENT_TIMESTAMP WHERE id=\? AND COALESCE\(refund_cents,0\)\?/);
+  assert.match(webhook, /SET status=\?,refund_cents=\?,updated_at=CURRENT_TIMESTAMP WHERE id=\? AND COALESCE\(refund_cents,0\)<\?/);
   assert.match(webhook, /source:'out_of_order_refund_reconciliation'/);
   assert.match(webhook, /t\.refund_cents>0 AND t\.gross_cents>0/);
   assert.match(webhook, /t\.net_intervenant_cents\*1\.0\*t\.refund_cents\/NULLIF\(t\.gross_cents,0\)/);
