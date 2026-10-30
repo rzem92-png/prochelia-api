@@ -93,6 +93,12 @@ test('Stripe event-specific amounts avoid false failure and dispute mismatches',
   assert.match(source, /isCheckout \? \(sessionId\|\|null\) : null/);
 });
 
+test('Generic PSP refund events distinguish partial refunds from full refunds', () => {
+  const webhook = source.slice(source.indexOf('async function paymentWebhook'), source.indexOf('async function openPaymentDispute'));
+  assert.match(webhook, /const refundStatus=refundCents>=Number\(tx\.gross_cents\|\|0\)\?'refunded':'partially_refunded'/);
+  assert.match(webhook, /SET status=\?,refund_cents=\?,updated_at=CURRENT_TIMESTAMP WHERE id=\? AND COALESCE\(refund_cents,0\)\?/);
+});
+
 test('Stripe refunds are bounded, adjust wallet balances, and distinguish partial refunds', () => {
   assert.match(source, /refundCents>grossCents/);
   assert.match(source, /'partially_refunded'/);
