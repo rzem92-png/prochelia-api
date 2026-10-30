@@ -96,3 +96,13 @@ test("composition rejects invalid actor limits", () => {
     request, candidates: [], maxActors: 3
   }), /exactly two/);
 });
+
+test("solo ranking excludes candidates over budget, including zero-budget requests", () => {
+  assert.deepEqual(rankNexusOpportunities({
+    request, candidates: [provider("within", { priceCents: 12000 }), provider("over", { priceCents: 12001 })]
+  }).map(x => x.candidateId), ["within"]);
+  const zeroBudget = { ...request, budgetCents: 0 };
+  assert.deepEqual(rankNexusOpportunities({
+    request: zeroBudget, candidates: [provider("free", { priceCents: 0 }), provider("paid", { priceCents: 1 })]
+  }).map(x => x.candidateId), ["free"]);
+});
