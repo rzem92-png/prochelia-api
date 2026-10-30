@@ -197,3 +197,10 @@ test('Initial manager bootstrap uses one atomic conditional INSERT and rejects a
   assert.ok(source.includes('Number(created?.meta?.changes || 0) !== 1'));
   assert.ok(source.includes("error: 'BOOTSTRAP_ALREADY_USED'"));
 });
+
+test('Mission payload validation rejects invalid dates and inconsistent price split', () => {
+  assert.ok(source.includes("const startMs = Date.parse(String(body.start_at || ''))"));
+  assert.ok(source.includes("endMs <= startMs"));
+  assert.ok(source.includes("errors.push('price_commission_mismatch')"));
+  assert.ok(source.includes("Math.abs(clientCents - intervenantCents - commissionCents) > 1"));
+});
