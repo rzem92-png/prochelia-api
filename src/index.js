@@ -402,10 +402,17 @@ async function bootstrap(request, env) {
   const passwordHash = await hashPassword(password);
   const userId = crypto.randomUUID();
 
-  await env.DB.prepare(
+  // Enforce the one-time bootstrap atomically: two concurrent requests must
+  // never both observe an empty users table and create two initial managers.
+  const created = await env.DB.prepare(
     `INSERT INTO users (id, role, email, first_name, last_name, phone, status, password_hash)
-     VALUES (?, 'gerante', ?, ?, ?, ?, 'active', ?)`
+     SELECT ?, 'gerante', ?, ?, ?, ?, 'active', ?
+      WHERE NOT EXISTS (SELECT 1 FROM users LIMIT 1)`
   ).bind(userId, email, firstName, lastName, phone, passwordHash).run();
+
+  if (Number(created?.meta?.changes || 0) !== 1) {
+    return json({ ok: false, error: 'BOOTSTRAP_ALREADY_USED', version: VERSION }, 409);
+  }
 
   return json({
     ok: true,
