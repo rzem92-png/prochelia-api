@@ -126,7 +126,7 @@ test('Copilot AI is server-side, bounded, privacy-minimizing, and never executes
   assert.match(source, /prompt\.length>6000/);
   assert.match(source, /await sha256Hex\(prompt\)/);
   assert.match(source, /OPENAI_MODEL/);
-  assert.match(source, /PLAN_ONLY_NO_MUTATION/);
+  assert.match(source, /PLAN_ONLY_WITH_READ_ONLY_CONTEXT_NO_MUTATION/);
   assert.match(source, /Aucune action métier n’est exécutée par la sortie du modèle/);
   assert.match(source, /human|Validation humaine obligatoire/);
   assert.match(source, /api\/copilot\/ask/);
@@ -170,7 +170,7 @@ test('Copilot readiness diagnostics are authenticated and never expose secret va
   assert.match(source, /async function copilotHealth\(request,env\)/);
   assert.match(source, /\/api\/copilot\/health/);
   assert.match(source, /AI_PROVIDER_SECRET/);
-  assert.match(source, /Aucun accès direct de l’IA aux données D1, Stripe ou documents/);
+  assert.match(source, /Contexte D1 agrégé et en lecture seule/);
 });
 
 
