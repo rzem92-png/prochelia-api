@@ -378,3 +378,10 @@ test('Pricing policy selection is deterministic and blocks duplicate active rule
   assert.match(quote, /PRICING_POLICY_AMBIGUOUS/);
   assert.match(quote, /const providerFloor=Math\.max\(Number\(rate\.intervenant_floor_cents\),Number\(policy\.intervenant_floor_cents\|\|0\)\)/);
 });
+
+
+test('Client quote endpoint cannot classify an intervenant account as B2C', () => {
+  const quote = source.slice(source.indexOf('async function pricingQuote'), source.indexOf('async function financeSummary'));
+  assert.match(quote, /requireAuthRole\(request,env,\['gerante','client','entreprise'\]\)/);
+  assert.doesNotMatch(quote.slice(0,250), /'intervenant'/);
+});
