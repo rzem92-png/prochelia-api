@@ -4496,7 +4496,7 @@ async function copilotHealth(request,env) {
     status:blocking.length?'PARTIALLY_CONFIGURED':'CONFIGURED',
     checks,blocking: blocking.map(x=>x.code),
     endpoints:{ask:'/api/copilot/ask',scenarios:'/api/copilot/scenarios',health:'/api/copilot/health'},
-    limitations:['Aucun accès direct de l’IA aux données D1, Stripe ou documents','Aucune mutation métier exécutée directement par la sortie du modèle','Les intégrations réelles et les parcours de bout en bout doivent être testés en préproduction']
+    limitations:['Contexte D1 agrégé et en lecture seule ; aucun accès direct Stripe, documents ou mutations métier','Aucune mutation métier exécutée directement par la sortie du modèle','Les intégrations réelles et les parcours de bout en bout doivent être testés en préproduction']
   });
 }
 
