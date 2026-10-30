@@ -106,3 +106,29 @@ test("solo ranking excludes candidates over budget, including zero-budget reques
     request: zeroBudget, candidates: [provider("free", { priceCents: 0 }), provider("paid", { priceCents: 1 })]
   }).map(x => x.candidateId), ["free"]);
 });
+
+test("request and candidate skill lists reject duplicates and malformed entries", () => {
+  assert.throws(() => rankNexusOpportunities({
+    request: { ...request, requiredSkills: ["cleaning", "cleaning"] },
+    candidates: [provider("x")]
+  }), /unique non-empty strings/);
+  assert.throws(() => rankNexusOpportunities({
+    request, candidates: [provider("bad", { skills: ["cleaning", ""] })]
+  }), /unique non-empty strings/);
+});
+
+test("zero-distance requests correctly prefer a provider at the exact location", () => {
+  const zeroDistance = { ...request, maxDistanceKm: 0 };
+  const result = rankNexusOpportunities({
+    request: zeroDistance,
+    candidates: [provider("exact", { distanceKm: 0 }), provider("away", { distanceKm: 0.1 })]
+  });
+  assert.deepEqual(result.map(x => x.candidateId), ["exact"]);
+});
+
+test("composition rejects duplicate candidate identities", () => {
+  assert.throws(() => composeNexusScenarios({
+    request,
+    candidates: [provider("duplicate", { skills: ["cleaning"] }), provider("duplicate", { skills: ["shopping"] })]
+  }), /unique/);
+});
