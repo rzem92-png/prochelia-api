@@ -3993,10 +3993,51 @@ async function stripeCheckout(request, env) {
   return json({ok:true,version:VERSION,checkout_url:data.url,checkout_session_id:data.id},201);
 }
 
+
+/* Read-only profile directories for the manager console.
+   Minimal fields only; private notes, payment data, documents and credentials are never returned. */
+async function listManagedProfiles(request,env,kind){
+  const gate=await requireAuthRole(request,env,['gerante']);
+  if(gate.error)return gate.error;
+  if(!env.DB)return json({ok:false,error:'DATABASE_UNAVAILABLE',version:VERSION},503);
+  const table=kind==='clients'?'clients':'intervenants';
+  const profileRole=kind==='clients'?'client':'intervenant';
+  const exists=await env.DB.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name=? LIMIT 1").bind(table).first();
+  const users=await env.DB.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='users' LIMIT 1").first();
+  if(!exists||!users)return json({ok:false,error:'PROFILE_SCHEMA_NOT_APPLIED',version:VERSION,required_migration:'0001_core_business_schema.sql'},503);
+  const url=new URL(request.url);
+  const rawLimit=Number.parseInt(url.searchParams.get('limit')||'50',10);
+  const rawPage=Number.parseInt(url.searchParams.get('page')||'1',10);
+  const limit=Number.isFinite(rawLimit)?Math.max(1,Math.min(100,rawLimit)):50;
+  const page=Number.isFinite(rawPage)?Math.max(1,Math.min(10001,rawPage)):1;
+  const offset=(page-1)*limit;
+  const search=clean(url.searchParams.get('q')||'').slice(0,100);
+  const like='%'+search.replace(/[\\%_]/g,'\\async function handle(request,env){
+  try {')+'%';
+  const filter=search?" AND (u.first_name LIKE ? ESCAPE '\\\\' OR u.last_name LIKE ? ESCAPE '\\\\' OR u.email LIKE ? ESCAPE '\\\\' OR u.phone LIKE ? ESCAPE '\\\\')":'';
+  const params=search?[profileRole,like,like,like,like]:[profileRole];
+  const count=await env.DB.prepare(`SELECT COUNT(*) AS total FROM ${table} p JOIN users u ON u.id=p.user_id WHERE u.role=?${filter}`).bind(...params).first();
+  let query;
+  if(kind==='clients'){
+    query=`SELECT p.id,u.id AS user_id,u.first_name,u.last_name,u.email,u.phone,u.status,p.city,p.postal_code,p.created_at
+      FROM clients p JOIN users u ON u.id=p.user_id WHERE u.role=?${filter}
+      ORDER BY p.created_at DESC,p.id LIMIT ? OFFSET ?`;
+  }else{
+    query=`SELECT p.id,u.id AS user_id,u.first_name,u.last_name,u.email,u.phone,u.status,
+      p.professional_status,p.description,p.service_area,p.hourly_rate,p.validation_status,p.created_at
+      FROM intervenants p JOIN users u ON u.id=p.user_id WHERE u.role=?${filter}
+      ORDER BY p.created_at DESC,p.id LIMIT ? OFFSET ?`;
+  }
+  const result=await env.DB.prepare(query).bind(...params,limit,offset).all();
+  return json({ok:true,version:VERSION,source:'D1',items:result.results||[],pagination:{page,limit,total:Number(count?.total||0),has_more:offset+((result.results||[]).length)<Number(count?.total||0)},read_only:true},200);
+}
+
 async function handle(request,env){
   try {
     if(isMutatingMethod(request.method) && new URL(request.url).pathname!=='/api/payments/webhook' && !securityOriginAllowed(request,env)) return json({ok:false,error:'ORIGIN_NOT_ALLOWED',version:VERSION},403);
     const url=new URL(request.url);
+    if(url.pathname==='/api/clients' && request.method==='GET') return listManagedProfiles(request,env,'clients');
+    if(url.pathname==='/api/intervenants' && request.method==='GET') return listManagedProfiles(request,env,'intervenants');
     // Native provider webhook has no browser Origin; its Stripe signature is the authority.
     if(url.pathname==='/api/payments/webhook') return stripeWebhook(request,env);
     if(url.pathname==='/api/payments/checkout') { if(request.method!=='POST') return json({ok:false,error:'METHOD_NOT_ALLOWED',version:VERSION},405,{'allow':'POST'}); return stripeCheckout(request,env); }
