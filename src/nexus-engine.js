@@ -60,6 +60,7 @@ function getWeights(weights = DEFAULT_WEIGHTS) {
 function eligibility(candidate, request, { partial = false } = {}) {
   if (candidate.active !== true || candidate.available !== true ||
       candidate.eligibilityVerified !== true) return false;
+  if (request.budgetCents !== undefined && candidate.priceCents > request.budgetCents) return false;
   if (request.maxDistanceKm !== undefined && candidate.distanceKm > request.maxDistanceKm) return false;
   if (request.slot && (!Array.isArray(candidate.availabilitySlots) ||
       !candidate.availabilitySlots.includes(request.slot))) return false;
@@ -71,8 +72,9 @@ function eligibility(candidate, request, { partial = false } = {}) {
 function scoreCandidate(candidate, request, weights) {
   const matched = request.requiredSkills.filter((skill) => candidate.skills.includes(skill));
   const skills = Math.floor(matched.length * 10000 / request.requiredSkills.length);
-  const affordability = request.budgetCents === undefined || request.budgetCents === 0
+  const affordability = request.budgetCents === undefined
     ? 5000
+    : request.budgetCents === 0 ? 10000
     : clamp(10000 - Math.floor(candidate.priceCents * 10000 / request.budgetCents));
   const proximity = request.maxDistanceKm === undefined || request.maxDistanceKm === 0
     ? 5000
