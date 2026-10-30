@@ -46,14 +46,14 @@ jobs:
             CREATE TABLE users (
               id TEXT PRIMARY KEY,
               role TEXT NOT NULL,
-              email TEXT,
-              first_name TEXT,
-              last_name TEXT,
-              phone TEXT NOT NULL,
-              password_hash TEXT,
-              status TEXT DEFAULT 'active',
-              created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-              updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+              email TEXT NOT NULL UNIQUE,
+              first_name TEXT NOT NULL,
+              last_name TEXT NOT NULL,
+              phone TEXT,
+              password_hash TEXT NOT NULL,
+              status TEXT NOT NULL DEFAULT 'active',
+              created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             );
             CREATE TABLE sessions (
               id TEXT PRIMARY KEY,
@@ -73,7 +73,8 @@ jobs:
               read_at TEXT,
               created_at TEXT DEFAULT CURRENT_TIMESTAMP
             );
-            INSERT INTO users(id, role, phone) VALUES('u-existing', 'client', '+33000000000');
+            INSERT INTO users(id, role, email, first_name, last_name, phone, password_hash)
+              VALUES('u-existing', 'client', 'existing@example.test', 'Test', 'Existing', '+33000000000', 'test-hash');
             INSERT INTO sessions(id, user_id, token_hash, expires_at)
               VALUES('s-existing', 'u-existing', 'hash-existing', '2099-01-01T00:00:00');
             INSERT INTO notifications(id, user_id, type, title, message, entity_type, entity_id)
@@ -122,7 +123,13 @@ jobs:
 
           # Runtime authentication compatibility against the exact exported core schema.
           users_info = {row[1]: row for row in db.execute("PRAGMA table_info(users)")}
-          assert users_info["phone"][3] == 1, "users.phone must remain NOT NULL"
+          assert users_info["email"][3] == 1, "users.email must remain NOT NULL"
+          assert users_info["first_name"][3] == 1, "users.first_name must remain NOT NULL"
+          assert users_info["last_name"][3] == 1, "users.last_name must remain NOT NULL"
+          assert users_info["password_hash"][3] == 1, "users.password_hash must remain NOT NULL"
+          assert users_info["phone"][3] == 0, "users.phone must remain nullable"
+          email_indexes = list(db.execute("PRAGMA index_list(users)"))
+          assert any(row[2] == 1 for row in email_indexes), "users.email UNIQUE index missing"
           session_columns = {row[1] for row in db.execute("PRAGMA table_info(sessions)")}
           assert {"id", "user_id", "token_hash", "expires_at", "created_at"} <= session_columns
           notification_columns = {row[1] for row in db.execute("PRAGMA table_info(notifications)")}
@@ -139,8 +146,8 @@ jobs:
 
           # Validate valid FK path and reject invalid mission references.
           db.execute(
-            "INSERT INTO users(id, role, phone) VALUES(?,?,?)",
-            ("u1", "client", "+33111111111")
+            "INSERT INTO users(id, role, email, first_name, last_name, phone, password_hash) VALUES(?,?,?,?,?,?,?)",
+            ("u1", "client", "client1@example.test", "Client", "One", "+33111111111", "test-hash")
           )
           db.execute("INSERT INTO clients(id, user_id) VALUES(?,?)", ("c1", "u1"))
           db.execute(
