@@ -35,6 +35,7 @@ jobs:
           migration = Path("migrations/0001_core_business_schema.sql").read_text(encoding="utf-8")
           pricing_migration = Path("migrations/0002_server_pricing.sql").read_text(encoding="utf-8")
           route_origin_migration = Path("migrations/0003_route_address_provenance.sql").read_text(encoding="utf-8")
+          wallet_ledger_migration = Path("migrations/0004_atomic_wallet_ledger.sql").read_text(encoding="utf-8")
           db = sqlite3.connect(":memory:")
           db.execute("PRAGMA foreign_keys = ON")
 
@@ -91,6 +92,10 @@ jobs:
           db.executescript(pricing_migration)
           db.executescript(route_origin_migration)
           db.executescript(route_origin_migration)
+          # The existing wallet table is created by the runtime payment schema.
+          db.executescript("""CREATE TABLE wallets (id TEXT PRIMARY KEY,user_id TEXT NOT NULL UNIQUE,currency TEXT NOT NULL DEFAULT 'EUR',available_cents INTEGER NOT NULL DEFAULT 0,pending_cents INTEGER NOT NULL DEFAULT 0,paid_cents INTEGER NOT NULL DEFAULT 0,reserved_cents INTEGER NOT NULL DEFAULT 0,created_at TEXT DEFAULT CURRENT_TIMESTAMP,updated_at TEXT DEFAULT CURRENT_TIMESTAMP);""")
+          db.executescript(wallet_ledger_migration)
+          db.executescript(wallet_ledger_migration)
 
           expected = {
             "clients", "intervenants", "prestations", "missions", "tarifs",
@@ -172,6 +177,13 @@ jobs:
           print("PASS: 11 business tables created")
           print("PASS: server pricing reference tables created and migration 0002 is idempotent")
           print("PASS: verified intervenant route-origin table created and migration 0003 is idempotent")
+          db.execute("INSERT INTO wallets(id,user_id,currency) VALUES('w1','provider-1','EUR')")
+          db.execute("""INSERT INTO payment_wallet_ledger(id,idempotency_key,transaction_id,user_id,entry_type,available_delta_cents,currency) VALUES('l1','payment:tx1:credit','tx1','provider-1','PAYMENT_CREDIT',12500,'EUR')""")
+          db.execute("""INSERT OR IGNORE INTO payment_wallet_ledger(id,idempotency_key,transaction_id,user_id,entry_type,available_delta_cents,currency) VALUES('l2','payment:tx1:credit','tx1','provider-1','PAYMENT_CREDIT',12500,'EUR')""")
+          assert db.execute("SELECT available_cents FROM wallets WHERE user_id='provider-1'").fetchone()[0] == 12500
+          db.execute("""INSERT INTO payment_wallet_ledger(id,idempotency_key,transaction_id,user_id,entry_type,available_delta_cents,currency) VALUES('l3','payment:tx1:refund:2500','tx1','provider-1','REFUND_REVERSAL',-2500,'EUR')""")
+          assert db.execute("SELECT available_cents FROM wallets WHERE user_id='provider-1'").fetchone()[0] == 10000
+          print("PASS: ledger trigger applies credits/refunds once and idempotency prevents duplicate wallet credits")
           print("PASS: migration is idempotent")
           print("PASS: valid client/prestation/mission inserts")
           print("PASS: invalid foreign key rejected")
