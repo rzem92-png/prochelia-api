@@ -1815,17 +1815,34 @@ function financeStrategicQuote({basePriceCents=0,phaseFactor=1,urgency='normal',
 }
 
 async function pricingRouteEstimate(request, env) {
-  const gate=await requireAuthRole(request,env,['gerante','client','entreprise','intervenant']);
+  // Les adresses ne viennent jamais du navigateur : elles sont lues dans les
+  // profils D1 du client connecté et de l'intervenant sélectionné.
+  const gate=await requireAuthRole(request,env,['client','entreprise']);
   if(gate.error)return gate.error;
   if(!env.DB)return json({ok:false,error:'DATABASE_UNAVAILABLE',version:VERSION},503);
   const provider=String(env.MAPS_PROVIDER||'').toLowerCase();
   if(provider!=='google'||!finalSecretConfigured(env,'MAPS_API_KEY'))
     return json({ok:false,error:'ROUTE_PROVIDER_NOT_CONFIGURED',version:VERSION},503);
   const b=await readJson(request)||{};
-  const origin=clean(b.origin_address),destination=clean(b.destination_address);
-  if(!origin||!destination||origin.length>300||destination.length>300||origin===destination)
-    return json({ok:false,error:'ROUTE_ADDRESSES_INVALID',version:VERSION},400);
+  const intervenantId=clean(b.intervenant_id);
+  if(!intervenantId||intervenantId.length>100)
+    return json({ok:false,error:'INTERVENANT_REQUIRED',version:VERSION},400);
   try {
+    await ensureConsolidatedSchema(env);
+    await ensureStrategicSchema(env);
+    const client=await env.DB.prepare(`SELECT address,city,postal_code FROM clients
+      WHERE user_id=? LIMIT 1`).bind(gate.auth.user.id).first();
+    if(!client)return json({ok:false,error:'CLIENT_PROFILE_NOT_FOUND',version:VERSION},409);
+    const intervenant=await env.DB.prepare(`SELECT id,base_address,base_city,base_postal_code,validation_status
+      FROM intervenants WHERE id=? LIMIT 1`).bind(intervenantId).first();
+    if(!intervenant)return json({ok:false,error:'INTERVENANT_NOT_FOUND',version:VERSION},404);
+    const approved=['ACTIVE','APPROVED','VALIDATED','VERIFIED'].includes(String(intervenant.validation_status||'').toUpperCase());
+    if(!approved)return json({ok:false,error:'INTERVENANT_NOT_VALIDATED',version:VERSION},409);
+    const destination=[client.address,client.postal_code,client.city].map(clean).filter(Boolean).join(', ');
+    const origin=[intervenant.base_address,intervenant.base_postal_code,intervenant.base_city].map(clean).filter(Boolean).join(', ');
+    if(!origin||!destination)return json({ok:false,error:'ROUTE_PROFILE_ADDRESS_INCOMPLETE',version:VERSION},409);
+    if(origin.toLowerCase()===destination.toLowerCase())
+      return json({ok:false,error:'ROUTE_ADDRESSES_INVALID',version:VERSION},400);
     const response=await fetch('https://routes.googleapis.com/directions/v2:computeRoutes',{
       method:'POST',
       headers:{
@@ -1847,10 +1864,8 @@ async function pricingRouteEstimate(request, env) {
     const payload=await response.json();
     const route=payload?.routes?.[0];
     const meters=Number(route?.distanceMeters);
-    if(!Number.isFinite(meters)||meters<0||meters>500000)
+    if(!Number.isFinite(meters)||meters<=0||meters>500000)
       return json({ok:false,error:'ROUTE_PROVIDER_RESULT_INVALID',version:VERSION},502);
-    await ensureConsolidatedSchema(env);
-    await ensureStrategicSchema(env);
     const estimateId=crypto.randomUUID();
     const expiresAt=new Date(Date.now()+15*60*1000).toISOString();
     const digest=async value=>{
@@ -1874,7 +1889,6 @@ async function pricingRouteEstimate(request, env) {
     return json({ok:false,error:'ROUTE_ESTIMATE_UNAVAILABLE',version:VERSION},503);
   }
 }
-
 async function pricingQuote(request, env) {
   // Un intervenant ne peut pas générer un devis client en étant requalifié B2C.
   const gate=await requireAuthRole(request,env,['gerante','client','entreprise']);
