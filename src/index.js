@@ -1777,18 +1777,35 @@ async function pricingQuote(request, env) {
   if(attemptedOverrides.length && gate.auth?.user?.role!=='gerante'){
     return json({ok:false,error:'FINANCIAL_POLICY_OVERRIDE_FORBIDDEN',version:VERSION,fields:attemptedOverrides},403);
   }
+  if(!env.DB) return json({ok:false,error:'DATABASE_UNAVAILABLE',version:VERSION},503);
   const phase=String(b.phase||await getSetting(env,'project_phase','TEST')).toUpperCase();
-  const cfg=PROJECT_PHASES[phase]||PROJECT_PHASES.TEST;
-  const distance=Number(b.distance_km||0);const duration=Number(b.duration_minutes||60);
-  const base=Number(b.base_price_cents||0);
+  if(!Object.prototype.hasOwnProperty.call(PROJECT_PHASES,phase)) return json({ok:false,error:'PRICING_PHASE_INVALID',version:VERSION},400);
+  const cfg=PROJECT_PHASES[phase];
+  const distance=Number(b.distance_km??0);
+  const duration=Number(b.duration_minutes??60);
+  const base=Number(b.base_price_cents??0);
   const clientType=String(b.client_type||'B2C').toUpperCase();
   const serviceCode=clean(b.service_code)||null;
+  const discount=Number(b.discount_cents??0);
+  const numericInputs=[
+    ['distance_km',distance,0,500],
+    ['duration_minutes',duration,1,1440],
+    ['base_price_cents',base,1,5000000],
+    ['discount_cents',discount,0,5000000]
+  ];
+  const invalidInputs=numericInputs.filter(([,value,min,max])=>!Number.isFinite(value)||value<min||value>max);
+  if(invalidInputs.length) return json({ok:false,error:'PRICING_INPUT_INVALID',version:VERSION,fields:invalidInputs.map(([field])=>field)},400);
+  if(!['B2C','B2B'].includes(clientType)) return json({ok:false,error:'CLIENT_TYPE_INVALID',version:VERSION},400);
+  if(discount>base) return json({ok:false,error:'DISCOUNT_EXCEEDS_BASE_PRICE',version:VERSION},400);
+  if(serviceCode && (typeof serviceCode!=='string'||serviceCode.length>80||!/^[A-Za-z0-9_-]+$/.test(serviceCode))) return json({ok:false,error:'SERVICE_CODE_INVALID',version:VERSION},400);
 
   let policy=null;
   try {
     policy=await env.DB.prepare(`SELECT * FROM pricing_policies WHERE active=1 AND phase=? AND client_type=? AND (service_code=? OR service_code IS NULL) ORDER BY CASE WHEN service_code=? THEN 0 ELSE 1 END LIMIT 1`)
       .bind(phase,clientType,serviceCode,serviceCode).first();
-  } catch (_) {}
+  } catch (_) {
+    return json({ok:false,error:'PRICING_POLICY_UNAVAILABLE',version:VERSION},503);
+  }
 
   const fuelMode=String(b.fuel_mode||'normal').toLowerCase()==='high'?'high':'normal';
   const fuelRateLegacy=Number(b.fuel_cost_per_km_cents??await getSetting(env,'fuel_cost_per_km_cents',20));
@@ -1804,7 +1821,7 @@ async function pricingQuote(request, env) {
     phaseFactor:cfg.pricingFactor,
     urgency:b.urgency||'normal',
     evening:Boolean(b.evening),night:Boolean(b.night),saturday:Boolean(b.saturday),sunday:Boolean(b.sunday),holiday:Boolean(b.holiday),lastMinute:Boolean(b.last_minute||b.lastMinute),
-    distanceKm:distance,fuelMode,fuelPriceCentsPerLitre,commissionRate,discountCents:Number(b.discount_cents||0),regulatedMaxCents:regulatedMax,
+    distanceKm:distance,fuelMode,fuelPriceCentsPerLitre,commissionRate,discountCents:discount,regulatedMaxCents:regulatedMax,
     intervenantFloorCents:intervenantFloor,pspPercent,pspFixedCents:pspFixed,softwareCostCents:software,targetMarginPercent:targetMargin
   });
   /* Compatibilité avec l'ancien contrat : fuel_cost_cents reste disponible. */
