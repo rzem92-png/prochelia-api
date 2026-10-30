@@ -1,0 +1,118 @@
+name: PROCHÉLIA D1 core migration tests
+
+on:
+  push:
+    branches:
+      - fix/v14.5.6-security-stripe-hardening
+    paths:
+      - "migrations/**"
+      - ".github/workflows/d1-core-migration-tests.yml"
+  pull_request:
+    paths:
+      - "migrations/**"
+      - ".github/workflows/d1-core-migration-tests.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  sqlite-migration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Test migration on isolated SQLite database
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import sqlite3
+          from pathlib import Path
+
+          migration = Path("migrations/0001_core_business_schema.sql").read_text(encoding="utf-8")
+          db = sqlite3.connect(":memory:")
+          db.execute("PRAGMA foreign_keys = ON")
+          db.executescript("""
+            CREATE TABLE users (
+              id TEXT PRIMARY KEY,
+              role TEXT NOT NULL,
+              email TEXT NOT NULL UNIQUE,
+              status TEXT NOT NULL DEFAULT 'pending'
+            );
+            CREATE TABLE sessions (
+              id TEXT PRIMARY KEY,
+              user_id TEXT NOT NULL,
+              token_hash TEXT NOT NULL UNIQUE,
+              expires_at TEXT NOT NULL,
+              FOREIGN KEY(user_id) REFERENCES users(id)
+            );
+          """)
+
+          # Idempotence: the same migration must be safe to apply twice.
+          db.executescript(migration)
+          db.executescript(migration)
+
+          expected = {
+            "clients", "intervenants", "prestations", "missions", "tarifs",
+            "paiements", "disponibilites", "evaluations", "documents",
+            "conflits", "journal"
+          }
+          actual = {
+            row[0] for row in db.execute(
+              "SELECT name FROM sqlite_master WHERE type='table'"
+            )
+          }
+          missing = expected - actual
+          assert not missing, f"Missing tables: {sorted(missing)}"
+
+          # Validate valid FK path and reject invalid mission references.
+          db.execute(
+            "INSERT INTO users(id, role, email, status) VALUES(?,?,?,?)",
+            ("u1", "client", "client@example.test", "active")
+          )
+          db.execute(
+            "INSERT INTO clients(id, user_id) VALUES(?,?)", ("c1", "u1")
+          )
+          db.execute(
+            "INSERT INTO prestations(id, name, active) VALUES(?,?,1)",
+            ("p1", "Accompagnement",)
+          )
+          db.execute(
+            "INSERT INTO missions(id, client_id, prestation_id, start_at) VALUES(?,?,?,?)",
+            ("m1", "c1", "p1", "2026-11-01T10:00:00")
+          )
+          try:
+            db.execute(
+              "INSERT INTO missions(id, client_id, prestation_id, start_at) VALUES(?,?,?,?)",
+              ("m-invalid", "missing-client", "p1", "2026-11-01T10:00:00")
+            )
+            raise AssertionError("Foreign key accepted an unknown client")
+          except sqlite3.IntegrityError:
+            pass
+
+          # Validate rating CHECK constraint.
+          try:
+            db.execute(
+              "INSERT INTO evaluations(id, mission_id, author_user_id, target_user_id, rating) VALUES(?,?,?,?,?)",
+              ("e-invalid", "m1", "u1", "u1", 6)
+            )
+            raise AssertionError("Rating CHECK accepted a value above 5")
+          except sqlite3.IntegrityError:
+            pass
+
+          fk_errors = list(db.execute("PRAGMA foreign_key_check"))
+          assert not fk_errors, f"Foreign key violations: {fk_errors}"
+          integrity = db.execute("PRAGMA integrity_check").fetchone()[0]
+          assert integrity == "ok", f"SQLite integrity_check: {integrity}"
+
+          print("PASS: 11 tables exist")
+          print("PASS: migration is idempotent")
+          print("PASS: valid client/prestation/mission inserts")
+          print("PASS: invalid foreign key rejected")
+          print("PASS: rating CHECK constraint enforced")
+          print("PASS: foreign_key_check clean")
+          print("PASS: integrity_check =", integrity)
+          PY
