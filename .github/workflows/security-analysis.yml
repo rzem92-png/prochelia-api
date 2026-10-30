@@ -1,0 +1,72 @@
+name: PROCHÉLIA security analysis
+
+on:
+  pull_request:
+    branches:
+      - staging-prochelia-v14
+  push:
+    branches:
+      - fix/v14.5.6-security-stripe-hardening
+  schedule:
+    - cron: "23 3 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: prochelia-security-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  codeql:
+    name: CodeQL JavaScript security analysis
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: javascript-typescript
+          queries: security-extended
+      - name: Analyze
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:javascript-typescript"
+
+  dependency-audit:
+    name: Dependency inventory and audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Audit npm lockfile when present
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -f package-lock.json ]]; then
+            npm ci --ignore-scripts
+            npm audit --omit=dev --audit-level=high
+          elif [[ -f npm-shrinkwrap.json ]]; then
+            npm ci --ignore-scripts
+            npm audit --omit=dev --audit-level=high
+          else
+            echo "::warning::No npm lockfile at repository root; root dependency audit is not applicable. Audit each deployable package and commit its lockfile before production."
+          fi
+          if [[ -f security/clamav-gateway/package-lock.json ]]; then
+            npm ci --ignore-scripts --prefix security/clamav-gateway
+            npm audit --prefix security/clamav-gateway --omit=dev --audit-level=high
+          fi
