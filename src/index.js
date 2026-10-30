@@ -1,6 +1,7 @@
 import { handleV7Route } from "./v7-routes.js";
 import { verifyStripeSignature, stripeCheckoutPayload } from "./stripe-adapter.js";
 import { evaluateTaskEligibility } from "./trust-passport.js";
+import { canAutoResolveSupportScenario } from "./copilot-action-policy.js";
 // PROCHÉLIA — INDEX BACKEND CONSOLIDÉ UNIQUE
 // Référence de consolidation : V14.1 Finance + sécurité/RBAC existants.
 // Généré le 19/10/2026. À déployer uniquement après recette avec la vraie base D1.
@@ -4410,7 +4411,7 @@ async function supportCreate(request,env){
   const severity=String(b.severity||'LOW').toUpperCase();
   const scenario=supportScenarioFor(category,severity);
   const rule=await env.DB.prepare(`SELECT * FROM copilot_resolution_rules WHERE scenario_key=? LIMIT 1`).bind(scenario).first();
-  const auto=Number(rule?.auto_allowed||0)===1 && String(severity)!=='CRITICAL' && String(severity)!=='HIGH';
+  const auto=canAutoResolveSupportScenario(scenario,severity,Number(rule?.auto_allowed||0)===1);
   const requiresManager=Number(rule?.manager_approval_required||1)===1 || !auto;
   const id=crypto.randomUUID();
   const proposed=rule?JSON.parse(rule.steps_json||'[]'):{steps:['collect_evidence','copilot_analysis','notify','audit']};
@@ -4426,7 +4427,7 @@ async function supportCreate(request,env){
 }
 
 async function supportAutoResolve(env,caseId,actorId,actorRole,scenario,context={}){
-  const safeAuto=['DELAY_LIGHT','NOTIFICATION_FAILED','DOCUMENT_REMINDER','SIMPLE_REFUND_CHECK','CLIENT_COMPLAINT'];
+  const safeAuto=['DELAY_LIGHT','NOTIFICATION_FAILED','DOCUMENT_REMINDER'];
   if(!safeAuto.includes(scenario)) return {ok:false,status:'MANAGER_REQUIRED'};
   // Sécurité de production : le Copilote ne doit jamais déclarer une résolution
   // simplement parce qu'il a généré une proposition. Une résolution automatique
@@ -4486,7 +4487,7 @@ async function supportDashboard(request,env){
   await ensureProcheliaMasterComplementSchema(env);
   const rows=await env.DB.prepare(`SELECT status,severity,COUNT(*) AS n FROM support_cases GROUP BY status,severity ORDER BY status,severity`).all();
   const recent=await env.DB.prepare(`SELECT id,source_role,category,severity,status,created_at,resolved_at FROM support_cases ORDER BY created_at DESC LIMIT 30`).all();
-  return json({ok:true,version:VERSION,dashboard:{breakdown:rows.results||[],recent:recent.results||[],policy:{simple_low_impact:'AUTOMATIQUE_APRES_CONTROLE',sensitive_or_high_impact:'VALIDATION_GERANTE',security_legal_rgpd:'ESCALADE_IMMEDIATE'}}});
+  return json({ok:true,version:VERSION,dashboard:{breakdown:rows.results||[],recent:recent.results||[],policy:{simple_low_impact:'AUTOMATISATION_LIMITEE_AUX_RAPPELS_ET_NOTIFICATIONS_REVERSIBLES',sensitive_or_high_impact:'VALIDATION_GERANTE',security_legal_rgpd:'ESCALADE_IMMEDIATE'}}});
 }
 
 const __procheliaComplementHandle = handle;
