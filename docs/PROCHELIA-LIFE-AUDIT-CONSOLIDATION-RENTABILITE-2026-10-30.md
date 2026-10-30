@@ -67,3 +67,18 @@ Avant de qualifier le socle de prêt :
 Un pilote limité peut être envisagé seulement lorsque les tests techniques, la sécurité, les documents contractuels, la protection des données, les assurances, le PSP et les procédures de support sont validés pour la catégorie et le territoire concernés.
 
 **Décision actuelle : PRÉPRODUCTION / AUDIT EN COURS. Pas de feu vert pour production ou ouverture commerciale générale.**
+
+
+---
+
+## 7. Audit complémentaire des remboursements PSP génériques
+
+Une revue statique du traitement `payment_refunded` a identifié un défaut de classification : un remboursement partiel pouvait faire passer la transaction directement à l'état `refunded`, alors que le montant remboursé restait inférieur au montant brut.
+
+Corrections ajoutées sur la branche de préproduction :
+- l'état est maintenant calculé à partir du cumul remboursé : `partially_refunded` tant que le remboursement cumulé est inférieur au montant brut, puis `refunded` lorsque le total atteint le montant brut ;
+- la réconciliation d'un remboursement reçu avant la confirmation du paiement calcule également la reprise proportionnelle du montant crédité au portefeuille ;
+- les tests de contrat statique ont été complétés pour couvrir la distinction remboursement partiel/complet, l'ordre d'arrivée des événements et la présence du portefeuille avant déclenchement du crédit par le ledger.
+
+Ces changements n'ont pas été exécutés contre une vraie base D1 ou un PSP de test. Il reste à démontrer, avec des événements signés de test et des scénarios concurrents, que les soldes sont exacts dans tous les ordres d'événements.
+
