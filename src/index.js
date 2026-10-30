@@ -3654,20 +3654,24 @@ async function stripeWebhook(request, env) {
       const isFailure=failedEvent.has(event.type);
       const isDispute=disputeEvent.has(event.type);
       const amount=Number(isCheckout ? (obj?.amount_total ?? -1) : isFailure ? (obj?.amount ?? -1) : isDispute ? -1 : (obj?.amount_received ?? obj?.amount ?? -1));
-      const sessionMatches=!isCheckout || !tx.provider_payment_id || String(tx.provider_payment_id)===sessionId;
+      const sessionMatches=!isCheckout || String(tx.provider_payment_id||'')===sessionId;
       const amountMatches=amount<0 || (amount===Number(tx.gross_cents) && currency===String(tx.currency||'EUR').toLowerCase());
+      if(isCheckout&&!tx.provider_payment_id){
+        await env.DB.prepare(`UPDATE payment_webhook_events SET processed=0,processed_at=NULL WHERE provider='stripe' AND event_id=?`).bind(String(event.id)).run();
+        return json({ok:false,error:'STRIPE_CHECKOUT_SESSION_NOT_LINKED',version:VERSION,event_id:event.id,retry:true},503);
+      }
       if(!sessionMatches || !amountMatches) {
         await paymentAudit(env,'STRIPE_WEBHOOK_MISMATCH',{transaction_id:tx.id,mission_id:tx.mission_id,metadata:{event_id:event.id,event_type:event.type}},'BLOCKED');
         result='MISMATCH_BLOCKED';
       } else if(paidEvent.has(event.type) && (!isCheckout || obj.payment_status==='paid')) {
-        if(tx.status!=='paid' && tx.status!=='refunded') {
-          await env.DB.prepare(`UPDATE payment_transactions SET status='paid',provider='stripe',provider_payment_id=COALESCE(?,provider_payment_id),updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(isCheckout ? (sessionId||null) : null,tx.id).run();
-          if(tx.intervenant_id) {
-            await env.DB.prepare(`INSERT OR IGNORE INTO wallets(id,user_id,currency,available_cents,pending_cents,paid_cents,reserved_cents) VALUES(?,?,?,0,0,0,0)`).bind(crypto.randomUUID(),tx.intervenant_id,tx.currency||'EUR').run();
-            await env.DB.prepare(`UPDATE wallets SET available_cents=available_cents+?,updated_at=CURRENT_TIMESTAMP WHERE user_id=?`).bind(Number(tx.net_intervenant_cents||0),tx.intervenant_id).run();
-          }
+        const paidTransition=await env.DB.prepare(`UPDATE payment_transactions SET status='paid',provider='stripe',provider_payment_id=COALESCE(?,provider_payment_id),updated_at=CURRENT_TIMESTAMP WHERE id=? AND status NOT IN ('paid','refunded','held')`).bind(isCheckout ? (sessionId||null) : null,tx.id).run();
+        // Créditer le portefeuille uniquement si cette livraison a gagné la transition
+        // atomique pending -> paid. Deux événements Stripe distincts ne peuvent créditer deux fois.
+        if(Number(paidTransition?.meta?.changes||0)===1&&tx.intervenant_id) {
+          await env.DB.prepare(`INSERT OR IGNORE INTO wallets(id,user_id,currency,available_cents,pending_cents,paid_cents,reserved_cents) VALUES(?,?,?,0,0,0,0)`).bind(crypto.randomUUID(),tx.intervenant_id,tx.currency||'EUR').run();
+          await env.DB.prepare(`UPDATE wallets SET available_cents=available_cents+?,updated_at=CURRENT_TIMESTAMP WHERE user_id=?`).bind(Number(tx.net_intervenant_cents||0),tx.intervenant_id).run();
         }
-        result='PAYMENT_CONFIRMED';
+        result=Number(paidTransition?.meta?.changes||0)===1?'PAYMENT_CONFIRMED':'PAYMENT_ALREADY_FINAL';
       } else if(failedEvent.has(event.type)) {
         if(!['paid','refunded'].includes(tx.status)) await env.DB.prepare(`UPDATE payment_transactions SET status='failed',updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(tx.id).run();
         result='PAYMENT_FAILED';
@@ -3684,14 +3688,16 @@ async function stripeWebhook(request, env) {
           const previousReversal=Math.round(Number(tx.net_intervenant_cents||0)*previousRefundCents/Math.max(1,grossCents));
           const totalReversal=Math.round(Number(tx.net_intervenant_cents||0)*refundCents/Math.max(1,grossCents));
           const walletReversal=Math.max(0,totalReversal-previousReversal);
-          if(walletReversal>0&&tx.intervenant_id){
+          const fullRefund=grossCents>0&&refundCents>=grossCents;
+          const refundTransition=await env.DB.prepare(`UPDATE payment_transactions SET status=?,refund_cents=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND COALESCE(refund_cents,0) < ?`).bind(fullRefund?'refunded':'partially_refunded',refundCents,tx.id,refundCents).run();
+          if(Number(refundTransition?.meta?.changes||0)===1&&walletReversal>0&&tx.intervenant_id){
             await env.DB.prepare(`INSERT OR IGNORE INTO wallets(id,user_id,currency,available_cents,pending_cents,paid_cents,reserved_cents) VALUES(?,?,?,0,0,0,0)`).bind(crypto.randomUUID(),tx.intervenant_id,tx.currency||'EUR').run();
             await env.DB.prepare(`UPDATE wallets SET available_cents=available_cents-?,updated_at=CURRENT_TIMESTAMP WHERE user_id=?`).bind(walletReversal,tx.intervenant_id).run();
           }
-          const fullRefund=grossCents>0&&refundCents>=grossCents;
-          await env.DB.prepare(`UPDATE payment_transactions SET status=?,refund_cents=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(fullRefund?'refunded':'partially_refunded',refundCents,tx.id).run();
-          await paymentAudit(env,'STRIPE_REFUND_WALLET_ADJUSTED',{transaction_id:tx.id,mission_id:tx.mission_id,metadata:{event_id:event.id,delta_refund_cents:deltaRefundCents,refund_total_cents:refundCents,wallet_reversal_cents:walletReversal}},'OK');
-          result=fullRefund?'REFUND_RECORDED_FULL':'REFUND_RECORDED_PARTIAL';
+          if(Number(refundTransition?.meta?.changes||0)===1){
+            await paymentAudit(env,'STRIPE_REFUND_WALLET_ADJUSTED',{transaction_id:tx.id,mission_id:tx.mission_id,metadata:{event_id:event.id,delta_refund_cents:deltaRefundCents,refund_total_cents:refundCents,wallet_reversal_cents:walletReversal}},'OK');
+          }
+          result=Number(refundTransition?.meta?.changes||0)===1?(fullRefund?'REFUND_RECORDED_FULL':'REFUND_RECORDED_PARTIAL'):'REFUND_ALREADY_RECONCILED';
         }
       } else if(disputeEvent.has(event.type)) {
         const disputeId=String(obj?.id||event.id);
