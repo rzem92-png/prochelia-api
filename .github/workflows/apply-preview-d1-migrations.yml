@@ -26,6 +26,7 @@ jobs:
       BACKUP_ENCRYPTION_KEY: ${{ secrets.BACKUP_ENCRYPTION_KEY }}
       EXPECTED_DB_NAME: prochelia-preview-db
       EXPECTED_DB_ID: 6adb95e5-e542-4bec-9008-fbea01042305
+      EXPECTED_ACCOUNT_ID: f2a79e9fa41566a8ec80fb24c02c60eb
     steps:
       - name: Checkout preproduction branch
         uses: actions/checkout@v4
@@ -60,11 +61,23 @@ jobs:
           PY
           test "$EXPECTED_DB_NAME" = "prochelia-preview-db"
           test "$EXPECTED_DB_ID" = "6adb95e5-e542-4bec-9008-fbea01042305"
+          test "$EXPECTED_ACCOUNT_ID" = "f2a79e9fa41566a8ec80fb24c02c60eb"
 
       - name: Install Node.js
         uses: actions/setup-node@v4
         with:
           node-version: "22"
+
+      - name: Verify Cloudflare account identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          identity="$(npx --yes wrangler@4 whoami 2>&1)"
+          printf '%s\\n' "$identity"
+          printf '%s' "$identity" | grep -Fq "$EXPECTED_ACCOUNT_ID" || {
+            echo "::error::Cloudflare account ID does not match the expected account."
+            exit 1
+          }
 
       - name: Export only Preview D1 before migration
         shell: bash
@@ -72,7 +85,7 @@ jobs:
           set -euo pipefail
           umask 077
           mkdir -p "$RUNNER_TEMP/prochelia-backup"
-          npx --yes wrangler@4 d1 export "$EXPECTED_DB_NAME" --remote --skip-confirmation --output="$RUNNER_TEMP/prochelia-backup/prochelia-preview.sql"
+          npx --yes wrangler@4 d1 export "$EXPECTED_DB_NAME" --remote --config wrangler.jsonc --skip-confirmation --output="$RUNNER_TEMP/prochelia-backup/prochelia-preview.sql"
           test -s "$RUNNER_TEMP/prochelia-backup/prochelia-preview.sql"
 
       - name: Encrypt and verify fresh backup
