@@ -88,3 +88,16 @@ Cette clause ne prouve rien si les journaux correspondants ne sont pas réelleme
 ## 13. Décision de publication
 
 **Statut : BLOQUÉ tant que les champs essentiels ne sont pas renseignés et que le document ne correspond pas aux fonctionnalités réelles.** Une consultation juridique n'est pas nécessairement obligatoire pour chaque document, mais une revue ciblée est fortement recommandée avant le lancement, surtout si PROCHÉLIA organise des prestations auprès de personnes vulnérables, traite des données sensibles ou intervient dans un régime réglementé.
+
+
+## 12. Cercle familial et tiers autorisés
+Les fonctionnalités de coordination familiale reposent sur des rôles séparés : bénéficiaire, représentant légal lorsque pertinent, proche invité, payeur tiers et intervenant. Chaque rôle dispose du minimum d'accès nécessaire. Une invitation est nominative, limitée dans le temps, révocable et journalisée. Le fait de financer une mission ne donne pas automatiquement accès aux échanges privés, informations de santé, adresse ou historique du bénéficiaire. Les règles de représentation et de capacité juridique sont vérifiées au cas par cas.
+
+## 13. Copilote transversal et responsabilité des décisions
+Le Copilote est un outil d'assistance et de préparation. Il peut analyser les données autorisées, signaler un risque, simuler un tarif, traduire un échange ou proposer un plan d'action. Il n'est ni dirigeant, ni juriste, ni expert-comptable, ni professionnel de santé, ni opérateur de paiement autonome. Les actions financières, contractuelles, réglementaires, disciplinaires, d'accès aux données ou de publication sont soumises à des permissions déterministes, à une approbation humaine et à une preuve d'exécution. Les sorties du modèle ne sont jamais exécutées comme SQL, code ou commande libre.
+
+## 14. Activation pays par pays
+L'ouverture d'un territoire exige une décision documentée portant sur l'entité opératrice, le rôle contractuel, le droit local, les services autorisés, les qualifications, les assurances, les règles fiscales/sociales, les paiements, les transferts de données, les langues, le support, la sécurité et la capacité opérationnelle. L'activation technique d'un Country Pack ne vaut pas validation juridique. La plateforme peut bloquer une zone ou une prestation tant qu'un élément requis n'est pas validé.
+
+## 15. Continuité, incidents et preuve
+Une alerte, un QR code, une géolocalisation ou un accusé de réception constitue une preuve technique limitée, et non une garantie absolue de présence, de sécurité ou de bonne exécution. Les procédures distinguent incident critique, absence, retard, erreur de matching, panne de notification et indisponibilité du prestataire. Les responsabilités, délais et escalades doivent être définis dans les contrats et procédures applicables.
