@@ -155,7 +155,7 @@ function getCookie(request, name) {
 }
 
 function sessionCookie(token, maxAge = SESSION_TTL_SECONDS) {
-  return `${SESSION_COOKIE}=${encodeURIComponent(token)}; Max-Age=${maxAge}; Path=/; HttpOnly; Secure; SameSite=Lax`;
+  return `${SESSION_COOKIE}=${encodeURIComponent(token)}; Max-Age=${maxAge}; Path=/; HttpOnly; Secure; SameSite=None`;
 }
 
 async function createSession(env, userId) {
@@ -4918,4 +4918,40 @@ handle = async function(request,env){
   }catch(e){
     return json({ok:false,error:'PRODUCTION_SAFETY_ERROR',version:VERSION},500);
   }
+};
+
+// Cross-origin browser access is restricted to the explicit CORS_ORIGIN allowlist.
+// Session cookies are SameSite=None because the Pages frontend and Worker API may
+// be on different sites; mutating requests are still protected by strict Origin checks.
+const __procheliaCorsHandle = handle;
+handle = async function(request,env){
+  const origin = request.headers.get('origin');
+  if (request.method === 'OPTIONS') {
+    if (!origin || !securityOriginAllowed(request,env)) {
+      return json({ok:false,error:'ORIGIN_NOT_ALLOWED',version:VERSION},403);
+    }
+    const requestedMethod = String(request.headers.get('access-control-request-method') || 'GET').toUpperCase();
+    const requestedHeaders = String(request.headers.get('access-control-request-headers') || '')
+      .split(',').map(x=>x.trim().toLowerCase()).filter(Boolean);
+    const allowedMethods = new Set(['GET','POST','PUT','PATCH','DELETE']);
+    const allowedHeaders = new Set(['content-type','x-idempotency-key','x-csrf-token']);
+    if (!allowedMethods.has(requestedMethod) || requestedHeaders.some(x=>!allowedHeaders.has(x))) {
+      return json({ok:false,error:'CORS_PREFLIGHT_REJECTED',version:VERSION},403);
+    }
+    return new Response(null,{status:204,headers:{
+      'access-control-allow-origin':origin,
+      'access-control-allow-credentials':'true',
+      'access-control-allow-methods':'GET, POST, PUT, PATCH, DELETE, OPTIONS',
+      'access-control-allow-headers':'Content-Type, X-Idempotency-Key, X-CSRF-Token',
+      'access-control-max-age':'600',
+      'vary':'Origin'
+    }});
+  }
+  const response = await __procheliaCorsHandle(request,env);
+  if (!origin || !securityOriginAllowed(request,env)) return response;
+  const headers = new Headers(response.headers);
+  headers.set('access-control-allow-origin',origin);
+  headers.set('access-control-allow-credentials','true');
+  headers.append('vary','Origin');
+  return new Response(response.body,{status:response.status,statusText:response.statusText,headers});
 };
