@@ -110,3 +110,20 @@ test("empty approval object safely remains proposal-only", () => {
   assert.equal(result.launchEligible, false);
   assert.equal(result.gates.blocked.length, 8);
 });
+
+test("approval gates reject unknown names and non-boolean values", () => {
+  assert.throws(() => evaluateNexusEnterpriseOpportunity({
+    company: company(), opportunity: opportunity({ approvals: { ...approvals, bypass: true } })
+  }), /unsupported gates/);
+  assert.throws(() => evaluateNexusEnterpriseOpportunity({
+    company: company(), opportunity: opportunity({ approvals: { ...approvals, legalReview: "yes" } })
+  }), /must be boolean/);
+});
+
+test("capacity scoring remains bounded for very large integer capacities", () => {
+  const result = evaluateNexusEnterpriseOpportunity({
+    company: company({ capacityUnits: Number.MAX_SAFE_INTEGER }),
+    opportunity: opportunity({ requiredCapacityUnits: 1 })
+  });
+  assert.equal(result.fitScoreBps, 10000);
+});
