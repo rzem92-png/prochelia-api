@@ -1,7 +1,18 @@
--- PROCHÉLIA V14.5.6 — adresses de référence pour le calcul d'itinéraire
--- Migration additive : les adresses existantes ne sont ni inventées ni modifiées.
--- Les devis avec déplacement restent bloqués tant que le profil intervenant
--- ne possède pas une adresse de départ complète et vérifiée.
-ALTER TABLE intervenants ADD COLUMN base_address TEXT;
-ALTER TABLE intervenants ADD COLUMN base_city TEXT;
-ALTER TABLE intervenants ADD COLUMN base_postal_code TEXT;
+-- PROCHÉLIA V14.5.6 — origine de déplacement vérifiée des intervenants
+-- Table additive et rejouable ; aucune adresse n'est inventée ni préremplie.
+CREATE TABLE IF NOT EXISTS intervenant_route_origins (
+  id TEXT PRIMARY KEY,
+  intervenant_id TEXT NOT NULL UNIQUE,
+  address TEXT NOT NULL,
+  city TEXT NOT NULL,
+  postal_code TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'PENDING' CHECK (status IN ('PENDING','VERIFIED','REJECTED')),
+  verified_at TEXT,
+  verified_by TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (intervenant_id) REFERENCES intervenants(id),
+  FOREIGN KEY (verified_by) REFERENCES users(id)
+);
+CREATE INDEX IF NOT EXISTS idx_intervenant_route_origin_status
+  ON intervenant_route_origins(status, intervenant_id);
