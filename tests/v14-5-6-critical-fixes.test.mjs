@@ -514,7 +514,7 @@ test('Promotion creation rejects invalid phase, audience, date windows, discount
   assert.match(source, /async function createPromotion/);
   assert.match(source, /PROMOTION_CONFIGURATION_INVALID/);
   assert.match(source, /discountType === 'PERCENT' && discount > 100/);
-  assert.match(source, /!['"]ALL['"],['"]B2C['"],['"]B2B['"]/.test(source) ? /clientType/ : /clientType/);
+  assert.match(source, /!\['ALL','B2C','B2B'\]\.includes\(clientType\)/);
   assert.match(source, /Number\.isSafeInteger\(budget\)/);
   assert.match(source, /endMs <= startMs/);
 });
