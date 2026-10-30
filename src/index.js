@@ -1921,12 +1921,18 @@ async function pricingQuote(request, env) {
     if(!tariffRows.results?.length)return json({ok:false,error:'ACTIVE_PRESTATION_TARIFF_NOT_FOUND',version:VERSION},409);
     if(tariffRows.results.length!==1)return json({ok:false,error:'ACTIVE_PRESTATION_TARIFF_AMBIGUOUS',version:VERSION},409);
     rate=tariffRows.results[0];
-    policy=await env.DB.prepare(`SELECT * FROM pricing_policies
+    const policyRows=await env.DB.prepare(`SELECT * FROM pricing_policies
       WHERE active=1 AND phase=? AND client_type=?
-      AND (service_code=? OR service_code IS NULL)
-      ORDER BY CASE WHEN service_code=? THEN 0 ELSE 1 END LIMIT 1`)
-      .bind(phase,clientType,rate.service_code,rate.service_code).first();
-    if(!policy)return json({ok:false,error:'PRICING_POLICY_UNAVAILABLE',version:VERSION},503);
+      AND (service_code=? OR service_code IS NULL)`)
+      .bind(phase,clientType,rate.service_code).all();
+    const exactPolicies=(policyRows.results||[]).filter(row=>row.service_code===rate.service_code);
+    const fallbackPolicies=(policyRows.results||[]).filter(row=>row.service_code==null);
+    // Une règle spécifique prime sur la règle générique, mais toute ambiguïté
+    // dans le niveau retenu bloque le devis au lieu de choisir une ligne arbitraire.
+    const selectedPolicies=exactPolicies.length?exactPolicies:fallbackPolicies;
+    if(!selectedPolicies.length)return json({ok:false,error:'PRICING_POLICY_UNAVAILABLE',version:VERSION},503);
+    if(selectedPolicies.length!==1)return json({ok:false,error:'PRICING_POLICY_AMBIGUOUS',version:VERSION},409);
+    policy=selectedPolicies[0];
     travelPolicy=await env.DB.prepare(`SELECT travel_fee_per_km_cents FROM pricing_travel_policies
       WHERE active=1 AND phase=? AND client_type=? LIMIT 1`).bind(phase,clientType).first();
     if(!travelPolicy)return json({ok:false,error:'TRAVEL_PRICING_POLICY_UNAVAILABLE',version:VERSION},503);
@@ -1964,7 +1970,7 @@ async function pricingQuote(request, env) {
 
   const cfg=PROJECT_PHASES[phase];
   const base=Number(rate.base_price_cents);
-  const providerFloor=Number(rate.intervenant_floor_cents);
+  const providerFloor=Math.max(Number(rate.intervenant_floor_cents),Number(policy.intervenant_floor_cents||0));
   const fixedFee=Number(policy.platform_fee_fixed_cents||0);
   const feePercent=Number(policy.platform_fee_percent||0);
   const pspPercent=Number(policy.psp_percent||0);
