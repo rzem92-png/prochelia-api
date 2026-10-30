@@ -961,6 +961,12 @@ async function ensurePaymentSchema(env) {
           updated_at=CURRENT_TIMESTAMP
         WHERE user_id=NEW.user_id;
       END`,
+    `CREATE TRIGGER IF NOT EXISTS trg_payment_wallet_ledger_no_update
+      BEFORE UPDATE ON payment_wallet_ledger
+      BEGIN SELECT RAISE(ABORT,'PAYMENT_WALLET_LEDGER_IMMUTABLE'); END`,
+    `CREATE TRIGGER IF NOT EXISTS trg_payment_wallet_ledger_no_delete
+      BEFORE DELETE ON payment_wallet_ledger
+      BEGIN SELECT RAISE(ABORT,'PAYMENT_WALLET_LEDGER_IMMUTABLE'); END`,
     `CREATE TABLE IF NOT EXISTS payment_transactions (
       id TEXT PRIMARY KEY, idempotency_key TEXT NOT NULL UNIQUE, mission_id TEXT,
       client_id TEXT, intervenant_id TEXT, type TEXT NOT NULL, status TEXT NOT NULL,
@@ -1180,15 +1186,40 @@ async function paymentWebhook(request, env) {
     if(tx){
       const statusMap={payment_succeeded:'paid',charge_succeeded:'paid',payment_failed:'failed',charge_failed:'failed',payment_refunded:'refunded'};
       const newStatus=statusMap[type];
-      if(newStatus){
-        const alreadyFinal = ['paid','failed','refunded'].includes(tx.status);
-        if(!alreadyFinal){
-          await env.DB.prepare('UPDATE payment_transactions SET status=?,provider_payment_id=COALESCE(?,provider_payment_id),updated_at=CURRENT_TIMESTAMP WHERE id=?').bind(newStatus,clean(event?.data?.provider_payment_id)||null,txId).run();
-          if(newStatus==='paid'){
-            const wallet=await env.DB.prepare('SELECT * FROM wallets WHERE user_id=? LIMIT 1').bind(tx.intervenant_id).first();
-            if(wallet) await env.DB.prepare('UPDATE wallets SET available_cents=available_cents+?,updated_at=CURRENT_TIMESTAMP WHERE id=?').bind(tx.net_intervenant_cents,wallet.id).run();
-          }
-        }
+      if(newStatus==='paid'&&tx.intervenant_id){
+        await env.DB.batch([
+          env.DB.prepare(`INSERT OR IGNORE INTO wallets(id,user_id,currency,available_cents,pending_cents,paid_cents,reserved_cents) VALUES(?,?,?,0,0,0,0)`).bind(crypto.randomUUID(),tx.intervenant_id,tx.currency||'EUR'),
+          env.DB.prepare(`UPDATE payment_transactions SET status='paid',provider_payment_id=COALESCE(?,provider_payment_id),updated_at=CURRENT_TIMESTAMP WHERE id=? AND status NOT IN ('paid','refunded','held','partially_refunded')`).bind(clean(event?.data?.provider_payment_id)||null,txId),
+          env.DB.prepare(`INSERT OR IGNORE INTO payment_wallet_ledger(id,idempotency_key,transaction_id,user_id,entry_type,available_delta_cents,currency,metadata_json)
+            SELECT ?,?,id,intervenant_id,'PAYMENT_CREDIT',net_intervenant_cents,currency,? FROM payment_transactions
+            WHERE id=? AND status IN ('paid','partially_refunded','refunded') AND net_intervenant_cents>0
+            AND NOT EXISTS(SELECT 1 FROM payment_wallet_ledger WHERE idempotency_key=?)`)
+            .bind(crypto.randomUUID(),`payment:${txId}:credit`,JSON.stringify({provider,event_id:eventId}),txId,`payment:${txId}:credit`),
+          env.DB.prepare(`INSERT OR IGNORE INTO payment_wallet_ledger(id,idempotency_key,transaction_id,user_id,entry_type,available_delta_cents,currency,metadata_json)
+            SELECT ?,?,t.id,t.intervenant_id,'REFUND_REVERSAL',-t.net_intervenant_cents,t.currency,?
+            FROM payment_transactions t WHERE t.id=? AND t.refund_cents>=t.gross_cents AND t.gross_cents>0
+            AND EXISTS(SELECT 1 FROM payment_wallet_ledger c WHERE c.transaction_id=t.id AND c.entry_type='PAYMENT_CREDIT')
+            AND NOT EXISTS(SELECT 1 FROM payment_wallet_ledger l WHERE l.idempotency_key=?)`)
+            .bind(crypto.randomUUID(),`payment:${txId}:refund:${tx.gross_cents}`,JSON.stringify({provider,event_id:eventId,source:'out_of_order_refund_reconciliation'}),txId,`payment:${txId}:refund:${tx.gross_cents}`)
+        ]);
+      } else if(newStatus==='refunded'){
+        const rawRefund=event?.data?.refund_cents??event?.data?.amount_refunded??tx.gross_cents;
+        const refundCents=Math.max(Number(tx.refund_cents||0),Math.min(Number(tx.gross_cents||0),Number(rawRefund||0)));
+        const refundKey=`payment:${txId}:refund:${refundCents}`;
+        await env.DB.batch([
+          env.DB.prepare(`UPDATE payment_transactions SET status='refunded',refund_cents=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND COALESCE(refund_cents,0)<?`).bind(refundCents,txId,refundCents),
+          env.DB.prepare(`INSERT OR IGNORE INTO payment_wallet_ledger(id,idempotency_key,transaction_id,user_id,entry_type,available_delta_cents,currency,metadata_json)
+            SELECT ?,?,t.id,t.intervenant_id,'REFUND_REVERSAL',
+              -MAX(0,ROUND(t.net_intervenant_cents*1.0*t.refund_cents/NULLIF(t.gross_cents,0))-
+                COALESCE((SELECT SUM(-available_delta_cents) FROM payment_wallet_ledger l WHERE l.transaction_id=t.id AND l.entry_type='REFUND_REVERSAL'),0)),
+              t.currency,?
+            FROM payment_transactions t WHERE t.id=? AND t.refund_cents=? AND t.gross_cents>0
+            AND EXISTS(SELECT 1 FROM payment_wallet_ledger c WHERE c.transaction_id=t.id AND c.entry_type='PAYMENT_CREDIT')
+            AND NOT EXISTS(SELECT 1 FROM payment_wallet_ledger l WHERE l.idempotency_key=?)`)
+            .bind(crypto.randomUUID(),refundKey,JSON.stringify({provider,event_id:eventId}),txId,refundCents,refundKey)
+        ]);
+      } else if(newStatus==='failed'&&!['paid','refunded','partially_refunded','held'].includes(tx.status)){
+        await env.DB.prepare(`UPDATE payment_transactions SET status='failed',provider_payment_id=COALESCE(?,provider_payment_id),updated_at=CURRENT_TIMESTAMP WHERE id=? AND status NOT IN ('paid','refunded','partially_refunded','held')`).bind(clean(event?.data?.provider_payment_id)||null,txId).run();
       }
     }
   }
