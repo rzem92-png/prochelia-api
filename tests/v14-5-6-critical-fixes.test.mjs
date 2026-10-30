@@ -257,3 +257,10 @@ test('Trust Passport reads the actual D1 intervenants.validation_status field fa
   assert.match(source, /suspended:rawProfileStatus==='SUSPENDED'/);
   assert.match(source, /status:\['ACTIVE','APPROVED','VALIDATED','VERIFIED'\]\.includes\(rawProfileStatus\)\?'ACTIVE':rawProfileStatus/);
 });
+
+
+test('Strategic pricing forwards the configured fuel price into the travel cost engine', () => {
+  assert.match(source, /function financeStrategicQuote\([\\s\\S]*?fuelPriceCentsPerLitre=null/);
+  assert.match(source, /financeStrategicTravel\(\{distanceKm,fuelMode,fuelPriceCentsPerLitre\}\)/);
+  assert.match(source, /distance:distance,fuelMode,fuelPriceCentsPerLitre,commissionRate/);
+});
