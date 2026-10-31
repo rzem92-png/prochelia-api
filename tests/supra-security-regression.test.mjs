@@ -89,3 +89,19 @@ test("ordinary low-impact read-only tasks remain auditable and non-executable", 
   assert.equal(plan.executionAllowed, false);
   assert.equal(plan.auditRequired, true);
 });
+
+
+test("urgent safeguarding cases are routed to the security domain", () => {
+  for (const caseType of ["urgence médicale", "danger personne", "suspicion maltraitance"]) {
+    const plan = buildSupraPlan({ caseType, impact: "CRITICAL" });
+    assert.equal(plan.domain, "securite", caseType);
+    assert.equal(plan.autonomy.level, "URGENT_HUMAN_ESCALATION", caseType);
+  }
+});
+
+test("complex legal cases are routed to the legal domain and require human review", () => {
+  const plan = buildSupraPlan({ caseType: "conseil juridique complexe", impact: "HIGH" });
+  assert.equal(plan.domain, "juridique");
+  assert.equal(plan.autonomy.approvalRequired, true);
+  assert.equal(plan.executionAllowed, false);
+});
