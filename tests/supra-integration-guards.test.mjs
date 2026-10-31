@@ -386,3 +386,30 @@ test("configuration audit can never authorize real production traffic by itself"
   assert.ok(audit.includes("additional_gates_required"));
   assert.ok(audit.includes("independent operational acceptance"));
 });
+
+
+test("identity approvals require a pending request, traceable evidence and a single atomic decision", () => {
+  assert.ok(source.includes('import { normalizeIdentityDecision, isCurrentIdentityEvidence } from "./identity-evidence.js";'));
+  const start=source.indexOf("async function securityIdentityApprove");
+  const end=source.indexOf("async function deliverSecurityCodes",start);
+  const handler=source.slice(start,end);
+  assert.ok(start>=0 && end>start);
+  assert.match(handler,/normalizeIdentityDecision\(body\)/);
+  assert.match(handler,/row\.status !== 'pending'/);
+  assert.match(handler,/WHERE id=\? AND status='pending'/);
+  assert.match(handler,/IDENTITY_DECISION_RACE_CONFLICT/);
+  assert.match(handler,/evidence_reference_recorded/);
+  assert.match(handler,/does not constitute|ne constitue pas/);
+});
+
+test("mission security accepts only current, referenced identity evidence with an explicit expiry", () => {
+  const start=source.indexOf("async function requireVerifiedIntervenant");
+  const end=source.indexOf("async function deviceHash",start);
+  const helper=source.slice(start,end);
+  assert.ok(start>=0 && end>start);
+  assert.match(helper,/provider_reference IS NOT NULL/);
+  assert.match(helper,/verified_at IS NOT NULL/);
+  assert.match(helper,/expires_at IS NOT NULL/);
+  assert.match(helper,/isCurrentIdentityEvidence\(row, now\)/);
+  assert.doesNotMatch(helper,/expires_at IS NULL/);
+});
