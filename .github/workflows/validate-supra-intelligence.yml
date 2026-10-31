@@ -7,6 +7,7 @@ on:
       - "src/index.js"
       - "src/v7.js"
       - "src/supra-intelligence.js"
+      - "src/supra-orchestrator.js"
       - "tests/supra-*.test.mjs"
       - ".github/workflows/validate-supra-intelligence.yml"
   workflow_dispatch:
