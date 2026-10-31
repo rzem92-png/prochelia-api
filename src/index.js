@@ -4769,6 +4769,20 @@ async function productionSubjectHash(request, route){
   return sha256Hex(`${ip}|${route}`);
 }
 
+async function productionRateLimitSchemaReady(env){
+  if(!env?.DB) return false;
+  // Read-only check: schema changes belong to a versioned migration, never a request.
+  const row=await env.DB.prepare(
+    "SELECT 1 AS ready FROM sqlite_master WHERE type='table' AND name='security_rate_limits' LIMIT 1"
+  ).first();
+  return row?.ready===1;
+}
+
+async function productionSubjectHash(request, route){
+  const ip=clean(request.headers.get('CF-Connecting-IP')) || clean(request.headers.get('X-Forwarded-For')) || 'unknown';
+  return sha256Hex(`${ip}|${route}`);
+}
+
 async function productionRateLimit(request,env){
   if(!isMutatingMethod(request.method)) return {ok:true};
   const path=new URL(request.url).pathname;
@@ -4777,7 +4791,6 @@ async function productionRateLimit(request,env){
     path.startsWith('/api/security/') ||
     path.startsWith('/api/payments/') ||
     path.startsWith('/api/support/') ||
-    path.startsWith('/api/copilot/') ||
     path==='/api/complaints' ||
     path==='/api/jobs/process' ||
     path==='/api/system/backup/run';
@@ -4787,7 +4800,9 @@ async function productionRateLimit(request,env){
   const subject=await productionSubjectHash(request,path);
   const now=Math.floor(Date.now()/1000);
   const start=new Date(Math.floor(now/windowSeconds)*windowSeconds*1000).toISOString();
-  await ensureFinalHardeningSchema(env);
+  if(!(await productionRateLimitSchemaReady(env))){
+    return {ok:false,response:json({ok:false,error:'RATE_LIMIT_SCHEMA_NOT_READY',version:VERSION},503,{'retry-after':'60'})};
+  }
   const existing=await env.DB.prepare(`SELECT request_count FROM security_rate_limits WHERE bucket=? AND subject_hash=? AND window_start=? LIMIT 1`).bind(bucket,subject,start).first();
   const count=Number(existing?.request_count||0)+1;
   if(existing){
@@ -4796,9 +4811,9 @@ async function productionRateLimit(request,env){
     await env.DB.prepare(`INSERT INTO security_rate_limits(id,bucket,subject_hash,window_start,request_count) VALUES(?,?,?,?,1)`).bind(crypto.randomUUID(),bucket,subject,start).run();
   }
   if(count>limit){
-    await productionSafetySchema(env);
-    await env.DB.prepare(`INSERT INTO production_security_events(id,event_type,route,subject_hash,decision,details_json) VALUES(?,?,?,?,?,?)`)
-      .bind(crypto.randomUUID(),'RATE_LIMIT',path,subject,'BLOCKED',JSON.stringify({limit,windowSeconds})).run();
+    // Emit a structured platform log without creating tables or writing an
+    // unversioned audit record from the request path.
+    console.warn(JSON.stringify({event:'RATE_LIMIT_BLOCKED',route:path,subject_hash:subject,limit,window_seconds:windowSeconds}));
     return {ok:false,response:json({ok:false,error:'RATE_LIMITED',version:VERSION,retry_after_seconds:Math.max(1,windowSeconds-(now%windowSeconds))},429,{'retry-after':String(Math.max(1,windowSeconds-(now%windowSeconds)))})};
   }
   return {ok:true};
