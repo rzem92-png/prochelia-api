@@ -76,3 +76,12 @@ test("session cookie remains HttpOnly and Secure with same-origin session cookie
   const source = await (await import("node:fs/promises")).readFile(new URL("../src/index.js", import.meta.url), "utf8");
   assert.match(source, /HttpOnly; Secure; SameSite=Lax/);
 });
+
+test("auth status fails closed when D1 is unavailable and never advertises bootstrap", async () => {
+  const response = await worker.fetch(new Request("https://prochelia-api.rzem92.workers.dev/api/auth/status"), {});
+  assert.equal(response.status, 503);
+  const body = await response.json();
+  assert.equal(body.ok, false);
+  assert.equal(body.database, false);
+  assert.equal(body.bootstrap_required, undefined);
+});
