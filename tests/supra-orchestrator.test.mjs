@@ -49,3 +49,48 @@ test("prototype-like case names do not resolve to inherited aliases", () => {
   assert.equal(buildSupraPlan({caseType}).domain,"direction");
  }
 });
+
+test("planner rejects invalid impact, action, market and unexpected fields", () => {
+ for (const input of [
+  {impact:"SEVERE"},
+  {requestedAction:"SEND MONEY"},
+  {market:"fr-FR"},
+  {unexpected:"client supplied evidence"}
+ ]) {
+  const p=buildSupraPlan(input);
+  assert.equal(p.executionAllowed,false);
+  assert.equal(p.autonomy.approvalRequired,true);
+  assert.equal(p.decisionOwner,"GERANTE");
+  assert.ok(p.rejectionReason);
+ }
+});
+
+test("caller-controlled verification flags never satisfy server evidence", () => {
+ const p=buildSupraPlan({
+  caseType:"paiement",
+  requestedAction:"REFUND",
+  impact:"LOW",
+  context:{
+   mission_id:"m-1", missionOwnershipVerified:true,
+   provider_id:"p-1", providerEligibilityVerified:true,
+   providerAvailabilityVerified:true,
+   client_id:"c-1", clientOwnershipVerified:true,
+   pspConfirmed:true
+  }
+ });
+ assert.ok(p.missingEvidence.includes("verify_mission_ownership_server_side"));
+ assert.ok(p.missingEvidence.includes("verify_provider_eligibility_server_side"));
+ assert.ok(p.missingEvidence.includes("verify_provider_availability_server_side"));
+ assert.ok(p.missingEvidence.includes("verify_client_ownership_server_side"));
+ assert.ok(p.missingEvidence.includes("verify_psp_event_and_ledger"));
+ assert.equal(p.executionAllowed,false);
+});
+
+test("planner rejects non-plain objects and malformed context types", () => {
+ for (const input of [null, "bad", 12, [], {context:[]}, {context:"bad"}, {market:12}]) {
+  const p=buildSupraPlan(input);
+  assert.equal(p.executionAllowed,false);
+  assert.equal(p.autonomy.approvalRequired,true);
+  assert.equal(p.auditRequired,true);
+ }
+});
