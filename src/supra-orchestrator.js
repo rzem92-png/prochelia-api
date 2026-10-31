@@ -73,7 +73,7 @@ function inferDomain(caseType, requestedDomain) {
   const explicit = cleanText(requestedDomain);
   if (explicit && Object.hasOwn(DOMAIN_REGISTRY, explicit)) return explicit;
   const normalized = cleanText(caseType);
-  return DOMAIN_ALIASES[normalized] || Object.keys(DOMAIN_REGISTRY).find(domain =>
+  return (Object.hasOwn(DOMAIN_ALIASES, normalized) ? DOMAIN_ALIASES[normalized] : null) || Object.keys(DOMAIN_REGISTRY).find(domain =>
     DOMAIN_REGISTRY[domain].some(term => normalized.includes(term))
   ) || "direction";
 }
