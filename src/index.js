@@ -956,10 +956,12 @@ async function paymentWebhook(request, env) {
       if(newStatus){
         const alreadyFinal = ['paid','failed','refunded'].includes(tx.status);
         if(!alreadyFinal){
+          const wallet=newStatus==='paid'
+            ? await env.DB.prepare('SELECT * FROM wallets WHERE user_id=? LIMIT 1').bind(tx.intervenant_id).first()
+            : null;
+          if(newStatus==='paid'&&!wallet) throw new Error('INTERVENANT_WALLET_NOT_FOUND');
           const changed=await env.DB.prepare(`UPDATE payment_transactions SET status=?,provider_payment_id=COALESCE(?,provider_payment_id),updated_at=CURRENT_TIMESTAMP WHERE id=? AND status NOT IN ('paid','failed','refunded')`).bind(newStatus,providerPaymentId||null,txId).run();
           if(changed.meta?.changes && newStatus==='paid'){
-            const wallet=await env.DB.prepare('SELECT * FROM wallets WHERE user_id=? LIMIT 1').bind(tx.intervenant_id).first();
-            if(!wallet) throw new Error('INTERVENANT_WALLET_NOT_FOUND');
             await env.DB.prepare('UPDATE wallets SET available_cents=available_cents+?,updated_at=CURRENT_TIMESTAMP WHERE id=?').bind(tx.net_intervenant_cents,wallet.id).run();
           }
         }
