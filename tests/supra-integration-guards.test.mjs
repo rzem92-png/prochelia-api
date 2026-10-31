@@ -24,3 +24,9 @@ test("les réaffectations et reports sont placés en file d'attente, sans UPDATE
 test("une action en attente ne ferme pas prématurément le dossier", () => {
   assert.match(source, /finalCaseStatus=hasPendingActions\?'ACTION_PENDING':'RESOLVED'/);
 });
+
+test("la file d'attente ne déclare jamais une action terminée sans exécuteur vérifié", () => {
+  assert.match(source, /WAITING_EXECUTOR/);
+  assert.match(source, /execution_verified:false/);
+  assert.doesNotMatch(source, /status='COMPLETED',processed_at=CURRENT_TIMESTAMP/);
+});
