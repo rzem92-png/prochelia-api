@@ -1605,13 +1605,39 @@ async function consolidatedInfo(env) {
   return json({ok:true,version:VERSION,architecture:'UNIQUE_TRANSVERSAL_ENGINE',phase,automation:'simple_low_impact_auto_sensitive_manager',mobile_pc:'responsive_web_required',domains:['B2C','B2B','missions','matching','metiers','incidents','remplacement','paiements','finance','comptabilite','reclamations','commercial','recrutement','RGPD','securite','audit','copilote'],b2b_rule:'societe paie intervenant; PROCHÉLIA facture commissions/service',b2c_rule:'client paie la prestation; orchestration du reversement intervenant',note:'Aucune opération financière réelle n’est simulée : les fonds passent par un PSP configuré et vérifié.'});
 }
 
+async function supraDomains(request, env) {
+  const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
+  return json({ok:true,version:VERSION,engine:'PROCHELIA_SUPRA_ORCHESTRATOR_V2',domains:procheliaV7.getSupraDomainRegistry()},200);
+}
+
+async function supraPlan(request, env) {
+  const gate=await requireAuthRole(request,env,['gerante','client','intervenant','entreprise']); if(gate.error)return gate.error;
+  if(request.method!=='POST') return json({ok:false,error:'METHOD_NOT_ALLOWED',version:VERSION},405);
+  const body=await readJson(request)||{};
+  const plan=procheliaV7.buildSupraPlan({
+    caseType:clean(body.case_type)||'analyse_generale',
+    domain:clean(body.domain),
+    impact:String(body.impact||'LOW').toUpperCase(),
+    requestedAction:clean(body.action)||'ANALYZE_AND_PROPOSE',
+    market:clean(body.market)||'fr',
+    context:body.context||{}
+  });
+  const governance=procheliaV7.assessSupraDecision({
+    caseType:plan.caseType,impact:plan.impact,requestedAction:plan.requestedAction,
+    actorRole:gate.auth.user.role,context:body.context||{}
+  });
+  return json({ok:true,version:VERSION,plan,governance},200);
+}
+
 async function handleConsolidated(request, env) {
   const url=new URL(request.url);
-  const consolidatedPath = ['/api/consolidated/info','/api/ops/dashboard','/api/journal','/api/cases','/api/cases/approve','/api/metiers','/api/metiers/suggest','/api/pricing/quote','/api/finance/summary','/api/complaints','/api/settings/phase'].includes(url.pathname);
+  const consolidatedPath = ['/api/consolidated/info','/api/ops/dashboard','/api/journal','/api/cases','/api/cases/approve','/api/metiers','/api/metiers/suggest','/api/pricing/quote','/api/finance/summary','/api/complaints','/api/settings/phase','/api/supra/domains','/api/supra/plan'].includes(url.pathname);
   if (consolidatedPath) {
     try { await ensureConsolidatedSchema(env); } catch (e) { return json({ok:false,error:'CONSOLIDATED_SCHEMA_ERROR',version:VERSION,message:e.message},500); }
   }
   if(url.pathname==='/api/consolidated/info' && request.method==='GET') return consolidatedInfo(env);
+  if(url.pathname==='/api/supra/domains' && request.method==='GET') return supraDomains(request,env);
+  if(url.pathname==='/api/supra/plan' && request.method==='POST') return supraPlan(request,env);
   if(url.pathname==='/api/ops/dashboard' && request.method==='GET') return getOperationsDashboard(request,env);
   if(url.pathname==='/api/journal' && request.method==='GET') return getJournal(request,env);
   if(url.pathname==='/api/cases' && request.method==='POST') return createOperationalCase(request,env);
