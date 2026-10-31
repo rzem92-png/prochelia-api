@@ -1,0 +1,32 @@
+name: PROCHÉLIA — preproduction release gate (fail closed)
+
+on:
+  pull_request:
+    branches:
+      - prelaunch/v14.5.7-consolidation-audit
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: prochelia-preproduction-release-gate-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release-gate:
+    name: Static safety audit and regression suite
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          package-manager-cache: false
+      - name: Run existing prelaunch regression tests
+        run: npm run test:prelaunch
+      - name: Run fail-closed release audit
+        run: node scripts/preproduction-release-audit.mjs
