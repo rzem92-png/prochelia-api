@@ -225,3 +225,18 @@ test("manager dispute decisions never fake PSP refunds, releases or final resolu
   assert.doesNotMatch(route,/status='resolved'/);
   assert.doesNotMatch(route,/SET status=\?,updated_at=CURRENT_TIMESTAMP WHERE id=\?/);
 });
+
+
+test("PSP webhooks reject provider spoofing and unsupported refund events before persistence", () => {
+  const route=source.slice(source.indexOf("async function paymentWebhook"),source.indexOf("async function openPaymentDispute"));
+  assert.match(route,/provider!==paymentProvider\(env\)/);
+  assert.match(route,/REFUND_RECONCILIATION_NOT_IMPLEMENTED/);
+  assert.match(route,/UNSUPPORTED_WEBHOOK_EVENT/);
+  assert.ok(route.indexOf("supportedEvents.includes(type)") < route.indexOf("INSERT OR IGNORE INTO payment_webhook_events"));
+});
+
+test("successful payout webhook requires the external PSP payout reference", () => {
+  const route=source.slice(source.indexOf("async function paymentWebhook"),source.indexOf("async function openPaymentDispute"));
+  assert.match(route,/PSP_PAYOUT_REFERENCE_REQUIRED/);
+  assert.ok(route.indexOf("PSP_PAYOUT_REFERENCE_REQUIRED") < route.indexOf("payoutUpdate"));
+});
