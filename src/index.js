@@ -2583,9 +2583,10 @@ async function productionConfigCheck(env) {
   const requiredTables=['users','sessions','missions','payment_accounts','wallets','payment_transactions','payment_webhook_events','payment_disputes','operational_cases','action_outbox','notification_outbox','accounting_ledger','promotions','promotion_recommendations','activity_journal','compliance_events'];
   for(const t of requiredTables) checks.push({code:`TABLE:${t}`,status:await tableExists(env,t)?'OK':'MISSING'});
   const pspRequired=paymentProvider(env)==='stripe'
-    ? ['PAYMENT_PROVIDER','STRIPE_SECRET_KEY','STRIPE_PUBLISHABLE_KEY','STRIPE_WEBHOOK_SECRET','STRIPE_DASHBOARD','STRIPE_FEES_COLLECTOR','STRIPE_LOSSES_COLLECTOR','APP_BASE_URL']
+    ? ['PAYMENT_PROVIDER','STRIPE_SECRET_KEY','STRIPE_WEBHOOK_SECRET','STRIPE_DASHBOARD','STRIPE_FEES_COLLECTOR','STRIPE_LOSSES_COLLECTOR','APP_BASE_URL']
     : ['PAYMENT_PROVIDER','PAYMENT_WEBHOOK_SECRET','PAYMENT_API_SECRET'];
   for(const k of pspRequired) checks.push({code:`SECRET:${k}`,status:finalSecretConfigured(env,k)?'OK':'NOT_CONFIGURED'});
+  if(paymentProvider(env)==='stripe') checks.push({code:'CONFIG:STRIPE_PUBLISHABLE_KEY',status:finalSecretConfigured(env,'STRIPE_PUBLISHABLE_KEY')?'OK':'NOT_CONFIGURED'});
   checks.push({code:'STRIPE_CHARGES_ADAPTER',status:STRIPE_CHARGES_AND_PAYOUTS_READY?'OK':'NOT_IMPLEMENTED'});
   checks.push({code:'STRIPE_PAYOUT_ADAPTER',status:STRIPE_CHARGES_AND_PAYOUTS_READY?'OK':'NOT_IMPLEMENTED'});
   checks.push({code:'BOOTSTRAP_TOKEN',status:finalSecretConfigured(env,'BOOTSTRAP_TOKEN')?'OK':'NOT_CONFIGURED'});
@@ -2600,7 +2601,7 @@ async function productionConfigCheck(env) {
   await registerIntegration(env,'MAPS','LOCATION',['MAPS_PROVIDER','MAPS_API_KEY'],['distance','geocoding','routing'],finalSecretConfigured(env,'MAPS_API_KEY')?'CONFIGURED':'NOT_CONFIGURED');
   await registerIntegration(env,'MARKET_DATA','COMMERCIAL',['MARKET_DATA_PROVIDER'],['market_prices','competitor_signals'],finalSecretConfigured(env,'MARKET_DATA_PROVIDER')?'CONFIGURED':'NOT_CONFIGURED');
   const blocking=checks.filter(x=>['MISSING','INCOMPLETE','NOT_IMPLEMENTED'].includes(x.status));
-  const externalNotConfigured=checks.filter(x=>x.status==='NOT_CONFIGURED' && pspRequired.map(k=>'SECRET:'+k).includes(x.code));
+  const externalNotConfigured=checks.filter(x=>x.status==='NOT_CONFIGURED' && (pspRequired.map(k=>'SECRET:'+k).includes(x.code)||x.code==='CONFIG:STRIPE_PUBLISHABLE_KEY'));
   const overall=blocking.length===0 && externalNotConfigured.length===0;
   for(const c of checks) await env.DB.prepare(`INSERT INTO system_config_checks(id,check_code,status,details_json) VALUES(?,?,?,?)`).bind(crypto.randomUUID(),c.code,c.status,JSON.stringify(c)).run();
   return {overall,checks,blocking:blocking.length,externalNotConfigured:externalNotConfigured.length};
@@ -3624,7 +3625,7 @@ async function strictProductionAudit(request,env){
     {code:'MAPS_PROVIDER',status:finalSecretConfigured(env,'MAPS_API_KEY')?'OK':'NOT_CONFIGURED'}
   ];
   const checks=[...(result.checks||[]),...extra];
-  const blockingCodes=new Set(['SECRET:PAYMENT_PROVIDER','SECRET:PAYMENT_WEBHOOK_SECRET','SECRET:PAYMENT_API_SECRET','SECRET:STRIPE_SECRET_KEY','SECRET:STRIPE_PUBLISHABLE_KEY','SECRET:STRIPE_WEBHOOK_SECRET','SECRET:STRIPE_DASHBOARD','SECRET:STRIPE_FEES_COLLECTOR','SECRET:STRIPE_LOSSES_COLLECTOR','SECRET:APP_BASE_URL','STRIPE_CHARGES_ADAPTER','STRIPE_PAYOUT_ADAPTER','SECURITY_CODE_DELIVERY','CORS_ORIGIN','BACKUP_R2']);
+  const blockingCodes=new Set(['SECRET:PAYMENT_PROVIDER','SECRET:PAYMENT_WEBHOOK_SECRET','SECRET:PAYMENT_API_SECRET','SECRET:STRIPE_SECRET_KEY','CONFIG:STRIPE_PUBLISHABLE_KEY','SECRET:STRIPE_WEBHOOK_SECRET','SECRET:STRIPE_DASHBOARD','SECRET:STRIPE_FEES_COLLECTOR','SECRET:STRIPE_LOSSES_COLLECTOR','SECRET:APP_BASE_URL','STRIPE_CHARGES_ADAPTER','STRIPE_PAYOUT_ADAPTER','SECURITY_CODE_DELIVERY','CORS_ORIGIN','BACKUP_R2']);
   const blocking=checks.filter(x=>blockingCodes.has(x.code)&&x.status!=='OK');
   const overall=blocking.length===0 && result.blocking===0;
   for(const c of extra){
