@@ -86,7 +86,7 @@ test("Stripe Connect onboarding creates the account and a fresh onboarding link 
   };
   try{
     const fake=fakeDb("intervenant");
-    const env={DB:fake.DB,PAYMENT_PROVIDER:"stripe",STRIPE_SECRET_KEY:"sk_test_unit",STRIPE_WEBHOOK_SECRET:"whsec_unit",APP_BASE_URL:"https://prochelia.pages.dev"};
+    const env={DB:fake.DB,PAYMENT_PROVIDER:"stripe",STRIPE_SECRET_KEY:"sk_test_unit",STRIPE_WEBHOOK_SECRET:"whsec_unit",STRIPE_DASHBOARD:"express",STRIPE_FEES_COLLECTOR:"application",STRIPE_LOSSES_COLLECTOR:"application",APP_BASE_URL:"https://prochelia.pages.dev"};
     const response=await worker.fetch(new Request("https://api.test/api/payments/onboard",{
       method:"POST",
       headers:{Origin:"https://prochelia.pages.dev",Cookie:"prochelia_session=synthetic-token","Content-Type":"application/json"},
@@ -100,6 +100,10 @@ test("Stripe Connect onboarding creates the account and a fresh onboarding link 
     assert.equal(calls.length,2);
     assert.equal(calls[0].init.headers.Authorization,"Bearer sk_test_unit");
     assert.match(calls[0].body,/email=provider%40example.test/);
+    assert.match(calls[0].body,/dashboard=express/);
+    assert.match(calls[0].body,/identity%5Bcountry%5D=FR/);
+    assert.match(calls[0].body,/defaults%5Bresponsibilities%5D%5Bfees_collector%5D=application/);
+    assert.match(calls[0].body,/defaults%5Bresponsibilities%5D%5Blosses_collector%5D=application/);
     assert.doesNotMatch(calls[0].body,/acct_attacker_controlled/);
     assert.match(calls[1].body,/account=acct_test123/);
     assert.match(calls[1].body,/use_case%5Btype%5D=account_onboarding/);
