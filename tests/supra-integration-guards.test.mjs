@@ -47,12 +47,13 @@ test("les routes SUPRA ne déclenchent aucune préparation automatique du schém
 });
 
 
-test("SUPRA plan route validates input and forwards evidence to governance", () => {
+test("SUPRA plan route validates input and never forwards caller-supplied evidence", () => {
   const route = source.slice(source.indexOf("async function supraPlan"), source.indexOf("async function handleConsolidated"));
   assert.match(route, /REQUEST_TOO_LARGE/);
   assert.match(route, /INVALID_JSON_OBJECT/);
   assert.match(route, /INVALID_SUPRA_PLAN_INPUT/);
-  assert.match(route, /actorRole:gate\.auth\.user\.role,context,evidence/);
+  assert.match(route, /actorRole:gate\.auth\.user\.role,context/);
+  assert.doesNotMatch(route, /actorRole:gate\.auth\.user\.role,context,evidence/);
   assert.match(route, /executionAllowed:false/);
   assert.match(route, /\['LOW','MEDIUM','HIGH','CRITICAL'\]/);
 });
@@ -61,7 +62,8 @@ test("SUPRA planning rejects browser-supplied evidence and validates context sha
   const route = source.slice(source.indexOf("async function supraPlan"), source.indexOf("async function handleConsolidated"));
   assert.match(route, /!isPlainRecord\(body\.context\)/);
   assert.match(route, /CLIENT_SUPPLIED_EVIDENCE_NOT_TRUSTED/);
-  assert.match(route, /const evidence=\{\};/);
+  assert.match(route, /request body is never a source of trusted evidence/);
+  assert.doesNotMatch(route, /const evidence=\{\};/);
 });
 
 
