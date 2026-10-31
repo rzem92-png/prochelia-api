@@ -27,6 +27,6 @@ test('consolidated DDL router preflights mapped roles before schema initializati
 });
 
 test('operational DDL router preflights mapped roles before schema initialization', () => {
-  const router = section('async function handleV139(request, env)', 'async function handleV140');
+  const router = section('async function handleV139(request, env)', '// ================================================================\n// PROCHÉLIA V14.0.0');
   assert.ok(router.indexOf('requireAuthRole') < router.indexOf('ensureOperationalSchema(env)'));
 });
