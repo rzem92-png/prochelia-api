@@ -27,3 +27,14 @@ test("preview-only dry-run command is explicitly configured", async () => {
   assert.match(packageJson.scripts["check:worker:preview"], /--dry-run/);
   assert.match(packageJson.scripts["check:worker:preview"], /wrangler\.preview\.jsonc/);
 });
+
+test("Cloudflare Workers Builds previews use the isolated preview D1, never production D1", () => {
+  const workerPreview = production.previews;
+  assert.equal(workerPreview?.vars?.APP_ENV, "preview");
+  assert.equal(workerPreview?.d1_databases?.length, 1);
+  assert.equal(workerPreview.d1_databases[0].binding, "DB");
+  assert.equal(workerPreview.d1_databases[0].database_name, "prochelia-preview-db");
+  assert.equal(workerPreview.d1_databases[0].database_id, "6adb95e5-e542-4bec-9008-fbea01042305");
+  const productionIds = (production.d1_databases || []).map(item => item.database_id);
+  assert.ok(!productionIds.includes(workerPreview.d1_databases[0].database_id));
+});
