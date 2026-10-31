@@ -121,3 +121,24 @@ test("read-only requests with unverified resource ownership are not autonomous",
  assert.ok(p.missingEvidence.includes("verify_mission_ownership_server_side"));
  assert.equal(p.executionAllowed,false);
 });
+
+test("replacement identifiers and claimed verification flags never unlock autonomous work", () => {
+ const p=buildSupraPlan({
+  caseType:"routine",
+  impact:"LOW",
+  requestedAction:"GENERATE_SUMMARY",
+  context:{
+   replacement_intervenant_id:"provider-new",
+   providerEligibilityVerified:true,
+   providerAvailabilityVerified:true,
+   missionOwnershipVerified:true,
+   clientOwnershipVerified:true,
+   pspConfirmed:true
+  }
+ });
+ assert.equal(p.autonomy.routineReadOnlyAutonomy,false);
+ assert.equal(p.autonomy.approvalRequired,true);
+ assert.ok(p.missingEvidence.includes("verify_provider_eligibility_server_side"));
+ assert.ok(p.missingEvidence.includes("verify_provider_availability_server_side"));
+ assert.equal(p.executionAllowed,false);
+});
