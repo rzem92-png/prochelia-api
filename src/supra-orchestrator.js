@@ -30,7 +30,10 @@ const DOMAIN_ALIASES = Object.freeze({
   absence_intervenant: "missions", retard_intervenant: "missions",
   remplacement: "matching", litige: "reclamations", reclamation_client: "reclamations",
   rgpd: "rgpd", fraude: "securite", incident_technique: "securite",
-  b2b: "entreprises", expansion: "international", crise_economique: "crise"
+  b2b: "entreprises", expansion: "international", crise_economique: "crise",
+  danger_personne: "securite", violence: "securite", urgence_medicale: "securite",
+  suspicion_maltraitance: "securite", incident_grave: "securite",
+  conseil_juridique_complexe: "juridique", fraude_financiere_majeure: "securite"
 });
 
 const HUMAN_DECISION_CASES = new Set([
