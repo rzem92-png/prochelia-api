@@ -6,6 +6,7 @@ on:
     paths:
       - "src/**"
       - "wrangler.jsonc"
+      - ".github/workflows/compare-preview-test-d1-integrity.yml"
       - ".github/workflows/validate-api-no-deploy.yml"
   push:
     branches: ["audit/d1-integrity-compare-v1"]
@@ -39,6 +40,24 @@ jobs:
         run: |
           echo "Contrôle syntaxique uniquement."
           echo "Aucun accès Cloudflare, aucune requête D1, aucune migration, aucun déploiement."
+
+
+      - name: Vérifier la syntaxe et le caractère lecture seule du script d'intégrité D1
+        shell: bash
+        run: |
+          set -euo pipefail
+          awk '
+            /cat > compare-d1\\.mjs << .NODE./ { inside=1; next }
+            inside && /^[[:space:]]*NODE$/ { exit }
+            inside { sub(/^          /, ""); print }
+          ' .github/workflows/compare-preview-test-d1-integrity.yml > "$RUNNER_TEMP/compare-d1.mjs"
+          test -s "$RUNNER_TEMP/compare-d1.mjs"
+          node --check "$RUNNER_TEMP/compare-d1.mjs"
+          if grep -Eiq '(^|[[:space:]])(INSERT|UPDATE|DELETE|REPLACE|CREATE|DROP|ALTER)[[:space:]]' "$RUNNER_TEMP/compare-d1.mjs"; then
+            echo "::error::Une instruction SQL potentiellement modificatrice a été détectée."
+            exit 1
+          fi
+          echo "Script d'intégrité valide syntaxiquement; aucune instruction SQL d'écriture détectée."
 
       - name: Vérifier l'API publique et la readiness D1 (GET uniquement)
         shell: bash
