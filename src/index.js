@@ -3,6 +3,7 @@ import { procheliaV7 } from "./v7.js";
 import { readBoundedRequestBody } from "./request-body.js";
 import { normalizeIdentityDecision, isCurrentIdentityEvidence } from "./identity-evidence.js";
 import { calculateFinancialQuote } from "./financial-quote.js";
+import { calculateForecastContributionCents } from "./finance-model-v1.js";
 // PROCHÉLIA — INDEX BACKEND CONSOLIDÉ UNIQUE
 // Référence de consolidation : V14.1 Finance + sécurité/RBAC existants.
 // Généré le 19/10/2026. À déployer uniquement après recette avec la vraie base D1.
@@ -2702,7 +2703,9 @@ async function financeForecast(request, env) {
     const payout=Math.round(Number(tx?.intervenant||0)/3*(1+0.03*i));
     const provider=Math.round(Number(tx?.provider_fee||0)/3*(1+0.03*i));
     const refunds=Math.round(Number(tx?.refunds||0)/3*(1+0.03*i));
-    const margin=revenue-commission*0+payout*-1+commission-provider-refunds;
+    const marginResult=calculateForecastContributionCents({commissionCents:commission,providerFeeCents:provider,refundCents:refunds});
+    if(!marginResult.ok)return json({ok:false,error:marginResult.error,version:VERSION},500);
+    const margin=marginResult.contribution_cents;
     const period=new Date(); period.setMonth(period.getMonth()+i); const key=period.toISOString().slice(0,7);
     await env.DB.prepare(`INSERT INTO finance_forecasts(id,period,scenario,revenue_cents,commission_cents,payout_cents,provider_fee_cents,refund_cents,estimated_margin_cents,confidence) VALUES(?,?,?,?,?,?,?,?,?,?)`)
       .bind(crypto.randomUUID(),key,'BASE',revenue,commission,payout,provider,refunds,margin,0.55).run();
