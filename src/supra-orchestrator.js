@@ -71,7 +71,7 @@ function cleanText(value, fallback = "") {
 
 function inferDomain(caseType, requestedDomain) {
   const explicit = cleanText(requestedDomain);
-  if (explicit && DOMAIN_REGISTRY[explicit]) return explicit;
+  if (explicit && Object.hasOwn(DOMAIN_REGISTRY, explicit)) return explicit;
   const normalized = cleanText(caseType);
   return DOMAIN_ALIASES[normalized] || Object.keys(DOMAIN_REGISTRY).find(domain =>
     DOMAIN_REGISTRY[domain].some(term => normalized.includes(term))
@@ -84,13 +84,16 @@ export function getSupraDomainRegistry() {
   }));
 }
 
-export function buildSupraPlan(input = {}) {
+export function buildSupraPlan(rawInput = {}) {
+  // Public helper: malformed external callers must receive a safe plan, not a TypeError.
+  const input = rawInput && typeof rawInput === "object" && !Array.isArray(rawInput) ? rawInput : {};
   const caseType = cleanText(input.caseType, "analyse_generale");
   const action = String(input.requestedAction ?? "ANALYZE_AND_PROPOSE").trim().toUpperCase();
   const impact = String(input.impact ?? "LOW").trim().toUpperCase();
   const domain = inferDomain(caseType, input.domain);
   const market = cleanText(input.market, "fr");
-  const context = input.context && typeof input.context === "object" ? input.context : {};
+  const context = input.context && typeof input.context === "object" && !Array.isArray(input.context)
+    ? input.context : {};
   const emergency = PROFESSIONAL_ESCALATION_CASES.has(caseType) || context.immediateDanger === true;
   const sensitive = HUMAN_DECISION_CASES.has(caseType) ||
     ["HIGH", "CRITICAL"].includes(impact) ||
