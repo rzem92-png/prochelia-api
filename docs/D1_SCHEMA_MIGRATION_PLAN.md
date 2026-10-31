@@ -17,6 +17,15 @@ This section supersedes stale version and test-count statements in earlier inves
 
 The 133 passing tests are regression evidence only. They do not prove that a live D1 database has the expected schema, that all initializer DDL has an equivalent migration, or that restore/recovery works. The static audit remains NO-GO.
 
+## 0A. CI workflow incident and correction — 2026-10-31
+
+- Commit `a9adec39630e824a9c9f78b42858a106e0c3aa84` attempted to replace an unsupported `package-manager-cache: false` input with `cache: false` on `actions/setup-node@v4`.
+- GitHub Actions run `41217532082` proved that `cache: false` is itself invalid: setup-node stopped with `Caching for 'false' is not supported`. The regression suite and release audit were skipped on that run. Do not count it as a code/test failure or a successful release gate.
+- Correction on commit `36b0c8686fec3e9672b4393d0fbc982831184592`: remove the cache input entirely. This is the supported way to leave setup-node caching unconfigured.
+- New release-gate run `41217671593` and CodeQL run `41217671683` were in progress when this note was recorded. Their final conclusions must be checked before claiming success.
+- CodeQL on the previous commit `a9adec3` completed successfully; that result does not certify the new commit.
+- No database, deployment, or production operation was performed.
+
 ## 1. Verified code findings
 
 At the audited prelaunch code:
