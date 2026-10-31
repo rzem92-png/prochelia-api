@@ -200,7 +200,7 @@ Reference:
 
 **Launch hold:** no activation of provider ranking, automated allocation, dynamic provider remuneration, GPS monitoring, account suspension/deactivation, or performance-based incentives until a French platform-work lawyer has reviewed their concrete effects on provider autonomy, employment status, algorithmic management, data protection and appeal rights.
 
-## 13. Legal review deliverables required from counsel
+\nThe French authorization regime (autorisation) is distinct from State approval (agrément) and SAP declaration; the applicable route must be recorded for each service and mode of intervention.\n\n## 13. Legal review deliverables required from counsel
 
 The legal review is not complete until counsel supplies dated, written answers and redlines for:
 - the actual business model and party to each client/provider service contract;
