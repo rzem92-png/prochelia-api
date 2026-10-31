@@ -1,0 +1,145 @@
+name: PROCHÉLIA — restauration D1 isolée v2 (préproduction)
+
+on:
+  workflow_dispatch:
+    inputs:
+      backup_run_id:
+        description: "ID du lancement de sauvegarde D1 réussi après les migrations du 30/10/2026 à 21:00 UTC"
+        required: true
+        type: string
+      confirm_isolated_test:
+        description: "Confirmer la restauration dans prochelia-restore-test-v2 uniquement"
+        required: true
+        type: boolean
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: prochelia-d1-restore-test-v2
+  cancel-in-progress: false
+
+jobs:
+  restore-test-v2:
+    name: Restaurer et vérifier la base D1 v2 isolée
+    if: ${{ inputs.confirm_isolated_test == true }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      CLOUDFLARE_ACCOUNT_ID: f2a79e9fa41566a8ec80fb24c02c60eb
+      RESTORE_DB_NAME: prochelia-restore-test-v2
+      RESTORE_DB_ID: a3526c2a-39cb-49ab-97c4-979138145f33
+      BACKUP_RUN_ID: ${{ inputs.backup_run_id }}
+    steps:
+      - name: Vérifier les entrées, secrets et cible Cloudflare exacte
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          BACKUP_ENCRYPTION_KEY: ${{ secrets.BACKUP_ENCRYPTION_KEY }}
+        run: |
+          set -euo pipefail
+          [[ "$BACKUP_RUN_ID" =~ ^[0-9]+$ ]] || { echo "::error::ID de sauvegarde invalide."; exit 1; }
+          [[ "$RESTORE_DB_NAME" == "prochelia-restore-test-v2" ]]
+          [[ "$RESTORE_DB_ID" == "a3526c2a-39cb-49ab-97c4-979138145f33" ]]
+          [[ -n "${CLOUDFLARE_API_TOKEN:-}" && -n "${BACKUP_ENCRYPTION_KEY:-}" ]] || { echo "::error::Secret requis manquant."; exit 1; }
+          token="${CLOUDFLARE_API_TOKEN#Bearer }"
+          token="${token#bearer }"
+          token="$(printf '%s' "$token" | tr -d '\r\n')"
+          [[ -n "$token" ]]
+          printf 'CLOUDFLARE_API_TOKEN=%s\n' "$token" >> "$GITHUB_ENV"
+          http="$(curl --silent --show-error --output "$RUNNER_TEMP/token.json" --write-out '%{http_code}' -H "Authorization: Bearer $token" "https://api.cloudflare.com/client/v4/user/tokens/verify")"
+          jq -e '.success == true and .result.status == "active"' "$RUNNER_TEMP/token.json" >/dev/null
+          [[ "$http" == "200" ]]
+          http="$(curl --silent --show-error --output "$RUNNER_TEMP/d1.json" --write-out '%{http_code}' -H "Authorization: Bearer $token" "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/d1/database?name=$RESTORE_DB_NAME")"
+          [[ "$http" == "200" ]]
+          count="$(jq --arg n "$RESTORE_DB_NAME" --arg id "$RESTORE_DB_ID" '[.result[]? | select(.name == $n and .uuid == $id)] | length' "$RUNNER_TEMP/d1.json")"
+          [[ "$count" == "1" ]] || { echo "::error::Nom/UUID de la base v2 non confirmés ; aucune écriture."; exit 1; }
+          echo "Jeton actif et cible D1 v2 exacte confirmée."
+
+      - name: Vérifier que le lancement de sauvegarde est réussi et télécharger son archive
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh run view "$BACKUP_RUN_ID" --repo "$GITHUB_REPOSITORY" --json conclusion,name --jq 'select(.conclusion == "success") | .name' | grep -F "sauvegarde D1 préproduction"
+          mkdir -p "$RUNNER_TEMP/prochelia-restore"
+          gh run download "$BACKUP_RUN_ID" --repo "$GITHUB_REPOSITORY" --name "prochelia-preview-d1-encrypted-$BACKUP_RUN_ID" --dir "$RUNNER_TEMP/prochelia-restore"
+          test -s "$RUNNER_TEMP/prochelia-restore/prochelia-preview.sql.gpg"
+          test -s "$RUNNER_TEMP/prochelia-restore/README.txt"
+          grep -Fx 'database=prochelia-preview-db' "$RUNNER_TEMP/prochelia-restore/README.txt"
+          created="$(sed -n 's/^created_utc=//p' "$RUNNER_TEMP/prochelia-restore/README.txt")"
+          [[ -n "$created" ]]
+          epoch="$(date -u -d "$created" +%s)"
+          cutoff="$(date -u -d '2026-10-30T21:00:00Z' +%s)"
+          (( epoch > cutoff )) || { echo "::error::Sauvegarde antérieure aux migrations du 30/10/2026 à 21:00 UTC ; restauration refusée."; exit 1; }
+          echo "Archive de préproduction récente confirmée."
+
+      - name: Déchiffrer et contrôler l’export SQL
+        shell: bash
+        env:
+          BACKUP_ENCRYPTION_KEY: ${{ secrets.BACKUP_ENCRYPTION_KEY }}
+        run: |
+          set -euo pipefail
+          encrypted="$RUNNER_TEMP/prochelia-restore/prochelia-preview.sql.gpg"
+          sql="$RUNNER_TEMP/prochelia-restore/prochelia-preview.sql"
+          printf '%s' "$BACKUP_ENCRYPTION_KEY" | gpg --batch --yes --pinentry-mode loopback --passphrase-fd 0 --decrypt "$encrypted" > "$sql"
+          test -s "$sql"
+          grep -Eiq 'CREATE TABLE|INSERT INTO|CREATE INDEX|PRAGMA' "$sql" || { echo "::error::Export SQL invalide."; exit 1; }
+          chmod 600 "$sql"
+          echo "Déchiffrement réussi ; contenu SQL non affiché."
+
+      - name: Installer Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+          package-manager-cache: false
+
+      - name: Vérifier que la base v2 est vide (lecture seule)
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          result="$RUNNER_TEMP/pre-restore.json"
+          npx --yes wrangler@4 d1 execute "$RESTORE_DB_NAME" --remote --command="SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT GLOB '_cf_*' ORDER BY name;" --json > "$result"
+          jq -e . "$result" >/dev/null
+          jq -r '[.. | objects | select(has("results")) | .results[]? | .name? // empty] | map(select(type == "string")) | unique | .[]' "$result" > "$RUNNER_TEMP/table-names.txt"
+          if [[ -s "$RUNNER_TEMP/table-names.txt" ]]; then
+            echo "::error::La base v2 n’est pas vide. Aucune donnée ne sera écrasée."
+            cat "$RUNNER_TEMP/table-names.txt"
+            exit 1
+          fi
+          jq -e '[.. | objects | has("results")] | any' "$result" >/dev/null
+          echo "Base v2 vide confirmée."
+
+      - name: Restaurer uniquement dans prochelia-restore-test-v2
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          [[ "$RESTORE_DB_NAME" == "prochelia-restore-test-v2" ]]
+          [[ "$RESTORE_DB_ID" == "a3526c2a-39cb-49ab-97c4-979138145f33" ]]
+          [[ "$RESTORE_DB_ID" != "6adb95e5-e542-4bec-9008-fbea01042305" ]]
+          [[ "$RESTORE_DB_ID" != "04f52830-ef5a-4f17-a640-42bbc2381bba" ]]
+          npx --yes wrangler@4 d1 execute "$RESTORE_DB_NAME" --remote --file="$RUNNER_TEMP/prochelia-restore/prochelia-preview.sql" --yes
+          echo "Import terminé sur la base de restauration v2."
+
+      - name: Vérifier intégrité, migrations et tables restaurées
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          npx --yes wrangler@4 d1 execute "$RESTORE_DB_NAME" --remote --command="PRAGMA quick_check;" --json > "$RUNNER_TEMP/quick-check.json"
+          jq -e '[.. | strings] | any(. == "ok")' "$RUNNER_TEMP/quick-check.json" >/dev/null || { echo "::error::PRAGMA quick_check n’a pas confirmé l’intégrité."; cat "$RUNNER_TEMP/quick-check.json"; exit 1; }
+          npx --yes wrangler@4 d1 execute "$RESTORE_DB_NAME" --remote --command="SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT GLOB '_cf_*' ORDER BY name;" --json > "$RUNNER_TEMP/tables.json"
+          npx --yes wrangler@4 d1 execute "$RESTORE_DB_NAME" --remote --command="SELECT COUNT(*) AS migration_count FROM d1_migrations; SELECT COUNT(*) AS holiday_count FROM pricing_holidays;" --json > "$RUNNER_TEMP/counts.json"
+          jq -e '[.. | objects | select(has("results")) | .results[]? | .name? // empty] | map(select(type == "string")) | unique | length >= 20' "$RUNNER_TEMP/tables.json" >/dev/null || { echo "::error::Nombre de tables restaurées inférieur au seuil attendu."; exit 1; }
+          jq -e '[.. | objects | select(has("results")) | .results[]? | to_entries[]? | select(.key == "migration_count") | .value] | any(. == 4)' "$RUNNER_TEMP/counts.json" >/dev/null || { echo "::error::Les 4 migrations attendues ne sont pas confirmées."; cat "$RUNNER_TEMP/counts.json"; exit 1; }
+          jq -e '[.. | objects | select(has("results")) | .results[]? | to_entries[]? | select(.key == "holiday_count") | .value] | any(. == 55)' "$RUNNER_TEMP/counts.json" >/dev/null || { echo "::error::Les 55 jours fériés attendus ne sont pas confirmés."; cat "$RUNNER_TEMP/counts.json"; exit 1; }
+          echo "Intégrité SQLite OK ; au moins 20 tables, 4 migrations et 55 jours fériés confirmés."
+          cat "$RUNNER_TEMP/tables.json"
+          cat "$RUNNER_TEMP/counts.json"
