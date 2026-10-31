@@ -86,3 +86,10 @@ test("calendar surcharges are derived in Europe/Paris from the scheduled timesta
   assert.match(route, /calendar\.holiday/);
   assert.match(route, /SCHEDULED_AT_MUST_INCLUDE_TIMEZONE/);
 });
+
+
+test("SUPRA market selector accepts the explicit other-market option", () => {
+  const route = source.slice(source.indexOf("async function supraPlan"), source.indexOf("async function handleConsolidated"));
+  assert.match(route, /market === "other"/);
+  assert.match(route, /\^\[a-z\]\{2\}\$/);
+});
