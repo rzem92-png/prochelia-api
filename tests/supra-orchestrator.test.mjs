@@ -108,3 +108,16 @@ test("planner rejects unexpected context keys and incorrectly typed identifiers"
   assert.ok(p.rejectionReason);
  }
 });
+
+test("read-only requests with unverified resource ownership are not autonomous", () => {
+ const p=buildSupraPlan({
+  caseType:"analyse_generale",
+  impact:"LOW",
+  requestedAction:"GENERATE_SUMMARY",
+  context:{mission_id:"mission-123",missionOwnershipVerified:true}
+ });
+ assert.equal(p.autonomy.routineReadOnlyAutonomy,false);
+ assert.equal(p.autonomy.approvalRequired,true);
+ assert.ok(p.missingEvidence.includes("verify_mission_ownership_server_side"));
+ assert.equal(p.executionAllowed,false);
+});
