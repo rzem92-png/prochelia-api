@@ -27,6 +27,56 @@ At the audited prelaunch code:
 - The current audited `/api/readiness` endpoint checks the declared required-table inventory read-only; this is not yet a full column/index/constraint/trigger compatibility proof against live D1.
 - `wrangler.jsonc` points at the preview database `prochelia-preview-db` (ID `6adb95e5-e542-4bec-9008-fbea01042305`) and a preview R2 bucket. This is configuration evidence only; it is not evidence of the live D1 schema or a successful backup/restore.
 
+## 1A. Source-derived initializer and migration inventory — 2026-10-31
+
+### 13 schema initializers found in src/index.js
+
+| Initializer | Source line in audited snapshot | Domain |
+|---|---:|---|
+| ensureSecuritySchema | 511 | Identity, device/session and mission security, audit |
+| ensureTrustPassportSchema | 678 | Service catalogue and provider evidence |
+| ensurePaymentSchema | 966 | Payment accounts, wallets, ledger, transactions, provider events |
+| ensureConsolidatedSchema | 1615 | Platform/business configuration, métiers, pricing, quotes, cases |
+| ensureStrategicSchema | 2401 | Promotions, recommendations, commercial events, market signals |
+| ensureOperationalSchema | 2815 | Outbox, Copilot briefings, loyalty, quality, B2B leads |
+| ensureFinalHardeningSchema | 3144 | System checks, idempotency and job controls |
+| ensureCommercialRecruitmentSchema | 3302 | Commercial and recruitment workflows |
+| ensureFinanceWorkspaceSchema | 3463 | Finance workspace and resolution cases |
+| ensureDocumentSecuritySchema | 3777 | Document security and scan state |
+| ensureNationalContinuitySchema | 4122 | Continuity, backup and resilience records |
+| ensureProcheliaMasterComplementSchema | 4366 | Master/reference and operating structures |
+| ensureCopilotSchema | 4587 | Copilot interactions and action plans |
+
+The 83 count reported by the release gate is a runtime call-site count, not a count of unique SQL statements or schema objects. Line numbers are locators for this snapshot and must be regenerated from the exact commit before review.
+
+### Existing migration object inventory
+
+A preliminary declaration scan of the five existing migrations found the following objects. This is not yet proof of equivalence with initializer DDL; parsing must be repeated with a SQL-aware parser that preserves multi-statement triggers.
+
+| Migration | Declared objects found |
+|---|---|
+| 0001_core_business_schema.sql | Tables: clients, intervenants, prestations, missions, tarifs, paiements, disponibilites, evaluations, documents, conflits, journal. Indexes: idx_clients_user, idx_intervenants_user, idx_missions_client, idx_missions_intervenant, idx_missions_date, idx_disponibilites_intervenant, idx_paiements_mission, idx_journal_user |
+| 0002_server_pricing.sql | Tables: pricing_policies, pricing_travel_policies, pricing_route_estimates, pricing_route_estimate_audit, pricing_holidays, pricing_quotes. Indexes: idx_pricing_policy_lookup, idx_pricing_route_owner_expiry |
+| 0003_route_address_provenance.sql | Table: intervenant_route_origins. Index: idx_intervenant_route_origin_status |
+| 0004_atomic_wallet_ledger.sql | Tables: wallets, payment_wallet_ledger. Indexes: idx_wallet_ledger_user_date, idx_wallet_ledger_tx. Triggers: trg_payment_wallet_ledger_require_wallet, trg_payment_wallet_ledger_guard_balances, trg_payment_wallet_ledger_apply, trg_payment_wallet_ledger_no_update, trg_payment_wallet_ledger_no_delete |
+| 0005_security_rate_limits.sql | Table: security_rate_limits. Index: idx_security_rate_limits_window |
+
+**Coverage status: NOT PROVEN.** Existing migrations visibly cover core marketplace, pricing, route provenance, wallet ledger and persistent rate limiting. This scan does not establish complete equivalence for all objects created by all 13 initializers. No initializer is removed and no migration is authored on this evidence alone.
+
+### Required machine-readable proof before migration drafting
+
+Build a normalized manifest from actual initializer SQL arrays/template literals containing:
+- object type/name and normalized SQL hash;
+- columns, defaults, CHECK/UNIQUE/PRIMARY KEY constraints;
+- foreign keys and referenced objects;
+- index uniqueness and ordered columns;
+- trigger timing/event/body and protected invariants;
+- ALTER TABLE, seed/configuration writes and conditional DDL;
+- initializer, all call sites, route/method and owning module;
+- matching migration filename and exact statement hash, or explicit UNMAPPED.
+
+Preserve multi-statement trigger bodies and dynamic SQL. Mark any unparseable statement UNPARSED; never silently omit it. CI must fail if new initializer DDL appears without a reviewed manifest mapping.
+
 ## 2. Hard safety boundaries
 
 - Do not run `wrangler d1 migrations apply`, `wrangler d1 execute`, SQL writes, remote restore, or deployment as part of this audit.
