@@ -123,7 +123,7 @@ test("real charges and payouts fail closed until the transaction adapters are im
   assert.equal(fake.calls.some(x=>x.sql.includes("INSERT INTO payment_transactions")),false);
 });
 
-test("Stripe account.updated webhook updates Connect readiness only after valid signature", async()=>{
+test("Stripe v2 account requirements webhook updates Connect readiness only after valid signature", async()=>{
   const fake=fakeDb("intervenant");
   const env={DB:fake.DB,PAYMENT_PROVIDER:"stripe",STRIPE_SECRET_KEY:"sk_test_unit",STRIPE_WEBHOOK_SECRET:"whsec_unit",APP_BASE_URL:"https://prochelia.pages.dev"};
   const timestamp=Math.floor(Date.now()/1000);
@@ -141,11 +141,10 @@ test("Stripe account.updated webhook updates Connect readiness only after valid 
   assert.equal(response.status,200,JSON.stringify(result));
   const update=fake.calls.find(x=>x.sql.includes("UPDATE payment_accounts SET charges_enabled"));
   assert.ok(update);
-  assert.equal(update.args[0],0);
-  assert.equal(update.args[1],1);
-  assert.equal(update.args[2],"active");
-  assert.equal(update.args[3],"submitted");
-  assert.equal(update.args[4],"acct_test123");
+  assert.equal(update.args[0],1);
+  assert.equal(update.args[1],"active");
+  assert.equal(update.args[2],"submitted");
+  assert.equal(update.args[3],"acct_test123");
   } finally {
     globalThis.fetch=originalFetch;
   }
