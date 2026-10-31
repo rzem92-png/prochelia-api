@@ -1699,7 +1699,7 @@ async function supraPlan(request, env) {
   const market=typeof body.market==='string'?body.market.trim().toLowerCase():'fr';
   if(!caseType || caseType.length>100 || !/^[A-Z0-9_]{2,64}$/.test(action) ||
      !['LOW','MEDIUM','HIGH','CRITICAL'].includes(impact) ||
-     !/^[a-z]{2}(-[A-Z]{2})?$/.test(market) ||
+     !(market === "other" || /^[a-z]{2}$/.test(market)) ||
      (domain!==undefined && domain.length>60) ||
      (body.context!==undefined && !isPlainRecord(body.context)) ||
      (body.evidence!==undefined && !isPlainRecord(body.evidence))) {
