@@ -40,16 +40,37 @@ jobs:
           echo "Contrôle syntaxique uniquement."
           echo "Aucun accès Cloudflare, aucune requête D1, aucune migration, aucun déploiement."
 
-      - name: Vérifier la disponibilité publique de l'API (GET uniquement)
+      - name: Vérifier l'API publique et la readiness D1 (GET uniquement)
         shell: bash
         run: |
           set -euo pipefail
-          curl --fail --silent --show-error --max-time 20 \
-            "https://prochelia-api.rzem92.workers.dev/api/health" \
-            -o "$RUNNER_TEMP/prochelia-health.json"
+          base="https://prochelia-api.rzem92.workers.dev"
+          curl --fail --silent --show-error --max-time 20 "$base/api/health" -o "$RUNNER_TEMP/health.json"
+          curl --fail --silent --show-error --max-time 20 "$base/api/readiness" -o "$RUNNER_TEMP/readiness.json"
+          curl --fail --silent --show-error --max-time 20 "$base/api/info" -o "$RUNNER_TEMP/info.json"
           node --input-type=module <<'NODE'
           import fs from 'node:fs';
-          const health = JSON.parse(fs.readFileSync(process.env.RUNNER_TEMP + '/prochelia-health.json', 'utf8'));
-          if (health.ok !== true) throw new Error('L’API publique ne confirme pas ok=true.');
-          console.log(JSON.stringify({ok:health.ok,service:health.service ?? null,version:health.version ?? null}));
+          const dir = process.env.RUNNER_TEMP;
+          const health = JSON.parse(fs.readFileSync(dir + '/health.json', 'utf8'));
+          const ready = JSON.parse(fs.readFileSync(dir + '/readiness.json', 'utf8'));
+          const info = JSON.parse(fs.readFileSync(dir + '/info.json', 'utf8'));
+          if (health.ok !== true || health.database !== true) throw new Error('Health API/D1 non valide.');
+          if (ready.ok !== true || ready.ready !== true || ready.database !== true ||
+              ready.missions_schema !== true || ready.users_schema !== true || ready.writes !== false) {
+            throw new Error('Readiness D1 ou schéma de base non validé.');
+          }
+          if (info.ok !== true || !Array.isArray(info.routes) ||
+              !info.routes.includes('/api/auth/login') ||
+              !info.routes.includes('/api/payments/onboard') ||
+              info.writes?.missions !== false) {
+            throw new Error('Contrat API public incomplet ou état des écritures non conforme.');
+          }
+          console.log(JSON.stringify({
+            ok: true,
+            service: health.service,
+            version: health.version,
+            database: ready.database,
+            ready: ready.ready,
+            missionWritesEnabled: info.writes?.missions === true
+          }));
           NODE
