@@ -6,7 +6,7 @@ Méthode : inventaire statique des définitions `ensure*Schema` et de leurs réf
 
 ## Résultat
 
-Dix helpers de schéma sont encore définis dans le Worker. L'inventaire statique compte **67 appels directs** à ces helpers dans `src/index.js` (7 + 9 + 7 + 10 + 12 + 5 + 6 + 1 + 3 + 7). Ils exécutent des `CREATE TABLE`, `CREATE INDEX`, parfois des `CREATE TRIGGER`, et certains insèrent aussi des valeurs par défaut à l'exécution. Ce total ne couvre pas les appels indirects, les autres fichiers ni les comportements effectifs de D1.
+Les dix helpers `ensure*Schema` recensés comptent **67 appels directs** dans `src/index.js` (7 + 9 + 7 + 10 + 12 + 5 + 6 + 1 + 3 + 7). L'audit a également identifié un onzième helper DDL, `productionSafetySchema`, qui crée `production_security_events` et son index en dehors de cette famille `ensure*Schema`. Le middleware `productionRateLimit` appelle `ensureFinalHardeningSchema` sur les requêtes mutantes ; en cas de dépassement de limite, il appelle aussi `productionSafetySchema`. Les helpers exécutent des `CREATE TABLE`, `CREATE INDEX`, parfois des `CREATE TRIGGER`, et certains insèrent des valeurs par défaut à l'exécution. Le périmètre n'inclut pas encore les appels indirects, les autres fichiers ni les comportements effectifs de D1.
 
 | Helper | Définition | Appels directs dans `src/index.js` |
 |---|---:|---|
@@ -27,13 +27,13 @@ Dix helpers de schéma sont encore définis dans le Worker. L'inventaire statiqu
 2. **Écriture de configuration au runtime** : certains helpers font aussi des `INSERT OR IGNORE` pour des paramètres, règles ou profils par défaut. Il faudra séparer structure et données de référence.
 3. **Initialisation transversale** : les chemins de contrôle final appellent plusieurs helpers successivement. Une seule requête peut donc tenter de préparer de nombreux domaines.
 4. **Périmètre sécurité** : le contrôle RBAC ajouté aux routeurs consolidé/opérationnel ne couvre pas automatiquement les autres familles (identité, paiement, commercial, finance, sauvegarde, profils, rate-limit). Chaque route doit être reliée à son contrôle d'accès effectif.
-5. **Rate limit dépendant du DDL** : `productionRateLimit` appelle encore `ensureFinalHardeningSchema`; le rate-limit lui-même ne doit pas dépendre d'une création de table à la première requête.
+5. **Rate limit dépendant du DDL** : `productionRateLimit` appelle `ensureFinalHardeningSchema` sur chaque requête mutante, et `productionSafetySchema` crée une table supplémentaire lors d'un blocage. Le rate-limit lui-même ne doit pas dépendre d'une création de table à la première requête.
 6. **Catalogue fragmenté** : les chemins existants lisent à la fois `prestations` et `métier_catalog`. Le schéma réel, les données et les relations historiques n'ont pas encore été rapprochés.
 
 ## Stratégie de migration — sans exécution
 
 - Geler les changements de schéma sur cette branche pendant l'inventaire.
-- Extraire chaque instruction DDL exacte, y compris indexes, triggers, contraintes et valeurs de référence, dans des migrations SQL numérotées et ordonnées.
+- Extraire chaque instruction DDL exacte des onze helpers, y compris indexes, triggers, contraintes et valeurs de référence, dans des migrations SQL numérotées et ordonnées.
 - Ajouter une table de suivi des migrations avec identifiant, checksum, date et version ; refuser toute divergence de checksum.
 - Construire un bootstrap de migration séparé du Worker applicatif, protégé par un environnement isolé et une approbation explicite.
 - Tester migrations sur une base D1 jetable, puis sur une copie de préproduction ; vérifier relance idempotente, interruption, reprise, contraintes et rollback compensatoire.
@@ -44,3 +44,8 @@ Dix helpers de schéma sont encore définis dans le Worker. L'inventaire statiqu
 ## Non-actions effectuées
 
 Aucune requête DDL n'a été exécutée. Aucune migration, sauvegarde, restauration, écriture D1, modification de secret, déploiement, fusion ou opération de paiement n'a été lancée.
+
+
+## Complément de périmètre — 2026-10-31
+
+Le comptage **67** concerne uniquement les appels directs aux dix fonctions `ensure*Schema`. `productionSafetySchema` est une fonction DDL supplémentaire, appelée depuis le chemin de rate-limit lorsque le seuil est dépassé ; elle n'est donc pas incluse dans les 67. L'inventaire complet du dépôt, des wrappers, des autres fichiers et des branches reste à effectuer avant d'affirmer qu'il n'existe plus aucun DDL runtime.
