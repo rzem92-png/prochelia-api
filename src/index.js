@@ -1351,6 +1351,62 @@ async function ensureConsolidatedSchema(env) {
   }
 }
 
+// Post a complete double-entry operation. All header, detail and legacy-ledger
+// rows are written in one D1 batch; the DB trigger is the final balance guard.
+async function postBalancedAccountingOperation(env,input) {
+  await ensureConsolidatedSchema(env);
+  const idempotencyKey=clean(input?.idempotency_key);
+  const referenceType=clean(input?.reference_type), referenceId=clean(input?.reference_id);
+  const currency=clean(input?.currency||'EUR').toUpperCase();
+  const lines=Array.isArray(input?.lines)?input.lines:[];
+  if(!idempotencyKey||idempotencyKey.length>180||!referenceType||!referenceId||
+    !/^[A-Z]{3}$/.test(currency)||lines.length<2||lines.length>50) {
+    return {ok:false,error:'INVALID_ACCOUNTING_OPERATION'};
+  }
+  let debit=0,credit=0;
+  const normalized=[];
+  for(const line of lines) {
+    const accountCode=clean(line?.account_code),direction=clean(line?.direction).toUpperCase();
+    const amount=Number(line?.amount_cents);
+    if(!accountCode||accountCode.length>64||!['DEBIT','CREDIT'].includes(direction)||
+      !Number.isSafeInteger(amount)||amount<=0) return {ok:false,error:'INVALID_ACCOUNTING_LINE'};
+    if(direction==='DEBIT') debit+=amount; else credit+=amount;
+    if(!Number.isSafeInteger(debit)||!Number.isSafeInteger(credit)) return {ok:false,error:'ACCOUNTING_AMOUNT_OVERFLOW'};
+    normalized.push({account_code:accountCode,direction,amount_cents:amount,label:clean(line?.label)||null});
+  }
+  if(debit!==credit||new Set(normalized.map(x=>x.account_code)).size<2)
+    return {ok:false,error:'ACCOUNTING_OPERATION_NOT_BALANCED'};
+  normalized.sort((a,b)=>a.account_code.localeCompare(b.account_code)||a.direction.localeCompare(b.direction)||a.amount_cents-b.amount_cents||String(a.label||'').localeCompare(String(b.label||'')));
+  const existing=await env.DB.prepare('SELECT * FROM accounting_operations WHERE idempotency_key=? LIMIT 1').bind(idempotencyKey).first();
+  if(existing) {
+    const prior=await env.DB.prepare('SELECT account_code,direction,amount_cents,label FROM accounting_operation_lines WHERE operation_id=? ORDER BY account_code,direction,amount_cents,label').bind(existing.id).all();
+    const priorLines=(prior.results||[]).map(x=>({account_code:x.account_code,direction:x.direction,amount_cents:Number(x.amount_cents),label:x.label||null}));
+    const same=existing.reference_type===referenceType&&existing.reference_id===referenceId&&existing.currency===currency&&
+      JSON.stringify(priorLines)===JSON.stringify(normalized);
+    return same&&existing.status==='POSTED'
+      ? {ok:true,idempotent_replay:true,operation_id:existing.id,status:'POSTED',total_debit_cents:debit,currency}
+      : {ok:false,error:'ACCOUNTING_IDEMPOTENCY_CONFLICT'};
+  }
+  const operationId=crypto.randomUUID();
+  const statements=[
+    env.DB.prepare(`INSERT INTO accounting_operations(id,idempotency_key,reference_type,reference_id,currency,status,description)
+      VALUES(?,?,?,?,?,'DRAFT',?)`).bind(operationId,idempotencyKey,referenceType,referenceId,currency,clean(input?.description)||null)
+  ];
+  for(const line of normalized) {
+    const lineId=crypto.randomUUID();
+    statements.push(env.DB.prepare(`INSERT INTO accounting_operation_lines(id,operation_id,account_code,direction,amount_cents,label)
+      VALUES(?,?,?,?,?,?)`).bind(lineId,operationId,line.account_code,line.direction,line.amount_cents,line.label));
+    statements.push(env.DB.prepare(`INSERT INTO accounting_ledger(id,reference_type,reference_id,account_code,direction,amount_cents,currency,label,metadata_json)
+      VALUES(?,?,?,?,?,?,?,?,?)`).bind(crypto.randomUUID(),referenceType,referenceId,line.account_code,line.direction,line.amount_cents,currency,line.label,
+        JSON.stringify({operation_id:operationId,idempotency_key:idempotencyKey})));
+  }
+  statements.push(env.DB.prepare(`UPDATE accounting_operations SET status='POSTED',posted_at=CURRENT_TIMESTAMP WHERE id=? AND status='DRAFT'`).bind(operationId));
+  await env.DB.batch(statements);
+  const posted=await env.DB.prepare('SELECT status FROM accounting_operations WHERE id=?').bind(operationId).first();
+  if(posted?.status!=='POSTED') return {ok:false,error:'ACCOUNTING_POST_NOT_CONFIRMED'};
+  return {ok:true,idempotent_replay:false,operation_id:operationId,status:'POSTED',total_debit_cents:debit,currency};
+}
+
 async function getSetting(env,key,fallback=null) {
   const r=await env.DB.prepare('SELECT value_json FROM platform_settings WHERE key=? LIMIT 1').bind(key).first();
   if (!r) return fallback;
