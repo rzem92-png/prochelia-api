@@ -364,3 +364,25 @@ test("SUPRA planner delegates body reads to the independently tested bounded str
   assert.ok(route.includes("INVALID_REQUEST_BODY"));
   assert.ok(!route.includes("request.text("));
 });
+
+
+test("production audit is an explicit POST action, never an unauthenticated GET side effect", () => {
+  const start=source.indexOf("const __procheliaProductionSafetyHandle = handle;");
+  const wrapper=source.slice(start);
+  assert.ok(start>=0);
+  assert.ok(wrapper.includes("preflightPath === '/api/system/final-audit' || preflightPath === '/api/system/production-check'"));
+  assert.ok(wrapper.includes("preflightMethod !== 'POST'"));
+  assert.ok(wrapper.indexOf("preflightMethod !== 'POST'") < wrapper.indexOf("const rate=await productionRateLimit"));
+  assert.ok(wrapper.includes("return strictProductionAudit(request,env)"));
+});
+
+test("configuration audit can never authorize real production traffic by itself", () => {
+  const start=source.indexOf("async function strictProductionAudit");
+  const end=source.indexOf("const __procheliaProductionSafetyHandle",start);
+  const audit=source.slice(start,end);
+  assert.ok(start>=0 && end>start);
+  assert.ok(audit.includes("ready_for_real_traffic:false"));
+  assert.ok(audit.includes("real_traffic_authorized:false"));
+  assert.ok(audit.includes("additional_gates_required"));
+  assert.ok(audit.includes("independent operational acceptance"));
+});
