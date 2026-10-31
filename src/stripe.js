@@ -1,5 +1,6 @@
 const STRIPE_API_BASE = "https://api.stripe.com/";
-const STRIPE_ALLOWED_PATHS = new Set(["v2/core/accounts", "v1/account_links"]);
+const STRIPE_API_VERSION = "2026-10-28.endive";
+const STRIPE_ALLOWED_PATHS = new Set(["v2/core/accounts", "v2/core/account_links"]);
 
 export async function stripePost(env, apiPath, params, idempotencyKey, fetchImpl = fetch) {
   const secret = String(env?.STRIPE_SECRET_KEY || "").trim();
@@ -7,19 +8,15 @@ export async function stripePost(env, apiPath, params, idempotencyKey, fetchImpl
   if (!STRIPE_ALLOWED_PATHS.has(apiPath)) throw new Error("STRIPE_PATH_NOT_ALLOWED");
   if (!idempotencyKey) throw new Error("STRIPE_IDEMPOTENCY_KEY_REQUIRED");
 
-  const body = new URLSearchParams();
-  for (const [key, value] of Object.entries(params || {})) {
-    if (value !== undefined && value !== null && value !== "") body.set(key, String(value));
-  }
-
   const response = await fetchImpl(STRIPE_API_BASE + apiPath, {
     method: "POST",
     headers: {
       Authorization: "Bearer " + secret,
-      "Content-Type": "application/x-www-form-urlencoded",
+      "Content-Type": "application/json",
+      "Stripe-Version": STRIPE_API_VERSION,
       "Idempotency-Key": idempotencyKey
     },
-    body
+    body: JSON.stringify(params || {})
   });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
@@ -35,7 +32,7 @@ export async function stripeGet(env, apiPath, fetchImpl = fetch) {
   if (!/^v2\/core\/accounts\/acct_[A-Za-z0-9]+$/.test(apiPath)) throw new Error("STRIPE_PATH_NOT_ALLOWED");
   const response = await fetchImpl(STRIPE_API_BASE + apiPath, {
     method: "GET",
-    headers: { Authorization: "Bearer " + secret }
+    headers: { Authorization: "Bearer " + secret, "Stripe-Version": STRIPE_API_VERSION }
   });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
