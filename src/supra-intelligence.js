@@ -8,6 +8,7 @@ const SENSITIVE_ACTIONS = new Set([
   "PERSONAL_DATA_EXPORT", "PERSONAL_DATA_DELETE", "DISCIPLINARY_ACTION",
   "HIRE", "TERMINATE", "COMPLAINT_RESOLUTION", "DISPUTE_RESOLUTION"
 ]);
+const PROFESSIONAL_ESCALATION_CASES = new Set(["danger_personne","violence","urgence_medicale","suspicion_maltraitance","conseil_juridique_complexe","fraude_financiere_majeure"]);
 const SENSITIVE_CASES = new Set([
   "reclamation_client", "litige", "absence_intervenant", "retard_intervenant",
   "paiement", "remboursement", "rgpd", "securite", "fraude", "juridique",
@@ -23,7 +24,7 @@ function normalized(value) {
 }
 
 export function assessSupraDecision(input = {}) {
-  const caseType = String(input.caseType ?? "unknown").trim().toLowerCase();
+  const caseType = String(input.caseType ?? "unknown").normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim().toLowerCase().replace(/[ -]+/g, "_");
   const impact = normalized(input.impact || "LOW");
   const action = normalized(input.requestedAction || "ANALYZE_AND_PROPOSE");
   const role = normalized(input.actorRole || "unknown").toLowerCase();
@@ -37,13 +38,14 @@ export function assessSupraDecision(input = {}) {
   if (["CHANGE_PRICE", "ACTIVATE_PROMOTION"].includes(action) && evidence.serverPricingPolicy !== true) missingEvidence.push("server_pricing_policy");
   if (context.client_id && evidence.clientOwnershipVerified !== true) missingEvidence.push("client_ownership");
 
-  const sensitive = impact === "HIGH" || impact === "CRITICAL" ||
+  const professionalEscalationRequired = PROFESSIONAL_ESCALATION_CASES.has(caseType) || context.immediateDanger === true;
+  const sensitive = professionalEscalationRequired || impact === "HIGH" || impact === "CRITICAL" ||
     SENSITIVE_CASES.has(caseType) || SENSITIVE_ACTIONS.has(action) ||
     missingEvidence.length > 0;
   const safeReadOnly = LOW_IMPACT_READ_ONLY.has(action) &&
     impact === "LOW" && missingEvidence.length === 0;
   const managerApprovalRequired = !safeReadOnly || role !== "gerante";
-  const autonomy = safeReadOnly ? "AUTONOMOUS_READ_ONLY" : "RECOMMEND_AND_WAIT";
+  const autonomy = professionalEscalationRequired ? "URGENT_HUMAN_ESCALATION" : safeReadOnly ? "AUTONOMOUS_READ_ONLY" : "RECOMMEND_AND_WAIT";
   const risk = impact === "CRITICAL" ? "CRITICAL" :
     (sensitive ? "HIGH" : (impact === "MEDIUM" ? "MEDIUM" : "LOW"));
 
@@ -56,10 +58,13 @@ export function assessSupraDecision(input = {}) {
     managerApprovalRequired,
     executionAllowed: false,
     missingEvidence,
-    recommendedNextStep: missingEvidence.length
+    recommendedNextStep: professionalEscalationRequired
+      ? "ESCALATE_TO_EMERGENCY_OR_QUALIFIED_PROFESSIONAL"
+      : missingEvidence.length
       ? "COLLECT_AND_VERIFY_EVIDENCE"
       : safeReadOnly ? "RETURN_ANALYSIS_ONLY" : "PRESENT_OPTIONS_TO_MANAGER",
-    decisionOwner: safeReadOnly && role === "gerante" ? "SYSTEM_WITH_AUDIT" : "GERANTE",
+    decisionOwner: professionalEscalationRequired ? "HUMAN_PROFESSIONAL_AND_GERANTE" : safeReadOnly && role === "gerante" ? "SYSTEM_WITH_AUDIT" : "GERANTE",
+    professionalEscalationRequired,
     rationale: sensitive
       ? "Action sensible ou impact élevé : aucune exécution sans validation explicite de la Gérante."
       : "La couche V1 autorise uniquement l'analyse en lecture seule ; les écritures restent bloquées."
