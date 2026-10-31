@@ -187,3 +187,25 @@ No release until:
 - independent security review accepts the evidence.
 
 **Current disposition: NO-GO.** The static audit findings are real blockers. This document is not proof that the database is ready and does not authorize writes.
+
+
+## 0B. Release-gate evidence refresh — 2026-10-31, run 41217695758
+
+- Exact audited commit: `f3e398298fd998199f0bc0cecf24f742ef295c5e` on `audit/preprod-release-gate-20261031`.
+- GitHub Actions run 41217695758 completed with conclusion `failure`; this is an intentional fail-closed result, not a successful release gate.
+- Setup job, checkout, Node.js setup, regression suite and required governance-document checks completed successfully.
+- Regression suite: 133 passed, 0 failed.
+- Static audit: 12 passed / 1 blocked. The only blocker is 83 runtime calls to 13 `ensure*Schema` initializers in `src/index.js`.
+- CodeQL run 41217695705 was queued when the run list was inspected. Its result is unknown and must not be represented as passed.
+- The runtime initializer review confirms that the scope is broader than DDL alone: at least `ensureProcheliaMasterComplementSchema` also inserts default brand identity, UI profiles and Copilot resolution rules; `ensureNationalContinuitySchema` seeds platform-scale defaults. These are data/bootstrap side effects and require explicit, idempotent seed migration design and ownership review, not just table creation.
+- Existing `0001`–`0005` migrations do not yet prove full equivalence with all initializer DDL, indexes, constraints, triggers, seed data or conditional behavior. Do not remove or bypass any initializer on the current evidence.
+- No D1 read/write, migration application, backup/restore, deployment, production change or PR merge was performed as part of this evidence refresh.
+
+### Immediate fail-closed acceptance criteria
+
+1. Extract every SQL statement and every non-DDL database write from all 13 initializers, preserving full trigger bodies and dynamic/conditional branches.
+2. Record object definitions and seed effects in a reviewed manifest; every item must be mapped to an ordered migration or explicitly classified as runtime data behavior that must remain outside schema initialization.
+3. Any statement that cannot be parsed or resolved is `UNPARSED` and blocks release.
+4. Compare the manifest against a schema-only, read-only export from the explicitly identified isolated preproduction D1; never infer live schema from migration files alone.
+5. Test fresh install, upgrade from each supported prior version, repeated migration, seed idempotency, FK integrity, ledger invariants, backup integrity and isolated restore before changing request-time behavior.
+6. Only after those proofs may a separate reviewed change remove request-time schema creation. Production remains NO-GO and requires separate explicit approval.
