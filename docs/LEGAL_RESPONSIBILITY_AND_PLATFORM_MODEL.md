@@ -180,3 +180,37 @@ Keep versioned evidence: legal opinions, insurance certificates and exclusions, 
 Release requires separate approvals from product/engineering, security, operations, finance, legal counsel and the company director. Any failed or missing evidence means NO-GO.
 
 **Current status:** all items above are requirements, not assertions that PROCHÉLIA already complies. This document alone does not certify compliance or remove personal/company liability.
+
+
+## 12. France-specific update — SAP and platform-work deadline (checked 31 October 2026)
+
+The official French SAP portal states that the required formality depends on the precise activity, target public and intervention mode. Declaration, State approval (agrément), and departmental authorization are distinct regimes. For certain assistance activities for older or disabled people, approval may be required in mandataire / mise à disposition modes, while authorization rules apply to specified prestataire activities. The official list and conditions must be checked for each service before activation.
+
+Official references:
+- https://www.servicesalapersonne.gouv.fr/je-suis-un-organisme-de-sap/organismes-de-services-la-personne-comment-demander-une-declaration-un
+- https://www.servicesalapersonne.gouv.fr/tout-savoir-sur-les-services-la-personne/les-26-activites-de-services-la-personne
+
+**PROCHÉLIA implementation consequence:** every catalogue item must have a jurisdiction + intervention-mode + target-population legal classification, with evidence of any required declaration/approval/authorization. The catalogue must remain disabled when classification is missing, an authorization is required but absent, or the provider qualification/insurance does not cover the exact activity. Do not advertise a tax credit or SAP benefit unless the exact legal conditions and applicable mode are satisfied and the required declarations/approvals are in place.
+
+Directive (EU) 2024/2831 has a transposition deadline of 2 December 2026. A French Senate committee report dated 22 June 2026 described the French transposition work as ongoing and discussed a possible later implementation timetable. This is a dated parliamentary account, not proof of the final enacted French law. Counsel must verify the legislation and official status immediately before launch and again before 2 December 2026. Do not treat the EU deadline as evidence that France has already transposed the directive, or that the directive's provisions automatically settle every domestic employment-status question.
+
+Reference:
+- https://oeil.europarl.europa.eu/oeil/en/document-summary?id=1794723
+- https://www.senat.fr/ (committee report, 22 June 2026; search for platform-work directive transposition)
+
+**Launch hold:** no activation of provider ranking, automated allocation, dynamic provider remuneration, GPS monitoring, account suspension/deactivation, or performance-based incentives until a French platform-work lawyer has reviewed their concrete effects on provider autonomy, employment status, algorithmic management, data protection and appeal rights.
+
+## 13. Legal review deliverables required from counsel
+
+The legal review is not complete until counsel supplies dated, written answers and redlines for:
+- the actual business model and party to each client/provider service contract;
+- the status of PROCHÉLIA for every service (intermediary, agent, service provider, employer or other regulated role);
+- a service catalogue classification matrix, including SAP declaration / agrément / authorization and any health/social-care restrictions;
+- platform-work directive scope and French transposition status at the date of launch;
+- reclassification risk from actual product features and commercial practices;
+- consumer, DSA, DAC7, VAT, invoicing and payment flow duties as applicable;
+- GDPR controller/processor roles, DPIA need, location tracking, identity and vulnerable-person data;
+- contract terms, complaint/mediation, safeguarding, insurance and claims handling;
+- country-by-country expansion conditions.
+
+Each opinion must identify assumptions, unresolved facts, applicable dates, responsible owner and conditions that would invalidate the conclusion. A generic disclaimer or template contract is not an acceptable substitute.
