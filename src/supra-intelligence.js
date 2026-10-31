@@ -112,16 +112,16 @@ export function assessSupraDecision(rawInput = {}) {
 export function simulateResilience(rawInput = {}) {
   if (!isPlainRecord(rawInput)) return { ok: false, error: "INVALID_SCENARIO_INPUT" };
   const input = rawInput;
-  const revenue = Number(input.monthlyRevenueCents);
-  const fixed = Number(input.monthlyFixedCostsCents);
-  const variableRate = Number(input.variableCostRate);
-  const cash = Number(input.cashCents);
-  const demandShock = Number(input.demandShockRate ?? 0);
-  const costShock = Number(input.costShockRate ?? 0);
+  const revenue = input.monthlyRevenueCents;
+  const fixed = input.monthlyFixedCostsCents;
+  const variableRate = input.variableCostRate;
+  const cash = input.cashCents;
+  const demandShock = input.demandShockRate ?? 0;
+  const costShock = input.costShockRate ?? 0;
   const monetaryValues = [revenue, fixed, cash];
   const rateValues = [variableRate, demandShock, costShock];
-  if (monetaryValues.some(v => !Number.isSafeInteger(v) || v < 0) ||
-      rateValues.some(v => !Number.isFinite(v)) ||
+  if (monetaryValues.some(v => typeof v !== "number" || !Number.isSafeInteger(v) || v < 0) ||
+      rateValues.some(v => typeof v !== "number" || !Number.isFinite(v)) ||
       variableRate < 0 || variableRate > 1 ||
       demandShock < 0 || demandShock > 1 || costShock < 0) {
     return { ok: false, error: "INVALID_SCENARIO_INPUT" };
