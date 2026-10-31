@@ -7,10 +7,12 @@ on:
     branches: [main]
     paths:
       - "src/index.js"
+      - "src/request-body.js"
       - "src/v7.js"
       - "src/supra-intelligence.js"
       - "src/supra-orchestrator.js"
       - "tests/supra-*.test.mjs"
+      - "tests/request-body.test.mjs"
       - "package.json"
       - "wrangler.jsonc"
       - "wrangler.preview.jsonc"
