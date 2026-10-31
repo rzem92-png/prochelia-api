@@ -3796,12 +3796,14 @@ async function strictProductionAudit(request,env){
   const checks=[...(result.checks||[]),...extra];
   const blockingCodes=new Set(['SECRET:PAYMENT_PROVIDER','SECRET:PAYMENT_WEBHOOK_SECRET','SECURITY_CODE_DELIVERY','CORS_ORIGIN','BACKUP_R2']);
   const blocking=checks.filter(x=>blockingCodes.has(x.code)&&x.status!=='OK');
-  const overall=blocking.length===0 && result.blocking===0;
+  const configurationReady=blocking.length===0 && result.blocking===0;
   for(const c of extra){
     await env.DB.prepare(`INSERT INTO system_config_checks(id,check_code,status,details_json) VALUES(?,?,?,?)`).bind(crypto.randomUUID(),c.code,c.status,JSON.stringify(c)).run();
   }
-  await journal(env,'gerante',gate.auth.user.id,'STRICT_PRODUCTION_AUDIT','system',null,overall?'OK':'ATTENTION',{blocking:blocking.map(x=>x.code)});
-  return json({ok:true,version:VERSION,production_gate:overall?'OPEN':'CLOSED',ready_for_real_traffic:overall,checks,blocking:blocking.map(x=>x.code),note:overall?'Configuration gate passed. A real production launch still requires sandbox/acceptance tests for PSP, notifications, identity/security, backups/restore and critical user journeys.':'Production traffic remains blocked until the listed blocking controls are configured and tested.'});
+  await journal(env,'gerante',gate.auth.user.id,'STRICT_PRODUCTION_AUDIT','system',null,configurationReady?'CONFIGURATION_READY':'ATTENTION',{blocking:blocking.map(x=>x.code)});
+  // Configuration presence is not proof of operational acceptance.
+  // Real traffic remains disabled until sandbox, E2E, restore, security and legal gates are independently attested.
+  return json({ok:true,version:VERSION,production_gate:configurationReady?'CONFIGURATION_READY':'CLOSED',configuration_ready:configurationReady,ready_for_real_traffic:false,real_traffic_authorized:false,checks,blocking:blocking.map(x=>x.code),additional_gates_required:['PSP_SANDBOX_AND_WEBHOOK_RECONCILIATION','CLIENT_PROVIDER_MANAGER_E2E','IOS_ANDROID_DESKTOP_ACCEPTANCE','BACKUP_RESTORE_DRILL','INDEPENDENT_SECURITY_REVIEW','RGPD_AND_LEGAL_APPROVAL','EXPLICIT_RELEASE_AUTHORIZATION'],note:'Configuration audit only. This endpoint can never authorize real traffic; independent operational acceptance and explicit release approval remain mandatory.'});
 }
 
 const __procheliaProductionSafetyHandle = handle;
@@ -3840,8 +3842,10 @@ handle = async function(request,env){
     const rate=await productionRateLimit(request,env);
     if(!rate.ok) return rate.response;
     const u=new URL(request.url);
-    if(u.pathname==='/api/system/final-audit' && request.method==='GET') return strictProductionAudit(request,env);
-    if(u.pathname==='/api/system/production-check' && request.method==='GET') return strictProductionAudit(request,env);
+    if(u.pathname==='/api/system/final-audit' || u.pathname==='/api/system/production-check') {
+      if(request.method!=='POST') return json({ok:false,error:'METHOD_NOT_ALLOWED',version:VERSION},405,{'allow':'POST'});
+      return strictProductionAudit(request,env);
+    }
     return __procheliaProductionSafetyHandle(request,env);
   }catch(e){
     return json({ok:false,error:'PRODUCTION_SAFETY_ERROR',version:VERSION},500);
