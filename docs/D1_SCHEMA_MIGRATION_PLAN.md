@@ -3,14 +3,28 @@
 **Status:** investigation and execution plan only. No SQL migration has been applied by this document.  
 **Target:** isolated preproduction D1 first. Production remains out of scope without explicit owner approval.
 
+## 0. Latest CI evidence snapshot — 2026-10-31
+
+This section supersedes stale version and test-count statements in earlier investigation notes below.
+
+- Audited branch head: `ee23510ee458cc2bb430d5ba75b81447ec4d369b`.
+- Worker version constant: `V14.5.8-EXPERT-PREPRODUCTION`.
+- Migration `0005_security_rate_limits.sql` release marker: `V14.5.8`.
+- GitHub Actions release-gate run: `41217091196` — 133 tests passed, 0 failed; static release audit reported 12 passed / 1 blocked.
+- The sole static blocker in that run: 83 runtime DDL call sites across the 13 initializer functions listed below.
+- CodeQL run `41217091200` was still in progress when this snapshot was recorded; do not mark it passed until GitHub reports a completed success.
+- Pull request #15 remains draft and unmerged. No D1 command, migration, restore, or deployment was executed by this audit.
+
+The 133 passing tests are regression evidence only. They do not prove that a live D1 database has the expected schema, that all initializer DDL has an equivalent migration, or that restore/recovery works. The static audit remains NO-GO.
+
 ## 1. Verified code findings
 
 At the audited prelaunch code:
 - Worker source is `src/index.js`.
-- Worker version constant is `V14.5.7-EXPERT-PREPRODUCTION`.
+- Earlier baseline Worker version was `V14.5.7-EXPERT-PREPRODUCTION`; the current audited branch head is `V14.5.8-EXPERT-PREPRODUCTION`.
 - `migrations/0005_security_rate_limits.sql` identifies itself as V14.5.8 and creates `security_rate_limits`.
-- The release audit detects 83 call sites matching `await ensure*Schema(env)`, across 13 distinct schema initializer functions.
-- The current `/api/readiness` check does not verify the full set of module dependencies required by the release audit.
+- The release audit detects 83 runtime DDL call sites matching `await ensure*Schema(env)`, across 13 distinct schema initializer functions.
+- The current audited `/api/readiness` endpoint checks the declared required-table inventory read-only; this is not yet a full column/index/constraint/trigger compatibility proof against live D1.
 - `wrangler.jsonc` points at the preview database `prochelia-preview-db` (ID `6adb95e5-e542-4bec-9008-fbea01042305`) and a preview R2 bucket. This is configuration evidence only; it is not evidence of the live D1 schema or a successful backup/restore.
 
 ## 2. Hard safety boundaries
