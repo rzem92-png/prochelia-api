@@ -570,3 +570,18 @@ test('Credentialed CORS is allowlist-bound and session cookies support cross-sit
   assert.match(source, /securityOriginAllowed\(request,env\)/);
   assert.match(source, /allowedHeaders = new Set\(\['content-type','x-idempotency-key','x-csrf-token'\]\)/);
 });
+
+test('Payout processing notifications never release reserved wallet funds', () => {
+  const webhook = source.slice(source.indexOf('async function paymentWebhook'), source.indexOf('async function openPaymentDispute'));
+  const processingStart = webhook.indexOf("if(newStatus==='processing'){");
+  const terminalStart = webhook.indexOf("} else {", processingStart);
+  assert.ok(processingStart >= 0, 'processing branch must exist');
+  assert.ok(terminalStart > processingStart, 'terminal branch must follow processing branch');
+  const processingBranch = webhook.slice(processingStart, terminalStart);
+  assert.match(processingBranch, /SET status='processing'/);
+  assert.doesNotMatch(processingBranch, /payment_wallet_ledger|reserved_delta_cents|PAYOUT_COMPLETED|PAYOUT_FAILED/);
+  const terminalBranch = webhook.slice(terminalStart);
+  assert.match(terminalBranch, /payment_wallet_ledger/);
+  assert.match(terminalBranch, /reserved_delta_cents/);
+  assert.match(terminalBranch, /PAYOUT_\$\{newStatus\.toUpperCase\(\)\}/);
+});
