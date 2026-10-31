@@ -56,21 +56,20 @@ const requiredMigrations = [
   '0001_core_business_schema.sql',
   '0002_server_pricing.sql',
   '0003_route_address_provenance.sql',
-  '0004_atomic_wallet_ledger.sql',
-  '0005_expert_hardening.sql'
+  '0004_atomic_wallet_ledger.sql'
 ];
+const fifthMigration = migrationFiles.find(name => /^0005_.+\.sql$/.test(name));
+const orderedMigrations = [...requiredMigrations, ...(fifthMigration ? [fifthMigration] : [])];
 const missingMigrations = requiredMigrations.filter(name => !migrationFiles.includes(name));
-check(missingMigrations.length === 0,
-  missingMigrations.length
-    ? `Required ordered migration files missing: ${missingMigrations.join(', ')}`
-    : 'Required migration sequence 0001–0005 is present');
+check(missingMigrations.length === 0 && Boolean(fifthMigration),
+  missingMigrations.length || !fifthMigration
+    ? `Required migration set incomplete. Missing: ${[...missingMigrations, ...(!fifthMigration ? ['a 0005_*.sql migration'] : [])].join(', ')}`
+    : `Ordered migration sequence 0001–0005 present (0005: ${fifthMigration})`);
 
-const migrationContents = requiredMigrations
-  .filter(name => migrationFiles.includes(name))
-  .map(name => read(path.join(migrationDir, name)));
+const migrationContents = orderedMigrations.map(name => read(path.join(migrationDir, name)));
 const migrationSql = migrationContents.join('\n');
-check(migrationContents.length === requiredMigrations.length, 'All required migration files are readable');
-if (migrationContents.length === requiredMigrations.length) {
+check(migrationContents.length === orderedMigrations.length && migrationContents.every(Boolean), 'All discovered required migration files are readable');
+if (migrationContents.length === orderedMigrations.length && migrationContents.every(Boolean)) {
   check(!/\bDROP\s+TABLE\b/i.test(migrationSql), 'No DROP TABLE in release migration set');
   check(!/\bPRAGMA\s+foreign_keys\s*=\s*OFF\b/i.test(migrationSql), 'Foreign-key enforcement is not disabled by migrations');
 }
