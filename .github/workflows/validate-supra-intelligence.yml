@@ -11,6 +11,8 @@ on:
       - "src/supra-intelligence.js"
       - "src/supra-orchestrator.js"
       - "tests/supra-*.test.mjs"
+      - "package.json"
+      - "wrangler.jsonc"
       - ".github/workflows/validate-supra-intelligence.yml"
   workflow_dispatch:
 
@@ -27,13 +29,13 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: "22"
+      - name: Install pinned project dependencies
+        run: npm install --no-audit --no-fund
       - name: Check JavaScript syntax
-        run: |
-          node --experimental-default-type=module --check src/index.js
-          node --experimental-default-type=module --check src/v7.js
-          node --experimental-default-type=module --check src/supra-intelligence.js
-          node --experimental-default-type=module --check src/supra-orchestrator.js
+        run: npm run build
+      - name: Bundle Cloudflare Worker without deploying
+        run: npm run check:worker
       - name: Run SUPRA governance, policy and integration tests
-        run: node --experimental-default-type=module --test tests/supra-*.test.mjs
-      - name: Confirm no production deployment
-        run: echo "Validation only — no Cloudflare deployment or D1 migration."
+        run: npm run test:supra
+      - name: Confirm no production deployment or D1 migration
+        run: echo "Validation only — Wrangler dry-run, no Cloudflare deployment and no D1 migration."
