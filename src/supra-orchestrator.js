@@ -133,6 +133,22 @@ export function buildSupraPlan(rawInput = {}) {
     if (input[key] !== undefined && typeof input[key] !== "string") return failClosedPlan("INVALID_FIELD_TYPE");
   }
   if (input.context !== undefined && !isPlainInput(input.context)) return failClosedPlan("INVALID_CONTEXT_TYPE");
+  const rawContext = input.context || {};
+  const allowedContextKeys = new Set([
+    "mission_id", "provider_id", "client_id", "replacement_intervenant_id",
+    "immediateDanger", "missionOwnershipVerified", "providerEligibilityVerified",
+    "providerAvailabilityVerified", "clientOwnershipVerified", "pspConfirmed"
+  ]);
+  if (Object.keys(rawContext).some(key => !allowedContextKeys.has(key)) ||
+      ["mission_id", "provider_id", "client_id", "replacement_intervenant_id"].some(key =>
+        rawContext[key] !== undefined && (typeof rawContext[key] !== "string" || !rawContext[key].trim() || rawContext[key].length > 128)
+      ) ||
+      ["immediateDanger", "missionOwnershipVerified", "providerEligibilityVerified",
+        "providerAvailabilityVerified", "clientOwnershipVerified", "pspConfirmed"].some(key =>
+        rawContext[key] !== undefined && typeof rawContext[key] !== "boolean"
+      )) {
+    return failClosedPlan("INVALID_CONTEXT_FIELD");
+  }
   const caseType = cleanText(input.caseType, "analyse_generale");
   const action = String(input.requestedAction ?? "ANALYZE_AND_PROPOSE").trim().toUpperCase();
   const impact = String(input.impact ?? "LOW").trim().toUpperCase();
@@ -144,7 +160,7 @@ export function buildSupraPlan(rawInput = {}) {
     return failClosedPlan("INVALID_FIELD_VALUE");
   }
   const domain = inferDomain(caseType, input.domain);
-  const context = input.context || {};
+  const context = rawContext;
   const emergency = PROFESSIONAL_ESCALATION_CASES.has(caseType) || context.immediateDanger === true;
   const sensitive = HUMAN_DECISION_CASES.has(caseType) ||
     ["HIGH", "CRITICAL"].includes(impact) ||
