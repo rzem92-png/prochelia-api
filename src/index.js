@@ -2407,17 +2407,11 @@ async function executeQueuedAction(env, action) {
     } else if (action.action_type === 'PAYOUT') {
       result={performed:false,requires_provider:true,reason:'PSP_EXECUTION_REQUIRED',payload};
     } else if (action.action_type === 'ACCOUNTING_ENTRY') {
-      if (await tableExists(env,'accounting_ledger')) {
-        const cols=await tableColumns(env,'accounting_ledger');
-        const values={id:crypto.randomUUID(),entry_type:payload.entry_type||'OPERATIONAL',amount_cents:Number(payload.amount_cents||0),
-          debit_cents:Number(payload.debit_cents||0),credit_cents:Number(payload.credit_cents||0),reference_type:action.entity_type,
-          reference_id:action.entity_id,description:payload.description||'',metadata_json:JSON.stringify(payload)};
-        const usable=Object.entries(values).filter(([k])=>cols.includes(k));
-        if(usable.length){
-          await env.DB.prepare(`INSERT INTO accounting_ledger(${usable.map(x=>x[0]).join(',')}) VALUES(${usable.map(()=>'?').join(',')})`).bind(...usable.map(x=>x[1])).run();
-          result={performed:true,accounting_recorded:true};
-        } else result={performed:false,reason:'ACCOUNTING_SCHEMA_INCOMPATIBLE'};
-      } else result={performed:false,reason:'ACCOUNTING_TABLE_MISSING'};
+      // A single unbalanced line is never accepted as a complete accounting
+      // operation. Until the paired-entry writer and reconciliation workflow
+      // are invoked, keep this action pending for a reviewed accounting batch.
+      result={performed:false,requires_accounting_batch:true,reason:'BALANCED_DOUBLE_ENTRY_REQUIRED',
+        reference_type:action.entity_type||null,reference_id:action.entity_id||null};
     } else result={performed:false,reason:'ACTION_TYPE_NOT_IMPLEMENTED'};
 
     const finalStatus = result.performed ? 'DONE' : (result.requires_provider ? 'WAITING_PROVIDER' : 'FAILED');
