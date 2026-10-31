@@ -23,6 +23,23 @@ const scripts = packageJson.scripts || {};
 check(Boolean(source), 'Worker source is present');
 check(fs.existsSync('docs/COMPLIANCE_AND_GOVERNANCE_GATE.md'), 'National and international compliance gate document is present');
 check(fs.existsSync('docs/LEGAL_RESPONSIBILITY_AND_PLATFORM_MODEL.md'), 'Legal responsibility and marketplace model gate is present');
+const legalControls = read('docs/LEGAL_RESPONSIBILITY_AND_PLATFORM_MODEL.md');
+const requiredLegalControls = [
+  'no promise of zero liability',
+  'reclassification',
+  'agrément',
+  'autorisation',
+  'Copilot constraints',
+  'country launch dossier',
+  'human approval',
+  'NO-GO'
+];
+const missingLegalControls = requiredLegalControls.filter(term =>
+  !legalControls.toLowerCase().includes(term.toLowerCase()));
+check(missingLegalControls.length === 0,
+  missingLegalControls.length
+    ? `Legal responsibility register is missing required controls: ${missingLegalControls.join(', ')}`
+    : 'Legal responsibility register includes core liability, employment, regulated-service, AI, human-approval and country gates');
 check(Boolean(scripts['test:prelaunch']), 'test:prelaunch script is defined');
 
 const runtimeSchemaCalls = [...source.matchAll(/\bawait\s+(ensure[A-Za-z0-9_]*Schema)\s*\(\s*env\s*\)/g)]
