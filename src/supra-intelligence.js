@@ -24,13 +24,50 @@ function normalized(value) {
   return String(value ?? "").trim().toUpperCase();
 }
 
-export function assessSupraDecision(input = {}) {
-  const caseType = String(input.caseType ?? "unknown").normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim().toLowerCase().replace(/[ -]+/g, "_");
+function normalizeCaseType(value) {
+  return String(value ?? "unknown")
+    .normalize("NFD")
+    .replace(/[\\u0300-\\u036f]/g, "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 100) || "unknown";
+}
+
+function isPlainRecord(value) {
+  return value !== null && typeof value === "object" &&
+    !Array.isArray(value) &&
+    (Object.getPrototypeOf(value) === Object.prototype || Object.getPrototypeOf(value) === null);
+}
+
+function invalidDecision(reason = "INVALID_INPUT_FAIL_CLOSED") {
+  return {
+    engine: "PROCHELIA_SUPRA_GOVERNANCE_V1",
+    caseType: "unknown",
+    action: "UNKNOWN",
+    risk: "HIGH",
+    autonomy: "RECOMMEND_AND_WAIT",
+    managerApprovalRequired: true,
+    executionAllowed: false,
+    missingEvidence: ["validate_input_and_server_authorized_evidence"],
+    recommendedNextStep: "ESCALATE_FOR_HUMAN_REVIEW",
+    decisionOwner: "GERANTE",
+    professionalEscalationRequired: false,
+    rationale: reason
+  };
+}
+
+export function assessSupraDecision(rawInput = {}) {
+  if (!isPlainRecord(rawInput)) return invalidDecision();
+  const input = rawInput;
+  const caseType = normalizeCaseType(input.caseType);
   const impact = normalized(input.impact || "LOW");
   const action = normalized(input.requestedAction || "ANALYZE_AND_PROPOSE");
   const role = normalized(input.actorRole || "unknown").toLowerCase();
-  const context = input.context && typeof input.context === "object" ? input.context : {};
-  const evidence = input.evidence && typeof input.evidence === "object" ? input.evidence : {};
+  if (!["LOW", "MEDIUM", "HIGH", "CRITICAL"].includes(impact)) return invalidDecision("INVALID_IMPACT_FAIL_CLOSED");
+  const context = isPlainRecord(input.context) ? input.context : {};
+  const evidence = isPlainRecord(input.evidence) ? input.evidence : {};
   const missingEvidence = [];
   if (context.mission_id && evidence.missionOwnershipVerified !== true) missingEvidence.push("mission_ownership");
   if (context.replacement_intervenant_id && evidence.providerEligibilityVerified !== true) missingEvidence.push("provider_eligibility");
@@ -72,23 +109,31 @@ export function assessSupraDecision(input = {}) {
   };
 }
 
-export function simulateResilience(input = {}) {
+export function simulateResilience(rawInput = {}) {
+  if (!isPlainRecord(rawInput)) return { ok: false, error: "INVALID_SCENARIO_INPUT" };
+  const input = rawInput;
   const revenue = Number(input.monthlyRevenueCents);
   const fixed = Number(input.monthlyFixedCostsCents);
   const variableRate = Number(input.variableCostRate);
   const cash = Number(input.cashCents);
   const demandShock = Number(input.demandShockRate ?? 0);
   const costShock = Number(input.costShockRate ?? 0);
-  const values = [revenue, fixed, variableRate, cash, demandShock, costShock];
-  if (values.some(v => !Number.isFinite(v)) || revenue < 0 || fixed < 0 ||
-      cash < 0 || variableRate < 0 || variableRate > 1 ||
+  const monetaryValues = [revenue, fixed, cash];
+  const rateValues = [variableRate, demandShock, costShock];
+  if (monetaryValues.some(v => !Number.isSafeInteger(v) || v < 0) ||
+      rateValues.some(v => !Number.isFinite(v)) ||
+      variableRate < 0 || variableRate > 1 ||
       demandShock < 0 || demandShock > 1 || costShock < 0) {
     return { ok: false, error: "INVALID_SCENARIO_INPUT" };
   }
   const stressedRevenue = Math.round(revenue * (1 - demandShock));
   const stressedVariableCosts = Math.round(stressedRevenue * variableRate * (1 + costShock));
   const stressedFixedCosts = Math.round(fixed * (1 + costShock));
+  if (![stressedRevenue, stressedVariableCosts, stressedFixedCosts].every(Number.isSafeInteger)) {
+    return { ok: false, error: "SCENARIO_AMOUNT_OVERFLOW" };
+  }
   const monthlyNet = stressedRevenue - stressedVariableCosts - stressedFixedCosts;
+  if (!Number.isSafeInteger(monthlyNet)) return { ok: false, error: "SCENARIO_AMOUNT_OVERFLOW" };
   const burn = Math.max(0, -monthlyNet);
   const runwayMonths = burn > 0 ? Number((cash / burn).toFixed(1)) : null;
   const actions = [];
