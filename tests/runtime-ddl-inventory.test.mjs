@@ -9,8 +9,8 @@ test('runtime DDL helper inventory stays explicit until versioned migrations rep
   assert.deepEqual(definitions, [
     'ensureCommercialRecruitmentSchema',
     'ensureConsolidatedSchema',
-    'ensureFinanceWorkspaceSchema',
     'ensureFinalHardeningSchema',
+    'ensureFinanceWorkspaceSchema',
     'ensureNationalContinuitySchema',
     'ensureOperationalSchema',
     'ensurePaymentSchema',
