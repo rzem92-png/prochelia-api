@@ -41,7 +41,8 @@ L'IA SUPRA n'est pas un chatbot isolé. Elle orchestre des capacités spécialis
 - Classement, détection de doublons et indicateurs.
 - Préparation de scénarios, tâches internes et brouillons.
 - Contrôles de cohérence, surveillance des sauvegardes et alertes.
-- Préparation de brouillons de relance et contrôles de routine en lecture seule.\n- Envoi d’une relance uniquement après vérification du consentement, du canal autorisé, du modèle approuvé et de la règle métier ; l’envoi n’est pas dans la liste des tâches autonomes par défaut.
+- Préparation de brouillons de relance et contrôles de routine en lecture seule.
+- Envoi d’une relance uniquement après vérification du consentement, du canal autorisé, du modèle approuvé et de la règle métier ; l’envoi n’est pas dans la liste des tâches autonomes par défaut.
 
 ### Validation explicite de la Gérante
 - Engagement ou dépense financière significative.
@@ -72,7 +73,12 @@ Aucun lancement de pays n'est automatique. Chaque marché doit avoir un dossier 
 - Aucun statut COMPLETED sans confirmation d'exécution réelle.
 - Tests unitaires, contrats API, intégration D1 isolée, tests E2E, sécurité et restauration avant mise en production.
 
-## Garde-fous de classification complémentaires\n- Normalisation Unicode des libellés français accentués avant classification afin que « urgence médicale » et les autres formulations usuelles ne contournent pas les règles d’escalade.\n- Routage explicite des situations urgentes vers la sécurité et des dossiers juridiques complexes vers le domaine juridique.\n- Les notifications sortantes et relances restent des effets de bord : aucune autonomie d’envoi sans preuve de consentement, canal et règle approuvés.\n\n## État de la V2 intégrée dans cette branche
+## Garde-fous de classification complémentaires
+- Normalisation Unicode des libellés français accentués avant classification afin que « urgence médicale » et les autres formulations usuelles ne contournent pas les règles d’escalade.
+- Routage explicite des situations urgentes vers la sécurité et des dossiers juridiques complexes vers le domaine juridique.
+- Les notifications sortantes et relances restent des effets de bord : aucune autonomie d’envoi sans preuve de consentement, canal et règle approuvés.
+
+## État de la V2 intégrée dans cette branche
 - Registre des domaines et planificateur transversal ajoutés.
 - Gouvernance d'autonomie et escalade ajoutées.
 - Intégration au moteur de recommandation des dossiers Copilote.
@@ -92,3 +98,61 @@ Aucun lancement de pays n'est automatique. Chaque marché doit avoir un dossier 
 8. Revue sécurité et conformité locale.
 9. Approbation explicite de la Gérante.
 10. Déploiement séparé avec plan de retour arrière.
+
+
+## Matrice de couverture globale PROCHÉLIA — registre anti-oubli
+
+Cette matrice est un registre de recette, pas une déclaration que les fonctions sont déjà opérationnelles. Chaque ligne doit être reliée à un endpoint, un propriétaire de données, une preuve d'exécution et un test automatisé avant d'être déclarée terminée.
+
+### Expérience et espaces utilisateurs
+- [ ] Client : découverte, inscription, demande rapide, devis détaillé, réservation, paiement, suivi, annulation, réclamation, facture, avis, fidélité et accessibilité.
+- [ ] Intervenant : candidature, identité, vérification des documents, compétences, zones, disponibilités, acceptation/refus, planning, pointage QR, suivi de mission, frais et revenus.
+- [ ] Gérante/Entreprise : pilotage, utilisateurs, rôles, missions, tarification, validation, finance, comptabilité, litiges, conformité, reporting, exports et audit.
+- [ ] B2B : comptes sociétés, multi-sites, utilisateurs délégués, contrats-cadres, commandes, facturation et rapprochement.
+- [ ] Responsive et accessibilité : iOS Safari/Chrome, Android, tablette, desktop, clavier, lecteurs d'écran, contrastes, langues et faible connectivité.
+
+### Cycle de vie des prestations et des missions
+- [ ] Catalogue de prestations versionné, description, durée, exclusions, zone, prérequis et niveau de risque.
+- [ ] Disponibilités, matching explicable, score de confiance, distance, compétences, vérification et règles anti-discrimination.
+- [ ] Cycle d'état unique et documenté : brouillon, devis, attente, confirmée, affectée, en cours, terminée, contestée, annulée, remboursée.
+- [ ] QR de début/fin, horodatage serveur, géolocalisation proportionnée, preuve de présence, corrections manuelles tracées.
+- [ ] Remplacement, retard, absence, annulation, urgence, continuité de service et notification des parties.
+- [ ] Kilométrage, frais de déplacement, justificatifs, règles de calcul et non-rétroactivité.
+
+### Tarification, revenus et comptabilité
+- [ ] Un moteur serveur unique : tarif de référence actif, durée, quantité, zone, options, majorations, remises et frais.
+- [ ] Promotions approuvées, dates de validité, cumul, éligibilité, budget et traçabilité.
+- [ ] Plafonds réglementaires : règle applicable, frais inclus/exclus, source juridique, version et date d'effet, revue professionnelle.
+- [ ] Calcul unique du brut client, net intervenant, commission fixe/variable, frais PSP, taxes, remboursements et marge.
+- [ ] Snapshot du devis accepté, facture cohérente, avoir, annulation, litige, rapprochement PSP/ledger et idempotence.
+- [ ] Aucune donnée financière estimée ne doit être présentée comme une transaction ou une marge réelle.
+
+### Sécurité, confiance et conformité
+- [ ] Authentification, récupération, MFA/OTP, sessions, révocation, limitation de débit, protection CSRF/origine et gestion des appareils.
+- [ ] RBAC et contrôle de propriété côté serveur sur chaque endpoint, objet, fichier et action.
+- [ ] Vérification identité/qualifications/assurance et échéance des documents, accès restreint et journalisé.
+- [ ] Protection contre fraude, doublons, rejeu, concurrence, abus, usurpation et injections.
+- [ ] RGPD : registre, base légale, consentement quand requis, minimisation, droits, durées, purge, anonymisation, sous-traitants et transferts.
+- [ ] Contrats, CGU/CGV, médiation, assurance, responsabilité, statut indépendant et frontière entre intermédiation et employeur à faire valider par juriste compétent.
+- [ ] Accessibilité, conservation des preuves et procédure d'incident de sécurité.
+
+### Infrastructure, données et continuité
+- [ ] Environnements séparés développement/préproduction/production et secrets distincts.
+- [ ] Schéma D1 versionné, migrations répétables, sauvegarde avant migration, tests sur base isolée et rollback documenté.
+- [ ] R2 chiffré, sauvegardes quotidiennes, vérification d'intégrité, restauration testée et preuves horodatées.
+- [ ] Files et tâches asynchrones : idempotence, reprises, DLQ, limites, alertes et statut final fondé sur confirmation.
+- [ ] Observabilité : logs structurés sans données sensibles, métriques, traces, alertes, SLO et coût par fonction.
+- [ ] Dépendances, SBOM, mises à jour, scans vulnérabilités, rotation des clés et plan de réponse aux incidents.
+- [ ] Tests de charge, panne PSP, panne DB, perte réseau, restauration et retour arrière.
+
+### IA SUPRA et avantage concurrentiel
+- [ ] Registre de compétences spécialisées et contrats d'entrée/sortie par domaine.
+- [ ] Sources de données, fraîcheur, provenance, confiance, hypothèses et incertitude affichées.
+- [ ] Détection de dérive, hallucination, conflit de règles, doublon, boucle et décision contradictoire.
+- [ ] Simulation avant action, bac à sable, approbation signée, exécution idempotente et vérification après action.
+- [ ] Mémoire métier contrôlée, journal de décision, explication, annulation/compensation et supervision.
+- [ ] Veille marché et réglementaire sourcée, tests des changements et validation locale avant activation.
+- [ ] Mesure de qualité : temps de résolution, taux d'erreur, satisfaction, marge nette réelle, rétention et coût opérationnel.
+
+### Règle de passage
+Une fonctionnalité ne passe à « validée » que si son contrat est documenté, ses permissions testées, ses cas nominaux et limites couverts, ses erreurs/reprises vérifiées, ses données de test isolées et sa preuve d'exécution conservée. Les intégrations PSP, SMS/email, GPS, stockage et signatures doivent être testées en sandbox avant toute activation réelle.
