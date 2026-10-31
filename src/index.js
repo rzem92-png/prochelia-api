@@ -8,6 +8,7 @@ import { stripePost, stripeGet, verifyStripeSignature } from "./stripe.js";
 
 const VERSION = 'V14.3.0-PREPRODUCTION-2026-10-19';
 const STRIPE_CHARGES_AND_PAYOUTS_READY = false;
+const SERVER_PRICING_POLICY_READY = false;
 const SECURITY_CODE_TTL_SECONDS = 15 * 60;
 const SECURITY_MAX_ATTEMPTS = 5;
 const SECURITY_LOCK_SECONDS = 15 * 60;
@@ -1713,6 +1714,7 @@ function financeStrategicQuote({basePriceCents=0,phaseFactor=1,urgency='normal',
 
 async function pricingQuote(request, env) {
   const gate=await requireAuthRole(request,env,['gerante','client','entreprise','intervenant']); if(gate.error)return gate.error;
+  if(!SERVER_PRICING_POLICY_READY) return json({ok:false,error:'SERVER_PRICING_POLICY_NOT_CONFIGURED',version:VERSION},503);
   const b=await readJson(request)||{};
   const phase=String(b.phase||await getSetting(env,'project_phase','TEST')).toUpperCase();
   const cfg=PROJECT_PHASES[phase]||PROJECT_PHASES.TEST;
@@ -2587,6 +2589,7 @@ async function productionConfigCheck(env) {
     : ['PAYMENT_PROVIDER','PAYMENT_WEBHOOK_SECRET','PAYMENT_API_SECRET'];
   for(const k of pspRequired) checks.push({code:`SECRET:${k}`,status:finalSecretConfigured(env,k)?'OK':'NOT_CONFIGURED'});
   if(paymentProvider(env)==='stripe') checks.push({code:'CONFIG:STRIPE_PUBLISHABLE_KEY',status:finalSecretConfigured(env,'STRIPE_PUBLISHABLE_KEY')?'OK':'NOT_CONFIGURED'});
+  checks.push({code:'SERVER_PRICING_POLICY',status:SERVER_PRICING_POLICY_READY?'OK':'NOT_IMPLEMENTED'});
   checks.push({code:'STRIPE_CHARGES_ADAPTER',status:STRIPE_CHARGES_AND_PAYOUTS_READY?'OK':'NOT_IMPLEMENTED'});
   checks.push({code:'STRIPE_PAYOUT_ADAPTER',status:STRIPE_CHARGES_AND_PAYOUTS_READY?'OK':'NOT_IMPLEMENTED'});
   checks.push({code:'BOOTSTRAP_TOKEN',status:finalSecretConfigured(env,'BOOTSTRAP_TOKEN')?'OK':'NOT_CONFIGURED'});
@@ -3625,7 +3628,7 @@ async function strictProductionAudit(request,env){
     {code:'MAPS_PROVIDER',status:finalSecretConfigured(env,'MAPS_API_KEY')?'OK':'NOT_CONFIGURED'}
   ];
   const checks=[...(result.checks||[]),...extra];
-  const blockingCodes=new Set(['SECRET:PAYMENT_PROVIDER','SECRET:PAYMENT_WEBHOOK_SECRET','SECRET:PAYMENT_API_SECRET','SECRET:STRIPE_SECRET_KEY','CONFIG:STRIPE_PUBLISHABLE_KEY','SECRET:STRIPE_WEBHOOK_SECRET','SECRET:STRIPE_DASHBOARD','SECRET:STRIPE_FEES_COLLECTOR','SECRET:STRIPE_LOSSES_COLLECTOR','SECRET:APP_BASE_URL','STRIPE_CHARGES_ADAPTER','STRIPE_PAYOUT_ADAPTER','SECURITY_CODE_DELIVERY','CORS_ORIGIN','BACKUP_R2']);
+  const blockingCodes=new Set(['SECRET:PAYMENT_PROVIDER','SECRET:PAYMENT_WEBHOOK_SECRET','SECRET:PAYMENT_API_SECRET','SECRET:STRIPE_SECRET_KEY','CONFIG:STRIPE_PUBLISHABLE_KEY','SECRET:STRIPE_WEBHOOK_SECRET','SECRET:STRIPE_DASHBOARD','SECRET:STRIPE_FEES_COLLECTOR','SECRET:STRIPE_LOSSES_COLLECTOR','SECRET:APP_BASE_URL','SERVER_PRICING_POLICY','STRIPE_CHARGES_ADAPTER','STRIPE_PAYOUT_ADAPTER','SECURITY_CODE_DELIVERY','CORS_ORIGIN','BACKUP_R2']);
   const blocking=checks.filter(x=>blockingCodes.has(x.code)&&x.status!=='OK');
   const overall=blocking.length===0 && result.blocking===0;
   for(const c of extra){
