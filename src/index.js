@@ -1231,11 +1231,19 @@ async function copilotRecommend(env, input) {
     caseType, impact, requestedAction: action === 'AUTO_RESOLVE' ? 'ANALYZE_AND_PROPOSE' : action,
     actorRole: 'system', context
   });
-  // La gouvernance V1 privilégie l'analyse et la recommandation. Aucun dossier n'est
-  // classé comme exécutable automatiquement tant que les preuves ne sont pas vérifiées.
+  const supraPlan = procheliaV7.buildSupraPlan({
+    caseType, impact, requestedAction: action === 'AUTO_RESOLVE' ? 'ANALYZE_AND_PROPOSE' : action,
+    domain: context.domain, market: context.market || 'fr', context
+  });
+  // Le moteur transversal relie les domaines et prépare un parcours complet.
+  // L'exécution réelle reste désactivée tant que chaque adaptateur n'a pas ses tests E2E.
   action = action === 'AUTO_RESOLVE' ? 'ANALYZE_AND_PROPOSE' : action;
-  solution = { ...solution, automatic:false, governance };
-  return { action, mode:'MANAGER_APPROVAL', confidence: simple ? 0.95 : 0.82, solution, context, phase, governance };
+  solution = { ...solution, automatic:false, governance, supraPlan };
+  return {
+    action, mode:'MANAGER_APPROVAL', confidence: simple ? 0.95 : 0.82,
+    solution, context, phase, governance, supraPlan,
+    domainsCovered: supraPlan.connectedDomains
+  };
 }
 
 async function createOperationalCase(request, env) {
