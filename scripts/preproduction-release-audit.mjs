@@ -69,8 +69,9 @@ check(missingMigrations.length === 0 && Boolean(fifthMigration),
 const migrationContents = orderedMigrations.map(name => read(path.join(migrationDir, name)));
 const migrationSql = migrationContents.join('\n');
 check(migrationContents.length === orderedMigrations.length && migrationContents.every(Boolean), 'All discovered required migration files are readable');
-const workerVersion = source.match(/const VERSION = ['\"](V[0-9]+\\.[0-9]+\\.[0-9]+)/)?.[1] || null;
-const fifthVersion = fifthMigration ? migrationSql.match(/--\\s*PROCHÉLIA\\s+(V[0-9]+\\.[0-9]+\\.[0-9]+)/)?.[1] || null : null;
+const workerVersion = source.match(/const VERSION = ['"](V[0-9]+\.[0-9]+\.[0-9]+)/)?.[1] || null;
+const fifthSql = fifthMigration ? read(path.join(migrationDir, fifthMigration)) : '';
+const fifthVersion = fifthSql.match(/--\s*PROCHÉLIA\s+(V[0-9]+\.[0-9]+\.[0-9]+)/)?.[1] || null;
 check(Boolean(workerVersion && fifthVersion && workerVersion === fifthVersion),
   workerVersion && fifthVersion
     ? `Worker/migration version mismatch: Worker ${workerVersion}, migration 0005 ${fifthVersion}`
