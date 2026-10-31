@@ -945,10 +945,17 @@ async function paymentWebhook(request, env) {
   let event; try{event=JSON.parse(raw)}catch{return json({ok:false,error:'INVALID_WEBHOOK_JSON',version:VERSION},400);}
   const provider=clean(event?.provider)||paymentProvider(env), eventId=clean(event?.id), type=clean(event?.type);
   if(!eventId||!type) return json({ok:false,error:'INVALID_WEBHOOK_EVENT',version:VERSION},400);
+  // This deployment has one configured PSP adapter. Never let a signed payload
+  // select another provider namespace or bypass provider-specific verification.
+  if(provider!==paymentProvider(env)) return json({ok:false,error:'PAYMENT_PROVIDER_MISMATCH',version:VERSION},400);
   const txId=clean(event?.data?.transaction_id), payoutId=clean(event?.data?.payout_id);
   const providerPaymentId=clean(event?.data?.provider_payment_id);
-  const paymentEvents=['payment_succeeded','charge_succeeded','payment_failed','charge_failed','payment_refunded'];
+  const paymentEvents=['payment_succeeded','charge_succeeded','payment_failed','charge_failed'];
   const payoutEvents=['payout_processing','payout_paid','payout_failed','payout_canceled'];
+  const supportedEvents=[...paymentEvents,...payoutEvents];
+  if(!supportedEvents.includes(type)) {
+    return json({ok:false,error:type==='payment_refunded'?'REFUND_RECONCILIATION_NOT_IMPLEMENTED':'UNSUPPORTED_WEBHOOK_EVENT',version:VERSION},501);
+  }
   if(['payment_succeeded','charge_succeeded'].includes(type) && (!txId||!providerPaymentId)) {
     return json({ok:false,error:'PSP_PAYMENT_REFERENCE_REQUIRED',version:VERSION},400);
   }
@@ -1006,6 +1013,8 @@ async function paymentWebhook(request, env) {
       if(clean(payout.provider)!==provider) throw new Error('PAYOUT_PROVIDER_MISMATCH');
       if(type==='payout_paid') {
         const amount=event?.data?.amount_cents, currency=clean(event?.data?.currency)?.toUpperCase();
+        const providerPayoutId=clean(event?.data?.provider_payout_id);
+        if(!providerPayoutId) throw new Error('PSP_PAYOUT_REFERENCE_REQUIRED');
         if(!Number.isSafeInteger(amount)||amount!==Number(payout.amount_cents)||currency!==String(payout.currency||'EUR').toUpperCase()) {
           throw new Error('PSP_PAYOUT_AMOUNT_OR_CURRENCY_MISMATCH');
         }
