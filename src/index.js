@@ -2026,9 +2026,24 @@ async function supraPlan(request, env) {
 
 async function handleConsolidated(request, env) {
   const url=new URL(request.url);
-  const consolidatedPath = ['/api/consolidated/info','/api/ops/dashboard','/api/journal','/api/cases','/api/cases/approve','/api/metiers','/api/metiers/suggest','/api/pricing/quote','/api/finance/summary','/api/complaints','/api/settings/phase'].includes(url.pathname);
-  if (consolidatedPath) {
-    try { await ensureConsolidatedSchema(env); } catch (e) { return json({ok:false,error:'CONSOLIDATED_SCHEMA_ERROR',version:VERSION,message:e.message},500); }
+  const consolidatedRoles = {
+    '/api/ops/dashboard':['gerante'],
+    '/api/journal':['gerante'],
+    '/api/cases':['gerante','client','intervenant','entreprise'],
+    '/api/cases/approve':['gerante'],
+    '/api/metiers':['gerante','entreprise','client','intervenant'],
+    '/api/metiers/suggest':['gerante'],
+    '/api/pricing/quote':['gerante','client','entreprise','intervenant'],
+    '/api/finance/summary':['gerante'],
+    '/api/complaints':['gerante','client','entreprise'],
+    '/api/settings/phase':['gerante']
+  };
+  const requiredRoles=consolidatedRoles[url.pathname];
+  if(requiredRoles) {
+    const preflight=await requireAuthRole(request,env,requiredRoles);
+    if(preflight.error)return preflight.error;
+    try { await ensureConsolidatedSchema(env); }
+    catch (e) { return json({ok:false,error:'CONSOLIDATED_SCHEMA_ERROR',version:VERSION},500); }
   }
   if(url.pathname==='/api/consolidated/info' && request.method==='GET') return consolidatedInfo(env);
   if(url.pathname==='/api/supra/domains' && request.method==='GET') return supraDomains(request,env);
@@ -2724,8 +2739,23 @@ async function handleV139(request, env) {
     '/api/ops/case/execute','/api/ops/outbox/process','/api/copilot/briefing','/api/clients/score','/api/loyalty/update',
     '/api/quality','/api/capacity/dashboard','/api/finance/forecast','/api/system/audit'
   ];
-  if(operationalPaths.includes(url.pathname)){
-    try{await ensureOperationalSchema(env);}catch(e){return json({ok:false,error:'OPERATIONAL_SCHEMA_ERROR',version:VERSION,message:e.message},500);}
+  const operationalRoles = {
+    '/api/ops/case/execute':['gerante'],
+    '/api/ops/outbox/process':['gerante'],
+    '/api/copilot/briefing':['gerante'],
+    '/api/clients/score':['gerante'],
+    '/api/loyalty/update':['gerante'],
+    '/api/quality':['gerante','client','entreprise'],
+    '/api/capacity/dashboard':['gerante'],
+    '/api/finance/forecast':['gerante'],
+    '/api/system/audit':['gerante']
+  };
+  const requiredRoles=operationalRoles[url.pathname];
+  if(requiredRoles) {
+    const preflight=await requireAuthRole(request,env,requiredRoles);
+    if(preflight.error)return preflight.error;
+    try{await ensureOperationalSchema(env);}
+    catch(e){return json({ok:false,error:'OPERATIONAL_SCHEMA_ERROR',version:VERSION},500);}
   }
   if(url.pathname==='/api/ops/case/execute'&&request.method==='POST')return operationalExecute(request,env);
   if(url.pathname==='/api/ops/outbox/process'&&request.method==='POST')return processActionOutbox(request,env);
