@@ -1069,7 +1069,19 @@ async function openPaymentDispute(request, env) {
   const prior=await env.DB.prepare(`SELECT id FROM payment_disputes WHERE transaction_id=? AND status IN ('open','awaiting_psp_action') LIMIT 1`).bind(tx.id).first();
   if(prior) return json({ok:false,error:'ACTIVE_DISPUTE_ALREADY_EXISTS',version:VERSION,dispute_id:prior.id},409);
   const id=crypto.randomUUID();
-  await env.DB.prepare(`INSERT INTO payment_disputes (id,mission_id,transaction_id,client_id,intervenant_id,status,reason,amount_cents) VALUES (?,?,?,?,?,?,?,?)`).bind(id,missionId,tx.id,tx.client_id,tx.intervenant_id,'open',reason,amount).run();
+  // A single guarded INSERT closes the race between the pre-check and creation:
+  // only one active dispute can be inserted for this payment.
+  const created=await env.DB.prepare(`INSERT INTO payment_disputes
+    (id,mission_id,transaction_id,client_id,intervenant_id,status,reason,amount_cents)
+    SELECT ?,?,?,?,?,?,?,? FROM payment_transactions
+    WHERE id=? AND status IN ('paid','held')
+      AND NOT EXISTS (SELECT 1 FROM payment_disputes WHERE transaction_id=? AND status IN ('open','awaiting_psp_action'))`)
+    .bind(id,missionId,tx.id,tx.client_id,tx.intervenant_id,'open',reason,amount,tx.id,tx.id).run();
+  if(Number(created.meta?.changes)!==1) {
+    const active=await env.DB.prepare(`SELECT id FROM payment_disputes WHERE transaction_id=? AND status IN ('open','awaiting_psp_action') LIMIT 1`).bind(tx.id).first();
+    if(active) return json({ok:false,error:'ACTIVE_DISPUTE_ALREADY_EXISTS',version:VERSION,dispute_id:active.id},409);
+    return json({ok:false,error:'PAYMENT_STATE_CHANGED_RETRY',version:VERSION},409);
+  }
   // Do not label the payment "held": this code path does not atomically freeze
   // the provider wallet. The open dispute instead blocks new payouts below.
   await paymentAudit(env,'PAYMENT_DISPUTE_OPENED',{transaction_id:tx.id,mission_id:missionId,user_id:auth.user.id,metadata:{amount_cents:amount,reason,wallet_frozen:false}},'OK');
