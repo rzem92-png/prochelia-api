@@ -66,12 +66,14 @@ jobs:
           curl --fail --silent --show-error --max-time 20 "$base/api/health" -o "$RUNNER_TEMP/health.json"
           curl --fail --silent --show-error --max-time 20 "$base/api/readiness" -o "$RUNNER_TEMP/readiness.json"
           curl --fail --silent --show-error --max-time 20 "$base/api/info" -o "$RUNNER_TEMP/info.json"
+          curl --fail --silent --show-error --max-time 20 "$base/api/core/schema" -o "$RUNNER_TEMP/core-schema.json"
           node --input-type=module <<'NODE'
           import fs from 'node:fs';
           const dir = process.env.RUNNER_TEMP;
           const health = JSON.parse(fs.readFileSync(dir + '/health.json', 'utf8'));
           const ready = JSON.parse(fs.readFileSync(dir + '/readiness.json', 'utf8'));
           const info = JSON.parse(fs.readFileSync(dir + '/info.json', 'utf8'));
+          const core = JSON.parse(fs.readFileSync(dir + '/core-schema.json', 'utf8'));
           if (health.ok !== true || health.database !== true) throw new Error('Health API/D1 non valide.');
           if (ready.ok !== true || ready.ready !== true || ready.database !== true ||
               ready.missions_schema !== true || ready.users_schema !== true || ready.writes !== false) {
@@ -82,6 +84,11 @@ jobs:
               !info.routes.includes('/api/payments/onboard') ||
               info.writes?.missions !== false) {
             throw new Error('Contrat API public incomplet ou état des écritures non conforme.');
+          }
+          for (const table of ['users','clients','intervenants','sessions','disponibilites']) {
+            if (core.ok !== true || core.tables?.[table]?.exists !== true) {
+              throw new Error('Table cœur D1 absente : ' + table);
+            }
           }
           console.log(JSON.stringify({
             ok: true,
