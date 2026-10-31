@@ -104,3 +104,11 @@ test("pricing policy rejects invalid server financial values and protects provid
   assert.match(route, /targetMargin>100/);
   assert.match(route, /commissionRate>1/);
 });
+
+
+test("non-test pricing phases require a complete approved server policy", () => {
+  const route = source.slice(source.indexOf("async function pricingQuote"), source.indexOf("async function financeSummary"));
+  assert.match(route, /INVALID_PROJECT_PHASE/);
+  assert.match(route, /NON_TEST_PRICING_POLICY_INCOMPLETE/);
+  assert.match(route, /phase!==\x27TEST\x27/);
+});
