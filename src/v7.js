@@ -1,4 +1,5 @@
 import { assessSupraDecision, simulateResilience } from "./supra-intelligence.js";
+import { buildSupraPlan, getSupraDomainRegistry } from "./supra-orchestrator.js";
 // =====================================================
 // PROCHÉLIA V7 - MODULE SERVEUR ADDITIF
 // =====================================================
@@ -1451,6 +1452,8 @@ export const procheliaV7 = {
   // IA SUPRA-INTELLIGENTE — gouvernance et simulation de résilience
   assessSupraDecision,
   simulateResilience,
+  buildSupraPlan,
+  getSupraDomainRegistry,
 
   // E-mail
   normalizeEmail:
