@@ -156,3 +156,8 @@ Cette matrice est un registre de recette, pas une déclaration que les fonctions
 
 ### Règle de passage
 Une fonctionnalité ne passe à « validée » que si son contrat est documenté, ses permissions testées, ses cas nominaux et limites couverts, ses erreurs/reprises vérifiées, ses données de test isolées et sa preuve d'exécution conservée. Les intégrations PSP, SMS/email, GPS, stockage et signatures doivent être testées en sandbox avant toute activation réelle.
+
+
+## Architecture globale PROCHÉLIA LIFE / NEXUS
+
+La vision de marque mère PROCHÉLIA LIFE, la couche d'orchestration PROCHÉLIA NEXUS, le portefeuille SERVICES / TALENTS / LIVE & CRÉATEURS / OPPORTUNITÉS, le PROFITABILITY ENGINE et la trajectoire nationale/internationale sont détaillés dans [`PROCHELIA-NEXUS-LIFE-STRATEGY-V1.md`](./PROCHELIA-NEXUS-LIFE-STRATEGY-V1.md). Ce document complète la gouvernance technique SUPRA V2 et ne remplace pas ses garde-fous d'autonomie.
