@@ -91,3 +91,9 @@ test("resilience rejects arithmetic overflow rather than returning misleading fi
   assert.equal(result.ok, false);
   assert.equal(result.error, "SCENARIO_AMOUNT_OVERFLOW");
 });
+
+test("resilience requires typed numeric inputs and rejects null coercion", () => {
+  assert.equal(simulateResilience({ monthlyRevenueCents: null, monthlyFixedCostsCents: 0, variableCostRate: 0.2, cashCents: 0 }).ok, false);
+  assert.equal(simulateResilience({ monthlyRevenueCents: "1000", monthlyFixedCostsCents: 0, variableCostRate: 0.2, cashCents: 0 }).ok, false);
+  assert.equal(simulateResilience({ monthlyRevenueCents: 1000, monthlyFixedCostsCents: 0, variableCostRate: null, cashCents: 0 }).ok, false);
+});
