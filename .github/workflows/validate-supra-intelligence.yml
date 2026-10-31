@@ -35,7 +35,7 @@ jobs:
         run: npm run build
       - name: Bundle Cloudflare Worker without deploying
         run: npm run check:worker
-      - name: Run SUPRA governance, policy and integration tests
-        run: npm run test:supra
+      - name: Run the complete API regression suite, including SUPRA
+        run: npm test
       - name: Confirm no production deployment or D1 migration
         run: echo "Validation only — Wrangler dry-run, no Cloudflare deployment and no D1 migration."
