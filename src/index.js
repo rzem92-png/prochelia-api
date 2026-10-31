@@ -608,6 +608,18 @@ async function securityPrepareMission(request, env) {
   const body = await readJson(request);
   const missionId=clean(body?.mission_id), clientId=clean(body?.client_id), intervenantId=clean(body?.intervenant_id);
   if(!missionId||!clientId||!intervenantId) return json({ok:false,error:'MISSION_SECURITY_FIELDS_REQUIRED',version:VERSION},400);
+  // Never trust identifiers supplied by the caller, even for a manager-only route.
+  // Bind security-code preparation to the authoritative mission assignment in D1.
+  const mission = await env.DB.prepare(
+    'SELECT id,client_id,intervenant_id FROM missions WHERE id=? LIMIT 1'
+  ).bind(missionId).first();
+  if(!mission) return json({ok:false,error:'MISSION_NOT_FOUND',version:VERSION},404);
+  if(String(mission.client_id)!==clientId || String(mission.intervenant_id)!==intervenantId) {
+    await securityAudit(env,'MISSION_SECURITY_ASSIGNMENT_MISMATCH',missionId,auth.user.id,auth.user.role,'DENIED',{
+      requested_client_id:clientId,requested_intervenant_id:intervenantId
+    });
+    return json({ok:false,error:'MISSION_ASSIGNMENT_MISMATCH',version:VERSION},409);
+  }
   const verified = await requireVerifiedIntervenant(env,intervenantId);
   if(!verified) return json({ok:false,error:'INTERVENANT_IDENTITY_NOT_VERIFIED',version:VERSION},409);
   const existing=await env.DB.prepare('SELECT id,status FROM mission_security WHERE mission_id=? LIMIT 1').bind(missionId).first();
