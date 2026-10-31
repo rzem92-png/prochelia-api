@@ -291,3 +291,22 @@ test("SUPRA accounting actions cannot write an unbalanced single ledger line", (
   assert.match(route,/WAITING_ACCOUNTING_BATCH/);
   assert.doesNotMatch(route,/INSERT INTO accounting_ledger/);
 });
+
+
+test("accounting operations require balanced debit/credit lines before posting", () => {
+  assert.match(source,/CREATE TABLE IF NOT EXISTS accounting_operations/);
+  assert.match(source,/idempotency_key TEXT NOT NULL UNIQUE/);
+  assert.match(source,/CREATE TABLE IF NOT EXISTS accounting_operation_lines/);
+  assert.match(source,/trg_accounting_operation_post BEFORE UPDATE OF status ON accounting_operations/);
+  assert.match(source,/COUNT\(\*\).*accounting_operation_lines[\s\S]*<2/);
+  assert.match(source,/ACCOUNTING_OPERATION_NOT_BALANCED/);
+  assert.match(source,/COUNT\(DISTINCT account_code\)/);
+});
+
+test("posted accounting operations and their lines cannot be modified or deleted", () => {
+  assert.match(source,/trg_accounting_operation_immutable BEFORE UPDATE ON accounting_operations/);
+  assert.match(source,/trg_accounting_operation_no_delete BEFORE DELETE ON accounting_operations/);
+  assert.match(source,/trg_accounting_lines_immutable_update BEFORE UPDATE ON accounting_operation_lines/);
+  assert.match(source,/trg_accounting_lines_immutable_delete BEFORE DELETE ON accounting_operation_lines/);
+  assert.match(source,/trg_accounting_lines_no_late_insert BEFORE INSERT ON accounting_operation_lines/);
+});
