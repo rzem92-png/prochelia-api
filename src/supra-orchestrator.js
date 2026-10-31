@@ -161,7 +161,7 @@ export function buildSupraPlan(rawInput = {}) {
     return failClosedPlan("INVALID_FIELD_VALUE");
   }
   // An explicit but unknown domain must never be silently re-routed by inference.
-  if (requestedDomain && !Object.hasOwn(DOMAIN_REGISTRY, requestedDomain)) {
+  if (input.domain !== undefined && (!requestedDomain || !Object.hasOwn(DOMAIN_REGISTRY, requestedDomain))) {
     return failClosedPlan("INVALID_DOMAIN_FAIL_CLOSED");
   }
   const domain = inferDomain(caseType, requestedDomain);
