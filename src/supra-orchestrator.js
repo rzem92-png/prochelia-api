@@ -52,7 +52,7 @@ const PROFESSIONAL_ESCALATION_CASES = new Set([
 ]);
 
 function cleanText(value, fallback = "") {
-  return String(value ?? fallback).normalize("NFD").replace(/[\\u0300-\\u036f]/g, "").trim().toLowerCase().replace(/[ -]+/g, "_").replace(/[^a-z0-9_]/g, "").slice(0, 100);
+  return String(value ?? fallback).normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim().toLowerCase().replace(/[ -]+/g, "_").replace(/[^a-z0-9_]/g, "").slice(0, 100);
 }
 
 function inferDomain(caseType, requestedDomain) {
