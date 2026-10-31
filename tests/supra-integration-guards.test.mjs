@@ -44,3 +44,20 @@ test("les routes SUPRA ne déclenchent aucune préparation automatique du schém
   assert.ok(match, "consolidated schema path list must be present");
   assert.doesNotMatch(match[1], /\/api\/supra\/(domains|plan)/);
 });
+
+
+test("SUPRA plan route validates input and forwards evidence to governance", () => {
+  const route = source.slice(source.indexOf("async function supraPlan"), source.indexOf("async function handleConsolidated"));
+  assert.match(route, /REQUEST_TOO_LARGE/);
+  assert.match(route, /INVALID_JSON_OBJECT/);
+  assert.match(route, /INVALID_SUPRA_PLAN_INPUT/);
+  assert.match(route, /actorRole:gate\.auth\.user\.role,context,evidence/);
+  assert.match(route, /executionAllowed:false/);
+  assert.match(route, /\['LOW','MEDIUM','HIGH','CRITICAL'\]/);
+});
+
+test("SUPRA planning does not accept arbitrary object arrays as context or evidence", () => {
+  const route = source.slice(source.indexOf("async function supraPlan"), source.indexOf("async function handleConsolidated"));
+  assert.match(route, /!isPlainRecord\(body\.context\)/);
+  assert.match(route, /!isPlainRecord\(body\.evidence\)/);
+});
