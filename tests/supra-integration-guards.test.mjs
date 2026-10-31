@@ -356,11 +356,11 @@ test("SUPRA API rejects wrong-typed and unexpected planner fields instead of def
 });
 
 
-test("SUPRA planner enforces its body-size limit while streaming instead of buffering unbounded input", () => {
+test("SUPRA planner delegates body reads to the independently tested bounded streaming reader", () => {
   const route = source.slice(source.indexOf("async function supraPlan"), source.indexOf("async function handleConsolidated"));
-  assert.match(route, /request\.body\?\.getReader\(\)/);
-  assert.match(route, /receivedBytes\+=chunk\.value\.byteLength/);
-  assert.match(route, /receivedBytes>16384/);
-  assert.match(route, /await reader\.cancel\(\)/);
-  assert.doesNotMatch(route, /const rawBody=await request\.text\(\)/);
+  assert.match(source, /import \\{ readBoundedRequestBody \\} from "\\.\\/request-body\\.js"/);
+  assert.match(route, /readBoundedRequestBody\\(request,16384\\)/);
+  assert.match(route, /boundedBody\\.reason==='TOO_LARGE'/);
+  assert.match(route, /INVALID_REQUEST_BODY/);
+  assert.doesNotMatch(route, /request\\.text\\(\\)/);
 });
