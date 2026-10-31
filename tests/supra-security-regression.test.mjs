@@ -133,3 +133,23 @@ test("immediate danger overrides an otherwise read-only action", () => {
   assert.equal(decision.managerApprovalRequired, true);
   assert.equal(decision.executionAllowed, false);
 });
+
+
+test("orchestrator and governance use the same read-only autonomy allowlist", () => {
+  const safeActions = [
+    "GENERATE_SUMMARY", "CLASSIFY_CASE", "DETECT_DUPLICATE",
+    "CALCULATE_INDICATOR", "PREPARE_SCENARIO", "DRAFT_INTERNAL_TASK",
+    "RECONCILE_READ_ONLY", "CHECK_BACKUP_STATUS"
+  ];
+  for (const action of safeActions) {
+    const plan = buildSupraPlan({caseType:"routine",impact:"LOW",requestedAction:action});
+    const decision = assessSupraDecision({caseType:"routine",impact:"LOW",requestedAction:action,actorRole:"gerante"});
+    assert.equal(plan.autonomy.routineReadOnlyAutonomy,true,action);
+    assert.equal(decision.autonomy,"AUTONOMOUS_READ_ONLY",action);
+    assert.equal(plan.executionAllowed,false,action);
+    assert.equal(decision.executionAllowed,false,action);
+  }
+  const notification = assessSupraDecision({caseType:"routine",impact:"LOW",requestedAction:"DRAFT_NOTIFICATION",actorRole:"gerante"});
+  assert.equal(notification.autonomy,"RECOMMEND_AND_WAIT");
+  assert.equal(notification.managerApprovalRequired,true);
+});
