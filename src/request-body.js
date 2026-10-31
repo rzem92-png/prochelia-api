@@ -28,16 +28,20 @@ export async function readBoundedRequestBody(request, maxBytes = 16_384) {
         return { ok: false, reason: "TOO_LARGE", bytes };
       }
 
-      text += decoder.decode(chunk.value, { stream: true });
+      try {
+        text += decoder.decode(chunk.value, { stream: true });
+      } catch {
+        await reader.cancel().catch(() => {});
+        return { ok: false, reason: "INVALID_UTF8", bytes };
+      }
     }
 
-    text += decoder.decode();
-    return { ok: true, text, bytes };
-  } catch (error) {
-    if (error instanceof TypeError) {
+    try {
+      text += decoder.decode();
+    } catch {
       return { ok: false, reason: "INVALID_UTF8", bytes };
     }
-    throw error;
+    return { ok: true, text, bytes };
   } finally {
     try { reader.releaseLock(); } catch {}
   }
