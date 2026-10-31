@@ -140,3 +140,26 @@ test("successful PSP webhooks require a provider payment reference before proces
   assert.match(route,/INSERT OR IGNORE INTO payment_webhook_events/);
   assert.ok(route.indexOf("PSP_PAYMENT_REFERENCE_REQUIRED") < route.indexOf("INSERT OR IGNORE INTO payment_webhook_events"));
 });
+
+test("PSP webhook delivery is retryable, collision-checked and atomically claimed", () => {
+  const route=source.slice(source.indexOf("async function paymentWebhook"),source.indexOf("async function openPaymentDispute"));
+  assert.match(route,/WEBHOOK_EVENT_ID_PAYLOAD_CONFLICT/);
+  assert.match(route,/existing\.payload_hash/);
+  assert.match(route,/processed=1/);
+  assert.match(route,/processed=2/);
+  assert.match(route,/received_at < datetime\('now','-5 minutes'\)/);
+  assert.match(route,/retry_after_seconds:30/);
+  assert.match(route,/SET processed=0 WHERE provider=\? AND event_id=\? AND processed=2/);
+  assert.match(route,/WEBHOOK_PROCESSING_FAILED/);
+  assert.match(route,/PAYMENT_TRANSACTION_NOT_FOUND/);
+  assert.match(route,/PAYOUT_REQUEST_NOT_FOUND/);
+  assert.match(route,/UPDATE payment_transactions SET status=\?,provider_payment_id=.*AND status NOT IN/);
+  assert.match(route,/if\(changed\.meta\?\.changes && newStatus==='paid'\)/);
+  assert.ok(route.indexOf("INTERVENANT_WALLET_NOT_FOUND") < route.indexOf("UPDATE payment_transactions SET status="));
+});
+
+test("PSP webhook requires object references for all known payment and payout events", () => {
+  const route=source.slice(source.indexOf("async function paymentWebhook"),source.indexOf("async function openPaymentDispute"));
+  assert.match(route,/paymentEvents\.includes\(type\)&&!txId/);
+  assert.match(route,/payoutEvents\.includes\(type\)&&!payoutId/);
+});
