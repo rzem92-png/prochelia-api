@@ -72,7 +72,7 @@ test("cookie-authenticated writes without Origin are blocked against CSRF", asyn
   assert.equal((await response.json()).error, "CSRF_ORIGIN_REQUIRED");
 });
 
-test("session cookie remains HttpOnly and Secure with cross-origin SameSite policy", async () => {
+test("session cookie remains HttpOnly and Secure with same-origin session cookie policy", async () => {
   const source = await (await import("node:fs/promises")).readFile(new URL("../src/index.js", import.meta.url), "utf8");
-  assert.match(source, /HttpOnly; Secure; SameSite=None/);
+  assert.match(source, /HttpOnly; Secure; SameSite=Lax/);
 });
