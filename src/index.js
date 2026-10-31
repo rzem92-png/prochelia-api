@@ -1171,25 +1171,22 @@ async function finalizeMissionPayment(request, env) {
   if(!requireRole(auth,['gerante'])) return json({ok:false,error:auth?.user?'FORBIDDEN':'UNAUTHENTICATED',version:VERSION},auth?.user?403:401);
   await ensurePaymentSchema(env);
   const body=await readJson(request), txId=clean(body?.transaction_id), outcome=clean(body?.outcome);
-  if(!txId||!['paid','failed','refunded','held'].includes(outcome)) return json({ok:false,error:'INVALID_PAYMENT_FINALIZATION',version:VERSION},400);
-  // A manager action is not proof of a PSP settlement. Only a verified provider event may
-  // confirm paid/refunded; this manual endpoint deliberately fails closed.
-  if(outcome==='paid'||outcome==='refunded') return json({ok:false,error:'PSP_WEBHOOK_CONFIRMATION_REQUIRED',version:VERSION,message:'Un statut payé/remboursé doit provenir d’un webhook PSP authentifié et vérifié.'},409);
-  const tx=await env.DB.prepare('SELECT * FROM payment_transactions WHERE id=? LIMIT 1').bind(txId).first();
-  if(!tx) return json({ok:false,error:'TRANSACTION_NOT_FOUND',version:VERSION},404);
-  if(['paid','refunded','failed'].includes(tx.status) && tx.status!==outcome) return json({ok:false,error:'PAYMENT_STATE_CONFLICT',version:VERSION,status:tx.status},409);
-  if(outcome==='paid'){
-    const wallet=await env.DB.prepare('SELECT * FROM wallets WHERE user_id=? LIMIT 1').bind(tx.intervenant_id).first();
-    if(!wallet) return json({ok:false,error:'INTERVENANT_WALLET_NOT_FOUND',version:VERSION},409);
-    await env.DB.prepare(`UPDATE payment_transactions SET status='paid',updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(txId).run();
-    await env.DB.prepare(`UPDATE wallets SET pending_cents=pending_cents+?,available_cents=available_cents+?,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(0,tx.net_intervenant_cents,wallet.id).run();
-  } else if(outcome==='held') {
-    await env.DB.prepare(`UPDATE payment_transactions SET status='held',updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(txId).run();
-  } else {
-    await env.DB.prepare(`UPDATE payment_transactions SET status=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(outcome,txId).run();
+  // This endpoint is intentionally limited to an administrative hold.
+  // Settlement, failure and refunds must come from an authenticated PSP event.
+  if(!txId||outcome!=='held') return json({ok:false,error:'PSP_EVENT_REQUIRED_FOR_FINANCIAL_TRANSITION',version:VERSION},409);
+  const result=await env.DB.prepare(`
+    UPDATE payment_transactions
+       SET status='held',updated_at=CURRENT_TIMESTAMP
+     WHERE id=? AND status NOT IN ('refunded','partially_refunded','failed','canceled')
+  `).bind(txId).run();
+  if(Number(result?.meta?.changes||0)!==1){
+    const tx=await env.DB.prepare('SELECT status FROM payment_transactions WHERE id=? LIMIT 1').bind(txId).first();
+    if(!tx) return json({ok:false,error:'TRANSACTION_NOT_FOUND',version:VERSION},404);
+    if(tx.status==='held') return json({ok:true,version:VERSION,transaction_id:txId,status:'held',idempotent_replay:true},200);
+    return json({ok:false,error:'PAYMENT_STATE_CONFLICT',version:VERSION,status:tx.status},409);
   }
-  await paymentAudit(env,'MISSION_PAYMENT_FINALIZED',{transaction_id:txId,mission_id:tx.mission_id,user_id:auth.user.id,metadata:{outcome}},'OK');
-  return json({ok:true,version:VERSION,transaction_id:txId,status:outcome},200);
+  await paymentAudit(env,'MISSION_PAYMENT_HELD',{transaction_id:txId,user_id:auth.user.id,metadata:{reason:'manager_hold'}},'OK');
+  return json({ok:true,version:VERSION,transaction_id:txId,status:'held'},200);
 }
 
 async function payoutRequest(request, env) {
