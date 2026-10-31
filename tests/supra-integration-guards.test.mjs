@@ -93,3 +93,14 @@ test("SUPRA market selector accepts the explicit other-market option", () => {
   assert.match(route, /market === "other"/);
   assert.match(route, /\^\[a-z\]\{2\}\$/);
 });
+
+
+test("pricing policy rejects invalid server financial values and protects provider floor", () => {
+  const route = source.slice(source.indexOf("async function pricingQuote"), source.indexOf("async function financeSummary"));
+  assert.match(route, /SERVER_PRICING_POLICY_INVALID/);
+  assert.match(route, /PRICING_POLICY_INFEASIBLE/);
+  assert.match(route, /configuredCommission>0\?configuredCommission:FINANCE_STRATEGIC\.commissionDefaultPercent/);
+  assert.match(route, /configuredProviderFloor>0\?configuredProviderFloor:base\*0\.70/);
+  assert.match(route, /targetMargin>100/);
+  assert.match(route, /commissionRate>1/);
+});
