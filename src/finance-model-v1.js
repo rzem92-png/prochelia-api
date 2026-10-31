@@ -41,9 +41,13 @@ export function calculateB2CQuote(input = {}) {
   if (!Number.isSafeInteger(clientTotalCents)) return { ok: false, error: 'AMOUNT_OVERFLOW' };
 
   const pspFeeCents = roundRatio(clientTotalCents, pspRateBps, 10000) + pspFixedCents;
+  if (![commissionCents, providerPayoutCents, pspFeeCents].every(Number.isSafeInteger)) {
+    return { ok: false, error: 'AMOUNT_OVERFLOW' };
+  }
   const platformContributionCents =
     commissionCents + travelClientCents - travelProviderCostCents -
     pspFeeCents - otherVariableCostsCents;
+  if (!Number.isSafeInteger(platformContributionCents)) return { ok: false, error: 'AMOUNT_OVERFLOW' };
   const targetContributionCents = Math.max(
     minimumContributionCents,
     roundRatio(clientTotalCents, targetContributionRateBps, 10000)
