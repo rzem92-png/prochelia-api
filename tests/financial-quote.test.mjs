@@ -54,3 +54,7 @@ test('rounds commission and PSP deterministically to whole cents', () => {
   assert.equal(q.commission_cents, 16);
   assert.equal(q.psp_cost_cents, 3);
 });
+
+test('rejects unsafe arithmetic overflow', () => {
+  assert.throws(() => calculateFinancialQuote({...base, basePriceCents: Number.MAX_SAFE_INTEGER, phaseFactor: 10}), /FINANCIAL_RESULT_OUT_OF_RANGE/);
+});
