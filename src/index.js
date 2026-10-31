@@ -1,4 +1,5 @@
 import { handleV7Route } from "./v7-routes.js";
+import { stripePost, stripeGet, verifyStripeSignature } from "./stripe.js";
 // PROCHÉLIA — INDEX BACKEND CONSOLIDÉ UNIQUE
 // Référence de consolidation : V14.1 Finance + sécurité/RBAC existants.
 // Généré le 19/10/2026. À déployer uniquement après recette avec la vraie base D1.
@@ -6,6 +7,8 @@ import { handleV7Route } from "./v7-routes.js";
 // authentification/RBAC/idempotence/contrôles métier n'a pas été validée.
 
 const VERSION = 'V14.3.0-PREPRODUCTION-2026-10-19';
+const STRIPE_CHARGES_AND_PAYOUTS_READY = false;
+const SERVER_PRICING_POLICY_READY = false;
 const SECURITY_CODE_TTL_SECONDS = 15 * 60;
 const SECURITY_MAX_ATTEMPTS = 5;
 const SECURITY_LOCK_SECONDS = 15 * 60;
@@ -144,7 +147,7 @@ function getCookie(request, name) {
 }
 
 function sessionCookie(token, maxAge = SESSION_TTL_SECONDS) {
-  return `${SESSION_COOKIE}=${encodeURIComponent(token)}; Max-Age=${maxAge}; Path=/; HttpOnly; Secure; SameSite=Lax`;
+  return `${SESSION_COOKIE}=${encodeURIComponent(token)}; Max-Age=${maxAge}; Path=/; HttpOnly; Secure; SameSite=None`;
 }
 
 async function createSession(env, userId) {
@@ -228,6 +231,75 @@ async function missionsSchema(env) {
     write_enabled: false, post_missions: 'DISABLED',
     note: 'Lecture seule tant que l’authentification/RBAC serveur n’est pas configurée.'
   });
+}
+
+async function listClients(request,env) {
+  if (!env.DB) return json({ok:false,error:'DATABASE_UNAVAILABLE',version:VERSION},503);
+  const gate=await requireAuthRole(request,env,['gerante','admin','client']);
+  if(gate.error) return gate.error;
+  const role=gate.auth.user.role;
+  const base=`SELECT c.id AS id,c.user_id AS user_id,u.first_name,u.last_name,u.email,u.phone,u.status,c.address,c.city,c.postal_code,c.notes
+    FROM clients c JOIN users u ON u.id=c.user_id`;
+  const result=role==='client'
+    ? await env.DB.prepare(base+` WHERE c.user_id=? ORDER BY u.last_name,u.first_name`).bind(gate.auth.user.id).all()
+    : await env.DB.prepare(base+` ORDER BY u.last_name,u.first_name`).all();
+  const clients=(result.results||[]).map(row=>({
+    id:row.id,userId:row.user_id,prenom:row.first_name,nom:row.last_name,
+    email:row.email,telephone:row.phone,ville:row.city||'',
+    adresse:row.address||'',codePostal:row.postal_code||'',notes:row.notes||'',
+    statut:row.status==='active'?'Actif':'À vérifier'
+  }));
+  return json({ok:true,source:'D1',version:VERSION,total:clients.length,clients});
+}
+
+async function listIntervenants(request,env) {
+  if (!env.DB) return json({ok:false,error:'DATABASE_UNAVAILABLE',version:VERSION},503);
+  const gate=await requireAuthRole(request,env,['gerante','admin','client','intervenant']);
+  if(gate.error) return gate.error;
+  const role=gate.auth.user.role;
+  const base=`SELECT i.id AS id,i.user_id AS user_id,u.first_name,u.last_name,u.email,u.phone,u.status AS user_status,
+      i.professional_status,i.description,i.service_area,i.hourly_rate,i.validation_status
+    FROM intervenants i JOIN users u ON u.id=i.user_id`;
+  let result;
+  if(role==='client') {
+    result=await env.DB.prepare(base+` WHERE u.status='active' AND LOWER(i.validation_status) IN ('approved','validated','valide','validé') ORDER BY u.first_name`).all();
+  } else if(role==='intervenant') {
+    result=await env.DB.prepare(base+` WHERE i.user_id=? LIMIT 1`).bind(gate.auth.user.id).all();
+  } else {
+    result=await env.DB.prepare(base+` ORDER BY u.last_name,u.first_name`).all();
+  }
+  const rows=result.results||[];
+  const ids=rows.map(row=>row.id).filter(Boolean);
+  let availability=[];
+  if(ids.length) {
+    const marks=ids.map(()=>'?').join(',');
+    const slots=await env.DB.prepare(`SELECT intervenant_id,start_at,end_at,status FROM disponibilites
+      WHERE intervenant_id IN (${marks}) AND status='available' AND date(start_at)>=date('now')
+      ORDER BY start_at LIMIT 500`).bind(...ids).all();
+    availability=slots.results||[];
+  }
+  const byProvider=new Map();
+  for(const slot of availability) {
+    const list=byProvider.get(slot.intervenant_id)||[];
+    list.push({start_at:slot.start_at,end_at:slot.end_at,status:slot.status});
+    byProvider.set(slot.intervenant_id,list);
+  }
+  const clientView=role==='client';
+  const intervenants=rows.map(row=>{
+    const slots=byProvider.get(row.id)||[];
+    const validated=['approved','validated','valide','validé'].includes(String(row.validation_status||'').toLowerCase());
+    return {
+      id:row.id,userId:row.user_id,prenom:row.first_name,nom:row.last_name,
+      email:clientView?null:row.email,telephone:clientView?null:row.phone,
+      ville:row.service_area||'',zoneIntervention:row.service_area||'',
+      activite:row.professional_status||'',description:row.description||'',
+      metiers:[],qualifications:[],tarif:row.hourly_rate==null?null:Number(row.hourly_rate),
+      statut:validated?'Validé':'À vérifier',
+      disponibilites:slots.length?slots.slice(0,5).map(x=>x.start_at+' → '+x.end_at).join(' · '):'À définir',
+      disponibiliteSlots:slots
+    };
+  });
+  return json({ok:true,source:'D1',version:VERSION,total:intervenants.length,intervenants});
 }
 
 function validatePayload(body) {
@@ -805,25 +877,95 @@ function paymentProvider(env) {
 }
 
 function paymentsConfigured(env) {
-  return !!env.PAYMENT_WEBHOOK_SECRET && !!env.PAYMENT_PROVIDER;
+  const provider=paymentProvider(env);
+  if(provider==='stripe') return !!env.STRIPE_SECRET_KEY && !!env.STRIPE_PUBLISHABLE_KEY && !!env.STRIPE_WEBHOOK_SECRET && !!env.APP_BASE_URL && !!env.STRIPE_DASHBOARD && !!env.STRIPE_FEES_COLLECTOR && !!env.STRIPE_LOSSES_COLLECTOR && STRIPE_CHARGES_AND_PAYOUTS_READY;
+  return false;
 }
 
 async function paymentOnboard(request, env) {
   const auth = await getSessionUser(request, env);
   if (!requireRole(auth, ['intervenant'])) return json({ok:false,error:auth?.user?'FORBIDDEN':'UNAUTHENTICATED',version:VERSION},auth?.user?403:401);
+  const dashboard=clean(env.STRIPE_DASHBOARD);
+  const feesCollector=clean(env.STRIPE_FEES_COLLECTOR);
+  const lossesCollector=clean(env.STRIPE_LOSSES_COLLECTOR);
+  if (paymentProvider(env)!=='stripe' || !env.STRIPE_SECRET_KEY || !env.STRIPE_PUBLISHABLE_KEY || !env.STRIPE_WEBHOOK_SECRET ||
+      !['express','full'].includes(dashboard) || !['application','stripe'].includes(feesCollector) ||
+      !['application','stripe'].includes(lossesCollector)) {
+    return json({ok:false,error:'STRIPE_CONNECT_NOT_CONFIGURED',version:VERSION,required:['PAYMENT_PROVIDER=stripe','STRIPE_SECRET_KEY','STRIPE_PUBLISHABLE_KEY','STRIPE_WEBHOOK_SECRET','STRIPE_DASHBOARD','STRIPE_FEES_COLLECTOR','STRIPE_LOSSES_COLLECTOR','APP_BASE_URL']},503);
+  }
+  if(dashboard==='express' && (feesCollector!=='application' || lossesCollector!=='application')) {
+    return json({ok:false,error:'STRIPE_EXPRESS_RESPONSIBILITY_CONFLICT',version:VERSION,required:'Express requires application fee/loss responsibility; choose explicitly or use full dashboard'},409);
+  }
+  let appBase;
+  try {
+    appBase=new URL(String(env.APP_BASE_URL||''));
+    const allowed=String(env.CORS_ORIGIN||'https://prochelia.pages.dev,https://56b01f85.prochelia.pages.dev').split(',').map(x=>x.trim()).filter(Boolean);
+    if(appBase.protocol!=='https:' || !allowed.includes(appBase.origin)) throw new Error('APP_ORIGIN_NOT_ALLOWED');
+  } catch {
+    return json({ok:false,error:'APP_BASE_URL_NOT_ALLOWED',version:VERSION},503);
+  }
+  const body=await readJson(request)||{};
+  const accountToken=clean(body.account_token);
+  if(!/^[A-Za-z0-9_]{8,255}$/.test(accountToken) || body.stripe_terms_accepted!==true) {
+    return json({ok:false,error:'STRIPE_ACCOUNT_TOKEN_AND_TERMS_REQUIRED',version:VERSION},400);
+  }
   await ensurePaymentSchema(env);
-  const body = await readJson(request);
-  const provider = paymentProvider(env);
-  const accountId = clean(body?.provider_account_id) || null;
   const existing = await env.DB.prepare('SELECT * FROM payment_accounts WHERE user_id=? LIMIT 1').bind(auth.user.id).first();
-  if (existing) return json({ok:true,version:VERSION,account:existing,action:'REUSE_EXISTING'},200);
-  const id=crypto.randomUUID();
-  await env.DB.prepare(`INSERT INTO payment_accounts
-    (id,user_id,provider,provider_account_id,status,onboarding_status)
-    VALUES (?,?,?,?, 'pending','required')`).bind(id,auth.user.id,provider,accountId).run();
-  await env.DB.prepare(`INSERT INTO wallets (id,user_id) VALUES (?,?)`).bind(crypto.randomUUID(),auth.user.id).run();
-  await paymentAudit(env,'PAYOUT_ACCOUNT_CREATED',{user_id:auth.user.id,metadata:{provider}},'OK');
-  return json({ok:true,version:VERSION,account_id:id,provider,onboarding_status:'required',next:'PSP_ONBOARDING_REQUIRED'},201);
+  if(existing && existing.provider!=='stripe') return json({ok:false,error:'PAYMENT_PROVIDER_CONFLICT',version:VERSION},409);
+  if(existing && Number(existing.payouts_enabled)===1 && existing.onboarding_status==='submitted') {
+    return json({ok:true,version:VERSION,provider:'stripe',account_id:existing.provider_account_id,onboarding_status:'complete',already_connected:true},200);
+  }
+  let accountId=clean(existing?.provider_account_id);
+  try {
+    if(!accountId) {
+      const accountTokenHash=await sha256Base64url(accountToken);
+      const account=await stripePost(env,'v2/core/accounts',{
+        account_token:accountToken,
+        dashboard,
+        configuration:{recipient:{capabilities:{stripe_balance:{stripe_transfers:{requested:true}}}}},
+        defaults:{currency:'eur',responsibilities:{fees_collector:feesCollector,losses_collector:lossesCollector}},
+        metadata:{prochelia_user_id:auth.user.id}
+      },'prochelia-connect-account-'+auth.user.id+'-'+accountTokenHash);
+      accountId=clean(account?.id);
+      if(!accountId) throw new Error('STRIPE_ACCOUNT_ID_MISSING');
+      if(existing) {
+        await env.DB.prepare(`UPDATE payment_accounts SET provider='stripe',provider_account_id=?,status='pending',onboarding_status='required',updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(accountId,existing.id).run();
+      } else {
+        await env.DB.prepare(`INSERT INTO payment_accounts (id,user_id,provider,provider_account_id,status,onboarding_status) VALUES (?,?,?,?, 'pending','required')`).bind(crypto.randomUUID(),auth.user.id,'stripe',accountId).run();
+      }
+      const wallet=await env.DB.prepare('SELECT id FROM wallets WHERE user_id=? LIMIT 1').bind(auth.user.id).first();
+      if(!wallet) await env.DB.prepare('INSERT INTO wallets (id,user_id) VALUES (?,?)').bind(crypto.randomUUID(),auth.user.id).run();
+      await paymentAudit(env,'STRIPE_ACCOUNT_TERMS_ACCEPTED',{user_id:auth.user.id,metadata:{terms:'stripe_connected_account_v2'}},'OK');
+      await paymentAudit(env,'STRIPE_CONNECT_ACCOUNT_CREATED',{user_id:auth.user.id,metadata:{provider:'stripe'}},'OK');
+    }
+    const refreshUrl=new URL('/',appBase); refreshUrl.searchParams.set('stripe_onboarding','refresh');
+    const returnUrl=new URL('/',appBase); returnUrl.searchParams.set('stripe_onboarding','return');
+    const link=await stripePost(env,'v2/core/account_links',{
+      account:accountId,
+      use_case:{
+        type:'account_onboarding',
+        account_onboarding:{
+          configurations:['recipient'],
+          refresh_url:refreshUrl.toString(),
+          return_url:returnUrl.toString(),
+          collection_options:{fields:'eventually_due'}
+        }
+      }
+    },'prochelia-connect-link-'+auth.user.id+'-'+crypto.randomUUID());
+    if(!link?.url) throw new Error('STRIPE_ACCOUNT_LINK_MISSING');
+    return json({ok:true,version:VERSION,provider:'stripe',account_id:accountId,onboarding_status:'required',onboarding_url:link.url,expires_at:link.expires_at,next:'COMPLETE_STRIPE_CONNECT_ONBOARDING'},201);
+  } catch(error) {
+    console.error('STRIPE_CONNECT_ONBOARDING_FAILED',error instanceof Error?error.message:String(error));
+    return json({ok:false,error:'STRIPE_ONBOARDING_FAILED',version:VERSION},502);
+  }
+}
+
+function paymentPublicConfig(request,env) {
+  const provider=paymentProvider(env);
+  const publishable=provider==='stripe' && env.STRIPE_PUBLISHABLE_KEY ? String(env.STRIPE_PUBLISHABLE_KEY) : null;
+  const onboardingReady=!!publishable && !!env.STRIPE_SECRET_KEY && !!env.STRIPE_WEBHOOK_SECRET && !!env.APP_BASE_URL &&
+    !!env.STRIPE_DASHBOARD && !!env.STRIPE_FEES_COLLECTOR && !!env.STRIPE_LOSSES_COLLECTOR;
+  return json({ok:true,version:VERSION,provider,stripe_publishable_key:publishable,stripe_api_version:'2026-10-28.endive',connect_onboarding_ready:onboardingReady});
 }
 
 async function paymentStatus(request, env) {
@@ -834,12 +976,13 @@ async function paymentStatus(request, env) {
   if(!wallet){ await env.DB.prepare('INSERT INTO wallets (id,user_id) VALUES (?,?)').bind(crypto.randomUUID(),auth.user.id).run(); wallet=await env.DB.prepare('SELECT * FROM wallets WHERE user_id=? LIMIT 1').bind(auth.user.id).first(); }
   const account=await env.DB.prepare('SELECT * FROM payment_accounts WHERE user_id=? LIMIT 1').bind(auth.user.id).first();
   const pending=await env.DB.prepare(`SELECT COUNT(*) total FROM payout_requests WHERE user_id=? AND status IN ('requested','processing')`).bind(auth.user.id).first();
-  return json({ok:true,version:VERSION,provider:paymentProvider(env),payments_configured:paymentsConfigured(env),wallet:{currency:wallet.currency,available_cents:wallet.available_cents,pending_cents:wallet.pending_cents,paid_cents:wallet.paid_cents,reserved_cents:wallet.reserved_cents},payout_account:account?{status:account.status,onboarding_status:account.onboarding_status,payouts_enabled:!!account.payouts_enabled}:null,pending_payouts:Number(pending?.total||0)},200);
+  return json({ok:true,version:VERSION,provider:paymentProvider(env),payments_configured:paymentsConfigured(env),wallet:{currency:wallet.currency,available_cents:wallet.available_cents,pending_cents:wallet.pending_cents,paid_cents:wallet.paid_cents,reserved_cents:wallet.reserved_cents},payout_account:account?{status:account.status,onboarding_status:account.onboarding_status,payouts_enabled:!!account.payouts_enabled,charges_enabled:!!account.charges_enabled}:null,pending_payouts:Number(pending?.total||0)},200);
 }
 
 async function createMissionPayment(request, env) {
   const auth=await getSessionUser(request,env);
   if(!requireRole(auth,['gerante'])) return json({ok:false,error:auth?.user?'FORBIDDEN':'UNAUTHENTICATED',version:VERSION},auth?.user?403:401);
+  if(!paymentsConfigured(env)) return json({ok:false,error:'REAL_PAYMENT_ADAPTER_NOT_READY',version:VERSION},503);
   await ensurePaymentSchema(env);
   const body=await readJson(request);
   const missionId=clean(body?.mission_id), clientId=clean(body?.client_id), intervenantId=clean(body?.intervenant_id);
@@ -864,6 +1007,7 @@ async function finalizeMissionPayment(request, env) {
   await ensurePaymentSchema(env);
   const body=await readJson(request), txId=clean(body?.transaction_id), outcome=clean(body?.outcome);
   if(!txId||!['paid','failed','refunded','held'].includes(outcome)) return json({ok:false,error:'INVALID_PAYMENT_FINALIZATION',version:VERSION},400);
+  if(['paid','refunded'].includes(outcome)) return json({ok:false,error:'PSP_WEBHOOK_CONFIRMATION_REQUIRED',version:VERSION},409);
   const tx=await env.DB.prepare('SELECT * FROM payment_transactions WHERE id=? LIMIT 1').bind(txId).first();
   if(!tx) return json({ok:false,error:'TRANSACTION_NOT_FOUND',version:VERSION},404);
   if(['paid','refunded','failed'].includes(tx.status) && tx.status!==outcome) return json({ok:false,error:'PAYMENT_STATE_CONFLICT',version:VERSION,status:tx.status},409);
@@ -884,6 +1028,7 @@ async function finalizeMissionPayment(request, env) {
 async function payoutRequest(request, env) {
   const auth=await getSessionUser(request,env);
   if(!requireRole(auth,['intervenant'])) return json({ok:false,error:auth?.user?'FORBIDDEN':'UNAUTHENTICATED',version:VERSION},auth?.user?403:401);
+  if(!paymentsConfigured(env)) return json({ok:false,error:'REAL_PAYOUT_ADAPTER_NOT_READY',version:VERSION},503);
   await ensurePaymentSchema(env);
   const body=await readJson(request), amount=moneyCents(body?.amount_eur), mode=clean(body?.mode)||'standard';
   const idem=clean(request.headers.get('idempotency-key'))||clean(body?.idempotency_key);
@@ -913,16 +1058,41 @@ async function verifyWebhookSignature(request, env, rawBody) {
 }
 
 async function paymentWebhook(request, env) {
-  await ensurePaymentSchema(env);
   const raw=await request.text();
-  if(!(await verifyWebhookSignature(request,env,raw))) return json({ok:false,error:'INVALID_WEBHOOK_SIGNATURE',version:VERSION},401);
+  const isStripe=paymentProvider(env)==='stripe';
+  const signatureValid=isStripe
+    ? await verifyStripeSignature(request.headers.get('stripe-signature'),env.STRIPE_WEBHOOK_SECRET,raw)
+    : await verifyWebhookSignature(request,env,raw);
+  if(!signatureValid) return json({ok:false,error:'INVALID_WEBHOOK_SIGNATURE',version:VERSION},401);
   let event; try{event=JSON.parse(raw)}catch{return json({ok:false,error:'INVALID_WEBHOOK_JSON',version:VERSION},400);}
-  const provider=clean(event?.provider)||paymentProvider(env), eventId=clean(event?.id), type=clean(event?.type);
-  if(!eventId||!type) return json({ok:false,error:'INVALID_WEBHOOK_EVENT',version:VERSION},400);
+  const provider=isStripe?'stripe':(clean(event?.provider)||paymentProvider(env));
+  const eventId=clean(event?.id), originalType=clean(event?.type);
+  if(!eventId||!originalType) return json({ok:false,error:'INVALID_WEBHOOK_EVENT',version:VERSION},400);
+  await ensurePaymentSchema(env);
   const payloadHash=await sha256Base64url(raw);
-  const inserted=await env.DB.prepare(`INSERT OR IGNORE INTO payment_webhook_events (id,provider,event_id,event_type,signature_valid,payload_hash) VALUES (?,?,?,?,1,?)`).bind(crypto.randomUUID(),provider,eventId,type,payloadHash).run();
+  const inserted=await env.DB.prepare(`INSERT OR IGNORE INTO payment_webhook_events (id,provider,event_id,event_type,signature_valid,payload_hash) VALUES (?,?,?,?,1,?)`).bind(crypto.randomUUID(),provider,eventId,originalType,payloadHash).run();
   if(!inserted.meta?.changes) return json({ok:true,version:VERSION,duplicate:true,event_id:eventId},200);
-  const txId=clean(event?.data?.transaction_id), payoutId=clean(event?.data?.payout_id);
+  const stripeObject=event?.data?.object||{};
+  const stripeTypeMap={
+    'payment_intent.succeeded':'payment_succeeded',
+    'payment_intent.payment_failed':'payment_failed',
+    'charge.refunded':'payment_refunded',
+    'payout.paid':'payout_paid',
+    'payout.failed':'payout_failed',
+    'payout.canceled':'payout_canceled'
+  };
+  const type=isStripe?(stripeTypeMap[originalType]||originalType):originalType;
+  const txId=isStripe?clean(stripeObject?.metadata?.prochelia_transaction_id):clean(event?.data?.transaction_id);
+  const payoutId=isStripe?clean(stripeObject?.metadata?.prochelia_payout_id):clean(event?.data?.payout_id);
+  const providerPaymentId=isStripe?clean(stripeObject?.id):clean(event?.data?.provider_payment_id);
+  if(isStripe && originalType==='v2.core.account[requirements].updated' && clean(stripeObject?.id)){
+    const account=await stripeGet(env,'v2/core/accounts/'+clean(stripeObject.id));
+    const transferStatus=account?.configuration?.recipient?.capabilities?.stripe_balance?.stripe_transfers?.status;
+    const payoutsEnabled=transferStatus==='active'?1:0;
+    const status=payoutsEnabled?'active':'pending';
+    const onboardingStatus=payoutsEnabled?'submitted':'required';
+    await env.DB.prepare(`UPDATE payment_accounts SET charges_enabled=0,payouts_enabled=?,status=?,onboarding_status=?,updated_at=CURRENT_TIMESTAMP WHERE provider='stripe' AND provider_account_id=?`).bind(payoutsEnabled,status,onboardingStatus,stripeObject.id).run();
+  }
   if(txId){
     const tx=await env.DB.prepare('SELECT * FROM payment_transactions WHERE id=? LIMIT 1').bind(txId).first();
     if(tx){
@@ -931,7 +1101,7 @@ async function paymentWebhook(request, env) {
       if(newStatus){
         const alreadyFinal = ['paid','failed','refunded'].includes(tx.status);
         if(!alreadyFinal){
-          await env.DB.prepare('UPDATE payment_transactions SET status=?,provider_payment_id=COALESCE(?,provider_payment_id),updated_at=CURRENT_TIMESTAMP WHERE id=?').bind(newStatus,clean(event?.data?.provider_payment_id)||null,txId).run();
+          await env.DB.prepare('UPDATE payment_transactions SET status=?,provider_payment_id=COALESCE(?,provider_payment_id),updated_at=CURRENT_TIMESTAMP WHERE id=?').bind(newStatus,providerPaymentId||null,txId).run();
           if(newStatus==='paid'){
             const wallet=await env.DB.prepare('SELECT * FROM wallets WHERE user_id=? LIMIT 1').bind(tx.intervenant_id).first();
             if(wallet) await env.DB.prepare('UPDATE wallets SET available_cents=available_cents+?,updated_at=CURRENT_TIMESTAMP WHERE id=?').bind(tx.net_intervenant_cents,wallet.id).run();
@@ -949,12 +1119,12 @@ async function paymentWebhook(request, env) {
       if(!alreadyFinal){
         if(newStatus==='completed') await env.DB.prepare(`UPDATE wallets SET reserved_cents=MAX(0,reserved_cents-?),paid_cents=paid_cents+?,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(payout.amount_cents,payout.amount_cents,payout.wallet_id).run();
         if(['failed','canceled'].includes(newStatus)) await env.DB.prepare(`UPDATE wallets SET reserved_cents=MAX(0,reserved_cents-?),available_cents=available_cents+?,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(payout.amount_cents,payout.amount_cents,payout.wallet_id).run();
-        await env.DB.prepare(`UPDATE payout_requests SET status=?,provider_payout_id=COALESCE(?,provider_payout_id),failure_code=?,failure_message=?,completed_at=CASE WHEN ?='completed' THEN CURRENT_TIMESTAMP ELSE completed_at END,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(newStatus,clean(event?.data?.provider_payout_id)||null,clean(event?.data?.failure_code)||null,clean(event?.data?.failure_message)||null,newStatus,payoutId).run();
+        await env.DB.prepare(`UPDATE payout_requests SET status=?,provider_payout_id=COALESCE(?,provider_payout_id),failure_code=?,failure_message=?,completed_at=CASE WHEN ?='completed' THEN CURRENT_TIMESTAMP ELSE completed_at END,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(newStatus,clean(stripeObject?.id)||clean(event?.data?.provider_payout_id)||null,clean(stripeObject?.failure_code)||clean(event?.data?.failure_code)||null,clean(stripeObject?.failure_message)||clean(event?.data?.failure_message)||null,newStatus,payoutId).run();
       }
     }
   }
   await env.DB.prepare('UPDATE payment_webhook_events SET processed=1,processed_at=CURRENT_TIMESTAMP WHERE provider=? AND event_id=?').bind(provider,eventId).run();
-  await paymentAudit(env,'PSP_WEBHOOK_PROCESSED',{transaction_id:txId,payout_id:payoutId,metadata:{provider,event_id:eventId,event_type:type}},'OK');
+  await paymentAudit(env,'PSP_WEBHOOK_PROCESSED',{transaction_id:txId,payout_id:payoutId,metadata:{provider,event_id:eventId,event_type:originalType}},'OK');
   return json({ok:true,version:VERSION,processed:true,event_id:eventId},200);
 }
 
@@ -1030,6 +1200,45 @@ async function handleBase(request, env) {
   if (url.pathname === '/api/health') {
     if (request.method !== 'GET') return json({ ok: false, error: 'METHOD_NOT_ALLOWED', version: VERSION }, 405);
     return health(env);
+  }
+
+  if (url.pathname === '/api/clients') {
+    if (request.method !== 'GET') return json({ok:false,error:'METHOD_NOT_ALLOWED',version:VERSION},405);
+    return listClients(request,env);
+  }
+
+  if (url.pathname === '/api/intervenants') {
+    if (request.method !== 'GET') return json({ok:false,error:'METHOD_NOT_ALLOWED',version:VERSION},405);
+    return listIntervenants(request,env);
+  }
+
+  if (url.pathname === '/api/payments/config') {
+    if (request.method !== 'GET') return json({ok:false,error:'METHOD_NOT_ALLOWED',version:VERSION},405);
+    return paymentPublicConfig(request,env);
+  }
+  if (url.pathname === '/api/payments/onboard') {
+    if (request.method !== 'POST') return json({ok:false,error:'METHOD_NOT_ALLOWED',version:VERSION},405);
+    return paymentOnboard(request,env);
+  }
+  if (url.pathname === '/api/payments/status') {
+    if (request.method !== 'GET') return json({ok:false,error:'METHOD_NOT_ALLOWED',version:VERSION},405);
+    return paymentStatus(request,env);
+  }
+  if (url.pathname === '/api/payments/mission/create') {
+    if (request.method !== 'POST') return json({ok:false,error:'METHOD_NOT_ALLOWED',version:VERSION},405);
+    return createMissionPayment(request,env);
+  }
+  if (url.pathname === '/api/payments/mission/finalize') {
+    if (request.method !== 'POST') return json({ok:false,error:'METHOD_NOT_ALLOWED',version:VERSION},405);
+    return finalizeMissionPayment(request,env);
+  }
+  if (url.pathname === '/api/payments/payout') {
+    if (request.method !== 'POST') return json({ok:false,error:'METHOD_NOT_ALLOWED',version:VERSION},405);
+    return payoutRequest(request,env);
+  }
+  if (url.pathname === '/api/payments/webhook') {
+    if (request.method !== 'POST') return json({ok:false,error:'METHOD_NOT_ALLOWED',version:VERSION},405);
+    return paymentWebhook(request,env);
   }
 
   if (url.pathname === '/api/prestations') {
@@ -1109,10 +1318,10 @@ async function handleBase(request, env) {
       version: VERSION,
       database: !!env.DB,
       routes: [
-        '/api/health','/api/prestations','/api/core/schema',
+        '/api/health','/api/clients','/api/intervenants','/api/prestations','/api/core/schema',
         '/api/missions/schema','/api/missions/validate','/api/missions',
         '/api/auth/status','/api/auth/login','/api/auth/logout','/api/auth/me',
-        '/api/auth/bootstrap','/api/security/identity/start','/api/security/identity/approve','/api/security/mission/prepare','/api/security/presence','/api/security/code/verify','/api/security/resend','/api/security/client-code','/api/security/status','/api/payments/onboard','/api/payments/status','/api/payments/mission/create','/api/payments/mission/finalize','/api/payments/payout','/api/payments/webhook','/api/payments/dispute','/api/payments/dispute/resolve','/api/readiness','/api/info'
+        '/api/auth/bootstrap','/api/security/identity/start','/api/security/identity/approve','/api/security/mission/prepare','/api/security/presence','/api/security/code/verify','/api/security/resend','/api/security/client-code','/api/security/status','/api/payments/config','/api/payments/onboard','/api/payments/status','/api/payments/mission/create','/api/payments/mission/finalize','/api/payments/payout','/api/payments/webhook','/api/readiness','/api/info'
       ],
       writes: { missions: false, bootstrap: true },
       status: 'AUTH_RBAC_IDENTITY_PRESENCE_SECURITY_HARDENED_FOR_TEST'
@@ -1505,6 +1714,7 @@ function financeStrategicQuote({basePriceCents=0,phaseFactor=1,urgency='normal',
 
 async function pricingQuote(request, env) {
   const gate=await requireAuthRole(request,env,['gerante','client','entreprise','intervenant']); if(gate.error)return gate.error;
+  if(!SERVER_PRICING_POLICY_READY) return json({ok:false,error:'SERVER_PRICING_POLICY_NOT_CONFIGURED',version:VERSION},503);
   const b=await readJson(request)||{};
   const phase=String(b.phase||await getSetting(env,'project_phase','TEST')).toUpperCase();
   const cfg=PROJECT_PHASES[phase]||PROJECT_PHASES.TEST;
@@ -2372,10 +2582,16 @@ async function registerIntegration(env, code, category, required, capabilities, 
 async function productionConfigCheck(env) {
   await ensureConsolidatedSchema(env); await ensurePaymentSchema(env); await ensureOperationalSchema(env); await ensureStrategicSchema(env); await ensureFinalHardeningSchema(env);
   const checks=[];
-  const requiredTables=['users','sessions','missions','payment_transactions','payment_webhook_events','payment_disputes','operational_cases','action_outbox','notification_outbox','accounting_ledger','promotions','promotion_recommendations','activity_journal','compliance_events'];
+  const requiredTables=['users','sessions','missions','payment_accounts','wallets','payment_transactions','payment_webhook_events','payment_disputes','operational_cases','action_outbox','notification_outbox','accounting_ledger','promotions','promotion_recommendations','activity_journal','compliance_events'];
   for(const t of requiredTables) checks.push({code:`TABLE:${t}`,status:await tableExists(env,t)?'OK':'MISSING'});
-  const pspRequired=['PAYMENT_PROVIDER','PAYMENT_WEBHOOK_SECRET'];
+  const pspRequired=paymentProvider(env)==='stripe'
+    ? ['PAYMENT_PROVIDER','STRIPE_SECRET_KEY','STRIPE_WEBHOOK_SECRET','STRIPE_DASHBOARD','STRIPE_FEES_COLLECTOR','STRIPE_LOSSES_COLLECTOR','APP_BASE_URL']
+    : ['PAYMENT_PROVIDER','PAYMENT_WEBHOOK_SECRET','PAYMENT_API_SECRET'];
   for(const k of pspRequired) checks.push({code:`SECRET:${k}`,status:finalSecretConfigured(env,k)?'OK':'NOT_CONFIGURED'});
+  if(paymentProvider(env)==='stripe') checks.push({code:'CONFIG:STRIPE_PUBLISHABLE_KEY',status:finalSecretConfigured(env,'STRIPE_PUBLISHABLE_KEY')?'OK':'NOT_CONFIGURED'});
+  checks.push({code:'SERVER_PRICING_POLICY',status:SERVER_PRICING_POLICY_READY?'OK':'NOT_IMPLEMENTED'});
+  checks.push({code:'STRIPE_CHARGES_ADAPTER',status:STRIPE_CHARGES_AND_PAYOUTS_READY?'OK':'NOT_IMPLEMENTED'});
+  checks.push({code:'STRIPE_PAYOUT_ADAPTER',status:STRIPE_CHARGES_AND_PAYOUTS_READY?'OK':'NOT_IMPLEMENTED'});
   checks.push({code:'BOOTSTRAP_TOKEN',status:finalSecretConfigured(env,'BOOTSTRAP_TOKEN')?'OK':'NOT_CONFIGURED'});
   const paymentCols=await tableColumns(env,'payment_transactions');
   const requiredPaymentCols=['id','idempotency_key','mission_id','client_id','intervenant_id','gross_cents','commission_cents','provider_fee_cents','refund_cents','net_intervenant_cents','status','provider_payment_id'];
@@ -2383,12 +2599,12 @@ async function productionConfigCheck(env) {
   const missionCols=await tableColumns(env,'missions');
   const usefulMissionCols=['id','client_id','intervenant_id'];
   checks.push({code:'MISSION_CORE_COLUMNS',status:usefulMissionCols.every(x=>missionCols.includes(x))?'OK':'INCOMPLETE',missing:usefulMissionCols.filter(x=>!missionCols.includes(x))});
-  await registerIntegration(env,'PSP','PAYMENT',['PAYMENT_PROVIDER','PAYMENT_WEBHOOK_SECRET'],['charge','refund','payout','webhook','reconciliation'],finalSecretConfigured(env,'PAYMENT_PROVIDER')&&finalSecretConfigured(env,'PAYMENT_WEBHOOK_SECRET')?'CONFIGURED':'NOT_CONFIGURED');
+  await registerIntegration(env,'PSP','PAYMENT',pspRequired,['connect_onboarding','charge','refund','payout','webhook','reconciliation'],paymentsConfigured(env)?'CONFIGURED':'NOT_CONFIGURED');
   await registerIntegration(env,'NOTIFICATIONS','MESSAGING',['NOTIFICATION_PROVIDER'],['email','sms','push'],finalSecretConfigured(env,'NOTIFICATION_PROVIDER')?'CONFIGURED':'NOT_CONFIGURED');
   await registerIntegration(env,'MAPS','LOCATION',['MAPS_PROVIDER','MAPS_API_KEY'],['distance','geocoding','routing'],finalSecretConfigured(env,'MAPS_API_KEY')?'CONFIGURED':'NOT_CONFIGURED');
   await registerIntegration(env,'MARKET_DATA','COMMERCIAL',['MARKET_DATA_PROVIDER'],['market_prices','competitor_signals'],finalSecretConfigured(env,'MARKET_DATA_PROVIDER')?'CONFIGURED':'NOT_CONFIGURED');
-  const blocking=checks.filter(x=>['MISSING','INCOMPLETE'].includes(x.status));
-  const externalNotConfigured=checks.filter(x=>x.status==='NOT_CONFIGURED' && ['SECRET:PAYMENT_PROVIDER','SECRET:PAYMENT_WEBHOOK_SECRET'].includes(x.code));
+  const blocking=checks.filter(x=>['MISSING','INCOMPLETE','NOT_IMPLEMENTED'].includes(x.status));
+  const externalNotConfigured=checks.filter(x=>x.status==='NOT_CONFIGURED' && (pspRequired.map(k=>'SECRET:'+k).includes(x.code)||x.code==='CONFIG:STRIPE_PUBLISHABLE_KEY'));
   const overall=blocking.length===0 && externalNotConfigured.length===0;
   for(const c of checks) await env.DB.prepare(`INSERT INTO system_config_checks(id,check_code,status,details_json) VALUES(?,?,?,?)`).bind(crypto.randomUUID(),c.code,c.status,JSON.stringify(c)).run();
   return {overall,checks,blocking:blocking.length,externalNotConfigured:externalNotConfigured.length};
@@ -2957,6 +3173,7 @@ async function handle(request,env){
     if(request.url.startsWith('https://')) headers.set('strict-transport-security','max-age=31536000; includeSubDomains');
     return new Response(response.body,{status:response.status,statusText:response.statusText,headers});
   } catch(error) {
+    console.error('PROCHELIA_API_INTERNAL_ERROR',error instanceof Error ? error.message : String(error));
     return json({ok:false,error:'INTERNAL_ERROR',version:VERSION},500);
   }
 }
@@ -3363,7 +3580,7 @@ async function productionSafetySchema(env){
 
 async function productionSubjectHash(request, route){
   const ip=clean(request.headers.get('CF-Connecting-IP')) || clean(request.headers.get('X-Forwarded-For')) || 'unknown';
-  return sha256Hex(`${ip}|${route}`);
+  return sha256Base64url(`${ip}|${route}`);
 }
 
 async function productionRateLimit(request,env){
@@ -3411,7 +3628,7 @@ async function strictProductionAudit(request,env){
     {code:'MAPS_PROVIDER',status:finalSecretConfigured(env,'MAPS_API_KEY')?'OK':'NOT_CONFIGURED'}
   ];
   const checks=[...(result.checks||[]),...extra];
-  const blockingCodes=new Set(['SECRET:PAYMENT_PROVIDER','SECRET:PAYMENT_WEBHOOK_SECRET','SECURITY_CODE_DELIVERY','CORS_ORIGIN','BACKUP_R2']);
+  const blockingCodes=new Set(['SECRET:PAYMENT_PROVIDER','SECRET:PAYMENT_WEBHOOK_SECRET','SECRET:PAYMENT_API_SECRET','SECRET:STRIPE_SECRET_KEY','CONFIG:STRIPE_PUBLISHABLE_KEY','SECRET:STRIPE_WEBHOOK_SECRET','SECRET:STRIPE_DASHBOARD','SECRET:STRIPE_FEES_COLLECTOR','SECRET:STRIPE_LOSSES_COLLECTOR','SECRET:APP_BASE_URL','SERVER_PRICING_POLICY','STRIPE_CHARGES_ADAPTER','STRIPE_PAYOUT_ADAPTER','SECURITY_CODE_DELIVERY','CORS_ORIGIN','BACKUP_R2']);
   const blocking=checks.filter(x=>blockingCodes.has(x.code)&&x.status!=='OK');
   const overall=blocking.length===0 && result.blocking===0;
   for(const c of extra){
@@ -3421,46 +3638,88 @@ async function strictProductionAudit(request,env){
   return json({ok:true,version:VERSION,production_gate:overall?'OPEN':'CLOSED',ready_for_real_traffic:overall,checks,blocking:blocking.map(x=>x.code),note:overall?'Configuration gate passed. A real production launch still requires sandbox/acceptance tests for PSP, notifications, identity/security, backups/restore and critical user journeys.':'Production traffic remains blocked until the listed blocking controls are configured and tested.'});
 }
 
+function applyCorsHeaders(request,env,response){
+  const origin=request.headers.get('origin');
+  if(!origin || !securityOriginAllowed(request,env)) return response;
+  const headers=new Headers(response.headers);
+  headers.set('access-control-allow-origin',origin);
+  headers.set('access-control-allow-credentials','true');
+  headers.set('access-control-expose-headers','Retry-After');
+  const vary=headers.get('vary');
+  headers.set('vary',vary ? vary + ', Origin' : 'Origin');
+  return new Response(response.body,{status:response.status,statusText:response.statusText,headers});
+}
+
 const __procheliaProductionSafetyHandle = handle;
 handle = async function(request,env){
+  const origin=request.headers.get('origin');
+  if(origin && !securityOriginAllowed(request,env)){
+    return json({ok:false,error:'ORIGIN_NOT_ALLOWED',version:VERSION},403);
+  }
+
+  // Cross-origin browser preflight must complete without touching D1,
+  // rate-limit tables, session state or any business handler.
+  if(request.method.toUpperCase()==='OPTIONS'){
+    const methods=new Set(['GET','HEAD','POST','OPTIONS']);
+    const requestedMethod=(request.headers.get('access-control-request-method')||'').toUpperCase();
+    if(requestedMethod && !methods.has(requestedMethod)){
+      return json({ok:false,error:'CORS_METHOD_NOT_ALLOWED',version:VERSION},405,{'allow':'GET, HEAD, POST, OPTIONS'});
+    }
+    const allowedHeaders=new Set(['accept','content-type','authorization','x-idempotency-key','x-csrf-token']);
+    const requestedHeaders=(request.headers.get('access-control-request-headers')||'')
+      .split(',').map(x=>x.trim().toLowerCase()).filter(Boolean);
+    if(requestedHeaders.some(x=>!allowedHeaders.has(x))){
+      return json({ok:false,error:'CORS_HEADER_NOT_ALLOWED',version:VERSION},400);
+    }
+    const headers=new Headers({
+      'access-control-allow-methods':'GET, HEAD, POST, OPTIONS',
+      'access-control-allow-headers':'Accept, Content-Type, Authorization, X-Idempotency-Key, X-CSRF-Token',
+      'access-control-max-age':'600',
+      'cache-control':'no-store',
+      'vary':'Origin, Access-Control-Request-Method, Access-Control-Request-Headers'
+    });
+    if(origin){
+      headers.set('access-control-allow-origin',origin);
+      headers.set('access-control-allow-credentials','true');
+    }
+    return new Response(null,{status:204,headers});
+  }
+
+  let response;
   try{
-    // Rejeter d'abord les méthodes non prises en charge sur les endpoints
-    // de diagnostic : une requête invalide ne doit pas dépendre de D1 ni
-    // déclencher le middleware de limitation de débit.
     const preflightUrl = new URL(request.url);
     const preflightPath = preflightUrl.pathname;
     const preflightMethod = request.method.toUpperCase();
     const getOnlyDiagnostics = new Set(['/api/health','/api/readiness','/api/info']);
-    // Apply browser-origin rejection before rate limiting or any D1 access.
-    // This keeps forbidden cross-origin writes a deterministic 403 even when
-    // the database is unavailable, instead of masking them as a generic 500.
-    if (isMutatingMethod(preflightMethod) && !securityOriginAllowed(request,env)) {
-      return json({ok:false,error:'ORIGIN_NOT_ALLOWED',version:VERSION},403);
+    const getOnlyProfileRoutes = new Set(['/api/clients','/api/intervenants']);
+    if (getOnlyProfileRoutes.has(preflightPath) && preflightMethod !== 'GET') {
+      return applyCorsHeaders(request,env,json({ok:false,error:'METHOD_NOT_ALLOWED',version:VERSION},405,{'allow':'GET'}));
     }
-    // Block anonymous mission validation before rate limiting touches D1.
     if (preflightPath === '/api/missions/validate') {
-      if (preflightMethod !== 'POST') return json({ok:false,error:'METHOD_NOT_ALLOWED',version:VERSION},405,{'allow':'POST'});
-      return json({ok:false,error:'AUTHENTICATED_VALIDATION_REQUIRED',version:VERSION,write_enabled:false},403);
+      if (preflightMethod !== 'POST') return applyCorsHeaders(request,env,json({ok:false,error:'METHOD_NOT_ALLOWED',version:VERSION},405,{'allow':'POST'}));
+      return applyCorsHeaders(request,env,json({ok:false,error:'AUTHENTICATED_VALIDATION_REQUIRED',version:VERSION,write_enabled:false},403));
     }
     if (getOnlyDiagnostics.has(preflightPath) && preflightMethod !== 'GET' && preflightMethod !== 'HEAD') {
-      return json({ok:false,error:'METHOD_NOT_ALLOWED',version:VERSION},405,{'allow':'GET, HEAD'});
+      return applyCorsHeaders(request,env,json({ok:false,error:'METHOD_NOT_ALLOWED',version:VERSION},405,{'allow':'GET, HEAD'}));
     }
     if (getOnlyDiagnostics.has(preflightPath) && preflightMethod === 'HEAD') {
-      const response = await __procheliaProductionSafetyHandle(new Request(request.url,{method:'GET',headers:request.headers}),env);
-      return new Response(null,{status:response.status,headers:response.headers});
+      const headResponse = await __procheliaProductionSafetyHandle(new Request(request.url,{method:'GET',headers:request.headers}),env);
+      return applyCorsHeaders(request,env,new Response(null,{status:headResponse.status,headers:headResponse.headers}));
     }
-    // Fail closed with a truthful service-unavailable response when a write
-    // needs the persistent rate limiter but D1 is not bound.
     if (isMutatingMethod(preflightMethod) && !env?.DB) {
-      return json({ok:false,error:'DATABASE_UNAVAILABLE',database:false,version:VERSION},503);
+      return applyCorsHeaders(request,env,json({ok:false,error:'DATABASE_UNAVAILABLE',database:false,version:VERSION},503));
     }
     const rate=await productionRateLimit(request,env);
-    if(!rate.ok) return rate.response;
-    const u=new URL(request.url);
-    if(u.pathname==='/api/system/final-audit' && request.method==='GET') return strictProductionAudit(request,env);
-    if(u.pathname==='/api/system/production-check' && request.method==='GET') return strictProductionAudit(request,env);
-    return __procheliaProductionSafetyHandle(request,env);
+    if(!rate.ok) response=rate.response;
+    else {
+      const u=new URL(request.url);
+      if(u.pathname==='/api/system/final-audit' && request.method==='GET') response=await strictProductionAudit(request,env);
+      else if(u.pathname==='/api/system/production-check' && request.method==='GET') response=await strictProductionAudit(request,env);
+      else response=await __procheliaProductionSafetyHandle(request,env);
+    }
   }catch(e){
-    return json({ok:false,error:'PRODUCTION_SAFETY_ERROR',version:VERSION},500);
+    console.error('PRODUCTION_SAFETY_MIDDLEWARE_ERROR',e instanceof Error?e.message:String(e));
+    response=json({ok:false,error:'PRODUCTION_SAFETY_ERROR',version:VERSION},500);
   }
+  return applyCorsHeaders(request,env,response);
 };

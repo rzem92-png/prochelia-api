@@ -1,0 +1,47 @@
+name: "PROCHÉLIA — valider config Worker restauré sans déploiement"
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "wrangler.restore-test.jsonc"
+      - ".github/workflows/deploy-restore-test-worker.yml"
+      - ".github/workflows/validate-restore-test-config.yml"
+  push:
+    branches: ["feat/stripe-connect-onboarding"]
+    paths:
+      - "wrangler.restore-test.jsonc"
+      - ".github/workflows/deploy-restore-test-worker.yml"
+      - ".github/workflows/validate-restore-test-config.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Vérifier que la configuration ne cible que la base restaurée
+        run: |
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const c=JSON.parse(fs.readFileSync('wrangler.restore-test.jsonc','utf8'));
+          if(c.name!=='prochelia-api-restore-test') throw new Error('Worker name mismatch');
+          if(c.d1_databases?.length!==1) throw new Error('Unexpected D1 bindings');
+          if(c.d1_databases[0].database_id!=='a3526c2a-39cb-49ab-97c4-979138145f33') throw new Error('Wrong restored database UUID');
+          if(['04f52830-ef5a-4f17-a640-42bbc2381bba','6adb95e5-e542-4bec-9008-fbea01042305'].includes(c.d1_databases[0].database_id)) throw new Error('Production/source preview database forbidden');
+          if(c.vars?.PAYMENT_PROVIDER!=='disabled') throw new Error('PSP must remain disabled on restore-test worker');
+          console.log('PASS: isolated Worker and restored D1 target verified.');
+          NODE
+      - name: Compiler Worker sans déploiement
+        run: |
+          node --check src/index.js
+          node --check src/stripe.js
+          npx --yes wrangler@4 deploy --config wrangler.restore-test.jsonc --dry-run
+      - name: Confirmer l'absence d'écriture ou déploiement
+        run: echo "Dry-run uniquement; aucun secret Cloudflare, aucune migration, aucune requête D1 distante, aucun déploiement."

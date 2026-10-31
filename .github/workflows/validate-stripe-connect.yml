@@ -1,0 +1,44 @@
+name: "PROCHÉLIA API — Stripe Connect sans déploiement"
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "src/**"
+      - "tests/**"
+      - ".github/workflows/validate-stripe-connect.yml"
+  push:
+    branches: ["feat/stripe-connect-onboarding"]
+    paths:
+      - "src/**"
+      - "tests/**"
+      - ".github/workflows/validate-stripe-connect.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  stripe-connect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Vérifier la syntaxe des modules Worker
+        run: |
+          node --check src/index.js
+          node --check src/stripe.js
+      - name: Tester CORS, profils, Stripe Connect et signatures webhook
+        run: node --test tests/cors-session.test.mjs tests/profile-read-routes.test.mjs tests/stripe-connect.test.mjs
+      - name: Vérifier que les paiements réels restent désactivés
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -Fq 'const STRIPE_CHARGES_AND_PAYOUTS_READY = false;' src/index.js
+          grep -Fq 'const SERVER_PRICING_POLICY_READY = false;' src/index.js
+          grep -Fq "REAL_PAYMENT_ADAPTER_NOT_READY" src/index.js
+          grep -Fq "REAL_PAYOUT_ADAPTER_NOT_READY" src/index.js
+      - name: Confirmer l'absence de déploiement
+        run: echo "Tests simulés uniquement; aucun appel Stripe réel, aucune écriture D1 distante, aucun déploiement."
