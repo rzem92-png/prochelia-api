@@ -1868,6 +1868,10 @@ async function pricingQuote(request, env) {
     return json({ok:false,error:'INVALID_URGENCY',version:VERSION},400);
   }
 
+  if(regulatedMax!==null && distance>0) {
+    return json({ok:false,error:'REGULATED_TRAVEL_TREATMENT_UNCONFIGURED',version:VERSION,
+      message:'Le traitement réglementaire des frais de déplacement dans le plafond doit être configuré et vérifié avant émission du devis.'},409);
+  }
   const strategic=financeStrategicQuote({
     basePriceCents:base,phaseFactor:cfg.pricingFactor,urgency,
     evening:calendar.evening,night:calendar.night,saturday:calendar.saturday,
