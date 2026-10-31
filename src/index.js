@@ -884,8 +884,8 @@ function paymentsConfigured(env) {
 async function paymentOnboard(request, env) {
   const auth = await getSessionUser(request, env);
   if (!requireRole(auth, ['intervenant'])) return json({ok:false,error:auth?.user?'FORBIDDEN':'UNAUTHENTICATED',version:VERSION},auth?.user?403:401);
-  if (paymentProvider(env)!=='stripe' || !env.STRIPE_SECRET_KEY) {
-    return json({ok:false,error:'STRIPE_CONNECT_NOT_CONFIGURED',version:VERSION,required:['PAYMENT_PROVIDER=stripe','STRIPE_SECRET_KEY','APP_BASE_URL']},503);
+  if (paymentProvider(env)!=='stripe' || !env.STRIPE_SECRET_KEY || !env.STRIPE_WEBHOOK_SECRET) {
+    return json({ok:false,error:'STRIPE_CONNECT_NOT_CONFIGURED',version:VERSION,required:['PAYMENT_PROVIDER=stripe','STRIPE_SECRET_KEY','STRIPE_WEBHOOK_SECRET','APP_BASE_URL']},503);
   }
   let appBase;
   try {
@@ -1028,7 +1028,6 @@ async function verifyWebhookSignature(request, env, rawBody) {
 }
 
 async function paymentWebhook(request, env) {
-  await ensurePaymentSchema(env);
   const raw=await request.text();
   const isStripe=paymentProvider(env)==='stripe';
   const signatureValid=isStripe
@@ -1039,6 +1038,7 @@ async function paymentWebhook(request, env) {
   const provider=isStripe?'stripe':(clean(event?.provider)||paymentProvider(env));
   const eventId=clean(event?.id), originalType=clean(event?.type);
   if(!eventId||!originalType) return json({ok:false,error:'INVALID_WEBHOOK_EVENT',version:VERSION},400);
+  await ensurePaymentSchema(env);
   const payloadHash=await sha256Base64url(raw);
   const inserted=await env.DB.prepare(`INSERT OR IGNORE INTO payment_webhook_events (id,provider,event_id,event_type,signature_valid,payload_hash) VALUES (?,?,?,?,1,?)`).bind(crypto.randomUUID(),provider,eventId,originalType,payloadHash).run();
   if(!inserted.meta?.changes) return json({ok:true,version:VERSION,duplicate:true,event_id:eventId},200);
