@@ -26,7 +26,7 @@ jobs:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       PREVIEW_DB_ID: "6adb95e5-e542-4bec-9008-fbea01042305"
       RESTORE_DB_ID: "a3526c2a-39cb-49ab-97c4-979138145f33"
-      BATCH_SIZE: "100"
+      BATCH_SIZE: "500"
       MAX_ROWS_PER_TABLE: "1000000"
 
     steps:
@@ -136,7 +136,7 @@ jobs:
           }
 
           function digestSchema(target) {
-            const rows = query(target, "SELECT type, name, tbl_name, COALESCE(sql,'') AS sql FROM sqlite_master WHERE type IN ('table','index','view','trigger') AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%' ORDER BY type,name,tbl_name");
+            const rows = query(target, "SELECT type, name, tbl_name, COALESCE(sql,'') AS sql FROM sqlite_master WHERE type IN ('table','index','view','trigger') AND name NOT GLOB 'sqlite_*' AND name NOT GLOB '_cf_*' ORDER BY type,name,tbl_name");
             const h = createHash("sha256");
             for (const row of rows) h.update(JSON.stringify([row.type,row.name,row.tbl_name,row.sql]) + "\n");
             return { hash: h.digest("hex"), objects: rows.length };
@@ -156,17 +156,25 @@ jobs:
             h.update(JSON.stringify({ table, columns }) + "\n");
             for (let offset = 0; offset < total; offset += batchSize) {
               const rows = query(target, "SELECT * FROM " + name + " ORDER BY " + order + " LIMIT " + batchSize + " OFFSET " + offset);
-              if (rows.length === 0) throw new Error("Lot vide inattendu pour " + table + " à l'offset " + offset);
+              const expected = Math.min(batchSize, total - offset);
+              if (rows.length !== expected) throw new Error("Lot incomplet pour " + table + " à l'offset " + offset);
               for (const row of rows) {
                 const values = columns.map(c => row[c]);
                 h.update(JSON.stringify(values) + "\n");
               }
             }
+            const finalCountRows = query(target, "SELECT COUNT(*) AS n FROM " + name);
+            const finalCount = Number(finalCountRows[0]?.n);
+            if (finalCount !== total) throw new Error("La table " + table + " a changé pendant la lecture; comparaison interrompue.");
             return { rows: total, columns, hash: h.digest("hex") };
           }
 
           function inspect(target) {
-            const tables = query(target, "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%' ORDER BY name").map(x => x.name);
+            const quickCheck = query(target, "PRAGMA quick_check");
+            if (!quickCheck.length || quickCheck.some(row => Object.values(row)[0] !== "ok")) {
+              throw new Error("PRAGMA quick_check non valide pour " + target.label);
+            }
+            const tables = query(target, "SELECT name FROM sqlite_master WHERE type='table' AND name NOT GLOB 'sqlite_*' AND name NOT GLOB '_cf_*' ORDER BY name").map(x => x.name);
             const schema = digestSchema(target);
             const tableResults = {};
             for (const table of tables) {
