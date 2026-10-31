@@ -3834,6 +3834,10 @@ handle = async function(request,env){
       const response = await __procheliaProductionSafetyHandle(new Request(request.url,{method:'GET',headers:request.headers}),env);
       return new Response(null,{status:response.status,headers:response.headers});
     }
+    // Production audit persists evidence and therefore is an explicit POST action, never a GET side effect.
+    if ((preflightPath === '/api/system/final-audit' || preflightPath === '/api/system/production-check') && preflightMethod !== 'POST') {
+      return json({ok:false,error:'METHOD_NOT_ALLOWED',version:VERSION},405,{'allow':'POST'});
+    }
     // Fail closed with a truthful service-unavailable response when a write
     // needs the persistent rate limiter but D1 is not bound.
     if (isMutatingMethod(preflightMethod) && !env?.DB) {
