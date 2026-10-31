@@ -174,3 +174,16 @@ test("PSP settlement validates provider, exact amount and currency before wallet
   assert.match(route,/PSP_PAYOUT_AMOUNT_OR_CURRENCY_MISMATCH/);
   assert.match(route,/amount!==Number\(payout\.amount_cents\)/);
 });
+
+
+test('payment wallet settlement uses a transactional D1 batch', () => {
+  const route=source.slice(source.indexOf('async function paymentWebhook'),source.indexOf('async function openPaymentDispute'));
+  assert.ok(route.includes('env.DB.batch([txUpdate,walletCredit])'));
+  assert.ok(route.includes('changes()=1'));
+});
+
+test('payout wallet settlement and release use transactional D1 batches', () => {
+  const route=source.slice(source.indexOf('async function paymentWebhook'),source.indexOf('async function openPaymentDispute'));
+  assert.ok(route.includes('env.DB.batch([payoutUpdate,settle])'));
+  assert.ok(route.includes('env.DB.batch([payoutUpdate,release])'));
+});
