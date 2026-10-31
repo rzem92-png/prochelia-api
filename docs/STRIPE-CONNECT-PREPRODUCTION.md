@@ -65,3 +65,11 @@ Copier le secret de signature fourni par Stripe dans `STRIPE_WEBHOOK_SECRET`. Le
 6. Laisser les paiements et versements désactivés tant que les parcours de charge, remboursement, transfert, rapprochement et litige ne sont pas implémentés et testés.
 
 Aucun déploiement production ni aucune clé live n'est autorisé par ce document.
+
+## Documentation Stripe officielle
+
+- [Accounts v2 — créer un compte connecté](https://docs.stripe.com/api/v2/core/accounts/create)
+- [Account Tokens v2 — créer un jeton de compte](https://docs.stripe.com/api/v2/core/account-tokens/create)
+- [Account Links v2 — créer un lien d'onboarding](https://docs.stripe.com/api/v2/core/account-links/create)
+- [Accounts v2 — guide Connect](https://docs.stripe.com/connect/accounts-v2)
+- [Webhooks Stripe — vérifier les signatures](https://docs.stripe.com/webhooks/signature)
