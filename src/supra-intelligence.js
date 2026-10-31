@@ -43,7 +43,7 @@ export function assessSupraDecision(input = {}) {
     SENSITIVE_CASES.has(caseType) || SENSITIVE_ACTIONS.has(action) ||
     missingEvidence.length > 0;
   const safeReadOnly = LOW_IMPACT_READ_ONLY.has(action) &&
-    impact === "LOW" && missingEvidence.length === 0;
+    impact === "LOW" && missingEvidence.length === 0 && !professionalEscalationRequired;
   const managerApprovalRequired = !safeReadOnly || role !== "gerante";
   const autonomy = professionalEscalationRequired ? "URGENT_HUMAN_ESCALATION" : safeReadOnly ? "AUTONOMOUS_READ_ONLY" : "RECOMMEND_AND_WAIT";
   const risk = impact === "CRITICAL" ? "CRITICAL" :
