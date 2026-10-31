@@ -154,7 +154,8 @@ test("PSP webhook delivery is retryable, collision-checked and atomically claime
   assert.match(route,/PAYMENT_TRANSACTION_NOT_FOUND/);
   assert.match(route,/PAYOUT_REQUEST_NOT_FOUND/);
   assert.match(route,/UPDATE payment_transactions SET status=\?,provider_payment_id=.*AND status NOT IN/);
-  assert.match(route,/if\(changed\.meta\?\.changes && newStatus==='paid'\)/);
+  assert.ok(route.includes('env.DB.batch([txUpdate,walletCredit])'));
+  assert.ok(route.includes('changes()=1'));
   assert.ok(route.indexOf("INTERVENANT_WALLET_NOT_FOUND") < route.indexOf("UPDATE payment_transactions SET status="));
 });
 
