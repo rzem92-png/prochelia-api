@@ -43,3 +43,9 @@ test("explicit domain aliases cannot select inherited object properties", () => 
  assert.equal(p.domain,"direction");
  assert.equal(p.executionAllowed,false);
 });
+
+test("prototype-like case names do not resolve to inherited aliases", () => {
+ for (const caseType of ["toString", "constructor", "__proto__"]) {
+  assert.equal(buildSupraPlan({caseType}).domain,"direction");
+ }
+});
