@@ -29,7 +29,7 @@ test("high and critical impacts require manager approval", () => {
   }
 });
 
-test("plans include evidence collection, alternatives and approval for sensitive work", () => {
+test("plans include evidence collection and approval for sensitive work", () => {
   const plan = buildSupraPlan({
     caseType:"remboursement", impact:"HIGH", requestedAction:"REFUND",
     context:{mission_id:"m1",client_id:"c1"}, market:"fr"
@@ -38,12 +38,14 @@ test("plans include evidence collection, alternatives and approval for sensitive
   assert.ok(plan.steps.includes("collect_authorized_evidence"));
   assert.ok(plan.steps.includes("request_explicit_manager_approval"));
   assert.ok(plan.steps.includes("verify_outcomes_and_log_evidence"));
+  assert.ok(Array.isArray(plan.missingEvidence));
 });
 
 test("emergency and safeguarding signals are escalated", () => {
   const plan = buildSupraPlan({caseType:"danger_personne",impact:"CRITICAL",context:{immediateDanger:true}});
-  assert.ok(plan.escalation);
+  assert.equal(plan.autonomy.level, "URGENT_HUMAN_ESCALATION");
   assert.equal(plan.autonomy.executionAllowed, false);
+  assert.equal(plan.professionalEscalationRequired, true);
 });
 
 test("resilience rejects invalid financial assumptions", () => {
