@@ -39,3 +39,17 @@ jobs:
         run: |
           echo "Contrôle syntaxique uniquement."
           echo "Aucun accès Cloudflare, aucune requête D1, aucune migration, aucun déploiement."
+
+      - name: Vérifier la disponibilité publique de l'API (GET uniquement)
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --max-time 20 \
+            "https://prochelia-api.rzem92.workers.dev/api/health" \
+            -o "$RUNNER_TEMP/prochelia-health.json"
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const health = JSON.parse(fs.readFileSync(process.env.RUNNER_TEMP + '/prochelia-health.json', 'utf8'));
+          if (health.ok !== true) throw new Error('L’API publique ne confirme pas ok=true.');
+          console.log(JSON.stringify({ok:health.ok,service:health.service ?? null,version:health.version ?? null}));
+          NODE
