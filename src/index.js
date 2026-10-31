@@ -1573,12 +1573,25 @@ async function pricingQuote(request, env) {
     fuelMode==='high'?'fuel_reference_price_cents_litre_high':'fuel_reference_price_cents_litre_normal',
     fuelMode==='high'?200:175));
   const software=Number(policy?.software_cost_cents??await getSetting(env,'software_monthly_cost_cents',0));
-  const pspPercent=Number(policy?.psp_percent??await getSetting(env,'psp_percent',0));
-  const pspFixed=Number(policy?.psp_fixed_cents??await getSetting(env,'psp_fixed_cents',0));
-  const targetMargin=Number(policy?.target_margin_percent??await getSetting(env,'default_margin_percent',FINANCE_STRATEGIC.marginFloorPercent));
-  const commissionRate=Number(policy?.platform_fee_percent??FINANCE_STRATEGIC.commissionDefaultPercent)/100;
-  const intervenantFloor=Math.max(0,Math.round(Number(policy?.intervenant_floor_cents??(base*0.70))));
+  const pspPercent=Number(policy?.psp_percent||await getSetting(env,'psp_percent',0));
+  const pspFixed=Number(policy?.psp_fixed_cents||await getSetting(env,'psp_fixed_cents',0));
+  const configuredMargin=Number(policy?.target_margin_percent||0);
+  const targetMargin=configuredMargin>0?configuredMargin:Number(await getSetting(env,'default_margin_percent',FINANCE_STRATEGIC.marginFloorPercent));
+  const configuredCommission=Number(policy?.platform_fee_percent||0);
+  const commissionRate=(configuredCommission>0?configuredCommission:FINANCE_STRATEGIC.commissionDefaultPercent)/100;
+  const configuredProviderFloor=Number(policy?.intervenant_floor_cents||0);
+  const intervenantFloor=Math.max(0,Math.round(configuredProviderFloor>0?configuredProviderFloor:base*0.70));
   const regulatedMax=Number(policy?.client_ceiling_cents)>0?Number(policy.client_ceiling_cents):null;
+  const financeInputs=[fuelPriceCentsPerLitre,software,pspPercent,pspFixed,targetMargin,commissionRate,intervenantFloor];
+  if(financeInputs.some(value=>!Number.isFinite(value)||value<0) ||
+     fuelPriceCentsPerLitre>1000 || pspPercent>20 || pspFixed>100000 ||
+     targetMargin>100 || commissionRate>1 || intervenantFloor>base*3 ||
+     (regulatedMax!==null && (!Number.isSafeInteger(regulatedMax)||regulatedMax<=0))) {
+    return json({ok:false,error:'SERVER_PRICING_POLICY_INVALID',version:VERSION},409);
+  }
+  if(regulatedMax!==null && intervenantFloor>regulatedMax) {
+    return json({ok:false,error:'PRICING_POLICY_INFEASIBLE',version:VERSION},409);
+  }
 
   let calendar={evening:false,night:false,saturday:false,sunday:false,holiday:false,lastMinute:false,localDate:null};
   if(b.scheduled_at!==undefined) {
