@@ -1306,21 +1306,32 @@ async function paymentWebhook(request, env) {
     if(payout&&newStatus){
       const alreadyFinal=['completed','failed','canceled'].includes(payout.status);
       if(!alreadyFinal){
-        const payoutLedgerKey=`payout:${payoutId}:${newStatus}`;
-        const payoutBatch=await env.DB.batch([
-          env.DB.prepare(`UPDATE payout_requests SET status=?,provider_payout_id=COALESCE(?,provider_payout_id),failure_code=?,failure_message=?,completed_at=CASE WHEN ?='completed' THEN CURRENT_TIMESTAMP ELSE completed_at END,updated_at=CURRENT_TIMESTAMP WHERE id=? AND status IN ('requested','processing')`).bind(newStatus,clean(event?.data?.provider_payout_id)||null,clean(event?.data?.failure_code)||null,clean(event?.data?.failure_message)||null,newStatus,payoutId),
-          env.DB.prepare(`INSERT OR IGNORE INTO payment_wallet_ledger
-            (id,idempotency_key,payout_id,user_id,entry_type,available_delta_cents,reserved_delta_cents,paid_delta_cents,currency,metadata_json)
-            SELECT ?,?,p.id,p.user_id,?,
-              CASE WHEN ? IN ('failed','canceled') THEN p.amount_cents ELSE 0 END,
-              -p.amount_cents,
-              CASE WHEN ?='completed' THEN p.amount_cents ELSE 0 END,
-              p.currency,?
-            FROM payout_requests p WHERE p.id=? AND p.status=?
-              AND NOT EXISTS(SELECT 1 FROM payment_wallet_ledger WHERE idempotency_key=?)`)
-            .bind(crypto.randomUUID(),payoutLedgerKey,`PAYOUT_${newStatus.toUpperCase()}`,newStatus,newStatus,JSON.stringify({stripe_event_id:event.id}),payoutId,newStatus,payoutLedgerKey)
-        ]);
-        if(Number(payoutBatch?.[0]?.meta?.changes||0)===1) result='PAYOUT_'+newStatus.toUpperCase();
+        if(newStatus==='processing'){
+          // A processing notification is informational: the funds remain reserved.
+          // Only a terminal PSP event may release the reservation or mark funds paid.
+          const processingUpdate=await env.DB.prepare(`UPDATE payout_requests
+            SET status='processing',provider_payout_id=COALESCE(?,provider_payout_id),
+                updated_at=CURRENT_TIMESTAMP
+            WHERE id=? AND status IN ('requested','processing')`).bind(
+              clean(event?.data?.provider_payout_id)||null,payoutId).run();
+          if(Number(processingUpdate?.meta?.changes||0)===1) result='PAYOUT_PROCESSING';
+        } else {
+          const payoutLedgerKey=`payout:${payoutId}:${newStatus}`;
+          const payoutBatch=await env.DB.batch([
+            env.DB.prepare(`UPDATE payout_requests SET status=?,provider_payout_id=COALESCE(?,provider_payout_id),failure_code=?,failure_message=?,completed_at=CASE WHEN ?='completed' THEN CURRENT_TIMESTAMP ELSE completed_at END,updated_at=CURRENT_TIMESTAMP WHERE id=? AND status IN ('requested','processing')`).bind(newStatus,clean(event?.data?.provider_payout_id)||null,clean(event?.data?.failure_code)||null,clean(event?.data?.failure_message)||null,newStatus,payoutId),
+            env.DB.prepare(`INSERT OR IGNORE INTO payment_wallet_ledger
+              (id,idempotency_key,payout_id,user_id,entry_type,available_delta_cents,reserved_delta_cents,paid_delta_cents,currency,metadata_json)
+              SELECT ?,?,p.id,p.user_id,?,
+                CASE WHEN ? IN ('failed','canceled') THEN p.amount_cents ELSE 0 END,
+                -p.amount_cents,
+                CASE WHEN ?='completed' THEN p.amount_cents ELSE 0 END,
+                p.currency,?
+              FROM payout_requests p WHERE p.id=? AND p.status=?
+                AND NOT EXISTS(SELECT 1 FROM payment_wallet_ledger WHERE idempotency_key=?)`)
+              .bind(crypto.randomUUID(),payoutLedgerKey,`PAYOUT_${newStatus.toUpperCase()}`,newStatus,newStatus,JSON.stringify({provider_event_id:eventId}),payoutId,newStatus,payoutLedgerKey)
+          ]);
+          if(Number(payoutBatch?.[0]?.meta?.changes||0)===1) result='PAYOUT_'+newStatus.toUpperCase();
+        }
       }
     }
   }
