@@ -22,6 +22,7 @@ const scripts = packageJson.scripts || {};
 
 check(Boolean(source), 'Worker source is present');
 check(fs.existsSync('docs/COMPLIANCE_AND_GOVERNANCE_GATE.md'), 'National and international compliance gate document is present');
+check(fs.existsSync('docs/LEGAL_RESPONSIBILITY_AND_PLATFORM_MODEL.md'), 'Legal responsibility and marketplace model gate is present');
 check(Boolean(scripts['test:prelaunch']), 'test:prelaunch script is defined');
 
 const runtimeSchemaCalls = [...source.matchAll(/\bawait\s+(ensure[A-Za-z0-9_]*Schema)\s*\(\s*env\s*\)/g)]
