@@ -105,19 +105,20 @@ jobs:
           function quoteIdent(s) { return '"' + String(s).replaceAll('"', '""') + '"'; }
 
           function findRows(value, depth = 0) {
-            if (depth > 8 || value == null) return null;
+            if (depth > 10 || value == null) return null;
             if (Array.isArray(value)) {
               if (value.length === 0) return value;
+              const wrapper = value.find(x => x && typeof x === "object" && !Array.isArray(x) &&
+                (Array.isArray(x.results) || Array.isArray(x.result?.results)));
+              if (wrapper) return findRows(wrapper.results ?? wrapper.result.results, depth + 1);
               if (value.every(x => x && typeof x === "object" && !Array.isArray(x))) return value;
-              for (const v of value) { const r = findRows(v, depth + 1); if (r) return r; }
+              for (const v of value) { const r = findRows(v, depth + 1); if (r !== null) return r; }
               return null;
             }
             if (typeof value === "object") {
-              if (Array.isArray(value.results)) {
-                const direct = value.results;
-                if (direct.length === 0 || direct.every(x => x && typeof x === "object" && !Array.isArray(x))) return direct;
-              }
-              for (const v of Object.values(value)) { const r = findRows(v, depth + 1); if (r) return r; }
+              if (Array.isArray(value.results)) return findRows(value.results, depth + 1);
+              if (Array.isArray(value.result?.results)) return findRows(value.result.results, depth + 1);
+              for (const v of Object.values(value)) { const r = findRows(v, depth + 1); if (r !== null) return r; }
             }
             return null;
           }
