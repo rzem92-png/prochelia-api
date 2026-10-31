@@ -54,6 +54,7 @@ jobs:
             "0002_server_pricing.sql",
             "0003_route_address_provenance.sql",
             "0004_atomic_wallet_ledger.sql",
+            "0005_security_rate_limits.sql",
           ):
             p = Path("migrations") / name
             assert p.is_file() and p.stat().st_size > 0, f"Missing migration: {name}"
