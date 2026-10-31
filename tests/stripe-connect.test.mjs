@@ -11,10 +11,10 @@ test("Stripe API helper sends a server-side secret and idempotency key", async()
   const result=await stripePost(
     {STRIPE_SECRET_KEY:"sk_test_unit"},
     "v2/core/accounts",
-    {type:"express",country:"FR",email:"provider@example.test"},
+    {dashboard:"express",contact_email:"provider@example.test"},
     "prochelia-test-idem",
     async(url,init)=>{
-      captured={url,init,body:String(init.body)};
+      captured={url,init,body:JSON.parse(String(init.body))};
       return new Response(JSON.stringify({id:"acct_test123"}),{status:200,headers:{"content-type":"application/json"}});
     }
   );
@@ -22,8 +22,9 @@ test("Stripe API helper sends a server-side secret and idempotency key", async()
   assert.equal(captured.url,"https://api.stripe.com/v2/core/accounts");
   assert.equal(captured.init.headers.Authorization,"Bearer sk_test_unit");
   assert.equal(captured.init.headers["Idempotency-Key"],"prochelia-test-idem");
-  assert.match(captured.body,/type=express/);
-  assert.match(captured.body,/country=FR/);
+  assert.equal(captured.init.headers["Stripe-Version"],"2026-10-28.endive");
+  assert.equal(captured.init.headers["Content-Type"],"application/json");
+  assert.equal(captured.body.dashboard,"express");
 });
 
 async function stripeSignature(secret,timestamp,body){
@@ -79,18 +80,18 @@ test("Stripe Connect onboarding creates the account and a fresh onboarding link 
   const originalFetch=globalThis.fetch;
   const calls=[];
   globalThis.fetch=async(url,init)=>{
-    calls.push({url,init,body:String(init.body)});
+    calls.push({url,init,body:JSON.parse(String(init.body))});
     if(String(url).endsWith("/v2/core/accounts")) return new Response(JSON.stringify({id:"acct_test123"}),{status:200,headers:{"content-type":"application/json"}});
-    if(String(url).endsWith("/v1/account_links")) return new Response(JSON.stringify({url:"https://connect.stripe.com/setup/test",expires_at:1799999999}),{status:200,headers:{"content-type":"application/json"}});
+    if(String(url).endsWith("/v2/core/account_links")) return new Response(JSON.stringify({url:"https://connect.stripe.com/setup/test",expires_at:1799999999}),{status:200,headers:{"content-type":"application/json"}});
     throw new Error("Unexpected Stripe endpoint");
   };
   try{
     const fake=fakeDb("intervenant");
-    const env={DB:fake.DB,PAYMENT_PROVIDER:"stripe",STRIPE_SECRET_KEY:"sk_test_unit",STRIPE_WEBHOOK_SECRET:"whsec_unit",STRIPE_DASHBOARD:"express",STRIPE_FEES_COLLECTOR:"application",STRIPE_LOSSES_COLLECTOR:"application",APP_BASE_URL:"https://prochelia.pages.dev"};
+    const env={DB:fake.DB,PAYMENT_PROVIDER:"stripe",STRIPE_SECRET_KEY:"sk_test_unit",STRIPE_PUBLISHABLE_KEY:"pk_test_unit",STRIPE_WEBHOOK_SECRET:"whsec_unit",STRIPE_DASHBOARD:"express",STRIPE_FEES_COLLECTOR:"application",STRIPE_LOSSES_COLLECTOR:"application",APP_BASE_URL:"https://prochelia.pages.dev"};
     const response=await worker.fetch(new Request("https://api.test/api/payments/onboard",{
       method:"POST",
       headers:{Origin:"https://prochelia.pages.dev",Cookie:"prochelia_session=synthetic-token","Content-Type":"application/json"},
-      body:JSON.stringify({provider_account_id:"acct_attacker_controlled"})
+      body:JSON.stringify({account_token:"acctok_test123",stripe_terms_accepted:true,provider_account_id:"acct_attacker_controlled"})
     }),env);
     const body=await response.json();
     assert.equal(response.status,201,JSON.stringify(body));
@@ -99,14 +100,16 @@ test("Stripe Connect onboarding creates the account and a fresh onboarding link 
     assert.equal(response.headers.get("access-control-allow-origin"),"https://prochelia.pages.dev");
     assert.equal(calls.length,2);
     assert.equal(calls[0].init.headers.Authorization,"Bearer sk_test_unit");
-    assert.match(calls[0].body,/email=provider%40example.test/);
-    assert.match(calls[0].body,/dashboard=express/);
-    assert.match(calls[0].body,/identity%5Bcountry%5D=FR/);
-    assert.match(calls[0].body,/defaults%5Bresponsibilities%5D%5Bfees_collector%5D=application/);
-    assert.match(calls[0].body,/defaults%5Bresponsibilities%5D%5Blosses_collector%5D=application/);
-    assert.doesNotMatch(calls[0].body,/acct_attacker_controlled/);
-    assert.match(calls[1].body,/account=acct_test123/);
-    assert.match(calls[1].body,/use_case%5Btype%5D=account_onboarding/);
+    assert.equal(calls[0].init.headers["Stripe-Version"],"2026-10-28.endive");
+    assert.equal(calls[0].body.account_token,"acctok_test123");
+    assert.equal(calls[0].body.dashboard,"express");
+    assert.equal(calls[0].body.defaults.responsibilities.fees_collector,"application");
+    assert.equal(calls[0].body.defaults.responsibilities.losses_collector,"application");
+    assert.equal(calls[0].body.metadata.prochelia_user_id,"user-test-1");
+    assert.equal(JSON.stringify(calls[0].body).includes("acct_attacker_controlled"),false);
+    assert.equal(calls[1].body.account,"acct_test123");
+    assert.equal(calls[1].body.use_case.type,"account_onboarding");
+    assert.deepEqual(calls[1].body.use_case.account_onboarding.configurations,["recipient"]);
     assert.ok(fake.calls.some(x=>x.sql.includes("INSERT INTO payment_accounts") && x.args.includes("acct_test123")));
   } finally {
     globalThis.fetch=originalFetch;
