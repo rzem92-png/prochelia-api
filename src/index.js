@@ -4778,11 +4778,6 @@ async function productionRateLimitSchemaReady(env){
   return row?.ready===1;
 }
 
-async function productionSubjectHash(request, route){
-  const ip=clean(request.headers.get('CF-Connecting-IP')) || clean(request.headers.get('X-Forwarded-For')) || 'unknown';
-  return sha256Hex(`${ip}|${route}`);
-}
-
 async function productionRateLimit(request,env){
   if(!isMutatingMethod(request.method)) return {ok:true};
   const path=new URL(request.url).pathname;
