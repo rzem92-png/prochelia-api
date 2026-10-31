@@ -1287,6 +1287,43 @@ async function ensureConsolidatedSchema(env) {
       BEGIN SELECT RAISE(ABORT,'ACCOUNTING_LEDGER_IMMUTABLE'); END`,
     `CREATE TRIGGER IF NOT EXISTS trg_ledger_immutable_delete BEFORE DELETE ON accounting_ledger
       BEGIN SELECT RAISE(ABORT,'ACCOUNTING_LEDGER_IMMUTABLE'); END`,
+    `CREATE TABLE IF NOT EXISTS accounting_operations (
+      id TEXT PRIMARY KEY, idempotency_key TEXT NOT NULL UNIQUE, reference_type TEXT NOT NULL,
+      reference_id TEXT NOT NULL, currency TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'DRAFT',
+      description TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, posted_at TEXT)`,
+    `CREATE TABLE IF NOT EXISTS accounting_operation_lines (
+      id TEXT PRIMARY KEY, operation_id TEXT NOT NULL, account_code TEXT NOT NULL,
+      direction TEXT NOT NULL, amount_cents INTEGER NOT NULL, label TEXT,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY(operation_id) REFERENCES accounting_operations(id))`,
+    `CREATE INDEX IF NOT EXISTS idx_accounting_lines_operation ON accounting_operation_lines(operation_id)`,
+    `CREATE TRIGGER IF NOT EXISTS trg_accounting_line_validate BEFORE INSERT ON accounting_operation_lines
+      WHEN NEW.amount_cents<=0 OR NEW.direction NOT IN ('DEBIT','CREDIT')
+        OR length(trim(NEW.account_code))=0
+        OR NOT EXISTS (SELECT 1 FROM accounting_operations WHERE id=NEW.operation_id AND status='DRAFT')
+      BEGIN SELECT RAISE(ABORT,'ACCOUNTING_OPERATION_LINE_INVALID'); END`,
+    `CREATE TRIGGER IF NOT EXISTS trg_accounting_operation_post BEFORE UPDATE OF status ON accounting_operations
+      WHEN OLD.status='DRAFT' AND NEW.status='POSTED'
+        AND ((SELECT COUNT(*) FROM accounting_operation_lines WHERE operation_id=NEW.id)<2
+          OR (SELECT COALESCE(SUM(CASE direction WHEN 'DEBIT' THEN amount_cents WHEN 'CREDIT' THEN -amount_cents ELSE 0 END),0)
+              FROM accounting_operation_lines WHERE operation_id=NEW.id)<>0
+          OR (SELECT COUNT(DISTINCT account_code) FROM accounting_operation_lines WHERE operation_id=NEW.id)<2)
+      BEGIN SELECT RAISE(ABORT,'ACCOUNTING_OPERATION_NOT_BALANCED'); END`,
+    `CREATE TRIGGER IF NOT EXISTS trg_accounting_operation_immutable BEFORE UPDATE ON accounting_operations
+      WHEN OLD.status='POSTED'
+      BEGIN SELECT RAISE(ABORT,'ACCOUNTING_OPERATION_IMMUTABLE'); END`,
+    `CREATE TRIGGER IF NOT EXISTS trg_accounting_operation_no_delete BEFORE DELETE ON accounting_operations
+      WHEN OLD.status='POSTED'
+      BEGIN SELECT RAISE(ABORT,'ACCOUNTING_OPERATION_IMMUTABLE'); END`,
+    `CREATE TRIGGER IF NOT EXISTS trg_accounting_lines_immutable_update BEFORE UPDATE ON accounting_operation_lines
+      WHEN EXISTS (SELECT 1 FROM accounting_operations WHERE id=OLD.operation_id AND status='POSTED')
+      BEGIN SELECT RAISE(ABORT,'ACCOUNTING_OPERATION_IMMUTABLE'); END`,
+    `CREATE TRIGGER IF NOT EXISTS trg_accounting_lines_immutable_delete BEFORE DELETE ON accounting_operation_lines
+      WHEN EXISTS (SELECT 1 FROM accounting_operations WHERE id=OLD.operation_id AND status='POSTED')
+      BEGIN SELECT RAISE(ABORT,'ACCOUNTING_OPERATION_IMMUTABLE'); END`,
+    `CREATE TRIGGER IF NOT EXISTS trg_accounting_lines_no_late_insert BEFORE INSERT ON accounting_operation_lines
+      WHEN EXISTS (SELECT 1 FROM accounting_operations WHERE id=NEW.operation_id AND status<>'DRAFT')
+      BEGIN SELECT RAISE(ABORT,'ACCOUNTING_OPERATION_IMMUTABLE'); END`,
     `CREATE TABLE IF NOT EXISTS business_expenses (id TEXT PRIMARY KEY, category TEXT NOT NULL, supplier TEXT, amount_cents INTEGER NOT NULL, recurring INTEGER NOT NULL DEFAULT 0, period TEXT, metadata_json TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`,
     `CREATE TABLE IF NOT EXISTS notification_outbox (id TEXT PRIMARY KEY, channel TEXT NOT NULL, recipient_ref TEXT NOT NULL, template TEXT NOT NULL, payload_json TEXT NOT NULL DEFAULT '{}', status TEXT NOT NULL DEFAULT 'PENDING', attempts INTEGER NOT NULL DEFAULT 0, last_error TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, sent_at TEXT)`,
     `CREATE TABLE IF NOT EXISTS compliance_events (id TEXT PRIMARY KEY, type TEXT NOT NULL, severity TEXT NOT NULL, entity_type TEXT, entity_id TEXT, status TEXT NOT NULL DEFAULT 'OPEN', details_json TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, closed_at TEXT)`
