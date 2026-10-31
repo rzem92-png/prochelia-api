@@ -413,3 +413,18 @@ test("mission security accepts only current, referenced identity evidence with a
   assert.match(helper,/isCurrentIdentityEvidence\(row, now\)/);
   assert.doesNotMatch(helper,/expires_at IS NULL/);
 });
+
+
+test("mission security preparation binds caller identifiers to the authoritative D1 assignment", () => {
+  const start=source.indexOf("async function securityPrepareMission");
+  const end=source.indexOf("async function securityPresence",start);
+  const handler=source.slice(start,end);
+  assert.ok(start>=0 && end>start);
+  assert.match(handler,/SELECT id,client_id,intervenant_id FROM missions WHERE id=\? LIMIT 1/);
+  assert.match(handler,/MISSION_NOT_FOUND/);
+  assert.match(handler,/String\(mission\.client_id\)!==clientId/);
+  assert.match(handler,/String\(mission\.intervenant_id\)!==intervenantId/);
+  assert.match(handler,/MISSION_ASSIGNMENT_MISMATCH/);
+  assert.ok(handler.indexOf("MISSION_ASSIGNMENT_MISMATCH") < handler.indexOf("requireVerifiedIntervenant"));
+  assert.ok(handler.indexOf("MISSION_ASSIGNMENT_MISMATCH") < handler.indexOf("securityCode()"));
+});
