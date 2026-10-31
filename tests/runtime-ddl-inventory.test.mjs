@@ -20,15 +20,19 @@ test('runtime DDL helper inventory stays explicit until versioned migrations rep
   ]);
 });
 
-test('rate limiting does not silently lose its schema dependency from the audit inventory', () => {
-  const start = source.indexOf('async function productionRateLimit');
+test('rate limiting has an explicit read-only schema dependency and no runtime DDL', () => {
+  const start = source.indexOf('async function productionRateLimit(request,env)');
   const end = source.indexOf('async function strictProductionAudit', start);
   assert.notEqual(start, -1);
   assert.notEqual(end, -1);
   const route = source.slice(start, end);
-  assert.match(route, /ensureFinalHardeningSchema\(env\)/);
+  assert.match(route, /productionRateLimitSchemaReady\(env\)/);
+  assert.match(source, /SELECT 1 AS ready FROM sqlite_master WHERE type='table' AND name='security_rate_limits'/);
+  assert.match(route, /RATE_LIMIT_SCHEMA_NOT_READY/);
+  assert.doesNotMatch(route, /ensure\w+Schema\s*\(/);
+  assert.doesNotMatch(route, /CREATE TABLE|CREATE INDEX|CREATE TRIGGER/i);
+  assert.doesNotMatch(source, /productionSafetySchema\s*\(/);
 });
-
 test('the catalogue still has two distinct read paths and cannot be consolidated without a migration', () => {
   assert.match(source, /SELECT \* FROM prestations ORDER BY id/);
   assert.match(source, /SELECT \* FROM métier_catalog WHERE active=1/);
