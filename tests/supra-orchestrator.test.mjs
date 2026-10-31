@@ -151,3 +151,25 @@ test("replacement identifiers and claimed verification flags never unlock autono
  assert.ok(p.missingEvidence.includes("verify_provider_availability_server_side"));
  assert.equal(p.executionAllowed,false);
 });
+
+test("accepts the SUPRA console problem statement without treating it as trusted evidence", () => {
+ const p=buildSupraPlan({
+  caseType:"analyse_generale",
+  impact:"LOW",
+  requestedAction:"ANALYZE_AND_PROPOSE",
+  context:{problem_statement:"Optimiser les coûts marketing et la rentabilité des promotions."}
+ });
+ assert.equal(p.rejectionReason,undefined);
+ assert.equal(p.domain,"direction");
+ assert.equal(p.executionAllowed,false);
+ assert.equal(p.autonomy.approvalRequired,true);
+});
+
+test("rejects malformed or oversized problem statements", () => {
+ for (const problem_statement of [42, "x".repeat(4001)]) {
+  const p=buildSupraPlan({context:{problem_statement}});
+  assert.equal(p.executionAllowed,false);
+  assert.equal(p.autonomy.approvalRequired,true);
+  assert.equal(p.rejectionReason,"INVALID_CONTEXT_FIELD");
+ }
+});
