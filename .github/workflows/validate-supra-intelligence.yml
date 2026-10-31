@@ -1,0 +1,35 @@
+name: Validate PROCHÉLIA IA SUPRA-INTELLIGENTE
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "src/index.js"
+      - "src/v7.js"
+      - "src/supra-intelligence.js"
+      - "tests/supra-*.test.mjs"
+      - ".github/workflows/validate-supra-intelligence.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  supra-governance:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Check JavaScript syntax
+        run: |
+          node --experimental-default-type=module --check src/index.js
+          node --experimental-default-type=module --check src/v7.js
+          node --experimental-default-type=module --check src/supra-intelligence.js
+      - name: Run SUPRA policy and integration tests
+        run: node --experimental-default-type=module --test tests/supra-intelligence.test.mjs tests/supra-integration-guards.test.mjs
+      - name: Confirm no production deployment
+        run: echo "Validation only — no Cloudflare deployment or D1 migration."
