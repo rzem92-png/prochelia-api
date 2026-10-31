@@ -60,7 +60,8 @@ test("SUPRA plan route validates input and forwards evidence to governance", () 
 test("SUPRA planning rejects browser-supplied evidence and validates context shape", () => {
   const route = source.slice(source.indexOf("async function supraPlan"), source.indexOf("async function handleConsolidated"));
   assert.match(route, /!isPlainRecord\(body\.context\)/);
-  assert.match(route, /!isPlainRecord\(body\.evidence\)/);
+  assert.match(route, /CLIENT_SUPPLIED_EVIDENCE_NOT_TRUSTED/);
+  assert.match(route, /const evidence=\{\};/);
 });
 
 
