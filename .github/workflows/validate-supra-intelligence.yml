@@ -1,6 +1,8 @@
 name: Validate PROCHÉLIA IA SUPRA-INTELLIGENTE
 
 on:
+  push:
+    branches: [feat/supra-intelligence-governance-v1]
   pull_request:
     branches: [main]
     paths:
