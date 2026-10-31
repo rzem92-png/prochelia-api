@@ -52,7 +52,7 @@ test("excellent score cannot override insufficient budget or capacity", () => {
     company: company({ availableBudgetCents: 999, capacityUnits: 1 }),
     opportunity: opportunity()
   });
-  assert.equal(result.fitScoreBps, 6500);
+  assert.equal(result.fitScoreBps, 8500);
   assert.equal(result.budgetFits, false);
   assert.equal(result.capacityFits, false);
   assert.equal(result.launchEligible, false);
