@@ -1,7 +1,7 @@
 // Pure, deterministic financial model. No I/O, database access, or side effects.
 const isSafeCents = value => Number.isSafeInteger(value) && value >= 0;
 const roundRatio = (amount, numerator, denominator) =>
-  Math.floor((amount * numerator + Math.floor(denominator / 2)) / denominator);
+  Number((BigInt(amount) * BigInt(numerator) + BigInt(Math.floor(denominator / 2))) / BigInt(denominator));
 
 export function calculateB2CQuote(input = {}) {
   const {
