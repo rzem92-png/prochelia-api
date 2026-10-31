@@ -29,3 +29,17 @@ test("international market launch requires local adaptation and review", () => {
  assert.equal(p.marketPack.launchAllowed,false);
  assert.equal(p.autonomy.approvalRequired,true);
 });
+
+test("malformed planner inputs fail closed without throwing", () => {
+ for (const value of [null, "invalid", 42, [], {context:[]}, {context:"invalid"}]) {
+  const p=buildSupraPlan(value);
+  assert.equal(p.executionAllowed,false);
+  assert.equal(p.auditRequired,true);
+  assert.equal(p.autonomy.approvalRequired,true);
+ }
+});
+test("explicit domain aliases cannot select inherited object properties", () => {
+ const p=buildSupraPlan({caseType:"analyse_generale",domain:"__proto__",impact:"LOW"});
+ assert.equal(p.domain,"direction");
+ assert.equal(p.executionAllowed,false);
+});
