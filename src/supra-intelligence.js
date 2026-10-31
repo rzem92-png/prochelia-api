@@ -79,9 +79,9 @@ export function assessSupraDecision(rawInput = {}) {
   const role = normalized(input.actorRole || "unknown").toLowerCase();
   if (!["LOW", "MEDIUM", "HIGH", "CRITICAL"].includes(impact)) return invalidDecision("INVALID_IMPACT_FAIL_CLOSED");
   const context = input.context || {};
-  const allowedContextKeys = new Set(["mission_id", "replacement_intervenant_id", "client_id", "immediateDanger"]);
+  const allowedContextKeys = new Set(["mission_id", "provider_id", "replacement_intervenant_id", "client_id", "immediateDanger"]);
   if (Object.keys(context).some(key => !allowedContextKeys.has(key)) ||
-      ["mission_id", "replacement_intervenant_id", "client_id"].some(key =>
+      ["mission_id", "provider_id", "replacement_intervenant_id", "client_id"].some(key =>
         context[key] !== undefined && (typeof context[key] !== "string" || !context[key].trim() || context[key].length > 128)
       ) ||
       (context.immediateDanger !== undefined && typeof context.immediateDanger !== "boolean")) {
@@ -92,8 +92,8 @@ export function assessSupraDecision(rawInput = {}) {
   const evidence = Object.create(null);
   const missingEvidence = [];
   if (context.mission_id && evidence.missionOwnershipVerified !== true) missingEvidence.push("mission_ownership");
-  if (context.replacement_intervenant_id && evidence.providerEligibilityVerified !== true) missingEvidence.push("provider_eligibility");
-  if (context.replacement_intervenant_id && evidence.providerAvailabilityVerified !== true) missingEvidence.push("provider_availability");
+  if ((context.provider_id || context.replacement_intervenant_id) && evidence.providerEligibilityVerified !== true) missingEvidence.push("provider_eligibility");
+  if ((context.provider_id || context.replacement_intervenant_id) && evidence.providerAvailabilityVerified !== true) missingEvidence.push("provider_availability");
   if (["REFUND", "PAYOUT", "CHARGE"].includes(action) && evidence.pspConfirmation !== true) missingEvidence.push("psp_confirmation");
   if (["CHANGE_PRICE", "ACTIVATE_PROMOTION"].includes(action) && evidence.serverPricingPolicy !== true) missingEvidence.push("server_pricing_policy");
   if (context.client_id && evidence.clientOwnershipVerified !== true) missingEvidence.push("client_ownership");
