@@ -1360,7 +1360,7 @@ async function postBalancedAccountingOperation(env,input) {
   const currency=clean(input?.currency||'EUR').toUpperCase();
   const lines=Array.isArray(input?.lines)?input.lines:[];
   if(!idempotencyKey||idempotencyKey.length>180||!referenceType||!referenceId||
-    !/^[A-Z]{3}$/.test(currency)||lines.length<2||lines.length>50) {
+    !/^[A-Z]{3}$/.test(currency)||lines.length<2||lines.length>40) {
     return {ok:false,error:'INVALID_ACCOUNTING_OPERATION'};
   }
   let debit=0,credit=0;
@@ -1380,7 +1380,7 @@ async function postBalancedAccountingOperation(env,input) {
   const existing=await env.DB.prepare('SELECT * FROM accounting_operations WHERE idempotency_key=? LIMIT 1').bind(idempotencyKey).first();
   if(existing) {
     const prior=await env.DB.prepare('SELECT account_code,direction,amount_cents,label FROM accounting_operation_lines WHERE operation_id=? ORDER BY account_code,direction,amount_cents,label').bind(existing.id).all();
-    const priorLines=(prior.results||[]).map(x=>({account_code:x.account_code,direction:x.direction,amount_cents:Number(x.amount_cents),label:x.label||null}));
+    const priorLines=(prior.results||[]).map(x=>({account_code:x.account_code,direction:x.direction,amount_cents:Number(x.amount_cents),label:x.label||null})).sort((a,b)=>a.account_code.localeCompare(b.account_code)||a.direction.localeCompare(b.direction)||a.amount_cents-b.amount_cents||String(a.label||'').localeCompare(String(b.label||'')));
     const same=existing.reference_type===referenceType&&existing.reference_id===referenceId&&existing.currency===currency&&
       JSON.stringify(priorLines)===JSON.stringify(normalized);
     return same&&existing.status==='POSTED'
