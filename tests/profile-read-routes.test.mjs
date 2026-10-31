@@ -46,7 +46,7 @@ test("GET /api/clients requires authentication and returns D1-backed records", a
   assert.equal(unauth.status,401);
   const env=makeEnv();
   const response=await worker.fetch(new Request(base+"/api/clients",{headers:{Cookie:cookie}}),env);
-  assert.equal(response.status,200);
+  assert.equal(response.status,200,JSON.stringify(body));
   const body=await response.json();
   assert.equal(body.source,"D1");
   assert.equal(body.clients[0].id,"client-1");
@@ -58,7 +58,7 @@ test("GET /api/intervenants hides private contact details from clients",async()=
   assert.equal(unauth.status,401);
   const env=makeEnv("client");
   const response=await worker.fetch(new Request(base+"/api/intervenants",{headers:{Cookie:cookie}}),env);
-  assert.equal(response.status,200);
+  assert.equal(response.status,200,JSON.stringify(body));
   const body=await response.json();
   assert.equal(body.source,"D1");
   assert.equal(body.intervenants[0].email,null);
@@ -76,7 +76,7 @@ test("profile read routes reject non-GET methods",async()=>{
 test("public API contract advertises both profile routes",async()=>{
   const response=await worker.fetch(new Request(base+"/api/info"),makeEnv());
   const body=await response.json();
-  assert.equal(response.status,200);
+  assert.equal(response.status,200,JSON.stringify(body));
   assert.ok(body.routes.includes("/api/clients"));
   assert.ok(body.routes.includes("/api/intervenants"));
 });
@@ -143,7 +143,7 @@ async function authenticatedGet(path,userId,role) {
 test("manager can read all client profiles from D1", async () => {
   const response=await authenticatedGet("/api/clients","u-manager","gerante");
   const body=await response.json();
-  assert.equal(response.status,200);
+  assert.equal(response.status,200,JSON.stringify(body));
   assert.equal(body.source,"D1");
   assert.equal(body.total,2);
   assert.equal(body.clients[0].email,"claire@example.test");
@@ -152,7 +152,7 @@ test("manager can read all client profiles from D1", async () => {
 test("client can read only their own client profile", async () => {
   const response=await authenticatedGet("/api/clients","u-client-1","client");
   const body=await response.json();
-  assert.equal(response.status,200);
+  assert.equal(response.status,200,JSON.stringify(body));
   assert.equal(body.total,1);
   assert.equal(body.clients[0].id,"c1");
 });
@@ -160,7 +160,7 @@ test("client can read only their own client profile", async () => {
 test("client sees only approved providers and no direct contact details", async () => {
   const response=await authenticatedGet("/api/intervenants","u-client-1","client");
   const body=await response.json();
-  assert.equal(response.status,200);
+  assert.equal(response.status,200,JSON.stringify(body));
   assert.equal(body.total,1);
   assert.equal(body.intervenants[0].id,"i1");
   assert.equal(body.intervenants[0].email,null);
@@ -171,7 +171,7 @@ test("client sees only approved providers and no direct contact details", async 
 test("provider can read only their own provider profile", async () => {
   const response=await authenticatedGet("/api/intervenants","u-provider-1","intervenant");
   const body=await response.json();
-  assert.equal(response.status,200);
+  assert.equal(response.status,200,JSON.stringify(body));
   assert.equal(body.total,1);
   assert.equal(body.intervenants[0].id,"i1");
 });
