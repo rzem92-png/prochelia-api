@@ -123,3 +123,20 @@ test("finance dashboard never labels ledger balance minus expenses as net profit
   assert.match(route,/PSP_AND_ACCOUNTING_RECONCILIATION_AND_FULL_COST_ALLOCATION_REQUIRED/);
   assert.match(route,/requireAuthRole\(request,env,\['gerante'\]\)/);
 });
+
+test("payment finalization cannot create PSP success and repeated calls cannot credit twice", () => {
+  const route=source.slice(source.indexOf("async function finalizeMissionPayment"),source.indexOf("async function payoutRequest"));
+  assert.match(route,/PSP_CONFIRMATION_REQUIRED/);
+  assert.match(route,/idempotent_replay:true/);
+  assert.match(route,/tx\.status===outcome/);
+  assert.match(route,/UPDATE wallets SET pending_cents=pending_cents\+\?,available_cents=available_cents\+\?/);
+});
+
+test("successful PSP webhooks require a provider payment reference before processing", () => {
+  const route=source.slice(source.indexOf("async function paymentWebhook"),source.indexOf("async function openPaymentDispute"));
+  assert.match(route,/PSP_PAYMENT_REFERENCE_REQUIRED/);
+  assert.match(route,/\['payment_succeeded','charge_succeeded'\]/);
+  assert.match(route,/providerPaymentId\|\|null/);
+  assert.match(route,/INSERT OR IGNORE INTO payment_webhook_events/);
+  assert.ok(route.indexOf("PSP_PAYMENT_REFERENCE_REQUIRED") < route.indexOf("INSERT OR IGNORE INTO payment_webhook_events"));
+});
