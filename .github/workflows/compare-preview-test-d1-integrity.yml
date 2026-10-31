@@ -1,0 +1,234 @@
+name: "PROCHÉLIA — intégrité D1 preview vs restauration (lecture seule)"
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_read_only:
+        description: "Confirmer que les deux bases ciblées sont exclusivement les bases de préproduction"
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: prochelia-d1-integrity-readonly
+  cancel-in-progress: false
+
+jobs:
+  compare:
+    if: ${{ inputs.confirm_read_only == true }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      PREVIEW_DB_ID: "6adb95e5-e542-4bec-9008-fbea01042305"
+      RESTORE_DB_ID: "a3526c2a-39cb-49ab-97c4-979138145f33"
+      BATCH_SIZE: "100"
+      MAX_ROWS_PER_TABLE: "1000000"
+
+    steps:
+      - name: Checkout branche d'audit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
+
+      - name: Installer Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Installer Wrangler
+        run: npm install --no-save wrangler@4
+
+      - name: Vérifier le jeton et l'identité exacte des deux bases
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          test -n "$CLOUDFLARE_API_TOKEN"
+          curl --fail --silent --show-error \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            "https://api.cloudflare.com/client/v4/user/tokens/verify" > token-check.json
+          node -e 'const x=require("./token-check.json"); if(!x.success || x.result?.status!=="active") process.exit(1)'
+          for item in "prochelia-preview-db:$PREVIEW_DB_ID" "prochelia-restore-test-v2:$RESTORE_DB_ID"; do
+            name="${item%%:*}"
+            expected="${item#*:}"
+            curl --fail --silent --show-error \
+              -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+              "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/d1/database/$expected" > db-check.json
+            node -e 'const x=require("./db-check.json"); const expected=process.argv[1]; const name=process.argv[2]; if(!x.success || x.result?.uuid!==expected || x.result?.name!==name) { console.error("Identité D1 inattendue:", name); process.exit(1) }' "$expected" "$name"
+          done
+          rm -f token-check.json db-check.json
+
+      - name: Créer deux configurations Wrangler temporaires isolées
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > wrangler-preview.toml <<EOF
+          name = "prochelia-audit-preview"
+          account_id = "$CLOUDFLARE_ACCOUNT_ID"
+          compatibility_date = "2026-10-31"
+          [[d1_databases]]
+          binding = "DB"
+          database_name = "prochelia-preview-db"
+          database_id = "$PREVIEW_DB_ID"
+          EOF
+          cat > wrangler-restore.toml <<EOF
+          name = "prochelia-audit-restore"
+          account_id = "$CLOUDFLARE_ACCOUNT_ID"
+          compatibility_date = "2026-10-31"
+          [[d1_databases]]
+          binding = "DB"
+          database_name = "prochelia-restore-test-v2"
+          database_id = "$RESTORE_DB_ID"
+          EOF
+
+      - name: Comparer schémas, volumes et empreintes de toutes les lignes
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > compare-d1.mjs <<'NODE'
+          import { execFileSync } from "node:child_process";
+          import { createHash } from "node:crypto";
+          import { writeFileSync } from "node:fs";
+
+          const batchSize = Number(process.env.BATCH_SIZE || 100);
+          const maxRows = Number(process.env.MAX_ROWS_PER_TABLE || 1000000);
+          const targets = [
+            { label: "preview", config: "wrangler-preview.toml", db: "prochelia-preview-db" },
+            { label: "restore", config: "wrangler-restore.toml", db: "prochelia-restore-test-v2" }
+          ];
+
+          function quoteIdent(s) { return '"' + String(s).replaceAll('"', '""') + '"'; }
+
+          function findRows(value, depth = 0) {
+            if (depth > 8 || value == null) return null;
+            if (Array.isArray(value)) {
+              if (value.length === 0) return value;
+              if (value.every(x => x && typeof x === "object" && !Array.isArray(x))) return value;
+              for (const v of value) { const r = findRows(v, depth + 1); if (r) return r; }
+              return null;
+            }
+            if (typeof value === "object") {
+              if (Array.isArray(value.results)) {
+                const direct = value.results;
+                if (direct.length === 0 || direct.every(x => x && typeof x === "object" && !Array.isArray(x))) return direct;
+              }
+              for (const v of Object.values(value)) { const r = findRows(v, depth + 1); if (r) return r; }
+            }
+            return null;
+          }
+
+          function query(target, sql) {
+            const raw = execFileSync("npx", ["wrangler", "d1", "execute", target.db, "--remote", "--json", "--config", target.config, "--command", sql], {
+              encoding: "utf8", maxBuffer: 32 * 1024 * 1024, stdio: ["ignore", "pipe", "pipe"]
+            });
+            let parsed;
+            try { parsed = JSON.parse(raw); }
+            catch { throw new Error("Sortie Wrangler non JSON pour " + target.label + "; sortie refusée."); }
+            const rows = findRows(parsed);
+            if (!rows) throw new Error("Format JSON Wrangler non reconnu pour " + target.label + "; aucune donnée exportée.");
+            return rows;
+          }
+
+          function digestSchema(target) {
+            const rows = query(target, "SELECT type, name, tbl_name, COALESCE(sql,'') AS sql FROM sqlite_master WHERE type IN ('table','index','view','trigger') AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%' ORDER BY type,name,tbl_name");
+            const h = createHash("sha256");
+            for (const row of rows) h.update(JSON.stringify([row.type,row.name,row.tbl_name,row.sql]) + "\n");
+            return { hash: h.digest("hex"), objects: rows.length };
+          }
+
+          function digestTable(target, table) {
+            const name = quoteIdent(table);
+            const info = query(target, "PRAGMA table_info(" + name + ")");
+            if (!info.length) throw new Error("Table sans colonnes détectables: " + table);
+            const columns = info.map(x => x.name);
+            const countRows = query(target, "SELECT COUNT(*) AS n FROM " + name);
+            const total = Number(countRows[0]?.n);
+            if (!Number.isSafeInteger(total) || total < 0) throw new Error("Comptage invalide pour " + table);
+            if (total > maxRows) throw new Error("Plafond de sécurité dépassé pour " + table + ": " + total + " lignes (limite " + maxRows + "). Aucun résultat global ne sera déclaré valide.");
+            const order = columns.map(quoteIdent).join(", ");
+            const h = createHash("sha256");
+            h.update(JSON.stringify({ table, columns }) + "\n");
+            for (let offset = 0; offset < total; offset += batchSize) {
+              const rows = query(target, "SELECT * FROM " + name + " ORDER BY " + order + " LIMIT " + batchSize + " OFFSET " + offset);
+              if (rows.length === 0) throw new Error("Lot vide inattendu pour " + table + " à l'offset " + offset);
+              for (const row of rows) {
+                const values = columns.map(c => row[c]);
+                h.update(JSON.stringify(values) + "\n");
+              }
+            }
+            return { rows: total, columns, hash: h.digest("hex") };
+          }
+
+          function inspect(target) {
+            const tables = query(target, "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%' ORDER BY name").map(x => x.name);
+            const schema = digestSchema(target);
+            const tableResults = {};
+            for (const table of tables) {
+              const result = digestTable(target, table);
+              tableResults[table] = { rows: result.rows, columns: result.columns, sha256: result.hash };
+              console.log(target.label + ": " + table + " — " + result.rows + " lignes — empreinte calculée");
+            }
+            return { tables, schema, tableResults };
+          }
+
+          const preview = inspect(targets[0]);
+          const restore = inspect(targets[1]);
+          const allTables = [...new Set([...preview.tables, ...restore.tables])].sort();
+          const diffs = [];
+          for (const table of allTables) {
+            const a = preview.tableResults[table];
+            const b = restore.tableResults[table];
+            if (!a || !b) diffs.push({ table, status: "TABLE_ABSENTE", preview_rows: a?.rows ?? null, restore_rows: b?.rows ?? null });
+            else if (a.rows !== b.rows || a.sha256 !== b.sha256 || JSON.stringify(a.columns) !== JSON.stringify(b.columns))
+              diffs.push({ table, status: "CONTENU_OU_STRUCTURE_DIFFERENT", preview_rows: a.rows, restore_rows: b.rows, preview_sha256: a.sha256, restore_sha256: b.sha256 });
+          }
+          const schemaEqual = preview.schema.hash === restore.schema.hash;
+          const report = {
+            generated_at: new Date().toISOString(),
+            method: "SHA-256 des lignes ordonnées par toutes les colonnes; empreinte des objets sqlite_master",
+            source: { name: targets[0].db, database_id: process.env.PREVIEW_DB_ID, tables: preview.tables.length, schema_sha256: preview.schema.hash, schema_objects: preview.schema.objects },
+            target: { name: targets[1].db, database_id: process.env.RESTORE_DB_ID, tables: restore.tables.length, schema_sha256: restore.schema.hash, schema_objects: restore.schema.objects },
+            schema_equal: schemaEqual,
+            differences: diffs
+          };
+          writeFileSync("d1-integrity-report.json", JSON.stringify(report, null, 2) + "\n");
+          const csv = ["table,status,preview_rows,restore_rows,preview_sha256,restore_sha256", ...allTables.map(t => {
+            const a=preview.tableResults[t], b=restore.tableResults[t];
+            return [t, !a||!b?"TABLE_ABSENTE":(a.rows===b.rows&&a.hash===b.hash&&JSON.stringify(a.columns)===JSON.stringify(b.columns)?"IDENTIQUE":"DIFFERENT"), a?.rows??"", b?.rows??"", a?.sha256??"", b?.sha256??""].map(v => '"' + String(v).replaceAll('"','""') + '"').join(",");
+          })].join("\n") + "\n";
+          writeFileSync("d1-integrity-report.csv", csv);
+          const ok = schemaEqual && diffs.length === 0;
+          writeFileSync("d1-integrity-status.txt", ok ? "IDENTIQUE: schéma et empreintes de lignes identiques.\n" : "ÉCARTS: schéma et/ou données différents. Voir les rapports.\n");
+          console.log("Résultat final: " + (ok ? "IDENTIQUE" : "ÉCARTS DÉTECTÉS"));
+          if (!ok) process.exitCode = 2;
+          NODE
+          node compare-d1.mjs
+
+      - name: Publier uniquement les rapports techniques sans données métier
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: prochelia-d1-integrity-report
+          path: |
+            d1-integrity-report.json
+            d1-integrity-report.csv
+            d1-integrity-status.txt
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Résumé
+        if: always()
+        run: |
+          {
+            echo "## Comparaison D1 en lecture seule"
+            echo "- Source : prochelia-preview-db (UUID contrôlé)"
+            echo "- Cible : prochelia-restore-test-v2 (UUID contrôlé)"
+            echo "- Aucune migration, écriture SQL, modification D1 ou commande de déploiement."
+            if [ -f d1-integrity-status.txt ]; then cat d1-integrity-status.txt; else echo "Comparaison non terminée; consulter les étapes précédentes."; fi
+            echo "- Les rapports contiennent des volumes et empreintes SHA-256, pas les lignes métier."
+          } >> "$GITHUB_STEP_SUMMARY"
