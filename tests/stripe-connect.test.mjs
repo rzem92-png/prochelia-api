@@ -10,7 +10,7 @@ test("Stripe API helper sends a server-side secret and idempotency key", async()
   let captured;
   const result=await stripePost(
     {STRIPE_SECRET_KEY:"sk_test_unit"},
-    "accounts",
+    "v2/core/accounts",
     {type:"express",country:"FR",email:"provider@example.test"},
     "prochelia-test-idem",
     async(url,init)=>{
@@ -19,7 +19,7 @@ test("Stripe API helper sends a server-side secret and idempotency key", async()
     }
   );
   assert.equal(result.id,"acct_test_123");
-  assert.equal(captured.url,"https://api.stripe.com/v1/accounts");
+  assert.equal(captured.url,"https://api.stripe.com/v2/core/accounts");
   assert.equal(captured.init.headers.Authorization,"Bearer sk_test_unit");
   assert.equal(captured.init.headers["Idempotency-Key"],"prochelia-test-idem");
   assert.match(captured.body,/type=express/);
@@ -80,8 +80,8 @@ test("Stripe Connect onboarding creates the account and a fresh onboarding link 
   const calls=[];
   globalThis.fetch=async(url,init)=>{
     calls.push({url,init,body:String(init.body)});
-    if(String(url).endsWith("/accounts")) return new Response(JSON.stringify({id:"acct_test_123"}),{status:200,headers:{"content-type":"application/json"}});
-    if(String(url).endsWith("/account_links")) return new Response(JSON.stringify({url:"https://connect.stripe.com/setup/test",expires_at:1799999999}),{status:200,headers:{"content-type":"application/json"}});
+    if(String(url).endsWith("/v2/core/accounts")) return new Response(JSON.stringify({id:"acct_test_123"}),{status:200,headers:{"content-type":"application/json"}});
+    if(String(url).endsWith("/v1/account_links")) return new Response(JSON.stringify({url:"https://connect.stripe.com/setup/test",expires_at:1799999999}),{status:200,headers:{"content-type":"application/json"}});
     throw new Error("Unexpected Stripe endpoint");
   };
   try{
@@ -102,7 +102,7 @@ test("Stripe Connect onboarding creates the account and a fresh onboarding link 
     assert.match(calls[0].body,/email=provider%40example.test/);
     assert.doesNotMatch(calls[0].body,/acct_attacker_controlled/);
     assert.match(calls[1].body,/account=acct_test_123/);
-    assert.match(calls[1].body,/type=account_onboarding/);
+    assert.match(calls[1].body,/use_case%5Btype%5D=account_onboarding/);
     assert.ok(fake.calls.some(x=>x.sql.includes("INSERT INTO payment_accounts") && x.args.includes("acct_test_123")));
   } finally {
     globalThis.fetch=originalFetch;
@@ -127,8 +127,11 @@ test("Stripe account.updated webhook updates Connect readiness only after valid 
   const fake=fakeDb("intervenant");
   const env={DB:fake.DB,PAYMENT_PROVIDER:"stripe",STRIPE_SECRET_KEY:"sk_test_unit",STRIPE_WEBHOOK_SECRET:"whsec_unit",APP_BASE_URL:"https://prochelia.pages.dev"};
   const timestamp=Math.floor(Date.now()/1000);
-  const body=JSON.stringify({id:"evt_account_updated_1",type:"account.updated",data:{object:{id:"acct_test_123",charges_enabled:false,payouts_enabled:true,details_submitted:true}}});
+  const body=JSON.stringify({id:"evt_account_updated_1",type:"v2.core.account[requirements].updated",data:{object:{id:"acct_test_123"}}});
   const signature=await stripeSignature("whsec_unit",timestamp,body);
+  const originalFetch=globalThis.fetch;
+  globalThis.fetch=async()=>new Response(JSON.stringify({id:"acct_test_123",configuration:{recipient:{capabilities:{stripe_balance:{stripe_transfers:{status:"active"}}}}}}),{status:200,headers:{"content-type":"application/json"}});
+  try {
   const response=await worker.fetch(new Request("https://api.test/api/payments/webhook",{
     method:"POST",
     headers:{"Content-Type":"application/json","Stripe-Signature":"t="+timestamp+",v1="+signature},
@@ -143,6 +146,9 @@ test("Stripe account.updated webhook updates Connect readiness only after valid 
   assert.equal(update.args[2],"active");
   assert.equal(update.args[3],"submitted");
   assert.equal(update.args[4],"acct_test_123");
+  } finally {
+    globalThis.fetch=originalFetch;
+  }
 });
 
 test("invalid Stripe webhook is rejected before payment schema DDL", async()=>{
