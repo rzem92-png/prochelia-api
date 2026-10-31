@@ -135,11 +135,14 @@ export function buildSupraPlan(rawInput = {}) {
   if (input.context !== undefined && !isPlainInput(input.context)) return failClosedPlan("INVALID_CONTEXT_TYPE");
   const rawContext = input.context || {};
   const allowedContextKeys = new Set([
+    "problem_statement",
     "mission_id", "provider_id", "client_id", "replacement_intervenant_id",
     "immediateDanger", "missionOwnershipVerified", "providerEligibilityVerified",
     "providerAvailabilityVerified", "clientOwnershipVerified", "pspConfirmed"
   ]);
   if (Object.keys(rawContext).some(key => !allowedContextKeys.has(key)) ||
+      (rawContext.problem_statement !== undefined &&
+        (typeof rawContext.problem_statement !== "string" || rawContext.problem_statement.length > 4000)) ||
       ["mission_id", "provider_id", "client_id", "replacement_intervenant_id"].some(key =>
         rawContext[key] !== undefined && (typeof rawContext[key] !== "string" || !rawContext[key].trim() || rawContext[key].length > 128)
       ) ||
