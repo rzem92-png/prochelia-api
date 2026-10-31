@@ -69,6 +69,12 @@ check(missingMigrations.length === 0 && Boolean(fifthMigration),
 const migrationContents = orderedMigrations.map(name => read(path.join(migrationDir, name)));
 const migrationSql = migrationContents.join('\n');
 check(migrationContents.length === orderedMigrations.length && migrationContents.every(Boolean), 'All discovered required migration files are readable');
+const workerVersion = source.match(/const VERSION = ['\"](V[0-9]+\\.[0-9]+\\.[0-9]+)/)?.[1] || null;
+const fifthVersion = fifthMigration ? migrationSql.match(/--\\s*PROCHÉLIA\\s+(V[0-9]+\\.[0-9]+\\.[0-9]+)/)?.[1] || null : null;
+check(Boolean(workerVersion && fifthVersion && workerVersion === fifthVersion),
+  workerVersion && fifthVersion
+    ? `Worker/migration version mismatch: Worker ${workerVersion}, migration 0005 ${fifthVersion}`
+    : 'Could not establish Worker and migration 0005 version evidence');
 if (migrationContents.length === orderedMigrations.length && migrationContents.every(Boolean)) {
   check(!/\bDROP\s+TABLE\b/i.test(migrationSql), 'No DROP TABLE in release migration set');
   check(!/\bPRAGMA\s+foreign_keys\s*=\s*OFF\b/i.test(migrationSql), 'Foreign-key enforcement is not disabled by migrations');
