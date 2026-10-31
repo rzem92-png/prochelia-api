@@ -1,0 +1,34 @@
+name: "PROCHÉLIA API — tests profils D1 sans déploiement"
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "src/index.js"
+      - "tests/profile-read-routes.test.mjs"
+      - ".github/workflows/validate-profile-read-routes.yml"
+  push:
+    branches: ["fix/api-profile-read-routes"]
+    paths:
+      - "src/index.js"
+      - "tests/profile-read-routes.test.mjs"
+      - ".github/workflows/validate-profile-read-routes.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  profile-routes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Vérifier la syntaxe Worker
+        run: node --check src/index.js
+      - name: Tester l'authentification et les méthodes des routes profils
+        run: node --test tests/profile-read-routes.test.mjs
+      - name: Confirmer l'absence de déploiement
+        run: echo "Tests locaux uniquement; aucune requête D1 distante, aucune migration, aucun déploiement."
