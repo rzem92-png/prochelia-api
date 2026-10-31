@@ -32,7 +32,8 @@ jobs:
           node --experimental-default-type=module --check src/index.js
           node --experimental-default-type=module --check src/v7.js
           node --experimental-default-type=module --check src/supra-intelligence.js
-      - name: Run SUPRA policy and integration tests
-        run: node --experimental-default-type=module --test tests/supra-intelligence.test.mjs tests/supra-integration-guards.test.mjs
+          node --experimental-default-type=module --check src/supra-orchestrator.js
+      - name: Run SUPRA governance, policy and integration tests
+        run: node --experimental-default-type=module --test tests/supra-*.test.mjs
       - name: Confirm no production deployment
         run: echo "Validation only — no Cloudflare deployment or D1 migration."
