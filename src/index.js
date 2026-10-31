@@ -867,23 +867,13 @@ async function finalizeMissionPayment(request, env) {
   if(!txId||!['paid','failed','refunded','held'].includes(outcome)) return json({ok:false,error:'INVALID_PAYMENT_FINALIZATION',version:VERSION},400);
   const tx=await env.DB.prepare('SELECT * FROM payment_transactions WHERE id=? LIMIT 1').bind(txId).first();
   if(!tx) return json({ok:false,error:'TRANSACTION_NOT_FOUND',version:VERSION},404);
-  if(['paid','refunded','failed'].includes(tx.status) && tx.status!==outcome) return json({ok:false,error:'PAYMENT_STATE_CONFLICT',version:VERSION,status:tx.status},409);
-  if(['paid','refunded','failed'].includes(tx.status) && tx.status===outcome) return json({ok:true,version:VERSION,transaction_id:txId,status:outcome,idempotent_replay:true},200);
-  if(outcome==='paid'){
-    // A manager action cannot manufacture PSP confirmation: only a provider reference
-    // recorded by a verified webhook can authorize the paid transition.
-    if(!clean(tx.provider_payment_id)) return json({ok:false,error:'PSP_CONFIRMATION_REQUIRED',version:VERSION},409);
-    const wallet=await env.DB.prepare('SELECT * FROM wallets WHERE user_id=? LIMIT 1').bind(tx.intervenant_id).first();
-    if(!wallet) return json({ok:false,error:'INTERVENANT_WALLET_NOT_FOUND',version:VERSION},409);
-    await env.DB.prepare(`UPDATE payment_transactions SET status='paid',updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(txId).run();
-    await env.DB.prepare(`UPDATE wallets SET pending_cents=pending_cents+?,available_cents=available_cents+?,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(0,tx.net_intervenant_cents,wallet.id).run();
-  } else if(outcome==='held') {
-    await env.DB.prepare(`UPDATE payment_transactions SET status='held',updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(txId).run();
-  } else {
-    await env.DB.prepare(`UPDATE payment_transactions SET status=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(outcome,txId).run();
-  }
-  await paymentAudit(env,'MISSION_PAYMENT_FINALIZED',{transaction_id:txId,mission_id:tx.mission_id,user_id:auth.user.id,metadata:{outcome}},'OK');
-  return json({ok:true,version:VERSION,transaction_id:txId,status:outcome},200);
+  if(tx.status===outcome) return json({ok:true,version:VERSION,transaction_id:txId,status:outcome,idempotent_replay:true},200);
+  if(['paid','refunded','failed'].includes(tx.status)) return json({ok:false,error:'PAYMENT_STATE_CONFLICT',version:VERSION,status:tx.status},409);
+  // Manual status changes are not financial evidence. In particular, a manager
+  // must not create a paid/refunded/failed/held state or wallet movement by API.
+  // Only verified PSP events plus reconciliation may change financial state.
+  await paymentAudit(env,'MISSION_PAYMENT_FINALIZATION_BLOCKED',{transaction_id:txId,mission_id:tx.mission_id,user_id:auth.user.id,metadata:{requested_outcome:outcome,reason:'PSP_RECONCILIATION_REQUIRED'}},'REJECTED');
+  return json({ok:false,error:'PSP_RECONCILIATION_REQUIRED',version:VERSION,financial_state_changed:false},409);
 }
 
 async function payoutRequest(request, env) {
