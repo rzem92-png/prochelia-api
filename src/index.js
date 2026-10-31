@@ -1611,7 +1611,9 @@ async function supraDomains(request, env) {
 }
 
 async function supraPlan(request, env) {
-  const gate=await requireAuthRole(request,env,['gerante','client','intervenant','entreprise']); if(gate.error)return gate.error;
+  // Le plan de pilotage transversal expose des informations stratégiques : Gérante uniquement.
+  // Des vues filtrées par rôle seront ajoutées séparément avec leurs tests de propriété.
+  const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
   if(request.method!=='POST') return json({ok:false,error:'METHOD_NOT_ALLOWED',version:VERSION},405);
   const body=await readJson(request)||{};
   const plan=procheliaV7.buildSupraPlan({
