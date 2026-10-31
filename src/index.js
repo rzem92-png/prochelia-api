@@ -1930,15 +1930,24 @@ async function supraPlan(request, env) {
   try { body=JSON.parse(rawBody); }
   catch { return json({ok:false,error:'INVALID_JSON'},400); }
   if(!isPlainRecord(body)) return json({ok:false,error:'INVALID_JSON_OBJECT',version:VERSION},400);
-  const caseType=typeof body.case_type==='string'?body.case_type.trim():'analyse_generale';
-  const domain=typeof body.domain==='string'?body.domain.trim():undefined;
-  const action=typeof body.action==='string'?body.action.trim().toUpperCase():'ANALYZE_AND_PROPOSE';
-  const impact=typeof body.impact==='string'?body.impact.trim().toUpperCase():'LOW';
-  const market=typeof body.market==='string'?body.market.trim().toLowerCase():'fr';
+  const allowedBodyKeys=new Set(['case_type','domain','action','impact','market','context','evidence']);
+  if(Object.keys(body).some(key=>!allowedBodyKeys.has(key))) {
+    return json({ok:false,error:'UNEXPECTED_SUPRA_PLAN_FIELD',version:VERSION},400);
+  }
+  for(const key of ['case_type','domain','action','impact','market']) {
+    if(body[key]!==undefined && typeof body[key]!=='string') {
+      return json({ok:false,error:'INVALID_SUPRA_PLAN_FIELD_TYPE',field:key,version:VERSION},400);
+    }
+  }
+  const caseType=body.case_type===undefined?'analyse_generale':body.case_type.trim();
+  const domain=body.domain===undefined?undefined:body.domain.trim();
+  const action=body.action===undefined?'ANALYZE_AND_PROPOSE':body.action.trim().toUpperCase();
+  const impact=body.impact===undefined?'LOW':body.impact.trim().toUpperCase();
+  const market=body.market===undefined?'fr':body.market.trim().toLowerCase();
   if(!caseType || caseType.length>100 || !/^[A-Z0-9_]{2,64}$/.test(action) ||
      !['LOW','MEDIUM','HIGH','CRITICAL'].includes(impact) ||
      !(market === "other" || /^[a-z]{2}$/.test(market)) ||
-     (domain!==undefined && domain.length>60) ||
+     (domain!==undefined && (!domain || domain.length>60)) ||
      (body.context!==undefined && !isPlainRecord(body.context))) {
     return json({ok:false,error:'INVALID_SUPRA_PLAN_INPUT',version:VERSION},400);
   }
