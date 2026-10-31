@@ -13,6 +13,7 @@ on:
       - "tests/supra-*.test.mjs"
       - "package.json"
       - "wrangler.jsonc"
+      - "wrangler.preview.jsonc"
       - ".github/workflows/validate-supra-intelligence.yml"
   workflow_dispatch:
 
@@ -33,9 +34,11 @@ jobs:
         run: npm install --no-audit --no-fund
       - name: Check JavaScript syntax
         run: npm run build
-      - name: Bundle Cloudflare Worker without deploying
+      - name: Bundle production configuration without deploying
         run: npm run check:worker
+      - name: Bundle isolated preview configuration without deploying
+        run: npm run check:worker:preview
       - name: Run the complete API regression suite, including SUPRA
         run: npm test
-      - name: Confirm no production deployment or D1 migration
-        run: echo "Validation only — Wrangler dry-run, no Cloudflare deployment and no D1 migration."
+      - name: Confirm no deployment or D1 migration
+        run: echo "Validation only — Wrangler dry-runs, no Cloudflare deployment and no D1 migration."
