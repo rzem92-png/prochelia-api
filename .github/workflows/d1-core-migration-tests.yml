@@ -37,6 +37,7 @@ jobs:
           pricing_migration = Path("migrations/0002_server_pricing.sql").read_text(encoding="utf-8")
           route_origin_migration = Path("migrations/0003_route_address_provenance.sql").read_text(encoding="utf-8")
           wallet_ledger_migration = Path("migrations/0004_atomic_wallet_ledger.sql").read_text(encoding="utf-8")
+          rate_limit_migration = Path("migrations/0005_security_rate_limits.sql").read_text(encoding="utf-8")
           db = sqlite3.connect(":memory:")
           db.execute("PRAGMA foreign_keys = ON")
 
@@ -96,6 +97,8 @@ jobs:
           db.executescript(route_origin_migration)
           db.executescript(wallet_ledger_migration)
           db.executescript(wallet_ledger_migration)
+          db.executescript(rate_limit_migration)
+          db.executescript(rate_limit_migration)
 
           expected = {
             "clients", "intervenants", "prestations", "missions", "tarifs",
@@ -110,6 +113,7 @@ jobs:
           }
           assert "payment_wallet_ledger" in actual, "Missing atomic wallet ledger table"
           assert "wallets" in actual, "Missing wallet table from migration 0004"
+          assert "security_rate_limits" in actual, "Missing persistent rate-limit table from migration 0005"
           missing = expected - actual
           assert not missing, f"Missing business tables: {sorted(missing)}"
 
@@ -228,6 +232,9 @@ jobs:
             pass
           print("PASS: ledger trigger applies credits/refunds once; duplicate credit does not change wallet")
           print("PASS: wallet ledger rejects UPDATE and DELETE")
+          rate_limit_columns = {row[1] for row in db.execute("PRAGMA table_info(security_rate_limits)")}
+          assert {"id", "bucket", "subject_hash", "window_start", "request_count"} <= rate_limit_columns
+          print("PASS: persistent rate-limit migration 0005 is idempotent and schema-complete")
           print("PASS: migration is idempotent")
           print("PASS: valid client/prestation/mission inserts")
           print("PASS: invalid foreign key rejected")
