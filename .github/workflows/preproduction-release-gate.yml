@@ -31,7 +31,9 @@ jobs:
           package-manager-cache: false
       - name: Run existing prelaunch regression tests
         run: npm run test:prelaunch
-      - name: Verify compliance register is present
-        run: test -s docs/COMPLIANCE_AND_GOVERNANCE_GATE.md
+      - name: Verify compliance and legal responsibility registers are present
+        run: |
+          test -s docs/COMPLIANCE_AND_GOVERNANCE_GATE.md
+          test -s docs/LEGAL_RESPONSIBILITY_AND_PLATFORM_MODEL.md
       - name: Run fail-closed release audit
         run: node scripts/preproduction-release-audit.mjs
