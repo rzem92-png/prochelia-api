@@ -3510,6 +3510,10 @@ handle = async function(request,env){
     const preflightPath = preflightUrl.pathname;
     const preflightMethod = request.method.toUpperCase();
     const getOnlyDiagnostics = new Set(['/api/health','/api/readiness','/api/info']);
+    const getOnlyProfileRoutes = new Set(['/api/clients','/api/intervenants']);
+    if (getOnlyProfileRoutes.has(preflightPath) && preflightMethod !== 'GET') {
+      return json({ok:false,error:'METHOD_NOT_ALLOWED',version:VERSION},405,{'allow':'GET'});
+    }
     // Apply browser-origin rejection before rate limiting or any D1 access.
     // This keeps forbidden cross-origin writes a deterministic 403 even when
     // the database is unavailable, instead of masking them as a generic 500.
