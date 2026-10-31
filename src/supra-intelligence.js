@@ -61,13 +61,35 @@ function invalidDecision(reason = "INVALID_INPUT_FAIL_CLOSED") {
 export function assessSupraDecision(rawInput = {}) {
   if (!isPlainRecord(rawInput)) return invalidDecision();
   const input = rawInput;
+  const allowedKeys = new Set(["caseType", "impact", "requestedAction", "actorRole", "context"]);
+  if (Object.keys(input).some(key => !allowedKeys.has(key))) {
+    return invalidDecision("UNEXPECTED_OR_UNTRUSTED_FIELD_FAIL_CLOSED");
+  }
+  for (const key of ["caseType", "impact", "requestedAction", "actorRole"]) {
+    if (input[key] !== undefined && typeof input[key] !== "string") {
+      return invalidDecision("INVALID_FIELD_TYPE_FAIL_CLOSED");
+    }
+  }
+  if (input.context !== undefined && !isPlainRecord(input.context)) {
+    return invalidDecision("INVALID_CONTEXT_FAIL_CLOSED");
+  }
   const caseType = normalizeCaseType(input.caseType);
   const impact = normalized(input.impact || "LOW");
   const action = normalized(input.requestedAction || "ANALYZE_AND_PROPOSE");
   const role = normalized(input.actorRole || "unknown").toLowerCase();
   if (!["LOW", "MEDIUM", "HIGH", "CRITICAL"].includes(impact)) return invalidDecision("INVALID_IMPACT_FAIL_CLOSED");
-  const context = isPlainRecord(input.context) ? input.context : {};
-  const evidence = isPlainRecord(input.evidence) ? input.evidence : {};
+  const context = input.context || {};
+  const allowedContextKeys = new Set(["mission_id", "replacement_intervenant_id", "client_id", "immediateDanger"]);
+  if (Object.keys(context).some(key => !allowedContextKeys.has(key)) ||
+      ["mission_id", "replacement_intervenant_id", "client_id"].some(key =>
+        context[key] !== undefined && (typeof context[key] !== "string" || !context[key].trim() || context[key].length > 128)
+      ) ||
+      (context.immediateDanger !== undefined && typeof context.immediateDanger !== "boolean")) {
+    return invalidDecision("INVALID_CONTEXT_FIELD_FAIL_CLOSED");
+  }
+  // No caller-supplied evidence is accepted. Only trusted server-side adapters may
+  // satisfy these checks after independently reading authoritative records.
+  const evidence = Object.create(null);
   const missingEvidence = [];
   if (context.mission_id && evidence.missionOwnershipVerified !== true) missingEvidence.push("mission_ownership");
   if (context.replacement_intervenant_id && evidence.providerEligibilityVerified !== true) missingEvidence.push("provider_eligibility");
