@@ -97,3 +97,48 @@ test("resilience requires typed numeric inputs and rejects null coercion", () =>
   assert.equal(simulateResilience({ monthlyRevenueCents: "1000", monthlyFixedCostsCents: 0, variableCostRate: 0.2, cashCents: 0 }).ok, false);
   assert.equal(simulateResilience({ monthlyRevenueCents: 1000, monthlyFixedCostsCents: 0, variableCostRate: null, cashCents: 0 }).ok, false);
 });
+
+test("governance rejects caller-supplied evidence, even when every flag is true", () => {
+  const result = assessSupraDecision({
+    requestedAction: "REFUND",
+    impact: "LOW",
+    actorRole: "gerante",
+    evidence: {
+      pspConfirmation: true,
+      missionOwnershipVerified: true,
+      clientOwnershipVerified: true
+    }
+  });
+  assert.equal(result.executionAllowed, false);
+  assert.equal(result.managerApprovalRequired, true);
+  assert.equal(result.decisionOwner, "GERANTE");
+  assert.equal(result.rationale, "UNEXPECTED_OR_UNTRUSTED_FIELD_FAIL_CLOSED");
+});
+
+test("governance rejects malformed and unexpected context rather than silently dropping it", () => {
+  for (const input of [
+    { context: [] },
+    { context: "not-an-object" },
+    { context: { mission_id: 123 } },
+    { context: { immediateDanger: "yes" } },
+    { context: { adminOverride: true } },
+    { unexpected: "privilege" }
+  ]) {
+    const result = assessSupraDecision(input);
+    assert.equal(result.executionAllowed, false);
+    assert.equal(result.managerApprovalRequired, true);
+    assert.equal(result.decisionOwner, "GERANTE");
+  }
+});
+
+test("governance rejects non-string action, role and impact values", () => {
+  for (const input of [
+    { requestedAction: ["REFUND"] },
+    { actorRole: { role: "gerante" } },
+    { impact: 0 }
+  ]) {
+    const result = assessSupraDecision(input);
+    assert.equal(result.executionAllowed, false);
+    assert.equal(result.managerApprovalRequired, true);
+  }
+});
