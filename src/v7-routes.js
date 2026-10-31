@@ -18,6 +18,16 @@ export async function handleV7Route(
     const method =
       request.method.toUpperCase();
 
+    // V7 POST handlers are pure validators and are not an authorization
+    // boundary. Keep them unreachable over HTTP until each route is wrapped
+    // in session, role, ownership and server-side evidence checks.
+    if (path.startsWith("/api/v7/") && method !== "GET") {
+      return Response.json(
+        { ok: false, error: "V7_HTTP_ENDPOINTS_DISABLED_PENDING_AUTHORIZATION", version: procheliaV7.version },
+        { status: 404, headers: { "Cache-Control": "no-store" } }
+      );
+    }
+
 
     // =================================================
     // STATUT V7
