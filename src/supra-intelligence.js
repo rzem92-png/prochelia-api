@@ -59,7 +59,7 @@ export function assessSupraDecision(input = {}) {
     recommendedNextStep: missingEvidence.length
       ? "COLLECT_AND_VERIFY_EVIDENCE"
       : safeReadOnly ? "RETURN_ANALYSIS_ONLY" : "PRESENT_OPTIONS_TO_MANAGER",
-    decisionOwner: safeReadOnly ? "SYSTEM_WITH_AUDIT" : "GERANTE",
+    decisionOwner: safeReadOnly && role === "gerante" ? "SYSTEM_WITH_AUDIT" : "GERANTE",
     rationale: sensitive
       ? "Action sensible ou impact élevé : aucune exécution sans validation explicite de la Gérante."
       : "La couche V1 autorise uniquement l'analyse en lecture seule ; les écritures restent bloquées."
