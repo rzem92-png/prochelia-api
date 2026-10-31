@@ -343,3 +343,14 @@ test("atomic accounting writer validates, batches and mirrors balanced ledger li
   assert.match(helper,/status='POSTED'/);
   assert.match(helper,/lines\.length>40/);
 });
+
+
+test("SUPRA API rejects wrong-typed and unexpected planner fields instead of defaulting risk downward", () => {
+  const route = source.slice(source.indexOf("async function supraPlan"), source.indexOf("async function handleConsolidated"));
+  assert.match(route, /UNEXPECTED_SUPRA_PLAN_FIELD/);
+  assert.match(route, /INVALID_SUPRA_PLAN_FIELD_TYPE/);
+  assert.match(route, /body\[key\]!==undefined && typeof body\[key\]!=='string'/);
+  assert.match(route, /const impact=body\.impact===undefined\?'LOW':body\.impact\.trim\(\)\.toUpperCase\(\)/);
+  assert.match(route, /const action=body\.action===undefined\?'ANALYZE_AND_PROPOSE':body\.action\.trim\(\)\.toUpperCase\(\)/);
+  assert.match(route, /domain!==undefined && \(!domain \|\| domain\.length>60\)/);
+});
