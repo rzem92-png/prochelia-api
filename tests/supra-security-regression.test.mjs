@@ -105,3 +105,31 @@ test("complex legal cases are routed to the legal domain and require human revie
   assert.equal(plan.autonomy.approvalRequired, true);
   assert.equal(plan.executionAllowed, false);
 });
+
+
+test("decision engine normalizes accented emergency cases and escalates to a qualified human", () => {
+  const decision = assessSupraDecision({
+    caseType: "urgence médicale",
+    impact: "LOW",
+    requestedAction: "GENERATE_SUMMARY",
+    actorRole: "gerante"
+  });
+  assert.equal(decision.caseType, "urgence_medicale");
+  assert.equal(decision.autonomy, "URGENT_HUMAN_ESCALATION");
+  assert.equal(decision.professionalEscalationRequired, true);
+  assert.equal(decision.recommendedNextStep, "ESCALATE_TO_EMERGENCY_OR_QUALIFIED_PROFESSIONAL");
+  assert.equal(decision.executionAllowed, false);
+});
+
+test("immediate danger overrides an otherwise read-only action", () => {
+  const decision = assessSupraDecision({
+    caseType: "routine",
+    impact: "LOW",
+    requestedAction: "GENERATE_SUMMARY",
+    actorRole: "gerante",
+    context: { immediateDanger: true }
+  });
+  assert.equal(decision.autonomy, "URGENT_HUMAN_ESCALATION");
+  assert.equal(decision.managerApprovalRequired, true);
+  assert.equal(decision.executionAllowed, false);
+});
