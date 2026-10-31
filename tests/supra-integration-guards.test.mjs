@@ -240,3 +240,12 @@ test("successful payout webhook requires the external PSP payout reference", () 
   assert.match(route,/PSP_PAYOUT_REFERENCE_REQUIRED/);
   assert.ok(route.indexOf("PSP_PAYOUT_REFERENCE_REQUIRED") < route.indexOf("payoutUpdate"));
 });
+
+
+test("payout idempotency keys cannot disclose another user's payout", () => {
+  const route=source.slice(source.indexOf("async function payoutRequest"),source.indexOf("\nasync function ",source.indexOf("async function payoutRequest")+30));
+  assert.match(route,/IDEMPOTENCY_KEY_TOO_LONG/);
+  assert.match(route,/String\(old\.user_id\)!==String\(auth\.user\.id\)/);
+  assert.match(route,/String\(replay\.user_id\)===String\(auth\.user\.id\)/);
+  assert.match(route,/IDEMPOTENCY_KEY_CONFLICT/);
+});
