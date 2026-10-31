@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - prelaunch/v14.5.7-consolidation-audit
+      - audit/preprod-release-gate-20261031
   pull_request:
     branches:
       - prelaunch/v14.5.7-consolidation-audit
