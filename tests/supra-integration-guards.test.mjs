@@ -257,3 +257,13 @@ test("dispute creation is guarded atomically against concurrent active duplicate
   assert.match(route,/NOT EXISTS \(SELECT 1 FROM payment_disputes WHERE transaction_id=\? AND status IN \('open','awaiting_psp_action'\)\)/);
   assert.match(route,/PAYMENT_STATE_CHANGED_RETRY/);
 });
+
+
+test("manual payment finalization cannot alter financial state or wallet balances", () => {
+  const route=source.slice(source.indexOf("async function finalizeMissionPayment"),source.indexOf("\nasync function ",source.indexOf("async function finalizeMissionPayment")+30));
+  assert.match(route,/PSP_RECONCILIATION_REQUIRED/);
+  assert.match(route,/financial_state_changed:false/);
+  assert.match(route,/MISSION_PAYMENT_FINALIZATION_BLOCKED/);
+  assert.doesNotMatch(route,/UPDATE wallets SET/);
+  assert.doesNotMatch(route,/UPDATE payment_transactions SET/);
+});
