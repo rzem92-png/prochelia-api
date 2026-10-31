@@ -280,3 +280,14 @@ test("accounting ledger rejects invalid entries and is append-only", () => {
   assert.match(source,/trg_ledger_immutable_delete BEFORE DELETE ON accounting_ledger/);
   assert.match(source,/ACCOUNTING_LEDGER_IMMUTABLE/);
 });
+
+
+test("SUPRA accounting actions cannot write an unbalanced single ledger line", () => {
+  const start=source.indexOf("async function executeQueuedAction");
+  const end=source.indexOf("async function operationalExecute",start);
+  const route=source.slice(start,end);
+  assert.match(route,/requires_accounting_batch:true/);
+  assert.match(route,/BALANCED_DOUBLE_ENTRY_REQUIRED/);
+  assert.match(route,/WAITING_ACCOUNTING_BATCH/);
+  assert.doesNotMatch(route,/INSERT INTO accounting_ledger/);
+});
