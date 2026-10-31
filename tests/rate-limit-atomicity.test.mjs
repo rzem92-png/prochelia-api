@@ -11,7 +11,7 @@ test('rate limiting never trusts the client-controlled X-Forwarded-For header', 
   assert.notEqual(end, -1, 'productionSubjectHash must have a clear boundary');
   const implementation = source.slice(start, end);
   assert.match(implementation, /CF-Connecting-IP/);
-  assert.match(implementation, /if\\(!ip\\) return null/);
+  assert.match(implementation, /if\(!ip\) return null/);
   assert.doesNotMatch(implementation, /headers\\.get\\(\\s*['\"]X-Forwarded-For['\"]\\s*\\)/i);
 });
 
