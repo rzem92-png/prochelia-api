@@ -41,7 +41,7 @@ L'IA SUPRA n'est pas un chatbot isolé. Elle orchestre des capacités spécialis
 - Classement, détection de doublons et indicateurs.
 - Préparation de scénarios, tâches internes et brouillons.
 - Contrôles de cohérence, surveillance des sauvegardes et alertes.
-- Relances de routine uniquement avec règles, consentements et canal validés.
+- Préparation de brouillons de relance et contrôles de routine en lecture seule.\n- Envoi d’une relance uniquement après vérification du consentement, du canal autorisé, du modèle approuvé et de la règle métier ; l’envoi n’est pas dans la liste des tâches autonomes par défaut.
 
 ### Validation explicite de la Gérante
 - Engagement ou dépense financière significative.
@@ -72,7 +72,7 @@ Aucun lancement de pays n'est automatique. Chaque marché doit avoir un dossier 
 - Aucun statut COMPLETED sans confirmation d'exécution réelle.
 - Tests unitaires, contrats API, intégration D1 isolée, tests E2E, sécurité et restauration avant mise en production.
 
-## État de la V2 intégrée dans cette branche
+## Garde-fous de classification complémentaires\n- Normalisation Unicode des libellés français accentués avant classification afin que « urgence médicale » et les autres formulations usuelles ne contournent pas les règles d’escalade.\n- Routage explicite des situations urgentes vers la sécurité et des dossiers juridiques complexes vers le domaine juridique.\n- Les notifications sortantes et relances restent des effets de bord : aucune autonomie d’envoi sans preuve de consentement, canal et règle approuvés.\n\n## État de la V2 intégrée dans cette branche
 - Registre des domaines et planificateur transversal ajoutés.
 - Gouvernance d'autonomie et escalade ajoutées.
 - Intégration au moteur de recommandation des dossiers Copilote.
