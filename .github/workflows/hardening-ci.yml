@@ -5,7 +5,7 @@ on:
       - hardening/preview-release-gates-v1
   pull_request:
     branches:
-      - main
+      - feat/supra-intelligence-governance-v1
 permissions:
   contents: read
 concurrency:
