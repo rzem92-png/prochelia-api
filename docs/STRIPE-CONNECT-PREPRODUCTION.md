@@ -23,7 +23,8 @@ Variables :
 - `STRIPE_LOSSES_COLLECTOR` = `application` ou `stripe`
 
 Secrets :
-- `STRIPE_SECRET_KEY` = clé API Stripe de test en préproduction
+- `STRIPE_SECRET_KEY` = clé API Stripe secrète de test en préproduction
+- `STRIPE_PUBLISHABLE_KEY` = clé publique Stripe de test (utilisée dans le navigateur pour créer un Account Token)
 - `STRIPE_WEBHOOK_SECRET` = secret de signature du webhook Stripe
 
 Ne jamais placer ces secrets dans GitHub, dans `index.html`, dans une capture d'écran ou dans une conversation.
@@ -38,6 +39,11 @@ Cela signifie que PROCHÉLIA supporte les frais concernés et peut être respons
 
 Le mode `full` et les responsabilités attribuées à Stripe ne doivent pas être choisis automatiquement : ils peuvent changer le modèle de paiement, l'expérience de l'intervenant et la compatibilité avec les transferts marketplace. Ne pas modifier ces paramètres sans valider le flux de paiement cible.
 
+## Création du Account Token en France
+Pour les comptes connectés créés en France, le parcours Accounts v2 exige un Account Token. Le navigateur le crée directement auprès de Stripe avec la clé publique; le Worker ne reçoit que l'identifiant à usage unique du token. L'écran demande le type d'entité et une acceptation explicite des conditions Stripe Connect avant de créer le token.
+
+La clé secrète ne quitte jamais le Worker. Le token ne doit jamais être journalisé ni conservé dans le navigateur après utilisation.
+
 ## Webhook Stripe
 
 Endpoint à enregistrer dans le compte Stripe de plateforme :
@@ -51,7 +57,7 @@ Copier le secret de signature fourni par Stripe dans `STRIPE_WEBHOOK_SECRET`. Le
 
 ## Recette avant toute clé live
 
-1. Configurer uniquement des clés Stripe de test.
+1. Configurer uniquement des clés Stripe de test, y compris la clé publique de test.
 2. Vérifier que `APP_BASE_URL` correspond exactement à une origine de `CORS_ORIGIN`.
 3. Connecter un compte intervenant de test.
 4. Vérifier le retour Stripe et l'événement webhook `v2.core.account[requirements].updated`.
