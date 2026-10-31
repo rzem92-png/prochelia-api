@@ -62,3 +62,27 @@ test("SUPRA planning does not accept arbitrary object arrays as context or evide
   assert.match(route, /!isPlainRecord\(body\.context\)/);
   assert.match(route, /!isPlainRecord\(body\.evidence\)/);
 });
+
+
+test("pricing route uses an active server catalog tariff and ignores client financial overrides", () => {
+  const route = source.slice(source.indexOf("async function pricingQuote"), source.indexOf("async function financeSummary"));
+  assert.match(route, /FROM métier_catalog WHERE code=\? AND active=1/);
+  assert.match(route, /serviceRules\?\.base_price_cents/);
+  assert.match(route, /FROM pricing_policies WHERE active=1/);
+  for (const field of ["base_price_cents","platform_fee_percent","psp_percent","psp_fixed_cents","target_margin_percent","intervenant_floor_cents","regulated_max_cents","discount_cents","fuel_price_cents_per_litre","software_cost_cents"]) {
+    assert.doesNotMatch(route, new RegExp("b\\." + field));
+  }
+  assert.match(route, /promotion_discount_cents:0/);
+  assert.match(route, /final_price_recalculated_at_mission_confirmation:true/);
+});
+
+test("calendar surcharges are derived in Europe/Paris from the scheduled timestamp", () => {
+  const route = source.slice(source.indexOf("function deriveMissionCalendarFlags"), source.indexOf("async function financeSummary"));
+  assert.match(route, /timeZone:'Europe\/Paris'/);
+  assert.match(route, /calendar\.evening/);
+  assert.match(route, /calendar\.night/);
+  assert.match(route, /calendar\.saturday/);
+  assert.match(route, /calendar\.sunday/);
+  assert.match(route, /calendar\.holiday/);
+  assert.match(route, /SCHEDULED_AT_MUST_INCLUDE_TIMEZONE/);
+});
