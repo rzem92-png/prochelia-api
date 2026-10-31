@@ -1803,6 +1803,12 @@ async function pricingQuote(request, env) {
      !['B2C','B2B'].includes(clientType)) {
     return json({ok:false,error:'INVALID_QUOTE_INPUT',version:VERSION},400);
   }
+  // B2B requires a separately modelled contract/volume/invoicing policy.
+  // Never silently reuse the B2C commission and payout formula.
+  if(clientType==='B2B') {
+    return json({ok:false,error:'B2B_PRICING_POLICY_NOT_IMPLEMENTED',version:VERSION,
+      message:'Le devis entreprise reste bloqué tant que sa politique contractuelle dédiée n’est pas configurée et testée.'},409);
+  }
 
   const catalog=await env.DB.prepare(`SELECT code,label,rules_json FROM métier_catalog WHERE code=? AND active=1 LIMIT 1`)
     .bind(serviceCode).first();
