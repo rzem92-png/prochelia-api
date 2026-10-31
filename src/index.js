@@ -4809,7 +4809,8 @@ async function productionSafetySchema(env){
 
 async function productionSubjectHash(request, route){
   // Trust only Cloudflare's edge-provided client IP. Never fall back to client-controlled X-Forwarded-For.
-  const ip=clean(request.headers.get('CF-Connecting-IP')) || 'unknown';
+  const ip=clean(request.headers.get('CF-Connecting-IP'));
+  if(!ip) return null;
   return sha256Hex(`${ip}|${route}`);
 }
 
@@ -4837,6 +4838,9 @@ async function productionRateLimit(request,env){
   const windowSeconds=60;
   const bucket=`${sensitive?'SENSITIVE':'GENERAL'}:${path}`;
   const subject=await productionSubjectHash(request,path);
+  if(!subject){
+    return {ok:false,response:json({ok:false,error:'TRUSTED_CLIENT_IP_UNAVAILABLE',version:VERSION},503,{'retry-after':'60'})};
+  }
   const now=Math.floor(Date.now()/1000);
   const start=new Date(Math.floor(now/windowSeconds)*windowSeconds*1000).toISOString();
   if(!(await productionRateLimitSchemaReady(env))){
