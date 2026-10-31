@@ -354,3 +354,13 @@ test("SUPRA API rejects wrong-typed and unexpected planner fields instead of def
   assert.match(route, /const action=body\.action===undefined\?'ANALYZE_AND_PROPOSE':body\.action\.trim\(\)\.toUpperCase\(\)/);
   assert.match(route, /domain!==undefined && \(!domain \|\| domain\.length>60\)/);
 });
+
+
+test("SUPRA planner enforces its body-size limit while streaming instead of buffering unbounded input", () => {
+  const route = source.slice(source.indexOf("async function supraPlan"), source.indexOf("async function handleConsolidated"));
+  assert.match(route, /request\.body\?\.getReader\(\)/);
+  assert.match(route, /receivedBytes\+=chunk\.value\.byteLength/);
+  assert.match(route, /receivedBytes>16384/);
+  assert.match(route, /await reader\.cancel\(\)/);
+  assert.doesNotMatch(route, /const rawBody=await request\.text\(\)/);
+});
