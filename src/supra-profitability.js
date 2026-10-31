@@ -11,6 +11,7 @@ const MONEY_FIELDS = [
   "refundCents",
   "variableOperatingCostCents"
 ];
+const ALLOWED_STATUSES = new Set(["SETTLED", "RECONCILED", "REFUNDED", "PARTIALLY_REFUNDED"]);
 
 function validCents(value) {
   return Number.isSafeInteger(value) && value >= 0;
@@ -18,9 +19,17 @@ function validCents(value) {
 
 function validRecord(record) {
   if (!record || typeof record !== "object" || Array.isArray(record)) return false;
-  if (typeof record.status !== "string" || !["SETTLED", "RECONCILED", "REFUNDED", "PARTIALLY_REFUNDED"].includes(record.status)) return false;
-  if (typeof record.activity !== "string" || !record.activity.trim() || record.activity.length > 80) return false;
-  return MONEY_FIELDS.every(field => validCents(record[field] ?? 0));
+  if (typeof record.status !== "string" || !ALLOWED_STATUSES.has(record.status)) return false;
+  if (typeof record.activity !== "string" || !record.activity.trim() || record.activity.trim().length > 80) return false;
+  // Missing amounts must not silently become zero: that would overstate margin.
+  return MONEY_FIELDS.every(field => Object.hasOwn(record, field) && validCents(record[field]));
+}
+
+function addSafe(target, field, amount) {
+  const next = target[field] + amount;
+  if (!Number.isSafeInteger(next) || next < 0) return false;
+  target[field] = next;
+  return true;
 }
 
 export function calculateProfitability(input = {}) {
@@ -28,8 +37,9 @@ export function calculateProfitability(input = {}) {
       !Array.isArray(input.orders) || input.orders.length > 100000) {
     return { ok: false, error: "INVALID_PROFITABILITY_INPUT" };
   }
-  if (!input.orders.every(validRecord)) {
-    return { ok: false, error: "INVALID_OR_UNRECONCILED_LEDGER_RECORD" };
+  // A for..of validation also visits sparse-array holes (Array.every skips them).
+  for (const order of input.orders) {
+    if (!validRecord(order)) return { ok: false, error: "INVALID_OR_UNRECONCILED_LEDGER_RECORD" };
   }
 
   const totals = {
@@ -47,8 +57,9 @@ export function calculateProfitability(input = {}) {
   const byActivity = Object.create(null);
 
   for (const order of input.orders) {
+    const activity = order.activity.trim();
     const isRefund = order.status === "REFUNDED" || order.status === "PARTIALLY_REFUNDED";
-    const target = byActivity[order.activity] ||= {
+    const target = byActivity[activity] ||= {
       orders: 0, refundedOrders: 0, clientPaidCents: 0, providerPaidCents: 0,
       platformCommissionCents: 0, pspFeeCents: 0, taxCents: 0,
       refundCents: 0, variableOperatingCostCents: 0, contributionMarginCents: 0
@@ -61,8 +72,9 @@ export function calculateProfitability(input = {}) {
       target.orders++;
     }
     for (const field of MONEY_FIELDS) {
-      totals[field] += order[field] ?? 0;
-      target[field] += order[field] ?? 0;
+      if (!addSafe(totals, field, order[field]) || !addSafe(target, field, order[field])) {
+        return { ok: false, error: "PROFITABILITY_AMOUNT_OVERFLOW" };
+      }
     }
   }
 
@@ -70,7 +82,12 @@ export function calculateProfitability(input = {}) {
     group.contributionMarginCents =
       group.platformCommissionCents - group.pspFeeCents -
       group.variableOperatingCostCents - group.refundCents;
-    totals.contributionMarginCents += group.contributionMarginCents;
+    if (!Number.isSafeInteger(group.contributionMarginCents)) {
+      return { ok: false, error: "PROFITABILITY_AMOUNT_OVERFLOW" };
+    }
+    if (!addSafe(totals, "contributionMarginCents", group.contributionMarginCents)) {
+      return { ok: false, error: "PROFITABILITY_AMOUNT_OVERFLOW" };
+    }
   }
 
   // Contribution margin excludes taxes and provider payouts because the
