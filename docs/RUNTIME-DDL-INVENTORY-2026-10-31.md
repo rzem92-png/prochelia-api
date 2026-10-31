@@ -61,3 +61,10 @@ Commit `487a5007ecd36b4d7e7d716bbbe82378004c0839` :
 - le dépassement de seuil est journalisé dans les logs Worker structurés, sans création d'une table d'audit runtime.
 
 Des tests statiques dédiés vérifient l'absence de DDL, l'ordre du contrôle de schéma et la mise à jour de l'inventaire de non-régression. Ce correctif ne prouve pas encore que la table existe dans la D1 preview ; cela doit être confirmé par une vérification strictement en lecture seule avant tout déploiement réel. Les autres helpers DDL runtime restent à migrer.
+
+
+## Migration rate-limit préparée en préproduction — non appliquée
+
+Une migration additive `0005_security_rate_limits.sql` a été créée sur la branche dédiée `prelaunch/v14.5.7-consolidation-audit` (commit `02ef1c0039ad15959a0fad902ff5e2d2c1d9a292`). Elle crée uniquement la table `security_rate_limits` et son index, avec contrainte de non-négativité du compteur et unicité du bucket/empreinte/fenêtre. Le workflow manuel de migration a été mis à jour pour exiger ce fichier (commit `e48c99b75a28577916ee64ddb9bd500f49fa05b4`).
+
+**Aucune migration n'a été appliquée à D1.** La cible configurée est explicitement la base de préproduction `prochelia-preview-db` (UUID `6adb95e5-e542-4bec-9008-fbea01042305`) et le Worker staging `prochelia-api-staging`. Avant toute exécution, il faut vérifier les migrations déjà enregistrées, réaliser une sauvegarde vérifiée et un exercice de restauration sur une base de test indépendante. La simple création du fichier SQL ne prouve ni son application ni la présence de la table dans la base.
