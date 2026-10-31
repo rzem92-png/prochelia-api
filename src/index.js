@@ -401,10 +401,16 @@ async function bootstrap(request, env) {
 }
 
 async function authStatus(request, env) {
+  // Never advertise an available bootstrap when the authoritative D1 binding
+  // is absent: the UI must fail closed instead of inviting a doomed setup.
+  if (!env?.DB) {
+    return json({ ok: false, database: false, version: VERSION }, 503);
+  }
   const auth = await getSessionUser(request, env);
-  const count = env.DB ? await env.DB.prepare('SELECT COUNT(*) AS total FROM users').first() : null;
+  const count = await env.DB.prepare('SELECT COUNT(*) AS total FROM users').first();
   return json({
     ok: true,
+    database: true,
     version: VERSION,
     authenticated: !!auth,
     user: auth?.user || null,
