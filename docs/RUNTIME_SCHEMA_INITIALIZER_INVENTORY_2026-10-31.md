@@ -72,3 +72,16 @@ The existing migrations visibly declare 21 tables, 15 indexes and 5 triggers. Na
 ## Safety boundary
 
 No D1 query or write was run to produce this report. No migration was applied. No initializer was removed. No Worker was deployed. PR #15 remains draft/unmerged. Production remains NO-GO.
+
+
+## Additional parity hazards found in targeted source comparison
+
+A targeted comparison of the payment, pricing and hardening initializer bodies against migrations found differences that make blind initializer removal unsafe:
+
+1. **Runtime index deletion:** `ensureConsolidatedSchema` contains `DROP INDEX IF EXISTS idx_pricing_travel_policy_active`, followed by recreation of a partial unique index with that name. This is a request-time schema mutation with a destructive index-drop step. The current migration `0002_server_pricing.sql` instead creates `idx_pricing_travel_policy_active_unique` and explicitly says it preserves any legacy index. These are not identical object histories or names. A migration plan must verify duplicate data and both index definitions before choosing a safe expand/contract path.
+2. **Route estimate constraint mismatch:** the runtime initializer's `pricing_route_estimates.status` column is `TEXT NOT NULL DEFAULT 'VALID'` without a CHECK in the excerpt; migration 0002 adds `CHECK (status IN ('VALID','EXPIRED','REVOKED'))`. The migration is stricter. Existing rows and all write paths must be checked before treating the schemas as interchangeable.
+3. **Holiday seed behavior:** runtime and migration both seed holiday rows, but full date/value parity and idempotency have not been programmatically compared. Do not assume the seed sets are identical.
+4. **Rate-limit constraint mismatch:** runtime `security_rate_limits.request_count` is declared `INTEGER NOT NULL DEFAULT 0` while migration 0005 adds `CHECK (request_count >= 0)`. This is a real schema-contract difference requiring an explicit compatibility decision.
+5. **Wallet trigger parity:** the initializer and migration both declare the five wallet-ledger triggers by name. This inspection did not compare normalized complete trigger bodies, so equivalence remains UNPROVEN.
+
+These findings are source-level comparisons only. No database was queried, no SQL was executed and no data state was inferred.
