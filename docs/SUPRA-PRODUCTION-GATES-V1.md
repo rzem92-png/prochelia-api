@@ -58,3 +58,12 @@ Une capacité ne peut pas hériter du niveau d'une autre. Chaque domaine et chaq
 
 ## État actuel
 Les modules d'orchestration et de gouvernance préparent des plans. Les adaptateurs réels, les tests E2E de tous les domaines et la validation des interfaces restent des travaux distincts. Le statut de cette branche demeure développement/préproduction non autorisée. Aucun merge, migration D1 ou déploiement de production n'est demandé par ce document.
+
+
+## Contrôle complémentaire — provenance des preuves SUPRA
+
+- Toute preuve fournie par le navigateur ou l'appelant est non fiable, même si elle porte un nom tel que `pspConfirmation`, `missionOwnershipVerified` ou `clientOwnershipVerified`.
+- Le moteur de gouvernance refuse les propriétés inattendues, les types incorrects et les contextes malformés.
+- La route API ne transmet aucune preuve fournie par le client au moteur de décision.
+- Les contrôles de propriété, d'éligibilité, de disponibilité et de rapprochement PSP restent en échec fermé tant qu'un adaptateur serveur ne les a pas lus depuis leur source de vérité.
+- Un plan ou une décision renvoyé par SUPRA ne constitue jamais une autorisation d'exécuter une mutation.
