@@ -22,17 +22,24 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: supra-validation-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   supra-governance:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: "22"
-      - name: Install pinned project dependencies
+      - name: Install dependencies (no committed lockfile yet)
         run: npm install --no-audit --no-fund
       - name: Check JavaScript syntax
         run: npm run build
