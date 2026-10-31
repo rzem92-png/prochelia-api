@@ -1,4 +1,5 @@
 import { handleV7Route } from "./v7-routes.js";
+import { procheliaV7 } from "./v7.js";
 // PROCHÉLIA — INDEX BACKEND CONSOLIDÉ UNIQUE
 // Référence de consolidation : V14.1 Finance + sécurité/RBAC existants.
 // Généré le 19/10/2026. À déployer uniquement après recette avec la vraie base D1.
@@ -1226,7 +1227,15 @@ async function copilotRecommend(env, input) {
     action='RESOLVE_CASE';
     solution={steps:['collect_evidence','reconcile_mission','reconcile_finance','calculate_impact','propose_resolution','notify','audit'],automatic:false};
   }
-  return { action, mode: solution.automatic ? 'AUTO' : 'MANAGER_APPROVAL', confidence: simple ? 0.95 : 0.82, solution, context, phase };
+  const governance = procheliaV7.assessSupraDecision({
+    caseType, impact, requestedAction: action === 'AUTO_RESOLVE' ? 'ANALYZE_AND_PROPOSE' : action,
+    actorRole: 'system', context
+  });
+  // La gouvernance V1 privilégie l'analyse et la recommandation. Aucun dossier n'est
+  // classé comme exécutable automatiquement tant que les preuves ne sont pas vérifiées.
+  action = action === 'AUTO_RESOLVE' ? 'ANALYZE_AND_PROPOSE' : action;
+  solution = { ...solution, automatic:false, governance };
+  return { action, mode:'MANAGER_APPROVAL', confidence: simple ? 0.95 : 0.82, solution, context, phase, governance };
 }
 
 async function createOperationalCase(request, env) {
@@ -1238,15 +1247,17 @@ async function createOperationalCase(request, env) {
   const priority=CASE_PRIORITIES[impact]||10;
   const rec=await copilotRecommend(env,{caseType,impact,phase,context:body.context||{}});
   const id=crypto.randomUUID();
-  const requiresManager=rec.mode==='MANAGER_APPROVAL' ? 1 : 0;
-  const status=rec.action==='AUTO_RESOLVE' ? 'AUTO_PENDING' : 'OPEN';
+  // SUPRA V1 : aucune création de dossier ne déclenche d'écriture métier automatique.
+  // Les dossiers restent en attente de validation explicite de la Gérante.
+  const requiresManager=1;
+  const status='OPEN';
   await env.DB.prepare(`INSERT INTO operational_cases(id,case_type,source,phase,priority,status,auto_mode,client_id,company_id,intervenant_id,mission_id,impact_level,description,context_json,proposed_solution_json,requires_manager) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
     .bind(id,caseType,'API',phase,priority,status,rec.mode,clean(body.client_id)||null,clean(body.company_id)||null,clean(body.intervenant_id)||null,clean(body.mission_id)||null,impact,clean(body.description)||null,JSON.stringify(body.context||{}),JSON.stringify(rec),requiresManager).run();
   await env.DB.prepare(`INSERT INTO copilot_log(id,case_id,action_type,recommendation,confidence,mode) VALUES(?,?,?,?,?,?)`)
     .bind(crypto.randomUUID(),id,rec.action,JSON.stringify(rec.solution),rec.confidence,rec.mode).run();
   await journal(env,'copilot',null,'CASE_CREATED','operational_case',id,'OK',{caseType,impact});
-  if(rec.action==='AUTO_RESOLVE') await executeOperationalCase(env,id,null,true);
-  return json({ok:true,version:VERSION,case_id:id,recommendation:rec,status:rec.action==='AUTO_RESOLVE'?'AUTO_EXECUTED':'WAITING_MANAGER'},201);
+  // SUPRA V1 : recommandation uniquement ; jamais d'exécution automatique ici.
+  return json({ok:true,version:VERSION,case_id:id,recommendation:rec,status:'WAITING_MANAGER'},201);
 }
 
 
@@ -1345,6 +1356,9 @@ async function processActionOutbox(request, env) {
 }
 
 async function executeOperationalCase(env, caseId, approverId=null, automatic=false) {
+  // SUPRA V1 : le mode automatique est neutralisé jusqu'à validation des contrôles
+  // de propriété, d'éligibilité, de disponibilité, d'idempotence et de preuve PSP.
+  if (automatic) return {ok:false,error:'AUTOMATION_DISABLED_PENDING_SUPRA_GOVERNANCE'};
   const c=await env.DB.prepare('SELECT * FROM operational_cases WHERE id=? LIMIT 1').bind(caseId).first();
   if(!c)return {ok:false,error:'CASE_NOT_FOUND'};
   if(c.status==='RESOLVED')return {ok:true,already:true};
