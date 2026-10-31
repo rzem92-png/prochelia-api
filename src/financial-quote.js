@@ -38,6 +38,10 @@ export function calculateFinancialQuote({
   const psp = Math.round(clientTotal * pspPercent / 100) + pspFixedCents;
   const contribution = commission + travelClientCents - travelProviderCostCents - psp - softwareCostCents;
   const minimumMargin = Math.max(200, Math.round(clientTotal * targetMarginPercent / 100));
+  const computedMoney = [servicePrice, commission, providerPayout, clientTotal, psp, contribution, minimumMargin];
+  if (computedMoney.some(value => !Number.isSafeInteger(value))) {
+    throw new Error('FINANCIAL_RESULT_OUT_OF_RANGE');
+  }
   const floorOk = providerPayout >= intervenantFloorCents;
   const marginOk = contribution >= minimumMargin;
   const allowed = floorOk && marginOk;
