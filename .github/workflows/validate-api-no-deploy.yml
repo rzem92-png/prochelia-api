@@ -1,0 +1,113 @@
+name: "PROCHÉLIA API — contrôle syntaxique sans déploiement"
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "src/**"
+      - "wrangler.jsonc"
+      - ".github/workflows/compare-preview-test-d1-integrity.yml"
+      - ".github/workflows/validate-api-no-deploy.yml"
+  push:
+    branches: ["audit/d1-integrity-compare-v1"]
+    paths:
+      - "src/**"
+      - "wrangler.jsonc"
+      - ".github/workflows/validate-api-no-deploy.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  syntax:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Vérifier la syntaxe des modules Worker
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check src/index.js
+          node --check src/v7-routes.js
+          node --check src/v7.js
+      - name: Confirmer le contrôle sans déploiement
+        run: |
+          echo "Contrôle syntaxique uniquement."
+          echo "Aucun accès Cloudflare, aucune requête D1, aucune migration, aucun déploiement."
+
+
+      - name: Vérifier la syntaxe et le caractère lecture seule du script d'intégrité D1
+        shell: bash
+        run: |
+          set -euo pipefail
+          awk '/cat > compare-d1.mjs <</ { inside=1; next } inside && /^[[:space:]]*NODE$/ { exit } inside { sub(/^          /, ""); print }' .github/workflows/compare-preview-test-d1-integrity.yml > "$RUNNER_TEMP/compare-d1.mjs"
+          test -s "$RUNNER_TEMP/compare-d1.mjs"
+          echo "Lignes extraites : $(wc -l < "$RUNNER_TEMP/compare-d1.mjs")"
+          node --check "$RUNNER_TEMP/compare-d1.mjs"
+          D1_AUDIT_SCRIPT="$RUNNER_TEMP/compare-d1.mjs" node --input-type=module <<'NODE'
+          import fs from "node:fs";
+          const source = fs.readFileSync(process.env.D1_AUDIT_SCRIPT, "utf8");
+          const writeSql = /query\s*\(\s*target\s*,\s*["']\s*(INSERT|UPDATE|DELETE|REPLACE|CREATE|DROP|ALTER)\b/i;
+          if (writeSql.test(source)) throw new Error("Instruction SQL modificatrice détectée.");
+          console.log("Script D1 valide syntaxiquement; appels SQL en lecture seule.");
+          NODE
+          
+      - name: Vérifier l'API publique et la readiness D1 (GET uniquement)
+        shell: bash
+        run: |
+          set -euo pipefail
+          base="https://prochelia-api.rzem92.workers.dev"
+          curl --fail --silent --show-error --max-time 20 "$base/api/health" -o "$RUNNER_TEMP/health.json"
+          curl --fail --silent --show-error --max-time 20 "$base/api/readiness" -o "$RUNNER_TEMP/readiness.json"
+          curl --fail --silent --show-error --max-time 20 "$base/api/info" -o "$RUNNER_TEMP/info.json"
+          curl --fail --silent --show-error --max-time 20 "$base/api/core/schema" -o "$RUNNER_TEMP/core-schema.json"
+          curl --fail --silent --show-error --max-time 20 "$base/api/missions/schema" -o "$RUNNER_TEMP/missions-schema.json"
+          curl --fail --silent --show-error --max-time 20 "$base/api/prestations" -o "$RUNNER_TEMP/prestations.json"
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const dir = process.env.RUNNER_TEMP;
+          const health = JSON.parse(fs.readFileSync(dir + '/health.json', 'utf8'));
+          const ready = JSON.parse(fs.readFileSync(dir + '/readiness.json', 'utf8'));
+          const info = JSON.parse(fs.readFileSync(dir + '/info.json', 'utf8'));
+          const core = JSON.parse(fs.readFileSync(dir + '/core-schema.json', 'utf8'));
+          const missions = JSON.parse(fs.readFileSync(dir + '/missions-schema.json', 'utf8'));
+          const catalog = JSON.parse(fs.readFileSync(dir + '/prestations.json', 'utf8'));
+          if (health.ok !== true || health.database !== true) throw new Error('Health API/D1 non valide.');
+          if (ready.ok !== true || ready.ready !== true || ready.database !== true ||
+              ready.missions_schema !== true || ready.users_schema !== true || ready.writes !== false) {
+            throw new Error('Readiness D1 ou schéma de base non validé.');
+          }
+          if (info.ok !== true || !Array.isArray(info.routes) ||
+              !info.routes.includes('/api/auth/login') ||
+              !info.routes.includes('/api/payments/onboard') ||
+              info.writes?.missions !== false) {
+            throw new Error('Contrat API public incomplet ou état des écritures non conforme.');
+          }
+          for (const table of ['users','clients','intervenants','sessions','disponibilites']) {
+            if (core.ok !== true || core.tables?.[table]?.exists !== true) {
+              throw new Error('Table cœur D1 absente : ' + table);
+            }
+          }
+          for (const table of ['users','clients','intervenants','sessions','disponibilites']) {
+            console.log('D1_SCHEMA_' + table.toUpperCase() + ': ' + (core.tables?.[table]?.create_sql || 'ABSENT'));
+          }
+          console.log('D1_SCHEMA_MISSIONS: ' + (missions.create_sql || 'ABSENT'));
+          console.log('D1_MISSIONS_WRITES_ENABLED: ' + String(missions.write_enabled === true));
+          const safeCatalog=(catalog.prestations||[]).map(p=>({id:p.id,code:p.code,name:p.name,base_price_cents:p.base_price_cents,price_cents:p.price_cents,duration_minutes:p.duration_minutes,active:p.active,status:p.status}));
+          console.log('PRESTATION_CATALOG_SAFE: ' + JSON.stringify(safeCatalog));
+          console.log('FRONTEND_PROFILE_ROUTES: ' + JSON.stringify(info.routes.filter(x => ['/api/clients','/api/intervenants'].includes(x))));
+          console.log(JSON.stringify({
+            ok: true,
+            service: health.service,
+            version: health.version,
+            database: ready.database,
+            ready: ready.ready,
+            missionWritesEnabled: info.writes?.missions === true
+          }));
+          NODE
