@@ -1,10 +1,10 @@
-const STRIPE_API_BASE = "https://api.stripe.com/v1/";
-const STRIPE_ALLOWED_RESOURCES = new Set(["accounts", "account_links", "payment_intents", "transfers", "payouts"]);
+const STRIPE_API_BASE = "https://api.stripe.com/";
+const STRIPE_ALLOWED_PATHS = new Set(["v2/core/accounts", "v1/account_links"]);
 
-export async function stripePost(env, resource, params, idempotencyKey, fetchImpl = fetch) {
+export async function stripePost(env, apiPath, params, idempotencyKey, fetchImpl = fetch) {
   const secret = String(env?.STRIPE_SECRET_KEY || "").trim();
   if (!secret) throw new Error("STRIPE_SECRET_KEY_NOT_CONFIGURED");
-  if (!STRIPE_ALLOWED_RESOURCES.has(resource)) throw new Error("STRIPE_RESOURCE_NOT_ALLOWED");
+  if (!STRIPE_ALLOWED_PATHS.has(apiPath)) throw new Error("STRIPE_PATH_NOT_ALLOWED");
   if (!idempotencyKey) throw new Error("STRIPE_IDEMPOTENCY_KEY_REQUIRED");
 
   const body = new URLSearchParams();
@@ -12,7 +12,7 @@ export async function stripePost(env, resource, params, idempotencyKey, fetchImp
     if (value !== undefined && value !== null && value !== "") body.set(key, String(value));
   }
 
-  const response = await fetchImpl(STRIPE_API_BASE + resource, {
+  const response = await fetchImpl(STRIPE_API_BASE + apiPath, {
     method: "POST",
     headers: {
       Authorization: "Bearer " + secret,
@@ -20,6 +20,22 @@ export async function stripePost(env, resource, params, idempotencyKey, fetchImp
       "Idempotency-Key": idempotencyKey
     },
     body
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const code = String(data?.error?.code || data?.error?.type || "unknown").replace(/[^a-zA-Z0-9_]/g, "").slice(0, 60);
+    throw new Error("STRIPE_API_ERROR_" + response.status + "_" + code);
+  }
+  return data;
+}
+
+export async function stripeGet(env, apiPath, fetchImpl = fetch) {
+  const secret = String(env?.STRIPE_SECRET_KEY || "").trim();
+  if (!secret) throw new Error("STRIPE_SECRET_KEY_NOT_CONFIGURED");
+  if (!/^v2\/core\/accounts\/acct_[A-Za-z0-9]+$/.test(apiPath)) throw new Error("STRIPE_PATH_NOT_ALLOWED");
+  const response = await fetchImpl(STRIPE_API_BASE + apiPath, {
+    method: "GET",
+    headers: { Authorization: "Bearer " + secret }
   });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
