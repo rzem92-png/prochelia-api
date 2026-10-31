@@ -47,7 +47,7 @@ jobs:
         run: |
           set -euo pipefail
           awk '
-            /cat > compare-d1\\.mjs << .NODE./ { inside=1; next }
+            /cat > compare-d1\.mjs << .NODE./ { inside=1; next }
             inside && /^[[:space:]]*NODE$/ { exit }
             inside { sub(/^          /, ""); print }
           ' .github/workflows/compare-preview-test-d1-integrity.yml > "$RUNNER_TEMP/compare-d1.mjs"
