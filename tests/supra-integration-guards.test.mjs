@@ -188,3 +188,15 @@ test('payout wallet settlement and release use transactional D1 batches', () => 
   assert.ok(route.includes('env.DB.batch([payoutUpdate,settle])'));
   assert.ok(route.includes('env.DB.batch([payoutUpdate,release])'));
 });
+
+
+test("payout reservation and payout request creation are atomic and balance-guarded", () => {
+  const route=source.slice(source.indexOf("async function payoutRequest"),source.indexOf("async function verifyWebhookSignature"));
+  assert.match(route,/env\.DB\.batch\(\[reservation,createPayout\]\)/);
+  assert.match(route,/available_cents>=\?/);
+  assert.match(route,/WHERE changes\(\)=1/);
+  assert.match(route,/meta\?\.changes\)!==1/);
+  assert.match(route,/idempotent_replay:true/);
+  assert.match(route,/currency='EUR'/);
+  assert.doesNotMatch(route,/UPDATE wallets SET available_cents=available_cents-\?,reserved_cents=reserved_cents\+\?,updated_at=CURRENT_TIMESTAMP WHERE id=\?/);
+});
