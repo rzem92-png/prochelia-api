@@ -1,0 +1,58 @@
+name: Deploy isolated SUPRA API preview (manual only)
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirmation:
+        description: "Type DEPLOY_PREVIEW_ONLY to allow isolated preview deployment"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: supra-api-preview-deploy
+  cancel-in-progress: false
+
+jobs:
+  isolated-preview:
+    if: github.ref == 'refs/heads/feat/supra-intelligence-governance-v1' && inputs.confirmation == 'DEPLOY_PREVIEW_ONLY'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: supra-preview
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+      - name: Validate isolated deployment target before authentication
+        shell: bash
+        run: |
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const preview = JSON.parse(fs.readFileSync('wrangler.preview.jsonc','utf8'));
+          const production = JSON.parse(fs.readFileSync('wrangler.jsonc','utf8'));
+          const expected = '6adb95e5-e542-4bec-9008-fbea01042305';
+          if (preview.name !== 'prochelia-api-preview') throw Error('Unexpected preview Worker name');
+          if (preview.vars?.APP_ENV !== 'preview') throw Error('Not in preview mode');
+          if (preview.workers_dev !== true) throw Error('Preview workers.dev disabled');
+          if (preview.d1_databases?.length !== 1 || preview.d1_databases[0].binding !== 'DB' || preview.d1_databases[0].database_name !== 'prochelia-preview-db' || preview.d1_databases[0].database_id !== expected) throw Error('Unexpected preview D1 binding');
+          if (production.name === preview.name || production.d1_databases?.some(db => db.database_id === expected)) throw Error('Production and preview resources are not isolated');
+          console.log('Isolated preview Worker and D1 identifiers verified.');
+          NODE
+      - run: npm install --no-audit --no-fund
+      - run: npm run build
+      - run: npm run check:worker:preview
+      - run: npm test
+      - name: Deploy ONLY named preview Worker (no D1 migrations)
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: npx wrangler deploy --config wrangler.preview.jsonc
+      - name: Document post-deployment manual checks
+        run: |
+          echo 'Verify the deployed workers.dev URL, /api/health, D1 binding, and browser proxy before configuring SUPRA_API_ORIGIN.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'No D1 migrations, no production deployment, and no production branch changes are performed by this workflow.' >> "$GITHUB_STEP_SUMMARY"

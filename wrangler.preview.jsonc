@@ -1,0 +1,24 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "prochelia-api-preview",
+  "main": "src/index.js",
+  "compatibility_date": "2026-09-25",
+  "workers_dev": true,
+  "vars": {
+    "APP_ENV": "preview",
+    "CORS_ORIGIN": "https://feat-supra-control-center-v1.prochelia.pages.dev"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "prochelia-preview-db",
+      "database_id": "6adb95e5-e542-4bec-9008-fbea01042305"
+    }
+  ],
+  "observability": {
+    "logs": {
+      "enabled": true,
+      "invocation_logs": true
+    }
+  }
+}

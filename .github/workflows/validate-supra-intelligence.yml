@@ -1,0 +1,55 @@
+name: Validate PROCHÉLIA IA SUPRA-INTELLIGENTE
+
+on:
+  push:
+    branches: [feat/supra-intelligence-governance-v1]
+  pull_request:
+    branches: [main]
+    paths:
+      - "src/index.js"
+      - "src/request-body.js"
+      - "src/identity-evidence.js"
+      - "src/v7.js"
+      - "src/supra-intelligence.js"
+      - "src/supra-orchestrator.js"
+      - "tests/supra-*.test.mjs"
+      - "tests/request-body.test.mjs"
+      - "tests/identity-evidence.test.mjs"
+      - "package.json"
+      - "wrangler.jsonc"
+      - "wrangler.preview.jsonc"
+      - ".github/workflows/validate-supra-intelligence.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: supra-validation-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  supra-governance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22"
+      - name: Install dependencies (no committed lockfile yet)
+        run: npm install --no-audit --no-fund
+      - name: Check JavaScript syntax
+        run: npm run build
+      - name: Bundle production configuration without deploying
+        run: npm run check:worker
+      - name: Bundle isolated preview configuration without deploying
+        run: npm run check:worker:preview
+      - name: Run the complete API regression suite, including SUPRA
+        run: npm test
+      - name: Confirm no deployment or D1 migration
+        run: echo "Validation only — Wrangler dry-runs, no Cloudflare deployment and no D1 migration."

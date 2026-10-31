@@ -1,4 +1,7 @@
 import { handleV7Route } from "./v7-routes.js";
+import { procheliaV7 } from "./v7.js";
+import { readBoundedRequestBody } from "./request-body.js";
+import { normalizeIdentityDecision, isCurrentIdentityEvidence } from "./identity-evidence.js";
 // PROCHÉLIA — INDEX BACKEND CONSOLIDÉ UNIQUE
 // Référence de consolidation : V14.1 Finance + sécurité/RBAC existants.
 // Généré le 19/10/2026. À déployer uniquement après recette avec la vraie base D1.
@@ -369,10 +372,17 @@ async function bootstrap(request, env) {
   const passwordHash = await hashPassword(password);
   const userId = crypto.randomUUID();
 
-  await env.DB.prepare(
+  // One atomic conditional INSERT prevents two concurrent first-use requests
+  // from creating multiple initial manager accounts.
+  const created = await env.DB.prepare(
     `INSERT INTO users (id, role, email, first_name, last_name, phone, status, password_hash)
-     VALUES (?, 'gerante', ?, ?, ?, ?, 'active', ?)`
+     SELECT ?, 'gerante', ?, ?, ?, ?, 'active', ?
+      WHERE NOT EXISTS (SELECT 1 FROM users)`
   ).bind(userId, email, firstName, lastName, phone, passwordHash).run();
+
+  if (Number(created?.meta?.changes || 0) !== 1) {
+    return json({ ok: false, error: 'BOOTSTRAP_ALREADY_USED', version: VERSION }, 409);
+  }
 
   return json({
     ok: true,
@@ -391,10 +401,16 @@ async function bootstrap(request, env) {
 }
 
 async function authStatus(request, env) {
+  // Never advertise an available bootstrap when the authoritative D1 binding
+  // is absent: the UI must fail closed instead of inviting a doomed setup.
+  if (!env?.DB) {
+    return json({ ok: false, database: false, version: VERSION }, 503);
+  }
   const auth = await getSessionUser(request, env);
-  const count = env.DB ? await env.DB.prepare('SELECT COUNT(*) AS total FROM users').first() : null;
+  const count = await env.DB.prepare('SELECT COUNT(*) AS total FROM users').first();
   return json({
     ok: true,
+    database: true,
     version: VERSION,
     authenticated: !!auth,
     user: auth?.user || null,
@@ -501,13 +517,18 @@ async function securityAudit(env, eventType, missionId, userId, role, result, me
 }
 
 async function requireVerifiedIntervenant(env, userId) {
-  const row = await env.DB.prepare(
-    `SELECT id,status,level,verified_at,expires_at FROM identity_verifications
+  const rows = await env.DB.prepare(
+    `SELECT id,status,level,provider,provider_reference,verified_at,expires_at FROM identity_verifications
      WHERE user_id=? AND status='verified'
-       AND (expires_at IS NULL OR expires_at > CURRENT_TIMESTAMP)
-     ORDER BY verified_at DESC LIMIT 1`
-  ).bind(userId).first();
-  return row || null;
+       AND provider='manual_control'
+       AND provider_reference IS NOT NULL
+       AND verified_at IS NOT NULL
+       AND expires_at IS NOT NULL
+       AND expires_at > CURRENT_TIMESTAMP
+     ORDER BY verified_at DESC LIMIT 5`
+  ).bind(userId).all();
+  const now = Date.now();
+  return (rows.results || []).find(row => isCurrentIdentityEvidence(row, now)) || null;
 }
 
 async function deviceHash(request, userId) {
@@ -533,21 +554,40 @@ async function securityIdentityApprove(request, env) {
   await ensureSecuritySchema(env);
   const body = await readJson(request);
   const verificationId = clean(body?.verification_id);
-  const status = clean(body?.status);
-  const level = clean(body?.level) || 'standard';
-  if (!verificationId || !['verified','rejected','pending'].includes(status)) return json({ok:false,error:'INVALID_IDENTITY_DECISION',version:VERSION},400);
-  const row = await env.DB.prepare('SELECT * FROM identity_verifications WHERE id=? LIMIT 1').bind(verificationId).first();
+  const decision = normalizeIdentityDecision(body);
+  if (!verificationId || !decision.ok) {
+    return json({ok:false,error:decision.error || 'INVALID_IDENTITY_DECISION',version:VERSION},400);
+  }
+  const row = await env.DB.prepare(
+    'SELECT id,user_id,status FROM identity_verifications WHERE id=? LIMIT 1'
+  ).bind(verificationId).first();
   if (!row) return json({ok:false,error:'VERIFICATION_NOT_FOUND',version:VERSION},404);
-  const provider = clean(body?.provider) || 'manual_control';
-  const providerReference = clean(body?.provider_reference) || null;
-  const reason = clean(body?.rejection_reason) || null;
+  if (row.status !== 'pending') {
+    return json({ok:false,error:'IDENTITY_DECISION_ALREADY_FINAL',version:VERSION},409);
+  }
+  const { status, level, provider, providerReference, rejectionReason } = decision.value;
   const verifiedAt = status === 'verified' ? new Date().toISOString() : null;
-  const expiresAt = status === 'verified' ? new Date(Date.now()+30*24*60*60*1000).toISOString() : null;
-  await env.DB.prepare(
-    `UPDATE identity_verifications SET status=?,level=?,provider=?,provider_reference=?,verified_at=?,expires_at=?,rejection_reason=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`
-  ).bind(status,level,provider,providerReference,verifiedAt,expiresAt,reason,verificationId).run();
-  await securityAudit(env,'IDENTITY_VERIFICATION_DECISION',null,auth.user.id,auth.user.role,status,{verification_id:verificationId,subject_user_id:row.user_id,level});
-  return json({ok:true,version:VERSION,verification_id:verificationId,user_id:row.user_id,status,level,verified_at:verifiedAt},200);
+  const expiresAt = status === 'verified'
+    ? new Date(Date.now()+30*24*60*60*1000).toISOString() : null;
+  const updated = await env.DB.prepare(
+    `UPDATE identity_verifications
+       SET status=?,level=?,provider=?,provider_reference=?,verified_at=?,expires_at=?,
+           rejection_reason=?,updated_at=CURRENT_TIMESTAMP
+     WHERE id=? AND status='pending'`
+  ).bind(status,level,provider,providerReference,verifiedAt,expiresAt,rejectionReason,verificationId).run();
+  if (Number(updated?.meta?.changes || 0) !== 1) {
+    return json({ok:false,error:'IDENTITY_DECISION_RACE_CONFLICT',version:VERSION},409);
+  }
+  await securityAudit(env,'IDENTITY_VERIFICATION_DECISION',null,auth.user.id,auth.user.role,status,{
+    verification_id:verificationId,subject_user_id:row.user_id,level,
+    evidence_reference_recorded:status==='verified'
+  });
+  return json({
+    ok:true,version:VERSION,verification_id:verificationId,user_id:row.user_id,
+    status,level,verified_at:verifiedAt,expires_at:expiresAt,
+    verification_mode:'MANUAL_REVIEW_REFERENCE_REQUIRED',
+    note:'Validation manuelle traçable. Ce statut ne constitue pas une vérification biométrique ou fournisseur externe.'
+  },200);
 }
 
 async function deliverSecurityCodes(env, payload) {
@@ -581,6 +621,18 @@ async function securityPrepareMission(request, env) {
   const body = await readJson(request);
   const missionId=clean(body?.mission_id), clientId=clean(body?.client_id), intervenantId=clean(body?.intervenant_id);
   if(!missionId||!clientId||!intervenantId) return json({ok:false,error:'MISSION_SECURITY_FIELDS_REQUIRED',version:VERSION},400);
+  // Never trust identifiers supplied by the caller, even for a manager-only route.
+  // Bind security-code preparation to the authoritative mission assignment in D1.
+  const mission = await env.DB.prepare(
+    'SELECT id,client_id,intervenant_id FROM missions WHERE id=? LIMIT 1'
+  ).bind(missionId).first();
+  if(!mission) return json({ok:false,error:'MISSION_NOT_FOUND',version:VERSION},404);
+  if(String(mission.client_id)!==clientId || String(mission.intervenant_id)!==intervenantId) {
+    await securityAudit(env,'MISSION_SECURITY_ASSIGNMENT_MISMATCH',missionId,auth.user.id,auth.user.role,'DENIED',{
+      requested_client_id:clientId,requested_intervenant_id:intervenantId
+    });
+    return json({ok:false,error:'MISSION_ASSIGNMENT_MISMATCH',version:VERSION},409);
+  }
   const verified = await requireVerifiedIntervenant(env,intervenantId);
   if(!verified) return json({ok:false,error:'INTERVENANT_IDENTITY_NOT_VERIFIED',version:VERSION},409);
   const existing=await env.DB.prepare('SELECT id,status FROM mission_security WHERE mission_id=? LIMIT 1').bind(missionId).first();
@@ -847,8 +899,16 @@ async function createMissionPayment(request, env) {
   if(!missionId||!clientId||!intervenantId||gross===null||commission===null||commission>gross) return json({ok:false,error:'INVALID_PAYMENT_AMOUNT_OR_PARTIES',version:VERSION},400);
   const idem=clean(request.headers.get('idempotency-key'))||clean(body?.idempotency_key);
   if(!idem) return json({ok:false,error:'IDEMPOTENCY_KEY_REQUIRED',version:VERSION},400);
+  if(idem.length>180) return json({ok:false,error:'IDEMPOTENCY_KEY_TOO_LONG',version:VERSION},400);
   const old=await env.DB.prepare('SELECT * FROM payment_transactions WHERE idempotency_key=? LIMIT 1').bind(idem).first();
-  if(old) return json({ok:true,version:VERSION,idempotent_replay:true,transaction:old},200);
+  if(old) {
+    const sameRequest=old.mission_id===missionId && old.client_id===clientId &&
+      old.intervenant_id===intervenantId && Number(old.gross_cents)===gross &&
+      Number(old.commission_cents)===commission && old.currency==='EUR' &&
+      old.provider===paymentProvider(env) && old.type==='MISSION_CHARGE';
+    if(!sameRequest) return json({ok:false,error:'IDEMPOTENCY_KEY_CONFLICT',version:VERSION},409);
+    return json({ok:true,version:VERSION,idempotent_replay:true,transaction:old},200);
+  }
   const net=gross-commission;
   const txId=crypto.randomUUID();
   await env.DB.prepare(`INSERT INTO payment_transactions
@@ -866,19 +926,13 @@ async function finalizeMissionPayment(request, env) {
   if(!txId||!['paid','failed','refunded','held'].includes(outcome)) return json({ok:false,error:'INVALID_PAYMENT_FINALIZATION',version:VERSION},400);
   const tx=await env.DB.prepare('SELECT * FROM payment_transactions WHERE id=? LIMIT 1').bind(txId).first();
   if(!tx) return json({ok:false,error:'TRANSACTION_NOT_FOUND',version:VERSION},404);
-  if(['paid','refunded','failed'].includes(tx.status) && tx.status!==outcome) return json({ok:false,error:'PAYMENT_STATE_CONFLICT',version:VERSION,status:tx.status},409);
-  if(outcome==='paid'){
-    const wallet=await env.DB.prepare('SELECT * FROM wallets WHERE user_id=? LIMIT 1').bind(tx.intervenant_id).first();
-    if(!wallet) return json({ok:false,error:'INTERVENANT_WALLET_NOT_FOUND',version:VERSION},409);
-    await env.DB.prepare(`UPDATE payment_transactions SET status='paid',updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(txId).run();
-    await env.DB.prepare(`UPDATE wallets SET pending_cents=pending_cents+?,available_cents=available_cents+?,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(0,tx.net_intervenant_cents,wallet.id).run();
-  } else if(outcome==='held') {
-    await env.DB.prepare(`UPDATE payment_transactions SET status='held',updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(txId).run();
-  } else {
-    await env.DB.prepare(`UPDATE payment_transactions SET status=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(outcome,txId).run();
-  }
-  await paymentAudit(env,'MISSION_PAYMENT_FINALIZED',{transaction_id:txId,mission_id:tx.mission_id,user_id:auth.user.id,metadata:{outcome}},'OK');
-  return json({ok:true,version:VERSION,transaction_id:txId,status:outcome},200);
+  if(tx.status===outcome) return json({ok:true,version:VERSION,transaction_id:txId,status:outcome,idempotent_replay:true},200);
+  if(['paid','refunded','failed'].includes(tx.status)) return json({ok:false,error:'PAYMENT_STATE_CONFLICT',version:VERSION,status:tx.status},409);
+  // Manual status changes are not financial evidence. In particular, a manager
+  // must not create a paid/refunded/failed/held state or wallet movement by API.
+  // Only verified PSP events plus reconciliation may change financial state.
+  await paymentAudit(env,'MISSION_PAYMENT_FINALIZATION_BLOCKED',{transaction_id:txId,mission_id:tx.mission_id,user_id:auth.user.id,metadata:{requested_outcome:outcome,reason:'PSP_RECONCILIATION_REQUIRED'}},'REJECTED');
+  return json({ok:false,error:'PSP_RECONCILIATION_REQUIRED',version:VERSION,financial_state_changed:false},409);
 }
 
 async function payoutRequest(request, env) {
@@ -888,15 +942,44 @@ async function payoutRequest(request, env) {
   const body=await readJson(request), amount=moneyCents(body?.amount_eur), mode=clean(body?.mode)||'standard';
   const idem=clean(request.headers.get('idempotency-key'))||clean(body?.idempotency_key);
   if(amount===null||amount<=0||!['standard','express'].includes(mode)||!idem) return json({ok:false,error:'INVALID_PAYOUT_REQUEST',version:VERSION},400);
+  if(idem.length>180) return json({ok:false,error:'IDEMPOTENCY_KEY_TOO_LONG',version:VERSION},400);
   const old=await env.DB.prepare('SELECT * FROM payout_requests WHERE idempotency_key=? LIMIT 1').bind(idem).first();
-  if(old) return json({ok:true,version:VERSION,idempotent_replay:true,payout:old},200);
+  if(old) {
+    if(String(old.user_id)!==String(auth.user.id)) {
+      return json({ok:false,error:'IDEMPOTENCY_KEY_CONFLICT',version:VERSION},409);
+    }
+    return json({ok:true,version:VERSION,idempotent_replay:true,payout:old},200);
+  }
   const account=await env.DB.prepare(`SELECT * FROM payment_accounts WHERE user_id=? LIMIT 1`).bind(auth.user.id).first();
   if(!account||Number(account.payouts_enabled)!==1) return json({ok:false,error:'PAYOUT_ACCOUNT_NOT_READY',version:VERSION,message:'Le compte de paiement de l’intervenant doit être vérifié et activé par le PSP.'},409);
+  const activeDispute=await env.DB.prepare(`SELECT id FROM payment_disputes WHERE intervenant_id=? AND status IN ('open','awaiting_psp_action') LIMIT 1`).bind(auth.user.id).first();
+  if(activeDispute) return json({ok:false,error:'PAYOUT_BLOCKED_BY_ACTIVE_DISPUTE',version:VERSION,dispute_id:activeDispute.id},409);
   const wallet=await env.DB.prepare('SELECT * FROM wallets WHERE user_id=? LIMIT 1').bind(auth.user.id).first();
-  if(!wallet||Number(wallet.available_cents)<amount) return json({ok:false,error:'INSUFFICIENT_AVAILABLE_BALANCE',version:VERSION,available_cents:Number(wallet?.available_cents||0)},409);
+  if(!wallet||String(wallet.currency||'EUR').toUpperCase()!=='EUR'||Number(wallet.available_cents)<amount) return json({ok:false,error:'INSUFFICIENT_AVAILABLE_BALANCE_OR_CURRENCY_MISMATCH',version:VERSION,available_cents:Number(wallet?.available_cents||0),currency:wallet?.currency||null},409);
   const payoutId=crypto.randomUUID();
-  await env.DB.prepare(`UPDATE wallets SET available_cents=available_cents-?,reserved_cents=reserved_cents+?,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(amount,amount,wallet.id).run();
-  await env.DB.prepare(`INSERT INTO payout_requests (id,idempotency_key,wallet_id,user_id,amount_cents,mode,provider,status) VALUES (?,?,?,?,?,?,?,'requested')`).bind(payoutId,idem,wallet.id,auth.user.id,amount,mode,paymentProvider(env)).run();
+  // Reserve balance and create the payout request in one D1 transaction.
+  // The conditional INSERT is evaluated immediately after the guarded UPDATE:
+  // no request can be created unless the wallet reservation succeeded.
+  try {
+    const reservation=env.DB.prepare(`UPDATE wallets
+      SET available_cents=available_cents-?,reserved_cents=reserved_cents+?,updated_at=CURRENT_TIMESTAMP
+      WHERE id=? AND user_id=? AND currency='EUR' AND available_cents>=?`).bind(amount,amount,wallet.id,auth.user.id,amount);
+    const createPayout=env.DB.prepare(`INSERT INTO payout_requests
+      (id,idempotency_key,wallet_id,user_id,amount_cents,currency,mode,provider,status)
+      SELECT ?,?,?,?,?, 'EUR',?,?, 'requested' WHERE changes()=1`).bind(payoutId,idem,wallet.id,auth.user.id,amount,mode,paymentProvider(env));
+    const results=await env.DB.batch([reservation,createPayout]);
+    if(Number(results?.[0]?.meta?.changes)!==1||Number(results?.[1]?.meta?.changes)!==1) {
+      const replay=await env.DB.prepare('SELECT * FROM payout_requests WHERE idempotency_key=? LIMIT 1').bind(idem).first();
+      if(replay && String(replay.user_id)===String(auth.user.id)) return json({ok:true,version:VERSION,idempotent_replay:true,payout:replay},200);
+      if(replay) return json({ok:false,error:'IDEMPOTENCY_KEY_CONFLICT',version:VERSION},409);
+      return json({ok:false,error:'PAYOUT_RESERVATION_NOT_CONFIRMED',version:VERSION},409);
+    }
+  } catch(error) {
+    const replay=await env.DB.prepare('SELECT * FROM payout_requests WHERE idempotency_key=? LIMIT 1').bind(idem).first();
+    if(replay && String(replay.user_id)===String(auth.user.id)) return json({ok:true,version:VERSION,idempotent_replay:true,payout:replay},200);
+    if(replay) return json({ok:false,error:'IDEMPOTENCY_KEY_CONFLICT',version:VERSION},409);
+    throw error;
+  }
   await paymentAudit(env,'PAYOUT_REQUESTED',{payout_id:payoutId,user_id:auth.user.id,metadata:{amount_cents:amount,mode}},'OK');
   return json({ok:true,version:VERSION,payout_id:payoutId,status:'requested',amount_cents:amount,mode,provider:paymentProvider(env),next:paymentsConfigured(env)?'PSP_PAYOUT_REQUIRED':'PAYMENT_PROVIDER_NOT_CONFIGURED'},201);
 }
@@ -919,58 +1002,139 @@ async function paymentWebhook(request, env) {
   let event; try{event=JSON.parse(raw)}catch{return json({ok:false,error:'INVALID_WEBHOOK_JSON',version:VERSION},400);}
   const provider=clean(event?.provider)||paymentProvider(env), eventId=clean(event?.id), type=clean(event?.type);
   if(!eventId||!type) return json({ok:false,error:'INVALID_WEBHOOK_EVENT',version:VERSION},400);
+  // This deployment has one configured PSP adapter. Never let a signed payload
+  // select another provider namespace or bypass provider-specific verification.
+  if(provider!==paymentProvider(env)) return json({ok:false,error:'PAYMENT_PROVIDER_MISMATCH',version:VERSION},400);
+  const txId=clean(event?.data?.transaction_id), payoutId=clean(event?.data?.payout_id);
+  const providerPaymentId=clean(event?.data?.provider_payment_id);
+  const paymentEvents=['payment_succeeded','charge_succeeded','payment_failed','charge_failed'];
+  const payoutEvents=['payout_processing','payout_paid','payout_failed','payout_canceled'];
+  const supportedEvents=[...paymentEvents,...payoutEvents];
+  if(!supportedEvents.includes(type)) {
+    return json({ok:false,error:type==='payment_refunded'?'REFUND_RECONCILIATION_NOT_IMPLEMENTED':'UNSUPPORTED_WEBHOOK_EVENT',version:VERSION},501);
+  }
+  if(['payment_succeeded','charge_succeeded'].includes(type) && (!txId||!providerPaymentId)) {
+    return json({ok:false,error:'PSP_PAYMENT_REFERENCE_REQUIRED',version:VERSION},400);
+  }
+  if(paymentEvents.includes(type)&&!txId) return json({ok:false,error:'PAYMENT_TRANSACTION_REFERENCE_REQUIRED',version:VERSION},400);
+  if(payoutEvents.includes(type)&&!payoutId) return json({ok:false,error:'PAYOUT_REFERENCE_REQUIRED',version:VERSION},400);
   const payloadHash=await sha256Base64url(raw);
   const inserted=await env.DB.prepare(`INSERT OR IGNORE INTO payment_webhook_events (id,provider,event_id,event_type,signature_valid,payload_hash) VALUES (?,?,?,?,1,?)`).bind(crypto.randomUUID(),provider,eventId,type,payloadHash).run();
-  if(!inserted.meta?.changes) return json({ok:true,version:VERSION,duplicate:true,event_id:eventId},200);
-  const txId=clean(event?.data?.transaction_id), payoutId=clean(event?.data?.payout_id);
-  if(txId){
-    const tx=await env.DB.prepare('SELECT * FROM payment_transactions WHERE id=? LIMIT 1').bind(txId).first();
-    if(tx){
+  const existing=await env.DB.prepare('SELECT * FROM payment_webhook_events WHERE provider=? AND event_id=? LIMIT 1').bind(provider,eventId).first();
+  if(!existing) return json({ok:false,error:'WEBHOOK_EVENT_PERSISTENCE_FAILED',version:VERSION},503);
+  if(existing.payload_hash && existing.payload_hash!==payloadHash) {
+    await paymentAudit(env,'PSP_WEBHOOK_ID_COLLISION',{metadata:{provider,event_id:eventId,event_type:type}},'REJECTED');
+    return json({ok:false,error:'WEBHOOK_EVENT_ID_PAYLOAD_CONFLICT',version:VERSION},409);
+  }
+  if(Number(existing.processed)===1) return json({ok:true,version:VERSION,duplicate:true,event_id:eventId},200);
+  // Atomic claim prevents two concurrent deliveries from crediting the same wallet.
+  // An abandoned claim becomes retryable after five minutes.
+  const claim=await env.DB.prepare(`UPDATE payment_webhook_events SET processed=2,received_at=CURRENT_TIMESTAMP
+    WHERE provider=? AND event_id=? AND (processed=0 OR (processed=2 AND received_at < datetime('now','-5 minutes')))`).bind(provider,eventId).run();
+  if(!claim.meta?.changes) return json({ok:true,version:VERSION,accepted:true,processing:true,event_id:eventId,retry_after_seconds:30},202);
+  try {
+    if(txId){
+      const tx=await env.DB.prepare('SELECT * FROM payment_transactions WHERE id=? LIMIT 1').bind(txId).first();
+      if(!tx) throw new Error('PAYMENT_TRANSACTION_NOT_FOUND');
+      if(clean(tx.provider)!==provider) throw new Error('PAYMENT_PROVIDER_MISMATCH');
+      if(['payment_succeeded','charge_succeeded'].includes(type)) {
+        const amount=event?.data?.amount_cents, currency=clean(event?.data?.currency)?.toUpperCase();
+        if(!Number.isSafeInteger(amount)||amount!==Number(tx.gross_cents)||currency!==String(tx.currency||'EUR').toUpperCase()) {
+          throw new Error('PSP_PAYMENT_AMOUNT_OR_CURRENCY_MISMATCH');
+        }
+      }
       const statusMap={payment_succeeded:'paid',charge_succeeded:'paid',payment_failed:'failed',charge_failed:'failed',payment_refunded:'refunded'};
       const newStatus=statusMap[type];
       if(newStatus){
         const alreadyFinal = ['paid','failed','refunded'].includes(tx.status);
         if(!alreadyFinal){
-          await env.DB.prepare('UPDATE payment_transactions SET status=?,provider_payment_id=COALESCE(?,provider_payment_id),updated_at=CURRENT_TIMESTAMP WHERE id=?').bind(newStatus,clean(event?.data?.provider_payment_id)||null,txId).run();
+          const wallet=newStatus==='paid'
+            ? await env.DB.prepare('SELECT * FROM wallets WHERE user_id=? LIMIT 1').bind(tx.intervenant_id).first()
+            : null;
+          if(newStatus==='paid'&&!wallet) throw new Error('INTERVENANT_WALLET_NOT_FOUND');
+          const txUpdate=env.DB.prepare(`UPDATE payment_transactions SET status=?,provider_payment_id=COALESCE(?,provider_payment_id),updated_at=CURRENT_TIMESTAMP WHERE id=? AND status NOT IN ('paid','failed','refunded')`).bind(newStatus,providerPaymentId||null,txId);
           if(newStatus==='paid'){
-            const wallet=await env.DB.prepare('SELECT * FROM wallets WHERE user_id=? LIMIT 1').bind(tx.intervenant_id).first();
-            if(wallet) await env.DB.prepare('UPDATE wallets SET available_cents=available_cents+?,updated_at=CURRENT_TIMESTAMP WHERE id=?').bind(tx.net_intervenant_cents,wallet.id).run();
+            // D1 batch is transactional. The second statement runs only when
+            // the guarded state transition changed exactly one row.
+            const walletCredit=env.DB.prepare(`UPDATE wallets SET available_cents=available_cents+?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND changes()=1`).bind(tx.net_intervenant_cents,wallet.id);
+            await env.DB.batch([txUpdate,walletCredit]);
+          } else {
+            await txUpdate.run();
           }
         }
       }
     }
-  }
-  if(payoutId){
-    const payout=await env.DB.prepare('SELECT * FROM payout_requests WHERE id=? LIMIT 1').bind(payoutId).first();
-    const statusMap={payout_processing:'processing',payout_paid:'completed',payout_failed:'failed',payout_canceled:'canceled'};
-    const newStatus=statusMap[type];
-    if(payout&&newStatus){
-      const alreadyFinal=['completed','failed','canceled'].includes(payout.status);
-      if(!alreadyFinal){
-        if(newStatus==='completed') await env.DB.prepare(`UPDATE wallets SET reserved_cents=MAX(0,reserved_cents-?),paid_cents=paid_cents+?,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(payout.amount_cents,payout.amount_cents,payout.wallet_id).run();
-        if(['failed','canceled'].includes(newStatus)) await env.DB.prepare(`UPDATE wallets SET reserved_cents=MAX(0,reserved_cents-?),available_cents=available_cents+?,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(payout.amount_cents,payout.amount_cents,payout.wallet_id).run();
-        await env.DB.prepare(`UPDATE payout_requests SET status=?,provider_payout_id=COALESCE(?,provider_payout_id),failure_code=?,failure_message=?,completed_at=CASE WHEN ?='completed' THEN CURRENT_TIMESTAMP ELSE completed_at END,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(newStatus,clean(event?.data?.provider_payout_id)||null,clean(event?.data?.failure_code)||null,clean(event?.data?.failure_message)||null,newStatus,payoutId).run();
+    if(payoutId){
+      const payout=await env.DB.prepare('SELECT * FROM payout_requests WHERE id=? LIMIT 1').bind(payoutId).first();
+      if(!payout) throw new Error('PAYOUT_REQUEST_NOT_FOUND');
+      if(clean(payout.provider)!==provider) throw new Error('PAYOUT_PROVIDER_MISMATCH');
+      if(type==='payout_paid') {
+        const amount=event?.data?.amount_cents, currency=clean(event?.data?.currency)?.toUpperCase();
+        const providerPayoutId=clean(event?.data?.provider_payout_id);
+        if(!providerPayoutId) throw new Error('PSP_PAYOUT_REFERENCE_REQUIRED');
+        if(!Number.isSafeInteger(amount)||amount!==Number(payout.amount_cents)||currency!==String(payout.currency||'EUR').toUpperCase()) {
+          throw new Error('PSP_PAYOUT_AMOUNT_OR_CURRENCY_MISMATCH');
+        }
+      }
+      const statusMap={payout_processing:'processing',payout_paid:'completed',payout_failed:'failed',payout_canceled:'canceled'};
+      const newStatus=statusMap[type];
+      if(newStatus){
+        const alreadyFinal=['completed','failed','canceled'].includes(payout.status);
+        if(!alreadyFinal){
+          // State transition is conditional; a retry cannot apply wallet movements twice.
+          const payoutUpdate=env.DB.prepare(`UPDATE payout_requests SET status=?,provider_payout_id=COALESCE(?,provider_payout_id),failure_code=?,failure_message=?,completed_at=CASE WHEN ?='completed' THEN CURRENT_TIMESTAMP ELSE completed_at END,updated_at=CURRENT_TIMESTAMP WHERE id=? AND status NOT IN ('completed','failed','canceled')`).bind(newStatus,clean(event?.data?.provider_payout_id)||null,clean(event?.data?.failure_code)||null,clean(event?.data?.failure_message)||null,newStatus,payoutId);
+          if(newStatus==='completed'){
+            const settle=env.DB.prepare(`UPDATE wallets SET reserved_cents=MAX(0,reserved_cents-?),paid_cents=paid_cents+?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND changes()=1`).bind(payout.amount_cents,payout.amount_cents,payout.wallet_id);
+            await env.DB.batch([payoutUpdate,settle]);
+          } else if(['failed','canceled'].includes(newStatus)){
+            const release=env.DB.prepare(`UPDATE wallets SET reserved_cents=MAX(0,reserved_cents-?),available_cents=available_cents+?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND changes()=1`).bind(payout.amount_cents,payout.amount_cents,payout.wallet_id);
+            await env.DB.batch([payoutUpdate,release]);
+          } else {
+            await payoutUpdate.run();
+          }
+        }
       }
     }
+    await paymentAudit(env,'PSP_WEBHOOK_PROCESSED',{transaction_id:txId,payout_id:payoutId,metadata:{provider,event_id:eventId,event_type:type}},'OK');
+    await env.DB.prepare('UPDATE payment_webhook_events SET processed=1,processed_at=CURRENT_TIMESTAMP WHERE provider=? AND event_id=? AND processed=2').bind(provider,eventId).run();
+    return json({ok:true,version:VERSION,processed:true,event_id:eventId},200);
+  } catch(e) {
+    await env.DB.prepare('UPDATE payment_webhook_events SET processed=0 WHERE provider=? AND event_id=? AND processed=2').bind(provider,eventId).run();
+    await paymentAudit(env,'PSP_WEBHOOK_PROCESSING_FAILED',{transaction_id:txId,payout_id:payoutId,metadata:{provider,event_id:eventId,event_type:type,error:String(e.message||e).slice(0,180)}},'RETRYABLE').catch(()=>{});
+    return json({ok:false,error:'WEBHOOK_PROCESSING_FAILED',retryable:true,version:VERSION},503);
   }
-  await env.DB.prepare('UPDATE payment_webhook_events SET processed=1,processed_at=CURRENT_TIMESTAMP WHERE provider=? AND event_id=?').bind(provider,eventId).run();
-  await paymentAudit(env,'PSP_WEBHOOK_PROCESSED',{transaction_id:txId,payout_id:payoutId,metadata:{provider,event_id:eventId,event_type:type}},'OK');
-  return json({ok:true,version:VERSION,processed:true,event_id:eventId},200);
 }
-
 async function openPaymentDispute(request, env) {
   const auth=await getSessionUser(request,env);
   if(!requireRole(auth,['client','gerante'])) return json({ok:false,error:auth?.user?'FORBIDDEN':'UNAUTHENTICATED',version:VERSION},auth?.user?403:401);
   await ensurePaymentSchema(env);
   const body=await readJson(request), missionId=clean(body?.mission_id), reason=clean(body?.reason), amount=moneyCents(body?.amount_eur);
-  if(!missionId||!reason||amount===null) return json({ok:false,error:'INVALID_DISPUTE',version:VERSION},400);
+  if(!missionId||!reason||amount===null||amount<=0) return json({ok:false,error:'INVALID_DISPUTE',version:VERSION},400);
   const tx=await env.DB.prepare(`SELECT * FROM payment_transactions WHERE mission_id=? ORDER BY created_at DESC LIMIT 1`).bind(missionId).first();
   if(!tx) return json({ok:false,error:'PAYMENT_NOT_FOUND_FOR_MISSION',version:VERSION},404);
-  if(tx.status==='paid') await env.DB.prepare(`UPDATE payment_transactions SET status='held',updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(tx.id).run();
+  if(auth.user.role==='client'&&String(tx.client_id)!==String(auth.user.id)) return json({ok:false,error:'MISSION_PAYMENT_FORBIDDEN',version:VERSION},403);
+  if(amount>Number(tx.gross_cents)) return json({ok:false,error:'DISPUTE_AMOUNT_EXCEEDS_PAYMENT',version:VERSION},400);
+  if(!['paid','held'].includes(tx.status)) return json({ok:false,error:'PAYMENT_NOT_DISPUTABLE_IN_CURRENT_STATE',version:VERSION},409);
+  const prior=await env.DB.prepare(`SELECT id FROM payment_disputes WHERE transaction_id=? AND status IN ('open','awaiting_psp_action') LIMIT 1`).bind(tx.id).first();
+  if(prior) return json({ok:false,error:'ACTIVE_DISPUTE_ALREADY_EXISTS',version:VERSION,dispute_id:prior.id},409);
   const id=crypto.randomUUID();
-  await env.DB.prepare(`INSERT INTO payment_disputes (id,mission_id,transaction_id,client_id,intervenant_id,status,reason,amount_cents) VALUES (?,?,?,?,?,?,?,?)`).bind(id,missionId,tx.id,tx.client_id,tx.intervenant_id,'open',reason,amount).run();
-  await paymentAudit(env,'PAYMENT_DISPUTE_OPENED',{transaction_id:tx.id,mission_id:missionId,user_id:auth.user.id,metadata:{amount_cents:amount,reason}},'OK');
-  return json({ok:true,version:VERSION,dispute_id:id,status:'open',payment_status:'held'},201);
+  // A single guarded INSERT closes the race between the pre-check and creation:
+  // only one active dispute can be inserted for this payment.
+  const created=await env.DB.prepare(`INSERT INTO payment_disputes
+    (id,mission_id,transaction_id,client_id,intervenant_id,status,reason,amount_cents)
+    SELECT ?,?,?,?,?,?,?,? FROM payment_transactions
+    WHERE id=? AND status IN ('paid','held')
+      AND NOT EXISTS (SELECT 1 FROM payment_disputes WHERE transaction_id=? AND status IN ('open','awaiting_psp_action'))`)
+    .bind(id,missionId,tx.id,tx.client_id,tx.intervenant_id,'open',reason,amount,tx.id,tx.id).run();
+  if(Number(created.meta?.changes)!==1) {
+    const active=await env.DB.prepare(`SELECT id FROM payment_disputes WHERE transaction_id=? AND status IN ('open','awaiting_psp_action') LIMIT 1`).bind(tx.id).first();
+    if(active) return json({ok:false,error:'ACTIVE_DISPUTE_ALREADY_EXISTS',version:VERSION,dispute_id:active.id},409);
+    return json({ok:false,error:'PAYMENT_STATE_CHANGED_RETRY',version:VERSION},409);
+  }
+  // Do not label the payment "held": this code path does not atomically freeze
+  // the provider wallet. The open dispute instead blocks new payouts below.
+  await paymentAudit(env,'PAYMENT_DISPUTE_OPENED',{transaction_id:tx.id,mission_id:missionId,user_id:auth.user.id,metadata:{amount_cents:amount,reason,wallet_frozen:false}},'OK');
+  return json({ok:true,version:VERSION,dispute_id:id,status:'open',payment_status:tx.status,payouts_blocked:true},201);
 }
 
 async function paymentAdminResolve(request, env) {
@@ -980,14 +1144,14 @@ async function paymentAdminResolve(request, env) {
   const body=await readJson(request), disputeId=clean(body?.dispute_id), resolution=clean(body?.resolution);
   if(!disputeId||!['release','partial_refund','full_refund','cancel'].includes(resolution)) return json({ok:false,error:'INVALID_DISPUTE_RESOLUTION',version:VERSION},400);
   const d=await env.DB.prepare('SELECT * FROM payment_disputes WHERE id=? LIMIT 1').bind(disputeId).first();
-  if(!d||d.status==='resolved') return json({ok:false,error:'DISPUTE_NOT_FOUND_OR_ALREADY_RESOLVED',version:VERSION},409);
-  await env.DB.prepare(`UPDATE payment_disputes SET status='resolved',resolution=?,resolved_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(resolution,disputeId).run();
-  if(d.transaction_id){
-    const newStatus=resolution==='release'?'paid':resolution==='full_refund'?'refunded':resolution==='cancel'?'canceled':'held';
-    await env.DB.prepare('UPDATE payment_transactions SET status=?,updated_at=CURRENT_TIMESTAMP WHERE id=?').bind(newStatus,d.transaction_id).run();
-  }
-  await paymentAudit(env,'PAYMENT_DISPUTE_RESOLVED',{transaction_id:d.transaction_id,mission_id:d.mission_id,user_id:auth.user.id,metadata:{dispute_id:disputeId,resolution}},'OK');
-  return json({ok:true,version:VERSION,dispute_id:disputeId,status:'resolved',resolution},200);
+  if(!d||!['open','awaiting_psp_action'].includes(d.status)) return json({ok:false,error:'DISPUTE_NOT_FOUND_OR_ALREADY_RESOLVED',version:VERSION},409);
+  // A manager decision is not proof of a PSP refund or a wallet release.
+  // Record the requested outcome, keep the dispute active and block payouts
+  // until an independently verified PSP/accounting reconciliation closes it.
+  const changed=await env.DB.prepare(`UPDATE payment_disputes SET status='awaiting_psp_action',resolution=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND status IN ('open','awaiting_psp_action')`).bind(resolution,disputeId).run();
+  if(Number(changed?.meta?.changes)!==1) return json({ok:false,error:'DISPUTE_STATE_CHANGED_RETRY',version:VERSION},409);
+  await paymentAudit(env,'PAYMENT_DISPUTE_DECISION_RECORDED',{transaction_id:d.transaction_id,mission_id:d.mission_id,user_id:auth.user.id,metadata:{dispute_id:disputeId,resolution,psp_action_required:true}},'PENDING');
+  return json({ok:true,version:VERSION,dispute_id:disputeId,status:'awaiting_psp_action',resolution,psp_action_required:true,financial_state_changed:false},202);
 }
 
 async function handleBase(request, env) {
@@ -1170,6 +1334,55 @@ async function ensureConsolidatedSchema(env) {
     `CREATE TABLE IF NOT EXISTS complaints (id TEXT PRIMARY KEY, client_type TEXT NOT NULL, client_id TEXT, company_id TEXT, mission_id TEXT, category TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'OPEN', severity TEXT NOT NULL DEFAULT 'LOW', description TEXT, resolution_case_id TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, resolved_at TEXT)`,
     `CREATE TABLE IF NOT EXISTS accounting_ledger (id TEXT PRIMARY KEY, reference_type TEXT NOT NULL, reference_id TEXT NOT NULL, account_code TEXT NOT NULL, direction TEXT NOT NULL, amount_cents INTEGER NOT NULL, currency TEXT NOT NULL DEFAULT 'EUR', label TEXT, metadata_json TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`,
     `CREATE INDEX IF NOT EXISTS idx_ledger_ref ON accounting_ledger(reference_type, reference_id, created_at)`,
+    `CREATE TRIGGER IF NOT EXISTS trg_ledger_validate_insert BEFORE INSERT ON accounting_ledger
+      WHEN NEW.amount_cents IS NULL OR NEW.amount_cents<=0
+        OR NEW.direction NOT IN ('DEBIT','CREDIT')
+        OR length(trim(NEW.account_code))=0
+        OR length(trim(NEW.reference_type))=0
+        OR length(trim(NEW.reference_id))=0
+        OR NEW.currency NOT GLOB '[A-Z][A-Z][A-Z]'
+      BEGIN SELECT RAISE(ABORT,'ACCOUNTING_LEDGER_INVALID_ENTRY'); END`,
+    `CREATE TRIGGER IF NOT EXISTS trg_ledger_immutable_update BEFORE UPDATE ON accounting_ledger
+      BEGIN SELECT RAISE(ABORT,'ACCOUNTING_LEDGER_IMMUTABLE'); END`,
+    `CREATE TRIGGER IF NOT EXISTS trg_ledger_immutable_delete BEFORE DELETE ON accounting_ledger
+      BEGIN SELECT RAISE(ABORT,'ACCOUNTING_LEDGER_IMMUTABLE'); END`,
+    `CREATE TABLE IF NOT EXISTS accounting_operations (
+      id TEXT PRIMARY KEY, idempotency_key TEXT NOT NULL UNIQUE, reference_type TEXT NOT NULL,
+      reference_id TEXT NOT NULL, currency TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'DRAFT',
+      description TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, posted_at TEXT)`,
+    `CREATE TABLE IF NOT EXISTS accounting_operation_lines (
+      id TEXT PRIMARY KEY, operation_id TEXT NOT NULL, account_code TEXT NOT NULL,
+      direction TEXT NOT NULL, amount_cents INTEGER NOT NULL, label TEXT,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY(operation_id) REFERENCES accounting_operations(id))`,
+    `CREATE INDEX IF NOT EXISTS idx_accounting_lines_operation ON accounting_operation_lines(operation_id)`,
+    `CREATE TRIGGER IF NOT EXISTS trg_accounting_line_validate BEFORE INSERT ON accounting_operation_lines
+      WHEN NEW.amount_cents<=0 OR NEW.direction NOT IN ('DEBIT','CREDIT')
+        OR length(trim(NEW.account_code))=0
+        OR NOT EXISTS (SELECT 1 FROM accounting_operations WHERE id=NEW.operation_id AND status='DRAFT')
+      BEGIN SELECT RAISE(ABORT,'ACCOUNTING_OPERATION_LINE_INVALID'); END`,
+    `CREATE TRIGGER IF NOT EXISTS trg_accounting_operation_post BEFORE UPDATE OF status ON accounting_operations
+      WHEN OLD.status='DRAFT' AND NEW.status='POSTED'
+        AND ((SELECT COUNT(*) FROM accounting_operation_lines WHERE operation_id=NEW.id)<2
+          OR (SELECT COALESCE(SUM(CASE direction WHEN 'DEBIT' THEN amount_cents WHEN 'CREDIT' THEN -amount_cents ELSE 0 END),0)
+              FROM accounting_operation_lines WHERE operation_id=NEW.id)<>0
+          OR (SELECT COUNT(DISTINCT account_code) FROM accounting_operation_lines WHERE operation_id=NEW.id)<2)
+      BEGIN SELECT RAISE(ABORT,'ACCOUNTING_OPERATION_NOT_BALANCED'); END`,
+    `CREATE TRIGGER IF NOT EXISTS trg_accounting_operation_immutable BEFORE UPDATE ON accounting_operations
+      WHEN OLD.status='POSTED'
+      BEGIN SELECT RAISE(ABORT,'ACCOUNTING_OPERATION_IMMUTABLE'); END`,
+    `CREATE TRIGGER IF NOT EXISTS trg_accounting_operation_no_delete BEFORE DELETE ON accounting_operations
+      WHEN OLD.status='POSTED'
+      BEGIN SELECT RAISE(ABORT,'ACCOUNTING_OPERATION_IMMUTABLE'); END`,
+    `CREATE TRIGGER IF NOT EXISTS trg_accounting_lines_immutable_update BEFORE UPDATE ON accounting_operation_lines
+      WHEN EXISTS (SELECT 1 FROM accounting_operations WHERE id=OLD.operation_id AND status='POSTED')
+      BEGIN SELECT RAISE(ABORT,'ACCOUNTING_OPERATION_IMMUTABLE'); END`,
+    `CREATE TRIGGER IF NOT EXISTS trg_accounting_lines_immutable_delete BEFORE DELETE ON accounting_operation_lines
+      WHEN EXISTS (SELECT 1 FROM accounting_operations WHERE id=OLD.operation_id AND status='POSTED')
+      BEGIN SELECT RAISE(ABORT,'ACCOUNTING_OPERATION_IMMUTABLE'); END`,
+    `CREATE TRIGGER IF NOT EXISTS trg_accounting_lines_no_late_insert BEFORE INSERT ON accounting_operation_lines
+      WHEN EXISTS (SELECT 1 FROM accounting_operations WHERE id=NEW.operation_id AND status<>'DRAFT')
+      BEGIN SELECT RAISE(ABORT,'ACCOUNTING_OPERATION_IMMUTABLE'); END`,
     `CREATE TABLE IF NOT EXISTS business_expenses (id TEXT PRIMARY KEY, category TEXT NOT NULL, supplier TEXT, amount_cents INTEGER NOT NULL, recurring INTEGER NOT NULL DEFAULT 0, period TEXT, metadata_json TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`,
     `CREATE TABLE IF NOT EXISTS notification_outbox (id TEXT PRIMARY KEY, channel TEXT NOT NULL, recipient_ref TEXT NOT NULL, template TEXT NOT NULL, payload_json TEXT NOT NULL DEFAULT '{}', status TEXT NOT NULL DEFAULT 'PENDING', attempts INTEGER NOT NULL DEFAULT 0, last_error TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, sent_at TEXT)`,
     `CREATE TABLE IF NOT EXISTS compliance_events (id TEXT PRIMARY KEY, type TEXT NOT NULL, severity TEXT NOT NULL, entity_type TEXT, entity_id TEXT, status TEXT NOT NULL DEFAULT 'OPEN', details_json TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, closed_at TEXT)`
@@ -1187,6 +1400,62 @@ async function ensureConsolidatedSchema(env) {
   for (const [key,value] of Object.entries(defaults)) {
     await env.DB.prepare(`INSERT OR IGNORE INTO platform_settings(key,value_json) VALUES(?,?)`).bind(key, JSON.stringify(value)).run();
   }
+}
+
+// Post a complete double-entry operation. All header, detail and legacy-ledger
+// rows are written in one D1 batch; the DB trigger is the final balance guard.
+async function postBalancedAccountingOperation(env,input) {
+  await ensureConsolidatedSchema(env);
+  const idempotencyKey=clean(input?.idempotency_key);
+  const referenceType=clean(input?.reference_type), referenceId=clean(input?.reference_id);
+  const currency=clean(input?.currency||'EUR').toUpperCase();
+  const lines=Array.isArray(input?.lines)?input.lines:[];
+  if(!idempotencyKey||idempotencyKey.length>180||!referenceType||!referenceId||
+    !/^[A-Z]{3}$/.test(currency)||lines.length<2||lines.length>40) {
+    return {ok:false,error:'INVALID_ACCOUNTING_OPERATION'};
+  }
+  let debit=0,credit=0;
+  const normalized=[];
+  for(const line of lines) {
+    const accountCode=clean(line?.account_code),direction=clean(line?.direction).toUpperCase();
+    const amount=Number(line?.amount_cents);
+    if(!accountCode||accountCode.length>64||!['DEBIT','CREDIT'].includes(direction)||
+      !Number.isSafeInteger(amount)||amount<=0) return {ok:false,error:'INVALID_ACCOUNTING_LINE'};
+    if(direction==='DEBIT') debit+=amount; else credit+=amount;
+    if(!Number.isSafeInteger(debit)||!Number.isSafeInteger(credit)) return {ok:false,error:'ACCOUNTING_AMOUNT_OVERFLOW'};
+    normalized.push({account_code:accountCode,direction,amount_cents:amount,label:clean(line?.label)||null});
+  }
+  if(debit!==credit||new Set(normalized.map(x=>x.account_code)).size<2)
+    return {ok:false,error:'ACCOUNTING_OPERATION_NOT_BALANCED'};
+  normalized.sort((a,b)=>a.account_code.localeCompare(b.account_code)||a.direction.localeCompare(b.direction)||a.amount_cents-b.amount_cents||String(a.label||'').localeCompare(String(b.label||'')));
+  const existing=await env.DB.prepare('SELECT * FROM accounting_operations WHERE idempotency_key=? LIMIT 1').bind(idempotencyKey).first();
+  if(existing) {
+    const prior=await env.DB.prepare('SELECT account_code,direction,amount_cents,label FROM accounting_operation_lines WHERE operation_id=? ORDER BY account_code,direction,amount_cents,label').bind(existing.id).all();
+    const priorLines=(prior.results||[]).map(x=>({account_code:x.account_code,direction:x.direction,amount_cents:Number(x.amount_cents),label:x.label||null})).sort((a,b)=>a.account_code.localeCompare(b.account_code)||a.direction.localeCompare(b.direction)||a.amount_cents-b.amount_cents||String(a.label||'').localeCompare(String(b.label||'')));
+    const same=existing.reference_type===referenceType&&existing.reference_id===referenceId&&existing.currency===currency&&
+      JSON.stringify(priorLines)===JSON.stringify(normalized);
+    return same&&existing.status==='POSTED'
+      ? {ok:true,idempotent_replay:true,operation_id:existing.id,status:'POSTED',total_debit_cents:debit,currency}
+      : {ok:false,error:'ACCOUNTING_IDEMPOTENCY_CONFLICT'};
+  }
+  const operationId=crypto.randomUUID();
+  const statements=[
+    env.DB.prepare(`INSERT INTO accounting_operations(id,idempotency_key,reference_type,reference_id,currency,status,description)
+      VALUES(?,?,?,?,?,'DRAFT',?)`).bind(operationId,idempotencyKey,referenceType,referenceId,currency,clean(input?.description)||null)
+  ];
+  for(const line of normalized) {
+    const lineId=crypto.randomUUID();
+    statements.push(env.DB.prepare(`INSERT INTO accounting_operation_lines(id,operation_id,account_code,direction,amount_cents,label)
+      VALUES(?,?,?,?,?,?)`).bind(lineId,operationId,line.account_code,line.direction,line.amount_cents,line.label));
+    statements.push(env.DB.prepare(`INSERT INTO accounting_ledger(id,reference_type,reference_id,account_code,direction,amount_cents,currency,label,metadata_json)
+      VALUES(?,?,?,?,?,?,?,?,?)`).bind(crypto.randomUUID(),referenceType,referenceId,line.account_code,line.direction,line.amount_cents,currency,line.label,
+        JSON.stringify({operation_id:operationId,idempotency_key:idempotencyKey})));
+  }
+  statements.push(env.DB.prepare(`UPDATE accounting_operations SET status='POSTED',posted_at=CURRENT_TIMESTAMP WHERE id=? AND status='DRAFT'`).bind(operationId));
+  await env.DB.batch(statements);
+  const posted=await env.DB.prepare('SELECT status FROM accounting_operations WHERE id=?').bind(operationId).first();
+  if(posted?.status!=='POSTED') return {ok:false,error:'ACCOUNTING_POST_NOT_CONFIRMED'};
+  return {ok:true,idempotent_replay:false,operation_id:operationId,status:'POSTED',total_debit_cents:debit,currency};
 }
 
 async function getSetting(env,key,fallback=null) {
@@ -1226,7 +1495,23 @@ async function copilotRecommend(env, input) {
     action='RESOLVE_CASE';
     solution={steps:['collect_evidence','reconcile_mission','reconcile_finance','calculate_impact','propose_resolution','notify','audit'],automatic:false};
   }
-  return { action, mode: solution.automatic ? 'AUTO' : 'MANAGER_APPROVAL', confidence: simple ? 0.95 : 0.82, solution, context, phase };
+  const governance = procheliaV7.assessSupraDecision({
+    caseType, impact, requestedAction: action === 'AUTO_RESOLVE' ? 'ANALYZE_AND_PROPOSE' : action,
+    actorRole: 'system', context
+  });
+  const supraPlan = procheliaV7.buildSupraPlan({
+    caseType, impact, requestedAction: action === 'AUTO_RESOLVE' ? 'ANALYZE_AND_PROPOSE' : action,
+    domain: context.domain, market: context.market || 'fr', context
+  });
+  // Le moteur transversal relie les domaines et prépare un parcours complet.
+  // L'exécution réelle reste désactivée tant que chaque adaptateur n'a pas ses tests E2E.
+  action = action === 'AUTO_RESOLVE' ? 'ANALYZE_AND_PROPOSE' : action;
+  solution = { ...solution, automatic:false, governance, supraPlan };
+  return {
+    action, mode:'MANAGER_APPROVAL', confidence: simple ? 0.95 : 0.82,
+    solution, context, phase, governance, supraPlan,
+    domainsCovered: supraPlan.connectedDomains
+  };
 }
 
 async function createOperationalCase(request, env) {
@@ -1238,15 +1523,17 @@ async function createOperationalCase(request, env) {
   const priority=CASE_PRIORITIES[impact]||10;
   const rec=await copilotRecommend(env,{caseType,impact,phase,context:body.context||{}});
   const id=crypto.randomUUID();
-  const requiresManager=rec.mode==='MANAGER_APPROVAL' ? 1 : 0;
-  const status=rec.action==='AUTO_RESOLVE' ? 'AUTO_PENDING' : 'OPEN';
+  // SUPRA V1 : aucune création de dossier ne déclenche d'écriture métier automatique.
+  // Les dossiers restent en attente de validation explicite de la Gérante.
+  const requiresManager=1;
+  const status='OPEN';
   await env.DB.prepare(`INSERT INTO operational_cases(id,case_type,source,phase,priority,status,auto_mode,client_id,company_id,intervenant_id,mission_id,impact_level,description,context_json,proposed_solution_json,requires_manager) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
     .bind(id,caseType,'API',phase,priority,status,rec.mode,clean(body.client_id)||null,clean(body.company_id)||null,clean(body.intervenant_id)||null,clean(body.mission_id)||null,impact,clean(body.description)||null,JSON.stringify(body.context||{}),JSON.stringify(rec),requiresManager).run();
   await env.DB.prepare(`INSERT INTO copilot_log(id,case_id,action_type,recommendation,confidence,mode) VALUES(?,?,?,?,?,?)`)
     .bind(crypto.randomUUID(),id,rec.action,JSON.stringify(rec.solution),rec.confidence,rec.mode).run();
   await journal(env,'copilot',null,'CASE_CREATED','operational_case',id,'OK',{caseType,impact});
-  if(rec.action==='AUTO_RESOLVE') await executeOperationalCase(env,id,null,true);
-  return json({ok:true,version:VERSION,case_id:id,recommendation:rec,status:rec.action==='AUTO_RESOLVE'?'AUTO_EXECUTED':'WAITING_MANAGER'},201);
+  // SUPRA V1 : recommandation uniquement ; jamais d'exécution automatique ici.
+  return json({ok:true,version:VERSION,case_id:id,recommendation:rec,status:'WAITING_MANAGER'},201);
 }
 
 
@@ -1282,14 +1569,10 @@ async function executeCaseBusinessAction(env, c, rec, actorId=null, automatic=fa
   if (action === 'SEARCH_REPLACEMENT' || c.case_type === 'absence_intervenant' || c.case_type === 'retard_intervenant') {
     const replacementId = clean(context.replacement_intervenant_id || context.replacement_id);
     if (replacementId && c.mission_id) {
-      const cols = await getTableColumns(env,'missions');
-      if (cols.includes('intervenant_id')) {
-        await env.DB.prepare('UPDATE missions SET intervenant_id=? WHERE id=?').bind(replacementId,c.mission_id).run();
-        results.push({action:'ASSIGN_REPLACEMENT',mission_id:c.mission_id,intervenant_id:replacementId,status:'EXECUTED'});
-      } else {
-        const queued=await enqueueAction(env,c.id,'ASSIGN_REPLACEMENT',{mission_id:c.mission_id,intervenant_id:replacementId},`${c.id}:replacement:${replacementId}`);
-        results.push({action:'ASSIGN_REPLACEMENT',...queued,reason:'MISSION_SCHEMA_NEEDS_REVIEW'});
-      }
+      // SUPRA V1 : aucune réaffectation directe. Contrôles d'éligibilité,
+      // disponibilité, propriété et acceptation du prestataire requis avant exécution.
+      const queued=await enqueueAction(env,c.id,'ASSIGN_REPLACEMENT',{mission_id:c.mission_id,intervenant_id:replacementId,requires_manager:true,requires_provider_validation:true},`${c.id}:replacement:${replacementId}`);
+      results.push({action:'ASSIGN_REPLACEMENT',...queued,reason:'SUPRA_VALIDATION_REQUIRED'});
     } else {
       const queued=await enqueueAction(env,c.id,'SEARCH_REPLACEMENT',{mission_id:c.mission_id||null,criteria:context.replacement_criteria||{},case_type:c.case_type},`${c.id}:search-replacement`);
       results.push({action:'SEARCH_REPLACEMENT',...queued});
@@ -1297,15 +1580,9 @@ async function executeCaseBusinessAction(env, c, rec, actorId=null, automatic=fa
   }
 
   if (context.reschedule_start_at && c.mission_id) {
-    const cols=await getTableColumns(env,'missions');
-    const target = cols.includes('start_at') ? 'start_at' : (cols.includes('scheduled_at') ? 'scheduled_at' : null);
-    if (target) {
-      await env.DB.prepare(`UPDATE missions SET ${target}=? WHERE id=?`).bind(String(context.reschedule_start_at),c.mission_id).run();
-      results.push({action:'RESCHEDULE_MISSION',mission_id:c.mission_id,field:target,status:'EXECUTED'});
-    } else {
-      const queued=await enqueueAction(env,c.id,'RESCHEDULE_MISSION',{mission_id:c.mission_id,start_at:context.reschedule_start_at},`${c.id}:reschedule:${context.reschedule_start_at}`);
-      results.push({action:'RESCHEDULE_MISSION',...queued,reason:'MISSION_SCHEMA_NEEDS_REVIEW'});
-    }
+    // SUPRA V1 : une modification de planning reste une proposition en attente.
+    const queued=await enqueueAction(env,c.id,'RESCHEDULE_MISSION',{mission_id:c.mission_id,start_at:context.reschedule_start_at,requires_manager:true,requires_participant_acceptance:true},`${c.id}:reschedule:${context.reschedule_start_at}`);
+    results.push({action:'RESCHEDULE_MISSION',...queued,reason:'SUPRA_VALIDATION_REQUIRED'});
   }
 
   if (context.client_notification || c.client_id || c.company_id) {
@@ -1330,34 +1607,39 @@ async function processActionOutbox(request, env) {
   const processed=[];
   for(const row of (rows.results||[])) {
     const payload=row.payload_json?JSON.parse(row.payload_json):{};
-    // Provider-dependent actions stay queued until the corresponding adapter/secret is configured.
+    // SUPRA V2 : ne jamais déclarer une action terminée sans adaptateur métier
+    // qui l'a réellement exécutée et vérifiée. Aucun faux statut COMPLETED.
     const external = ['PSP_REFUND_REVIEW','NOTIFY_CLIENT','SEARCH_REPLACEMENT','RESCHEDULE_MISSION','ASSIGN_REPLACEMENT'].includes(String(row.action_type));
-    if(external) {
-      await env.DB.prepare(`UPDATE action_outbox SET status='WAITING_PROVIDER',last_error=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind('External adapter/provider required for final execution.',row.id).run();
-      processed.push({id:row.id,status:'WAITING_PROVIDER',action_type:row.action_type});
-      continue;
-    }
-    await env.DB.prepare(`UPDATE action_outbox SET status='COMPLETED',processed_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(row.id).run();
-    processed.push({id:row.id,status:'COMPLETED',action_type:row.action_type,payload});
+    const waitingStatus = external ? 'WAITING_PROVIDER' : 'WAITING_EXECUTOR';
+    const reason = external
+      ? 'External adapter/provider required for final execution.'
+      : 'No verified business executor is registered for this action type.';
+    await env.DB.prepare(`UPDATE action_outbox SET status=?,last_error=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(waitingStatus,reason,row.id).run();
+    processed.push({id:row.id,status:waitingStatus,action_type:row.action_type,execution_verified:false});
   }
   await journal(env,'gerante',gate.auth.user.id,'ACTION_OUTBOX_PROCESSED','system',null,'OK',{count:processed.length});
   return json({ok:true,version:VERSION,processed},200);
 }
 
 async function executeOperationalCase(env, caseId, approverId=null, automatic=false) {
+  // SUPRA V1 : le mode automatique est neutralisé jusqu'à validation des contrôles
+  // de propriété, d'éligibilité, de disponibilité, d'idempotence et de preuve PSP.
+  if (automatic) return {ok:false,error:'AUTOMATION_DISABLED_PENDING_SUPRA_GOVERNANCE'};
   const c=await env.DB.prepare('SELECT * FROM operational_cases WHERE id=? LIMIT 1').bind(caseId).first();
   if(!c)return {ok:false,error:'CASE_NOT_FOUND'};
   if(c.status==='RESOLVED')return {ok:true,already:true};
   const rec=c.proposed_solution_json?JSON.parse(c.proposed_solution_json):{};
   if(c.requires_manager && !automatic && !approverId) return {ok:false,error:'MANAGER_APPROVAL_REQUIRED'};
   const businessResults = await executeCaseBusinessAction(env,c,rec,approverId,automatic);
-  const resolution={executed:true,automatic,action:rec.action||'RESOLVE',steps:rec.solution?.steps||[],business_results:businessResults,executed_at:new Date().toISOString()};
-  await env.DB.prepare(`INSERT INTO case_actions(id,case_id,action_code,mode,status,payload_json,result_json,completed_at) VALUES(?,?,?,?,?,?,?,CURRENT_TIMESTAMP)`)
-    .bind(crypto.randomUUID(),caseId,rec.action||'RESOLVE',automatic?'AUTO':'MANAGER','COMPLETED',JSON.stringify(rec),JSON.stringify(resolution)).run();
-  await env.DB.prepare(`UPDATE operational_cases SET status='RESOLVED',resolution_json=?,requires_manager=0,updated_at=CURRENT_TIMESTAMP,resolved_at=CURRENT_TIMESTAMP WHERE id=?`).bind(JSON.stringify(resolution),caseId).run();
+  const hasPendingActions=businessResults.some(item=>['PENDING','WAITING_PROVIDER'].includes(String(item.status||'')));
+  const finalCaseStatus=hasPendingActions?'ACTION_PENDING':'RESOLVED';
+  const resolution={executed:!hasPendingActions,execution_state:hasPendingActions?'ACTIONS_QUEUED':'COMPLETED',automatic,action:rec.action||'RESOLVE',steps:rec.solution?.steps||[],business_results:businessResults,executed_at:new Date().toISOString()};
+  await env.DB.prepare(`INSERT INTO case_actions(id,case_id,action_code,mode,status,payload_json,result_json,completed_at) VALUES(?,?,?,?,?,?,?,?)`)
+    .bind(crypto.randomUUID(),caseId,rec.action||'RESOLVE',automatic?'AUTO':'MANAGER',hasPendingActions?'PENDING':'COMPLETED',JSON.stringify(rec),JSON.stringify(resolution),hasPendingActions?null:new Date().toISOString()).run();
+  await env.DB.prepare(`UPDATE operational_cases SET status=?,resolution_json=?,requires_manager=0,updated_at=CURRENT_TIMESTAMP,resolved_at=CASE WHEN ?='RESOLVED' THEN CURRENT_TIMESTAMP ELSE NULL END WHERE id=?`).bind(finalCaseStatus,JSON.stringify(resolution),finalCaseStatus,caseId).run();
   await env.DB.prepare(`UPDATE copilot_log SET approved_by=COALESCE(?,approved_by),result=? WHERE case_id=? AND id=(SELECT id FROM copilot_log WHERE case_id=? ORDER BY created_at DESC LIMIT 1)`).bind(approverId,JSON.stringify(resolution),caseId,caseId).run();
-  await journal(env,automatic?'copilot':'gerante',approverId,automatic?'AUTO_CASE_RESOLVED':'CASE_RESOLVED','operational_case',caseId,'OK',resolution);
-  return {ok:true,case_id:caseId,resolution};
+  await journal(env,automatic?'copilot':'gerante',approverId,automatic?'AUTO_CASE_RESOLVED':(hasPendingActions?'CASE_ACTIONS_QUEUED':'CASE_RESOLVED'),'operational_case',caseId,'OK',resolution);
+  return {ok:true,case_id:caseId,status:finalCaseStatus,resolution};
 }
 
 async function approveOperationalCase(request, env) {
@@ -1503,43 +1785,119 @@ function financeStrategicQuote({basePriceCents=0,phaseFactor=1,urgency='normal',
   };
 }
 
+function deriveMissionCalendarFlags(date, holidayDates=[]) {
+  const parts=new Intl.DateTimeFormat('en-US',{
+    timeZone:'Europe/Paris',year:'numeric',month:'2-digit',day:'2-digit',
+    weekday:'short',hour:'2-digit',hourCycle:'h23'
+  }).formatToParts(date);
+  const value=type=>parts.find(part=>part.type===type)?.value;
+  const localDate=`${value('year')}-${value('month')}-${value('day')}`;
+  const weekday=value('weekday');
+  const hour=Number(value('hour'));
+  return {
+    localDate,
+    evening:hour>=18 && hour<22,
+    night:hour>=22 || hour<6,
+    saturday:weekday==='Sat',
+    sunday:weekday==='Sun',
+    holiday:Array.isArray(holidayDates) && holidayDates.includes(localDate),
+    lastMinute:date.getTime()-Date.now()<=24*60*60*1000
+  };
+}
+
 async function pricingQuote(request, env) {
   const gate=await requireAuthRole(request,env,['gerante','client','entreprise','intervenant']); if(gate.error)return gate.error;
-  const b=await readJson(request)||{};
-  const phase=String(b.phase||await getSetting(env,'project_phase','TEST')).toUpperCase();
-  const cfg=PROJECT_PHASES[phase]||PROJECT_PHASES.TEST;
-  const distance=Number(b.distance_km||0);const duration=Number(b.duration_minutes||60);
-  const base=Number(b.base_price_cents||0);
-  const clientType=String(b.client_type||'B2C').toUpperCase();
-  const serviceCode=clean(b.service_code)||null;
+  const b=await readJson(request);
+  if(!b || typeof b!=='object' || Array.isArray(b)) return json({ok:false,error:'INVALID_QUOTE_INPUT',version:VERSION},400);
+  const phase=String(await getSetting(env,'project_phase','TEST')).toUpperCase();
+  const cfg=PROJECT_PHASES[phase];
+  if(!cfg) return json({ok:false,error:'INVALID_PROJECT_PHASE',version:VERSION},409);
+  const distance=Number(b.distance_km??0);
+  const duration=Number(b.duration_minutes??60);
+  const serviceCode=clean(b.service_code);
+  const role=String(gate.auth.user.role||'').toLowerCase();
+  const clientType=role==='entreprise'?'B2B':role==='gerante'?String(b.client_type||'B2C').toUpperCase():'B2C';
+  if(!serviceCode || serviceCode.length>80 ||
+     !Number.isFinite(distance) || distance<0 || distance>300 ||
+     !Number.isInteger(duration) || duration<15 || duration>1440 ||
+     !['B2C','B2B'].includes(clientType)) {
+    return json({ok:false,error:'INVALID_QUOTE_INPUT',version:VERSION},400);
+  }
 
-  let policy=null;
-  try {
-    policy=await env.DB.prepare(`SELECT * FROM pricing_policies WHERE active=1 AND phase=? AND client_type=? AND (service_code=? OR service_code IS NULL) ORDER BY CASE WHEN service_code=? THEN 0 ELSE 1 END LIMIT 1`)
-      .bind(phase,clientType,serviceCode,serviceCode).first();
-  } catch (_) {}
+  const catalog=await env.DB.prepare(`SELECT code,label,rules_json FROM métier_catalog WHERE code=? AND active=1 LIMIT 1`)
+    .bind(serviceCode).first();
+  if(!catalog) return json({ok:false,error:'ACTIVE_SERVICE_NOT_FOUND',version:VERSION},404);
+  let serviceRules;
+  try { serviceRules=JSON.parse(catalog.rules_json||'{}'); }
+  catch { return json({ok:false,error:'SERVICE_TARIFF_CONFIGURATION_INVALID',version:VERSION},409); }
+  const base=Number(serviceRules?.base_price_cents);
+  if(!Number.isSafeInteger(base) || base<=0) {
+    return json({ok:false,error:'SERVER_TARIFF_NOT_CONFIGURED',version:VERSION},409);
+  }
 
-  const fuelMode=String(b.fuel_mode||'normal').toLowerCase()==='high'?'high':'normal';
-  const fuelRateLegacy=Number(b.fuel_cost_per_km_cents??await getSetting(env,'fuel_cost_per_km_cents',20));
-  const fuelPriceCentsPerLitre=Number(b.fuel_price_cents_per_litre??await getSetting(env,fuelMode==='high'?'fuel_reference_price_cents_litre_high':'fuel_reference_price_cents_litre_normal',fuelMode==='high'?200:175));
-  const software=Number(b.software_cost_cents||await getSetting(env,'software_monthly_cost_cents',0));
-  const pspPercent=Number(b.psp_percent||0);const pspFixed=Number(b.psp_fixed_cents||0);
-  const targetMargin=Number(b.target_margin_percent??policy?.target_margin_percent??await getSetting(env,'default_margin_percent',FINANCE_STRATEGIC.marginFloorPercent));
-  const commissionRate=Number(b.platform_fee_percent!=null?b.platform_fee_percent/100:(policy?.platform_fee_percent!=null?policy.platform_fee_percent/100:FINANCE_STRATEGIC.commissionDefaultPercent/100));
-  const intervenantFloor=Math.max(0,Math.round(Number(b.intervenant_floor_cents??policy?.intervenant_floor_cents??(base*0.70))));
-  const regulatedMax=b.regulated_max_cents!=null?Number(b.regulated_max_cents):(policy?.client_ceiling_cents>0?Number(policy.client_ceiling_cents):null);
+  const policy=await env.DB.prepare(`SELECT * FROM pricing_policies WHERE active=1 AND phase=? AND client_type=? AND (service_code=? OR service_code IS NULL) ORDER BY CASE WHEN service_code=? THEN 0 ELSE 1 END LIMIT 1`)
+    .bind(phase,clientType,serviceCode,serviceCode).first();
+  const fuelMode=String(await getSetting(env,'fuel_mode','normal')).toLowerCase()==='high'?'high':'normal';
+  const fuelPriceCentsPerLitre=Number(await getSetting(env,
+    fuelMode==='high'?'fuel_reference_price_cents_litre_high':'fuel_reference_price_cents_litre_normal',
+    fuelMode==='high'?200:175));
+  const software=Number(policy?.software_cost_cents??await getSetting(env,'software_monthly_cost_cents',0));
+  const pspPercent=Number(policy?.psp_percent||await getSetting(env,'psp_percent',0));
+  const pspFixed=Number(policy?.psp_fixed_cents||await getSetting(env,'psp_fixed_cents',0));
+  const configuredMargin=Number(policy?.target_margin_percent||0);
+  const targetMargin=configuredMargin>0?configuredMargin:Number(await getSetting(env,'default_margin_percent',FINANCE_STRATEGIC.marginFloorPercent));
+  const configuredCommission=Number(policy?.platform_fee_percent||0);
+  const commissionRate=(configuredCommission>0?configuredCommission:FINANCE_STRATEGIC.commissionDefaultPercent)/100;
+  const configuredProviderFloor=Number(policy?.intervenant_floor_cents||0);
+  const intervenantFloor=Math.max(0,Math.round(configuredProviderFloor>0?configuredProviderFloor:base*0.70));
+  const regulatedMax=Number(policy?.client_ceiling_cents)>0?Number(policy.client_ceiling_cents):null;
+  if(phase!=='TEST' && (!policy || configuredCommission<=0 ||
+     Number(policy.psp_percent)<=0 || configuredMargin<=0 ||
+     configuredProviderFloor<=0)) {
+    return json({ok:false,error:'NON_TEST_PRICING_POLICY_INCOMPLETE',version:VERSION},409);
+  }
+  const financeInputs=[fuelPriceCentsPerLitre,software,pspPercent,pspFixed,targetMargin,commissionRate,intervenantFloor];
+  if(financeInputs.some(value=>!Number.isFinite(value)||value<0) ||
+     fuelPriceCentsPerLitre>1000 || pspPercent>20 || pspFixed>100000 ||
+     targetMargin>100 || commissionRate>1 || intervenantFloor>base*3 ||
+     (regulatedMax!==null && (!Number.isSafeInteger(regulatedMax)||regulatedMax<=0))) {
+    return json({ok:false,error:'SERVER_PRICING_POLICY_INVALID',version:VERSION},409);
+  }
+  if(regulatedMax!==null && intervenantFloor>regulatedMax) {
+    return json({ok:false,error:'PRICING_POLICY_INFEASIBLE',version:VERSION},409);
+  }
+
+  let calendar={evening:false,night:false,saturday:false,sunday:false,holiday:false,lastMinute:false,localDate:null};
+  if(b.scheduled_at!==undefined) {
+    if(typeof b.scheduled_at!=='string' || !/(Z|[+-]\d{2}:\d{2})$/.test(b.scheduled_at)) {
+      return json({ok:false,error:'SCHEDULED_AT_MUST_INCLUDE_TIMEZONE',version:VERSION},400);
+    }
+    const scheduledAt=new Date(b.scheduled_at);
+    if(!Number.isFinite(scheduledAt.getTime()) || scheduledAt.getTime()<Date.now()) {
+      return json({ok:false,error:'INVALID_OR_PAST_SCHEDULED_AT',version:VERSION},400);
+    }
+    let holidayDates=[];
+    try {
+      const parsed=JSON.parse(await getSetting(env,'public_holidays_fr','[]'));
+      if(Array.isArray(parsed)) holidayDates=parsed.filter(x=>typeof x==='string' && /^\d{4}-\d{2}-\d{2}$/.test(x));
+    } catch {}
+    calendar=deriveMissionCalendarFlags(scheduledAt,holidayDates);
+  }
+  const urgency=String(b.urgency||'normal').toLowerCase();
+  if(!['normal','rapid','urgent','very_urgent','immediate'].includes(urgency)) {
+    return json({ok:false,error:'INVALID_URGENCY',version:VERSION},400);
+  }
+
   const strategic=financeStrategicQuote({
-    basePriceCents:base,
-    phaseFactor:cfg.pricingFactor,
-    urgency:b.urgency||'normal',
-    evening:Boolean(b.evening),night:Boolean(b.night),saturday:Boolean(b.saturday),sunday:Boolean(b.sunday),holiday:Boolean(b.holiday),lastMinute:Boolean(b.last_minute||b.lastMinute),
-    distanceKm:distance,fuelMode,fuelPriceCentsPerLitre,commissionRate,discountCents:Number(b.discount_cents||0),regulatedMaxCents:regulatedMax,
-    intervenantFloorCents:intervenantFloor,pspPercent,pspFixedCents:pspFixed,softwareCostCents:software,targetMarginPercent:targetMargin
+    basePriceCents:base,phaseFactor:cfg.pricingFactor,urgency,
+    evening:calendar.evening,night:calendar.night,saturday:calendar.saturday,
+    sunday:calendar.sunday,holiday:calendar.holiday,lastMinute:calendar.lastMinute,
+    distanceKm:distance,fuelMode,fuelPriceCentsPerLitre,commissionRate,
+    discountCents:0,regulatedMaxCents:regulatedMax,intervenantFloorCents:intervenantFloor,
+    pspPercent,pspFixedCents:pspFixed,softwareCostCents:software,targetMarginPercent:targetMargin
   });
-  /* Compatibilité avec l'ancien contrat : fuel_cost_cents reste disponible. */
-  const legacyFuel=Math.max(0,Math.round(distance*fuelRateLegacy));
   const quote={
-    phase,clientType,distance,duration,
+    phase,clientType,serviceCode,distance,duration,scheduled_local_date:calendar.localDate,
     client_price_cents:strategic.client_price_cents,
     intervenant_amount_cents:strategic.intervenant_amount_cents,
     platform_commission_cents:strategic.commission_cents,
@@ -1548,7 +1906,16 @@ async function pricingQuote(request, env) {
     fuel_cost_cents:strategic.travel.total_cost_cents,
     estimated_margin_cents:strategic.estimated_margin_cents,
     strategic_finance:strategic,
-    assumptions:{market_position:'strategic',fuel_included:true,fuel_mode:fuelMode,fuel_reference_price_cents_per_litre:fuelPriceCentsPerLitre,legacy_fuel_cost_per_km_cents:legacyFuel,software_included:true,target_margin_percent:targetMargin,commission_rate_percent:commissionRate*100,b2b_rule:'company_pays_intervenant_platform_bills_commission',single_finance_engine:true}
+    assumptions:{
+      tariff_source:'ACTIVE_SERVER_SERVICE_CATALOG',
+      policy_source:policy?'ACTIVE_SERVER_PRICING_POLICY':'SERVER_DEFAULTS',
+      calendar_source:b.scheduled_at?'EUROPE_PARIS_SERVER_DERIVED':'NOT_PROVIDED',
+      promotion_discount_cents:0,
+      promotion_note:'Aucune remise client n’est acceptée sans promotion validée côté serveur.',
+      final_price_recalculated_at_mission_confirmation:true,
+      b2b_rule:'company_pays_intervenant_platform_bills_commission',
+      single_finance_engine:true
+    }
   };
   await env.DB.prepare(`INSERT INTO pricing_quotes(id,phase,client_type,service_code,distance_km,duration_minutes,client_price_cents,intervenant_amount_cents,platform_commission_cents,psp_cost_cents,software_cost_cents,fuel_cost_cents,estimated_margin_cents,assumptions_json) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
     .bind(crypto.randomUUID(),phase,clientType,serviceCode,distance,duration,quote.client_price_cents,quote.intervenant_amount_cents,quote.platform_commission_cents,quote.psp_cost_cents,quote.software_cost_cents,quote.fuel_cost_cents,quote.estimated_margin_cents,JSON.stringify(quote.assumptions)).run();
@@ -1557,14 +1924,16 @@ async function pricingQuote(request, env) {
 
 async function financeSummary(request, env) {
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
-  const tx=await env.DB.prepare(`SELECT COALESCE(SUM(gross_cents),0) gross,COALESCE(SUM(commission_cents),0) commission,COALESCE(SUM(provider_fee_cents),0) provider_fee,COALESCE(SUM(refund_cents),0) refunds,COALESCE(SUM(net_intervenant_cents),0) intervenant FROM payment_transactions`).first();
+  // Report payment-status totals separately from a fully reconciled accounting result.
+  // "paid" is a platform state; it is not proof of PSP/bank reconciliation.
+  const tx=await env.DB.prepare(`SELECT COALESCE(SUM(gross_cents),0) gross,COALESCE(SUM(commission_cents),0) commission,COALESCE(SUM(provider_fee_cents),0) provider_fee,COALESCE(SUM(refund_cents),0) refunds,COALESCE(SUM(net_intervenant_cents),0) intervenant FROM payment_transactions WHERE status='paid'`).first();
   const ledger=await env.DB.prepare(`SELECT COALESCE(SUM(CASE WHEN direction='CREDIT' THEN amount_cents ELSE -amount_cents END),0) balance FROM accounting_ledger`).first();
   const expenses=await env.DB.prepare(`SELECT COALESCE(SUM(amount_cents),0) total FROM business_expenses`).first();
   const pending=await env.DB.prepare(`SELECT COALESCE(SUM(gross_cents),0) total,COUNT(*) n FROM payment_transactions WHERE status IN ('pending','processing','held')`).first();
   const paid=await env.DB.prepare(`SELECT COALESCE(SUM(gross_cents),0) total,COUNT(*) n FROM payment_transactions WHERE status='paid'`).first();
   const payouts=await env.DB.prepare(`SELECT COALESCE(SUM(amount_cents),0) total,COUNT(*) n FROM payout_requests WHERE status IN ('requested','processing')`).first();
   const disputed=await env.DB.prepare(`SELECT COALESCE(SUM(amount_cents),0) total,COUNT(*) n FROM payment_disputes WHERE status IN ('open','pending')`).first().catch(()=>null);
-  return json({ok:true,version:VERSION,finance:{gross_cents:Number(tx?.gross||0),commission_cents:Number(tx?.commission||0),provider_fee_cents:Number(tx?.provider_fee||0),refund_cents:Number(tx?.refunds||0),intervenant_cents:Number(tx?.intervenant||0),ledger_balance_cents:Number(ledger?.balance||0),expenses_cents:Number(expenses?.total||0),net_estimate_cents:Number(ledger?.balance||0)-Number(expenses?.total||0),pending_cents:Number(pending?.total||0),pending_transactions:Number(pending?.n||0),paid_cents:Number(paid?.total||0),paid_transactions:Number(paid?.n||0),payouts_pending_cents:Number(payouts?.total||0),payouts_pending:Number(payouts?.n||0),disputed_cents:Number(disputed?.total||0),disputes_pending:Number(disputed?.n||0)},models:{B2C:'client -> PROCHÉLIA -> intervenant',B2B:'société -> intervenant ; PROCHÉLIA facture sa commission/service'},finance_core_version:FINANCE_STRATEGIC_VERSION});
+  return json({ok:true,version:VERSION,finance:{gross_cents:Number(tx?.gross||0),commission_cents:Number(tx?.commission||0),provider_fee_cents:Number(tx?.provider_fee||0),refund_cents:Number(tx?.refunds||0),intervenant_cents:Number(tx?.intervenant||0),ledger_balance_cents:Number(ledger?.balance||0),expenses_cents:Number(expenses?.total||0),net_estimate_cents:null,net_profit_available:false,net_profit_reason:'PSP_AND_ACCOUNTING_RECONCILIATION_AND_FULL_COST_ALLOCATION_REQUIRED',paid_status_is_reconciled:false,pending_cents:Number(pending?.total||0),pending_transactions:Number(pending?.n||0),paid_cents:Number(paid?.total||0),paid_transactions:Number(paid?.n||0),payouts_pending_cents:Number(payouts?.total||0),payouts_pending:Number(payouts?.n||0),disputed_cents:Number(disputed?.total||0),disputes_pending:Number(disputed?.n||0)},models:{B2C:'client -> PROCHÉLIA -> intervenant',B2B:'société -> intervenant ; PROCHÉLIA facture sa commission/service'},finance_core_version:FINANCE_STRATEGIC_VERSION});
 }
 
 async function complaintCreate(request, env) {
@@ -1591,6 +1960,74 @@ async function consolidatedInfo(env) {
   return json({ok:true,version:VERSION,architecture:'UNIQUE_TRANSVERSAL_ENGINE',phase,automation:'simple_low_impact_auto_sensitive_manager',mobile_pc:'responsive_web_required',domains:['B2C','B2B','missions','matching','metiers','incidents','remplacement','paiements','finance','comptabilite','reclamations','commercial','recrutement','RGPD','securite','audit','copilote'],b2b_rule:'societe paie intervenant; PROCHÉLIA facture commissions/service',b2c_rule:'client paie la prestation; orchestration du reversement intervenant',note:'Aucune opération financière réelle n’est simulée : les fonds passent par un PSP configuré et vérifié.'});
 }
 
+async function supraDomains(request, env) {
+  const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
+  return json({ok:true,version:VERSION,engine:'PROCHELIA_SUPRA_ORCHESTRATOR_V2',domains:procheliaV7.getSupraDomainRegistry()},200);
+}
+
+function isPlainRecord(value) {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+async function supraPlan(request, env) {
+  // Le plan de pilotage transversal expose des informations stratégiques : Gérante uniquement.
+  const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
+  if(request.method!=='POST') return json({ok:false,error:'METHOD_NOT_ALLOWED',version:VERSION},405,{'allow':'POST'});
+  // Enforce the limit while streaming; reject invalid UTF-8 and cancel oversized bodies.
+  const boundedBody=await readBoundedRequestBody(request,16384);
+  if(!boundedBody.ok) {
+    const tooLarge=boundedBody.reason==='TOO_LARGE';
+    return json({ok:false,error:tooLarge?'REQUEST_TOO_LARGE':'INVALID_REQUEST_BODY',version:VERSION},tooLarge?413:400);
+  }
+  const rawBody=boundedBody.text;
+  let body;
+  try { body=JSON.parse(rawBody); }
+  catch { return json({ok:false,error:'INVALID_JSON'},400); }
+  if(!isPlainRecord(body)) return json({ok:false,error:'INVALID_JSON_OBJECT',version:VERSION},400);
+  const allowedBodyKeys=new Set(['case_type','domain','action','impact','market','context','evidence']);
+  if(Object.keys(body).some(key=>!allowedBodyKeys.has(key))) {
+    return json({ok:false,error:'UNEXPECTED_SUPRA_PLAN_FIELD',version:VERSION},400);
+  }
+  for(const key of ['case_type','domain','action','impact','market']) {
+    if(body[key]!==undefined && typeof body[key]!=='string') {
+      return json({ok:false,error:'INVALID_SUPRA_PLAN_FIELD_TYPE',field:key,version:VERSION},400);
+    }
+  }
+  const caseType=body.case_type===undefined?'analyse_generale':body.case_type.trim();
+  const domain=body.domain===undefined?undefined:body.domain.trim();
+  const action=body.action===undefined?'ANALYZE_AND_PROPOSE':body.action.trim().toUpperCase();
+  const impact=body.impact===undefined?'LOW':body.impact.trim().toUpperCase();
+  const market=body.market===undefined?'fr':body.market.trim().toLowerCase();
+  if(!caseType || caseType.length>100 || !/^[A-Z0-9_]{2,64}$/.test(action) ||
+     !['LOW','MEDIUM','HIGH','CRITICAL'].includes(impact) ||
+     !(market === "other" || /^[a-z]{2}$/.test(market)) ||
+     (domain!==undefined && (!domain || domain.length>60)) ||
+     (body.context!==undefined && !isPlainRecord(body.context))) {
+    return json({ok:false,error:'INVALID_SUPRA_PLAN_INPUT',version:VERSION},400);
+  }
+  if(body.evidence!==undefined) return json({ok:false,error:'CLIENT_SUPPLIED_EVIDENCE_NOT_TRUSTED',version:VERSION},400);
+  const context=body.context||{};
+  // The request body is never a source of trusted evidence. Governance remains fail-closed
+  // until server-side adapters independently verify ownership, eligibility and PSP state.
+  const plan=procheliaV7.buildSupraPlan({
+    caseType,domain,impact,requestedAction:action,market,context
+  });
+  const governance=procheliaV7.assessSupraDecision({
+    caseType:plan.caseType,impact:plan.impact,requestedAction:plan.requestedAction,
+    actorRole:gate.auth.user.role,context
+  });
+  const missingEvidence=[...new Set([...(plan.missingEvidence||[]),...(governance.missingEvidence||[])])];
+  return json({
+    ok:true,version:VERSION,plan:{
+      ...plan,
+      missingEvidence,
+      executionAllowed:false,
+      autonomy:{...plan.autonomy,executionAdapterReady:false}
+    },
+    governance
+  },200);
+}
+
 async function handleConsolidated(request, env) {
   const url=new URL(request.url);
   const consolidatedPath = ['/api/consolidated/info','/api/ops/dashboard','/api/journal','/api/cases','/api/cases/approve','/api/metiers','/api/metiers/suggest','/api/pricing/quote','/api/finance/summary','/api/complaints','/api/settings/phase'].includes(url.pathname);
@@ -1598,6 +2035,8 @@ async function handleConsolidated(request, env) {
     try { await ensureConsolidatedSchema(env); } catch (e) { return json({ok:false,error:'CONSOLIDATED_SCHEMA_ERROR',version:VERSION,message:e.message},500); }
   }
   if(url.pathname==='/api/consolidated/info' && request.method==='GET') return consolidatedInfo(env);
+  if(url.pathname==='/api/supra/domains' && request.method==='GET') return supraDomains(request,env);
+  if(url.pathname==='/api/supra/plan' && request.method==='POST') return supraPlan(request,env);
   if(url.pathname==='/api/ops/dashboard' && request.method==='GET') return getOperationsDashboard(request,env);
   if(url.pathname==='/api/journal' && request.method==='GET') return getJournal(request,env);
   if(url.pathname==='/api/cases' && request.method==='POST') return createOperationalCase(request,env);
@@ -2132,20 +2571,14 @@ async function executeQueuedAction(env, action) {
     } else if (action.action_type === 'PAYOUT') {
       result={performed:false,requires_provider:true,reason:'PSP_EXECUTION_REQUIRED',payload};
     } else if (action.action_type === 'ACCOUNTING_ENTRY') {
-      if (await tableExists(env,'accounting_ledger')) {
-        const cols=await tableColumns(env,'accounting_ledger');
-        const values={id:crypto.randomUUID(),entry_type:payload.entry_type||'OPERATIONAL',amount_cents:Number(payload.amount_cents||0),
-          debit_cents:Number(payload.debit_cents||0),credit_cents:Number(payload.credit_cents||0),reference_type:action.entity_type,
-          reference_id:action.entity_id,description:payload.description||'',metadata_json:JSON.stringify(payload)};
-        const usable=Object.entries(values).filter(([k])=>cols.includes(k));
-        if(usable.length){
-          await env.DB.prepare(`INSERT INTO accounting_ledger(${usable.map(x=>x[0]).join(',')}) VALUES(${usable.map(()=>'?').join(',')})`).bind(...usable.map(x=>x[1])).run();
-          result={performed:true,accounting_recorded:true};
-        } else result={performed:false,reason:'ACCOUNTING_SCHEMA_INCOMPATIBLE'};
-      } else result={performed:false,reason:'ACCOUNTING_TABLE_MISSING'};
+      // A single unbalanced line is never accepted as a complete accounting
+      // operation. Until the paired-entry writer and reconciliation workflow
+      // are invoked, keep this action pending for a reviewed accounting batch.
+      result={performed:false,requires_accounting_batch:true,reason:'BALANCED_DOUBLE_ENTRY_REQUIRED',
+        reference_type:action.entity_type||null,reference_id:action.entity_id||null};
     } else result={performed:false,reason:'ACTION_TYPE_NOT_IMPLEMENTED'};
 
-    const finalStatus = result.performed ? 'DONE' : (result.requires_provider ? 'WAITING_PROVIDER' : 'FAILED');
+    const finalStatus = result.performed ? 'DONE' : (result.requires_provider ? 'WAITING_PROVIDER' : (result.requires_accounting_batch ? 'WAITING_ACCOUNTING_BATCH' : 'FAILED'));
     await env.DB.prepare(`UPDATE action_outbox SET status=?,result_json=?,attempts=attempts+1,updated_at=CURRENT_TIMESTAMP,executed_at=? WHERE id=?`)
       .bind(finalStatus,JSON.stringify(result),result.performed?now:null,action.id).run();
     return {ok:true,status:finalStatus,result};
@@ -3413,12 +3846,14 @@ async function strictProductionAudit(request,env){
   const checks=[...(result.checks||[]),...extra];
   const blockingCodes=new Set(['SECRET:PAYMENT_PROVIDER','SECRET:PAYMENT_WEBHOOK_SECRET','SECURITY_CODE_DELIVERY','CORS_ORIGIN','BACKUP_R2']);
   const blocking=checks.filter(x=>blockingCodes.has(x.code)&&x.status!=='OK');
-  const overall=blocking.length===0 && result.blocking===0;
+  const configurationReady=blocking.length===0 && result.blocking===0;
   for(const c of extra){
     await env.DB.prepare(`INSERT INTO system_config_checks(id,check_code,status,details_json) VALUES(?,?,?,?)`).bind(crypto.randomUUID(),c.code,c.status,JSON.stringify(c)).run();
   }
-  await journal(env,'gerante',gate.auth.user.id,'STRICT_PRODUCTION_AUDIT','system',null,overall?'OK':'ATTENTION',{blocking:blocking.map(x=>x.code)});
-  return json({ok:true,version:VERSION,production_gate:overall?'OPEN':'CLOSED',ready_for_real_traffic:overall,checks,blocking:blocking.map(x=>x.code),note:overall?'Configuration gate passed. A real production launch still requires sandbox/acceptance tests for PSP, notifications, identity/security, backups/restore and critical user journeys.':'Production traffic remains blocked until the listed blocking controls are configured and tested.'});
+  await journal(env,'gerante',gate.auth.user.id,'STRICT_PRODUCTION_AUDIT','system',null,configurationReady?'CONFIGURATION_READY':'ATTENTION',{blocking:blocking.map(x=>x.code)});
+  // Configuration presence is not proof of operational acceptance.
+  // Real traffic remains disabled until sandbox, E2E, restore, security and legal gates are independently attested.
+  return json({ok:true,version:VERSION,production_gate:configurationReady?'CONFIGURATION_READY':'CLOSED',configuration_ready:configurationReady,ready_for_real_traffic:false,real_traffic_authorized:false,checks,blocking:blocking.map(x=>x.code),additional_gates_required:['PSP_SANDBOX_AND_WEBHOOK_RECONCILIATION','CLIENT_PROVIDER_MANAGER_E2E','IOS_ANDROID_DESKTOP_ACCEPTANCE','BACKUP_RESTORE_DRILL','INDEPENDENT_SECURITY_REVIEW','RGPD_AND_LEGAL_APPROVAL','EXPLICIT_RELEASE_AUTHORIZATION'],note:'Configuration audit only. This endpoint can never authorize real traffic; independent operational acceptance and explicit release approval remain mandatory.'});
 }
 
 const __procheliaProductionSafetyHandle = handle;
@@ -3449,6 +3884,10 @@ handle = async function(request,env){
       const response = await __procheliaProductionSafetyHandle(new Request(request.url,{method:'GET',headers:request.headers}),env);
       return new Response(null,{status:response.status,headers:response.headers});
     }
+    // Production audit persists evidence and therefore is an explicit POST action, never a GET side effect.
+    if ((preflightPath === '/api/system/final-audit' || preflightPath === '/api/system/production-check') && preflightMethod !== 'POST') {
+      return json({ok:false,error:'METHOD_NOT_ALLOWED',version:VERSION},405,{'allow':'POST'});
+    }
     // Fail closed with a truthful service-unavailable response when a write
     // needs the persistent rate limiter but D1 is not bound.
     if (isMutatingMethod(preflightMethod) && !env?.DB) {
@@ -3457,10 +3896,77 @@ handle = async function(request,env){
     const rate=await productionRateLimit(request,env);
     if(!rate.ok) return rate.response;
     const u=new URL(request.url);
-    if(u.pathname==='/api/system/final-audit' && request.method==='GET') return strictProductionAudit(request,env);
-    if(u.pathname==='/api/system/production-check' && request.method==='GET') return strictProductionAudit(request,env);
+    if(u.pathname==='/api/system/final-audit' || u.pathname==='/api/system/production-check') {
+      if(request.method!=='POST') return json({ok:false,error:'METHOD_NOT_ALLOWED',version:VERSION},405,{'allow':'POST'});
+      return strictProductionAudit(request,env);
+    }
     return __procheliaProductionSafetyHandle(request,env);
   }catch(e){
     return json({ok:false,error:'PRODUCTION_SAFETY_ERROR',version:VERSION},500);
   }
+};
+
+// Browser session transport: exact-origin credentialed CORS + CSRF origin binding.
+// Preflight is answered before D1, rate limiting, authentication or business logic.
+function applyCorsHeaders(request,env,response){
+  const origin=request.headers.get('origin');
+  if(!origin || !securityOriginAllowed(request,env)) return response;
+  const headers=new Headers(response.headers);
+  headers.set('access-control-allow-origin',origin);
+  headers.set('access-control-allow-credentials','true');
+  headers.set('access-control-expose-headers','Retry-After');
+  const vary=headers.get('vary');
+  headers.set('vary',vary ? vary + ', Origin' : 'Origin');
+  return new Response(response.body,{status:response.status,statusText:response.statusText,headers});
+}
+
+const __procheliaCredentialedCorsHandle = handle;
+handle = async function(request,env){
+  const origin=request.headers.get('origin');
+  const method=request.method.toUpperCase();
+  if(origin && !securityOriginAllowed(request,env)){
+    return json({ok:false,error:'ORIGIN_NOT_ALLOWED',version:VERSION},403);
+  }
+
+  // Cookie-authenticated state changes must carry an approved browser Origin.
+  // Non-browser signed webhooks without a session cookie continue through their own verification.
+  const cookieHeader=request.headers.get('cookie')||'';
+  const hasSessionCookie=cookieHeader.split(';').some(part=>part.trim().startsWith(SESSION_COOKIE+'='));
+  if(isMutatingMethod(method) && hasSessionCookie && !origin){
+    return json({ok:false,error:'CSRF_ORIGIN_REQUIRED',version:VERSION},403);
+  }
+
+  if(method==='OPTIONS'){
+    const methods=new Set(['GET','HEAD','POST','OPTIONS']);
+    const requestedMethod=(request.headers.get('access-control-request-method')||'').toUpperCase();
+    if(requestedMethod && !methods.has(requestedMethod)){
+      return json({ok:false,error:'CORS_METHOD_NOT_ALLOWED',version:VERSION},405,{'allow':'GET, HEAD, POST, OPTIONS'});
+    }
+    const allowedHeaders=new Set(['accept','content-type','authorization','x-idempotency-key','x-csrf-token']);
+    const requestedHeaders=(request.headers.get('access-control-request-headers')||'')
+      .split(',').map(x=>x.trim().toLowerCase()).filter(Boolean);
+    if(requestedHeaders.some(x=>!allowedHeaders.has(x))){
+      return json({ok:false,error:'CORS_HEADER_NOT_ALLOWED',version:VERSION},400);
+    }
+    const headers=new Headers({
+      'access-control-allow-methods':'GET, HEAD, POST, OPTIONS',
+      'access-control-allow-headers':'Accept, Content-Type, Authorization, X-Idempotency-Key, X-CSRF-Token',
+      'access-control-max-age':'600',
+      'cache-control':'no-store',
+      'vary':'Origin, Access-Control-Request-Method, Access-Control-Request-Headers'
+    });
+    if(origin){
+      headers.set('access-control-allow-origin',origin);
+      headers.set('access-control-allow-credentials','true');
+    }
+    return new Response(null,{status:204,headers});
+  }
+
+  let response;
+  try{
+    response=await __procheliaCredentialedCorsHandle(request,env);
+  }catch(error){
+    response=json({ok:false,error:'CORS_WRAPPER_ERROR',version:VERSION},500);
+  }
+  return applyCorsHeaders(request,env,response);
 };
