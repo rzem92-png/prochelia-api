@@ -122,3 +122,52 @@ test("real charges and payouts fail closed until the transaction adapters are im
   assert.equal(body.error,"REAL_PAYMENT_ADAPTER_NOT_READY");
   assert.equal(fake.calls.some(x=>x.sql.includes("INSERT INTO payment_transactions")),false);
 });
+
+test("Stripe account.updated webhook updates Connect readiness only after valid signature", async()=>{
+  const fake=fakeDb("intervenant");
+  const env={DB:fake.DB,PAYMENT_PROVIDER:"stripe",STRIPE_SECRET_KEY:"sk_test_unit",STRIPE_WEBHOOK_SECRET:"whsec_unit",APP_BASE_URL:"https://prochelia.pages.dev"};
+  const timestamp=Math.floor(Date.now()/1000);
+  const body=JSON.stringify({id:"evt_account_updated_1",type:"account.updated",data:{object:{id:"acct_test_123",charges_enabled:false,payouts_enabled:true,details_submitted:true}}});
+  const signature=await stripeSignature("whsec_unit",timestamp,body);
+  const response=await worker.fetch(new Request("https://api.test/api/payments/webhook",{
+    method:"POST",
+    headers:{"Content-Type":"application/json","Stripe-Signature":"t="+timestamp+",v1="+signature},
+    body
+  }),env);
+  const result=await response.json();
+  assert.equal(response.status,200,JSON.stringify(result));
+  const update=fake.calls.find(x=>x.sql.includes("UPDATE payment_accounts SET charges_enabled"));
+  assert.ok(update);
+  assert.equal(update.args[0],0);
+  assert.equal(update.args[1],1);
+  assert.equal(update.args[2],"active");
+  assert.equal(update.args[3],"submitted");
+  assert.equal(update.args[4],"acct_test_123");
+});
+
+test("invalid Stripe webhook is rejected before payment schema DDL", async()=>{
+  const fake=fakeDb("intervenant");
+  const env={DB:fake.DB,PAYMENT_PROVIDER:"stripe",STRIPE_WEBHOOK_SECRET:"whsec_unit"};
+  const response=await worker.fetch(new Request("https://api.test/api/payments/webhook",{
+    method:"POST",
+    headers:{"Content-Type":"application/json","Stripe-Signature":"t=1,v1=invalid"},
+    body:'{"id":"evt_bad","type":"account.updated"}'
+  }),env);
+  const body=await response.json();
+  assert.equal(response.status,401,JSON.stringify(body));
+  assert.equal(fake.calls.some(x=>x.sql.includes("CREATE TABLE IF NOT EXISTS payment_accounts")),false);
+});
+
+test("payout requests remain blocked until a real payout adapter exists", async()=>{
+  const fake=fakeDb("intervenant");
+  const env={DB:fake.DB,PAYMENT_PROVIDER:"stripe",STRIPE_SECRET_KEY:"sk_test_unit",STRIPE_WEBHOOK_SECRET:"whsec_unit",APP_BASE_URL:"https://prochelia.pages.dev"};
+  const response=await worker.fetch(new Request("https://api.test/api/payments/payout",{
+    method:"POST",
+    headers:{Cookie:"prochelia_session=synthetic-token","Content-Type":"application/json"},
+    body:JSON.stringify({amount_eur:100})
+  }),env);
+  const body=await response.json();
+  assert.equal(response.status,503,JSON.stringify(body));
+  assert.equal(body.error,"REAL_PAYOUT_ADAPTER_NOT_READY");
+  assert.equal(fake.calls.some(x=>x.sql.includes("INSERT INTO payout_requests")),false);
+});
