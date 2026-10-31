@@ -90,6 +90,10 @@ jobs:
               throw new Error('Table cœur D1 absente : ' + table);
             }
           }
+          for (const table of ['clients','intervenants','missions']) {
+            console.log('D1_SCHEMA_' + table.toUpperCase() + ': ' + (core.tables?.[table]?.create_sql || 'ABSENT'));
+          }
+          console.log('FRONTEND_PROFILE_ROUTES: ' + JSON.stringify(info.routes.filter(x => ['/api/clients','/api/intervenants'].includes(x))));
           console.log(JSON.stringify({
             ok: true,
             service: health.service,
