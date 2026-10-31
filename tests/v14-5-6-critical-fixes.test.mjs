@@ -124,7 +124,7 @@ test('Stripe disputes are persisted idempotently for investigation', () => {
 });
 
 test('security and payment hardening is explicitly versioned', () => {
-  assert.match(source, /V14\.5\.7-EXPERT-PREPRODUCTION/);
+  assert.match(source, /V14\.5\.8-EXPERT-PREPRODUCTION/);
 });
 
 
