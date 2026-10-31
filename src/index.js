@@ -1542,7 +1542,8 @@ async function pricingQuote(request, env) {
   const b=await readJson(request);
   if(!b || typeof b!=='object' || Array.isArray(b)) return json({ok:false,error:'INVALID_QUOTE_INPUT',version:VERSION},400);
   const phase=String(await getSetting(env,'project_phase','TEST')).toUpperCase();
-  const cfg=PROJECT_PHASES[phase]||PROJECT_PHASES.TEST;
+  const cfg=PROJECT_PHASES[phase];
+  if(!cfg) return json({ok:false,error:'INVALID_PROJECT_PHASE',version:VERSION},409);
   const distance=Number(b.distance_km??0);
   const duration=Number(b.duration_minutes??60);
   const serviceCode=clean(b.service_code);
@@ -1582,6 +1583,11 @@ async function pricingQuote(request, env) {
   const configuredProviderFloor=Number(policy?.intervenant_floor_cents||0);
   const intervenantFloor=Math.max(0,Math.round(configuredProviderFloor>0?configuredProviderFloor:base*0.70));
   const regulatedMax=Number(policy?.client_ceiling_cents)>0?Number(policy.client_ceiling_cents):null;
+  if(phase!=='TEST' && (!policy || configuredCommission<=0 ||
+     Number(policy.psp_percent)<=0 || configuredMargin<=0 ||
+     configuredProviderFloor<=0)) {
+    return json({ok:false,error:'NON_TEST_PRICING_POLICY_INCOMPLETE',version:VERSION},409);
+  }
   const financeInputs=[fuelPriceCentsPerLitre,software,pspPercent,pspFixed,targetMargin,commissionRate,intervenantFloor];
   if(financeInputs.some(value=>!Number.isFinite(value)||value<0) ||
      fuelPriceCentsPerLitre>1000 || pspPercent>20 || pspFixed>100000 ||
