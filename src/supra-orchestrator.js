@@ -162,28 +162,30 @@ export function buildSupraPlan(rawInput = {}) {
   const domain = inferDomain(caseType, input.domain);
   const context = rawContext;
   const emergency = PROFESSIONAL_ESCALATION_CASES.has(caseType) || context.immediateDanger === true;
-  const sensitive = HUMAN_DECISION_CASES.has(caseType) ||
-    ["HIGH", "CRITICAL"].includes(impact) ||
-    ["REFUND", "PAYOUT", "CHARGE", "CHANGE_PRICE", "ACTIVATE_PROMOTION",
-      "ASSIGN_REPLACEMENT", "RESCHEDULE_MISSION", "CANCEL_MISSION",
-      "CONTRACT_CHANGE", "PERSONAL_DATA_EXPORT", "PERSONAL_DATA_DELETE",
-      "ACCOUNT_SUSPENSION", "HIRE", "TERMINATE"].includes(action);
-  const readOnly = SAFE_AUTONOMOUS_TASKS.has(action) && impact === "LOW" && !sensitive && !emergency;
-  const autonomyLevel = emergency ? "URGENT_HUMAN_ESCALATION" :
-    sensitive ? "PREPARE_RECOMMENDATION_AND_REQUIRE_GERANTE" :
-    readOnly ? "AUTONOMOUS_READ_ONLY_OR_ROUTINE" : "AUTONOMOUS_PREPARATION_THEN_APPROVAL";
-  const approvalRequired = !readOnly;
   const professionalRequired = emergency ||
     ["conseil_juridique_complexe", "urgence_medicale"].includes(caseType);
   const missingEvidence = [];
-  // These flags may be supplied by an untrusted caller; only server adapters can satisfy evidence.
+  // Caller flags are descriptive only; no client assertion can satisfy server evidence.
   if (context.mission_id) missingEvidence.push("verify_mission_ownership_server_side");
-  if (context.provider_id) {
+  if (context.provider_id || context.replacement_intervenant_id) {
     missingEvidence.push("verify_provider_eligibility_server_side");
     missingEvidence.push("verify_provider_availability_server_side");
   }
   if (["REFUND", "PAYOUT", "CHARGE"].includes(action)) missingEvidence.push("verify_psp_event_and_ledger");
   if (context.client_id) missingEvidence.push("verify_client_ownership_server_side");
+  const sensitive = HUMAN_DECISION_CASES.has(caseType) ||
+    ["HIGH", "CRITICAL"].includes(impact) ||
+    missingEvidence.length > 0 ||
+    ["REFUND", "PAYOUT", "CHARGE", "CHANGE_PRICE", "ACTIVATE_PROMOTION",
+      "ASSIGN_REPLACEMENT", "RESCHEDULE_MISSION", "CANCEL_MISSION",
+      "CONTRACT_CHANGE", "PERSONAL_DATA_EXPORT", "PERSONAL_DATA_DELETE",
+      "ACCOUNT_SUSPENSION", "HIRE", "TERMINATE"].includes(action);
+  const readOnly = SAFE_AUTONOMOUS_TASKS.has(action) && impact === "LOW" &&
+    !sensitive && !emergency && missingEvidence.length === 0;
+  const autonomyLevel = emergency ? "URGENT_HUMAN_ESCALATION" :
+    sensitive ? "PREPARE_RECOMMENDATION_AND_REQUIRE_GERANTE" :
+    readOnly ? "AUTONOMOUS_READ_ONLY_OR_ROUTINE" : "AUTONOMOUS_PREPARATION_THEN_APPROVAL";
+  const approvalRequired = !readOnly;
 
   const steps = [
     "detect_and_classify",
