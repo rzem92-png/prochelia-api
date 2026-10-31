@@ -49,3 +49,15 @@ Aucune requête DDL n'a été exécutée. Aucune migration, sauvegarde, restaura
 ## Complément de périmètre — 2026-10-31
 
 Le comptage **67** concerne uniquement les appels directs aux dix fonctions `ensure*Schema`. `productionSafetySchema` est une fonction DDL supplémentaire, appelée depuis le chemin de rate-limit lorsque le seuil est dépassé ; elle n'est donc pas incluse dans les 67. L'inventaire complet du dépôt, des wrappers, des autres fichiers et des branches reste à effectuer avant d'affirmer qu'il n'existe plus aucun DDL runtime.
+
+
+## Correctif du rate-limit — 2026-10-31
+
+Commit `487a5007ecd36b4d7e7d716bbbe82378004c0839` :
+- suppression de `productionSafetySchema`, qui créait une table et un index depuis le chemin de requête ;
+- suppression de l'appel à `ensureFinalHardeningSchema` dans `productionRateLimit` ;
+- contrôle préalable en lecture seule de l'existence de `security_rate_limits` dans `sqlite_master` ;
+- si la migration n'a pas préalablement créé cette table, le middleware échoue fermé avec HTTP 503 `RATE_LIMIT_SCHEMA_NOT_READY` au lieu de créer le schéma à la volée ;
+- le dépassement de seuil est journalisé dans les logs Worker structurés, sans création d'une table d'audit runtime.
+
+Un test statique dédié vérifie l'absence de DDL et l'ordre du contrôle de schéma. Ce correctif ne prouve pas encore que la table existe dans la D1 preview ; cela doit être confirmé par une vérification strictement en lecture seule avant tout déploiement réel. Les autres helpers DDL runtime restent à migrer.
