@@ -36,8 +36,9 @@ CREATE TABLE IF NOT EXISTS pricing_travel_policies (
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
-DROP INDEX IF EXISTS idx_pricing_travel_policy_active;
-CREATE UNIQUE INDEX IF NOT EXISTS idx_pricing_travel_policy_active
+-- Preserve any legacy index. A distinct unique index enforces the active-policy invariant.
+-- If duplicate active policies exist, SQLite aborts safely and the migration remains unapplied.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_pricing_travel_policy_active_unique
   ON pricing_travel_policies(phase, client_type) WHERE active=1;
 
 CREATE TABLE IF NOT EXISTS pricing_route_estimates (
