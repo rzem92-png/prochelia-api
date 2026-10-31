@@ -68,6 +68,7 @@ jobs:
           curl --fail --silent --show-error --max-time 20 "$base/api/info" -o "$RUNNER_TEMP/info.json"
           curl --fail --silent --show-error --max-time 20 "$base/api/core/schema" -o "$RUNNER_TEMP/core-schema.json"
           curl --fail --silent --show-error --max-time 20 "$base/api/missions/schema" -o "$RUNNER_TEMP/missions-schema.json"
+          curl --fail --silent --show-error --max-time 20 "$base/api/prestations" -o "$RUNNER_TEMP/prestations.json"
           node --input-type=module <<'NODE'
           import fs from 'node:fs';
           const dir = process.env.RUNNER_TEMP;
@@ -76,6 +77,7 @@ jobs:
           const info = JSON.parse(fs.readFileSync(dir + '/info.json', 'utf8'));
           const core = JSON.parse(fs.readFileSync(dir + '/core-schema.json', 'utf8'));
           const missions = JSON.parse(fs.readFileSync(dir + '/missions-schema.json', 'utf8'));
+          const catalog = JSON.parse(fs.readFileSync(dir + '/prestations.json', 'utf8'));
           if (health.ok !== true || health.database !== true) throw new Error('Health API/D1 non valide.');
           if (ready.ok !== true || ready.ready !== true || ready.database !== true ||
               ready.missions_schema !== true || ready.users_schema !== true || ready.writes !== false) {
@@ -97,6 +99,8 @@ jobs:
           }
           console.log('D1_SCHEMA_MISSIONS: ' + (missions.create_sql || 'ABSENT'));
           console.log('D1_MISSIONS_WRITES_ENABLED: ' + String(missions.write_enabled === true));
+          const safeCatalog=(catalog.prestations||[]).map(p=>({id:p.id,code:p.code,name:p.name,base_price_cents:p.base_price_cents,price_cents:p.price_cents,duration_minutes:p.duration_minutes,active:p.active,status:p.status}));
+          console.log('PRESTATION_CATALOG_SAFE: ' + JSON.stringify(safeCatalog));
           console.log('FRONTEND_PROFILE_ROUTES: ' + JSON.stringify(info.routes.filter(x => ['/api/clients','/api/intervenants'].includes(x))));
           console.log(JSON.stringify({
             ok: true,
