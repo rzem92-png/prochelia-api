@@ -6,10 +6,10 @@ const allowedOrigin = "https://feat-supra-control-center-v1.prochelia.pages.dev"
 const endpoint = "https://prochelia-api.rzem92.workers.dev/api/auth/login";
 
 test("credentialed CORS preflight succeeds without touching D1", async () => {
-  const env = new Proxy({}, {
+  const env = new Proxy({ CORS_ORIGIN: allowedOrigin }, {
     get(_target, property) {
       if (property === "DB") throw new Error("Preflight must not access D1");
-      return undefined;
+      return target[property];
     }
   });
   const response = await worker.fetch(new Request(endpoint, {
@@ -47,7 +47,7 @@ test("unapproved preflight headers are rejected", async () => {
       "Access-Control-Request-Method": "POST",
       "Access-Control-Request-Headers": "x-evil-header"
     }
-  }), {});
+  }), { CORS_ORIGIN: allowedOrigin });
   assert.equal(response.status, 400);
   assert.equal(response.headers.get("access-control-allow-origin"), null);
 });
@@ -57,7 +57,7 @@ test("approved browser requests receive credentialed CORS headers on safe failur
     method: "POST",
     headers: { Origin: allowedOrigin, "Content-Type": "application/json" },
     body: JSON.stringify({ email: "test@example.com", password: "not-a-real-password" })
-  }), {});
+  }), { CORS_ORIGIN: allowedOrigin });
   assert.equal(response.status, 503);
   assert.equal(response.headers.get("access-control-allow-origin"), allowedOrigin);
   assert.equal(response.headers.get("access-control-allow-credentials"), "true");
