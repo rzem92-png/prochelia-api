@@ -38,9 +38,18 @@ test("malformed planner inputs fail closed without throwing", () => {
   assert.equal(p.autonomy.approvalRequired,true);
  }
 });
-test("explicit domain aliases cannot select inherited object properties", () => {
- const p=buildSupraPlan({caseType:"analyse_generale",domain:"__proto__",impact:"LOW"});
- assert.equal(p.domain,"direction");
+test("unknown explicit domains fail closed instead of silently falling back to inference", () => {
+ for (const domain of ["__proto__", "constructor", "finance-admin", "not-a-domain"]) {
+  const p=buildSupraPlan({caseType:"analyse_generale",domain,impact:"LOW"});
+  assert.equal(p.executionAllowed,false);
+  assert.equal(p.autonomy.approvalRequired,true);
+  assert.equal(p.rejectionReason,"INVALID_DOMAIN_FAIL_CLOSED");
+ }
+});
+
+test("valid explicit domains are preserved exactly", () => {
+ const p=buildSupraPlan({caseType:"analyse_generale",domain:"finance",impact:"LOW"});
+ assert.equal(p.domain,"finance");
  assert.equal(p.executionAllowed,false);
 });
 
