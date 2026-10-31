@@ -94,3 +94,17 @@ test("planner rejects non-plain objects and malformed context types", () => {
   assert.equal(p.auditRequired,true);
  }
 });
+
+test("planner rejects unexpected context keys and incorrectly typed identifiers", () => {
+ for (const input of [
+  {context:{adminOverride:true}},
+  {context:{mission_id:42}},
+  {context:{immediateDanger:"true"}},
+  {context:{provider_id:"p-1",providerEligibilityVerified:"true"}}
+ ]) {
+  const p=buildSupraPlan(input);
+  assert.equal(p.executionAllowed,false);
+  assert.equal(p.autonomy.approvalRequired,true);
+  assert.ok(p.rejectionReason);
+ }
+});
