@@ -30,3 +30,11 @@ test("la file d'attente ne déclare jamais une action terminée sans exécuteur 
   assert.match(source, /execution_verified:false/);
   assert.doesNotMatch(source, /status='COMPLETED',processed_at=CURRENT_TIMESTAMP/);
 });
+
+test("les routes SUPRA sont authentifiées et exposent les domaines et plans", () => {
+  assert.match(source, /async function supraDomains\(request, env\)/);
+  assert.match(source, /async function supraPlan\(request, env\)/);
+  assert.match(source, /requireAuthRole\(request,env,\['gerante'\]\)/);
+  assert.match(source, /\/api\/supra\/domains/);
+  assert.match(source, /\/api\/supra\/plan/);
+});
