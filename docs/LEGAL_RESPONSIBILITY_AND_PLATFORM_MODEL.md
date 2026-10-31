@@ -214,3 +214,21 @@ The legal review is not complete until counsel supplies dated, written answers a
 - country-by-country expansion conditions.
 
 Each opinion must identify assumptions, unresolved facts, applicable dates, responsible owner and conditions that would invalidate the conclusion. A generic disclaimer or template contract is not an acceptable substitute.
+
+
+## 14. Current French regulatory status — checked 31 October 2026
+
+The official SAP government portal, updated 8 October 2026, confirms that declaration, State agrément and departmental authorization are distinct and that the required formality depends on the activity, vulnerable public and mode of intervention. Some assistance activities for older or disabled people require agrément in mandataire / mise à disposition mode; specified prestataire activities fall under departmental authorization rules. The exact activity and mode must be classified before catalogue activation.
+
+Official current sources:
+- https://www.servicesalapersonne.gouv.fr/je-suis-un-organisme-de-sap/organismes-de-services-la-personne-comment-demander-une-declaration-un
+- https://www.servicesalapersonne.gouv.fr/je-suis-un-organisme-de-sap/les-obligations-reglementaires-des-organismes-de-services-la-personne
+- https://www.servicesalapersonne.gouv.fr/tout-savoir-sur-les-services-la-personne/les-26-activites-de-services-la-personne
+
+The European Platform Work Directive 2024/2831 has a 2 December 2026 transposition deadline. Eurofound reported on 20 October 2026 that the French Labour Minister had said France would not meet that deadline; the ministry was preparing a draft bill, with adoption timing uncertain. This is a dated report of the minister's statement, not a substitute for checking the French Official Journal and current legislation. Counsel must verify national implementation status at launch and continuously thereafter.
+
+Current status reference:
+- https://apps.eurofound.europa.eu/platformeconomydb/france-labour-minister-says-the-transposition-deadline-will-not-be-met-110308
+- https://service.betterregulation.com/document/766630
+
+**Launch rule:** do not assume the directive has already been transposed in France, and do not assume delayed transposition removes existing French employment, privacy, consumer or safety duties. Build to the directive's safeguards now: transparent algorithmic management, human oversight of significant decisions, explanations, contestability, and access to relevant evidence, subject to legal review.
