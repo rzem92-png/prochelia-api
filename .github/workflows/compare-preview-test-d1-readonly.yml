@@ -17,7 +17,7 @@ concurrency:
 
 jobs:
   compare:
-    name: Comparer préproduction et base de test
+    name: Comparer préproduction et restauration v2
     if: ${{ inputs.confirm_read_only == true }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -25,8 +25,8 @@ jobs:
       CLOUDFLARE_ACCOUNT_ID: f2a79e9fa41566a8ec80fb24c02c60eb
       PREVIEW_DB_NAME: prochelia-preview-db
       PREVIEW_DB_ID: 6adb95e5-e542-4bec-9008-fbea01042305
-      TEST_DB_NAME: prochelia-restore-test-db
-      TEST_DB_ID: bb35b09c-03de-4adb-9fa0-381e8487a6bf
+      TEST_DB_NAME: prochelia-restore-test-v2
+      TEST_DB_ID: a3526c2a-39cb-49ab-97c4-979138145f33
     steps:
       - name: Vérifier le jeton et les deux cibles exactes
         shell: bash
@@ -129,7 +129,7 @@ jobs:
             echo "### Préproduction"
             cat "$out/preview-row-counts.csv"
             echo ""
-            echo "### Base de test"
+            echo "### Restauration v2"
             cat "$out/test-row-counts.csv"
           } >> "$GITHUB_STEP_SUMMARY"
 
