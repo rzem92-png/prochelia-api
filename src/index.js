@@ -868,7 +868,11 @@ async function finalizeMissionPayment(request, env) {
   const tx=await env.DB.prepare('SELECT * FROM payment_transactions WHERE id=? LIMIT 1').bind(txId).first();
   if(!tx) return json({ok:false,error:'TRANSACTION_NOT_FOUND',version:VERSION},404);
   if(['paid','refunded','failed'].includes(tx.status) && tx.status!==outcome) return json({ok:false,error:'PAYMENT_STATE_CONFLICT',version:VERSION,status:tx.status},409);
+  if(['paid','refunded','failed'].includes(tx.status) && tx.status===outcome) return json({ok:true,version:VERSION,transaction_id:txId,status:outcome,idempotent_replay:true},200);
   if(outcome==='paid'){
+    // A manager action cannot manufacture PSP confirmation: only a provider reference
+    // recorded by a verified webhook can authorize the paid transition.
+    if(!clean(tx.provider_payment_id)) return json({ok:false,error:'PSP_CONFIRMATION_REQUIRED',version:VERSION},409);
     const wallet=await env.DB.prepare('SELECT * FROM wallets WHERE user_id=? LIMIT 1').bind(tx.intervenant_id).first();
     if(!wallet) return json({ok:false,error:'INTERVENANT_WALLET_NOT_FOUND',version:VERSION},409);
     await env.DB.prepare(`UPDATE payment_transactions SET status='paid',updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(txId).run();
@@ -920,10 +924,14 @@ async function paymentWebhook(request, env) {
   let event; try{event=JSON.parse(raw)}catch{return json({ok:false,error:'INVALID_WEBHOOK_JSON',version:VERSION},400);}
   const provider=clean(event?.provider)||paymentProvider(env), eventId=clean(event?.id), type=clean(event?.type);
   if(!eventId||!type) return json({ok:false,error:'INVALID_WEBHOOK_EVENT',version:VERSION},400);
+  const txId=clean(event?.data?.transaction_id), payoutId=clean(event?.data?.payout_id);
+  const providerPaymentId=clean(event?.data?.provider_payment_id);
+  if(['payment_succeeded','charge_succeeded'].includes(type) && (!txId||!providerPaymentId)) {
+    return json({ok:false,error:'PSP_PAYMENT_REFERENCE_REQUIRED',version:VERSION},400);
+  }
   const payloadHash=await sha256Base64url(raw);
   const inserted=await env.DB.prepare(`INSERT OR IGNORE INTO payment_webhook_events (id,provider,event_id,event_type,signature_valid,payload_hash) VALUES (?,?,?,?,1,?)`).bind(crypto.randomUUID(),provider,eventId,type,payloadHash).run();
   if(!inserted.meta?.changes) return json({ok:true,version:VERSION,duplicate:true,event_id:eventId},200);
-  const txId=clean(event?.data?.transaction_id), payoutId=clean(event?.data?.payout_id);
   if(txId){
     const tx=await env.DB.prepare('SELECT * FROM payment_transactions WHERE id=? LIMIT 1').bind(txId).first();
     if(tx){
@@ -932,7 +940,7 @@ async function paymentWebhook(request, env) {
       if(newStatus){
         const alreadyFinal = ['paid','failed','refunded'].includes(tx.status);
         if(!alreadyFinal){
-          await env.DB.prepare('UPDATE payment_transactions SET status=?,provider_payment_id=COALESCE(?,provider_payment_id),updated_at=CURRENT_TIMESTAMP WHERE id=?').bind(newStatus,clean(event?.data?.provider_payment_id)||null,txId).run();
+          await env.DB.prepare('UPDATE payment_transactions SET status=?,provider_payment_id=COALESCE(?,provider_payment_id),updated_at=CURRENT_TIMESTAMP WHERE id=?').bind(newStatus,providerPaymentId||null,txId).run();
           if(newStatus==='paid'){
             const wallet=await env.DB.prepare('SELECT * FROM wallets WHERE user_id=? LIMIT 1').bind(tx.intervenant_id).first();
             if(wallet) await env.DB.prepare('UPDATE wallets SET available_cents=available_cents+?,updated_at=CURRENT_TIMESTAMP WHERE id=?').bind(tx.net_intervenant_cents,wallet.id).run();
