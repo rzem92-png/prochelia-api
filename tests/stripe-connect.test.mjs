@@ -86,7 +86,7 @@ test("Stripe Connect onboarding creates the account and a fresh onboarding link 
   };
   try{
     const fake=fakeDb("intervenant");
-    const env={...fake.DB,PAYMENT_PROVIDER:"stripe",STRIPE_SECRET_KEY:"sk_test_unit",STRIPE_WEBHOOK_SECRET:"whsec_unit",APP_BASE_URL:"https://prochelia.pages.dev"};
+    const env={DB:fake.DB,PAYMENT_PROVIDER:"stripe",STRIPE_SECRET_KEY:"sk_test_unit",STRIPE_WEBHOOK_SECRET:"whsec_unit",APP_BASE_URL:"https://prochelia.pages.dev"};
     const response=await worker.fetch(new Request("https://api.test/api/payments/onboard",{
       method:"POST",
       headers:{Origin:"https://prochelia.pages.dev",Cookie:"prochelia_session=synthetic-token","Content-Type":"application/json"},
