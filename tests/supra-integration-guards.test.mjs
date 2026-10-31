@@ -200,3 +200,28 @@ test("payout reservation and payout request creation are atomic and balance-guar
   assert.match(route,/currency='EUR'/);
   assert.doesNotMatch(route,/UPDATE wallets SET available_cents=available_cents-\?,reserved_cents=reserved_cents\+\?,updated_at=CURRENT_TIMESTAMP WHERE id=\?/);
 });
+
+
+test("disputes enforce client ownership and valid payment amount without false wallet holds", () => {
+  const route=source.slice(source.indexOf("async function openPaymentDispute"),source.indexOf("async function paymentAdminResolve"));
+  assert.match(route,/MISSION_PAYMENT_FORBIDDEN/);
+  assert.match(route,/DISPUTE_AMOUNT_EXCEEDS_PAYMENT/);
+  assert.match(route,/ACTIVE_DISPUTE_ALREADY_EXISTS/);
+  assert.match(route,/wallet_frozen:false/);
+  assert.doesNotMatch(route,/SET status='held'/);
+});
+
+test("active disputes block intervenant payouts", () => {
+  const route=source.slice(source.indexOf("async function payoutRequest"),source.indexOf("async function verifyWebhookSignature"));
+  assert.match(route,/PAYOUT_BLOCKED_BY_ACTIVE_DISPUTE/);
+  assert.match(route,/status IN \('open','awaiting_psp_action'\)/);
+});
+
+test("manager dispute decisions never fake PSP refunds, releases or final resolution", () => {
+  const route=source.slice(source.indexOf("async function paymentAdminResolve"),source.indexOf("async function handleBase"));
+  assert.match(route,/status='awaiting_psp_action'/);
+  assert.match(route,/psp_action_required:true/);
+  assert.match(route,/financial_state_changed:false/);
+  assert.doesNotMatch(route,/status='resolved'/);
+  assert.doesNotMatch(route,/SET status=\?,updated_at=CURRENT_TIMESTAMP WHERE id=\?/);
+});
