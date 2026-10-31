@@ -877,15 +877,23 @@ function paymentProvider(env) {
 
 function paymentsConfigured(env) {
   const provider=paymentProvider(env);
-  if(provider==='stripe') return !!env.STRIPE_SECRET_KEY && !!env.STRIPE_WEBHOOK_SECRET && !!env.APP_BASE_URL && STRIPE_CHARGES_AND_PAYOUTS_READY;
+  if(provider==='stripe') return !!env.STRIPE_SECRET_KEY && !!env.STRIPE_WEBHOOK_SECRET && !!env.APP_BASE_URL && !!env.STRIPE_DASHBOARD && !!env.STRIPE_FEES_COLLECTOR && !!env.STRIPE_LOSSES_COLLECTOR && STRIPE_CHARGES_AND_PAYOUTS_READY;
   return false;
 }
 
 async function paymentOnboard(request, env) {
   const auth = await getSessionUser(request, env);
   if (!requireRole(auth, ['intervenant'])) return json({ok:false,error:auth?.user?'FORBIDDEN':'UNAUTHENTICATED',version:VERSION},auth?.user?403:401);
-  if (paymentProvider(env)!=='stripe' || !env.STRIPE_SECRET_KEY || !env.STRIPE_WEBHOOK_SECRET) {
-    return json({ok:false,error:'STRIPE_CONNECT_NOT_CONFIGURED',version:VERSION,required:['PAYMENT_PROVIDER=stripe','STRIPE_SECRET_KEY','STRIPE_WEBHOOK_SECRET','APP_BASE_URL']},503);
+  const dashboard=clean(env.STRIPE_DASHBOARD);
+  const feesCollector=clean(env.STRIPE_FEES_COLLECTOR);
+  const lossesCollector=clean(env.STRIPE_LOSSES_COLLECTOR);
+  if (paymentProvider(env)!=='stripe' || !env.STRIPE_SECRET_KEY || !env.STRIPE_WEBHOOK_SECRET ||
+      !['express','full'].includes(dashboard) || !['application','stripe'].includes(feesCollector) ||
+      !['application','stripe'].includes(lossesCollector)) {
+    return json({ok:false,error:'STRIPE_CONNECT_NOT_CONFIGURED',version:VERSION,required:['PAYMENT_PROVIDER=stripe','STRIPE_SECRET_KEY','STRIPE_WEBHOOK_SECRET','STRIPE_DASHBOARD','STRIPE_FEES_COLLECTOR','STRIPE_LOSSES_COLLECTOR','APP_BASE_URL']},503);
+  }
+  if(dashboard==='express' && (feesCollector!=='application' || lossesCollector!=='application')) {
+    return json({ok:false,error:'STRIPE_EXPRESS_RESPONSIBILITY_CONFLICT',version:VERSION,required:'Express requires application fee/loss responsibility; choose explicitly or use full dashboard'},409);
   }
   let appBase;
   try {
@@ -908,13 +916,13 @@ async function paymentOnboard(request, env) {
       const account=await stripePost(env,'v2/core/accounts',{
         contact_email:auth.user.email,
         display_name:displayName||auth.user.email,
-        dashboard:'express',
+        dashboard,
         'identity[country]':'FR',
         'identity[entity_type]':'individual',
         'configuration[recipient][capabilities][stripe_balance][stripe_transfers][requested]':'true',
         'defaults[currency]':'eur',
-        'defaults[responsibilities][fees_collector]':'application',
-        'defaults[responsibilities][losses_collector]':'application',
+        'defaults[responsibilities][fees_collector]':feesCollector,
+        'defaults[responsibilities][losses_collector]':lossesCollector,
         'metadata[prochelia_user_id]':auth.user.id
       },'prochelia-connect-account-'+auth.user.id);
       accountId=clean(account?.id);
@@ -2558,7 +2566,7 @@ async function productionConfigCheck(env) {
   const requiredTables=['users','sessions','missions','payment_accounts','wallets','payment_transactions','payment_webhook_events','payment_disputes','operational_cases','action_outbox','notification_outbox','accounting_ledger','promotions','promotion_recommendations','activity_journal','compliance_events'];
   for(const t of requiredTables) checks.push({code:`TABLE:${t}`,status:await tableExists(env,t)?'OK':'MISSING'});
   const pspRequired=paymentProvider(env)==='stripe'
-    ? ['PAYMENT_PROVIDER','STRIPE_SECRET_KEY','STRIPE_WEBHOOK_SECRET','APP_BASE_URL']
+    ? ['PAYMENT_PROVIDER','STRIPE_SECRET_KEY','STRIPE_WEBHOOK_SECRET','STRIPE_DASHBOARD','STRIPE_FEES_COLLECTOR','STRIPE_LOSSES_COLLECTOR','APP_BASE_URL']
     : ['PAYMENT_PROVIDER','PAYMENT_WEBHOOK_SECRET','PAYMENT_API_SECRET'];
   for(const k of pspRequired) checks.push({code:`SECRET:${k}`,status:finalSecretConfigured(env,k)?'OK':'NOT_CONFIGURED'});
   checks.push({code:'STRIPE_CHARGES_ADAPTER',status:STRIPE_CHARGES_AND_PAYOUTS_READY?'OK':'NOT_IMPLEMENTED'});
@@ -3599,7 +3607,7 @@ async function strictProductionAudit(request,env){
     {code:'MAPS_PROVIDER',status:finalSecretConfigured(env,'MAPS_API_KEY')?'OK':'NOT_CONFIGURED'}
   ];
   const checks=[...(result.checks||[]),...extra];
-  const blockingCodes=new Set(['SECRET:PAYMENT_PROVIDER','SECRET:PAYMENT_WEBHOOK_SECRET','SECRET:PAYMENT_API_SECRET','SECRET:STRIPE_SECRET_KEY','SECRET:STRIPE_WEBHOOK_SECRET','SECRET:APP_BASE_URL','STRIPE_CHARGES_ADAPTER','STRIPE_PAYOUT_ADAPTER','SECURITY_CODE_DELIVERY','CORS_ORIGIN','BACKUP_R2']);
+  const blockingCodes=new Set(['SECRET:PAYMENT_PROVIDER','SECRET:PAYMENT_WEBHOOK_SECRET','SECRET:PAYMENT_API_SECRET','SECRET:STRIPE_SECRET_KEY','SECRET:STRIPE_WEBHOOK_SECRET','SECRET:STRIPE_DASHBOARD','SECRET:STRIPE_FEES_COLLECTOR','SECRET:STRIPE_LOSSES_COLLECTOR','SECRET:APP_BASE_URL','STRIPE_CHARGES_ADAPTER','STRIPE_PAYOUT_ADAPTER','SECURITY_CODE_DELIVERY','CORS_ORIGIN','BACKUP_R2']);
   const blocking=checks.filter(x=>blockingCodes.has(x.code)&&x.status!=='OK');
   const overall=blocking.length===0 && result.blocking===0;
   for(const c of extra){
