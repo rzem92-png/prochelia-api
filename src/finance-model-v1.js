@@ -80,3 +80,14 @@ export function calculateB2CQuote(input = {}) {
     regulated_client_ceiling_cents: regulatedClientCeilingCents
   };
 }
+
+// Forecast contribution is platform commission less payment-provider costs and refunds.
+// Gross customer collections and provider payouts are not added again: doing so double-counts commission.
+export function calculateForecastContributionCents({ commissionCents, providerFeeCents, refundCents } = {}) {
+  for (const [key, value] of Object.entries({ commissionCents, providerFeeCents, refundCents })) {
+    if (!Number.isSafeInteger(value) || value < 0) return { ok: false, error: 'INVALID_' + key.replace(/[A-Z]/g, c => '_' + c).toUpperCase() };
+  }
+  const contributionCents = commissionCents - providerFeeCents - refundCents;
+  if (!Number.isSafeInteger(contributionCents)) return { ok: false, error: 'AMOUNT_OVERFLOW' };
+  return { ok: true, contribution_cents: contributionCents };
+}
