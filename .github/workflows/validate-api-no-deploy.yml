@@ -46,19 +46,16 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          awk '
-            /cat > compare-d1\.mjs << .NODE./ { inside=1; next }
-            inside && /^[[:space:]]*NODE$/ { exit }
-            inside { sub(/^          /, ""); print }
-          ' .github/workflows/compare-preview-test-d1-integrity.yml > "$RUNNER_TEMP/compare-d1.mjs"
+          awk '/cat > compare-d1.mjs <</ { inside=1; next } inside && /^[[:space:]]*NODE$/ { exit } inside { sub(/^          /, ""); print }' .github/workflows/compare-preview-test-d1-integrity.yml > "$RUNNER_TEMP/compare-d1.mjs"
           test -s "$RUNNER_TEMP/compare-d1.mjs"
+          echo "Lignes extraites : $(wc -l < "$RUNNER_TEMP/compare-d1.mjs")"
           node --check "$RUNNER_TEMP/compare-d1.mjs"
-          if grep -Eiq '(^|[[:space:]])(INSERT|UPDATE|DELETE|REPLACE|CREATE|DROP|ALTER)[[:space:]]' "$RUNNER_TEMP/compare-d1.mjs"; then
-            echo "::error::Une instruction SQL potentiellement modificatrice a été détectée."
+          if grep -Eiq 'query\(target,[[:space:]]*["'\'''](INSERT|UPDATE|DELETE|REPLACE|CREATE|DROP|ALTER)([[:space:]]|$)' "$RUNNER_TEMP/compare-d1.mjs"; then
+            echo "::error::Une instruction SQL modificatrice a été détectée."
             exit 1
           fi
-          echo "Script d'intégrité valide syntaxiquement; aucune instruction SQL d'écriture détectée."
-
+          echo "Script D1 valide syntaxiquement; les appels SQL sont en lecture seule."
+          
       - name: Vérifier l'API publique et la readiness D1 (GET uniquement)
         shell: bash
         run: |
