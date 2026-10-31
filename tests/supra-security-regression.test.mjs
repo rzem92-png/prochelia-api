@@ -153,3 +153,14 @@ test("orchestrator and governance use the same read-only autonomy allowlist", ()
   assert.equal(notification.autonomy,"RECOMMEND_AND_WAIT");
   assert.equal(notification.managerApprovalRequired,true);
 });
+
+
+test("non-manager read-only request is downgraded to recommendation pending approval", () => {
+  const decision = assessSupraDecision({
+    caseType:"routine", impact:"LOW", requestedAction:"GENERATE_SUMMARY", actorRole:"client"
+  });
+  assert.equal(decision.managerApprovalRequired,true);
+  assert.equal(decision.autonomy,"RECOMMEND_AND_WAIT");
+  assert.equal(decision.decisionOwner,"GERANTE");
+  assert.equal(decision.executionAllowed,false);
+});
