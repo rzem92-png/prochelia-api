@@ -6,7 +6,7 @@ Méthode : inventaire statique des définitions `ensure*Schema` et de leurs réf
 
 ## Résultat
 
-Dix helpers de schéma sont encore définis dans le Worker. Ils exécutent des `CREATE TABLE`, `CREATE INDEX`, parfois des `CREATE TRIGGER`, et certains insèrent aussi des valeurs par défaut à l'exécution.
+Dix helpers de schéma sont encore définis dans le Worker. L'inventaire statique compte **67 appels directs** à ces helpers dans `src/index.js` (7 + 9 + 7 + 10 + 12 + 5 + 6 + 1 + 3 + 7). Ils exécutent des `CREATE TABLE`, `CREATE INDEX`, parfois des `CREATE TRIGGER`, et certains insèrent aussi des valeurs par défaut à l'exécution. Ce total ne couvre pas les appels indirects, les autres fichiers ni les comportements effectifs de D1.
 
 | Helper | Définition | Appels directs dans `src/index.js` |
 |---|---:|---|
