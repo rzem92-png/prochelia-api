@@ -53,7 +53,7 @@ jobs:
           D1_AUDIT_SCRIPT="$RUNNER_TEMP/compare-d1.mjs" node --input-type=module <<'NODE'
           import fs from "node:fs";
           const source = fs.readFileSync(process.env.D1_AUDIT_SCRIPT, "utf8");
-          const writeSql = /query\\s*\\(\\s*target\\s*,\\s*["']\\s*(INSERT|UPDATE|DELETE|REPLACE|CREATE|DROP|ALTER)\\b/i;
+          const writeSql = /query\s*\(\s*target\s*,\s*["']\s*(INSERT|UPDATE|DELETE|REPLACE|CREATE|DROP|ALTER)\b/i;
           if (writeSql.test(source)) throw new Error("Instruction SQL modificatrice détectée.");
           console.log("Script D1 valide syntaxiquement; appels SQL en lecture seule.");
           NODE
