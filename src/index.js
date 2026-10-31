@@ -1944,14 +1944,14 @@ async function supraPlan(request, env) {
   }
   if(body.evidence!==undefined) return json({ok:false,error:'CLIENT_SUPPLIED_EVIDENCE_NOT_TRUSTED',version:VERSION},400);
   const context=body.context||{};
-  // A browser cannot assert verified facts. Only future server-side adapters may populate evidence.
-  const evidence={};
+  // The request body is never a source of trusted evidence. Governance remains fail-closed
+  // until server-side adapters independently verify ownership, eligibility and PSP state.
   const plan=procheliaV7.buildSupraPlan({
     caseType,domain,impact,requestedAction:action,market,context
   });
   const governance=procheliaV7.assessSupraDecision({
     caseType:plan.caseType,impact:plan.impact,requestedAction:plan.requestedAction,
-    actorRole:gate.auth.user.role,context,evidence
+    actorRole:gate.auth.user.role,context
   });
   const missingEvidence=[...new Set([...(plan.missingEvidence||[]),...(governance.missingEvidence||[])])];
   return json({
