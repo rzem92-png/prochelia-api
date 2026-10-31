@@ -7,6 +7,7 @@ import { stripePost, verifyStripeSignature } from "./stripe.js";
 // authentification/RBAC/idempotence/contrôles métier n'a pas été validée.
 
 const VERSION = 'V14.3.0-PREPRODUCTION-2026-10-19';
+const STRIPE_CHARGES_AND_PAYOUTS_READY = false;
 const SECURITY_CODE_TTL_SECONDS = 15 * 60;
 const SECURITY_MAX_ATTEMPTS = 5;
 const SECURITY_LOCK_SECONDS = 15 * 60;
@@ -876,8 +877,8 @@ function paymentProvider(env) {
 
 function paymentsConfigured(env) {
   const provider=paymentProvider(env);
-  if(provider==='stripe') return !!env.STRIPE_SECRET_KEY && !!env.STRIPE_WEBHOOK_SECRET && !!env.APP_BASE_URL && false;
-  return !!env.PAYMENT_WEBHOOK_SECRET && !!env.PAYMENT_API_SECRET && !!env.PAYMENT_PROVIDER;
+  if(provider==='stripe') return !!env.STRIPE_SECRET_KEY && !!env.STRIPE_WEBHOOK_SECRET && !!env.APP_BASE_URL && STRIPE_CHARGES_AND_PAYOUTS_READY;
+  return false;
 }
 
 async function paymentOnboard(request, env) {
@@ -951,6 +952,7 @@ async function paymentStatus(request, env) {
 async function createMissionPayment(request, env) {
   const auth=await getSessionUser(request,env);
   if(!requireRole(auth,['gerante'])) return json({ok:false,error:auth?.user?'FORBIDDEN':'UNAUTHENTICATED',version:VERSION},auth?.user?403:401);
+  if(!paymentsConfigured(env)) return json({ok:false,error:'REAL_PAYMENT_ADAPTER_NOT_READY',version:VERSION},503);
   await ensurePaymentSchema(env);
   const body=await readJson(request);
   const missionId=clean(body?.mission_id), clientId=clean(body?.client_id), intervenantId=clean(body?.intervenant_id);
@@ -975,6 +977,7 @@ async function finalizeMissionPayment(request, env) {
   await ensurePaymentSchema(env);
   const body=await readJson(request), txId=clean(body?.transaction_id), outcome=clean(body?.outcome);
   if(!txId||!['paid','failed','refunded','held'].includes(outcome)) return json({ok:false,error:'INVALID_PAYMENT_FINALIZATION',version:VERSION},400);
+  if(['paid','refunded'].includes(outcome)) return json({ok:false,error:'PSP_WEBHOOK_CONFIRMATION_REQUIRED',version:VERSION},409);
   const tx=await env.DB.prepare('SELECT * FROM payment_transactions WHERE id=? LIMIT 1').bind(txId).first();
   if(!tx) return json({ok:false,error:'TRANSACTION_NOT_FOUND',version:VERSION},404);
   if(['paid','refunded','failed'].includes(tx.status) && tx.status!==outcome) return json({ok:false,error:'PAYMENT_STATE_CONFLICT',version:VERSION,status:tx.status},409);
@@ -995,6 +998,7 @@ async function finalizeMissionPayment(request, env) {
 async function payoutRequest(request, env) {
   const auth=await getSessionUser(request,env);
   if(!requireRole(auth,['intervenant'])) return json({ok:false,error:auth?.user?'FORBIDDEN':'UNAUTHENTICATED',version:VERSION},auth?.user?403:401);
+  if(!paymentsConfigured(env)) return json({ok:false,error:'REAL_PAYOUT_ADAPTER_NOT_READY',version:VERSION},503);
   await ensurePaymentSchema(env);
   const body=await readJson(request), amount=moneyCents(body?.amount_eur), mode=clean(body?.mode)||'standard';
   const idem=clean(request.headers.get('idempotency-key'))||clean(body?.idempotency_key);
@@ -2520,8 +2524,12 @@ async function productionConfigCheck(env) {
   const checks=[];
   const requiredTables=['users','sessions','missions','payment_transactions','payment_webhook_events','payment_disputes','operational_cases','action_outbox','notification_outbox','accounting_ledger','promotions','promotion_recommendations','activity_journal','compliance_events'];
   for(const t of requiredTables) checks.push({code:`TABLE:${t}`,status:await tableExists(env,t)?'OK':'MISSING'});
-  const pspRequired=['PAYMENT_PROVIDER','PAYMENT_WEBHOOK_SECRET'];
+  const pspRequired=paymentProvider(env)==='stripe'
+    ? ['PAYMENT_PROVIDER','STRIPE_SECRET_KEY','STRIPE_WEBHOOK_SECRET','APP_BASE_URL']
+    : ['PAYMENT_PROVIDER','PAYMENT_WEBHOOK_SECRET','PAYMENT_API_SECRET'];
   for(const k of pspRequired) checks.push({code:`SECRET:${k}`,status:finalSecretConfigured(env,k)?'OK':'NOT_CONFIGURED'});
+  checks.push({code:'STRIPE_CHARGES_ADAPTER',status:STRIPE_CHARGES_AND_PAYOUTS_READY?'OK':'NOT_IMPLEMENTED'});
+  checks.push({code:'STRIPE_PAYOUT_ADAPTER',status:STRIPE_CHARGES_AND_PAYOUTS_READY?'OK':'NOT_IMPLEMENTED'});
   checks.push({code:'BOOTSTRAP_TOKEN',status:finalSecretConfigured(env,'BOOTSTRAP_TOKEN')?'OK':'NOT_CONFIGURED'});
   const paymentCols=await tableColumns(env,'payment_transactions');
   const requiredPaymentCols=['id','idempotency_key','mission_id','client_id','intervenant_id','gross_cents','commission_cents','provider_fee_cents','refund_cents','net_intervenant_cents','status','provider_payment_id'];
@@ -2529,12 +2537,12 @@ async function productionConfigCheck(env) {
   const missionCols=await tableColumns(env,'missions');
   const usefulMissionCols=['id','client_id','intervenant_id'];
   checks.push({code:'MISSION_CORE_COLUMNS',status:usefulMissionCols.every(x=>missionCols.includes(x))?'OK':'INCOMPLETE',missing:usefulMissionCols.filter(x=>!missionCols.includes(x))});
-  await registerIntegration(env,'PSP','PAYMENT',['PAYMENT_PROVIDER','PAYMENT_WEBHOOK_SECRET'],['charge','refund','payout','webhook','reconciliation'],finalSecretConfigured(env,'PAYMENT_PROVIDER')&&finalSecretConfigured(env,'PAYMENT_WEBHOOK_SECRET')?'CONFIGURED':'NOT_CONFIGURED');
+  await registerIntegration(env,'PSP','PAYMENT',pspRequired,['connect_onboarding','charge','refund','payout','webhook','reconciliation'],paymentsConfigured(env)?'CONFIGURED':'NOT_CONFIGURED');
   await registerIntegration(env,'NOTIFICATIONS','MESSAGING',['NOTIFICATION_PROVIDER'],['email','sms','push'],finalSecretConfigured(env,'NOTIFICATION_PROVIDER')?'CONFIGURED':'NOT_CONFIGURED');
   await registerIntegration(env,'MAPS','LOCATION',['MAPS_PROVIDER','MAPS_API_KEY'],['distance','geocoding','routing'],finalSecretConfigured(env,'MAPS_API_KEY')?'CONFIGURED':'NOT_CONFIGURED');
   await registerIntegration(env,'MARKET_DATA','COMMERCIAL',['MARKET_DATA_PROVIDER'],['market_prices','competitor_signals'],finalSecretConfigured(env,'MARKET_DATA_PROVIDER')?'CONFIGURED':'NOT_CONFIGURED');
-  const blocking=checks.filter(x=>['MISSING','INCOMPLETE'].includes(x.status));
-  const externalNotConfigured=checks.filter(x=>x.status==='NOT_CONFIGURED' && ['SECRET:PAYMENT_PROVIDER','SECRET:PAYMENT_WEBHOOK_SECRET'].includes(x.code));
+  const blocking=checks.filter(x=>['MISSING','INCOMPLETE','NOT_IMPLEMENTED'].includes(x.status));
+  const externalNotConfigured=checks.filter(x=>x.status==='NOT_CONFIGURED' && pspRequired.map(k=>'SECRET:'+k).includes(x.code));
   const overall=blocking.length===0 && externalNotConfigured.length===0;
   for(const c of checks) await env.DB.prepare(`INSERT INTO system_config_checks(id,check_code,status,details_json) VALUES(?,?,?,?)`).bind(crypto.randomUUID(),c.code,c.status,JSON.stringify(c)).run();
   return {overall,checks,blocking:blocking.length,externalNotConfigured:externalNotConfigured.length};
