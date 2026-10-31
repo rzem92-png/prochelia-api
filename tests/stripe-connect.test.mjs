@@ -180,3 +180,17 @@ test("payout requests remain blocked until a real payout adapter exists", async(
   assert.equal(body.error,"REAL_PAYOUT_ADAPTER_NOT_READY");
   assert.equal(fake.calls.some(x=>x.sql.includes("INSERT INTO payout_requests")),false);
 });
+
+test("Stripe onboarding refuses to choose dashboard and financial responsibility silently", async()=>{
+  const fake=fakeDb("intervenant");
+  const env={DB:fake.DB,PAYMENT_PROVIDER:"stripe",STRIPE_SECRET_KEY:"sk_test_unit",STRIPE_WEBHOOK_SECRET:"whsec_unit",APP_BASE_URL:"https://prochelia.pages.dev"};
+  const response=await worker.fetch(new Request("https://api.test/api/payments/onboard",{
+    method:"POST",
+    headers:{Origin:"https://prochelia.pages.dev",Cookie:"prochelia_session=synthetic-token","Content-Type":"application/json"},
+    body:"{}"
+  }),env);
+  const body=await response.json();
+  assert.equal(response.status,503,JSON.stringify(body));
+  assert.equal(body.error,"STRIPE_CONNECT_NOT_CONFIGURED");
+  assert.equal(fake.calls.some(x=>x.sql.includes("INSERT INTO payment_accounts")),false);
+});
