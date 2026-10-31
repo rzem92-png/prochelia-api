@@ -43,7 +43,7 @@ const HUMAN_DECISION_CASES = new Set([
 const SAFE_AUTONOMOUS_TASKS = new Set([
   "GENERATE_SUMMARY", "CLASSIFY_CASE", "DETECT_DUPLICATE",
   "CALCULATE_INDICATOR", "PREPARE_SCENARIO", "DRAFT_INTERNAL_TASK",
-  "SEND_ROUTINE_REMINDER", "RECONCILE_READ_ONLY", "CHECK_BACKUP_STATUS"
+  "RECONCILE_READ_ONLY", "CHECK_BACKUP_STATUS"
 ]);
 
 const PROFESSIONAL_ESCALATION_CASES = new Set([
@@ -52,7 +52,7 @@ const PROFESSIONAL_ESCALATION_CASES = new Set([
 ]);
 
 function cleanText(value, fallback = "") {
-  return String(value ?? fallback).trim().toLowerCase().replace(/[^a-z0-9_ -]/g, "").slice(0, 100);
+  return String(value ?? fallback).normalize("NFD").replace(/[\\u0300-\\u036f]/g, "").trim().toLowerCase().replace(/[ -]+/g, "_").replace(/[^a-z0-9_]/g, "").slice(0, 100);
 }
 
 function inferDomain(caseType, requestedDomain) {
