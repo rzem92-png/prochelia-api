@@ -57,3 +57,35 @@ test("resilience output is indicative and never triggers execution", () => {
   assert.equal(result.executionAllowed,false);
   assert.equal(result.decisionOwner,"GERANTE");
 });
+
+
+test("accented French emergency wording is normalized and escalated", () => {
+  const plan = buildSupraPlan({ caseType: "urgence médicale", impact: "CRITICAL" });
+  assert.equal(plan.caseType, "urgence_medicale");
+  assert.equal(plan.autonomy.level, "URGENT_HUMAN_ESCALATION");
+  assert.equal(plan.autonomy.professionalEscalationRequired, true);
+  assert.equal(plan.executionAllowed, false);
+});
+
+test("routine reminders are not autonomous until consent and channel controls exist", () => {
+  const plan = buildSupraPlan({
+    caseType: "routine",
+    impact: "LOW",
+    requestedAction: "SEND_ROUTINE_REMINDER"
+  });
+  assert.equal(plan.autonomy.routineReadOnlyAutonomy, false);
+  assert.equal(plan.autonomy.approvalRequired, true);
+  assert.equal(plan.executionAllowed, false);
+});
+
+test("ordinary low-impact read-only tasks remain auditable and non-executable", () => {
+  const plan = buildSupraPlan({
+    caseType: "routine",
+    impact: "LOW",
+    requestedAction: "GENERATE_SUMMARY"
+  });
+  assert.equal(plan.autonomy.routineReadOnlyAutonomy, true);
+  assert.equal(plan.autonomy.approvalRequired, false);
+  assert.equal(plan.executionAllowed, false);
+  assert.equal(plan.auditRequired, true);
+});
