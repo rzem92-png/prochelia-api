@@ -1281,7 +1281,7 @@ async function ensureConsolidatedSchema(env) {
         OR length(trim(NEW.account_code))=0
         OR length(trim(NEW.reference_type))=0
         OR length(trim(NEW.reference_id))=0
-        OR NEW.currency NOT IN ('EUR')
+        OR NEW.currency NOT GLOB '[A-Z][A-Z][A-Z]'
       BEGIN SELECT RAISE(ABORT,'ACCOUNTING_LEDGER_INVALID_ENTRY'); END`,
     `CREATE TRIGGER IF NOT EXISTS trg_ledger_immutable_update BEFORE UPDATE ON accounting_ledger
       BEGIN SELECT RAISE(ABORT,'ACCOUNTING_LEDGER_IMMUTABLE'); END`,
