@@ -1,0 +1,41 @@
+name: "PROCHÉLIA API — tests CORS/session sans déploiement"
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "src/index.js"
+      - "tests/cors-session.test.mjs"
+      - ".github/workflows/validate-cors-session.yml"
+  push:
+    branches: ["fix/api-cors-cookie-session"]
+    paths:
+      - "src/index.js"
+      - "tests/cors-session.test.mjs"
+      - ".github/workflows/validate-cors-session.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  cors-session:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Vérifier la syntaxe du Worker
+        run: node --check src/index.js
+      - name: Exécuter les tests CORS et session
+        run: node --test tests/cors-session.test.mjs
+      - name: Vérifier le cookie de session sécurisé
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -Fq 'SameSite=None' src/index.js
+          grep -Fq 'HttpOnly; Secure; SameSite=None' src/index.js
+          echo "Cookie de session HttpOnly + Secure + SameSite=None confirmé."
+      - name: Confirmer l'absence de déploiement
+        run: echo "Tests locaux uniquement; aucun secret Cloudflare, aucune écriture D1 et aucun déploiement."
