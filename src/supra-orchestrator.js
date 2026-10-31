@@ -153,13 +153,18 @@ export function buildSupraPlan(rawInput = {}) {
   const action = String(input.requestedAction ?? "ANALYZE_AND_PROPOSE").trim().toUpperCase();
   const impact = String(input.impact ?? "LOW").trim().toUpperCase();
   const market = cleanText(input.market, "fr");
+  const requestedDomain = cleanText(input.domain);
   if (!caseType || caseType.length > 100 ||
       !/^[A-Z0-9_]{2,64}$/.test(action) ||
       !["LOW", "MEDIUM", "HIGH", "CRITICAL"].includes(impact) ||
       !(market === "other" || /^[a-z]{2}$/.test(market))) {
     return failClosedPlan("INVALID_FIELD_VALUE");
   }
-  const domain = inferDomain(caseType, input.domain);
+  // An explicit but unknown domain must never be silently re-routed by inference.
+  if (requestedDomain && !Object.hasOwn(DOMAIN_REGISTRY, requestedDomain)) {
+    return failClosedPlan("INVALID_DOMAIN_FAIL_CLOSED");
+  }
+  const domain = inferDomain(caseType, requestedDomain);
   const context = rawContext;
   const emergency = PROFESSIONAL_ESCALATION_CASES.has(caseType) || context.immediateDanger === true;
   const professionalRequired = emergency ||
