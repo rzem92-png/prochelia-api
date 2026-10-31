@@ -1,5 +1,6 @@
 import { handleV7Route } from "./v7-routes.js";
 import { procheliaV7 } from "./v7.js";
+import { readBoundedRequestBody } from "./request-body.js";
 // PROCHÉLIA — INDEX BACKEND CONSOLIDÉ UNIQUE
 // Référence de consolidation : V14.1 Finance + sécurité/RBAC existants.
 // Généré le 19/10/2026. À déployer uniquement après recette avec la vraie base D1.
@@ -1922,24 +1923,13 @@ async function supraPlan(request, env) {
   // Le plan de pilotage transversal expose des informations stratégiques : Gérante uniquement.
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
   if(request.method!=='POST') return json({ok:false,error:'METHOD_NOT_ALLOWED',version:VERSION},405,{'allow':'POST'});
-  // Enforce the limit while streaming; do not buffer an attacker-sized body first.
-  const reader=request.body?.getReader();
-  const decoder=new TextDecoder();
-  let rawBody='';
-  let receivedBytes=0;
-  if(reader) {
-    while(true) {
-      const chunk=await reader.read();
-      if(chunk.done) break;
-      receivedBytes+=chunk.value.byteLength;
-      if(receivedBytes>16384) {
-        await reader.cancel().catch(()=>{});
-        return json({ok:false,error:'REQUEST_TOO_LARGE',version:VERSION},413);
-      }
-      rawBody+=decoder.decode(chunk.value,{stream:true});
-    }
-    rawBody+=decoder.decode();
+  // Enforce the limit while streaming; reject invalid UTF-8 and cancel oversized bodies.
+  const boundedBody=await readBoundedRequestBody(request,16384);
+  if(!boundedBody.ok) {
+    const tooLarge=boundedBody.reason==='TOO_LARGE';
+    return json({ok:false,error:tooLarge?'REQUEST_TOO_LARGE':'INVALID_REQUEST_BODY',version:VERSION},tooLarge?413:400);
   }
+  const rawBody=boundedBody.text;
   let body;
   try { body=JSON.parse(rawBody); }
   catch { return json({ok:false,error:'INVALID_JSON'},400); }
