@@ -42,3 +42,27 @@ test("does not claim net profit without fixed overhead allocation", () => {
 test("rejects non-array or excessive ledger input", () => {
   assert.equal(calculateProfitability({orders:"bad"}).ok,false);
 });
+
+test("rejects missing financial fields instead of treating them as zero", () => {
+  const incomplete = {...settled};
+  delete incomplete.pspFeeCents;
+  assert.deepEqual(calculateProfitability({orders:[incomplete]}), {
+    ok:false, error:"INVALID_OR_UNRECONCILED_LEDGER_RECORD"
+  });
+});
+
+test("rejects sparse ledger arrays and unsafe aggregate overflow", () => {
+  const sparse = [];
+  sparse.length = 1;
+  assert.equal(calculateProfitability({orders:sparse}).ok,false);
+  assert.equal(calculateProfitability({orders:[
+    {...settled, platformCommissionCents:Number.MAX_SAFE_INTEGER},
+    {...settled, platformCommissionCents:1}
+  ]}).ok,false);
+});
+
+test("normalizes activity labels before grouping", () => {
+  const result=calculateProfitability({orders:[settled,{...settled,activity:" services "}]});
+  assert.equal(Object.keys(result.byActivity).length,1);
+  assert.equal(result.byActivity.services.orders,2);
+});
