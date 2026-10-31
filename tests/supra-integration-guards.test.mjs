@@ -163,3 +163,14 @@ test("PSP webhook requires object references for all known payment and payout ev
   assert.match(route,/paymentEvents\.includes\(type\)&&!txId/);
   assert.match(route,/payoutEvents\.includes\(type\)&&!payoutId/);
 });
+
+test("PSP settlement validates provider, exact amount and currency before wallet credit", () => {
+  const route=source.slice(source.indexOf("async function paymentWebhook"),source.indexOf("async function openPaymentDispute"));
+  assert.match(route,/PAYMENT_PROVIDER_MISMATCH/);
+  assert.match(route,/PSP_PAYMENT_AMOUNT_OR_CURRENCY_MISMATCH/);
+  assert.match(route,/amount!==Number\(tx\.gross_cents\)/);
+  assert.match(route,/currency!==String\(tx\.currency\|\|'EUR'\)\.toUpperCase\(\)/);
+  assert.match(route,/PAYOUT_PROVIDER_MISMATCH/);
+  assert.match(route,/PSP_PAYOUT_AMOUNT_OR_CURRENCY_MISMATCH/);
+  assert.match(route,/amount!==Number\(payout\.amount_cents\)/);
+});
