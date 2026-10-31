@@ -44,18 +44,24 @@ jobs:
           for target in preview test; do
             if [[ "$target" == "preview" ]]; then name="$PREVIEW_DB_NAME"; id="$PREVIEW_DB_ID"; else name="$TEST_DB_NAME"; id="$TEST_DB_ID"; fi
             http="$(curl --silent --show-error --output "$RUNNER_TEMP/d1-$target.json" --write-out '%{http_code}' -H "Authorization: Bearer $token" "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/d1/database?name=$name")"
-            [[ "$http" == "200" ]] || { echo "::error::Impossible de vérifier la base $target."; exit 1; }
+            [[ "$http" == "200" ]] || { echo "::error::Impossible de vérifier la base $target (HTTP $http)."; exit 1; }
             matches="$(jq --arg n "$name" --arg id "$id" '[.result[]? | select(.name == $n and .uuid == $id)] | length' "$RUNNER_TEMP/d1-$target.json")"
             [[ "$matches" == "1" ]] || { echo "::error::Nom/UUID inattendu pour $target ; arrêt."; exit 1; }
           done
           [[ "$PREVIEW_DB_ID" != "$TEST_DB_ID" ]] || { echo "::error::Les deux UUID doivent être distincts."; exit 1; }
           echo "Les deux bases sont identifiées exactement. Aucune écriture ne sera effectuée."
 
-      - name: Installer Node.js
+      - name: Installer Wrangler une seule fois
         uses: actions/setup-node@v5
         with:
           node-version: "22"
           package-manager-cache: false
+      - name: Préparer l'outil D1
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install --no-save --no-audit --no-fund wrangler@4
+          ./node_modules/.bin/wrangler --version
 
       - name: Comparer les tables et les nombres de lignes en lecture seule
         shell: bash
@@ -63,28 +69,62 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         run: |
           set -euo pipefail
+          export CLOUDFLARE_API_TOKEN
           out="$RUNNER_TEMP/d1-compare"
           mkdir -p "$out"
+
           for target in preview test; do
-            if [[ "$target" == "preview" ]]; then db="$PREVIEW_DB_NAME"; else db="$TEST_DB_NAME"; fi
+            if [[ "$target" == "preview" ]]; then db="$PREVIEW_DB_NAME"; id="$PREVIEW_DB_ID"; else db="$TEST_DB_NAME"; id="$TEST_DB_ID"; fi
+            config="$out/$target-wrangler.json"
+            cat > "$config" <<EOF
+          {
+            "name": "prochelia-readonly-$target",
+            "compatibility_date": "2026-09-25",
+            "d1_databases": [
+              { "binding": "DB", "database_name": "$db", "database_id": "$id" }
+            ]
+          }
+          EOF
+
+            echo "::group::Lecture des tables — $target ($db)"
             raw="$out/$target-tables.json"
-            npx --yes wrangler@4 d1 execute "$db" --remote --command="SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT GLOB '_cf_*' ORDER BY name;" --json > "$raw"
+            if ! timeout 60s ./node_modules/.bin/wrangler d1 execute "$db" --remote --config "$config" --command="SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT GLOB '_cf_*' ORDER BY name;" --json > "$raw"; then
+              echo "::error::Échec de lecture de la liste des tables pour $target."
+              exit 1
+            fi
             jq -e . "$raw" >/dev/null
             jq -r '[.. | objects | select(has("results")) | .results[]? | .name? // empty] | map(select(type == "string")) | unique | .[]' "$raw" > "$out/$target-tables.txt"
-            csv="$out/$target-row-counts.csv"
-            printf 'table,row_count\n' > "$csv"
+            [[ -s "$out/$target-tables.txt" ]] || { echo "::error::Aucune table détectée pour $target ; arrêt par sécurité."; exit 1; }
+
+            sql=""
             while IFS= read -r table; do
               [[ "$table" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || { echo "::error::Nom de table inattendu ; arrêt."; exit 1; }
-              count="$out/count.json"
-              npx --yes wrangler@4 d1 execute "$db" --remote --command="SELECT COUNT(*) AS row_count FROM \"$table\";" --json > "$count"
-              rows="$(jq -r '[.. | objects | select(has("results")) | .results[]? | .row_count? // empty][0] // empty' "$count")"
-              [[ "$rows" =~ ^[0-9]+$ ]] || { echo "::error::Comptage invalide ; arrêt."; exit 1; }
-              printf '"%s",%s\n' "$table" "$rows" >> "$csv"
+              statement="SELECT '$table' AS table_name, COUNT(*) AS row_count FROM \"$table\""
+              if [[ -n "$sql" ]]; then sql="$sql UNION ALL $statement"; else sql="$statement"; fi
             done < "$out/$target-tables.txt"
-            echo "Contrôle $target terminé ; détails dans le rapport CSV."
+            sql="$sql ORDER BY table_name"
+
+            echo "Tables détectées : $(wc -l < "$out/$target-tables.txt" | tr -d ' ')"
+            echo "::endgroup::"
+            echo "::group::Comptage groupé — $target ($db)"
+            counts="$out/$target-counts.json"
+            if ! timeout 90s ./node_modules/.bin/wrangler d1 execute "$db" --remote --config "$config" --command="$sql" --json > "$counts"; then
+              echo "::error::Échec du comptage groupé pour $target."
+              exit 1
+            fi
+            jq -e . "$counts" >/dev/null
+            jq -r '[.. | objects | select(has("results")) | .results[]? | select(.table_name != null and .row_count != null) | [.table_name, (.row_count|tostring)] | @csv] | .[]' "$counts" > "$out/$target-row-counts.csv"
+            [[ -s "$out/$target-row-counts.csv" ]] || { echo "::error::Le résultat de comptage est vide pour $target."; exit 1; }
+            printf 'table,row_count\n' | cat - "$out/$target-row-counts.csv" > "$out/$target-row-counts.tmp"
+            mv "$out/$target-row-counts.tmp" "$out/$target-row-counts.csv"
+            echo "Comptage terminé pour $target."
+            echo "::endgroup::"
           done
+
           {
             echo "## Comparaison D1 en lecture seule"
+            echo ""
+            echo "Aucune instruction d'écriture n'a été exécutée."
             echo ""
             echo "### Préproduction"
             cat "$out/preview-row-counts.csv"
