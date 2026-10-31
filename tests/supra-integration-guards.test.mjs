@@ -38,3 +38,9 @@ test("les routes SUPRA sont authentifiées et le plan stratégique est réservé
   assert.match(source, /\/api\/supra\/domains/);
   assert.match(source, /\/api\/supra\/plan/);
 });
+
+test("les routes SUPRA ne déclenchent aucune préparation automatique du schéma D1", () => {
+  const match = source.match(/const consolidatedPath = \[([^\]]+)\]/);
+  assert.ok(match, "consolidated schema path list must be present");
+  assert.doesNotMatch(match[1], /\/api\/supra\/(domains|plan)/);
+});
