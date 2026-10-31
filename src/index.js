@@ -3681,6 +3681,7 @@ handle = async function(request,env){
       else response=await __procheliaProductionSafetyHandle(request,env);
     }
   }catch(e){
+    console.error('PRODUCTION_SAFETY_MIDDLEWARE_ERROR',e instanceof Error?e.message:String(e));
     response=json({ok:false,error:'PRODUCTION_SAFETY_ERROR',version:VERSION},500);
   }
   return applyCorsHeaders(request,env,response);
