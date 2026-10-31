@@ -13,5 +13,17 @@
       "enabled": true,
       "invocation_logs": true
     }
+  },
+  "previews": {
+    "vars": {
+      "APP_ENV": "preview"
+    },
+    "d1_databases": [
+      {
+        "binding": "DB",
+        "database_name": "prochelia-preview-db",
+        "database_id": "6adb95e5-e542-4bec-9008-fbea01042305"
+      }
+    ]
   }
 }
