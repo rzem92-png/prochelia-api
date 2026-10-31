@@ -50,7 +50,7 @@ test('applies authorized discount as a distinct input and rejects zero result', 
 });
 
 test('rounds commission and PSP deterministically to whole cents', () => {
-  const q = calculateFinancialQuote({...base, basePriceCents: 101, commissionRate: 0.155, pspPercent: 1.5, pspFixedCents: 1, intervenantFloorCents: 0, targetMarginPercent: 0});
+  const q = calculateFinancialQuote({...base, basePriceCents: 101, commissionRate: 0.155, pspPercent: 1.5, pspFixedCents: 1, intervenantFloorCents: 0, travelClientCents: 0, travelProviderCostCents: 0, targetMarginPercent: 0});
   assert.equal(q.commission_cents, 16);
   assert.equal(q.psp_cost_cents, 3);
 });
