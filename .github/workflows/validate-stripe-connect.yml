@@ -37,6 +37,7 @@ jobs:
         run: |
           set -euo pipefail
           grep -Fq 'const STRIPE_CHARGES_AND_PAYOUTS_READY = false;' src/index.js
+          grep -Fq 'const SERVER_PRICING_POLICY_READY = false;' src/index.js
           grep -Fq "REAL_PAYMENT_ADAPTER_NOT_READY" src/index.js
           grep -Fq "REAL_PAYOUT_ADAPTER_NOT_READY" src/index.js
       - name: Confirmer l'absence de déploiement
