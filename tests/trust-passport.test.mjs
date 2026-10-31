@@ -51,17 +51,45 @@ test('draft or suspended service and suspended profile fail closed', () => {
   assert.equal(evaluateTaskEligibility({ service, profile: { ...profile, suspended: true }, verifications: [identity, qualification], missionAt }).decision, 'BLOCKED');
 });
 
-test('global evidence is not accepted unless the catalogue explicitly permits it', () => {
+test('global evidence is always rejected, including legacy catalogue opt-in', () => {
   const globalIdentity = { ...identity, service_code: '*' };
   const globalQualification = { ...qualification, service_code: '*' };
   const denied = evaluateTaskEligibility({ service, profile, verifications: [globalIdentity, globalQualification], missionAt });
   assert.equal(denied.decision, 'BLOCKED');
-  const explicitlyAllowed = evaluateTaskEligibility({ service: { ...service, allow_global_scope: true }, profile, verifications: [globalIdentity, globalQualification], missionAt });
-  assert.equal(explicitlyAllowed.decision, 'ELIGIBLE');
+  const legacyOptIn = evaluateTaskEligibility({ service: { ...service, allow_global_scope: true }, profile, verifications: [globalIdentity, globalQualification], missionAt });
+  assert.equal(legacyOptIn.decision, 'BLOCKED');
+  assert.ok(legacyOptIn.reasons.includes('GLOBAL_EVIDENCE_SCOPE_PROHIBITED'));
 });
 
 test('missing or invalid mission date and incomplete server data block eligibility', () => {
   assert.equal(evaluateTaskEligibility({ service, profile, verifications: [identity, qualification], missionAt: 'not-a-date' }).decision, 'BLOCKED');
   assert.equal(evaluateTaskEligibility({ service, profile, verifications: null, missionAt }).decision, 'BLOCKED');
   assert.equal(evaluateTaskEligibility({ service: null, profile, verifications: [identity, qualification], missionAt }).decision, 'BLOCKED');
+});
+
+test('insurance and authorization evidence must always carry a future expiry date', () => {
+  for (const category of ['INSURANCE', 'AUTHORIZATION']) {
+    const evidence = { category, status: 'DOCUMENT_VERIFIED', service_code: service.service_code, requires_expiry: false };
+    const withoutExpiry = evaluateTaskEligibility({
+      service: { ...service, requirements: [{ category, required: true }] },
+      profile, verifications: [identity, evidence], missionAt
+    });
+    assert.equal(withoutExpiry.decision, 'BLOCKED', category);
+    const expired = evaluateTaskEligibility({
+      service: { ...service, requirements: [{ category, required: true }] },
+      profile, verifications: [identity, { ...evidence, expires_at: '2026-11-10T10:00:00.000Z' }], missionAt
+    });
+    assert.equal(expired.decision, 'BLOCKED', category);
+  }
+});
+
+test('evidence for another service cannot satisfy insurance or authorization requirements', () => {
+  for (const category of ['INSURANCE', 'AUTHORIZATION']) {
+    const evidence = { category, status: 'DOCUMENT_VERIFIED', service_code: 'OTHER_SERVICE', expires_at: '2027-01-01T00:00:00.000Z', requires_expiry: true };
+    const result = evaluateTaskEligibility({
+      service: { ...service, requirements: [{ category, required: true }] },
+      profile, verifications: [identity, evidence], missionAt
+    });
+    assert.equal(result.decision, 'BLOCKED', category);
+  }
 });
