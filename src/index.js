@@ -877,7 +877,7 @@ function paymentProvider(env) {
 
 function paymentsConfigured(env) {
   const provider=paymentProvider(env);
-  if(provider==='stripe') return !!env.STRIPE_SECRET_KEY && !!env.STRIPE_WEBHOOK_SECRET && !!env.APP_BASE_URL && !!env.STRIPE_DASHBOARD && !!env.STRIPE_FEES_COLLECTOR && !!env.STRIPE_LOSSES_COLLECTOR && STRIPE_CHARGES_AND_PAYOUTS_READY;
+  if(provider==='stripe') return !!env.STRIPE_SECRET_KEY && !!env.STRIPE_PUBLISHABLE_KEY && !!env.STRIPE_WEBHOOK_SECRET && !!env.APP_BASE_URL && !!env.STRIPE_DASHBOARD && !!env.STRIPE_FEES_COLLECTOR && !!env.STRIPE_LOSSES_COLLECTOR && STRIPE_CHARGES_AND_PAYOUTS_READY;
   return false;
 }
 
@@ -887,10 +887,10 @@ async function paymentOnboard(request, env) {
   const dashboard=clean(env.STRIPE_DASHBOARD);
   const feesCollector=clean(env.STRIPE_FEES_COLLECTOR);
   const lossesCollector=clean(env.STRIPE_LOSSES_COLLECTOR);
-  if (paymentProvider(env)!=='stripe' || !env.STRIPE_SECRET_KEY || !env.STRIPE_WEBHOOK_SECRET ||
+  if (paymentProvider(env)!=='stripe' || !env.STRIPE_SECRET_KEY || !env.STRIPE_PUBLISHABLE_KEY || !env.STRIPE_WEBHOOK_SECRET ||
       !['express','full'].includes(dashboard) || !['application','stripe'].includes(feesCollector) ||
       !['application','stripe'].includes(lossesCollector)) {
-    return json({ok:false,error:'STRIPE_CONNECT_NOT_CONFIGURED',version:VERSION,required:['PAYMENT_PROVIDER=stripe','STRIPE_SECRET_KEY','STRIPE_WEBHOOK_SECRET','STRIPE_DASHBOARD','STRIPE_FEES_COLLECTOR','STRIPE_LOSSES_COLLECTOR','APP_BASE_URL']},503);
+    return json({ok:false,error:'STRIPE_CONNECT_NOT_CONFIGURED',version:VERSION,required:['PAYMENT_PROVIDER=stripe','STRIPE_SECRET_KEY','STRIPE_PUBLISHABLE_KEY','STRIPE_WEBHOOK_SECRET','STRIPE_DASHBOARD','STRIPE_FEES_COLLECTOR','STRIPE_LOSSES_COLLECTOR','APP_BASE_URL']},503);
   }
   if(dashboard==='express' && (feesCollector!=='application' || lossesCollector!=='application')) {
     return json({ok:false,error:'STRIPE_EXPRESS_RESPONSIBILITY_CONFLICT',version:VERSION,required:'Express requires application fee/loss responsibility; choose explicitly or use full dashboard'},409);
@@ -903,6 +903,11 @@ async function paymentOnboard(request, env) {
   } catch {
     return json({ok:false,error:'APP_BASE_URL_NOT_ALLOWED',version:VERSION},503);
   }
+  const body=await readJson(request)||{};
+  const accountToken=clean(body.account_token);
+  if(!/^[A-Za-z0-9_]{8,255}$/.test(accountToken) || body.stripe_terms_accepted!==true) {
+    return json({ok:false,error:'STRIPE_ACCOUNT_TOKEN_AND_TERMS_REQUIRED',version:VERSION},400);
+  }
   await ensurePaymentSchema(env);
   const existing = await env.DB.prepare('SELECT * FROM payment_accounts WHERE user_id=? LIMIT 1').bind(auth.user.id).first();
   if(existing && existing.provider!=='stripe') return json({ok:false,error:'PAYMENT_PROVIDER_CONFLICT',version:VERSION},409);
@@ -912,19 +917,14 @@ async function paymentOnboard(request, env) {
   let accountId=clean(existing?.provider_account_id);
   try {
     if(!accountId) {
-      const displayName=[auth.user.first_name,auth.user.last_name].filter(Boolean).join(' ').slice(0,120);
+      const accountTokenHash=await sha256Base64url(accountToken);
       const account=await stripePost(env,'v2/core/accounts',{
-        contact_email:auth.user.email,
-        display_name:displayName||auth.user.email,
+        account_token:accountToken,
         dashboard,
-        'identity[country]':'FR',
-        'identity[entity_type]':'individual',
-        'configuration[recipient][capabilities][stripe_balance][stripe_transfers][requested]':'true',
-        'defaults[currency]':'eur',
-        'defaults[responsibilities][fees_collector]':feesCollector,
-        'defaults[responsibilities][losses_collector]':lossesCollector,
-        'metadata[prochelia_user_id]':auth.user.id
-      },'prochelia-connect-account-'+auth.user.id);
+        configuration:{recipient:{capabilities:{stripe_balance:{stripe_transfers:{requested:true}}}}},
+        defaults:{currency:'eur',responsibilities:{fees_collector:feesCollector,losses_collector:lossesCollector}},
+        metadata:{prochelia_user_id:auth.user.id}
+      },'prochelia-connect-account-'+auth.user.id+'-'+accountTokenHash);
       accountId=clean(account?.id);
       if(!accountId) throw new Error('STRIPE_ACCOUNT_ID_MISSING');
       if(existing) {
@@ -934,17 +934,22 @@ async function paymentOnboard(request, env) {
       }
       const wallet=await env.DB.prepare('SELECT id FROM wallets WHERE user_id=? LIMIT 1').bind(auth.user.id).first();
       if(!wallet) await env.DB.prepare('INSERT INTO wallets (id,user_id) VALUES (?,?)').bind(crypto.randomUUID(),auth.user.id).run();
+      await paymentAudit(env,'STRIPE_ACCOUNT_TERMS_ACCEPTED',{user_id:auth.user.id,metadata:{terms:'stripe_connected_account_v2'}},'OK');
       await paymentAudit(env,'STRIPE_CONNECT_ACCOUNT_CREATED',{user_id:auth.user.id,metadata:{provider:'stripe'}},'OK');
     }
     const refreshUrl=new URL('/',appBase); refreshUrl.searchParams.set('stripe_onboarding','refresh');
     const returnUrl=new URL('/',appBase); returnUrl.searchParams.set('stripe_onboarding','return');
-    const link=await stripePost(env,'v1/account_links',{
+    const link=await stripePost(env,'v2/core/account_links',{
       account:accountId,
-      'use_case[type]':'account_onboarding',
-      'use_case[account_onboarding][configurations][0]':'recipient',
-      'use_case[account_onboarding][refresh_url]':refreshUrl.toString(),
-      'use_case[account_onboarding][return_url]':returnUrl.toString(),
-      'use_case[account_onboarding][collection_options][fields]':'eventually_due'
+      use_case:{
+        type:'account_onboarding',
+        account_onboarding:{
+          configurations:['recipient'],
+          refresh_url:refreshUrl.toString(),
+          return_url:returnUrl.toString(),
+          collection_options:{fields:'eventually_due'}
+        }
+      }
     },'prochelia-connect-link-'+auth.user.id+'-'+crypto.randomUUID());
     if(!link?.url) throw new Error('STRIPE_ACCOUNT_LINK_MISSING');
     return json({ok:true,version:VERSION,provider:'stripe',account_id:accountId,onboarding_status:'required',onboarding_url:link.url,expires_at:link.expires_at,next:'COMPLETE_STRIPE_CONNECT_ONBOARDING'},201);
@@ -952,6 +957,14 @@ async function paymentOnboard(request, env) {
     console.error('STRIPE_CONNECT_ONBOARDING_FAILED',error instanceof Error?error.message:String(error));
     return json({ok:false,error:'STRIPE_ONBOARDING_FAILED',version:VERSION},502);
   }
+}
+
+function paymentPublicConfig(request,env) {
+  const provider=paymentProvider(env);
+  const publishable=provider==='stripe' && env.STRIPE_PUBLISHABLE_KEY ? String(env.STRIPE_PUBLISHABLE_KEY) : null;
+  const onboardingReady=!!publishable && !!env.STRIPE_SECRET_KEY && !!env.STRIPE_WEBHOOK_SECRET && !!env.APP_BASE_URL &&
+    !!env.STRIPE_DASHBOARD && !!env.STRIPE_FEES_COLLECTOR && !!env.STRIPE_LOSSES_COLLECTOR;
+  return json({ok:true,version:VERSION,provider,stripe_publishable_key:publishable,stripe_api_version:'2026-10-28.endive',connect_onboarding_ready:onboardingReady});
 }
 
 async function paymentStatus(request, env) {
@@ -1198,6 +1211,10 @@ async function handleBase(request, env) {
     return listIntervenants(request,env);
   }
 
+  if (url.pathname === '/api/payments/config') {
+    if (request.method !== 'GET') return json({ok:false,error:'METHOD_NOT_ALLOWED',version:VERSION},405);
+    return paymentPublicConfig(request,env);
+  }
   if (url.pathname === '/api/payments/onboard') {
     if (request.method !== 'POST') return json({ok:false,error:'METHOD_NOT_ALLOWED',version:VERSION},405);
     return paymentOnboard(request,env);
@@ -1303,7 +1320,7 @@ async function handleBase(request, env) {
         '/api/health','/api/clients','/api/intervenants','/api/prestations','/api/core/schema',
         '/api/missions/schema','/api/missions/validate','/api/missions',
         '/api/auth/status','/api/auth/login','/api/auth/logout','/api/auth/me',
-        '/api/auth/bootstrap','/api/security/identity/start','/api/security/identity/approve','/api/security/mission/prepare','/api/security/presence','/api/security/code/verify','/api/security/resend','/api/security/client-code','/api/security/status','/api/payments/onboard','/api/payments/status','/api/payments/mission/create','/api/payments/mission/finalize','/api/payments/payout','/api/payments/webhook','/api/readiness','/api/info'
+        '/api/auth/bootstrap','/api/security/identity/start','/api/security/identity/approve','/api/security/mission/prepare','/api/security/presence','/api/security/code/verify','/api/security/resend','/api/security/client-code','/api/security/status','/api/payments/config','/api/payments/onboard','/api/payments/status','/api/payments/mission/create','/api/payments/mission/finalize','/api/payments/payout','/api/payments/webhook','/api/readiness','/api/info'
       ],
       writes: { missions: false, bootstrap: true },
       status: 'AUTH_RBAC_IDENTITY_PRESENCE_SECURITY_HARDENED_FOR_TEST'
@@ -2566,7 +2583,7 @@ async function productionConfigCheck(env) {
   const requiredTables=['users','sessions','missions','payment_accounts','wallets','payment_transactions','payment_webhook_events','payment_disputes','operational_cases','action_outbox','notification_outbox','accounting_ledger','promotions','promotion_recommendations','activity_journal','compliance_events'];
   for(const t of requiredTables) checks.push({code:`TABLE:${t}`,status:await tableExists(env,t)?'OK':'MISSING'});
   const pspRequired=paymentProvider(env)==='stripe'
-    ? ['PAYMENT_PROVIDER','STRIPE_SECRET_KEY','STRIPE_WEBHOOK_SECRET','STRIPE_DASHBOARD','STRIPE_FEES_COLLECTOR','STRIPE_LOSSES_COLLECTOR','APP_BASE_URL']
+    ? ['PAYMENT_PROVIDER','STRIPE_SECRET_KEY','STRIPE_PUBLISHABLE_KEY','STRIPE_WEBHOOK_SECRET','STRIPE_DASHBOARD','STRIPE_FEES_COLLECTOR','STRIPE_LOSSES_COLLECTOR','APP_BASE_URL']
     : ['PAYMENT_PROVIDER','PAYMENT_WEBHOOK_SECRET','PAYMENT_API_SECRET'];
   for(const k of pspRequired) checks.push({code:`SECRET:${k}`,status:finalSecretConfigured(env,k)?'OK':'NOT_CONFIGURED'});
   checks.push({code:'STRIPE_CHARGES_ADAPTER',status:STRIPE_CHARGES_AND_PAYOUTS_READY?'OK':'NOT_IMPLEMENTED'});
@@ -3607,7 +3624,7 @@ async function strictProductionAudit(request,env){
     {code:'MAPS_PROVIDER',status:finalSecretConfigured(env,'MAPS_API_KEY')?'OK':'NOT_CONFIGURED'}
   ];
   const checks=[...(result.checks||[]),...extra];
-  const blockingCodes=new Set(['SECRET:PAYMENT_PROVIDER','SECRET:PAYMENT_WEBHOOK_SECRET','SECRET:PAYMENT_API_SECRET','SECRET:STRIPE_SECRET_KEY','SECRET:STRIPE_WEBHOOK_SECRET','SECRET:STRIPE_DASHBOARD','SECRET:STRIPE_FEES_COLLECTOR','SECRET:STRIPE_LOSSES_COLLECTOR','SECRET:APP_BASE_URL','STRIPE_CHARGES_ADAPTER','STRIPE_PAYOUT_ADAPTER','SECURITY_CODE_DELIVERY','CORS_ORIGIN','BACKUP_R2']);
+  const blockingCodes=new Set(['SECRET:PAYMENT_PROVIDER','SECRET:PAYMENT_WEBHOOK_SECRET','SECRET:PAYMENT_API_SECRET','SECRET:STRIPE_SECRET_KEY','SECRET:STRIPE_PUBLISHABLE_KEY','SECRET:STRIPE_WEBHOOK_SECRET','SECRET:STRIPE_DASHBOARD','SECRET:STRIPE_FEES_COLLECTOR','SECRET:STRIPE_LOSSES_COLLECTOR','SECRET:APP_BASE_URL','STRIPE_CHARGES_ADAPTER','STRIPE_PAYOUT_ADAPTER','SECURITY_CODE_DELIVERY','CORS_ORIGIN','BACKUP_R2']);
   const blocking=checks.filter(x=>blockingCodes.has(x.code)&&x.status!=='OK');
   const overall=blocking.length===0 && result.blocking===0;
   for(const c of extra){
