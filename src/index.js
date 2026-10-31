@@ -1610,25 +1610,52 @@ async function supraDomains(request, env) {
   return json({ok:true,version:VERSION,engine:'PROCHELIA_SUPRA_ORCHESTRATOR_V2',domains:procheliaV7.getSupraDomainRegistry()},200);
 }
 
+function isPlainRecord(value) {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
 async function supraPlan(request, env) {
   // Le plan de pilotage transversal expose des informations stratégiques : Gérante uniquement.
-  // Des vues filtrées par rôle seront ajoutées séparément avec leurs tests de propriété.
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
-  if(request.method!=='POST') return json({ok:false,error:'METHOD_NOT_ALLOWED',version:VERSION},405);
-  const body=await readJson(request)||{};
+  if(request.method!=='POST') return json({ok:false,error:'METHOD_NOT_ALLOWED',version:VERSION},405,{'allow':'POST'});
+  const contentLength=Number(request.headers.get('content-length')||0);
+  if(Number.isFinite(contentLength) && contentLength>16384) {
+    return json({ok:false,error:'REQUEST_TOO_LARGE',version:VERSION},413);
+  }
+  const body=await readJson(request);
+  if(!isPlainRecord(body)) return json({ok:false,error:'INVALID_JSON_OBJECT',version:VERSION},400);
+  const caseType=typeof body.case_type==='string'?body.case_type.trim():'analyse_generale';
+  const domain=typeof body.domain==='string'?body.domain.trim():undefined;
+  const action=typeof body.action==='string'?body.action.trim().toUpperCase():'ANALYZE_AND_PROPOSE';
+  const impact=typeof body.impact==='string'?body.impact.trim().toUpperCase():'LOW';
+  const market=typeof body.market==='string'?body.market.trim().toLowerCase():'fr';
+  if(!caseType || caseType.length>100 || !/^[A-Z0-9_]{2,64}$/.test(action) ||
+     !['LOW','MEDIUM','HIGH','CRITICAL'].includes(impact) ||
+     !/^[a-z]{2}(-[A-Z]{2})?$/.test(market) ||
+     (domain!==undefined && domain.length>60) ||
+     (body.context!==undefined && !isPlainRecord(body.context)) ||
+     (body.evidence!==undefined && !isPlainRecord(body.evidence))) {
+    return json({ok:false,error:'INVALID_SUPRA_PLAN_INPUT',version:VERSION},400);
+  }
+  const context=body.context||{};
+  const evidence=body.evidence||{};
   const plan=procheliaV7.buildSupraPlan({
-    caseType:clean(body.case_type)||'analyse_generale',
-    domain:clean(body.domain),
-    impact:String(body.impact||'LOW').toUpperCase(),
-    requestedAction:clean(body.action)||'ANALYZE_AND_PROPOSE',
-    market:clean(body.market)||'fr',
-    context:body.context||{}
+    caseType,domain,impact,requestedAction:action,market,context
   });
   const governance=procheliaV7.assessSupraDecision({
     caseType:plan.caseType,impact:plan.impact,requestedAction:plan.requestedAction,
-    actorRole:gate.auth.user.role,context:body.context||{}
+    actorRole:gate.auth.user.role,context,evidence
   });
-  return json({ok:true,version:VERSION,plan,governance},200);
+  const missingEvidence=[...new Set([...(plan.missingEvidence||[]),...(governance.missingEvidence||[])])];
+  return json({
+    ok:true,version:VERSION,plan:{
+      ...plan,
+      missingEvidence,
+      executionAllowed:false,
+      autonomy:{...plan.autonomy,executionAdapterReady:false}
+    },
+    governance
+  },200);
 }
 
 async function handleConsolidated(request, env) {
