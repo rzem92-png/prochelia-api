@@ -5,12 +5,13 @@ Dernière révision : 31 octobre 2026
 ## État vérifié
 
 - La validation GitHub de l'API exécute la syntaxe, le bundle Wrangler en mode `--dry-run` et les tests Node.
-- Le dernier passage complet connu a réussi : 41 tests / 41, aucun échec.
-- Le contrôle de bundle utilise le fichier `wrangler.jsonc`.
-- Ce fichier référence actuellement la base D1 de production.
-- Aucun identifiant D1 de préproduction distinct n'a été fourni ou vérifié.
-- L'aperçu Cloudflare Workers a échoué sur des commits récents ; le journal Cloudflare détaillé doit être consulté pour identifier la cause exacte.
-- L'interface Pages a un aperçu publié, mais le raccordement réel à une API isolée n'est pas encore validé.
+- Le contrôle CI exécute la syntaxe, les bundles Wrangler en dry-run (configuration production et configuration preview) et la suite complète de tests Node.
+- Le run `41183435612` a réussi sur le commit `340a8a30a21fe07dc3474b127b94a54dff747246`, après correction des assertions de tests devenues obsolètes.
+- `wrangler.jsonc` référence la D1 de production ; son usage CI est strictement limité au dry-run.
+- `wrangler.preview.jsonc` référence un Worker et une D1 dédiés à la preview ; l'identifiant preview est différent de celui de production.
+- Un workflow manuel dédié valide les identifiants et l'isolation avant un éventuel déploiement preview ; il ne lance aucune migration D1.
+- Un Preview Cloudflare a été confirmé sur le commit `0972c36`. Le Preview des commits plus récents doit encore être confirmé.
+- Le raccordement réel du navigateur Pages à l'API, notamment session, CORS/CSRF et Safari iOS/desktop, n'est pas encore validé.
 
 ## Règle impérative : ne pas déployer la configuration actuelle en préproduction
 
