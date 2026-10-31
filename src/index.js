@@ -1618,11 +1618,13 @@ async function supraPlan(request, env) {
   // Le plan de pilotage transversal expose des informations stratégiques : Gérante uniquement.
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
   if(request.method!=='POST') return json({ok:false,error:'METHOD_NOT_ALLOWED',version:VERSION},405,{'allow':'POST'});
-  const contentLength=Number(request.headers.get('content-length')||0);
-  if(Number.isFinite(contentLength) && contentLength>16384) {
+  const rawBody=await request.text();
+  if(new TextEncoder().encode(rawBody).byteLength>16384) {
     return json({ok:false,error:'REQUEST_TOO_LARGE',version:VERSION},413);
   }
-  const body=await readJson(request);
+  let body;
+  try { body=JSON.parse(rawBody); }
+  catch { return json({ok:false,error:'INVALID_JSON'},400); }
   if(!isPlainRecord(body)) return json({ok:false,error:'INVALID_JSON_OBJECT',version:VERSION},400);
   const caseType=typeof body.case_type==='string'?body.case_type.trim():'analyse_generale';
   const domain=typeof body.domain==='string'?body.domain.trim():undefined;
