@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       backup_run_id:
-        description: "ID du lancement de sauvegarde D1 réussi après les migrations du 30/10/2026 à 21:00 UTC"
+        description: "ID de la sauvegarde D1 réussie après les migrations du 30/10/2026 à 21:00 UTC"
         required: true
         type: string
       confirm_isolated_test:
@@ -57,13 +57,19 @@ jobs:
           [[ "$count" == "1" ]] || { echo "::error::Nom/UUID de la base v2 non confirmés ; aucune écriture."; exit 1; }
           echo "Jeton actif et cible D1 v2 exacte confirmée."
 
-      - name: Vérifier que le lancement de sauvegarde est réussi et télécharger son archive
+      - name: Vérifier le lancement, télécharger et authentifier l’archive
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          gh run view "$BACKUP_RUN_ID" --repo "$GITHUB_REPOSITORY" --json conclusion,name --jq 'select(.conclusion == "success") | .name' | grep -F "sauvegarde D1 préproduction"
+          run_json="$RUNNER_TEMP/backup-run.json"
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$BACKUP_RUN_ID" > "$run_json"
+          jq -e '.conclusion == "success" and .path == ".github/workflows/backup-preview-d1.yml" and .event == "workflow_dispatch"' "$run_json" >/dev/null || { echo "::error::Le run fourni n’est pas une sauvegarde manuelle réussie du workflow attendu."; exit 1; }
+          run_created="$(jq -r '.created_at' "$run_json")"
+          run_epoch="$(date -u -d "$run_created" +%s)"
+          cutoff="$(date -u -d '2026-10-30T21:00:00Z' +%s)"
+          (( run_epoch > cutoff )) || { echo "::error::Run de sauvegarde antérieur aux migrations ; restauration refusée."; exit 1; }
           mkdir -p "$RUNNER_TEMP/prochelia-restore"
           gh run download "$BACKUP_RUN_ID" --repo "$GITHUB_REPOSITORY" --name "prochelia-preview-d1-encrypted-$BACKUP_RUN_ID" --dir "$RUNNER_TEMP/prochelia-restore"
           test -s "$RUNNER_TEMP/prochelia-restore/prochelia-preview.sql.gpg"
@@ -71,12 +77,11 @@ jobs:
           grep -Fx 'database=prochelia-preview-db' "$RUNNER_TEMP/prochelia-restore/README.txt"
           created="$(sed -n 's/^created_utc=//p' "$RUNNER_TEMP/prochelia-restore/README.txt")"
           [[ -n "$created" ]]
-          epoch="$(date -u -d "$created" +%s)"
-          cutoff="$(date -u -d '2026-10-30T21:00:00Z' +%s)"
-          (( epoch > cutoff )) || { echo "::error::Sauvegarde antérieure aux migrations du 30/10/2026 à 21:00 UTC ; restauration refusée."; exit 1; }
-          echo "Archive de préproduction récente confirmée."
+          archive_epoch="$(date -u -d "$created" +%s)"
+          (( archive_epoch > cutoff && archive_epoch <= run_epoch + 300 )) || { echo "::error::Horodatage de l’archive incohérent ou antérieur aux migrations."; exit 1; }
+          echo "Archive de préproduction postérieure aux migrations confirmée."
 
-      - name: Déchiffrer et contrôler l’export SQL
+      - name: Déchiffrer et contrôler le fichier SQL
         shell: bash
         env:
           BACKUP_ENCRYPTION_KEY: ${{ secrets.BACKUP_ENCRYPTION_KEY }}
@@ -88,7 +93,10 @@ jobs:
           test -s "$sql"
           grep -Eiq 'CREATE TABLE|INSERT INTO|CREATE INDEX|PRAGMA' "$sql" || { echo "::error::Export SQL invalide."; exit 1; }
           chmod 600 "$sql"
-          echo "Déchiffrement réussi ; contenu SQL non affiché."
+          for table in d1_migrations pricing_holidays users missions pricing_policies payment_wallet_ledger; do
+            grep -Eiq "CREATE TABLE .*[\"\x60]?${table}[\"\x60]?([ (]|$)" "$sql" || { echo "::error::Table attendue absente de l’archive : $table"; exit 1; }
+          done
+          echo "Déchiffrement réussi et tables structurantes retrouvées."
 
       - name: Installer Node.js
         uses: actions/setup-node@v5
@@ -136,10 +144,9 @@ jobs:
           npx --yes wrangler@4 d1 execute "$RESTORE_DB_NAME" --remote --command="PRAGMA quick_check;" --json > "$RUNNER_TEMP/quick-check.json"
           jq -e '[.. | strings] | any(. == "ok")' "$RUNNER_TEMP/quick-check.json" >/dev/null || { echo "::error::PRAGMA quick_check n’a pas confirmé l’intégrité."; cat "$RUNNER_TEMP/quick-check.json"; exit 1; }
           npx --yes wrangler@4 d1 execute "$RESTORE_DB_NAME" --remote --command="SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT GLOB '_cf_*' ORDER BY name;" --json > "$RUNNER_TEMP/tables.json"
-          npx --yes wrangler@4 d1 execute "$RESTORE_DB_NAME" --remote --command="SELECT COUNT(*) AS migration_count FROM d1_migrations; SELECT COUNT(*) AS holiday_count FROM pricing_holidays;" --json > "$RUNNER_TEMP/counts.json"
-          jq -e '[.. | objects | select(has("results")) | .results[]? | .name? // empty] | map(select(type == "string")) | unique | length >= 20' "$RUNNER_TEMP/tables.json" >/dev/null || { echo "::error::Nombre de tables restaurées inférieur au seuil attendu."; exit 1; }
-          jq -e '[.. | objects | select(has("results")) | .results[]? | to_entries[]? | select(.key == "migration_count") | .value] | any(. == 4)' "$RUNNER_TEMP/counts.json" >/dev/null || { echo "::error::Les 4 migrations attendues ne sont pas confirmées."; cat "$RUNNER_TEMP/counts.json"; exit 1; }
-          jq -e '[.. | objects | select(has("results")) | .results[]? | to_entries[]? | select(.key == "holiday_count") | .value] | any(. == 55)' "$RUNNER_TEMP/counts.json" >/dev/null || { echo "::error::Les 55 jours fériés attendus ne sont pas confirmés."; cat "$RUNNER_TEMP/counts.json"; exit 1; }
-          echo "Intégrité SQLite OK ; au moins 20 tables, 4 migrations et 55 jours fériés confirmés."
+          jq -e '[.. | objects | select(has("results")) | .results[]? | .name? // empty] | map(select(type == "string")) | unique | length == 24' "$RUNNER_TEMP/tables.json" >/dev/null || { echo "::error::Le nombre exact de tables attendu (24) n’est pas confirmé."; cat "$RUNNER_TEMP/tables.json"; exit 1; }
+          npx --yes wrangler@4 d1 execute "$RESTORE_DB_NAME" --remote --command="SELECT (SELECT COUNT(*) FROM d1_migrations) AS migration_count, (SELECT COUNT(*) FROM pricing_holidays) AS holiday_count;" --json > "$RUNNER_TEMP/counts.json"
+          jq -e '[.. | objects | select(has("results")) | .results[]? | select(.migration_count == 4 and .holiday_count == 55)] | any' "$RUNNER_TEMP/counts.json" >/dev/null || { echo "::error::Les 4 migrations ou les 55 jours fériés ne correspondent pas."; cat "$RUNNER_TEMP/counts.json"; exit 1; }
+          echo "SUCCÈS : intégrité SQLite OK, 24 tables, 4 migrations, 55 jours fériés."
           cat "$RUNNER_TEMP/tables.json"
           cat "$RUNNER_TEMP/counts.json"
