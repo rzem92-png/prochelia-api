@@ -1,5 +1,5 @@
 import { handleV7Route } from "./v7-routes.js";
-import { stripePost, verifyStripeSignature } from "./stripe.js";
+import { stripePost, stripeGet, verifyStripeSignature } from "./stripe.js";
 // PROCHÉLIA — INDEX BACKEND CONSOLIDÉ UNIQUE
 // Référence de consolidation : V14.1 Finance + sécurité/RBAC existants.
 // Généré le 19/10/2026. À déployer uniquement après recette avec la vraie base D1.
@@ -904,11 +904,17 @@ async function paymentOnboard(request, env) {
   let accountId=clean(existing?.provider_account_id);
   try {
     if(!accountId) {
-      const account=await stripePost(env,'accounts',{
-        type:'express',
-        country:'FR',
-        email:auth.user.email,
-        'capabilities[transfers][requested]':'true',
+      const displayName=[auth.user.first_name,auth.user.last_name].filter(Boolean).join(' ').slice(0,120);
+      const account=await stripePost(env,'v2/core/accounts',{
+        contact_email:auth.user.email,
+        display_name:displayName||auth.user.email,
+        dashboard:'express',
+        'identity[country]':'FR',
+        'identity[entity_type]':'individual',
+        'configuration[recipient][capabilities][stripe_balance][stripe_transfers][requested]':'true',
+        'defaults[currency]':'eur',
+        'defaults[responsibilities][fees_collector]':'application',
+        'defaults[responsibilities][losses_collector]':'application',
         'metadata[prochelia_user_id]':auth.user.id
       },'prochelia-connect-account-'+auth.user.id);
       accountId=clean(account?.id);
@@ -924,11 +930,13 @@ async function paymentOnboard(request, env) {
     }
     const refreshUrl=new URL('/',appBase); refreshUrl.searchParams.set('stripe_onboarding','refresh');
     const returnUrl=new URL('/',appBase); returnUrl.searchParams.set('stripe_onboarding','return');
-    const link=await stripePost(env,'account_links',{
+    const link=await stripePost(env,'v1/account_links',{
       account:accountId,
-      refresh_url:refreshUrl.toString(),
-      return_url:returnUrl.toString(),
-      type:'account_onboarding'
+      'use_case[type]':'account_onboarding',
+      'use_case[account_onboarding][configurations][0]':'recipient',
+      'use_case[account_onboarding][refresh_url]':refreshUrl.toString(),
+      'use_case[account_onboarding][return_url]':returnUrl.toString(),
+      'use_case[account_onboarding][collection_options][fields]':'eventually_due'
     },'prochelia-connect-link-'+auth.user.id+'-'+crypto.randomUUID());
     if(!link?.url) throw new Error('STRIPE_ACCOUNT_LINK_MISSING');
     return json({ok:true,version:VERSION,provider:'stripe',account_id:accountId,onboarding_status:'required',onboarding_url:link.url,expires_at:link.expires_at,next:'COMPLETE_STRIPE_CONNECT_ONBOARDING'},201);
@@ -1055,13 +1063,13 @@ async function paymentWebhook(request, env) {
   const txId=isStripe?clean(stripeObject?.metadata?.prochelia_transaction_id):clean(event?.data?.transaction_id);
   const payoutId=isStripe?clean(stripeObject?.metadata?.prochelia_payout_id):clean(event?.data?.payout_id);
   const providerPaymentId=isStripe?clean(stripeObject?.id):clean(event?.data?.provider_payment_id);
-  if(isStripe && originalType==='account.updated' && clean(stripeObject?.id)){
-    const chargesEnabled=!!stripeObject.charges_enabled?1:0;
-    const payoutsEnabled=!!stripeObject.payouts_enabled?1:0;
-    const detailsSubmitted=!!stripeObject.details_submitted?1:0;
-    const status=payoutsEnabled&&detailsSubmitted?'active':'pending';
-    const onboardingStatus=detailsSubmitted?'submitted':'required';
-    await env.DB.prepare(`UPDATE payment_accounts SET charges_enabled=?,payouts_enabled=?,status=?,onboarding_status=?,updated_at=CURRENT_TIMESTAMP WHERE provider='stripe' AND provider_account_id=?`).bind(chargesEnabled,payoutsEnabled,status,onboardingStatus,stripeObject.id).run();
+  if(isStripe && originalType==='v2.core.account[requirements].updated' && clean(stripeObject?.id)){
+    const account=await stripeGet(env,'v2/core/accounts/'+clean(stripeObject.id));
+    const transferStatus=account?.configuration?.recipient?.capabilities?.stripe_balance?.stripe_transfers?.status;
+    const payoutsEnabled=transferStatus==='active'?1:0;
+    const status=payoutsEnabled?'active':'pending';
+    const onboardingStatus=payoutsEnabled?'submitted':'required';
+    await env.DB.prepare(`UPDATE payment_accounts SET charges_enabled=0,payouts_enabled=?,status=?,onboarding_status=?,updated_at=CURRENT_TIMESTAMP WHERE provider='stripe' AND provider_account_id=?`).bind(payoutsEnabled,status,onboardingStatus,stripeObject.id).run();
   }
   if(txId){
     const tx=await env.DB.prepare('SELECT * FROM payment_transactions WHERE id=? LIMIT 1').bind(txId).first();
