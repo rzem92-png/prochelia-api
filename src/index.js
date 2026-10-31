@@ -876,7 +876,7 @@ function paymentProvider(env) {
 
 function paymentsConfigured(env) {
   const provider=paymentProvider(env);
-  if(provider==='stripe') return !!env.STRIPE_SECRET_KEY && !!env.STRIPE_WEBHOOK_SECRET && !!env.APP_BASE_URL;
+  if(provider==='stripe') return !!env.STRIPE_SECRET_KEY && !!env.STRIPE_WEBHOOK_SECRET && !!env.APP_BASE_URL && false;
   return !!env.PAYMENT_WEBHOOK_SECRET && !!env.PAYMENT_API_SECRET && !!env.PAYMENT_PROVIDER;
 }
 
@@ -897,7 +897,7 @@ async function paymentOnboard(request, env) {
   await ensurePaymentSchema(env);
   const existing = await env.DB.prepare('SELECT * FROM payment_accounts WHERE user_id=? LIMIT 1').bind(auth.user.id).first();
   if(existing && existing.provider!=='stripe') return json({ok:false,error:'PAYMENT_PROVIDER_CONFLICT',version:VERSION},409);
-  if(existing && Number(existing.payouts_enabled)===1 && Number(existing.charges_enabled)===1) {
+  if(existing && Number(existing.payouts_enabled)===1 && existing.onboarding_status==='submitted') {
     return json({ok:true,version:VERSION,provider:'stripe',account_id:existing.provider_account_id,onboarding_status:'complete',already_connected:true},200);
   }
   let accountId=clean(existing?.provider_account_id);
@@ -1055,7 +1055,7 @@ async function paymentWebhook(request, env) {
     const chargesEnabled=!!stripeObject.charges_enabled?1:0;
     const payoutsEnabled=!!stripeObject.payouts_enabled?1:0;
     const detailsSubmitted=!!stripeObject.details_submitted?1:0;
-    const status=chargesEnabled&&payoutsEnabled?'active':'pending';
+    const status=payoutsEnabled&&detailsSubmitted?'active':'pending';
     const onboardingStatus=detailsSubmitted?'submitted':'required';
     await env.DB.prepare(`UPDATE payment_accounts SET charges_enabled=?,payouts_enabled=?,status=?,onboarding_status=?,updated_at=CURRENT_TIMESTAMP WHERE provider='stripe' AND provider_account_id=?`).bind(chargesEnabled,payoutsEnabled,status,onboardingStatus,stripeObject.id).run();
   }
