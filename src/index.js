@@ -1514,18 +1514,36 @@ async function handleBase(request, env) {
   if (url.pathname === '/api/readiness') {
     if (request.method !== 'GET') return json({ ok: false, ready: false, database: false, version: VERSION }, 503);
     if (!env.DB) return json({ ok: false, ready: false, database: false, version: VERSION }, 503);
-    const h = await env.DB.prepare('SELECT 1 AS ok').first();
-    const s = await env.DB.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='missions';").first();
-    const u = await env.DB.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='users';").first();
-    return json({
-      ok: true,
-      ready: h?.ok === 1 && !!s?.sql && !!u?.sql,
-      database: h?.ok === 1,
-      missions_schema: !!s?.sql,
-      users_schema: !!u?.sql,
-      writes: false,
-      version: VERSION
-    });
+    // Read-only schema inventory. Missing tables block readiness; this endpoint
+    // never creates, repairs, or migrates database objects.
+    const requiredTables = [
+      'users', 'sessions', 'missions', 'pricing_policies',
+      'payment_transactions', 'payment_webhook_events',
+      'identity_verifications', 'security_audit',
+      'trust_service_catalog', 'copilot_interactions',
+      'backup_runs', 'document_security_scans'
+    ];
+    try {
+      const h = await env.DB.prepare('SELECT 1 AS ok').first();
+      const rows = await env.DB.prepare(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name IN (" +
+        requiredTables.map(() => '?').join(',') + ")"
+      ).bind(...requiredTables).all();
+      const present = new Set((rows.results || []).map(row => String(row.name)));
+      const missingTables = requiredTables.filter(name => !present.has(name));
+      const database = h?.ok === 1;
+      const ready = database && missingTables.length === 0;
+      return json({
+        ok: true,
+        ready,
+        database,
+        schema: { required_tables: requiredTables, present_tables: requiredTables.filter(name => present.has(name)), missing_tables: missingTables },
+        writes: false,
+        version: VERSION
+      }, ready ? 200 : 503);
+    } catch {
+      return json({ ok: false, ready: false, database: false, error: 'READINESS_SCHEMA_CHECK_FAILED', writes: false, version: VERSION }, 503);
+    }
   }
 
   if (url.pathname === '/api/info') {
