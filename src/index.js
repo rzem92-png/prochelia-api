@@ -1922,9 +1922,23 @@ async function supraPlan(request, env) {
   // Le plan de pilotage transversal expose des informations stratégiques : Gérante uniquement.
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
   if(request.method!=='POST') return json({ok:false,error:'METHOD_NOT_ALLOWED',version:VERSION},405,{'allow':'POST'});
-  const rawBody=await request.text();
-  if(new TextEncoder().encode(rawBody).byteLength>16384) {
-    return json({ok:false,error:'REQUEST_TOO_LARGE',version:VERSION},413);
+  // Enforce the limit while streaming; do not buffer an attacker-sized body first.
+  const reader=request.body?.getReader();
+  const decoder=new TextDecoder();
+  let rawBody='';
+  let receivedBytes=0;
+  if(reader) {
+    while(true) {
+      const chunk=await reader.read();
+      if(chunk.done) break;
+      receivedBytes+=chunk.value.byteLength;
+      if(receivedBytes>16384) {
+        await reader.cancel().catch(()=>{});
+        return json({ok:false,error:'REQUEST_TOO_LARGE',version:VERSION},413);
+      }
+      rawBody+=decoder.decode(chunk.value,{stream:true});
+    }
+    rawBody+=decoder.decode();
   }
   let body;
   try { body=JSON.parse(rawBody); }
