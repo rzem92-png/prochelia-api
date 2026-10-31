@@ -52,3 +52,42 @@ test("simulation de crise valide calcule marge et runway sans action réelle", (
 test("simulation rejette les hypothèses incohérentes", () => {
   assert.deepEqual(simulateResilience({ monthlyRevenueCents: -1 }), { ok: false, error: "INVALID_SCENARIO_INPUT" });
 });
+
+test("malformed decision inputs fail closed without throwing", () => {
+  for (const value of [null, "bad", 7, [], { context: [] }]) {
+    const result = assessSupraDecision(value);
+    assert.equal(result.executionAllowed, false);
+    assert.equal(result.managerApprovalRequired, true);
+    assert.equal(result.decisionOwner, "GERANTE");
+  }
+});
+
+test("unknown impact fails closed", () => {
+  const result = assessSupraDecision({ requestedAction: "GENERATE_SUMMARY", impact: "EXTREME", actorRole: "gerante" });
+  assert.equal(result.executionAllowed, false);
+  assert.equal(result.managerApprovalRequired, true);
+});
+
+test("accented and punctuated emergency case names are normalized", () => {
+  const result = assessSupraDecision({ caseType: "Urgence médicale !!!", impact: "LOW" });
+  assert.equal(result.professionalEscalationRequired, true);
+  assert.equal(result.executionAllowed, false);
+});
+
+test("resilience rejects malformed and unsafe integer monetary inputs", () => {
+  assert.equal(simulateResilience(null).ok, false);
+  assert.equal(simulateResilience("bad").ok, false);
+  assert.equal(simulateResilience({ monthlyRevenueCents: Number.MAX_SAFE_INTEGER + 1, monthlyFixedCostsCents: 0, variableCostRate: 0.2, cashCents: 0 }).ok, false);
+});
+
+test("resilience rejects arithmetic overflow rather than returning misleading figures", () => {
+  const result = simulateResilience({
+    monthlyRevenueCents: Number.MAX_SAFE_INTEGER,
+    monthlyFixedCostsCents: Number.MAX_SAFE_INTEGER,
+    variableCostRate: 1,
+    cashCents: 0,
+    costShockRate: 2
+  });
+  assert.equal(result.ok, false);
+  assert.equal(result.error, "SCENARIO_AMOUNT_OVERFLOW");
+});
