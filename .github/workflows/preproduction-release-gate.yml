@@ -1,6 +1,9 @@
 name: PROCHÉLIA — preproduction release gate (fail closed)
 
 on:
+  push:
+    branches:
+      - audit/preprod-release-gate-20261031
   pull_request:
     branches:
       - prelaunch/v14.5.7-consolidation-audit
