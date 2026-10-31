@@ -310,3 +310,17 @@ test("posted accounting operations and their lines cannot be modified or deleted
   assert.match(source,/trg_accounting_lines_immutable_delete BEFORE DELETE ON accounting_operation_lines/);
   assert.match(source,/trg_accounting_lines_no_late_insert BEFORE INSERT ON accounting_operation_lines/);
 });
+
+
+test("mission payment idempotency keys are bound to the exact original request", () => {
+  const start = source.indexOf("async function createMissionPayment");
+  const end = source.indexOf("async function finalizeMissionPayment", start);
+  const handler = source.slice(start, end);
+  assert.match(handler,/IDEMPOTENCY_KEY_TOO_LONG/);
+  assert.match(handler,/old\.mission_id===missionId/);
+  assert.match(handler,/old\.client_id===clientId/);
+  assert.match(handler,/old\.intervenant_id===intervenantId/);
+  assert.match(handler,/Number\(old\.gross_cents\)===gross/);
+  assert.match(handler,/Number\(old\.commission_cents\)===commission/);
+  assert.match(handler,/IDEMPOTENCY_KEY_CONFLICT/);
+});
