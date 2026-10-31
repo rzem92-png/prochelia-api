@@ -269,3 +269,14 @@ test("manual payment finalization cannot alter financial state or wallet balance
   assert.doesNotMatch(route,/UPDATE wallets SET/);
   assert.doesNotMatch(route,/UPDATE payment_transactions SET/);
 });
+
+
+test("accounting ledger rejects invalid entries and is append-only", () => {
+  assert.match(source,/trg_ledger_validate_insert BEFORE INSERT ON accounting_ledger/);
+  assert.match(source,/NEW\.amount_cents<=0/);
+  assert.match(source,/NEW\.direction NOT IN \('DEBIT','CREDIT'\)/);
+  assert.match(source,/NEW\.currency NOT GLOB '\[A-Z\]\[A-Z\]\[A-Z\]'/);
+  assert.match(source,/trg_ledger_immutable_update BEFORE UPDATE ON accounting_ledger/);
+  assert.match(source,/trg_ledger_immutable_delete BEFORE DELETE ON accounting_ledger/);
+  assert.match(source,/ACCOUNTING_LEDGER_IMMUTABLE/);
+});
