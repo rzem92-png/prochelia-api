@@ -23,35 +23,34 @@ function makeEnv(role="gerante", userId="user-manager") {
   const DB={
     prepare(sql) {
       calls.push(sql);
-      return {
-        bind(...args) {
-          return {
-            async first() {
-              if (sql.includes("FROM sessions s")) return sessionUser;
-              return null;
-            },
-            async all() {
-              if (sql.includes("FROM clients c JOIN users u")) {
-                const rows=sql.includes("WHERE c.user_id=?") ? clients.filter(x=>x.user_id===args[0]) : clients;
-                return {results:rows};
-              }
-              if (sql.includes("FROM intervenants i JOIN users u")) {
-                let rows=providers;
-                if (sql.includes("WHERE u.status='active'")) rows=rows.filter(x=>x.user_status==="active" && x.validation_status==="approved");
-                if (sql.includes("WHERE i.user_id=?")) rows=rows.filter(x=>x.user_id===args[0]);
-                return {results:rows};
-              }
-              if (sql.includes("FROM disponibilites")) return {results:[]};
-              return {results:[]};
-            }
-          };
+      const statement={
+        args:[],
+        bind(...args){this.args=args;return this;},
+        async first(){
+          if(sql.includes("FROM sessions s")) return sessionUser;
+          return null;
+        },
+        async all(){
+          const args=this.args;
+          if(sql.includes("FROM clients c JOIN users u")) {
+            const rows=sql.includes("WHERE c.user_id=?") ? clients.filter(x=>x.user_id===args[0]) : clients;
+            return {results:rows};
+          }
+          if(sql.includes("FROM intervenants i JOIN users u")) {
+            let rows=providers;
+            if(sql.includes("WHERE u.status='active'")) rows=rows.filter(x=>x.user_status==="active" && x.validation_status==="approved");
+            if(sql.includes("WHERE i.user_id=?")) rows=rows.filter(x=>x.user_id===args[0]);
+            return {results:rows};
+          }
+          if(sql.includes("FROM disponibilites")) return {results:[]};
+          return {results:[]};
         }
       };
+      return statement;
     }
   };
   return {DB,calls};
 }
-
 async function get(path, env) {
   return worker.fetch(new Request(base+path,{headers:{Cookie:cookie}}),env);
 }
