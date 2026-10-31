@@ -8,7 +8,7 @@ import { canAutoResolveSupportScenario } from "./copilot-action-policy.js";
 // Les écritures de missions restent volontairement désactivées tant que la chaîne
 // authentification/RBAC/idempotence/contrôles métier n'a pas été validée.
 
-const VERSION = 'V14.5.7-EXPERT-PREPRODUCTION';
+const VERSION = 'V14.5.8-EXPERT-PREPRODUCTION';
 const SECURITY_CODE_TTL_SECONDS = 15 * 60;
 const SECURITY_MAX_ATTEMPTS = 5;
 const SECURITY_LOCK_SECONDS = 15 * 60;
@@ -1514,18 +1514,36 @@ async function handleBase(request, env) {
   if (url.pathname === '/api/readiness') {
     if (request.method !== 'GET') return json({ ok: false, ready: false, database: false, version: VERSION }, 503);
     if (!env.DB) return json({ ok: false, ready: false, database: false, version: VERSION }, 503);
-    const h = await env.DB.prepare('SELECT 1 AS ok').first();
-    const s = await env.DB.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='missions';").first();
-    const u = await env.DB.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='users';").first();
-    return json({
-      ok: true,
-      ready: h?.ok === 1 && !!s?.sql && !!u?.sql,
-      database: h?.ok === 1,
-      missions_schema: !!s?.sql,
-      users_schema: !!u?.sql,
-      writes: false,
-      version: VERSION
-    });
+    // Read-only schema inventory. Missing tables block readiness; this endpoint
+    // never creates, repairs, or migrates database objects.
+    const requiredTables = [
+      'users', 'sessions', 'missions', 'pricing_policies',
+      'payment_transactions', 'payment_webhook_events',
+      'identity_verifications', 'security_audit',
+      'trust_service_catalog', 'copilot_interactions',
+      'backup_runs', 'document_security_scans'
+    ];
+    try {
+      const h = await env.DB.prepare('SELECT 1 AS ok').first();
+      const rows = await env.DB.prepare(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name IN (" +
+        requiredTables.map(() => '?').join(',') + ")"
+      ).bind(...requiredTables).all();
+      const present = new Set((rows.results || []).map(row => String(row.name)));
+      const missingTables = requiredTables.filter(name => !present.has(name));
+      const database = h?.ok === 1;
+      const ready = database && missingTables.length === 0;
+      return json({
+        ok: true,
+        ready,
+        database,
+        schema: { required_tables: requiredTables, present_tables: requiredTables.filter(name => present.has(name)), missing_tables: missingTables },
+        writes: false,
+        version: VERSION
+      }, ready ? 200 : 503);
+    } catch {
+      return json({ ok: false, ready: false, database: false, error: 'READINESS_SCHEMA_CHECK_FAILED', writes: false, version: VERSION }, 503);
+    }
   }
 
   if (url.pathname === '/api/info') {
@@ -4790,7 +4808,9 @@ async function productionSafetySchema(env){
 }
 
 async function productionSubjectHash(request, route){
-  const ip=clean(request.headers.get('CF-Connecting-IP')) || clean(request.headers.get('X-Forwarded-For')) || 'unknown';
+  // Trust only Cloudflare's edge-provided client IP. Never fall back to client-controlled X-Forwarded-For.
+  const ip=clean(request.headers.get('CF-Connecting-IP'));
+  if(!ip) return null;
   return sha256Hex(`${ip}|${route}`);
 }
 
@@ -4818,17 +4838,24 @@ async function productionRateLimit(request,env){
   const windowSeconds=60;
   const bucket=`${sensitive?'SENSITIVE':'GENERAL'}:${path}`;
   const subject=await productionSubjectHash(request,path);
+  if(!subject){
+    return {ok:false,response:json({ok:false,error:'TRUSTED_CLIENT_IP_UNAVAILABLE',version:VERSION},503,{'retry-after':'60'})};
+  }
   const now=Math.floor(Date.now()/1000);
   const start=new Date(Math.floor(now/windowSeconds)*windowSeconds*1000).toISOString();
   if(!(await productionRateLimitSchemaReady(env))){
     return {ok:false,response:json({ok:false,error:'RATE_LIMIT_SCHEMA_NOT_READY',version:VERSION},503,{'retry-after':'60'})};
   }
-  const existing=await env.DB.prepare(`SELECT request_count FROM security_rate_limits WHERE bucket=? AND subject_hash=? AND window_start=? LIMIT 1`).bind(bucket,subject,start).first();
-  const count=Number(existing?.request_count||0)+1;
-  if(existing){
-    await env.DB.prepare(`UPDATE security_rate_limits SET request_count=? WHERE bucket=? AND subject_hash=? AND window_start=?`).bind(count,bucket,subject,start).run();
-  }else{
-    await env.DB.prepare(`INSERT INTO security_rate_limits(id,bucket,subject_hash,window_start,request_count) VALUES(?,?,?,?,1)`).bind(crypto.randomUUID(),bucket,subject,start).run();
+  // Atomic increment: the unique bucket/subject/window key prevents lost updates
+  // when multiple requests hit the same rate-limit bucket concurrently.
+  const counter=await env.DB.prepare(`INSERT INTO security_rate_limits(id,bucket,subject_hash,window_start,request_count)
+    VALUES(?,?,?,?,1)
+    ON CONFLICT(bucket,subject_hash,window_start)
+    DO UPDATE SET request_count=security_rate_limits.request_count+1
+    RETURNING request_count`).bind(crypto.randomUUID(),bucket,subject,start).first();
+  const count=Number(counter?.request_count||0);
+  if(!Number.isSafeInteger(count)||count<1){
+    return {ok:false,response:json({ok:false,error:'RATE_LIMIT_COUNTER_FAILED',version:VERSION},503,{'retry-after':'60'})};
   }
   if(count>limit){
     // Emit a structured platform log without creating tables or writing an

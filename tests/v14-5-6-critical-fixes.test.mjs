@@ -124,7 +124,7 @@ test('Stripe disputes are persisted idempotently for investigation', () => {
 });
 
 test('security and payment hardening is explicitly versioned', () => {
-  assert.match(source, /V14\.5\.7-EXPERT-PREPRODUCTION/);
+  assert.match(source, /V14\.5\.8-EXPERT-PREPRODUCTION/);
 });
 
 
@@ -584,4 +584,19 @@ test('Payout processing notifications never release reserved wallet funds', () =
   assert.match(terminalBranch, /payment_wallet_ledger/);
   assert.match(terminalBranch, /reserved_delta_cents/);
   assert.match(terminalBranch, /PAYOUT_\$\{newStatus\.toUpperCase\(\)\}/);
+});
+
+test('readiness endpoint performs read-only verification of all required module tables and fails closed', () => {
+  const route = source.slice(source.indexOf("url.pathname === '/api/readiness'"), source.indexOf("url.pathname === '/api/info'"));
+  for (const table of [
+    'users', 'sessions', 'missions', 'pricing_policies',
+    'payment_transactions', 'payment_webhook_events',
+    'identity_verifications', 'security_audit',
+    'trust_service_catalog', 'copilot_interactions',
+    'backup_runs', 'document_security_scans'
+  ]) assert.ok(route.includes(table), 'readiness table missing: ' + table);
+  assert.match(route, /missing_tables/);
+  assert.match(route, /ready \? 200 : 503/);
+  assert.match(route, /READINESS_SCHEMA_CHECK_FAILED/);
+  assert.doesNotMatch(route, /CREATE TABLE|DROP TABLE|\.run\(\)/);
 });

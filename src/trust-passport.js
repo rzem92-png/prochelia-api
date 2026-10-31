@@ -23,8 +23,9 @@ function verificationApplies(record, service, category, missionMs) {
   if (normalized(record.status) !== (VERIFIED_STATUS_BY_CATEGORY[category] || 'DOCUMENT_VERIFIED')) return false;
   const scope = String(record.service_code || '').trim();
   const exactScope = scope === String(service.service_code);
-  const approvedGlobalScope = scope === '*' && service.allow_global_scope === true;
-  if (!exactScope && !approvedGlobalScope) return false;
+  // Evidence is never transferable across services. Global wildcard scope is
+  // rejected even if an old catalogue row still contains allow_global_scope.
+  if (!exactScope || scope === '*') return false;
   if (record.valid_from) {
     const start = validInstant(record.valid_from);
     if (start === null || start > missionMs) return false;
@@ -32,8 +33,11 @@ function verificationApplies(record, service, category, missionMs) {
   if (record.expires_at) {
     const expiry = validInstant(record.expires_at);
     if (expiry === null || expiry <= missionMs) return false;
+  } else if (['QUALIFICATION', 'INSURANCE', 'AUTHORIZATION'].includes(category)) {
+    return false;
   }
-  if (record.requires_expiry === true && !record.expires_at) return false;
+  const expiryMandatory = ['QUALIFICATION', 'INSURANCE', 'AUTHORIZATION'].includes(category);
+  if ((record.requires_expiry === true || expiryMandatory) && !record.expires_at) return false;
   return true;
 }
 
@@ -55,7 +59,8 @@ export function evaluateTaskEligibility({ service, profile, verifications, missi
 
   if (reasons.length) return { decision: 'BLOCKED', reasons: [...new Set(reasons)] };
   const records = verifications;
-  const serviceCode = String(service.service_code);
+  const serviceCode = String(service.service_code).trim();
+  if (service.allow_global_scope === true) reasons.push('GLOBAL_EVIDENCE_SCOPE_PROHIBITED');
   if (service.require_identity !== false && !records.some(v => verificationApplies(v, service, 'IDENTITY', missionMs))) {
     reasons.push('IDENTITY_VERIFICATION_REQUIRED');
   }
