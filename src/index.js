@@ -2414,7 +2414,7 @@ async function executeQueuedAction(env, action) {
         reference_type:action.entity_type||null,reference_id:action.entity_id||null};
     } else result={performed:false,reason:'ACTION_TYPE_NOT_IMPLEMENTED'};
 
-    const finalStatus = result.performed ? 'DONE' : (result.requires_provider ? 'WAITING_PROVIDER' : 'FAILED');
+    const finalStatus = result.performed ? 'DONE' : (result.requires_provider ? 'WAITING_PROVIDER' : (result.requires_accounting_batch ? 'WAITING_ACCOUNTING_BATCH' : 'FAILED'));
     await env.DB.prepare(`UPDATE action_outbox SET status=?,result_json=?,attempts=attempts+1,updated_at=CURRENT_TIMESTAMP,executed_at=? WHERE id=?`)
       .bind(finalStatus,JSON.stringify(result),result.performed?now:null,action.id).run();
     return {ok:true,status:finalStatus,result};
