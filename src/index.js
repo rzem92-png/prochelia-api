@@ -951,6 +951,13 @@ async function paymentWebhook(request, env) {
     if(txId){
       const tx=await env.DB.prepare('SELECT * FROM payment_transactions WHERE id=? LIMIT 1').bind(txId).first();
       if(!tx) throw new Error('PAYMENT_TRANSACTION_NOT_FOUND');
+      if(clean(tx.provider)!==provider) throw new Error('PAYMENT_PROVIDER_MISMATCH');
+      if(['payment_succeeded','charge_succeeded'].includes(type)) {
+        const amount=event?.data?.amount_cents, currency=clean(event?.data?.currency)?.toUpperCase();
+        if(!Number.isSafeInteger(amount)||amount!==Number(tx.gross_cents)||currency!==String(tx.currency||'EUR').toUpperCase()) {
+          throw new Error('PSP_PAYMENT_AMOUNT_OR_CURRENCY_MISMATCH');
+        }
+      }
       const statusMap={payment_succeeded:'paid',charge_succeeded:'paid',payment_failed:'failed',charge_failed:'failed',payment_refunded:'refunded'};
       const newStatus=statusMap[type];
       if(newStatus){
@@ -970,6 +977,13 @@ async function paymentWebhook(request, env) {
     if(payoutId){
       const payout=await env.DB.prepare('SELECT * FROM payout_requests WHERE id=? LIMIT 1').bind(payoutId).first();
       if(!payout) throw new Error('PAYOUT_REQUEST_NOT_FOUND');
+      if(clean(payout.provider)!==provider) throw new Error('PAYOUT_PROVIDER_MISMATCH');
+      if(type==='payout_paid') {
+        const amount=event?.data?.amount_cents, currency=clean(event?.data?.currency)?.toUpperCase();
+        if(!Number.isSafeInteger(amount)||amount!==Number(payout.amount_cents)||currency!==String(payout.currency||'EUR').toUpperCase()) {
+          throw new Error('PSP_PAYOUT_AMOUNT_OR_CURRENCY_MISMATCH');
+        }
+      }
       const statusMap={payout_processing:'processing',payout_paid:'completed',payout_failed:'failed',payout_canceled:'canceled'};
       const newStatus=statusMap[type];
       if(newStatus){
