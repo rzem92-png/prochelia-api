@@ -4808,7 +4808,8 @@ async function productionSafetySchema(env){
 }
 
 async function productionSubjectHash(request, route){
-  const ip=clean(request.headers.get('CF-Connecting-IP')) || clean(request.headers.get('X-Forwarded-For')) || 'unknown';
+  // Trust only Cloudflare's edge-provided client IP. Never fall back to client-controlled X-Forwarded-For.
+  const ip=clean(request.headers.get('CF-Connecting-IP')) || 'unknown';
   return sha256Hex(`${ip}|${route}`);
 }
 
@@ -4841,12 +4842,16 @@ async function productionRateLimit(request,env){
   if(!(await productionRateLimitSchemaReady(env))){
     return {ok:false,response:json({ok:false,error:'RATE_LIMIT_SCHEMA_NOT_READY',version:VERSION},503,{'retry-after':'60'})};
   }
-  const existing=await env.DB.prepare(`SELECT request_count FROM security_rate_limits WHERE bucket=? AND subject_hash=? AND window_start=? LIMIT 1`).bind(bucket,subject,start).first();
-  const count=Number(existing?.request_count||0)+1;
-  if(existing){
-    await env.DB.prepare(`UPDATE security_rate_limits SET request_count=? WHERE bucket=? AND subject_hash=? AND window_start=?`).bind(count,bucket,subject,start).run();
-  }else{
-    await env.DB.prepare(`INSERT INTO security_rate_limits(id,bucket,subject_hash,window_start,request_count) VALUES(?,?,?,?,1)`).bind(crypto.randomUUID(),bucket,subject,start).run();
+  // Atomic increment: the unique bucket/subject/window key prevents lost updates
+  // when multiple requests hit the same rate-limit bucket concurrently.
+  const counter=await env.DB.prepare(`INSERT INTO security_rate_limits(id,bucket,subject_hash,window_start,request_count)
+    VALUES(?,?,?,?,1)
+    ON CONFLICT(bucket,subject_hash,window_start)
+    DO UPDATE SET request_count=security_rate_limits.request_count+1
+    RETURNING request_count`).bind(crypto.randomUUID(),bucket,subject,start).first();
+  const count=Number(counter?.request_count||0);
+  if(!Number.isSafeInteger(count)||count<1){
+    return {ok:false,response:json({ok:false,error:'RATE_LIMIT_COUNTER_FAILED',version:VERSION},503,{'retry-after':'60'})};
   }
   if(count>limit){
     // Emit a structured platform log without creating tables or writing an
