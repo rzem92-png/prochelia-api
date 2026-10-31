@@ -29,3 +29,41 @@ jobs:
           node --check security/clamav-gateway/server.mjs
       - name: Critical regression tests
         run: node --test tests/v14-5-6-critical-fixes.test.mjs tests/stripe-adapter.behavior.test.mjs tests/trust-passport.test.mjs tests/trust-passport-runtime.test.mjs tests/backup-retention-policy.test.mjs
+      - name: Wallet ledger SQLite invariants
+        run: |
+          python3 - <<'PY'
+          import sqlite3
+          from pathlib import Path
+          db = sqlite3.connect(":memory:")
+          db.executescript(Path("migrations/0004_atomic_wallet_ledger.sql").read_text())
+          db.execute("INSERT INTO wallets(id,user_id,currency) VALUES('w1','u1','EUR')")
+          def add(key, available=0, pending=0, reserved=0, paid=0, currency='EUR'):
+              db.execute("""INSERT INTO payment_wallet_ledger
+                (id,idempotency_key,user_id,entry_type,available_delta_cents,pending_delta_cents,reserved_delta_cents,paid_delta_cents,currency)
+                VALUES(?,?,?,'TEST',?,?,?,?,?)""",
+                (key,key,'u1',available,pending,reserved,paid,currency))
+          add('credit', available=1000)
+          add('reserve', available=-400, reserved=400)
+          add('settle', reserved=-400, paid=400)
+          assert db.execute("SELECT available_cents,reserved_cents,paid_cents FROM wallets WHERE user_id='u1'").fetchone() == (600,0,400)
+          add('refund', available=-1200)
+          assert db.execute("SELECT available_cents FROM wallets WHERE user_id='u1'").fetchone()[0] == -600
+          for sql, expected in [
+            ("INSERT INTO payment_wallet_ledger(id,idempotency_key,user_id,entry_type,reserved_delta_cents) VALUES('x','x','u1','TEST',-1)", "PAYMENT_WALLET_NEGATIVE_PROTECTED_BALANCE"),
+            ("UPDATE payment_wallet_ledger SET entry_type='EDIT' WHERE id='credit'", "PAYMENT_WALLET_LEDGER_IMMUTABLE"),
+            ("DELETE FROM payment_wallet_ledger WHERE id='credit'", "PAYMENT_WALLET_LEDGER_IMMUTABLE"),
+            ("INSERT INTO payment_wallet_ledger(id,idempotency_key,user_id,entry_type) VALUES('dup','credit','u1','TEST')", "UNIQUE"),
+          ]:
+            try:
+              db.execute(sql)
+              raise AssertionError(f"Expected rejection: {expected}")
+            except sqlite3.IntegrityError as exc:
+              assert expected in str(exc), (expected, str(exc))
+          db.execute("INSERT INTO wallets(id,user_id,currency) VALUES('w2','u2','EUR')")
+          try:
+            db.execute("INSERT INTO payment_wallet_ledger(id,idempotency_key,user_id,entry_type,currency) VALUES('bad','bad','u2','TEST','USD')")
+            raise AssertionError("Currency mismatch accepted")
+          except sqlite3.IntegrityError as exc:
+            assert "PAYMENT_WALLET_NOT_FOUND_OR_CURRENCY_MISMATCH" in str(exc)
+          print("PASS: atomic posting, payout reserve/settle, refund receivable, protected balances, immutable ledger, idempotency, currency isolation")
+          PY
