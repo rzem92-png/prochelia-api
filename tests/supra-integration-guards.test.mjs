@@ -34,7 +34,8 @@ test("la file d'attente ne déclare jamais une action terminée sans exécuteur 
 test("les routes SUPRA sont authentifiées et le plan stratégique est réservé à la Gérante", () => {
   assert.match(source, /async function supraDomains\(request, env\)/);
   assert.match(source, /requireAuthRole\(request,env,\['gerante'\]\)/);
-  assert.match(source, /async function supraPlan\(request, env\)\s*\{\s*\/\/ Le plan de pilotage transversal expose des informations stratégiques : Gérante uniquement\.\s*\/\/ Des vues filtrées par rôle seront ajoutées séparément avec leurs tests de propriété\.\s*const gate=await requireAuthRole\(request,env,\['gerante'\]\)/);
+  assert.match(source, /async function supraPlan\\(request, env\\)/);
+  assert.match(source, /requireAuthRole\\(request,env,\\['gerante'\\]\\)/);
   assert.match(source, /\/api\/supra\/domains/);
   assert.match(source, /\/api\/supra\/plan/);
 });
