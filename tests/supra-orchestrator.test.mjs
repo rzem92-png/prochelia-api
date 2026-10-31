@@ -4,7 +4,7 @@ import { buildSupraPlan, getSupraDomainRegistry } from "../src/supra-orchestrato
 
 test("transversal domain coverage", () => {
  const domains=getSupraDomainRegistry().map(x=>x.domain);
- for (const d of ["direction","finance","comptabilite","tarification","missions","matching","intervenants","clients","entreprises","reclamations","commercial","marketing","securite","rgpd","juridique","international","innovation","crise"]) assert.ok(domains.includes(d),d);
+ for (const d of ["direction","services","talents","live_createurs","opportunites","rentabilite","croissance","finance","comptabilite","tarification","missions","matching","intervenants","clients","entreprises","reclamations","commercial","marketing","securite","rgpd","juridique","international","innovation","crise"]) assert.ok(domains.includes(d),d);
 });
 test("routine read-only work is autonomous but audited", () => {
  const p=buildSupraPlan({caseType:"analyse_generale",impact:"LOW",requestedAction:"GENERATE_SUMMARY"});
