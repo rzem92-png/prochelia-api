@@ -1582,7 +1582,7 @@ async function pricingQuote(request, env) {
 
   let calendar={evening:false,night:false,saturday:false,sunday:false,holiday:false,lastMinute:false,localDate:null};
   if(b.scheduled_at!==undefined) {
-    if(typeof b.scheduled_at!=='string' || !/(Z|[+-]\\d{2}:\\d{2})$/.test(b.scheduled_at)) {
+    if(typeof b.scheduled_at!=='string' || !/(Z|[+-]\d{2}:\d{2})$/.test(b.scheduled_at)) {
       return json({ok:false,error:'SCHEDULED_AT_MUST_INCLUDE_TIMEZONE',version:VERSION},400);
     }
     const scheduledAt=new Date(b.scheduled_at);
@@ -1592,7 +1592,7 @@ async function pricingQuote(request, env) {
     let holidayDates=[];
     try {
       const parsed=JSON.parse(await getSetting(env,'public_holidays_fr','[]'));
-      if(Array.isArray(parsed)) holidayDates=parsed.filter(x=>typeof x==='string' && /^\\d{4}-\\d{2}-\\d{2}$/.test(x));
+      if(Array.isArray(parsed)) holidayDates=parsed.filter(x=>typeof x==='string' && /^\d{4}-\d{2}-\d{2}$/.test(x));
     } catch {}
     calendar=deriveMissionCalendarFlags(scheduledAt,holidayDates);
   }
