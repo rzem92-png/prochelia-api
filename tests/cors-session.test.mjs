@@ -7,7 +7,7 @@ const endpoint = "https://prochelia-api.rzem92.workers.dev/api/auth/login";
 
 test("credentialed CORS preflight succeeds without touching D1", async () => {
   const env = new Proxy({ CORS_ORIGIN: allowedOrigin }, {
-    get(_target, property) {
+    get(target, property) {
       if (property === "DB") throw new Error("Preflight must not access D1");
       return target[property];
     }
