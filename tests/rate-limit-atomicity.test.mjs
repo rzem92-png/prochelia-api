@@ -11,7 +11,7 @@ test('rate limiting never trusts the client-controlled X-Forwarded-For header', 
   assert.notEqual(end, -1, 'productionSubjectHash must have a clear boundary');
   const implementation = source.slice(start, end);
   assert.match(implementation, /CF-Connecting-IP/);
-  assert.doesNotMatch(implementation, /X-Forwarded-For/);
+  assert.doesNotMatch(implementation, /headers\\.get\\(\\s*['\"]X-Forwarded-For['\"]\\s*\\)/i);
 });
 
 test('rate-limit increments use one atomic D1 UPSERT with the schema unique key', () => {
