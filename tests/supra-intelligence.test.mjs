@@ -142,3 +142,17 @@ test("governance rejects non-string action, role and impact values", () => {
     assert.equal(result.managerApprovalRequired, true);
   }
 });
+
+test("governance requires server verification for provider_id as well as replacement identifiers", () => {
+  const result = assessSupraDecision({
+    caseType: "routine",
+    impact: "LOW",
+    requestedAction: "GENERATE_SUMMARY",
+    actorRole: "gerante",
+    context: { provider_id: "provider-123" }
+  });
+  assert.equal(result.executionAllowed, false);
+  assert.equal(result.managerApprovalRequired, true);
+  assert.ok(result.missingEvidence.includes("provider_eligibility"));
+  assert.ok(result.missingEvidence.includes("provider_availability"));
+});
