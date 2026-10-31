@@ -1,6 +1,7 @@
 import { handleV7Route } from "./v7-routes.js";
 import { procheliaV7 } from "./v7.js";
 import { readBoundedRequestBody } from "./request-body.js";
+import { normalizeIdentityDecision, isCurrentIdentityEvidence } from "./identity-evidence.js";
 // PROCHÉLIA — INDEX BACKEND CONSOLIDÉ UNIQUE
 // Référence de consolidation : V14.1 Finance + sécurité/RBAC existants.
 // Généré le 19/10/2026. À déployer uniquement après recette avec la vraie base D1.
@@ -503,13 +504,18 @@ async function securityAudit(env, eventType, missionId, userId, role, result, me
 }
 
 async function requireVerifiedIntervenant(env, userId) {
-  const row = await env.DB.prepare(
-    `SELECT id,status,level,verified_at,expires_at FROM identity_verifications
+  const rows = await env.DB.prepare(
+    `SELECT id,status,level,provider,provider_reference,verified_at,expires_at FROM identity_verifications
      WHERE user_id=? AND status='verified'
-       AND (expires_at IS NULL OR expires_at > CURRENT_TIMESTAMP)
-     ORDER BY verified_at DESC LIMIT 1`
-  ).bind(userId).first();
-  return row || null;
+       AND provider='manual_control'
+       AND provider_reference IS NOT NULL
+       AND verified_at IS NOT NULL
+       AND expires_at IS NOT NULL
+       AND expires_at > CURRENT_TIMESTAMP
+     ORDER BY verified_at DESC LIMIT 5`
+  ).bind(userId).all();
+  const now = Date.now();
+  return (rows.results || []).find(row => isCurrentIdentityEvidence(row, now)) || null;
 }
 
 async function deviceHash(request, userId) {
@@ -535,21 +541,40 @@ async function securityIdentityApprove(request, env) {
   await ensureSecuritySchema(env);
   const body = await readJson(request);
   const verificationId = clean(body?.verification_id);
-  const status = clean(body?.status);
-  const level = clean(body?.level) || 'standard';
-  if (!verificationId || !['verified','rejected','pending'].includes(status)) return json({ok:false,error:'INVALID_IDENTITY_DECISION',version:VERSION},400);
-  const row = await env.DB.prepare('SELECT * FROM identity_verifications WHERE id=? LIMIT 1').bind(verificationId).first();
+  const decision = normalizeIdentityDecision(body);
+  if (!verificationId || !decision.ok) {
+    return json({ok:false,error:decision.error || 'INVALID_IDENTITY_DECISION',version:VERSION},400);
+  }
+  const row = await env.DB.prepare(
+    'SELECT id,user_id,status FROM identity_verifications WHERE id=? LIMIT 1'
+  ).bind(verificationId).first();
   if (!row) return json({ok:false,error:'VERIFICATION_NOT_FOUND',version:VERSION},404);
-  const provider = clean(body?.provider) || 'manual_control';
-  const providerReference = clean(body?.provider_reference) || null;
-  const reason = clean(body?.rejection_reason) || null;
+  if (row.status !== 'pending') {
+    return json({ok:false,error:'IDENTITY_DECISION_ALREADY_FINAL',version:VERSION},409);
+  }
+  const { status, level, provider, providerReference, rejectionReason } = decision.value;
   const verifiedAt = status === 'verified' ? new Date().toISOString() : null;
-  const expiresAt = status === 'verified' ? new Date(Date.now()+30*24*60*60*1000).toISOString() : null;
-  await env.DB.prepare(
-    `UPDATE identity_verifications SET status=?,level=?,provider=?,provider_reference=?,verified_at=?,expires_at=?,rejection_reason=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`
-  ).bind(status,level,provider,providerReference,verifiedAt,expiresAt,reason,verificationId).run();
-  await securityAudit(env,'IDENTITY_VERIFICATION_DECISION',null,auth.user.id,auth.user.role,status,{verification_id:verificationId,subject_user_id:row.user_id,level});
-  return json({ok:true,version:VERSION,verification_id:verificationId,user_id:row.user_id,status,level,verified_at:verifiedAt},200);
+  const expiresAt = status === 'verified'
+    ? new Date(Date.now()+30*24*60*60*1000).toISOString() : null;
+  const updated = await env.DB.prepare(
+    `UPDATE identity_verifications
+       SET status=?,level=?,provider=?,provider_reference=?,verified_at=?,expires_at=?,
+           rejection_reason=?,updated_at=CURRENT_TIMESTAMP
+     WHERE id=? AND status='pending'`
+  ).bind(status,level,provider,providerReference,verifiedAt,expiresAt,rejectionReason,verificationId).run();
+  if (Number(updated?.meta?.changes || 0) !== 1) {
+    return json({ok:false,error:'IDENTITY_DECISION_RACE_CONFLICT',version:VERSION},409);
+  }
+  await securityAudit(env,'IDENTITY_VERIFICATION_DECISION',null,auth.user.id,auth.user.role,status,{
+    verification_id:verificationId,subject_user_id:row.user_id,level,
+    evidence_reference_recorded:status==='verified'
+  });
+  return json({
+    ok:true,version:VERSION,verification_id:verificationId,user_id:row.user_id,
+    status,level,verified_at:verifiedAt,expires_at:expiresAt,
+    verification_mode:'MANUAL_REVIEW_REFERENCE_REQUIRED',
+    note:'Validation manuelle traçable. Ce statut ne constitue pas une vérification biométrique ou fournisseur externe.'
+  },200);
 }
 
 async function deliverSecurityCodes(env, payload) {
