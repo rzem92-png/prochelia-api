@@ -1,4 +1,5 @@
 import { handleV7Route } from "./v7-routes.js";
+import { stripePost, verifyStripeSignature } from "./stripe.js";
 // PROCHÉLIA — INDEX BACKEND CONSOLIDÉ UNIQUE
 // Référence de consolidation : V14.1 Finance + sécurité/RBAC existants.
 // Généré le 19/10/2026. À déployer uniquement après recette avec la vraie base D1.
@@ -874,25 +875,66 @@ function paymentProvider(env) {
 }
 
 function paymentsConfigured(env) {
-  return !!env.PAYMENT_WEBHOOK_SECRET && !!env.PAYMENT_PROVIDER;
+  const provider=paymentProvider(env);
+  if(provider==='stripe') return !!env.STRIPE_SECRET_KEY && !!env.STRIPE_WEBHOOK_SECRET && !!env.APP_BASE_URL;
+  return !!env.PAYMENT_WEBHOOK_SECRET && !!env.PAYMENT_API_SECRET && !!env.PAYMENT_PROVIDER;
 }
 
 async function paymentOnboard(request, env) {
   const auth = await getSessionUser(request, env);
   if (!requireRole(auth, ['intervenant'])) return json({ok:false,error:auth?.user?'FORBIDDEN':'UNAUTHENTICATED',version:VERSION},auth?.user?403:401);
+  if (paymentProvider(env)!=='stripe' || !env.STRIPE_SECRET_KEY) {
+    return json({ok:false,error:'STRIPE_CONNECT_NOT_CONFIGURED',version:VERSION,required:['PAYMENT_PROVIDER=stripe','STRIPE_SECRET_KEY','APP_BASE_URL']},503);
+  }
+  let appBase;
+  try {
+    appBase=new URL(String(env.APP_BASE_URL||''));
+    const allowed=String(env.CORS_ORIGIN||'https://prochelia.pages.dev,https://56b01f85.prochelia.pages.dev').split(',').map(x=>x.trim()).filter(Boolean);
+    if(appBase.protocol!=='https:' || !allowed.includes(appBase.origin)) throw new Error('APP_ORIGIN_NOT_ALLOWED');
+  } catch {
+    return json({ok:false,error:'APP_BASE_URL_NOT_ALLOWED',version:VERSION},503);
+  }
   await ensurePaymentSchema(env);
-  const body = await readJson(request);
-  const provider = paymentProvider(env);
-  const accountId = clean(body?.provider_account_id) || null;
   const existing = await env.DB.prepare('SELECT * FROM payment_accounts WHERE user_id=? LIMIT 1').bind(auth.user.id).first();
-  if (existing) return json({ok:true,version:VERSION,account:existing,action:'REUSE_EXISTING'},200);
-  const id=crypto.randomUUID();
-  await env.DB.prepare(`INSERT INTO payment_accounts
-    (id,user_id,provider,provider_account_id,status,onboarding_status)
-    VALUES (?,?,?,?, 'pending','required')`).bind(id,auth.user.id,provider,accountId).run();
-  await env.DB.prepare(`INSERT INTO wallets (id,user_id) VALUES (?,?)`).bind(crypto.randomUUID(),auth.user.id).run();
-  await paymentAudit(env,'PAYOUT_ACCOUNT_CREATED',{user_id:auth.user.id,metadata:{provider}},'OK');
-  return json({ok:true,version:VERSION,account_id:id,provider,onboarding_status:'required',next:'PSP_ONBOARDING_REQUIRED'},201);
+  if(existing && existing.provider!=='stripe') return json({ok:false,error:'PAYMENT_PROVIDER_CONFLICT',version:VERSION},409);
+  if(existing && Number(existing.payouts_enabled)===1 && Number(existing.charges_enabled)===1) {
+    return json({ok:true,version:VERSION,provider:'stripe',account_id:existing.provider_account_id,onboarding_status:'complete',already_connected:true},200);
+  }
+  let accountId=clean(existing?.provider_account_id);
+  try {
+    if(!accountId) {
+      const account=await stripePost(env,'accounts',{
+        type:'express',
+        country:'FR',
+        email:auth.user.email,
+        'capabilities[transfers][requested]':'true',
+        'metadata[prochelia_user_id]':auth.user.id
+      },'prochelia-connect-account-'+auth.user.id);
+      accountId=clean(account?.id);
+      if(!accountId) throw new Error('STRIPE_ACCOUNT_ID_MISSING');
+      if(existing) {
+        await env.DB.prepare(`UPDATE payment_accounts SET provider='stripe',provider_account_id=?,status='pending',onboarding_status='required',updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(accountId,existing.id).run();
+      } else {
+        await env.DB.prepare(`INSERT INTO payment_accounts (id,user_id,provider,provider_account_id,status,onboarding_status) VALUES (?,?,?,?, 'pending','required')`).bind(crypto.randomUUID(),auth.user.id,'stripe',accountId).run();
+      }
+      const wallet=await env.DB.prepare('SELECT id FROM wallets WHERE user_id=? LIMIT 1').bind(auth.user.id).first();
+      if(!wallet) await env.DB.prepare('INSERT INTO wallets (id,user_id) VALUES (?,?)').bind(crypto.randomUUID(),auth.user.id).run();
+      await paymentAudit(env,'STRIPE_CONNECT_ACCOUNT_CREATED',{user_id:auth.user.id,metadata:{provider:'stripe'}},'OK');
+    }
+    const refreshUrl=new URL('/',appBase); refreshUrl.searchParams.set('stripe_onboarding','refresh');
+    const returnUrl=new URL('/',appBase); returnUrl.searchParams.set('stripe_onboarding','return');
+    const link=await stripePost(env,'account_links',{
+      account:accountId,
+      refresh_url:refreshUrl.toString(),
+      return_url:returnUrl.toString(),
+      type:'account_onboarding'
+    },'prochelia-connect-link-'+auth.user.id+'-'+crypto.randomUUID());
+    if(!link?.url) throw new Error('STRIPE_ACCOUNT_LINK_MISSING');
+    return json({ok:true,version:VERSION,provider:'stripe',account_id:accountId,onboarding_status:'required',onboarding_url:link.url,expires_at:link.expires_at,next:'COMPLETE_STRIPE_CONNECT_ONBOARDING'},201);
+  } catch(error) {
+    console.error('STRIPE_CONNECT_ONBOARDING_FAILED',error instanceof Error?error.message:String(error));
+    return json({ok:false,error:'STRIPE_ONBOARDING_FAILED',version:VERSION},502);
+  }
 }
 
 async function paymentStatus(request, env) {
@@ -903,7 +945,7 @@ async function paymentStatus(request, env) {
   if(!wallet){ await env.DB.prepare('INSERT INTO wallets (id,user_id) VALUES (?,?)').bind(crypto.randomUUID(),auth.user.id).run(); wallet=await env.DB.prepare('SELECT * FROM wallets WHERE user_id=? LIMIT 1').bind(auth.user.id).first(); }
   const account=await env.DB.prepare('SELECT * FROM payment_accounts WHERE user_id=? LIMIT 1').bind(auth.user.id).first();
   const pending=await env.DB.prepare(`SELECT COUNT(*) total FROM payout_requests WHERE user_id=? AND status IN ('requested','processing')`).bind(auth.user.id).first();
-  return json({ok:true,version:VERSION,provider:paymentProvider(env),payments_configured:paymentsConfigured(env),wallet:{currency:wallet.currency,available_cents:wallet.available_cents,pending_cents:wallet.pending_cents,paid_cents:wallet.paid_cents,reserved_cents:wallet.reserved_cents},payout_account:account?{status:account.status,onboarding_status:account.onboarding_status,payouts_enabled:!!account.payouts_enabled}:null,pending_payouts:Number(pending?.total||0)},200);
+  return json({ok:true,version:VERSION,provider:paymentProvider(env),payments_configured:paymentsConfigured(env),wallet:{currency:wallet.currency,available_cents:wallet.available_cents,pending_cents:wallet.pending_cents,paid_cents:wallet.paid_cents,reserved_cents:wallet.reserved_cents},payout_account:account?{status:account.status,onboarding_status:account.onboarding_status,payouts_enabled:!!account.payouts_enabled,charges_enabled:!!account.charges_enabled}:null,pending_payouts:Number(pending?.total||0)},200);
 }
 
 async function createMissionPayment(request, env) {
@@ -984,14 +1026,39 @@ async function verifyWebhookSignature(request, env, rawBody) {
 async function paymentWebhook(request, env) {
   await ensurePaymentSchema(env);
   const raw=await request.text();
-  if(!(await verifyWebhookSignature(request,env,raw))) return json({ok:false,error:'INVALID_WEBHOOK_SIGNATURE',version:VERSION},401);
+  const isStripe=paymentProvider(env)==='stripe';
+  const signatureValid=isStripe
+    ? await verifyStripeSignature(request.headers.get('stripe-signature'),env.STRIPE_WEBHOOK_SECRET,raw)
+    : await verifyWebhookSignature(request,env,raw);
+  if(!signatureValid) return json({ok:false,error:'INVALID_WEBHOOK_SIGNATURE',version:VERSION},401);
   let event; try{event=JSON.parse(raw)}catch{return json({ok:false,error:'INVALID_WEBHOOK_JSON',version:VERSION},400);}
-  const provider=clean(event?.provider)||paymentProvider(env), eventId=clean(event?.id), type=clean(event?.type);
-  if(!eventId||!type) return json({ok:false,error:'INVALID_WEBHOOK_EVENT',version:VERSION},400);
+  const provider=isStripe?'stripe':(clean(event?.provider)||paymentProvider(env));
+  const eventId=clean(event?.id), originalType=clean(event?.type);
+  if(!eventId||!originalType) return json({ok:false,error:'INVALID_WEBHOOK_EVENT',version:VERSION},400);
   const payloadHash=await sha256Base64url(raw);
-  const inserted=await env.DB.prepare(`INSERT OR IGNORE INTO payment_webhook_events (id,provider,event_id,event_type,signature_valid,payload_hash) VALUES (?,?,?,?,1,?)`).bind(crypto.randomUUID(),provider,eventId,type,payloadHash).run();
+  const inserted=await env.DB.prepare(`INSERT OR IGNORE INTO payment_webhook_events (id,provider,event_id,event_type,signature_valid,payload_hash) VALUES (?,?,?,?,1,?)`).bind(crypto.randomUUID(),provider,eventId,originalType,payloadHash).run();
   if(!inserted.meta?.changes) return json({ok:true,version:VERSION,duplicate:true,event_id:eventId},200);
-  const txId=clean(event?.data?.transaction_id), payoutId=clean(event?.data?.payout_id);
+  const stripeObject=event?.data?.object||{};
+  const stripeTypeMap={
+    'payment_intent.succeeded':'payment_succeeded',
+    'payment_intent.payment_failed':'payment_failed',
+    'charge.refunded':'payment_refunded',
+    'payout.paid':'payout_paid',
+    'payout.failed':'payout_failed',
+    'payout.canceled':'payout_canceled'
+  };
+  const type=isStripe?(stripeTypeMap[originalType]||originalType):originalType;
+  const txId=isStripe?clean(stripeObject?.metadata?.prochelia_transaction_id):clean(event?.data?.transaction_id);
+  const payoutId=isStripe?clean(stripeObject?.metadata?.prochelia_payout_id):clean(event?.data?.payout_id);
+  const providerPaymentId=isStripe?clean(stripeObject?.id):clean(event?.data?.provider_payment_id);
+  if(isStripe && originalType==='account.updated' && clean(stripeObject?.id)){
+    const chargesEnabled=!!stripeObject.charges_enabled?1:0;
+    const payoutsEnabled=!!stripeObject.payouts_enabled?1:0;
+    const detailsSubmitted=!!stripeObject.details_submitted?1:0;
+    const status=chargesEnabled&&payoutsEnabled?'active':'pending';
+    const onboardingStatus=detailsSubmitted?'submitted':'required';
+    await env.DB.prepare(`UPDATE payment_accounts SET charges_enabled=?,payouts_enabled=?,status=?,onboarding_status=?,updated_at=CURRENT_TIMESTAMP WHERE provider='stripe' AND provider_account_id=?`).bind(chargesEnabled,payoutsEnabled,status,onboardingStatus,stripeObject.id).run();
+  }
   if(txId){
     const tx=await env.DB.prepare('SELECT * FROM payment_transactions WHERE id=? LIMIT 1').bind(txId).first();
     if(tx){
@@ -1000,7 +1067,7 @@ async function paymentWebhook(request, env) {
       if(newStatus){
         const alreadyFinal = ['paid','failed','refunded'].includes(tx.status);
         if(!alreadyFinal){
-          await env.DB.prepare('UPDATE payment_transactions SET status=?,provider_payment_id=COALESCE(?,provider_payment_id),updated_at=CURRENT_TIMESTAMP WHERE id=?').bind(newStatus,clean(event?.data?.provider_payment_id)||null,txId).run();
+          await env.DB.prepare('UPDATE payment_transactions SET status=?,provider_payment_id=COALESCE(?,provider_payment_id),updated_at=CURRENT_TIMESTAMP WHERE id=?').bind(newStatus,providerPaymentId||null,txId).run();
           if(newStatus==='paid'){
             const wallet=await env.DB.prepare('SELECT * FROM wallets WHERE user_id=? LIMIT 1').bind(tx.intervenant_id).first();
             if(wallet) await env.DB.prepare('UPDATE wallets SET available_cents=available_cents+?,updated_at=CURRENT_TIMESTAMP WHERE id=?').bind(tx.net_intervenant_cents,wallet.id).run();
@@ -1018,12 +1085,12 @@ async function paymentWebhook(request, env) {
       if(!alreadyFinal){
         if(newStatus==='completed') await env.DB.prepare(`UPDATE wallets SET reserved_cents=MAX(0,reserved_cents-?),paid_cents=paid_cents+?,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(payout.amount_cents,payout.amount_cents,payout.wallet_id).run();
         if(['failed','canceled'].includes(newStatus)) await env.DB.prepare(`UPDATE wallets SET reserved_cents=MAX(0,reserved_cents-?),available_cents=available_cents+?,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(payout.amount_cents,payout.amount_cents,payout.wallet_id).run();
-        await env.DB.prepare(`UPDATE payout_requests SET status=?,provider_payout_id=COALESCE(?,provider_payout_id),failure_code=?,failure_message=?,completed_at=CASE WHEN ?='completed' THEN CURRENT_TIMESTAMP ELSE completed_at END,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(newStatus,clean(event?.data?.provider_payout_id)||null,clean(event?.data?.failure_code)||null,clean(event?.data?.failure_message)||null,newStatus,payoutId).run();
+        await env.DB.prepare(`UPDATE payout_requests SET status=?,provider_payout_id=COALESCE(?,provider_payout_id),failure_code=?,failure_message=?,completed_at=CASE WHEN ?='completed' THEN CURRENT_TIMESTAMP ELSE completed_at END,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(newStatus,clean(stripeObject?.id)||clean(event?.data?.provider_payout_id)||null,clean(stripeObject?.failure_code)||clean(event?.data?.failure_code)||null,clean(stripeObject?.failure_message)||clean(event?.data?.failure_message)||null,newStatus,payoutId).run();
       }
     }
   }
   await env.DB.prepare('UPDATE payment_webhook_events SET processed=1,processed_at=CURRENT_TIMESTAMP WHERE provider=? AND event_id=?').bind(provider,eventId).run();
-  await paymentAudit(env,'PSP_WEBHOOK_PROCESSED',{transaction_id:txId,payout_id:payoutId,metadata:{provider,event_id:eventId,event_type:type}},'OK');
+  await paymentAudit(env,'PSP_WEBHOOK_PROCESSED',{transaction_id:txId,payout_id:payoutId,metadata:{provider,event_id:eventId,event_type:originalType}},'OK');
   return json({ok:true,version:VERSION,processed:true,event_id:eventId},200);
 }
 
