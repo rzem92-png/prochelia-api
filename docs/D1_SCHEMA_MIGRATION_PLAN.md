@@ -209,3 +209,45 @@ No release until:
 4. Compare the manifest against a schema-only, read-only export from the explicitly identified isolated preproduction D1; never infer live schema from migration files alone.
 5. Test fresh install, upgrade from each supported prior version, repeated migration, seed idempotency, FK integrity, ledger invariants, backup integrity and isolated restore before changing request-time behavior.
 6. Only after those proofs may a separate reviewed change remove request-time schema creation. Production remains NO-GO and requires separate explicit approval.
+
+
+## 0C. Migration object inventory — read-only source inspection, 2026-10-31
+
+The following inventory was extracted directly from the five existing migration files on the audit branch. It is a migration-side inventory only; it is not proof that runtime initializers are equivalent or that a remote D1 database has these objects.
+
+| Migration | Tables declared | Indexes declared | Triggers declared |
+|---|---:|---:|---:|
+| 0001_core_business_schema.sql | 11 | 8 | 0 |
+| 0002_server_pricing.sql | 6 | 3 | 0 |
+| 0003_route_address_provenance.sql | 1 | 1 | 0 |
+| 0004_atomic_wallet_ledger.sql | 2 | 2 | 5 |
+| 0005_security_rate_limits.sql | 1 | 1 | 0 |
+| **Total declarations** | **21** | **15** | **5** |
+
+Names extracted from migration source:
+
+- 0001 tables: clients, intervenants, prestations, missions, tarifs, paiements, disponibilites, evaluations, documents, conflits, journal. Indexes: idx_clients_user, idx_intervenants_user, idx_missions_client, idx_missions_intervenant, idx_missions_date, idx_disponibilites_intervenant, idx_paiements_mission, idx_journal_user.
+- 0002 tables: pricing_policies, pricing_travel_policies, pricing_route_estimates, pricing_route_estimate_audit, pricing_holidays, pricing_quotes. Indexes: idx_pricing_policy_lookup, idx_pricing_travel_policy_active_unique, idx_pricing_route_owner_expiry.
+- 0003 table: intervenant_route_origins. Index: idx_intervenant_route_origin_status.
+- 0004 tables: wallets, payment_wallet_ledger. Indexes: idx_wallet_ledger_user_date, idx_wallet_ledger_tx. Triggers: trg_payment_wallet_ledger_require_wallet, trg_payment_wallet_ledger_guard_balances, trg_payment_wallet_ledger_apply, trg_payment_wallet_ledger_no_update, trg_payment_wallet_ledger_no_delete.
+- 0005 table: security_rate_limits. Index: idx_security_rate_limits_window.
+
+Initializer source inspection confirms material non-DDL behavior that must be included in any migration plan:
+
+- `ensureSecuritySchema` creates security/identity/mission-security objects and writes a security-audit event; callers invoke it before normal request operations.
+- `ensureTrustPassportSchema` creates service-catalog and verification objects; catalog writes are separate application behavior and must not be blindly replayed as schema seeds.
+- `ensureNationalContinuitySchema` inserts default platform-scale configuration with `INSERT OR IGNORE`.
+- `ensureProcheliaMasterComplementSchema` inserts brand identity, interface profiles and Copilot resolution rules with `INSERT OR IGNORE`.
+- Other initializers cover payments, consolidated pricing/platform settings, promotions, operational outbox/briefings/loyalty/quality/B2B, hardening/idempotency/jobs, commercial/recruitment, finance workspace, document scans and Copilot interaction/action-plan storage.
+
+Important limitations:
+
+1. Counts above are declarations found by a simple source inventory; they do not compare column definitions, CHECK/UNIQUE/FK constraints, partial-index predicates, trigger bodies, SQL execution order, conditional branches or D1's actual schema.
+2. Runtime SQL is not yet fully parsed into a statement-by-statement manifest. No object is classified as safely covered solely because a similar name appears in a migration.
+3. The audit's 83 count is runtime initializer call sites, not 83 unique schema objects.
+4. Do not write or apply a corrective migration based only on this inventory. The next engineering deliverable is a parser-backed manifest with unresolved/dynamic SQL marked `UNPARSED`, followed by isolated SQLite fresh-install/upgrade/idempotency/restore tests and a separately approved read-only D1 schema comparison.
+5. No live D1 query, write, migration, deployment, backup/restore operation or production change was performed during this inspection.
+
+### Updated static-analysis evidence
+
+On commit `425ef0e0227a5675f3581f4cbccff5bf7720120a`, run `41217929690` (CodeQL JavaScript/TypeScript) completed successfully. Run `41217929683` completed with 133/133 regression tests passing, 12 static audit checks passing, and the single expected blocker: 83 runtime calls across 13 schema initializers. The release gate remains failed closed.
