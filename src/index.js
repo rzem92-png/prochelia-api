@@ -147,7 +147,7 @@ function getCookie(request, name) {
 }
 
 function sessionCookie(token, maxAge = SESSION_TTL_SECONDS) {
-  return `${SESSION_COOKIE}=${encodeURIComponent(token)}; Max-Age=${maxAge}; Path=/; HttpOnly; Secure; SameSite=Lax`;
+  return `${SESSION_COOKIE}=${encodeURIComponent(token)}; Max-Age=${maxAge}; Path=/; HttpOnly; Secure; SameSite=None`;
 }
 
 async function createSession(env, userId) {
@@ -3891,4 +3891,69 @@ handle = async function(request,env){
   }catch(e){
     return json({ok:false,error:'PRODUCTION_SAFETY_ERROR',version:VERSION},500);
   }
+};
+
+// Browser session transport: exact-origin credentialed CORS + CSRF origin binding.
+// Preflight is answered before D1, rate limiting, authentication or business logic.
+function applyCorsHeaders(request,env,response){
+  const origin=request.headers.get('origin');
+  if(!origin || !securityOriginAllowed(request,env)) return response;
+  const headers=new Headers(response.headers);
+  headers.set('access-control-allow-origin',origin);
+  headers.set('access-control-allow-credentials','true');
+  headers.set('access-control-expose-headers','Retry-After');
+  const vary=headers.get('vary');
+  headers.set('vary',vary ? vary + ', Origin' : 'Origin');
+  return new Response(response.body,{status:response.status,statusText:response.statusText,headers});
+}
+
+const __procheliaCredentialedCorsHandle = handle;
+handle = async function(request,env){
+  const origin=request.headers.get('origin');
+  const method=request.method.toUpperCase();
+  if(origin && !securityOriginAllowed(request,env)){
+    return json({ok:false,error:'ORIGIN_NOT_ALLOWED',version:VERSION},403);
+  }
+
+  // Cookie-authenticated state changes must carry an approved browser Origin.
+  // Non-browser signed webhooks without a session cookie continue through their own verification.
+  const cookieHeader=request.headers.get('cookie')||'';
+  const hasSessionCookie=cookieHeader.split(';').some(part=>part.trim().startsWith(SESSION_COOKIE+'='));
+  if(isMutatingMethod(method) && hasSessionCookie && !origin){
+    return json({ok:false,error:'CSRF_ORIGIN_REQUIRED',version:VERSION},403);
+  }
+
+  if(method==='OPTIONS'){
+    const methods=new Set(['GET','HEAD','POST','OPTIONS']);
+    const requestedMethod=(request.headers.get('access-control-request-method')||'').toUpperCase();
+    if(requestedMethod && !methods.has(requestedMethod)){
+      return json({ok:false,error:'CORS_METHOD_NOT_ALLOWED',version:VERSION},405,{'allow':'GET, HEAD, POST, OPTIONS'});
+    }
+    const allowedHeaders=new Set(['accept','content-type','authorization','x-idempotency-key','x-csrf-token']);
+    const requestedHeaders=(request.headers.get('access-control-request-headers')||'')
+      .split(',').map(x=>x.trim().toLowerCase()).filter(Boolean);
+    if(requestedHeaders.some(x=>!allowedHeaders.has(x))){
+      return json({ok:false,error:'CORS_HEADER_NOT_ALLOWED',version:VERSION},400);
+    }
+    const headers=new Headers({
+      'access-control-allow-methods':'GET, HEAD, POST, OPTIONS',
+      'access-control-allow-headers':'Accept, Content-Type, Authorization, X-Idempotency-Key, X-CSRF-Token',
+      'access-control-max-age':'600',
+      'cache-control':'no-store',
+      'vary':'Origin, Access-Control-Request-Method, Access-Control-Request-Headers'
+    });
+    if(origin){
+      headers.set('access-control-allow-origin',origin);
+      headers.set('access-control-allow-credentials','true');
+    }
+    return new Response(null,{status:204,headers});
+  }
+
+  let response;
+  try{
+    response=await __procheliaCredentialedCorsHandle(request,env);
+  }catch(error){
+    response=json({ok:false,error:'CORS_WRAPPER_ERROR',version:VERSION},500);
+  }
+  return applyCorsHeaders(request,env,response);
 };
