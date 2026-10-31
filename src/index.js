@@ -2,6 +2,8 @@ import { handleV7Route } from "./v7-routes.js";
 import { procheliaV7 } from "./v7.js";
 import { readBoundedRequestBody } from "./request-body.js";
 import { normalizeIdentityDecision, isCurrentIdentityEvidence } from "./identity-evidence.js";
+import { calculateFinancialQuote } from "./financial-quote.js";
+import { calculateForecastContributionCents } from "./finance-model-v1.js";
 // PROCHÉLIA — INDEX BACKEND CONSOLIDÉ UNIQUE
 // Référence de consolidation : V14.1 Finance + sécurité/RBAC existants.
 // Généré le 19/10/2026. À déployer uniquement après recette avec la vraie base D1.
@@ -1198,16 +1200,22 @@ async function handleBase(request, env) {
 
   if (url.pathname === '/api/prestations') {
     if (request.method !== 'GET') return json({ ok: false, error: 'METHOD_NOT_ALLOWED', version: VERSION }, 405);
+    const gate=await requireAuthRole(request,env,['gerante','entreprise','client','intervenant']);
+    if(gate.error)return gate.error;
     return getPrestations(env);
   }
 
   if (url.pathname === '/api/core/schema') {
     if (request.method !== 'GET') return json({ ok: false, error: 'METHOD_NOT_ALLOWED', version: VERSION }, 405);
+    const gate=await requireAuthRole(request,env,['gerante']);
+    if(gate.error)return gate.error;
     return coreAccountsSchema(env);
   }
 
   if (url.pathname === '/api/missions/schema') {
     if (request.method !== 'GET') return json({ ok: false, error: 'METHOD_NOT_ALLOWED', version: VERSION }, 405);
+    const gate=await requireAuthRole(request,env,['gerante']);
+    if(gate.error)return gate.error;
     return missionsSchema(env);
   }
 
@@ -1738,8 +1746,8 @@ function financeStrategicTravel({distanceKm=0,fuelMode='normal',fuelPriceCentsPe
   };
 }
 
-function financeStrategicQuote({basePriceCents=0,phaseFactor=1,urgency='normal',evening=false,night=false,saturday=false,sunday=false,holiday=false,lastMinute=false,distanceKm=0,fuelMode='normal',commissionRate=0.20,discountCents=0,regulatedMaxCents=null,intervenantFloorCents=0,pspPercent=0,pspFixedCents=0,softwareCostCents=0,targetMarginPercent=12}={}) {
-  let service=Math.max(0,Math.round((Number(basePriceCents)||0)*(Number(phaseFactor)||1)));
+function financeStrategicQuote({basePriceCents=0,phaseFactor=1,urgency='normal',evening=false,night=false,saturday=false,sunday=false,holiday=false,lastMinute=false,distanceKm=0,fuelMode='normal',fuelPriceCentsPerLitre=null,commissionRate=0.20,discountCents=0,regulatedMaxCents=null,intervenantFloorCents=0,pspPercent=0,pspFixedCents=0,softwareCostCents=0,targetMarginPercent=12}={}) {
+  let service=Math.round(Number(basePriceCents)*Number(phaseFactor));
   const u=String(urgency||'normal').toLowerCase();
   service=Math.round(service*(FINANCE_STRATEGIC.multipliers.urgency[u] ?? 1));
   if(evening)service=Math.round(service*FINANCE_STRATEGIC.multipliers.evening);
@@ -1748,40 +1756,19 @@ function financeStrategicQuote({basePriceCents=0,phaseFactor=1,urgency='normal',
   if(sunday)service=Math.round(service*FINANCE_STRATEGIC.multipliers.sunday);
   if(holiday)service=Math.round(service*FINANCE_STRATEGIC.multipliers.holiday);
   if(lastMinute)service=Math.round(service*FINANCE_STRATEGIC.multipliers.last_minute);
-  service=Math.max(0,service-Math.max(0,Math.round(Number(discountCents)||0)));
-  if(regulatedMaxCents!=null)service=Math.min(service,Math.max(0,Math.round(Number(regulatedMaxCents)||0)));
-  const travel=financeStrategicTravel({distanceKm,fuelMode});
-  const rate=Math.max(0,Number(commissionRate)||0);
-  const commission=Math.round(service*rate);
-  let clientPrice=service+travel.total_cost_cents;
-  const intervenant=Math.max(0,Math.round(Number(intervenantFloorCents)||0));
-  const psp=Math.round(clientPrice*(Math.max(0,Number(pspPercent)||0)/100))+Math.max(0,Math.round(Number(pspFixedCents)||0));
-  const software=Math.max(0,Math.round(Number(softwareCostCents)||0));
-  let margin=clientPrice-intervenant-psp-software-travel.total_cost_cents;
-  const minMargin=Math.max(FINANCE_STRATEGIC.marginFloorCents,Math.round(clientPrice*(Math.max(0,Number(targetMarginPercent)||0)/100)));
-  if(margin<minMargin){
-    const uplift=minMargin-margin;
-    const proposed=clientPrice+uplift;
-    // Le plafond tarifaire est prioritaire : ne jamais augmenter le prix au-delà.
-    clientPrice=regulatedMaxCents==null
-      ? proposed
-      : Math.min(proposed,Math.max(0,Math.round(Number(regulatedMaxCents)||0)));
-    margin=clientPrice-intervenant-Math.round(clientPrice*(Math.max(0,Number(pspPercent)||0)/100))-Math.max(0,Math.round(Number(pspFixedCents)||0))-software-travel.total_cost_cents;
-  }
-  const finalMinMargin=Math.max(FINANCE_STRATEGIC.marginFloorCents,Math.round(clientPrice*(Math.max(0,Number(targetMarginPercent)||0)/100)));
+  const travel=financeStrategicTravel({distanceKm,fuelMode,fuelPriceCentsPerLitre});
+  const result=calculateFinancialQuote({
+    basePriceCents:service, phaseFactor:1, commissionRate, discountCents,
+    regulatedMaxCents, intervenantFloorCents,
+    travelClientCents:travel.total_cost_cents,
+    travelProviderCostCents:travel.total_cost_cents,
+    pspPercent, pspFixedCents, softwareCostCents, targetMarginPercent
+  });
   return {
     finance_version:FINANCE_STRATEGIC_VERSION,
-    service_price_cents:service,
+    ...result,
     travel,
-    client_price_cents:clientPrice,
-    intervenant_amount_cents:intervenant,
-    commission_cents:commission,
-    psp_cost_cents:Math.round(clientPrice*(Math.max(0,Number(pspPercent)||0)/100))+Math.max(0,Math.round(Number(pspFixedCents)||0)),
-    software_cost_cents:software,
-    estimated_margin_cents:margin,
-    target_margin_percent:Number(targetMarginPercent)||0,
-    profitability_status:margin<0?'DEFICITAIRE':(margin<finalMinMargin?'MARGE_FAIBLE':'RENTABLE'),
-    profitability_gate:margin>=finalMinMargin?'ALLOW':'ADJUST_OR_ESCALATE'
+    target_margin_percent:targetMarginPercent
   };
 }
 
@@ -1822,6 +1809,12 @@ async function pricingQuote(request, env) {
      !Number.isInteger(duration) || duration<15 || duration>1440 ||
      !['B2C','B2B'].includes(clientType)) {
     return json({ok:false,error:'INVALID_QUOTE_INPUT',version:VERSION},400);
+  }
+  // B2B requires a separately modelled contract/volume/invoicing policy.
+  // Never silently reuse the B2C commission and payout formula.
+  if(clientType==='B2B') {
+    return json({ok:false,error:'B2B_PRICING_POLICY_NOT_IMPLEMENTED',version:VERSION,
+      message:'Le devis entreprise reste bloqué tant que sa politique contractuelle dédiée n’est pas configurée et testée.'},409);
   }
 
   const catalog=await env.DB.prepare(`SELECT code,label,rules_json FROM métier_catalog WHERE code=? AND active=1 LIMIT 1`)
@@ -1888,6 +1881,10 @@ async function pricingQuote(request, env) {
     return json({ok:false,error:'INVALID_URGENCY',version:VERSION},400);
   }
 
+  if(regulatedMax!==null && distance>0) {
+    return json({ok:false,error:'REGULATED_TRAVEL_TREATMENT_UNCONFIGURED',version:VERSION,
+      message:'Le traitement réglementaire des frais de déplacement dans le plafond doit être configuré et vérifié avant émission du devis.'},409);
+  }
   const strategic=financeStrategicQuote({
     basePriceCents:base,phaseFactor:cfg.pricingFactor,urgency,
     evening:calendar.evening,night:calendar.night,saturday:calendar.saturday,
@@ -1896,6 +1893,12 @@ async function pricingQuote(request, env) {
     discountCents:0,regulatedMaxCents:regulatedMax,intervenantFloorCents:intervenantFloor,
     pspPercent,pspFixedCents:pspFixed,softwareCostCents:software,targetMarginPercent:targetMargin
   });
+  if(strategic.profitability_gate!=='ALLOW') {
+    return json({ok:false,error:strategic.profitability_status,version:VERSION,
+      quote_gate:{provider_floor_ok:strategic.provider_floor_ok,margin_ok:strategic.margin_ok,
+        estimated_margin_cents:strategic.estimated_margin_cents,minimum_margin_cents:strategic.minimum_margin_cents}},
+      409);
+  }
   const quote={
     phase,clientType,serviceCode,distance,duration,scheduled_local_date:calendar.localDate,
     client_price_cents:strategic.client_price_cents,
@@ -2030,9 +2033,24 @@ async function supraPlan(request, env) {
 
 async function handleConsolidated(request, env) {
   const url=new URL(request.url);
-  const consolidatedPath = ['/api/consolidated/info','/api/ops/dashboard','/api/journal','/api/cases','/api/cases/approve','/api/metiers','/api/metiers/suggest','/api/pricing/quote','/api/finance/summary','/api/complaints','/api/settings/phase'].includes(url.pathname);
-  if (consolidatedPath) {
-    try { await ensureConsolidatedSchema(env); } catch (e) { return json({ok:false,error:'CONSOLIDATED_SCHEMA_ERROR',version:VERSION,message:e.message},500); }
+  const consolidatedRoles = {
+    '/api/ops/dashboard':['gerante'],
+    '/api/journal':['gerante'],
+    '/api/cases':['gerante','client','intervenant','entreprise'],
+    '/api/cases/approve':['gerante'],
+    '/api/metiers':['gerante','entreprise','client','intervenant'],
+    '/api/metiers/suggest':['gerante'],
+    '/api/pricing/quote':['gerante','client','entreprise','intervenant'],
+    '/api/finance/summary':['gerante'],
+    '/api/complaints':['gerante','client','entreprise'],
+    '/api/settings/phase':['gerante']
+  };
+  const requiredRoles=consolidatedRoles[url.pathname];
+  if(requiredRoles) {
+    const preflight=await requireAuthRole(request,env,requiredRoles);
+    if(preflight.error)return preflight.error;
+    try { await ensureConsolidatedSchema(env); }
+    catch (e) { return json({ok:false,error:'CONSOLIDATED_SCHEMA_ERROR',version:VERSION},500); }
   }
   if(url.pathname==='/api/consolidated/info' && request.method==='GET') return consolidatedInfo(env);
   if(url.pathname==='/api/supra/domains' && request.method==='GET') return supraDomains(request,env);
@@ -2685,7 +2703,9 @@ async function financeForecast(request, env) {
     const payout=Math.round(Number(tx?.intervenant||0)/3*(1+0.03*i));
     const provider=Math.round(Number(tx?.provider_fee||0)/3*(1+0.03*i));
     const refunds=Math.round(Number(tx?.refunds||0)/3*(1+0.03*i));
-    const margin=revenue-commission*0+payout*-1+commission-provider-refunds;
+    const marginResult=calculateForecastContributionCents({commissionCents:commission,providerFeeCents:provider,refundCents:refunds});
+    if(!marginResult.ok)return json({ok:false,error:marginResult.error,version:VERSION},500);
+    const margin=marginResult.contribution_cents;
     const period=new Date(); period.setMonth(period.getMonth()+i); const key=period.toISOString().slice(0,7);
     await env.DB.prepare(`INSERT INTO finance_forecasts(id,period,scenario,revenue_cents,commission_cents,payout_cents,provider_fee_cents,refund_cents,estimated_margin_cents,confidence) VALUES(?,?,?,?,?,?,?,?,?,?)`)
       .bind(crypto.randomUUID(),key,'BASE',revenue,commission,payout,provider,refunds,margin,0.55).run();
@@ -2728,8 +2748,23 @@ async function handleV139(request, env) {
     '/api/ops/case/execute','/api/ops/outbox/process','/api/copilot/briefing','/api/clients/score','/api/loyalty/update',
     '/api/quality','/api/capacity/dashboard','/api/finance/forecast','/api/system/audit'
   ];
-  if(operationalPaths.includes(url.pathname)){
-    try{await ensureOperationalSchema(env);}catch(e){return json({ok:false,error:'OPERATIONAL_SCHEMA_ERROR',version:VERSION,message:e.message},500);}
+  const operationalRoles = {
+    '/api/ops/case/execute':['gerante'],
+    '/api/ops/outbox/process':['gerante'],
+    '/api/copilot/briefing':['gerante'],
+    '/api/clients/score':['gerante'],
+    '/api/loyalty/update':['gerante'],
+    '/api/quality':['gerante','client','entreprise'],
+    '/api/capacity/dashboard':['gerante'],
+    '/api/finance/forecast':['gerante'],
+    '/api/system/audit':['gerante']
+  };
+  const requiredRoles=operationalRoles[url.pathname];
+  if(requiredRoles) {
+    const preflight=await requireAuthRole(request,env,requiredRoles);
+    if(preflight.error)return preflight.error;
+    try{await ensureOperationalSchema(env);}
+    catch(e){return json({ok:false,error:'OPERATIONAL_SCHEMA_ERROR',version:VERSION},500);}
   }
   if(url.pathname==='/api/ops/case/execute'&&request.method==='POST')return operationalExecute(request,env);
   if(url.pathname==='/api/ops/outbox/process'&&request.method==='POST')return processActionOutbox(request,env);
@@ -3784,14 +3819,13 @@ handle = async function(request,env){
    - traçabilité des blocages de sécurité
    ============================================================================ */
 
-async function productionSafetySchema(env){
-  if(!env.DB) throw new Error('DATABASE_REQUIRED');
-  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS production_security_events (
-    id TEXT PRIMARY KEY, event_type TEXT NOT NULL, route TEXT, subject_hash TEXT,
-    decision TEXT NOT NULL, details_json TEXT NOT NULL DEFAULT '{}',
-    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-  )`).run();
-  await env.DB.prepare(`CREATE INDEX IF NOT EXISTS idx_prod_sec_events_date ON production_security_events(event_type,created_at)`).run();
+async function productionRateLimitSchemaReady(env){
+  if(!env?.DB) return false;
+  // Read-only check: schema changes belong to a versioned migration, never a request.
+  const row=await env.DB.prepare(
+    "SELECT 1 AS ready FROM sqlite_master WHERE type='table' AND name='security_rate_limits' LIMIT 1"
+  ).first();
+  return row?.ready===1;
 }
 
 async function productionSubjectHash(request, route){
@@ -3816,7 +3850,9 @@ async function productionRateLimit(request,env){
   const subject=await productionSubjectHash(request,path);
   const now=Math.floor(Date.now()/1000);
   const start=new Date(Math.floor(now/windowSeconds)*windowSeconds*1000).toISOString();
-  await ensureFinalHardeningSchema(env);
+  if(!(await productionRateLimitSchemaReady(env))){
+    return {ok:false,response:json({ok:false,error:'RATE_LIMIT_SCHEMA_NOT_READY',version:VERSION},503,{'retry-after':'60'})};
+  }
   const existing=await env.DB.prepare(`SELECT request_count FROM security_rate_limits WHERE bucket=? AND subject_hash=? AND window_start=? LIMIT 1`).bind(bucket,subject,start).first();
   const count=Number(existing?.request_count||0)+1;
   if(existing){
@@ -3825,9 +3861,9 @@ async function productionRateLimit(request,env){
     await env.DB.prepare(`INSERT INTO security_rate_limits(id,bucket,subject_hash,window_start,request_count) VALUES(?,?,?,?,1)`).bind(crypto.randomUUID(),bucket,subject,start).run();
   }
   if(count>limit){
-    await productionSafetySchema(env);
-    await env.DB.prepare(`INSERT INTO production_security_events(id,event_type,route,subject_hash,decision,details_json) VALUES(?,?,?,?,?,?)`)
-      .bind(crypto.randomUUID(),'RATE_LIMIT',path,subject,'BLOCKED',JSON.stringify({limit,windowSeconds})).run();
+    // Emit a structured platform log without creating tables or writing an
+    // unversioned audit record from the request path.
+    console.warn(JSON.stringify({event:'RATE_LIMIT_BLOCKED',route:path,subject_hash:subject,limit,window_seconds:windowSeconds}));
     return {ok:false,response:json({ok:false,error:'RATE_LIMITED',version:VERSION,retry_after_seconds:Math.max(1,windowSeconds-(now%windowSeconds))},429,{'retry-after':String(Math.max(1,windowSeconds-(now%windowSeconds)))})};
   }
   return {ok:true};

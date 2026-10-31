@@ -40,10 +40,15 @@ test("les routes SUPRA sont authentifiées et le plan stratégique est réservé
   assert.match(source, /\/api\/supra\/plan/);
 });
 
-test("les routes SUPRA ne déclenchent aucune préparation automatique du schéma D1", () => {
-  const match = source.match(/const consolidatedPath = \[([^\]]+)\]/);
-  assert.ok(match, "consolidated schema path list must be present");
-  assert.doesNotMatch(match[1], /\/api\/supra\/(domains|plan)/);
+test("les routes SUPRA restent hors des routes qui préparent le schéma D1", () => {
+  const rolesStart = source.indexOf("const consolidatedRoles = {");
+  assert.notEqual(rolesStart, -1);
+  const rolesEnd = source.indexOf("};", rolesStart);
+  assert.notEqual(rolesEnd, -1);
+  const rolesMap = source.slice(rolesStart, rolesEnd);
+  assert.doesNotMatch(rolesMap, /\/api\/supra\/(domains|plan)/);
+  assert.match(source.slice(rolesEnd), /const requiredRoles=consolidatedRoles\[url\.pathname\]/);
+  assert.match(source.slice(rolesEnd), /requireAuthRole\(request,env,requiredRoles\)/);
 });
 
 

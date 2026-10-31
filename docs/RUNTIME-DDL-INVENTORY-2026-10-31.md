@@ -1,0 +1,70 @@
+# Audit DDL à l'exécution — branche hardening/preview-release-gates-v1
+
+Date de l'audit : 2026-10-31
+Fichier audité : `src/index.js` (4 005 lignes au commit audité)
+Méthode : inventaire statique des définitions `ensure*Schema` et de leurs références directes dans ce fichier. Ce n'est ni un audit dynamique D1, ni une preuve que tous les appels indirects du dépôt sont couverts.
+
+## Résultat
+
+Les dix helpers `ensure*Schema` recensés comptent **67 appels directs** dans `src/index.js` (7 + 9 + 7 + 10 + 12 + 5 + 6 + 1 + 3 + 7). L'audit a également identifié un onzième helper DDL, `productionSafetySchema`, qui crée `production_security_events` et son index en dehors de cette famille `ensure*Schema`. Le middleware `productionRateLimit` appelle `ensureFinalHardeningSchema` sur les requêtes mutantes ; en cas de dépassement de limite, il appelle aussi `productionSafetySchema`. Les helpers exécutent des `CREATE TABLE`, `CREATE INDEX`, parfois des `CREATE TRIGGER`, et certains insèrent des valeurs par défaut à l'exécution. Le périmètre n'inclut pas encore les appels indirects, les autres fichiers ni les comportements effectifs de D1.
+
+| Helper | Définition | Appels directs dans `src/index.js` |
+|---|---:|---|
+| `ensureSecuritySchema` | 432 | 543, 555, 621, 669, 687, 742, 762 |
+| `ensurePaymentSchema` | 774 | 867, 885, 896, 925, 942, 1000, 1111, 1144, 2838 |
+| `ensureConsolidatedSchema` | 1325 | 1415, 2051, 2612, 2716, 2838, 2871, 3094 |
+| `ensureStrategicSchema` | 2083 | 2225, 2324, 2369, 2381, 2400, 2433, 2634, 2716, 2838, 2871 |
+| `ensureOperationalSchema` | 2461 | 1612, 2612, 2634, 2655, 2672, 2682, 2716, 2731, 2763, 2838, 2871, 2893 |
+| `ensureFinalHardeningSchema` | 2787 | 2838, 2871, 2885, 2893, 3851 |
+| `ensureCommercialRecruitmentSchema` | 2945 | 3046, 3056, 3067, 3074, 3085, 3094 |
+| `ensureFinanceWorkspaceSchema` | 3106 | 3167 |
+| `ensureNationalContinuitySchema` | 3453 | 3486, 3523, 3529 |
+| `ensureProcheliaMasterComplementSchema` | 3616 | 3688, 3697, 3707, 3715, 3758, 3773, 3788 |
+
+## Risques confirmés par le code
+
+1. **DDL dans le chemin des requêtes** : les helpers sont appelés par des handlers de routes. Cela couple disponibilité métier, latence et droits SQL au processus HTTP.
+2. **Écriture de configuration au runtime** : certains helpers font aussi des `INSERT OR IGNORE` pour des paramètres, règles ou profils par défaut. Il faudra séparer structure et données de référence.
+3. **Initialisation transversale** : les chemins de contrôle final appellent plusieurs helpers successivement. Une seule requête peut donc tenter de préparer de nombreux domaines.
+4. **Périmètre sécurité** : le contrôle RBAC ajouté aux routeurs consolidé/opérationnel ne couvre pas automatiquement les autres familles (identité, paiement, commercial, finance, sauvegarde, profils, rate-limit). Chaque route doit être reliée à son contrôle d'accès effectif.
+5. **Rate limit dépendant du DDL** : `productionRateLimit` appelle `ensureFinalHardeningSchema` sur chaque requête mutante, et `productionSafetySchema` crée une table supplémentaire lors d'un blocage. Le rate-limit lui-même ne doit pas dépendre d'une création de table à la première requête.
+6. **Catalogue fragmenté** : les chemins existants lisent à la fois `prestations` et `métier_catalog`. Le schéma réel, les données et les relations historiques n'ont pas encore été rapprochés.
+
+## Stratégie de migration — sans exécution
+
+- Geler les changements de schéma sur cette branche pendant l'inventaire.
+- Extraire chaque instruction DDL exacte des onze helpers, y compris indexes, triggers, contraintes et valeurs de référence, dans des migrations SQL numérotées et ordonnées.
+- Ajouter une table de suivi des migrations avec identifiant, checksum, date et version ; refuser toute divergence de checksum.
+- Construire un bootstrap de migration séparé du Worker applicatif, protégé par un environnement isolé et une approbation explicite.
+- Tester migrations sur une base D1 jetable, puis sur une copie de préproduction ; vérifier relance idempotente, interruption, reprise, contraintes et rollback compensatoire.
+- Faire une sauvegarde chiffrée, vérifier son intégrité et effectuer une restauration complète avant toute migration préproduction.
+- Convertir les helpers runtime en vérifications de schéma en lecture seule, puis retirer le DDL runtime uniquement après preuve que toutes les tables et données attendues existent.
+- Ne jamais appliquer cette séquence sur la D1 de production sans validation distincte et plan de retour arrière testé.
+
+## Non-actions effectuées
+
+Aucune requête DDL n'a été exécutée. Aucune migration, sauvegarde, restauration, écriture D1, modification de secret, déploiement, fusion ou opération de paiement n'a été lancée.
+
+
+## Complément de périmètre — 2026-10-31
+
+Le comptage **67** concerne uniquement les appels directs aux dix fonctions `ensure*Schema`. `productionSafetySchema` est une fonction DDL supplémentaire, appelée depuis le chemin de rate-limit lorsque le seuil est dépassé ; elle n'est donc pas incluse dans les 67. L'inventaire complet du dépôt, des wrappers, des autres fichiers et des branches reste à effectuer avant d'affirmer qu'il n'existe plus aucun DDL runtime.
+
+
+## Correctif du rate-limit — 2026-10-31
+
+Commit `487a5007ecd36b4d7e7d716bbbe82378004c0839` :
+- suppression de `productionSafetySchema`, qui créait une table et un index depuis le chemin de requête ;
+- suppression de l'appel à `ensureFinalHardeningSchema` dans `productionRateLimit` ;
+- contrôle préalable en lecture seule de l'existence de `security_rate_limits` dans `sqlite_master` ;
+- si la migration n'a pas préalablement créé cette table, le middleware échoue fermé avec HTTP 503 `RATE_LIMIT_SCHEMA_NOT_READY` au lieu de créer le schéma à la volée ;
+- le dépassement de seuil est journalisé dans les logs Worker structurés, sans création d'une table d'audit runtime.
+
+Des tests statiques dédiés vérifient l'absence de DDL, l'ordre du contrôle de schéma et la mise à jour de l'inventaire de non-régression. Ce correctif ne prouve pas encore que la table existe dans la D1 preview ; cela doit être confirmé par une vérification strictement en lecture seule avant tout déploiement réel. Les autres helpers DDL runtime restent à migrer.
+
+
+## Migration rate-limit préparée en préproduction — non appliquée
+
+Une migration additive `0005_security_rate_limits.sql` a été créée sur la branche dédiée `prelaunch/v14.5.7-consolidation-audit` (commit `02ef1c0039ad15959a0fad902ff5e2d2c1d9a292`). Elle crée uniquement la table `security_rate_limits` et son index, avec contrainte de non-négativité du compteur et unicité du bucket/empreinte/fenêtre. Le workflow manuel de migration a été mis à jour pour exiger ce fichier (commit `e48c99b75a28577916ee64ddb9bd500f49fa05b4`).
+
+**Aucune migration n'a été appliquée à D1.** La cible configurée est explicitement la base de préproduction `prochelia-preview-db` (UUID `6adb95e5-e542-4bec-9008-fbea01042305`) et le Worker staging `prochelia-api-staging`. Avant toute exécution, il faut vérifier les migrations déjà enregistrées, réaliser une sauvegarde vérifiée et un exercice de restauration sur une base de test indépendante. La simple création du fichier SQL ne prouve ni son application ni la présence de la table dans la base.
