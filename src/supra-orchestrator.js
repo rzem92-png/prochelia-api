@@ -4,6 +4,12 @@
 
 const DOMAIN_REGISTRY = Object.freeze({
   direction: ["strategie", "objectifs", "priorites", "gouvernance", "performance"],
+  services: ["catalogue", "prestations", "devis", "commandes", "qualite", "continuite"],
+  talents: ["profils", "competences", "qualifications", "disponibilites", "parcours"],
+  live_createurs: ["diffusion", "createurs", "contenus", "moderation", "droits_image", "conversion"],
+  opportunites: ["pipeline", "partenariats", "parrainage", "licences", "abonnements", "distribution"],
+  rentabilite: ["marge_nette", "cac_reel", "valeur_vie_client", "revenus_par_activite", "tresorerie_13_semaines"],
+  croissance: ["acquisition", "retention", "replication_territoriale", "seuils_de_croissance"],
   finance: ["tresorerie", "budget", "marges", "commissions", "couts", "previsions"],
   comptabilite: ["ledger", "rapprochement", "factures", "impayes", "cloture"],
   tarification: ["devis", "tarifs", "promotions", "majorations", "plafonds"],
@@ -31,6 +37,11 @@ const DOMAIN_ALIASES = Object.freeze({
   remplacement: "matching", litige: "reclamations", reclamation_client: "reclamations",
   rgpd: "rgpd", fraude: "securite", incident_technique: "securite",
   b2b: "entreprises", expansion: "international", crise_economique: "crise",
+  prestation: "services", catalogue: "services", commande: "services",
+  talent: "talents", profil_professionnel: "talents", createur: "live_createurs",
+  live: "live_createurs", opportunite: "opportunites", partenariat: "opportunites",
+  cac: "rentabilite", profitabilite: "rentabilite", marge_nette: "rentabilite",
+  croissance_nationale: "croissance", developpement_territorial: "croissance",
   danger_personne: "securite", violence: "securite", urgence_medicale: "securite",
   suspicion_maltraitance: "securite", incident_grave: "securite",
   conseil_juridique_complexe: "juridique", fraude_financiere_majeure: "securite"
