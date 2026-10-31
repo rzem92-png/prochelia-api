@@ -133,6 +133,24 @@ jobs:
             cat "$out/test-row-counts.csv"
           } >> "$GITHUB_STEP_SUMMARY"
 
+      - name: Comparer les écarts de tables et de volumes
+        shell: bash
+        run: |
+          set -euo pipefail
+          out="$RUNNER_TEMP/d1-compare"
+          diff -u "$out/preview-tables.txt" "$out/test-tables.txt" > "$out/table-schema-diff.txt" || true
+          {
+            echo "table,preview_rows,restore_v2_rows,difference"
+            awk -F, 'NR==FNR {gsub(/"/,"",$1); a[$1]=$2; next} {gsub(/"/,"",$1); b[$1]=$2} END {for (t in a) {x=a[t]+0; y=(t in b)?b[t]+0:0; print t "," x "," y "," y-x} for (t in b) if (!(t in a)) print t ",0," b[t] "," b[t]}' "$out/preview-row-counts.csv" "$out/test-row-counts.csv" | sort
+          } > "$out/row-count-diff.csv"
+          if cmp -s "$out/preview-tables.txt" "$out/test-tables.txt" && diff -u <(tail -n +2 "$out/preview-row-counts.csv" | sort) <(tail -n +2 "$out/test-row-counts.csv" | sort); then
+            echo "## Résultat comparaison" >> "$GITHUB_STEP_SUMMARY"
+            echo "Tables et volumes de lignes identiques." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "## Écarts détectés" >> "$GITHUB_STEP_SUMMARY"
+            echo "Les rapports d'écarts sont joints ; aucune écriture n'a été effectuée." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
       - name: Publier les rapports CSV sans données personnelles
         uses: actions/upload-artifact@v6
         with:
@@ -140,5 +158,7 @@ jobs:
           path: |
             ${{ runner.temp }}/d1-compare/preview-row-counts.csv
             ${{ runner.temp }}/d1-compare/test-row-counts.csv
+            ${{ runner.temp }}/d1-compare/row-count-diff.csv
+            ${{ runner.temp }}/d1-compare/table-schema-diff.txt
           if-no-files-found: error
           retention-days: 30
