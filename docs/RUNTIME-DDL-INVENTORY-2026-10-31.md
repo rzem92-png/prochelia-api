@@ -60,4 +60,4 @@ Commit `487a5007ecd36b4d7e7d716bbbe82378004c0839` :
 - si la migration n'a pas préalablement créé cette table, le middleware échoue fermé avec HTTP 503 `RATE_LIMIT_SCHEMA_NOT_READY` au lieu de créer le schéma à la volée ;
 - le dépassement de seuil est journalisé dans les logs Worker structurés, sans création d'une table d'audit runtime.
 
-Un test statique dédié vérifie l'absence de DDL et l'ordre du contrôle de schéma. Ce correctif ne prouve pas encore que la table existe dans la D1 preview ; cela doit être confirmé par une vérification strictement en lecture seule avant tout déploiement réel. Les autres helpers DDL runtime restent à migrer.
+Des tests statiques dédiés vérifient l'absence de DDL, l'ordre du contrôle de schéma et la mise à jour de l'inventaire de non-régression. Ce correctif ne prouve pas encore que la table existe dans la D1 preview ; cela doit être confirmé par une vérification strictement en lecture seule avant tout déploiement réel. Les autres helpers DDL runtime restent à migrer.
