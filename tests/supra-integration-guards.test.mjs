@@ -324,3 +324,20 @@ test("mission payment idempotency keys are bound to the exact original request",
   assert.match(handler,/Number\(old\.commission_cents\)===commission/);
   assert.match(handler,/IDEMPOTENCY_KEY_CONFLICT/);
 });
+
+
+test("atomic accounting writer validates, batches and mirrors balanced ledger lines", () => {
+  const start=source.indexOf("async function postBalancedAccountingOperation");
+  const end=source.indexOf("async function getSetting",start);
+  const helper=source.slice(start,end);
+  assert.ok(start>=0 && end>start);
+  assert.match(helper,/ACCOUNTING_OPERATION_NOT_BALANCED/);
+  assert.match(helper,/ACCOUNTING_AMOUNT_OVERFLOW/);
+  assert.match(helper,/ACCOUNTING_IDEMPOTENCY_CONFLICT/);
+  assert.match(helper,/idempotency_key TEXT NOT NULL UNIQUE|idempotency_key/);
+  assert.match(helper,/env\.DB\.batch\(statements\)/);
+  assert.match(helper,/INSERT INTO accounting_operation_lines/);
+  assert.match(helper,/INSERT INTO accounting_ledger/);
+  assert.match(helper,/status='POSTED'/);
+  assert.match(helper,/lines\.length>40/);
+});
