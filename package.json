@@ -11,6 +11,7 @@
     "test:supra": "node --test tests/supra-*.test.mjs",
     "test": "node --test tests/*.test.mjs",
     "check:worker": "wrangler deploy --dry-run",
+    "check:worker:preview": "wrangler deploy --dry-run --config wrangler.preview.jsonc",
     "deploy": "wrangler deploy"
   },
   "devDependencies": {
