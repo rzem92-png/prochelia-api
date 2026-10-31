@@ -1720,12 +1720,13 @@ async function supraPlan(request, env) {
      !['LOW','MEDIUM','HIGH','CRITICAL'].includes(impact) ||
      !(market === "other" || /^[a-z]{2}$/.test(market)) ||
      (domain!==undefined && domain.length>60) ||
-     (body.context!==undefined && !isPlainRecord(body.context)) ||
-     (body.evidence!==undefined && !isPlainRecord(body.evidence))) {
+     (body.context!==undefined && !isPlainRecord(body.context))) {
     return json({ok:false,error:'INVALID_SUPRA_PLAN_INPUT',version:VERSION},400);
   }
+  if(body.evidence!==undefined) return json({ok:false,error:'CLIENT_SUPPLIED_EVIDENCE_NOT_TRUSTED',version:VERSION},400);
   const context=body.context||{};
-  const evidence=body.evidence||{};
+  // A browser cannot assert verified facts. Only future server-side adapters may populate evidence.
+  const evidence={};
   const plan=procheliaV7.buildSupraPlan({
     caseType,domain,impact,requestedAction:action,market,context
   });
