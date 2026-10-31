@@ -1275,6 +1275,18 @@ async function ensureConsolidatedSchema(env) {
     `CREATE TABLE IF NOT EXISTS complaints (id TEXT PRIMARY KEY, client_type TEXT NOT NULL, client_id TEXT, company_id TEXT, mission_id TEXT, category TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'OPEN', severity TEXT NOT NULL DEFAULT 'LOW', description TEXT, resolution_case_id TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, resolved_at TEXT)`,
     `CREATE TABLE IF NOT EXISTS accounting_ledger (id TEXT PRIMARY KEY, reference_type TEXT NOT NULL, reference_id TEXT NOT NULL, account_code TEXT NOT NULL, direction TEXT NOT NULL, amount_cents INTEGER NOT NULL, currency TEXT NOT NULL DEFAULT 'EUR', label TEXT, metadata_json TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`,
     `CREATE INDEX IF NOT EXISTS idx_ledger_ref ON accounting_ledger(reference_type, reference_id, created_at)`,
+    `CREATE TRIGGER IF NOT EXISTS trg_ledger_validate_insert BEFORE INSERT ON accounting_ledger
+      WHEN NEW.amount_cents IS NULL OR NEW.amount_cents<=0
+        OR NEW.direction NOT IN ('DEBIT','CREDIT')
+        OR length(trim(NEW.account_code))=0
+        OR length(trim(NEW.reference_type))=0
+        OR length(trim(NEW.reference_id))=0
+        OR NEW.currency NOT IN ('EUR')
+      BEGIN SELECT RAISE(ABORT,'ACCOUNTING_LEDGER_INVALID_ENTRY'); END`,
+    `CREATE TRIGGER IF NOT EXISTS trg_ledger_immutable_update BEFORE UPDATE ON accounting_ledger
+      BEGIN SELECT RAISE(ABORT,'ACCOUNTING_LEDGER_IMMUTABLE'); END`,
+    `CREATE TRIGGER IF NOT EXISTS trg_ledger_immutable_delete BEFORE DELETE ON accounting_ledger
+      BEGIN SELECT RAISE(ABORT,'ACCOUNTING_LEDGER_IMMUTABLE'); END`,
     `CREATE TABLE IF NOT EXISTS business_expenses (id TEXT PRIMARY KEY, category TEXT NOT NULL, supplier TEXT, amount_cents INTEGER NOT NULL, recurring INTEGER NOT NULL DEFAULT 0, period TEXT, metadata_json TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`,
     `CREATE TABLE IF NOT EXISTS notification_outbox (id TEXT PRIMARY KEY, channel TEXT NOT NULL, recipient_ref TEXT NOT NULL, template TEXT NOT NULL, payload_json TEXT NOT NULL DEFAULT '{}', status TEXT NOT NULL DEFAULT 'PENDING', attempts INTEGER NOT NULL DEFAULT 0, last_error TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, sent_at TEXT)`,
     `CREATE TABLE IF NOT EXISTS compliance_events (id TEXT PRIMARY KEY, type TEXT NOT NULL, severity TEXT NOT NULL, entity_type TEXT, entity_id TEXT, status TEXT NOT NULL DEFAULT 'OPEN', details_json TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, closed_at TEXT)`
