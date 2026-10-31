@@ -249,3 +249,11 @@ test("payout idempotency keys cannot disclose another user's payout", () => {
   assert.match(route,/String\(replay\.user_id\)===String\(auth\.user\.id\)/);
   assert.match(route,/IDEMPOTENCY_KEY_CONFLICT/);
 });
+
+
+test("dispute creation is guarded atomically against concurrent active duplicates", () => {
+  const route=source.slice(source.indexOf("async function openPaymentDispute"),source.indexOf("\nasync function ",source.indexOf("async function openPaymentDispute")+30));
+  assert.match(route,/INSERT INTO payment_disputes[\s\S]*SELECT \?,\?,\?,\?,\?,\?,\?,\? FROM payment_transactions/);
+  assert.match(route,/NOT EXISTS \(SELECT 1 FROM payment_disputes WHERE transaction_id=\? AND status IN \('open','awaiting_psp_action'\)\)/);
+  assert.match(route,/PAYMENT_STATE_CHANGED_RETRY/);
+});
