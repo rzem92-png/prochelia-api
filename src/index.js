@@ -848,8 +848,16 @@ async function createMissionPayment(request, env) {
   if(!missionId||!clientId||!intervenantId||gross===null||commission===null||commission>gross) return json({ok:false,error:'INVALID_PAYMENT_AMOUNT_OR_PARTIES',version:VERSION},400);
   const idem=clean(request.headers.get('idempotency-key'))||clean(body?.idempotency_key);
   if(!idem) return json({ok:false,error:'IDEMPOTENCY_KEY_REQUIRED',version:VERSION},400);
+  if(idem.length>180) return json({ok:false,error:'IDEMPOTENCY_KEY_TOO_LONG',version:VERSION},400);
   const old=await env.DB.prepare('SELECT * FROM payment_transactions WHERE idempotency_key=? LIMIT 1').bind(idem).first();
-  if(old) return json({ok:true,version:VERSION,idempotent_replay:true,transaction:old},200);
+  if(old) {
+    const sameRequest=old.mission_id===missionId && old.client_id===clientId &&
+      old.intervenant_id===intervenantId && Number(old.gross_cents)===gross &&
+      Number(old.commission_cents)===commission && old.currency==='EUR' &&
+      old.provider===paymentProvider(env) && old.type==='MISSION_CHARGE';
+    if(!sameRequest) return json({ok:false,error:'IDEMPOTENCY_KEY_CONFLICT',version:VERSION},409);
+    return json({ok:true,version:VERSION,idempotent_replay:true,transaction:old},200);
+  }
   const net=gross-commission;
   const txId=crypto.randomUUID();
   await env.DB.prepare(`INSERT INTO payment_transactions
