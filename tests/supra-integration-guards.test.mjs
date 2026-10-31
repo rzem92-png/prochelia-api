@@ -113,3 +113,13 @@ test("non-test pricing phases require a complete approved server policy", () => 
   assert.match(route, /NON_TEST_PRICING_POLICY_INCOMPLETE/);
   assert.match(route, /phase!==\x27TEST\x27/);
 });
+
+test("finance dashboard never labels ledger balance minus expenses as net profit", () => {
+  const route=source.slice(source.indexOf("async function financeSummary"),source.indexOf("async function complaintCreate"));
+  assert.match(route,/FROM payment_transactions WHERE status='paid'/);
+  assert.match(route,/net_estimate_cents:null/);
+  assert.match(route,/net_profit_available:false/);
+  assert.match(route,/paid_status_is_reconciled:false/);
+  assert.match(route,/PSP_AND_ACCOUNTING_RECONCILIATION_AND_FULL_COST_ALLOCATION_REQUIRED/);
+  assert.match(route,/requireAuthRole\(request,env,\['gerante'\]\)/);
+});
