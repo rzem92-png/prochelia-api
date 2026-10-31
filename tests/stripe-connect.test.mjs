@@ -223,3 +223,17 @@ test("Stripe onboarding requires an account token and explicit terms acceptance"
   assert.equal(body.error,"STRIPE_ACCOUNT_TOKEN_AND_TERMS_REQUIRED");
   assert.equal(fake.calls.some(x=>x.sql.includes("INSERT INTO payment_accounts")),false);
 });
+
+test("server quote endpoint refuses client-controlled prices until a tariff policy is configured", async()=>{
+  const fake=fakeDb("gerante");
+  const env={DB:fake.DB};
+  const response=await worker.fetch(new Request("https://api.test/api/pricing/quote",{
+    method:"POST",
+    headers:{Cookie:"prochelia_session=synthetic-token","Content-Type":"application/json"},
+    body:JSON.stringify({base_price_cents:1,platform_fee_percent:0,discount_cents:999999,holiday:true})
+  }),env);
+  const body=await response.json();
+  assert.equal(response.status,503,JSON.stringify(body));
+  assert.equal(body.error,"SERVER_PRICING_POLICY_NOT_CONFIGURED");
+  assert.equal(fake.calls.some(x=>x.sql.includes("INSERT INTO pricing_quotes")),false);
+});
