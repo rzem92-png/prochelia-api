@@ -164,3 +164,59 @@ test("non-manager read-only request is downgraded to recommendation pending appr
   assert.equal(decision.decisionOwner,"GERANTE");
   assert.equal(decision.executionAllowed,false);
 });
+
+
+test("SUPRA execution invariant holds across a deterministic adversarial action-impact matrix", () => {
+  const actions = [
+    "GENERATE_SUMMARY", "CLASSIFY_CASE", "DETECT_DUPLICATE", "CALCULATE_INDICATOR",
+    "PREPARE_SCENARIO", "DRAFT_INTERNAL_TASK", "RECONCILE_READ_ONLY", "CHECK_BACKUP_STATUS",
+    "REFUND", "PAYOUT", "CHARGE", "CHANGE_PRICE", "ACTIVATE_PROMOTION",
+    "ASSIGN_REPLACEMENT", "RESCHEDULE_MISSION", "CANCEL_MISSION",
+    "CONTRACT_CHANGE", "PERSONAL_DATA_EXPORT", "PERSONAL_DATA_DELETE",
+    "ACCOUNT_SUSPENSION", "HIRE", "TERMINATE", "SEND_PAYMENT", "__proto__", "UNKNOWN"
+  ];
+  const impacts = ["LOW", "MEDIUM", "HIGH", "CRITICAL"];
+  for (const action of actions) {
+    for (const impact of impacts) {
+      const input = {
+        caseType: "routine",
+        requestedAction: action,
+        impact,
+        actorRole: "gerante",
+        context: { mission_id: "mission-test", missionOwnershipVerified: true }
+      };
+      const plan = buildSupraPlan(input);
+      const decision = assessSupraDecision({
+        caseType: input.caseType,
+        requestedAction: input.requestedAction,
+        impact: input.impact,
+        actorRole: input.actorRole,
+        context: { mission_id: "mission-test" }
+      });
+      assert.equal(plan.executionAllowed, false, action + "/" + impact);
+      assert.equal(decision.executionAllowed, false, action + "/" + impact);
+      assert.equal(plan.autonomy.routineReadOnlyAutonomy, false, action + "/" + impact);
+      assert.equal(plan.autonomy.approvalRequired, true, action + "/" + impact);
+    }
+  }
+});
+
+test("decision engine rejects caller-supplied context verification flags", () => {
+  for (const context of [
+    { mission_id: "m-1", missionOwnershipVerified: true },
+    { provider_id: "p-1", providerEligibilityVerified: true },
+    { client_id: "c-1", clientOwnershipVerified: true },
+    { pspConfirmed: true }
+  ]) {
+    const decision = assessSupraDecision({
+      caseType: "routine",
+      requestedAction: "GENERATE_SUMMARY",
+      impact: "LOW",
+      actorRole: "gerante",
+      context
+    });
+    assert.equal(decision.executionAllowed, false);
+    assert.equal(decision.managerApprovalRequired, true);
+    assert.equal(decision.rationale, "INVALID_CONTEXT_FIELD_FAIL_CLOSED");
+  }
+});
