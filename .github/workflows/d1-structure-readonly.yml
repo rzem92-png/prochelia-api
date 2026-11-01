@@ -121,8 +121,8 @@ jobs:
             d="$out/$target"
             ./node_modules/.bin/wrangler d1 execute "$db" --remote --config "$cfg" --command="PRAGMA quick_check;" --json > "$d/quick-check.json"
             ./node_modules/.bin/wrangler d1 execute "$db" --remote --config "$cfg" --command="PRAGMA foreign_key_check;" --json > "$d/foreign-key-check.json"
-            jq -e '[.. | objects | to_entries[]? | select(.key == "quick_check") | .value] | length > 0 and all(. == "ok")' "$d/quick-check.json" >/dev/null || { echo "::error::quick_check non conforme sur $target."; exit 1; }
-            jq -e '[.. | objects | select(has("results")) | .results[]?] | length == 0' "$d/foreign-key-check.json" >/dev/null || { echo "::error::Violations de clés étrangères sur $target."; exit 1; }
+            jq -e '([.. | objects | to_entries[]? | select(.key == "quick_check") | .value]) as $checks | ($checks | length) > 0 and all($checks[]; . == "ok")' "$d/quick-check.json" >/dev/null || { echo "::error::quick_check non conforme sur $target."; exit 1; }
+            jq -e '([.. | objects | select(has("results")) | .results]) as $sets | ($sets | length) > 0 and all($sets[]; type == "array") and ([ $sets[][] ] | length == 0)' "$d/foreign-key-check.json" >/dev/null || { echo "::error::Violations de clés étrangères sur $target."; exit 1; }
           done
 
       - name: Comparer les structures et produire le rapport
