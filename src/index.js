@@ -4287,7 +4287,7 @@ async function backupStatus(env){
   const r=initialized
     ? await env.DB.prepare(`SELECT * FROM backup_runs ORDER BY started_at DESC LIMIT 20`).all()
     : {results:[]};
-  return {ok:true,configured:!!env.BACKUP_BUCKET&&!!env.BACKUP_ENCRYPTION_KEY,automatic:true,frequency:'DAILY',retentionDays:90,initialized,read_only:true,runs:r.results||[]};
+  return {ok:true,configured:!!env.BACKUP_BUCKET&&!!env.BACKUP_ENCRYPTION_KEY,automatic:true,frequency:'DAILY',retentionPolicyDays:90,retentionEnforced:false,retentionStatus:'R2_LIFECYCLE_RULE_NOT_VERIFIED',initialized,read_only:true,runs:r.results||[]};
 }
 
 async function verifyNationalBackup(env,runId){
