@@ -28,6 +28,8 @@ Après déploiement autorisé de la préproduction, s'authentifier comme Gérant
 
 Le code de sauvegarde exporte les tables applicatives en lots de 500 lignes, chiffre les données avec AES-GCM, conserve une empreinte SHA-256 et écrit un manifeste chiffré dans R2 avec les entrées de données et le DDL (tables, index, triggers et vues) capturé depuis `sqlite_master`. Les tables internes `backup_runs`, `backup_objects` et `backup_verifications` sont exclues des données et du DDL pour éviter de réimporter les journaux de sauvegarde.
 
+**Limite de cohérence à retenir :** cet export logique lit les tables par requêtes D1 successives et n'est pas un snapshot transactionnel global. Des écritures concurrentes peuvent donc produire un état qui ne correspond pas à un instant unique. Le manifeste et l'API exposent `BEST_EFFORT_NON_TRANSACTIONAL` / `snapshot_consistent: false` pour ne pas présenter cette archive comme un point de reprise cohérent. Avant de la qualifier de sauvegarde restaurable, il faut geler les écritures pendant la capture ou utiliser un mécanisme de snapshot cohérent fourni par la plateforme, puis effectuer et documenter la restauration isolée.
+
 ## 3. Restauration — exercice isolé obligatoire
 
 **Ne pas restaurer directement sur la base utilisée par les utilisateurs.** La restauration destructive automatique n'est pas exposée par l'API.
