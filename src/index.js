@@ -285,15 +285,72 @@ async function coreAccountsSchema(env) {
 }
 
 async function missionsSchema(env) {
-  if (!env.DB) return json({ ok: false, database: false, version: VERSION }, 503);
-  const row = await env.DB.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='missions';").first();
-  const count = await env.DB.prepare('SELECT COUNT(*) AS total FROM missions;').first();
-  return json({
-    ok: true, source: 'D1', version: VERSION, table: 'missions', exists: !!row?.sql,
-    create_sql: row?.sql || null, total_rows: Number(count?.total || 0),
-    write_enabled: false, post_missions: 'DISABLED',
-    note: 'Lecture seule tant que l’authentification/RBAC serveur n’est pas configurée.'
-  });
+  if (!env?.DB) {
+    return json({ ok: false, database: false, version: VERSION, error: 'DATABASE_UNAVAILABLE' }, 503);
+  }
+
+  try {
+    // Inspect sqlite_master first: never issue COUNT against a missing table.
+    const row = await env.DB.prepare(
+      "SELECT sql FROM sqlite_master WHERE type='table' AND name=? LIMIT 1;"
+    ).bind('missions').first();
+
+    if (!row?.sql) {
+      return json({
+        ok: true,
+        source: 'D1',
+        version: VERSION,
+        table: 'missions',
+        exists: false,
+        create_sql: null,
+        total_rows: null,
+        write_enabled: false,
+        post_missions: 'DISABLED',
+        mode: 'READ_ONLY_SCHEMA_AUDIT',
+        warning: 'MISSIONS_TABLE_MISSING',
+        note: 'Table absente : aucun comptage ni aucune écriture exécutés.'
+      });
+    }
+
+    const count = await env.DB.prepare('SELECT COUNT(*) AS total FROM missions;').first();
+    const total = Number(count?.total);
+    if (!Number.isSafeInteger(total) || total < 0) {
+      return json({
+        ok: false,
+        source: 'D1',
+        version: VERSION,
+        table: 'missions',
+        exists: true,
+        total_rows: null,
+        write_enabled: false,
+        error: 'INVALID_ROW_COUNT'
+      }, 503);
+    }
+
+    return json({
+      ok: true,
+      source: 'D1',
+      version: VERSION,
+      table: 'missions',
+      exists: true,
+      create_sql: row.sql,
+      total_rows: total,
+      write_enabled: false,
+      post_missions: 'DISABLED',
+      mode: 'READ_ONLY_SCHEMA_AUDIT',
+      note: 'Lecture seule : aucune donnée de mission ni aucun secret n’est renvoyé.'
+    });
+  } catch {
+    // Fail closed without exposing SQL errors, bindings, or database details.
+    return json({
+      ok: false,
+      source: 'D1',
+      version: VERSION,
+      table: 'missions',
+      write_enabled: false,
+      error: 'SCHEMA_AUDIT_FAILED'
+    }, 503);
+  }
 }
 
 function validatePayload(body) {
