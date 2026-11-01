@@ -56,5 +56,5 @@ test('GET backup and national-scale diagnostics never initialize or mutate D1 sc
   assert.match(scale, /read_only:true/);
   assert.match(backup, /SELECT name FROM sqlite_master/);
   assert.match(backup, /initialized,read_only:true/);
-  assert.match(backup, /if\(initialized\)/);
+  assert.match(backup, /const r=initialized/);
 });
