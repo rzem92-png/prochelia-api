@@ -60,6 +60,18 @@ test('GET backup and national-scale diagnostics never initialize or mutate D1 sc
 });
 
 
+test('logical D1 backups explicitly disclose that they are not point-in-time snapshots', () => {
+  const run = source.slice(source.indexOf('async function runNationalBackup'), source.indexOf('async function nationalScaleStatus'));
+  const status = source.slice(source.indexOf('async function backupStatus'), source.indexOf('async function verifyNationalBackup'));
+  assert.match(run, /BEST_EFFORT_NON_TRANSACTIONAL/);
+  assert.match(run, /snapshot_consistent:false/);
+  assert.match(run, /capture_started_at/);
+  assert.match(run, /capture_completed_at/);
+  assert.match(run, /manifestPlain=JSON\.stringify\(\{format:'PROCHELIA_BACKUP_MANIFEST_V1'.*consistency:/);
+  assert.match(status, /consistencyModel:'BEST_EFFORT_NON_TRANSACTIONAL'/);
+  assert.match(status, /snapshotConsistent:false/);
+});
+
 test('backup API does not present a declared retention target as an enforced R2 lifecycle rule', () => {
   const backup = source.slice(source.indexOf('async function backupStatus'), source.indexOf('async function verifyNationalBackup'));
   assert.match(backup, /retentionPolicyDays:90/);
