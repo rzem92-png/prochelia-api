@@ -46,3 +46,15 @@ test('restore runbook requires isolated restore, integrity checks and replaying 
   assert.match(runbook, /ne constitue pas une preuve d'exécution/);
   assert.match(runbook, /outil de déchiffrement\/import contrôlé/);
 });
+
+test('GET backup and national-scale diagnostics never initialize or mutate D1 schema', () => {
+  const scale = source.slice(source.indexOf('async function nationalScaleStatus'), source.indexOf('async function backupStatus'));
+  const backup = source.slice(source.indexOf('async function backupStatus'), source.indexOf('async function verifyNationalBackup'));
+  assert.doesNotMatch(scale, /ensureNationalContinuitySchema\s*\(/);
+  assert.doesNotMatch(backup, /ensureNationalContinuitySchema\s*\(/);
+  assert.match(scale, /SELECT name FROM sqlite_master/);
+  assert.match(scale, /read_only:true/);
+  assert.match(backup, /SELECT name FROM sqlite_master/);
+  assert.match(backup, /initialized,read_only:true/);
+  assert.match(backup, /if\(initialized\)/);
+});
