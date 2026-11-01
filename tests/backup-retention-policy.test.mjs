@@ -58,3 +58,12 @@ test('GET backup and national-scale diagnostics never initialize or mutate D1 sc
   assert.match(backup, /initialized,read_only:true/);
   assert.match(backup, /const r=initialized/);
 });
+
+
+test('backup API does not present a declared retention target as an enforced R2 lifecycle rule', () => {
+  const backup = source.slice(source.indexOf('async function backupStatus'), source.indexOf('async function verifyNationalBackup'));
+  assert.match(backup, /retentionPolicyDays:90/);
+  assert.match(backup, /retentionEnforced:false/);
+  assert.match(backup, /R2_LIFECYCLE_RULE_NOT_VERIFIED/);
+  assert.doesNotMatch(backup, /retentionDays:90/);
+});
