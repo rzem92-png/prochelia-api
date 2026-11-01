@@ -3936,12 +3936,14 @@ async function stripeWebhook(request, env) {
   if(request.method!=='POST') return json({ok:false,error:'METHOD_NOT_ALLOWED',version:VERSION},405,{'allow':'POST'});
   if(!env.DB) return json({ok:false,error:'DATABASE_REQUIRED',version:VERSION},503);
   if(!env.STRIPE_WEBHOOK_SECRET) return json({ok:false,error:'STRIPE_WEBHOOK_NOT_CONFIGURED',version:VERSION},503);
-  await ensurePaymentSchema(env);
   const raw=await request.text();
   const valid=await verifyStripeSignature(raw,request.headers.get('stripe-signature'),env.STRIPE_WEBHOOK_SECRET);
   if(!valid) return json({ok:false,error:'INVALID_STRIPE_SIGNATURE',version:VERSION},401);
   let event; try{event=JSON.parse(raw);}catch{return json({ok:false,error:'INVALID_STRIPE_EVENT_JSON',version:VERSION},400);}
   if(!event?.id || !event?.type || !event?.data?.object) return json({ok:false,error:'INVALID_STRIPE_EVENT',version:VERSION},400);
+  // Only a valid, signed and structurally valid Stripe event may initialize payment schema.
+  // Unauthenticated requests must not trigger D1 DDL or create an amplification path.
+  await ensurePaymentSchema(env);
   const payloadHash=await sha256Base64url(raw);
   // Persist event identity and atomically claim processing. processed=2 means in-flight;
   // an interrupted claim may be retried after a five-minute lease. This prevents two
