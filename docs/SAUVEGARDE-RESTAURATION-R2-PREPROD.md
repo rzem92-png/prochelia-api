@@ -24,6 +24,7 @@ Après déploiement autorisé de la préproduction, s'authentifier comme Gérant
 - Vérification cryptographique d'un run : `POST /api/system/backups/{runId}/verify` (Gérante uniquement). La route contrôle le checksum SHA-256, déchiffre les objets, valide le manifeste et enregistre un rapport dans `backup_verifications`.
 - Vérifier `configured: true`, un résultat `COMPLETED`, un nombre de lignes/objets cohérent et les objets présents dans le bucket R2.
 - Vérifier le Cron dans les déclencheurs/observabilité Cloudflare après le prochain 03:00 UTC. L'API distingue désormais `automaticScheduleConfigured` / `scheduleDeclaredInConfig` de `automaticExecutionVerified`; tant qu'une exécution planifiée n'est pas prouvée, `automatic` reste `false` et le statut indique `SCHEDULE_NOT_RUNTIME_VERIFIED`.
+- Une planification déclarée dans la configuration ne constitue pas une preuve d'exécution : seule une exécution Cron observée et corrélée à un run réussi peut être considérée comme réalisée.
 - Alerter sur chaque statut `FAILED`, absence de sauvegarde quotidienne, incohérence du nombre d'objets ou erreur de clé.
 
 Le code de sauvegarde exporte les tables applicatives en lots de 500 lignes, chiffre les données avec AES-GCM, conserve une empreinte SHA-256 et écrit un manifeste chiffré dans R2 avec les entrées de données et le DDL (tables, index, triggers et vues) capturé depuis `sqlite_master`. Les tables internes `backup_runs`, `backup_objects` et `backup_verifications` sont exclues des données et du DDL pour éviter de réimporter les journaux de sauvegarde.
