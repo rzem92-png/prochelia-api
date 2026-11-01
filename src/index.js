@@ -4279,7 +4279,7 @@ async function nationalScaleStatus(env){
   const config=c
     ? await env.DB.prepare(`SELECT key,value_json FROM platform_scale_config ORDER BY key`).all()
     : {results:[]};
-  return {ok:true,mode:'NATIONAL_SCALE',artificialUserCap:false,unlimitedInBusinessRules:true,database:'D1',documents:'R2_RECOMMENDED',backups:{provider:'R2',automatic:true,encrypted:!!env.BACKUP_ENCRYPTION_KEY},pagination:{cursorRecommended:true,maxPageSize:100},tables:(t.results||[]).map(x=>x.name),config:config.results||[],continuity_schema_initialized:!!c,read_only:true};
+  return {ok:true,mode:'NATIONAL_SCALE',artificialUserCap:false,unlimitedInBusinessRules:true,database:'D1',documents:'R2_RECOMMENDED',backups:{provider:'R2',automatic:false,scheduleDeclaredInConfig:true,automaticExecutionVerified:false,automaticStatus:'SCHEDULE_NOT_RUNTIME_VERIFIED',encrypted:!!env.BACKUP_ENCRYPTION_KEY},pagination:{cursorRecommended:true,maxPageSize:100},tables:(t.results||[]).map(x=>x.name),config:config.results||[],continuity_schema_initialized:!!c,read_only:true};
 }
 async function backupStatus(env){
   if(!env.DB) throw new Error('DATABASE_REQUIRED');
@@ -4290,7 +4290,7 @@ async function backupStatus(env){
   const r=initialized
     ? await env.DB.prepare(`SELECT * FROM backup_runs ORDER BY started_at DESC LIMIT 20`).all()
     : {results:[]};
-  return {ok:true,configured:!!env.BACKUP_BUCKET&&!!env.BACKUP_ENCRYPTION_KEY,automatic:true,frequency:'DAILY',consistencyModel:'BEST_EFFORT_NON_TRANSACTIONAL',snapshotConsistent:false,retentionPolicyDays:90,retentionEnforced:false,retentionStatus:'R2_LIFECYCLE_RULE_NOT_VERIFIED',initialized,read_only:true,runs:r.results||[]};
+  return {ok:true,configured:!!env.BACKUP_BUCKET&&!!env.BACKUP_ENCRYPTION_KEY,automatic:false,automaticScheduleConfigured:true,automaticExecutionVerified:false,automaticStatus:'SCHEDULE_NOT_RUNTIME_VERIFIED',frequency:'DAILY',consistencyModel:'BEST_EFFORT_NON_TRANSACTIONAL',snapshotConsistent:false,retentionPolicyDays:90,retentionEnforced:false,retentionStatus:'R2_LIFECYCLE_RULE_NOT_VERIFIED',initialized,read_only:true,runs:r.results||[]};
 }
 
 async function verifyNationalBackup(env,runId){
