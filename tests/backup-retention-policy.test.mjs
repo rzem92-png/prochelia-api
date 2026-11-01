@@ -72,6 +72,17 @@ test('logical D1 backups explicitly disclose that they are not point-in-time sna
   assert.match(status, /snapshotConsistent:false/);
 });
 
+test('backup status does not claim a configured schedule has executed successfully', () => {
+  const scale = source.slice(source.indexOf('async function nationalScaleStatus'), source.indexOf('async function backupStatus'));
+  const backup = source.slice(source.indexOf('async function backupStatus'), source.indexOf('async function verifyNationalBackup'));
+  assert.match(scale, /automatic:false/);
+  assert.match(scale, /automaticExecutionVerified:false/);
+  assert.match(backup, /automatic:false/);
+  assert.match(backup, /automaticScheduleConfigured:true/);
+  assert.match(backup, /automaticExecutionVerified:false/);
+  assert.match(backup, /SCHEDULE_NOT_RUNTIME_VERIFIED/);
+});
+
 test('backup API does not present a declared retention target as an enforced R2 lifecycle rule', () => {
   const backup = source.slice(source.indexOf('async function backupStatus'), source.indexOf('async function verifyNationalBackup'));
   assert.match(backup, /retentionPolicyDays:90/);
