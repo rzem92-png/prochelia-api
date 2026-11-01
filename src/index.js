@@ -4981,8 +4981,10 @@ handle = async function(request,env){
     if(u.pathname==='/api/trust-passport/catalog' && request.method==='POST') return trustPassportSaveCatalog(request,env);
     if(u.pathname==='/api/trust-passport/verifications' && request.method==='POST') return trustPassportVerifyEvidence(request,env);
     if(u.pathname==='/api/documents/scan' && request.method==='POST') return rescanDocumentEndpoint(request,env);
-    if(u.pathname==='/api/system/final-audit' && request.method==='GET') return strictProductionAudit(request,env);
-    if(u.pathname==='/api/system/production-check' && request.method==='GET') return strictProductionAudit(request,env);
+    if(u.pathname==='/api/system/final-audit' || u.pathname==='/api/system/production-check') {
+      if(request.method!=='POST') return json({ok:false,error:'METHOD_NOT_ALLOWED',version:VERSION},405,{'allow':'POST'});
+      return strictProductionAudit(request,env);
+    }
     return __procheliaProductionSafetyHandle(request,env);
   }catch(e){
     return json({ok:false,error:'PRODUCTION_SAFETY_ERROR',version:VERSION},500);
