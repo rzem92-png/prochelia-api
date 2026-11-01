@@ -4224,7 +4224,9 @@ async function runNationalBackup(env,trigger='MANUAL'){
   const secret=env.BACKUP_ENCRYPTION_KEY;
   if(!secret) throw new Error('BACKUP_ENCRYPTION_KEY_REQUIRED');
   const runId=crypto.randomUUID(), day=new Date().toISOString().slice(0,10);
-  await env.DB.prepare(`INSERT INTO backup_runs(id,status,trigger_type,storage_provider,metadata_json) VALUES(?,?,?,?,?)`).bind(runId,'RUNNING',trigger,'R2',JSON.stringify({version:VERSION,scope:'FULL_LOGICAL_DB'})).run();
+  const captureStartedAt=new Date().toISOString();
+  const consistency={model:'BEST_EFFORT_NON_TRANSACTIONAL',snapshot_consistent:false,capture_started_at:captureStartedAt,warning:'D1 logical export is read in separate queries; concurrent writes may produce a cross-table or within-table point-in-time mismatch. Freeze writes or use a provider-native consistent snapshot before treating this export as a recovery point.'};
+  await env.DB.prepare(`INSERT INTO backup_runs(id,status,trigger_type,storage_provider,metadata_json) VALUES(?,?,?,?,?)`).bind(runId,'RUNNING',trigger,'R2',JSON.stringify({version:VERSION,scope:'FULL_LOGICAL_DB',consistency})).run();
   let objects=0,rowsTotal=0;
   const manifestEntries=[];
   try{
@@ -4255,14 +4257,15 @@ async function runNationalBackup(env,trigger='MANUAL'){
     }
     const manifestKey=`prochelia/backups/${day}/${runId}/manifest.json.enc`;
     const schema=await backupSchema(env);
-    const manifestPlain=JSON.stringify({format:'PROCHELIA_BACKUP_MANIFEST_V1',runId,createdAt:new Date().toISOString(),version:VERSION,rowCount:rowsTotal,schema,entries:manifestEntries});
+    const captureCompletedAt=new Date().toISOString();
+    const manifestPlain=JSON.stringify({format:'PROCHELIA_BACKUP_MANIFEST_V1',runId,createdAt:captureCompletedAt,version:VERSION,rowCount:rowsTotal,consistency:{...consistency,capture_completed_at:captureCompletedAt},schema,entries:manifestEntries});
     const manifestEncrypted=await backupEncrypt(manifestPlain,secret);
     const manifestChecksum=await backupHash(manifestEncrypted),manifestBytes=new TextEncoder().encode(manifestEncrypted).byteLength;
     await env.BACKUP_BUCKET.put(manifestKey,manifestEncrypted,{httpMetadata:{contentType:'application/octet-stream'}});
     await env.DB.prepare(`INSERT INTO backup_objects(id,backup_run_id,object_key,table_name,row_count,byte_size,checksum,encrypted) VALUES(?,?,?,?,?,?,?,1)`).bind(crypto.randomUUID(),runId,manifestKey,'__manifest__',manifestEntries.length,manifestBytes,manifestChecksum).run();
     objects++;
     await env.DB.prepare(`UPDATE backup_runs SET status='COMPLETED',completed_at=CURRENT_TIMESTAMP,object_count=?,row_count=? WHERE id=?`).bind(objects,rowsTotal,runId).run();
-    return {ok:true,runId,status:'COMPLETED',objectCount:objects,rowCount:rowsTotal,storage:'R2',encrypted:true,manifestKey,manifestChecksum};
+    return {ok:true,runId,status:'COMPLETED',objectCount:objects,rowCount:rowsTotal,storage:'R2',encrypted:true,consistency:{...consistency,capture_completed_at:captureCompletedAt},manifestKey,manifestChecksum};
   }catch(e){
     await env.DB.prepare(`UPDATE backup_runs SET status='FAILED',completed_at=CURRENT_TIMESTAMP,object_count=?,row_count=?,error_message=? WHERE id=?`).bind(objects,rowsTotal,String(e.message||e),runId).run();
     throw e;
@@ -4287,7 +4290,7 @@ async function backupStatus(env){
   const r=initialized
     ? await env.DB.prepare(`SELECT * FROM backup_runs ORDER BY started_at DESC LIMIT 20`).all()
     : {results:[]};
-  return {ok:true,configured:!!env.BACKUP_BUCKET&&!!env.BACKUP_ENCRYPTION_KEY,automatic:true,frequency:'DAILY',retentionPolicyDays:90,retentionEnforced:false,retentionStatus:'R2_LIFECYCLE_RULE_NOT_VERIFIED',initialized,read_only:true,runs:r.results||[]};
+  return {ok:true,configured:!!env.BACKUP_BUCKET&&!!env.BACKUP_ENCRYPTION_KEY,automatic:true,frequency:'DAILY',consistencyModel:'BEST_EFFORT_NON_TRANSACTIONAL',snapshotConsistent:false,retentionPolicyDays:90,retentionEnforced:false,retentionStatus:'R2_LIFECYCLE_RULE_NOT_VERIFIED',initialized,read_only:true,runs:r.results||[]};
 }
 
 async function verifyNationalBackup(env,runId){
