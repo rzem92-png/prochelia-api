@@ -118,8 +118,12 @@ export function evaluateNexusEnterpriseOpportunity({ company, opportunity } = {}
   const budgetFits = company.availableBudgetCents >= opportunity.estimatedInvestmentCents;
   const capacityFits = company.capacityUnits >= opportunity.requiredCapacityUnits;
   const gates = gateReport(opportunity.approvals);
+  // Include budget fit in the score; hard eligibility gates remain authoritative.
+  // Weights total 10,000 bps: capabilities 35%, objectives 25%, capacity 20%, budget 20%.
+  const budgetBps = budgetFits ? 10000 : 0;
   const fitScoreBps = Math.floor(
-    (capabilityBps * 4500 + objectiveBps * 3500 + capacityBps * 2000) / 10000
+    (capabilityBps * 3500 + objectiveBps * 2500 +
+      capacityBps * 2000 + budgetBps * 2000) / 10000
   );
   const launchEligible = budgetFits && capacityFits && gates.passed &&
     opportunity.riskLevel !== "high" && opportunity.riskLevel !== "unknown";
