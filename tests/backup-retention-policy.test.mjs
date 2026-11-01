@@ -24,7 +24,7 @@ test('backup export excludes its own journal tables and captures schema metadata
   assert.match(source, /await backupHash\(enc\)/);
   assert.match(source, /PROCHELIA_BACKUP_MANIFEST_V1/);
   assert.match(source, /async function backupSchema\(env\)/);
-  assert.match(source, /rowCount:rowsTotal,schema,entries:manifestEntries/);
+  assert.match(source, /rowCount:rowsTotal,consistency:\{\.\.\.consistency,capture_completed_at:captureCompletedAt\},schema,entries:manifestEntries/);
   assert.match(source, /type IN \('table','index','trigger','view'\)/);
   assert.match(source, /async function verifyNationalBackup\(env,runId\)/);
   assert.match(source, /backup_verifications/);
