@@ -19,7 +19,7 @@ jobs:
   inventory:
     if: ${{ inputs.confirm_read_only == true }}
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
     env:
       CLOUDFLARE_ACCOUNT_ID: f2a79e9fa41566a8ec80fb24c02c60eb
       PREVIEW_DB_NAME: prochelia-preview-db
@@ -47,7 +47,7 @@ jobs:
             [[ "$matches" == "1" ]] || { echo "::error::Nom/UUID inattendu pour $target ; arrêt."; exit 1; }
           done
           [[ "$PREVIEW_DB_ID" != "$TEST_DB_ID" ]] || { echo "::error::Les UUID doivent être distincts."; exit 1; }
-          echo "Identités vérifiées. Aucune écriture D1 ne sera exécutée."
+          echo "Identités exactes vérifiées. Aucun secret n'est affiché."
 
       - name: Installer Node.js et Wrangler
         uses: actions/setup-node@v5
@@ -61,7 +61,7 @@ jobs:
           npm install --no-save --no-audit --no-fund wrangler@4
           ./node_modules/.bin/wrangler --version
 
-      - name: Collecter tables, volumes, colonnes, index et clés étrangères
+      - name: Collecter le schéma complet et les volumes sans données métier
         shell: bash
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -80,54 +80,80 @@ jobs:
             "d1_databases": [{ "binding": "DB", "database_name": "$db", "database_id": "$id" }]
           }
           EOF
-            target_dir="$out/$target"
-            mkdir -p "$target_dir"
+            d="$out/$target"
+            mkdir -p "$d"
             echo "::group::Inventaire $target ($db)"
-            ./node_modules/.bin/wrangler d1 execute "$db" --remote --config "$cfg" --command="SELECT name, sql FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT GLOB '_cf_*' ORDER BY name;" --json > "$target_dir/tables-schema.json"
-            jq -e . "$target_dir/tables-schema.json" >/dev/null
-            jq -r '[.. | objects | select(has("results")) | .results[]? | .name? // empty] | map(select(type == "string")) | unique | .[]' "$target_dir/tables-schema.json" > "$target_dir/tables.txt"
-            [[ -s "$target_dir/tables.txt" ]] || { echo "::error::Aucune table détectée pour $target."; exit 1; }
-            : > "$target_dir/row-counts.csv"
-            printf 'table,row_count\n' > "$target_dir/row-counts.csv"
+            ./node_modules/.bin/wrangler d1 execute "$db" --remote --config "$cfg" --command="SELECT type, name, tbl_name, sql FROM sqlite_master WHERE type IN ('table','view','index','trigger') AND name NOT LIKE 'sqlite_%' AND name NOT GLOB '_cf_*' ORDER BY type, name;" --json > "$d/schema-objects.json"
+            jq -e . "$d/schema-objects.json" >/dev/null
+            jq -r '[.. | objects | select(has("results")) | .results[]? | select(.type == "table") | .name] | unique | .[]' "$d/schema-objects.json" > "$d/tables.txt"
+            [[ -s "$d/tables.txt" ]] || { echo "::error::Aucune table détectée pour $target."; exit 1; }
+            jq -r '[.. | objects | select(has("results")) | .results[]? | select(.type == "view") | [.name,.sql] | @tsv] | .[]' "$d/schema-objects.json" > "$d/views.tsv"
+            jq -r '[.. | objects | select(has("results")) | .results[]? | select(.type == "trigger") | [.name,.tbl_name,.sql] | @tsv] | .[]' "$d/schema-objects.json" > "$d/triggers.tsv"
+            jq -r '[.. | objects | select(has("results")) | .results[]? | select(.type == "index") | [.name,.tbl_name,.sql] | @tsv] | .[]' "$d/schema-objects.json" > "$d/index-definitions.tsv"
+            printf 'table,row_count\n' > "$d/row-counts.csv"
             while IFS= read -r table; do
               [[ "$table" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || { echo "::error::Nom de table inattendu."; exit 1; }
-              ./node_modules/.bin/wrangler d1 execute "$db" --remote --config "$cfg" --command="SELECT COUNT(*) AS row_count FROM \"$table\";" --json > "$target_dir/count-$table.json"
-              rows="$(jq -r '[.. | objects | select(has("results")) | .results[]? | .row_count? // empty][0] // empty' "$target_dir/count-$table.json")"
+              ./node_modules/.bin/wrangler d1 execute "$db" --remote --config "$cfg" --command="SELECT COUNT(*) AS row_count FROM \"$table\";" --json > "$d/count-$table.json"
+              rows="$(jq -r '[.. | objects | select(has("results")) | .results[]? | .row_count? // empty][0] // empty' "$d/count-$table.json")"
               [[ "$rows" =~ ^[0-9]+$ ]] || { echo "::error::Comptage invalide pour $table."; exit 1; }
-              printf '"%s",%s\n' "$table" "$rows" >> "$target_dir/row-counts.csv"
-              ./node_modules/.bin/wrangler d1 execute "$db" --remote --config "$cfg" --command="PRAGMA table_info(\"$table\");" --json > "$target_dir/columns-$table.json"
-              ./node_modules/.bin/wrangler d1 execute "$db" --remote --config "$cfg" --command="PRAGMA foreign_key_list(\"$table\");" --json > "$target_dir/foreign-keys-$table.json"
-              ./node_modules/.bin/wrangler d1 execute "$db" --remote --config "$cfg" --command="PRAGMA index_list(\"$table\");" --json > "$target_dir/indexes-$table.json"
-              ./node_modules/.bin/wrangler d1 execute "$db" --remote --config "$cfg" --command="SELECT name, sql FROM sqlite_master WHERE type='index' AND tbl_name='$table' ORDER BY name;" --json > "$target_dir/index-definitions-$table.json"
-            done < "$target_dir/tables.txt"
+              printf '"%s",%s\n' "$table" "$rows" >> "$d/row-counts.csv"
+              ./node_modules/.bin/wrangler d1 execute "$db" --remote --config "$cfg" --command="PRAGMA table_xinfo(\"$table\");" --json > "$d/columns-$table.json"
+              ./node_modules/.bin/wrangler d1 execute "$db" --remote --config "$cfg" --command="PRAGMA foreign_key_list(\"$table\");" --json > "$d/foreign-keys-$table.json"
+              ./node_modules/.bin/wrangler d1 execute "$db" --remote --config "$cfg" --command="PRAGMA index_list(\"$table\");" --json > "$d/indexes-$table.json"
+              jq -e . "$d/columns-$table.json" >/dev/null
+              jq -e . "$d/foreign-keys-$table.json" >/dev/null
+              jq -e . "$d/indexes-$table.json" >/dev/null
+            done < "$d/tables.txt"
             echo "::endgroup::"
           done
-          ./node_modules/.bin/wrangler d1 execute "$PREVIEW_DB_NAME" --remote --config "$out/preview-wrangler.json" --command="PRAGMA quick_check;" --json > "$out/preview/quick-check.json"
-          ./node_modules/.bin/wrangler d1 execute "$PREVIEW_DB_NAME" --remote --config "$out/preview-wrangler.json" --command="PRAGMA foreign_key_check;" --json > "$out/preview/foreign-key-check.json"
-          ./node_modules/.bin/wrangler d1 execute "$TEST_DB_NAME" --remote --config "$out/test-wrangler.json" --command="PRAGMA quick_check;" --json > "$out/test/quick-check.json"
-          ./node_modules/.bin/wrangler d1 execute "$TEST_DB_NAME" --remote --config "$out/test-wrangler.json" --command="PRAGMA foreign_key_check;" --json > "$out/test/foreign-key-check.json"
 
-      - name: Produire le résumé de comparaison
+      - name: Vérifier l'intégrité SQLite et les clés étrangères
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          export CLOUDFLARE_API_TOKEN
+          out="$RUNNER_TEMP/d1-structure"
+          for target in preview test; do
+            if [[ "$target" == "preview" ]]; then db="$PREVIEW_DB_NAME"; else db="$TEST_DB_NAME"; fi
+            cfg="$out/$target-wrangler.json"
+            d="$out/$target"
+            ./node_modules/.bin/wrangler d1 execute "$db" --remote --config "$cfg" --command="PRAGMA quick_check;" --json > "$d/quick-check.json"
+            ./node_modules/.bin/wrangler d1 execute "$db" --remote --config "$cfg" --command="PRAGMA foreign_key_check;" --json > "$d/foreign-key-check.json"
+            jq -e '[.. | objects | to_entries[]? | select(.key == "quick_check") | .value] | length > 0 and all(. == "ok")' "$d/quick-check.json" >/dev/null || { echo "::error::quick_check non conforme sur $target."; exit 1; }
+            jq -e '[.. | objects | select(has("results")) | .results[]?] | length == 0' "$d/foreign-key-check.json" >/dev/null || { echo "::error::Violations de clés étrangères sur $target."; exit 1; }
+          done
+
+      - name: Comparer les structures et produire le rapport
         shell: bash
         run: |
           set -euo pipefail
           out="$RUNNER_TEMP/d1-structure"
-          diff -u "$out/preview/tables.txt" "$out/test/tables.txt" > "$out/table-name-diff.txt" || true
+          for kind in tables views triggers index-definitions; do
+            case "$kind" in
+              tables) a="$out/preview/tables.txt"; b="$out/test/tables.txt" ;;
+              *) a="$out/preview/$kind.tsv"; b="$out/test/$kind.tsv" ;;
+            esac
+            diff -u "$a" "$b" > "$out/$kind-diff.txt" || true
+          done
           {
-            echo "## Inventaire structurel D1 — lecture seule"
+            echo "## Inventaire D1 — lecture seule"
             echo ""
-            echo "Les cibles ont été identifiées par nom et UUID. Les commandes exécutées sont SELECT et PRAGMA uniquement."
+            echo "Cibles vérifiées par nom et UUID. Requêtes SELECT et PRAGMA uniquement."
             echo ""
-            echo "### Préproduction"
-            cat "$out/preview/row-counts.csv"
-            echo ""
-            echo "### Restauration de test v2"
-            cat "$out/test/row-counts.csv"
-            echo ""
-            echo "### Différence des noms de tables"
-            if [[ -s "$out/table-name-diff.txt" ]]; then cat "$out/table-name-diff.txt"; else echo "Aucune différence de noms de tables."; fi
-            echo ""
-            echo "Les détails par table (colonnes, index, clés étrangères et SQL de création) sont dans l'artefact."
+            for target in preview test; do
+              echo "### $target"
+              echo "- Tables : $(wc -l < "$out/$target/tables.txt" | tr -d ' ')"
+              echo "- Vues : $(wc -l < "$out/$target/views.tsv" | tr -d ' ')"
+              echo "- Déclencheurs : $(wc -l < "$out/$target/triggers.tsv" | tr -d ' ')"
+              echo "- Index : $(wc -l < "$out/$target/index-definitions.tsv" | tr -d ' ')"
+              cat "$out/$target/row-counts.csv"
+              echo "- quick_check : OK"
+              echo "- foreign_key_check : aucune violation"
+              echo ""
+            done
+            echo "Les différences détaillées et métadonnées sont jointes à l'artefact."
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Publier les preuves structurelles sans données métier
