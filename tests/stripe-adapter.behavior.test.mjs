@@ -78,3 +78,18 @@ test('Stripe checkout idempotency key is server-derived from the internal transa
   assert.match(workerSource, /'idempotency-key':`prochelia-checkout-\$\{tx\.id\}`/);
   assert.doesNotMatch(workerSource, /'idempotency-key':String\(request\.headers\.get\('idempotency-key'\)/);
 });
+
+
+test('Stripe webhook authenticates and validates the event before any payment schema DDL', () => {
+  const start = workerSource.indexOf('async function stripeWebhook(');
+  const end = workerSource.indexOf('\n}\n', start);
+  assert.notEqual(start, -1);
+  assert.notEqual(end, -1);
+  const handler = workerSource.slice(start, end);
+  const signatureCheck = handler.indexOf('if(!valid)');
+  const eventValidation = handler.indexOf("if(!event?.id || !event?.type || !event?.data?.object)");
+  const schemaInitialization = handler.indexOf('await ensurePaymentSchema(env)');
+  assert.ok(signatureCheck >= 0 && eventValidation > signatureCheck);
+  assert.ok(schemaInitialization > eventValidation,
+    'D1 payment schema must not be initialized before Stripe signature and payload validation');
+});
