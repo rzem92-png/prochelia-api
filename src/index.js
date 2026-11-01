@@ -4892,13 +4892,17 @@ async function productionRateLimit(request,env){
   if(!(await productionRateLimitSchemaReady(env))){
     return {ok:false,response:json({ok:false,error:'RATE_LIMIT_SCHEMA_NOT_READY',version:VERSION},503,{'retry-after':'60'})};
   }
-  const existing=await env.DB.prepare(`SELECT request_count FROM security_rate_limits WHERE bucket=? AND subject_hash=? AND window_start=? LIMIT 1`).bind(bucket,subject,start).first();
-  const count=Number(existing?.request_count||0)+1;
-  if(existing){
-    await env.DB.prepare(`UPDATE security_rate_limits SET request_count=? WHERE bucket=? AND subject_hash=? AND window_start=?`).bind(count,bucket,subject,start).run();
-  }else{
-    await env.DB.prepare(`INSERT INTO security_rate_limits(id,bucket,subject_hash,window_start,request_count) VALUES(?,?,?,?,1)`).bind(crypto.randomUUID(),bucket,subject,start).run();
+  // Atomic UPSERT: a SELECT-then-UPDATE sequence lets concurrent requests
+  // observe the same count and exceed the configured limit.
+  const bucketRow=await env.DB.prepare(`INSERT INTO security_rate_limits(id,bucket,subject_hash,window_start,request_count)
+    VALUES(?,?,?,?,1)
+    ON CONFLICT(bucket,subject_hash,window_start)
+    DO UPDATE SET request_count=security_rate_limits.request_count+1
+    RETURNING request_count`).bind(crypto.randomUUID(),bucket,subject,start).first();
+  if(!bucketRow || !Number.isSafeInteger(Number(bucketRow.request_count)) || Number(bucketRow.request_count)<1){
+    return {ok:false,response:json({ok:false,error:'RATE_LIMIT_COUNTER_UNAVAILABLE',version:VERSION},503,{'retry-after':'60'})};
   }
+  const count=Number(bucketRow.request_count);
   if(count>limit){
     // Emit a structured platform log without creating tables or writing an
     // unversioned audit record from the request path.
