@@ -58,7 +58,7 @@ jobs:
           ):
             p = Path("migrations") / name
             assert p.is_file() and p.stat().st_size > 0, f"Missing migration: {name}"
-          print("PASS: staging Worker, exact preview D1 and four migration files verified")
+          print("PASS: staging Worker, exact preview D1 and five migration files verified")
           PY
           test "$EXPECTED_DB_NAME" = "prochelia-preview-db"
           test "$EXPECTED_DB_ID" = "6adb95e5-e542-4bec-9008-fbea01042305"
