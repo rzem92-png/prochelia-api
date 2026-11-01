@@ -98,9 +98,14 @@ jobs:
               ./node_modules/.bin/wrangler d1 execute "$db" --remote --config "$cfg" --command="PRAGMA table_info(\"$table\");" --json > "$target_dir/columns-$table.json"
               ./node_modules/.bin/wrangler d1 execute "$db" --remote --config "$cfg" --command="PRAGMA foreign_key_list(\"$table\");" --json > "$target_dir/foreign-keys-$table.json"
               ./node_modules/.bin/wrangler d1 execute "$db" --remote --config "$cfg" --command="PRAGMA index_list(\"$table\");" --json > "$target_dir/indexes-$table.json"
+              ./node_modules/.bin/wrangler d1 execute "$db" --remote --config "$cfg" --command="SELECT name, sql FROM sqlite_master WHERE type='index' AND tbl_name='$table' ORDER BY name;" --json > "$target_dir/index-definitions-$table.json"
             done < "$target_dir/tables.txt"
             echo "::endgroup::"
           done
+          ./node_modules/.bin/wrangler d1 execute "$PREVIEW_DB_NAME" --remote --config "$out/preview-wrangler.json" --command="PRAGMA quick_check;" --json > "$out/preview/quick-check.json"
+          ./node_modules/.bin/wrangler d1 execute "$PREVIEW_DB_NAME" --remote --config "$out/preview-wrangler.json" --command="PRAGMA foreign_key_check;" --json > "$out/preview/foreign-key-check.json"
+          ./node_modules/.bin/wrangler d1 execute "$TEST_DB_NAME" --remote --config "$out/test-wrangler.json" --command="PRAGMA quick_check;" --json > "$out/test/quick-check.json"
+          ./node_modules/.bin/wrangler d1 execute "$TEST_DB_NAME" --remote --config "$out/test-wrangler.json" --command="PRAGMA foreign_key_check;" --json > "$out/test/foreign-key-check.json"
 
       - name: Produire le résumé de comparaison
         shell: bash
