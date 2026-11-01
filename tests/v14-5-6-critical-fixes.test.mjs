@@ -585,3 +585,14 @@ test('Payout processing notifications never release reserved wallet funds', () =
   assert.match(terminalBranch, /reserved_delta_cents/);
   assert.match(terminalBranch, /PAYOUT_\$\{newStatus\.toUpperCase\(\)\}/);
 });
+
+
+test('Persistent rate limiter increments each bucket atomically under concurrent requests', () => {
+  const limiter = source.slice(source.indexOf('async function productionRateLimit(request,env)'), source.indexOf('async function strictProductionAudit'));
+  assert.match(limiter, /ON CONFLICT\(bucket,subject_hash,window_start\)/);
+  assert.match(limiter, /DO UPDATE SET request_count=security_rate_limits\.request_count\+1/);
+  assert.match(limiter, /RETURNING request_count/);
+  assert.doesNotMatch(limiter, /SELECT request_count FROM security_rate_limits/);
+  assert.doesNotMatch(limiter, /UPDATE security_rate_limits SET request_count=/);
+  assert.match(limiter, /RATE_LIMIT_COUNTER_UNAVAILABLE/);
+});
