@@ -4267,15 +4267,25 @@ async function runNationalBackup(env,trigger='MANUAL'){
   }
 }
 async function nationalScaleStatus(env){
-  await ensureNationalContinuitySchema(env);
-  const c=await env.DB.prepare(`SELECT key,value_json FROM platform_scale_config ORDER BY key`).all();
+  if(!env.DB) throw new Error('DATABASE_REQUIRED');
+  // GET diagnostics must never create tables, indexes, defaults, or otherwise mutate D1.
+  const c=await env.DB.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name='platform_scale_config' LIMIT 1`).first();
   const t=await env.DB.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name`).all();
-  return {ok:true,mode:'NATIONAL_SCALE',artificialUserCap:false,unlimitedInBusinessRules:true,database:'D1',documents:'R2_RECOMMENDED',backups:{provider:'R2',automatic:true,encrypted:true},pagination:{cursorRecommended:true,maxPageSize:100},tables:(t.results||[]).map(x=>x.name),config:(c.results||[])};
+  const config=c
+    ? await env.DB.prepare(`SELECT key,value_json FROM platform_scale_config ORDER BY key`).all()
+    : {results:[]};
+  return {ok:true,mode:'NATIONAL_SCALE',artificialUserCap:false,unlimitedInBusinessRules:true,database:'D1',documents:'R2_RECOMMENDED',backups:{provider:'R2',automatic:true,encrypted:!!env.BACKUP_ENCRYPTION_KEY},pagination:{cursorRecommended:true,maxPageSize:100},tables:(t.results||[]).map(x=>x.name),config:config.results||[],continuity_schema_initialized:!!c,read_only:true};
 }
 async function backupStatus(env){
-  await ensureNationalContinuitySchema(env);
-  const r=await env.DB.prepare(`SELECT * FROM backup_runs ORDER BY started_at DESC LIMIT 20`).all();
-  return {ok:true,configured:!!env.BACKUP_BUCKET&&!!env.BACKUP_ENCRYPTION_KEY,automatic:true,frequency:'DAILY',retentionDays:90,runs:r.results||[]};
+  if(!env.DB) throw new Error('DATABASE_REQUIRED');
+  // Do not initialize backup tables from a GET request. An uninitialized schema is reported as such.
+  const tables=await env.DB.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name IN ('backup_runs','backup_objects')`).all();
+  const names=new Set((tables.results||[]).map(x=>String(x.name)));
+  const initialized=names.has('backup_runs')&&names.has('backup_objects');
+  const r=initialized
+    ? await env.DB.prepare(`SELECT * FROM backup_runs ORDER BY started_at DESC LIMIT 20`).all()
+    : {results:[]};
+  return {ok:true,configured:!!env.BACKUP_BUCKET&&!!env.BACKUP_ENCRYPTION_KEY,automatic:true,frequency:'DAILY',retentionDays:90,initialized,read_only:true,runs:r.results||[]};
 }
 
 async function verifyNationalBackup(env,runId){
