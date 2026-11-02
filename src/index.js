@@ -896,22 +896,16 @@ async function finalizeMissionPayment(request, env) {
   if(outcome==='paid'||outcome==='refunded') return json({ok:false,error:'PSP_WEBHOOK_CONFIRMATION_REQUIRED',version:VERSION,message:'Un statut payé/remboursé doit provenir d’un webhook PSP authentifié et vérifié.'},409);
   const tx=await env.DB.prepare('SELECT * FROM payment_transactions WHERE id=? LIMIT 1').bind(txId).first();
   if(!tx) return json({ok:false,error:'TRANSACTION_NOT_FOUND',version:VERSION},404);
-  if(['paid','refunded','failed'].includes(tx.status) && tx.status!==outcome) return json({ok:false,error:'PAYMENT_STATE_CONFLICT',version:VERSION,status:tx.status},409);
+  if(['paid','refunded','failed','held','refund_pending_reconciliation'].includes(tx.status)) return json({ok:false,error:'PAYMENT_STATE_CONFLICT',version:VERSION,status:tx.status},409);
   if(outcome==='paid'){
-    const wallet=await env.DB.prepare('SELECT * FROM wallets WHERE user_id=? LIMIT 1').bind(tx.intervenant_id).first();
-    if(!wallet) return json({ok:false,error:'INTERVENANT_WALLET_NOT_FOUND',version:VERSION},409);
-    // Manual finalization must be idempotent too: status transition gates
-    // the balance credit, and both statements are committed in one D1 batch.
-    const transition=env.DB.prepare(`UPDATE payment_transactions SET status='paid',updated_at=CURRENT_TIMESTAMP WHERE id=? AND status NOT IN ('paid','failed','refunded','refund_pending_reconciliation','held')`).bind(txId);
-    const credit=env.DB.prepare(`UPDATE wallets SET available_cents=available_cents+?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND changes()=1`).bind(Number(tx.net_intervenant_cents||0),wallet.id);
-    const settled=await env.DB.batch([transition,credit]);
-    if(Number(settled?.[0]?.meta?.changes||0)!==1 || Number(settled?.[1]?.meta?.changes||0)!==1){
-      return json({ok:false,error:'PAYMENT_ALREADY_FINALIZED',version:VERSION},409);
-    }
+    // unreachable by design: paid is PSP-confirmation-only above.
+    return json({ok:false,error:'PSP_WEBHOOK_CONFIRMATION_REQUIRED',version:VERSION},409);
   } else if(outcome==='held') {
-    await env.DB.prepare(`UPDATE payment_transactions SET status='held',updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(txId).run();
+    const held=await env.DB.prepare(`UPDATE payment_transactions SET status='held',updated_at=CURRENT_TIMESTAMP WHERE id=? AND status NOT IN ('paid','failed','refunded','refund_pending_reconciliation','held')`).bind(txId).run();
+    if(Number(held?.meta?.changes||0)!==1) return json({ok:false,error:'PAYMENT_STATE_CONFLICT',version:VERSION},409);
   } else {
-    await env.DB.prepare(`UPDATE payment_transactions SET status=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(outcome,txId).run();
+    const failed=await env.DB.prepare(`UPDATE payment_transactions SET status='failed',updated_at=CURRENT_TIMESTAMP WHERE id=? AND status NOT IN ('paid','failed','refunded','refund_pending_reconciliation','held')`).bind(txId).run();
+    if(Number(failed?.meta?.changes||0)!==1) return json({ok:false,error:'PAYMENT_STATE_CONFLICT',version:VERSION},409);
   }
   await paymentAudit(env,'MISSION_PAYMENT_FINALIZED',{transaction_id:txId,mission_id:tx.mission_id,user_id:auth.user.id,metadata:{outcome}},'OK');
   return json({ok:true,version:VERSION,transaction_id:txId,status:outcome},200);
