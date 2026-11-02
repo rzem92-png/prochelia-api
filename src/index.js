@@ -934,6 +934,9 @@ async function payoutRequest(request, env) {
   }
   const account=await env.DB.prepare(`SELECT * FROM payment_accounts WHERE user_id=? LIMIT 1`).bind(auth.user.id).first();
   if(!account||Number(account.payouts_enabled)!==1) return json({ok:false,error:'PAYOUT_ACCOUNT_NOT_READY',version:VERSION,message:'Le compte de paiement de l’intervenant doit être vérifié et activé par le PSP.'},409);
+  // Fail closed: prevent withdrawals while a provider/client dispute remains unresolved.
+  const openDispute=await env.DB.prepare(`SELECT id FROM payment_disputes WHERE intervenant_id=? AND status NOT IN ('resolved','closed') LIMIT 1`).bind(auth.user.id).first();
+  if(openDispute) return json({ok:false,error:'PAYOUT_BLOCKED_BY_OPEN_DISPUTE',version:VERSION,dispute_id:openDispute.id},423);
   const wallet=await env.DB.prepare('SELECT * FROM wallets WHERE user_id=? LIMIT 1').bind(auth.user.id).first();
   if(!wallet) return json({ok:false,error:'INSUFFICIENT_AVAILABLE_BALANCE',version:VERSION,available_cents:0},409);
   const payoutId=crypto.randomUUID();
