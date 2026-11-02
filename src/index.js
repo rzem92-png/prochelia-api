@@ -3179,14 +3179,18 @@ async function stripeWebhook(request, env) {
         await paymentAudit(env,'STRIPE_WEBHOOK_MISMATCH',{transaction_id:tx.id,mission_id:tx.mission_id,metadata:{event_id:event.id,event_type:event.type}},'BLOCKED');
         result='MISMATCH_BLOCKED';
       } else if(paidEvent.has(event.type) && (!isCheckout || obj.payment_status==='paid')) {
-        if(tx.status!=='paid' && tx.status!=='refunded') {
-          await env.DB.prepare(`UPDATE payment_transactions SET status='paid',provider='stripe',provider_payment_id=COALESCE(?,provider_payment_id),updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(sessionId||null,tx.id).run();
-          if(tx.intervenant_id) {
-            await env.DB.prepare(`INSERT OR IGNORE INTO wallets(id,user_id,currency,available_cents,pending_cents,paid_cents,reserved_cents) VALUES(?,?,?,0,0,0,0)`).bind(crypto.randomUUID(),tx.intervenant_id,tx.currency||'EUR').run();
-            await env.DB.prepare(`UPDATE wallets SET available_cents=available_cents+?,updated_at=CURRENT_TIMESTAMP WHERE user_id=?`).bind(Number(tx.net_intervenant_cents||0),tx.intervenant_id).run();
-          }
+        // Wallet creation is idempotent. The conditional payment transition
+        // gates the wallet credit across different Stripe event IDs.
+        if(tx.intervenant_id) {
+          await env.DB.prepare(`INSERT OR IGNORE INTO wallets(id,user_id,currency,available_cents,pending_cents,paid_cents,reserved_cents) VALUES(?,?,?,0,0,0,0)`).bind(crypto.randomUUID(),tx.intervenant_id,tx.currency||'EUR').run();
+          const transition=env.DB.prepare(`UPDATE payment_transactions SET status='paid',provider='stripe',provider_payment_id=COALESCE(?,provider_payment_id),updated_at=CURRENT_TIMESTAMP WHERE id=? AND status NOT IN ('paid','refunded','refund_pending_reconciliation')`).bind(sessionId||null,tx.id);
+          const credit=env.DB.prepare(`UPDATE wallets SET available_cents=available_cents+?,updated_at=CURRENT_TIMESTAMP WHERE user_id=? AND changes()=1`).bind(Number(tx.net_intervenant_cents||0),tx.intervenant_id);
+          const settled=await env.DB.batch([transition,credit]);
+          result=Number(settled?.[0]?.meta?.changes||0)===1 && Number(settled?.[1]?.meta?.changes||0)===1?'PAYMENT_CONFIRMED':'PAYMENT_ALREADY_SETTLED';
+        } else {
+          await env.DB.prepare(`UPDATE payment_transactions SET status='paid',provider='stripe',provider_payment_id=COALESCE(?,provider_payment_id),updated_at=CURRENT_TIMESTAMP WHERE id=? AND status NOT IN ('paid','refunded','refund_pending_reconciliation')`).bind(sessionId||null,tx.id).run();
+          result='PAYMENT_CONFIRMED';
         }
-        result='PAYMENT_CONFIRMED';
       } else if(failedEvent.has(event.type)) {
         if(!['paid','refunded'].includes(tx.status)) await env.DB.prepare(`UPDATE payment_transactions SET status='failed',updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(tx.id).run();
         result='PAYMENT_FAILED';
