@@ -32,6 +32,14 @@ class StripeWebhookSafetySourceTests(unittest.TestCase):
         self.assertIn("processed=2", SOURCE)
         self.assertIn("processed=1,processed_at=CURRENT_TIMESTAMP", SOURCE)
 
+
+    def test_stripe_webhook_body_is_bounded_before_signature_verification(self):
+        self.assertIn("async function readBoundedText(request", SOURCE)
+        self.assertIn("MAX_JSON_BODY_BYTES = 1024 * 1024", SOURCE)
+        self.assertIn("await readBoundedText(request,MAX_JSON_BODY_BYTES)", SOURCE)
+        self.assertIn("STRIPE_WEBHOOK_BODY_TOO_LARGE_OR_INVALID", SOURCE)
+        self.assertIn("await reader.cancel('Request body too large')", SOURCE)
+
     def test_payouts_fail_closed_on_unmatched_stripe_dispute(self):
         self.assertIn("external_id LIKE 'dp_%'", SOURCE)
         self.assertIn("status='unmatched'", SOURCE)
