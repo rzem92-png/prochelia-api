@@ -195,6 +195,50 @@ class PaymentSettlementSqliteIntegrationTests(unittest.TestCase):
         final=self.db.execute("SELECT request_count FROM security_rate_limits WHERE bucket='SENSITIVE:/api/auth/login' AND subject_hash='ip-hash'").fetchone()[0]
         self.assertEqual(final,40)
 
+    def test_payout_reservation_and_request_insert_are_atomic(self):
+        self.db.executescript("""
+          CREATE TABLE payout_requests(
+            id TEXT PRIMARY KEY,idempotency_key TEXT UNIQUE,wallet_id TEXT,user_id TEXT,
+            amount_cents INTEGER,mode TEXT,provider TEXT,status TEXT
+          );
+          CREATE TABLE payout_wallets(
+            id TEXT PRIMARY KEY,user_id TEXT UNIQUE,available_cents INTEGER NOT NULL,
+            reserved_cents INTEGER NOT NULL DEFAULT 0
+          );
+          INSERT INTO payout_wallets VALUES('w-1','worker-1',3000,0);
+        """)
+        def reserve(payout_id, key, amount):
+            self.db.execute("BEGIN")
+            wallet=self.db.execute("UPDATE payout_wallets SET available_cents=available_cents-?,reserved_cents=reserved_cents+? WHERE id='w-1' AND available_cents>=?",(amount,amount,amount))
+            created=self.db.execute("INSERT INTO payout_requests(id,idempotency_key,wallet_id,user_id,amount_cents,mode,provider,status) SELECT ?,?,'w-1','worker-1',?,'standard','stripe','requested' WHERE changes()=1",(payout_id,key,amount))
+            self.db.commit()
+            return wallet.rowcount,created.rowcount
+        self.assertEqual(reserve('p-1','key-1',2000),(1,1))
+        # Insufficient balance: no request is created and wallet is unchanged.
+        self.assertEqual(reserve('p-2','key-2',1500),(0,0))
+        self.assertEqual(self.db.execute("SELECT available_cents,reserved_cents FROM payout_wallets WHERE id='w-1'").fetchone(),(1000,2000))
+        self.assertEqual(self.db.execute("SELECT COUNT(*) FROM payout_requests").fetchone()[0],1)
+
+    def test_duplicate_payout_key_rolls_back_wallet_reservation(self):
+        self.db.executescript("""
+          CREATE TABLE payout_requests(
+            id TEXT PRIMARY KEY,idempotency_key TEXT UNIQUE,wallet_id TEXT,user_id TEXT,
+            amount_cents INTEGER,mode TEXT,provider TEXT,status TEXT
+          );
+          CREATE TABLE payout_wallets(
+            id TEXT PRIMARY KEY,user_id TEXT UNIQUE,available_cents INTEGER NOT NULL,
+            reserved_cents INTEGER NOT NULL DEFAULT 0
+          );
+          INSERT INTO payout_wallets VALUES('w-1','worker-1',3000,0);
+          INSERT INTO payout_requests VALUES('p-old','same-key','w-1','worker-1',1000,'standard','stripe','requested');
+        """)
+        self.db.execute("BEGIN")
+        self.db.execute("UPDATE payout_wallets SET available_cents=available_cents-1000,reserved_cents=reserved_cents+1000 WHERE id='w-1' AND available_cents>=1000")
+        with self.assertRaises(sqlite3.IntegrityError):
+            self.db.execute("INSERT INTO payout_requests(id,idempotency_key,wallet_id,user_id,amount_cents,mode,provider,status) SELECT 'p-new','same-key','w-1','worker-1',1000,'standard','stripe','requested' WHERE changes()=1")
+        self.db.rollback()
+        self.assertEqual(self.db.execute("SELECT available_cents,reserved_cents FROM payout_wallets WHERE id='w-1'").fetchone(),(3000,0))
+
     def tearDown(self):
         self.db.close()
 
