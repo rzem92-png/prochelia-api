@@ -55,6 +55,16 @@ class StripeWebhookSafetySourceTests(unittest.TestCase):
         self.assertIn("DATABASE_REQUIRED_FOR_RATE_LIMIT", SOURCE)
         self.assertIn("Fail closed if the limiter cannot persist", SOURCE)
 
+
+    def test_security_headers_are_applied_at_worker_entrypoint(self):
+        self.assertIn("async fetch(request,env)", SOURCE)
+        self.assertIn("const response=await handle(request,env)", SOURCE)
+        self.assertIn("headers.set('x-content-type-options','nosniff')", SOURCE)
+        self.assertIn("headers.set('x-frame-options','DENY')", SOURCE)
+        self.assertIn("headers.set('referrer-policy','no-referrer')", SOURCE)
+        self.assertIn("headers.set('permissions-policy','geolocation=(self),camera=(),microphone=()')", SOURCE)
+        self.assertIn("new Response(response.body,{status:response.status,statusText:response.statusText,headers})", SOURCE)
+
     def test_payouts_fail_closed_on_unmatched_stripe_dispute(self):
         self.assertIn("external_id LIKE 'dp_%'", SOURCE)
         self.assertIn("status='unmatched'", SOURCE)
