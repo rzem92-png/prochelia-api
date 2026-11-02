@@ -46,6 +46,27 @@ class PaymentSettlementSqliteIntegrationTests(unittest.TestCase):
         self.assertEqual(self.settle(), (1, 1))
         self.assertEqual(self.db.execute("SELECT available_cents FROM wallets WHERE user_id='worker-1'").fetchone()[0], 1200)
 
+    def test_manual_finalization_status_gate_prevents_double_credit(self):
+        self.db.execute("INSERT INTO wallets(id,user_id,available_cents) VALUES('wallet-manual','worker-1',0)")
+        self.db.commit()
+        results=[]
+        for _ in range(2):
+            self.db.execute("BEGIN")
+            transition=self.db.execute("""
+              UPDATE payment_transactions SET status='paid'
+              WHERE id='tx-1' AND status NOT IN
+                ('paid','failed','refunded','refund_pending_reconciliation','held')
+            """)
+            credit=self.db.execute("""
+              UPDATE wallets SET available_cents=available_cents+1200
+              WHERE id='wallet-manual' AND changes()=1
+            """)
+            self.db.commit()
+            results.append((transition.rowcount,credit.rowcount))
+        balance=self.db.execute("SELECT available_cents FROM wallets WHERE id='wallet-manual'").fetchone()[0]
+        self.assertEqual(balance,1200)
+        self.assertEqual(results,[(1,1),(0,0)])
+
     def tearDown(self):
         self.db.close()
 
