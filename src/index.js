@@ -349,6 +349,27 @@ async function postMissions(request, env) {
   }, 503);
 }
 
+// Account-keyed secondary limiter for credential stuffing across rotating IPs.
+// Kept at a generous threshold to avoid making account lockout an easy DoS vector.
+async function loginAccountRateLimit(email, env) {
+  const subject = await sha256Hex(`LOGIN_EMAIL:${normalizeEmail(email)}`);
+  const now = Math.floor(Date.now() / 1000);
+  const windowSeconds = 60;
+  const start = new Date(Math.floor(now / windowSeconds) * windowSeconds * 1000).toISOString();
+  await ensureFinalHardeningSchema(env);
+  const counter = await env.DB.prepare(`INSERT INTO security_rate_limits(id,bucket,subject_hash,window_start,request_count)
+    VALUES(?, 'LOGIN_EMAIL', ?, ?, 1)
+    ON CONFLICT(bucket,subject_hash,window_start)
+    DO UPDATE SET request_count=security_rate_limits.request_count+1
+    RETURNING request_count`).bind(crypto.randomUUID(), subject, start).first();
+  const count = Number(counter?.request_count || 0);
+  if (count > 30) {
+    const retry = Math.max(1, windowSeconds - (now % windowSeconds));
+    return json({ok:false,error:'RATE_LIMITED',version:VERSION,retry_after_seconds:retry},429,{'retry-after':String(retry)});
+  }
+  return null;
+}
+
 async function login(request, env) {
   if (!env.DB) return json({ ok: false, database: false, version: VERSION }, 503);
   const body = await readJson(request);
@@ -357,6 +378,9 @@ async function login(request, env) {
   if (!validEmail(email) || !validPassword(password)) {
     return json({ ok: false, error: 'INVALID_CREDENTIALS', version: VERSION }, 401);
   }
+
+  const accountLimit = await loginAccountRateLimit(email, env);
+  if (accountLimit) return accountLimit;
 
   const user = await env.DB.prepare(
     `SELECT id, role, email, first_name, last_name, phone, status, created_at, updated_at, password_hash
