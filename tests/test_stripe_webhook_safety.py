@@ -74,6 +74,22 @@ class StripeWebhookSafetySourceTests(unittest.TestCase):
         self.assertIn("String(replay.mode||'standard')!==mode", SOURCE)
         self.assertIn("String(replay.currency||'EUR').toUpperCase()!=='EUR'", SOURCE)
 
+    def test_payout_creation_is_disabled_unless_explicitly_enabled(self):
+        self.assertIn("String(env.PAYOUTS_ENABLED).toLowerCase()!=='true'", SOURCE)
+        self.assertIn("PAYOUTS_DISABLED_UNTIL_CONNECT_ACCEPTANCE", SOURCE)
+        self.assertIn("Number(account.payouts_enabled)!==1", SOURCE)
+
+    def test_payout_reservation_is_balance_conditional_and_batch_atomic(self):
+        self.assertIn("available_cents>=?", SOURCE)
+        self.assertIn("env.DB.batch([", SOURCE)
+        self.assertIn("WHERE changes()=1", SOURCE)
+        self.assertIn("reserved_cents=reserved_cents+?", SOURCE)
+
+    def test_payout_terminal_webhook_only_settles_once(self):
+        self.assertIn("status NOT IN ('completed','failed','canceled')", SOURCE)
+        self.assertIn("WHERE id=? AND changes()=1", SOURCE)
+        self.assertIn("reserved_cents=MAX(0,reserved_cents-?)", SOURCE)
+
     def test_payouts_fail_closed_on_unmatched_stripe_dispute(self):
         self.assertIn("external_id LIKE 'dp_%'", SOURCE)
         self.assertIn("status='unmatched'", SOURCE)
