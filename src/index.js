@@ -988,10 +988,19 @@ async function paymentWebhook(request, env) {
   if(txId){
     const tx=await env.DB.prepare('SELECT * FROM payment_transactions WHERE id=? LIMIT 1').bind(txId).first();
     if(tx){
-      const statusMap={payment_succeeded:'paid',charge_succeeded:'paid',payment_failed:'failed',charge_failed:'failed',payment_refunded:'refunded'};
+      const statusMap={payment_succeeded:'paid',charge_succeeded:'paid',payment_failed:'failed',charge_failed:'failed'};
       const newStatus=statusMap[type];
-      if(newStatus){
-        const alreadyFinal = ['paid','failed','refunded'].includes(tx.status);
+      if(type==='payment_refunded') {
+        // Do not claim a refund is fully reconciled while the wallet ledger
+        // reversal is absent. Keep the transaction visibly blocked for manual
+        // PSP reconciliation; never silently leave a "refunded" status while
+        // funds remain credited to the intervenant.
+        if(!['refunded','refund_pending_reconciliation'].includes(tx.status)) {
+          await env.DB.prepare(`UPDATE payment_transactions SET status='refund_pending_reconciliation',provider_payment_id=COALESCE(?,provider_payment_id),updated_at=CURRENT_TIMESTAMP WHERE id=? AND status IN ('paid','held','refund_pending_reconciliation')`).bind(clean(event?.data?.provider_payment_id)||null,txId).run();
+          await paymentAudit(env,'PAYMENT_REFUND_REQUIRES_RECONCILIATION',{transaction_id:txId,mission_id:tx.mission_id,user_id:tx.intervenant_id,metadata:{provider,event_id:eventId,reason:'wallet_ledger_reversal_not_implemented'}},'REVIEW_REQUIRED');
+        }
+      } else if(newStatus){
+        const alreadyFinal = ['paid','failed','refunded','refund_pending_reconciliation'].includes(tx.status);
         if(!alreadyFinal){
           await env.DB.prepare('UPDATE payment_transactions SET status=?,provider_payment_id=COALESCE(?,provider_payment_id),updated_at=CURRENT_TIMESTAMP WHERE id=?').bind(newStatus,clean(event?.data?.provider_payment_id)||null,txId).run();
           if(newStatus==='paid'){
