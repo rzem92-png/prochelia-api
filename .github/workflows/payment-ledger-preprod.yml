@@ -24,4 +24,8 @@ jobs:
       - name: Run ledger SQL safety tests
         run: python -m unittest discover -s tests -p 'test*.py' -v
       - name: Validate Worker JavaScript syntax
-        run: node --check src/index.js
+        run: |
+          node --check src/index.js
+          node --check stripe-adapter.js
+      - name: Run Stripe signature regression tests
+        run: node tests/test_stripe_signature.mjs
