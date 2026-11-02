@@ -3272,7 +3272,7 @@ async function stripeWebhook(request, env) {
   const paidEvent=new Set(['checkout.session.completed','checkout.session.async_payment_succeeded','payment_intent.succeeded']);
   const failedEvent=new Set(['checkout.session.async_payment_failed','payment_intent.payment_failed']);
   const refundEvent=new Set(['charge.refunded']);
-  const disputeEvent=new Set(['charge.dispute.created']);
+  const disputeEvent=new Set(['charge.dispute.created','charge.dispute.closed']);
   let result='IGNORED';
   if(disputeEvent.has(event.type) && !txId) {
     const disputeId=clean(obj?.id);
@@ -3291,7 +3291,7 @@ async function stripeWebhook(request, env) {
       const currency=String(obj?.currency||'').toLowerCase();
       const isCheckout=String(event.type).startsWith('checkout.session.');
       const sessionMatches=!isCheckout || !tx.provider_payment_id || String(tx.provider_payment_id)===sessionId;
-      const amountMatches=amount<0 || (amount===Number(tx.gross_cents) && currency===String(tx.currency||'EUR').toLowerCase());
+      const amountMatches=amount<0 || (disputeEvent.has(event.type) ? currency===String(tx.currency||'EUR').toLowerCase() : (amount===Number(tx.gross_cents) && currency===String(tx.currency||'EUR').toLowerCase()));
       if(!sessionMatches || !amountMatches) {
         await paymentAudit(env,'STRIPE_WEBHOOK_MISMATCH',{transaction_id:tx.id,mission_id:tx.mission_id,metadata:{event_id:event.id,event_type:event.type}},'BLOCKED');
         result='MISMATCH_BLOCKED';
@@ -3319,6 +3319,18 @@ async function stripeWebhook(request, env) {
         await env.DB.prepare(`UPDATE payment_transactions SET status='refund_pending_reconciliation',refund_cents=MAX(refund_cents,?),updated_at=CURRENT_TIMESTAMP WHERE id=? AND status IN ('paid','held','refund_pending_reconciliation')`).bind(refundedCents,tx.id).run();
         await paymentAudit(env,'STRIPE_REFUND_REQUIRES_RECONCILIATION',{transaction_id:tx.id,mission_id:tx.mission_id,user_id:tx.intervenant_id,metadata:{event_id:event.id,refund_cents:refundedCents,reason:'wallet_ledger_reversal_not_implemented'}},'REVIEW_REQUIRED');
         result='REFUND_PENDING_RECONCILIATION';
+      } else if(event.type==='charge.dispute.closed') {
+        // Stripe's outcome closes the PSP case, but is not by itself proof that
+        // the internal wallet/payout ledger has been reconciled. Keep the payout
+        // lock until an explicit accounting reconciliation closes this case.
+        const stripeDisputeId=clean(obj?.id);
+        const outcome=clean(obj?.status)||'unknown';
+        if(stripeDisputeId) {
+          const closed=await env.DB.prepare(`UPDATE payment_disputes SET status='closed_pending_reconciliation',resolution=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND status NOT IN ('resolved','closed')`).bind(`stripe_${outcome}`,`stripe_${stripeDisputeId}`).run();
+          await env.DB.prepare(`UPDATE payment_transactions SET status='held',updated_at=CURRENT_TIMESTAMP WHERE id=? AND status IN ('paid','held')`).bind(tx.id).run();
+          await paymentAudit(env,'STRIPE_DISPUTE_CLOSED_REQUIRES_RECONCILIATION',{transaction_id:tx.id,mission_id:tx.mission_id,user_id:tx.intervenant_id,metadata:{stripe_dispute_id:stripeDisputeId,outcome,event_id:event.id,local_case_updated:Number(closed?.meta?.changes||0)===1}},'REVIEW_REQUIRED');
+          result='DISPUTE_CLOSED_PENDING_RECONCILIATION';
+        }
       } else if(disputeEvent.has(event.type)) {
         // Record the Stripe dispute itself, not only a local payment hold.
         // payoutRequest checks this table, so PSP-originated disputes block payouts too.
