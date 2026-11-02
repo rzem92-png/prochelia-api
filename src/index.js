@@ -1030,7 +1030,12 @@ async function payoutRequest(request, env) {
     // idempotency-key conflict). Do not expose raw database errors.
     const replay=await env.DB.prepare('SELECT * FROM payout_requests WHERE idempotency_key=? LIMIT 1').bind(idem).first();
     if(replay) {
-      if(String(replay.user_id)!==String(auth.user.id)) return json({ok:false,error:'IDEMPOTENCY_KEY_CONFLICT',version:VERSION},409);
+      if(String(replay.user_id)!==String(auth.user.id) ||
+         Number(replay.amount_cents)!==amount ||
+         String(replay.mode||'standard')!==mode ||
+         String(replay.currency||'EUR').toUpperCase()!=='EUR') {
+        return json({ok:false,error:'IDEMPOTENCY_KEY_CONFLICT',version:VERSION},409);
+      }
       return json({ok:true,version:VERSION,idempotent_replay:true,payout:replay},200);
     }
     throw err;

@@ -69,6 +69,11 @@ class StripeWebhookSafetySourceTests(unittest.TestCase):
     def test_checkout_idempotency_key_is_server_bound_to_transaction(self):
         self.assertIn("'idempotency-key':`prochelia-checkout-${tx.id}`", SOURCE)
 
+    def test_payout_batch_race_replay_checks_payload_and_owner(self):
+        self.assertIn("Number(replay.amount_cents)!==amount", SOURCE)
+        self.assertIn("String(replay.mode||'standard')!==mode", SOURCE)
+        self.assertIn("String(replay.currency||'EUR').toUpperCase()!=='EUR'", SOURCE)
+
     def test_payouts_fail_closed_on_unmatched_stripe_dispute(self):
         self.assertIn("external_id LIKE 'dp_%'", SOURCE)
         self.assertIn("status='unmatched'", SOURCE)
