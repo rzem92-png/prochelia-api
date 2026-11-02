@@ -65,6 +65,11 @@ class StripeWebhookSafetySourceTests(unittest.TestCase):
         self.assertIn("headers.set('permissions-policy','geolocation=(self),camera=(),microphone=()')", SOURCE)
         self.assertIn("new Response(response.body,{status:response.status,statusText:response.statusText,headers})", SOURCE)
 
+
+    def test_checkout_idempotency_key_is_server_bound_to_transaction(self):
+        self.assertIn("'idempotency-key':`prochelia-checkout-${tx.id}`", SOURCE)
+        self.assertNotIn("request.headers.get('idempotency-key')", SOURCE)
+
     def test_payouts_fail_closed_on_unmatched_stripe_dispute(self):
         self.assertIn("external_id LIKE 'dp_%'", SOURCE)
         self.assertIn("status='unmatched'", SOURCE)
