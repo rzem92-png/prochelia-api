@@ -26,9 +26,39 @@ function json(data, status = 200, extraHeaders = {}) {
   });
 }
 
+const MAX_JSON_BODY_BYTES = 1024 * 1024; // 1 MiB; APIs must not buffer unbounded JSON payloads.
+
 async function readJson(request) {
-  try { return await request.json(); }
-  catch { return null; }
+  try {
+    const declaredLength = request.headers.get('content-length');
+    if (declaredLength !== null) {
+      const length = Number(declaredLength);
+      if (!Number.isFinite(length) || length < 0 || length > MAX_JSON_BODY_BYTES) return null;
+    }
+    if (!request.body) return null;
+    const reader = request.body.getReader();
+    const chunks = [];
+    let total = 0;
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > MAX_JSON_BODY_BYTES) {
+        try { await reader.cancel('JSON body too large'); } catch {}
+        return null;
+      }
+      chunks.push(value);
+    }
+    const bytes = new Uint8Array(total);
+    let offset = 0;
+    for (const chunk of chunks) {
+      bytes.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
+    return JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes));
+  } catch {
+    return null;
+  }
 }
 
 function clean(value) {
