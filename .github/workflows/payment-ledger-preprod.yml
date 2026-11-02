@@ -23,3 +23,5 @@ jobs:
           python-version: '3.12'
       - name: Run ledger SQL safety tests
         run: python -m unittest discover -s tests -p 'test*.py' -v
+      - name: Validate Worker JavaScript syntax
+        run: node --check src/index.js
