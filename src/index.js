@@ -28,12 +28,12 @@ function json(data, status = 200, extraHeaders = {}) {
 
 const MAX_JSON_BODY_BYTES = 1024 * 1024; // 1 MiB; APIs must not buffer unbounded JSON payloads.
 
-async function readJson(request) {
+async function readBoundedText(request, maxBytes = MAX_JSON_BODY_BYTES) {
   try {
     const declaredLength = request.headers.get('content-length');
     if (declaredLength !== null) {
       const length = Number(declaredLength);
-      if (!Number.isFinite(length) || length < 0 || length > MAX_JSON_BODY_BYTES) return null;
+      if (!Number.isFinite(length) || length < 0 || length > maxBytes) return null;
     }
     if (!request.body) return null;
     const reader = request.body.getReader();
@@ -43,8 +43,8 @@ async function readJson(request) {
       const { done, value } = await reader.read();
       if (done) break;
       total += value.byteLength;
-      if (total > MAX_JSON_BODY_BYTES) {
-        try { await reader.cancel('JSON body too large'); } catch {}
+      if (total > maxBytes) {
+        try { await reader.cancel('Request body too large'); } catch {}
         return null;
       }
       chunks.push(value);
@@ -55,10 +55,16 @@ async function readJson(request) {
       bytes.set(chunk, offset);
       offset += chunk.byteLength;
     }
-    return JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes));
+    return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
   } catch {
     return null;
   }
+}
+
+async function readJson(request) {
+  const raw = await readBoundedText(request);
+  if (raw === null) return null;
+  try { return JSON.parse(raw); } catch { return null; }
 }
 
 function clean(value) {
@@ -3249,7 +3255,8 @@ async function stripeWebhook(request, env) {
   if(!env.DB) return json({ok:false,error:'DATABASE_REQUIRED',version:VERSION},503);
   if(!env.STRIPE_WEBHOOK_SECRET) return json({ok:false,error:'STRIPE_WEBHOOK_NOT_CONFIGURED',version:VERSION},503);
   await ensurePaymentSchema(env);
-  const raw=await request.text();
+  const raw=await readBoundedText(request,MAX_JSON_BODY_BYTES);
+  if(raw===null) return json({ok:false,error:'STRIPE_WEBHOOK_BODY_TOO_LARGE_OR_INVALID',version:VERSION},413);
   const valid=await verifyStripeSignature(raw,request.headers.get('stripe-signature'),env.STRIPE_WEBHOOK_SECRET);
   if(!valid) return json({ok:false,error:'INVALID_STRIPE_SIGNATURE',version:VERSION},401);
   let event; try{event=JSON.parse(raw);}catch{return json({ok:false,error:'INVALID_STRIPE_EVENT_JSON',version:VERSION},400);}
