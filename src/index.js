@@ -999,15 +999,25 @@ async function paymentWebhook(request, env) {
           await env.DB.prepare(`UPDATE payment_transactions SET status='refund_pending_reconciliation',provider_payment_id=COALESCE(?,provider_payment_id),updated_at=CURRENT_TIMESTAMP WHERE id=? AND status IN ('paid','held','refund_pending_reconciliation')`).bind(clean(event?.data?.provider_payment_id)||null,txId).run();
           await paymentAudit(env,'PAYMENT_REFUND_REQUIRES_RECONCILIATION',{transaction_id:txId,mission_id:tx.mission_id,user_id:tx.intervenant_id,metadata:{provider,event_id:eventId,reason:'wallet_ledger_reversal_not_implemented'}},'REVIEW_REQUIRED');
         }
-      } else if(newStatus){
-        const alreadyFinal = ['paid','failed','refunded','refund_pending_reconciliation'].includes(tx.status);
-        if(!alreadyFinal){
-          await env.DB.prepare('UPDATE payment_transactions SET status=?,provider_payment_id=COALESCE(?,provider_payment_id),updated_at=CURRENT_TIMESTAMP WHERE id=?').bind(newStatus,clean(event?.data?.provider_payment_id)||null,txId).run();
-          if(newStatus==='paid'){
-            const wallet=await env.DB.prepare('SELECT * FROM wallets WHERE user_id=? LIMIT 1').bind(tx.intervenant_id).first();
-            if(wallet) await env.DB.prepare('UPDATE wallets SET available_cents=available_cents+?,updated_at=CURRENT_TIMESTAMP WHERE id=?').bind(tx.net_intervenant_cents,wallet.id).run();
+      } else if(newStatus==='paid'){
+        // Event-id dedupe alone does not protect against distinct provider
+        // events for one transaction. Gate credit on the transaction status
+        // transition and execute transition + wallet credit atomically.
+        if(tx.intervenant_id){
+          await env.DB.prepare(`INSERT OR IGNORE INTO wallets(id,user_id,currency,available_cents,pending_cents,paid_cents,reserved_cents) VALUES(?,?,?,0,0,0,0)`)
+            .bind(crypto.randomUUID(),tx.intervenant_id,tx.currency||'EUR').run();
+          const transition=env.DB.prepare(`UPDATE payment_transactions SET status='paid',provider_payment_id=COALESCE(?,provider_payment_id),updated_at=CURRENT_TIMESTAMP WHERE id=? AND status NOT IN ('paid','failed','refunded','refund_pending_reconciliation','held')`)
+            .bind(clean(event?.data?.provider_payment_id)||null,txId);
+          const credit=env.DB.prepare(`UPDATE wallets SET available_cents=available_cents+?,updated_at=CURRENT_TIMESTAMP WHERE user_id=? AND changes()=1`)
+            .bind(Number(tx.net_intervenant_cents||0),tx.intervenant_id);
+          const settled=await env.DB.batch([transition,credit]);
+          if(Number(settled?.[0]?.meta?.changes||0)!==1 || Number(settled?.[1]?.meta?.changes||0)!==1){
+            await paymentAudit(env,'PAYMENT_ALREADY_SETTLED',{transaction_id:txId,mission_id:tx.mission_id,user_id:tx.intervenant_id,metadata:{provider,event_id:eventId,event_type:type}},'DUPLICATE');
           }
         }
+      } else if(newStatus==='failed'){
+        await env.DB.prepare(`UPDATE payment_transactions SET status='failed',provider_payment_id=COALESCE(?,provider_payment_id),updated_at=CURRENT_TIMESTAMP WHERE id=? AND status NOT IN ('paid','refunded','refund_pending_reconciliation','held')`)
+          .bind(clean(event?.data?.provider_payment_id)||null,txId).run();
       }
     }
   }
