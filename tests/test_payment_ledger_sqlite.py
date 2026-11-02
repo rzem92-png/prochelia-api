@@ -85,6 +85,40 @@ class PaymentSettlementSqliteIntegrationTests(unittest.TestCase):
         """,('worker-1',)).fetchone()
         self.assertIsNone(active)
 
+    def test_dispute_hold_transition_is_atomic_and_paid_only(self):
+        self.db.execute("UPDATE payment_transactions SET status='paid' WHERE id='tx-1'")
+        self.db.execute("CREATE TABLE payment_disputes(id TEXT PRIMARY KEY,transaction_id TEXT,status TEXT)")
+        self.db.commit()
+        self.db.execute("BEGIN")
+        hold=self.db.execute("UPDATE payment_transactions SET status='held' WHERE id='tx-1' AND status='paid'")
+        insert=self.db.execute("""
+          INSERT INTO payment_disputes(id,transaction_id,status)
+          SELECT 'd-1','tx-1','open' WHERE changes()=1
+        """)
+        self.db.commit()
+        self.assertEqual((hold.rowcount,insert.rowcount),(1,1))
+        self.db.execute("BEGIN")
+        hold2=self.db.execute("UPDATE payment_transactions SET status='held' WHERE id='tx-1' AND status='paid'")
+        insert2=self.db.execute("""
+          INSERT INTO payment_disputes(id,transaction_id,status)
+          SELECT 'd-2','tx-1','open' WHERE changes()=1
+        """)
+        self.db.commit()
+        self.assertEqual((hold2.rowcount,insert2.rowcount),(0,0))
+        self.assertEqual(self.db.execute("SELECT COUNT(*) FROM payment_disputes").fetchone()[0],1)
+
+    def test_terminal_payment_status_cannot_be_overwritten(self):
+        for terminal in ('paid','failed','refunded','refund_pending_reconciliation','held'):
+            self.db.execute("UPDATE payment_transactions SET status=? WHERE id='tx-1'",(terminal,))
+            self.db.commit()
+            result=self.db.execute("""
+              UPDATE payment_transactions SET status='failed'
+              WHERE id='tx-1' AND status NOT IN ('paid','failed','refunded','refund_pending_reconciliation','held')
+            """)
+            self.db.commit()
+            self.assertEqual(result.rowcount,0,terminal)
+            self.assertEqual(self.db.execute("SELECT status FROM payment_transactions WHERE id='tx-1'").fetchone()[0],terminal)
+
     def tearDown(self):
         self.db.close()
 
