@@ -3183,8 +3183,13 @@ async function stripeWebhook(request, env) {
         if(!['paid','refunded'].includes(tx.status)) await env.DB.prepare(`UPDATE payment_transactions SET status='failed',updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(tx.id).run();
         result='PAYMENT_FAILED';
       } else if(refundEvent.has(event.type)) {
-        await env.DB.prepare(`UPDATE payment_transactions SET status='refunded',refund_cents=MAX(refund_cents,?),updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(Math.max(0,Number(obj?.amount_refunded ?? amount)),tx.id).run();
-        result='REFUND_RECORDED';
+        // Stripe confirms the external refund, but the internal wallet ledger
+        // has no reversal entry yet. Quarantine instead of marking reconciled.
+        // This avoids a false "refunded" state with funds still spendable.
+        const refundedCents=Math.max(0,Number(obj?.amount_refunded ?? amount));
+        await env.DB.prepare(`UPDATE payment_transactions SET status='refund_pending_reconciliation',refund_cents=MAX(refund_cents,?),updated_at=CURRENT_TIMESTAMP WHERE id=? AND status IN ('paid','held','refund_pending_reconciliation')`).bind(refundedCents,tx.id).run();
+        await paymentAudit(env,'STRIPE_REFUND_REQUIRES_RECONCILIATION',{transaction_id:tx.id,mission_id:tx.mission_id,user_id:tx.intervenant_id,metadata:{event_id:event.id,refund_cents:refundedCents,reason:'wallet_ledger_reversal_not_implemented'}},'REVIEW_REQUIRED');
+        result='REFUND_PENDING_RECONCILIATION';
       } else if(disputeEvent.has(event.type)) {
         if(tx.status==='paid') await env.DB.prepare(`UPDATE payment_transactions SET status='held',updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(tx.id).run();
         result='DISPUTE_HELD';
