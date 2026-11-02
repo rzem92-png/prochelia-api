@@ -239,6 +239,34 @@ class PaymentSettlementSqliteIntegrationTests(unittest.TestCase):
         self.db.rollback()
         self.assertEqual(self.db.execute("SELECT available_cents,reserved_cents FROM payout_wallets WHERE id='w-1'").fetchone(),(3000,0))
 
+    def test_terminal_payout_webhook_releases_reserve_exactly_once(self):
+        self.db.executescript("""
+          CREATE TABLE payout_requests(
+            id TEXT PRIMARY KEY,wallet_id TEXT,amount_cents INTEGER,status TEXT
+          );
+          CREATE TABLE payout_wallets(
+            id TEXT PRIMARY KEY,available_cents INTEGER,reserved_cents INTEGER,paid_cents INTEGER
+          );
+          INSERT INTO payout_requests VALUES('p-1','w-1',1200,'processing');
+          INSERT INTO payout_wallets VALUES('w-1',800,1200,0);
+        """)
+        outcomes=[]
+        for _ in range(3):
+            self.db.execute("BEGIN")
+            transition=self.db.execute("""
+              UPDATE payout_requests SET status='failed'
+              WHERE id='p-1' AND status NOT IN ('completed','failed','canceled')
+            """)
+            wallet=self.db.execute("""
+              UPDATE payout_wallets SET reserved_cents=MAX(0,reserved_cents-1200),
+                available_cents=available_cents+1200
+              WHERE id='w-1' AND changes()=1
+            """)
+            self.db.commit()
+            outcomes.append((transition.rowcount,wallet.rowcount))
+        self.assertEqual(outcomes,[(1,1),(0,0),(0,0)])
+        self.assertEqual(self.db.execute("SELECT available_cents,reserved_cents,paid_cents FROM payout_wallets WHERE id='w-1'").fetchone(),(2000,0,0))
+
     def tearDown(self):
         self.db.close()
 
