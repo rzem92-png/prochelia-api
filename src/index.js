@@ -3227,7 +3227,18 @@ async function stripeWebhook(request, env) {
         await paymentAudit(env,'STRIPE_REFUND_REQUIRES_RECONCILIATION',{transaction_id:tx.id,mission_id:tx.mission_id,user_id:tx.intervenant_id,metadata:{event_id:event.id,refund_cents:refundedCents,reason:'wallet_ledger_reversal_not_implemented'}},'REVIEW_REQUIRED');
         result='REFUND_PENDING_RECONCILIATION';
       } else if(disputeEvent.has(event.type)) {
-        if(tx.status==='paid') await env.DB.prepare(`UPDATE payment_transactions SET status='held',updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(tx.id).run();
+        // Record the Stripe dispute itself, not only a local payment hold.
+        // payoutRequest checks this table, so PSP-originated disputes block payouts too.
+        const stripeDisputeId=clean(obj?.id);
+        const disputedCents=Math.max(0,Number(obj?.amount||0));
+        if(stripeDisputeId) {
+          await env.DB.batch([
+            env.DB.prepare(`UPDATE payment_transactions SET status='held',updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='paid'`).bind(tx.id),
+            env.DB.prepare(`INSERT OR IGNORE INTO payment_disputes (id,mission_id,transaction_id,client_id,intervenant_id,status,reason,amount_cents) VALUES (?,?,?,?,?,?,?,?)`)
+              .bind('stripe_'+stripeDisputeId,tx.mission_id,tx.id,tx.client_id,tx.intervenant_id,'open',clean(obj?.reason)||'stripe_dispute',disputedCents)
+          ]);
+          await paymentAudit(env,'STRIPE_DISPUTE_OPENED',{transaction_id:tx.id,mission_id:tx.mission_id,user_id:tx.intervenant_id,metadata:{stripe_dispute_id:stripeDisputeId,amount_cents:disputedCents,event_id:event.id}},'REVIEW_REQUIRED');
+        }
         result='DISPUTE_HELD';
       }
       await paymentAudit(env,'STRIPE_WEBHOOK_PROCESSED',{transaction_id:tx.id,mission_id:tx.mission_id,metadata:{event_id:event.id,event_type:event.type,result}},'OK');
