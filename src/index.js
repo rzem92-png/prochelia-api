@@ -3183,12 +3183,12 @@ async function stripeWebhook(request, env) {
         // gates the wallet credit across different Stripe event IDs.
         if(tx.intervenant_id) {
           await env.DB.prepare(`INSERT OR IGNORE INTO wallets(id,user_id,currency,available_cents,pending_cents,paid_cents,reserved_cents) VALUES(?,?,?,0,0,0,0)`).bind(crypto.randomUUID(),tx.intervenant_id,tx.currency||'EUR').run();
-          const transition=env.DB.prepare(`UPDATE payment_transactions SET status='paid',provider='stripe',provider_payment_id=COALESCE(?,provider_payment_id),updated_at=CURRENT_TIMESTAMP WHERE id=? AND status NOT IN ('paid','refunded','refund_pending_reconciliation')`).bind(sessionId||null,tx.id);
+          const transition=env.DB.prepare(`UPDATE payment_transactions SET status='paid',provider='stripe',provider_payment_id=COALESCE(?,provider_payment_id),updated_at=CURRENT_TIMESTAMP WHERE id=? AND status NOT IN ('paid','refunded','refund_pending_reconciliation','held')`).bind(sessionId||null,tx.id);
           const credit=env.DB.prepare(`UPDATE wallets SET available_cents=available_cents+?,updated_at=CURRENT_TIMESTAMP WHERE user_id=? AND changes()=1`).bind(Number(tx.net_intervenant_cents||0),tx.intervenant_id);
           const settled=await env.DB.batch([transition,credit]);
           result=Number(settled?.[0]?.meta?.changes||0)===1 && Number(settled?.[1]?.meta?.changes||0)===1?'PAYMENT_CONFIRMED':'PAYMENT_ALREADY_SETTLED';
         } else {
-          await env.DB.prepare(`UPDATE payment_transactions SET status='paid',provider='stripe',provider_payment_id=COALESCE(?,provider_payment_id),updated_at=CURRENT_TIMESTAMP WHERE id=? AND status NOT IN ('paid','refunded','refund_pending_reconciliation')`).bind(sessionId||null,tx.id).run();
+          await env.DB.prepare(`UPDATE payment_transactions SET status='paid',provider='stripe',provider_payment_id=COALESCE(?,provider_payment_id),updated_at=CURRENT_TIMESTAMP WHERE id=? AND status NOT IN ('paid','refunded','refund_pending_reconciliation','held')`).bind(sessionId||null,tx.id).run();
           result='PAYMENT_CONFIRMED';
         }
       } else if(failedEvent.has(event.type)) {
