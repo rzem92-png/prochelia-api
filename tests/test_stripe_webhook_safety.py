@@ -40,6 +40,21 @@ class StripeWebhookSafetySourceTests(unittest.TestCase):
         self.assertIn("STRIPE_WEBHOOK_BODY_TOO_LARGE_OR_INVALID", SOURCE)
         self.assertIn("await reader.cancel('Request body too large')", SOURCE)
 
+
+    def test_csrf_origin_gate_rejects_missing_origin_for_session_cookie(self):
+        self.assertIn("function securityOriginAllowed(request,env)", SOURCE)
+        self.assertIn("hasSessionCookie", SOURCE)
+        self.assertIn("return !hasSessionCookie", SOURCE)
+        self.assertIn("if(isMutatingMethod(request.method) && !securityOriginAllowed(request,env))", SOURCE)
+        self.assertIn("allowed.includes(origin)", SOURCE)
+
+    def test_rate_limiter_uses_cloudflare_edge_ip_not_forwarded_header(self):
+        self.assertIn("request.headers.get('CF-Connecting-IP')", SOURCE)
+        self.assertIn("Never trust", SOURCE)
+        self.assertNotIn("request.headers.get('X-Forwarded-For')", SOURCE)
+        self.assertIn("DATABASE_REQUIRED_FOR_RATE_LIMIT", SOURCE)
+        self.assertIn("Fail closed if the limiter cannot persist", SOURCE)
+
     def test_payouts_fail_closed_on_unmatched_stripe_dispute(self):
         self.assertIn("external_id LIKE 'dp_%'", SOURCE)
         self.assertIn("status='unmatched'", SOURCE)
