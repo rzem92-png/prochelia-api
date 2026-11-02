@@ -174,6 +174,27 @@ class PaymentSettlementSqliteIntegrationTests(unittest.TestCase):
         self.assertNotEqual(row[1],'client-2')
         self.assertNotEqual(row[2],'worker-2')
 
+
+    def test_rate_limit_counter_upsert_is_atomic_and_accumulates(self):
+        self.db.executescript("""
+          CREATE TABLE security_rate_limits(
+            id TEXT PRIMARY KEY,bucket TEXT NOT NULL,subject_hash TEXT NOT NULL,
+            window_start TEXT NOT NULL,request_count INTEGER NOT NULL DEFAULT 0,
+            UNIQUE(bucket,subject_hash,window_start)
+          );
+        """)
+        for n in range(1,41):
+            row=self.db.execute("""
+              INSERT INTO security_rate_limits(id,bucket,subject_hash,window_start,request_count)
+              VALUES(?,?,?,?,1)
+              ON CONFLICT(bucket,subject_hash,window_start)
+              DO UPDATE SET request_count=security_rate_limits.request_count+1
+              RETURNING request_count
+            """,(f'rl-{n}','SENSITIVE:/api/auth/login','ip-hash','2026-11-02T21:00:00Z')).fetchone()
+            self.assertEqual(row[0],n)
+        final=self.db.execute("SELECT request_count FROM security_rate_limits WHERE bucket='SENSITIVE:/api/auth/login' AND subject_hash='ip-hash'").fetchone()[0]
+        self.assertEqual(final,40)
+
     def tearDown(self):
         self.db.close()
 
