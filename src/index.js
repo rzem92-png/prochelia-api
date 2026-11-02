@@ -3187,10 +3187,17 @@ async function stripeCheckout(request, env) {
 
 async function handle(request,env){
   try {
-    if(isMutatingMethod(request.method) && new URL(request.url).pathname!=='/api/payments/webhook' && !securityOriginAllowed(request,env)) return json({ok:false,error:'ORIGIN_NOT_ALLOWED',version:VERSION},403);
     const url=new URL(request.url);
     // Native provider webhook has no browser Origin; its Stripe signature is the authority.
     if(url.pathname==='/api/payments/webhook') return stripeWebhook(request,env);
+    // Wire the previously-defined per-IP/per-route limiter into every mutating
+    // request. Fail closed if the limiter cannot persist its decision.
+    if(isMutatingMethod(request.method)){
+      if(!env?.DB) return json({ok:false,error:'DATABASE_REQUIRED_FOR_RATE_LIMIT',version:VERSION},503);
+      const limit=await productionRateLimit(request,env);
+      if(!limit.ok) return limit.response;
+    }
+    if(isMutatingMethod(request.method) && !securityOriginAllowed(request,env)) return json({ok:false,error:'ORIGIN_NOT_ALLOWED',version:VERSION},403);
     if(url.pathname==='/api/payments/checkout') { if(request.method!=='POST') return json({ok:false,error:'METHOD_NOT_ALLOWED',version:VERSION},405,{'allow':'POST'}); return stripeCheckout(request,env); }
     if(url.pathname==='/api/documents/mine') { if(request.method!=='GET') return json({ok:false,error:'METHOD_NOT_ALLOWED',version:VERSION},405,{'allow':'GET'}); return documentsMine(request,env); }
     if(url.pathname==='/api/documents/upload') { if(request.method!=='POST') return json({ok:false,error:'METHOD_NOT_ALLOWED',version:VERSION},405,{'allow':'POST'}); return documentUpload(request,env); }
