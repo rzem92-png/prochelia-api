@@ -918,21 +918,59 @@ async function payoutRequest(request, env) {
   await ensurePaymentSchema(env);
   const body=await readJson(request), amount=moneyCents(body?.amount_eur), mode=clean(body?.mode)||'standard';
   const idem=clean(request.headers.get('idempotency-key'))||clean(body?.idempotency_key);
-  if(amount===null||amount<=0||!['standard','express'].includes(mode)||!idem) return json({ok:false,error:'INVALID_PAYOUT_REQUEST',version:VERSION},400);
+  if(amount===null||amount<=0||!['standard','express'].includes(mode)||!idem||idem.length>255) return json({ok:false,error:'INVALID_PAYOUT_REQUEST',version:VERSION},400);
+
+  // Fast replay check is only an optimization; uniqueness is enforced again at INSERT.
   const old=await env.DB.prepare('SELECT * FROM payout_requests WHERE idempotency_key=? LIMIT 1').bind(idem).first();
   if(old) {
-    // Idempotency keys are globally unique in this schema: never disclose another
-    // intervenant's payout details when a key is reused across accounts.
     if(String(old.user_id)!==String(auth.user.id)) return json({ok:false,error:'IDEMPOTENCY_KEY_CONFLICT',version:VERSION},409);
     return json({ok:true,version:VERSION,idempotent_replay:true,payout:old},200);
   }
-  const account=await env.DB.prepare(`SELECT * FROM payment_accounts WHERE user_id=? LIMIT 1`).bind(auth.user.id).first();
-  if(!account||Number(account.payouts_enabled)!==1) return json({ok:false,error:'PAYOUT_ACCOUNT_NOT_READY',version:VERSION,message:'Le compte de paiement de l’intervenant doit être vérifié et activé par le PSP.'},409);
+  const account=await env.DB.prepare('SELECT * FROM payment_accounts WHERE user_id=? LIMIT 1').bind(auth.user.id).first();
+  if(!account||Number(account.payouts_enabled)!==1) return json({ok:false,error:'PAYOUT_ACCOUNT_NOT_READY',version:VERSION},409);
   const wallet=await env.DB.prepare('SELECT * FROM wallets WHERE user_id=? LIMIT 1').bind(auth.user.id).first();
-  if(!wallet||Number(wallet.available_cents)<amount) return json({ok:false,error:'INSUFFICIENT_AVAILABLE_BALANCE',version:VERSION,available_cents:Number(wallet?.available_cents||0)},409);
+  if(!wallet) return json({ok:false,error:'WALLET_NOT_FOUND',version:VERSION},409);
+
   const payoutId=crypto.randomUUID();
-  await env.DB.prepare(`UPDATE wallets SET available_cents=available_cents-?,reserved_cents=reserved_cents+?,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(amount,amount,wallet.id).run();
-  await env.DB.prepare(`INSERT INTO payout_requests (id,idempotency_key,wallet_id,user_id,amount_cents,mode,provider,status) VALUES (?,?,?,?,?,?,?,'requested')`).bind(payoutId,idem,wallet.id,auth.user.id,amount,mode,paymentProvider(env)).run();
+  // One conditional debit prevents concurrent requests from reserving more than
+  // the currently available balance. The unique key is still the final replay guard.
+  const reservation=await env.DB.prepare(`
+    UPDATE wallets
+       SET available_cents=available_cents-?,
+           reserved_cents=reserved_cents+?,
+           updated_at=CURRENT_TIMESTAMP
+     WHERE id=? AND user_id=? AND available_cents>=?
+  `).bind(amount,amount,wallet.id,auth.user.id,amount).run();
+  if(Number(reservation?.meta?.changes||0)!==1) {
+    const latest=await env.DB.prepare('SELECT available_cents FROM wallets WHERE id=? AND user_id=? LIMIT 1').bind(wallet.id,auth.user.id).first();
+    return json({ok:false,error:'INSUFFICIENT_AVAILABLE_BALANCE',version:VERSION,available_cents:Number(latest?.available_cents||0)},409);
+  }
+
+  try {
+    const insert=await env.DB.prepare(`
+      INSERT INTO payout_requests (id,idempotency_key,wallet_id,user_id,amount_cents,mode,provider,status)
+      VALUES (?,?,?,?,?,?,?,'requested')
+    `).bind(payoutId,idem,wallet.id,auth.user.id,amount,mode,paymentProvider(env)).run();
+    if(Number(insert?.meta?.changes||0)!==1) throw new Error('PAYOUT_INSERT_NOT_APPLIED');
+  } catch(error) {
+    // Compensate only this request's reservation. This remains guarded so a
+    // concurrent payout or terminal webhook cannot be overwritten.
+    await env.DB.prepare(`
+      UPDATE wallets
+         SET available_cents=available_cents+?,
+             reserved_cents=MAX(0,reserved_cents-?),
+             updated_at=CURRENT_TIMESTAMP
+       WHERE id=? AND user_id=?
+         AND EXISTS (SELECT 1 FROM payout_requests WHERE id=? AND user_id=?)
+    `).bind(amount,amount,wallet.id,auth.user.id,payoutId,auth.user.id).run().catch(()=>{});
+    const replay=await env.DB.prepare('SELECT * FROM payout_requests WHERE idempotency_key=? LIMIT 1').bind(idem).first().catch(()=>null);
+    if(replay) {
+      if(String(replay.user_id)!==String(auth.user.id)) return json({ok:false,error:'IDEMPOTENCY_KEY_CONFLICT',version:VERSION},409);
+      return json({ok:true,version:VERSION,idempotent_replay:true,payout:replay},200);
+    }
+    return json({ok:false,error:'PAYOUT_RESERVATION_FAILED',version:VERSION},503);
+  }
+
   await paymentAudit(env,'PAYOUT_REQUESTED',{payout_id:payoutId,user_id:auth.user.id,metadata:{amount_cents:amount,mode}},'OK');
   return json({ok:true,version:VERSION,payout_id:payoutId,status:'requested',amount_cents:amount,mode,provider:paymentProvider(env),next:paymentsConfigured(env)?'PSP_PAYOUT_REQUIRED':'PAYMENT_PROVIDER_NOT_CONFIGURED'},201);
 }
@@ -3151,8 +3189,15 @@ async function stripeWebhook(request, env) {
         if(!['paid','refunded'].includes(tx.status)) await env.DB.prepare(`UPDATE payment_transactions SET status='failed',updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(tx.id).run();
         result='PAYMENT_FAILED';
       } else if(refundEvent.has(event.type)) {
-        await env.DB.prepare(`UPDATE payment_transactions SET status='refunded',refund_cents=MAX(refund_cents,?),updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(Math.max(0,Number(obj?.amount_refunded ?? amount)),tx.id).run();
-        result='REFUND_RECORDED';
+        // Refunds are recorded, but never make an unsafe negative wallet mutation:
+        // a dedicated PSP refund workflow must reverse the posted ledger entry.
+        const cumulativeRefund=Math.max(0,Number(obj?.amount_refunded ?? amount));
+        if(cumulativeRefund>Number(tx.gross_cents||0)) {
+          result='REFUND_AMOUNT_EXCEEDS_PAYMENT';
+        } else {
+          await env.DB.prepare(`UPDATE payment_transactions SET status='refund_pending_review',refund_cents=MAX(refund_cents,?),updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(cumulativeRefund,tx.id).run();
+          result='REFUND_REQUIRES_LEDGER_REVERSAL';
+        }
       } else if(disputeEvent.has(event.type)) {
         if(tx.status==='paid') await env.DB.prepare(`UPDATE payment_transactions SET status='held',updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(tx.id).run();
         result='DISPUTE_HELD';
