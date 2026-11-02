@@ -875,7 +875,16 @@ async function createMissionPayment(request, env) {
   const idem=clean(request.headers.get('idempotency-key'))||clean(body?.idempotency_key);
   if(!idem) return json({ok:false,error:'IDEMPOTENCY_KEY_REQUIRED',version:VERSION},400);
   const old=await env.DB.prepare('SELECT * FROM payment_transactions WHERE idempotency_key=? LIMIT 1').bind(idem).first();
-  if(old) return json({ok:true,version:VERSION,idempotent_replay:true,transaction:old},200);
+  if(old) {
+    // Bind the idempotency key to the original payment intent. Reusing a key
+    // with a different mission, parties, amount or commission is a conflict.
+    if(String(old.mission_id)!==String(missionId) || String(old.client_id)!==String(clientId) ||
+       String(old.intervenant_id)!==String(intervenantId) || Number(old.gross_cents)!==gross ||
+       Number(old.commission_cents)!==commission || String(old.currency||'EUR').toUpperCase()!=='EUR') {
+      return json({ok:false,error:'IDEMPOTENCY_KEY_CONFLICT',version:VERSION},409);
+    }
+    return json({ok:true,version:VERSION,idempotent_replay:true,transaction:old},200);
+  }
   const net=gross-commission;
   const txId=crypto.randomUUID();
   await env.DB.prepare(`INSERT INTO payment_transactions

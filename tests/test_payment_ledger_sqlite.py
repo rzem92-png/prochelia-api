@@ -154,6 +154,21 @@ class PaymentSettlementSqliteIntegrationTests(unittest.TestCase):
         self.assertNotEqual(row[1],5000)
         self.assertNotEqual(row[2],'express')
 
+
+    def test_payment_idempotency_key_is_bound_to_intent(self):
+        self.db.executescript("""
+          INSERT INTO payment_transactions(id,idempotency_key,mission_id,client_id,intervenant_id,type,status,gross_cents,commission_cents,net_intervenant_cents,currency)
+          VALUES('tx-key','intent-key','mission-1','client-1','worker-1','MISSION_CHARGE','pending',5000,500,4500,'EUR');
+        """)
+        row=self.db.execute("""SELECT mission_id,client_id,intervenant_id,gross_cents,commission_cents,currency
+          FROM payment_transactions WHERE idempotency_key='intent-key'""").fetchone()
+        self.assertEqual(row,('mission-1','client-1','worker-1',5000,500,'EUR'))
+        self.assertNotEqual(row[3],6000)
+        self.assertNotEqual(row[4],1000)
+        self.assertNotEqual(row[0],'mission-2')
+        self.assertNotEqual(row[1],'client-2')
+        self.assertNotEqual(row[2],'worker-2')
+
     def tearDown(self):
         self.db.close()
 
