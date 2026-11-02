@@ -931,6 +931,9 @@ async function payoutRequest(request, env) {
   // Fail closed: prevent withdrawals while a provider/client dispute remains unresolved.
   const openDispute=await env.DB.prepare(`SELECT id FROM payment_disputes WHERE intervenant_id=? AND status NOT IN ('resolved','closed') LIMIT 1`).bind(auth.user.id).first();
   if(openDispute) return json({ok:false,error:'PAYOUT_BLOCKED_BY_OPEN_DISPUTE',version:VERSION,dispute_id:openDispute.id},423);
+  // Fail closed globally when a Stripe dispute could not yet be matched to a transaction/provider.
+  const unmatchedStripeDispute=await env.DB.prepare(`SELECT id,external_id FROM payment_reconciliation WHERE provider='stripe' AND status='unmatched' AND external_id LIKE 'dp_%' LIMIT 1`).first();
+  if(unmatchedStripeDispute) return json({ok:false,error:'PAYOUT_BLOCKED_BY_UNMATCHED_STRIPE_DISPUTE',version:VERSION,reconciliation_id:unmatchedStripeDispute.id},423);
   const wallet=await env.DB.prepare('SELECT * FROM wallets WHERE user_id=? LIMIT 1').bind(auth.user.id).first();
   if(!wallet) return json({ok:false,error:'INSUFFICIENT_AVAILABLE_BALANCE',version:VERSION,available_cents:0},409);
   const payoutId=crypto.randomUUID();
@@ -3190,6 +3193,15 @@ async function stripeWebhook(request, env) {
   const refundEvent=new Set(['charge.refunded']);
   const disputeEvent=new Set(['charge.dispute.created']);
   let result='IGNORED';
+  if(disputeEvent.has(event.type) && !txId) {
+    const disputeId=clean(obj?.id);
+    if(disputeId) {
+      await env.DB.prepare(`INSERT OR IGNORE INTO payment_reconciliation (id,provider,external_id,internal_transaction_id,amount_cents,currency,status) VALUES (?,?,?,?,?,?, 'unmatched')`)
+        .bind(crypto.randomUUID(),'stripe',disputeId,null,Math.max(0,Number(obj?.amount||0)),String(obj?.currency||'eur').toUpperCase()).run();
+      await paymentAudit(env,'STRIPE_DISPUTE_UNMATCHED',{metadata:{stripe_dispute_id:disputeId,reason:'transaction_id_missing'}},'REVIEW_REQUIRED');
+      result='DISPUTE_UNMATCHED_PAYOUTS_BLOCKED';
+    }
+  }
   if(txId && (paidEvent.has(event.type)||failedEvent.has(event.type)||refundEvent.has(event.type)||disputeEvent.has(event.type))) {
     const tx=await env.DB.prepare('SELECT * FROM payment_transactions WHERE id=? LIMIT 1').bind(txId).first();
     if(tx && String(tx.provider||'').toLowerCase()==='stripe') {
