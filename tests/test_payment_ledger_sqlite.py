@@ -119,6 +119,24 @@ class PaymentSettlementSqliteIntegrationTests(unittest.TestCase):
             self.assertEqual(result.rowcount,0,terminal)
             self.assertEqual(self.db.execute("SELECT status FROM payment_transactions WHERE id='tx-1'").fetchone()[0],terminal)
 
+    def test_unmatched_stripe_dispute_blocks_payout_until_reconciled(self):
+        self.db.executescript("""
+          CREATE TABLE payment_reconciliation(id TEXT PRIMARY KEY,provider TEXT,external_id TEXT,status TEXT);
+          INSERT INTO payment_reconciliation VALUES('rec-1','stripe','dp_123','unmatched');
+        """)
+        unmatched=self.db.execute("""
+          SELECT id FROM payment_reconciliation WHERE provider='stripe'
+          AND status='unmatched' AND external_id LIKE 'dp_%' LIMIT 1
+        """).fetchone()
+        self.assertEqual(unmatched[0],'rec-1')
+        self.db.execute("UPDATE payment_reconciliation SET status='matched' WHERE id='rec-1'")
+        self.db.commit()
+        unmatched=self.db.execute("""
+          SELECT id FROM payment_reconciliation WHERE provider='stripe'
+          AND status='unmatched' AND external_id LIKE 'dp_%' LIMIT 1
+        """).fetchone()
+        self.assertIsNone(unmatched)
+
     def tearDown(self):
         self.db.close()
 
