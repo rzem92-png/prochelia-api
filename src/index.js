@@ -3484,10 +3484,15 @@ async function supportEvent(env,caseId,actorRole,actorId,eventType,details={}){
 }
 
 async function brandIdentityEndpoint(request,env){
-  await ensureProcheliaMasterComplementSchema(env);
-  const r=await env.DB.prepare(`SELECT * FROM brand_identity WHERE brand_key='PROCHELIA' LIMIT 1`).first();
-  const assets=await env.DB.prepare(`SELECT asset_type,asset_name,storage_key,checksum,version,status FROM brand_assets WHERE status='ACTIVE' ORDER BY asset_type,asset_name`).all();
-  return json({ok:true,version:VERSION,brand:{name:PROCHELIA_BRAND.name,identity:r||null,assets:assets.results||[],visual:PROCHELIA_BRAND.visual,uniqueness_policy:PROCHELIA_BRAND.uniqueness_policy,note:'L’originalité graphique interne est une spécification de création ; l’exclusivité juridique doit être confirmée par les recherches de similarités et le dépôt de marque.'}});
+  // GET must remain side-effect free: no CREATE TABLE/INSERT on public reads.
+  let identity=null, assets=[];
+  if(env?.DB){
+    const brandTable=await env.DB.prepare(`SELECT 1 AS present FROM sqlite_master WHERE type='table' AND name='brand_identity' LIMIT 1`).first();
+    const assetsTable=await env.DB.prepare(`SELECT 1 AS present FROM sqlite_master WHERE type='table' AND name='brand_assets' LIMIT 1`).first();
+    if(brandTable?.present) identity=await env.DB.prepare(`SELECT * FROM brand_identity WHERE brand_key='PROCHELIA' LIMIT 1`).first();
+    if(assetsTable?.present){const rows=await env.DB.prepare(`SELECT asset_type,asset_name,storage_key,checksum,version,status FROM brand_assets WHERE status='ACTIVE' ORDER BY asset_type,asset_name`).all();assets=rows.results||[];}
+  }
+  return json({ok:true,version:VERSION,brand:{name:PROCHELIA_BRAND.name,identity,assets,visual:PROCHELIA_BRAND.visual,uniqueness_policy:PROCHELIA_BRAND.uniqueness_policy,note:'L’originalité graphique interne est une spécification de création ; l’exclusivité juridique doit être confirmée par les recherches de similarités et le dépôt de marque.'}});
 }
 
 async function brandClearanceRecord(request,env){
@@ -3503,7 +3508,7 @@ async function brandClearanceRecord(request,env){
 }
 
 async function interfaceConfigEndpoint(request,env){
-  await ensureProcheliaMasterComplementSchema(env);
+  // Public GET serves immutable configuration and must not initialize D1.
   const url=new URL(request.url); const requested=supportRoleNormalize(url.searchParams.get('role')||'');
   if(requested && PROCHELIA_UI[requested]) return json({ok:true,version:VERSION,role:requested,config:PROCHELIA_UI[requested],brand:PROCHELIA_BRAND.visual});
   return json({ok:true,version:VERSION,interfaces:PROCHELIA_UI,brand:PROCHELIA_BRAND.visual});
