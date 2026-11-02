@@ -5,9 +5,14 @@ class PaymentSettlementSqliteIntegrationTests(unittest.TestCase):
     def setUp(self):
         self.db = sqlite3.connect(":memory:")
         self.db.executescript("""
-          CREATE TABLE payment_transactions(id TEXT PRIMARY KEY,status TEXT NOT NULL,provider TEXT,provider_payment_id TEXT);
+          CREATE TABLE payment_transactions(
+            id TEXT PRIMARY KEY,status TEXT NOT NULL,provider TEXT,provider_payment_id TEXT,
+            idempotency_key TEXT,mission_id TEXT,client_id TEXT,intervenant_id TEXT,type TEXT,
+            gross_cents INTEGER DEFAULT 0,commission_cents INTEGER DEFAULT 0,
+            net_intervenant_cents INTEGER DEFAULT 0,currency TEXT DEFAULT 'EUR'
+          );
           CREATE TABLE wallets(id TEXT PRIMARY KEY,user_id TEXT UNIQUE NOT NULL,available_cents INTEGER NOT NULL DEFAULT 0);
-          INSERT INTO payment_transactions VALUES('tx-1','pending','stripe',NULL);
+          INSERT INTO payment_transactions(id,status,provider,provider_payment_id) VALUES('tx-1','pending','stripe',NULL);
         """)
         self.db.commit()
 
