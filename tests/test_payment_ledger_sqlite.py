@@ -67,6 +67,24 @@ class PaymentSettlementSqliteIntegrationTests(unittest.TestCase):
         self.assertEqual(balance,1200)
         self.assertEqual(results,[(1,1),(0,0)])
 
+    def test_open_dispute_blocks_payout_until_resolved(self):
+        self.db.executescript("""
+          CREATE TABLE payment_disputes(id TEXT PRIMARY KEY,intervenant_id TEXT,status TEXT);
+          INSERT INTO payment_disputes VALUES('dispute-1','worker-1','open');
+        """)
+        active=self.db.execute("""
+          SELECT id FROM payment_disputes WHERE intervenant_id=?
+          AND status NOT IN ('resolved','closed') LIMIT 1
+        """,('worker-1',)).fetchone()
+        self.assertEqual(active[0],'dispute-1')
+        self.db.execute("UPDATE payment_disputes SET status='resolved' WHERE id='dispute-1'")
+        self.db.commit()
+        active=self.db.execute("""
+          SELECT id FROM payment_disputes WHERE intervenant_id=?
+          AND status NOT IN ('resolved','closed') LIMIT 1
+        """,('worker-1',)).fetchone()
+        self.assertIsNone(active)
+
     def tearDown(self):
         self.db.close()
 
