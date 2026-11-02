@@ -924,6 +924,11 @@ async function payoutRequest(request, env) {
     // Idempotency keys are globally unique in this schema: never disclose another
     // intervenant's payout details when a key is reused across accounts.
     if(String(old.user_id)!==String(auth.user.id)) return json({ok:false,error:'IDEMPOTENCY_KEY_CONFLICT',version:VERSION},409);
+    // A replay is valid only for the exact same request payload. Reusing a key
+    // for a different amount or payout mode must not silently return an old payout.
+    if(Number(old.amount_cents)!==amount || String(old.mode||'standard')!==mode || String(old.currency||'EUR').toUpperCase()!=='EUR') {
+      return json({ok:false,error:'IDEMPOTENCY_KEY_CONFLICT',version:VERSION},409);
+    }
     return json({ok:true,version:VERSION,idempotent_replay:true,payout:old},200);
   }
   const account=await env.DB.prepare(`SELECT * FROM payment_accounts WHERE user_id=? LIMIT 1`).bind(auth.user.id).first();

@@ -137,6 +137,23 @@ class PaymentSettlementSqliteIntegrationTests(unittest.TestCase):
         """).fetchone()
         self.assertIsNone(unmatched)
 
+
+    def test_payout_idempotency_key_is_bound_to_user_amount_and_mode(self):
+        self.db.executescript("""
+          CREATE TABLE payout_requests(
+            id TEXT PRIMARY KEY,idempotency_key TEXT UNIQUE,user_id TEXT,
+            amount_cents INTEGER,mode TEXT,currency TEXT,status TEXT
+          );
+          INSERT INTO payout_requests VALUES('p-1','same-key','worker-1',2500,'standard','EUR','requested');
+        """)
+        row=self.db.execute("SELECT user_id,amount_cents,mode,currency FROM payout_requests WHERE idempotency_key=?",('same-key',)).fetchone()
+        # Same actor and same payload is a replay.
+        self.assertEqual(row,('worker-1',2500,'standard','EUR'))
+        # Actor, amount, or mode mismatch is a conflict, not a replay.
+        self.assertNotEqual(row[0],'worker-2')
+        self.assertNotEqual(row[1],5000)
+        self.assertNotEqual(row[2],'express')
+
     def tearDown(self):
         self.db.close()
 
