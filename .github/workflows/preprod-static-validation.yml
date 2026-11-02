@@ -1,0 +1,68 @@
+name: PROCHÉLIA preproduction static validation
+
+on:
+  push:
+    branches:
+      - staging-prochelia-v14
+  pull_request:
+    branches:
+      - staging-prochelia-v14
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: prochelia-preprod-static-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  syntax-and-safety:
+    name: Syntax and configuration guardrails
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Verify JavaScript syntax
+        run: |
+          set -euo pipefail
+          node --check index.js
+          node --check src/index.js
+          node --check v7.js
+          node --check v7-routes.js
+          node --check stripe-adapter.js
+
+      - name: Verify Wrangler config does not target production
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const raw = fs.readFileSync('wrangler.jsonc', 'utf8');
+          const config = JSON.parse(raw);
+          const dbs = config.d1_databases ?? [];
+          if (!dbs.length) throw new Error('No D1 binding configured');
+          const prodId = '04f52830-ef5a-4f17-a640-42bbc2381bba';
+          if (dbs.some(db => db.database_id === prodId)) {
+            throw new Error('Production D1 UUID detected in staging Wrangler config');
+          }
+          if (!/staging|preview|preprod/i.test(config.name ?? '')) {
+            throw new Error('Worker name does not clearly indicate staging/preview/preproduction');
+          }
+          console.log('Staging Wrangler config guard passed');
+          NODE
+
+      - name: Verify no accidental production deploy command in workflow
+        run: |
+          set -euo pipefail
+          if grep -RInE 'wrangler deploy|wrangler d1 migrations apply|wrangler d1 execute' .github/workflows; then
+            echo "Potential deployment or D1 write command found in workflows; review required."
+            exit 1
+          fi
+          echo "No Wrangler deployment or D1 write commands found in workflows"
