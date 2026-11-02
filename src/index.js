@@ -3274,7 +3274,7 @@ async function stripeWebhook(request, env) {
   const refundEvent=new Set(['charge.refunded']);
   const disputeEvent=new Set(['charge.dispute.created','charge.dispute.closed']);
   let result='IGNORED';
-  if(disputeEvent.has(event.type) && !txId) {
+  if((disputeEvent.has(event.type) || event.type==='charge.dispute.closed') && !txId) {
     const disputeId=clean(obj?.id);
     if(disputeId) {
       await env.DB.prepare(`INSERT OR IGNORE INTO payment_reconciliation (id,provider,external_id,internal_transaction_id,amount_cents,currency,status) VALUES (?,?,?,?,?,?, 'unmatched')`)
