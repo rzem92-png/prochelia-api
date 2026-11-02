@@ -58,11 +58,12 @@ jobs:
           console.log('Staging Wrangler config guard passed');
           NODE
 
-      - name: Verify no accidental production deploy command in workflow
+      - name: Verify no accidental production deploy command in other workflows
         run: |
           set -euo pipefail
-          if grep -RInE 'wrangler deploy|wrangler d1 migrations apply|wrangler d1 execute' .github/workflows; then
-            echo "Potential deployment or D1 write command found in workflows; review required."
+          files="$(git ls-files '.github/workflows/*.yml' '.github/workflows/*.yaml' | grep -v 'preprod-static-validation.yml' || true)"
+          if [ -n "$files" ] && grep -nHE 'wrangler deploy|wrangler d1 migrations apply|wrangler d1 execute' $files; then
+            echo "Potential deployment or D1 write command found in another workflow; review required."
             exit 1
           fi
-          echo "No Wrangler deployment or D1 write commands found in workflows"
+          echo "Staging workflow guard passed"
