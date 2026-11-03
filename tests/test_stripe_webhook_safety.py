@@ -10,6 +10,14 @@ SOURCE = (Path(__file__).resolve().parents[1] / "src" / "index.js").read_text()
 
 
 class StripeWebhookSafetySourceTests(unittest.TestCase):
+    def test_duplicate_webhook_is_not_acknowledged_before_processed(self):
+        start = SOURCE.index("const inserted=await env.DB.prepare(")
+        end = SOURCE.index("const txId=clean(event?.data?.transaction_id)", start)
+        block = SOURCE[start:end]
+        self.assertIn("SELECT processed FROM payment_webhook_events", block)
+        self.assertIn("WEBHOOK_EVENT_PENDING_RECONCILIATION", block)
+        self.assertIn("Number(existingEvent?.processed||0)===1", block)
+
     def test_generic_accounting_entry_is_disabled_until_double_entry_controls_exist(self):
         start = SOURCE.index("action.action_type === 'ACCOUNTING_ENTRY'")
         end = SOURCE.index("reason:'ACTION_TYPE_NOT_IMPLEMENTED'", start)
