@@ -1081,7 +1081,14 @@ async function paymentWebhook(request, env) {
   if(String(provider).toLowerCase()==='stripe') return json({ok:false,error:'STRIPE_WEBHOOK_ADAPTER_NOT_IMPLEMENTED',version:VERSION,message:'Le vérificateur Stripe officiel doit être raccordé avant d’accepter les événements Stripe.'},503);
   const payloadHash=await sha256Base64url(raw);
   const inserted=await env.DB.prepare(`INSERT OR IGNORE INTO payment_webhook_events (id,provider,event_id,event_type,signature_valid,payload_hash) VALUES (?,?,?,?,1,?)`).bind(crypto.randomUUID(),provider,eventId,type,payloadHash).run();
-  if(!inserted.meta?.changes) return json({ok:true,version:VERSION,duplicate:true,event_id:eventId},200);
+  if(!inserted.meta?.changes) {
+    // A duplicate delivery is safe to acknowledge only after the original
+    // event completed. A prior execution may have failed after claiming the
+    // event but before applying its business mutation; never silently ACK it.
+    const existingEvent=await env.DB.prepare('SELECT processed FROM payment_webhook_events WHERE provider=? AND event_id=? LIMIT 1').bind(provider,eventId).first();
+    if(Number(existingEvent?.processed||0)===1) return json({ok:true,version:VERSION,duplicate:true,event_id:eventId},200);
+    return json({ok:false,error:'WEBHOOK_EVENT_PENDING_RECONCILIATION',version:VERSION,event_id:eventId},503);
+  }
   const txId=clean(event?.data?.transaction_id), payoutId=clean(event?.data?.payout_id);
   if(txId){
     const tx=await env.DB.prepare('SELECT * FROM payment_transactions WHERE id=? LIMIT 1').bind(txId).first();
