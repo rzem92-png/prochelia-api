@@ -4,7 +4,7 @@ on:
   push:
     branches: [feat/supra-intelligence-governance-v1]
   pull_request:
-    branches: [main]
+    branches: [main, feat/supra-intelligence-governance-v1]
     paths:
       - "src/index.js"
       - "src/request-body.js"
@@ -13,6 +13,8 @@ on:
       - "src/supra-intelligence.js"
       - "src/supra-orchestrator.js"
       - "tests/supra-*.test.mjs"
+      - "tests/api-health.test.mjs"
+      - ".github/workflows/deploy-supra-preview-manual.yml"
       - "tests/request-body.test.mjs"
       - "tests/identity-evidence.test.mjs"
       - "package.json"
