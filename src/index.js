@@ -912,8 +912,22 @@ async function payoutRequest(request, env) {
   const wallet=await env.DB.prepare('SELECT * FROM wallets WHERE user_id=? LIMIT 1').bind(auth.user.id).first();
   if(!wallet||Number(wallet.available_cents)<amount) return json({ok:false,error:'INSUFFICIENT_AVAILABLE_BALANCE',version:VERSION,available_cents:Number(wallet?.available_cents||0)},409);
   const payoutId=crypto.randomUUID();
-  await env.DB.prepare(`UPDATE wallets SET available_cents=available_cents-?,reserved_cents=reserved_cents+?,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(amount,amount,wallet.id).run();
-  await env.DB.prepare(`INSERT INTO payout_requests (id,idempotency_key,wallet_id,user_id,amount_cents,mode,provider,status) VALUES (?,?,?,?,?,?,?,'requested')`).bind(payoutId,idem,wallet.id,auth.user.id,amount,mode,paymentProvider(env)).run();
+  // Atomic D1 batch: conditional balance reservation and payout insert commit together.
+  // The conditional UPDATE is the concurrency guard against simultaneous withdrawals.
+  let reservation;
+  try {
+    const results=await env.DB.batch([
+      env.DB.prepare(`UPDATE wallets SET available_cents=available_cents-?,reserved_cents=reserved_cents+?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND user_id=? AND available_cents>=?`).bind(amount,amount,wallet.id,auth.user.id,amount),
+      env.DB.prepare(`INSERT INTO payout_requests (id,idempotency_key,wallet_id,user_id,amount_cents,mode,provider,status) SELECT ?,?,?,?,?,?,?,'requested' WHERE changes()=1`).bind(payoutId,idem,wallet.id,auth.user.id,amount,mode,paymentProvider(env))
+    ]);
+    reservation=results?.[0]?.meta?.changes;
+    if(Number(reservation||0)!==1 || Number(results?.[1]?.meta?.changes||0)!==1)
+      return json({ok:false,error:'PAYOUT_RESERVATION_CONFLICT',version:VERSION},409);
+  } catch (error) {
+    // D1 batch is transactional; duplicate-key/constraint failures roll back the reservation.
+    const duplicate=String(error?.message||'').toLowerCase().includes('unique');
+    return json({ok:false,error:duplicate?'IDEMPOTENCY_KEY_CONFLICT':'PAYOUT_RESERVATION_FAILED',version:VERSION},duplicate?409:503);
+  }
   await paymentAudit(env,'PAYOUT_REQUESTED',{payout_id:payoutId,user_id:auth.user.id,metadata:{amount_cents:amount,mode}},'OK');
   return json({ok:true,version:VERSION,payout_id:payoutId,status:'requested',amount_cents:amount,mode,provider:paymentProvider(env),next:paymentsConfigured(env)?'PSP_PAYOUT_REQUIRED':'PAYMENT_PROVIDER_NOT_CONFIGURED'},201);
 }
