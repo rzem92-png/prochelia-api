@@ -2121,7 +2121,7 @@ async function handleConsolidated(request, env) {
   const url=new URL(request.url);
   const consolidatedPath = ['/api/consolidated/info','/api/ops/dashboard','/api/journal','/api/cases','/api/cases/approve','/api/metiers','/api/metiers/suggest','/api/pricing/quote','/api/finance/summary','/api/complaints','/api/settings/phase'].includes(url.pathname);
   if (consolidatedPath) {
-    try { await ensureConsolidatedSchema(env); } catch (e) { return json({ok:false,error:'CONSOLIDATED_SCHEMA_ERROR',version:VERSION,message:e.message},500); }
+    try { await ensureConsolidatedSchema(env); } catch (e) { return json({ok:false,error:'CONSOLIDATED_SCHEMA_ERROR',version:VERSION},500); }
   }
   if(url.pathname==='/api/consolidated/info' && request.method==='GET') return consolidatedInfo(env);
   if(url.pathname==='/api/supra/domains' && request.method==='GET') return supraDomains(request,env);
@@ -2503,7 +2503,7 @@ async function handleStrategic(request, env) {
 
   if (strategicPaths.includes(url.pathname)) {
     try { await ensureStrategicSchema(env); }
-    catch (e) { return json({ok:false,error:'STRATEGIC_SCHEMA_ERROR',version:VERSION,message:e.message},500); }
+    catch (e) { return json({ok:false,error:'STRATEGIC_SCHEMA_ERROR',version:VERSION},500); }
   }
 
   if (url.pathname === '/api/strategic/promotions/recommend' && request.method === 'POST')
