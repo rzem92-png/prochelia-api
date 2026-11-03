@@ -999,6 +999,9 @@ async function paymentWebhook(request, env) {
   }
   if(txId){
     const tx=await env.DB.prepare('SELECT * FROM payment_transactions WHERE id=? LIMIT 1').bind(txId).first();
+    // Never acknowledge/mark a signed event processed if its referenced record
+    // is missing: this could hide a bad reference or a temporary DB inconsistency.
+    if(!tx) return json({ok:false,error:'PAYMENT_TRANSACTION_NOT_FOUND',version:VERSION},503);
     const statusMap={payment_succeeded:'paid',charge_succeeded:'paid',payment_failed:'failed',charge_failed:'failed',payment_refunded:'refunded'};
     const newStatus=statusMap[type];
     if(tx&&newStatus){
@@ -1011,6 +1014,8 @@ async function paymentWebhook(request, env) {
   }
   if(payoutId){
     const payout=await env.DB.prepare('SELECT * FROM payout_requests WHERE id=? LIMIT 1').bind(payoutId).first();
+    // Fail closed; keep the event retryable until the payout record is available.
+    if(!payout) return json({ok:false,error:'PAYOUT_NOT_FOUND',version:VERSION},503);
     const statusMap={payout_processing:'processing',payout_paid:'completed',payout_failed:'failed',payout_canceled:'canceled'};
     const newStatus=statusMap[type];
     if(payout&&newStatus){
