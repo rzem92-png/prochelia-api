@@ -201,7 +201,7 @@ class StripeWebhookSafetySourceTests(unittest.TestCase):
         refund = SOURCE[SOURCE.index("} else if(refundEvent.has(event.type)) {"):SOURCE.index("} else if(disputeEvent.has(event.type)) {")]
         self.assertIn("obj?.amount_refunded", refund)
         self.assertIn("Number.isSafeInteger(refundedRaw)", refund)
-        self.assertIn("refundedCents<=Number(tx.gross_cents||0)", refund)
+        self.assertIn("refundedCents>Number(tx.gross_cents||0)", refund)
         self.assertIn("refund_amount_out_of_bounds", refund)
 
 if __name__ == "__main__":
