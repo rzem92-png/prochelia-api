@@ -968,10 +968,13 @@ async function paymentWebhook(request, env) {
   const payloadHash=await sha256Base64url(raw);
   const inserted=await env.DB.prepare(`INSERT OR IGNORE INTO payment_webhook_events (id,provider,event_id,event_type,signature_valid,payload_hash) VALUES (?,?,?,?,1,?)`).bind(crypto.randomUUID(),provider,eventId,type,payloadHash).run();
   if(!inserted.meta?.changes) {
-    const prior=await env.DB.prepare('SELECT payload_hash,event_type FROM payment_webhook_events WHERE provider=? AND event_id=? LIMIT 1').bind(provider,eventId).first();
+    const prior=await env.DB.prepare('SELECT payload_hash,event_type,processed FROM payment_webhook_events WHERE provider=? AND event_id=? LIMIT 1').bind(provider,eventId).first();
     if(prior && (prior.payload_hash!==payloadHash || prior.event_type!==type))
       return json({ok:false,error:'WEBHOOK_EVENT_ID_CONFLICT',version:VERSION},409);
-    return json({ok:true,version:VERSION,duplicate:true,event_id:eventId},200);
+    // A recorded but unprocessed event must be retried; only processed events are safe duplicates.
+    if(prior?.processed===1 || prior?.processed===true)
+      return json({ok:true,version:VERSION,duplicate:true,event_id:eventId},200);
+    if(!prior) return json({ok:false,error:'WEBHOOK_EVENT_STATE_UNAVAILABLE',version:VERSION},503);
   }
   const txId=clean(event?.data?.transaction_id), payoutId=clean(event?.data?.payout_id);
   if(txId){
