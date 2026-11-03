@@ -652,6 +652,15 @@ async function deliverSecurityCodes(env, payload) {
   if (!webhook) return {ok:false,error:'SECURITY_CODE_WEBHOOK_NOT_CONFIGURED'};
   const secret = clean(env.SECURITY_CODE_WEBHOOK_SECRET);
   if (!secret) return {ok:false,error:'SECURITY_CODE_WEBHOOK_SECRET_NOT_CONFIGURED'};
+  let webhookUrl;
+  try {
+    webhookUrl = new URL(webhook);
+    if (webhookUrl.protocol !== 'https:' || webhookUrl.username || webhookUrl.password) {
+      return {ok:false,error:'SECURITY_CODE_WEBHOOK_URL_INVALID'};
+    }
+  } catch {
+    return {ok:false,error:'SECURITY_CODE_WEBHOOK_URL_INVALID'};
+  }
   const body = JSON.stringify({
     event:'PROCHELIA_SECURITY_CODES',
     mission_id:payload.mission_id,
@@ -661,24 +670,27 @@ async function deliverSecurityCodes(env, payload) {
     end_code:payload.end_code,
     end_expires_at:payload.end_expires_at
   });
-  // HMAC-SHA-256 provides keyed authentication; plain SHA256(secret + body) is not HMAC.
-  let webhookUrl;
-  try {
-    webhookUrl = new URL(webhook);
-    if (webhookUrl.protocol !== 'https:' || webhookUrl.username || webhookUrl.password) return {ok:false,error:'SECURITY_CODE_WEBHOOK_URL_INVALID'};
-  } catch {
-    return {ok:false,error:'SECURITY_CODE_WEBHOOK_URL_INVALID'};
-  }
+  // HMAC-SHA-256; signature is bound to the exact transmitted bytes.
   const signature = await hmacSha256Base64url(secret, body);
-  const response = await fetch(webhookUrl.toString(),{
-    method:'POST',
-    headers:{'content-type':'application/json','x-prochelia-signature':'sha256=' + signature},
-    body
-  });
+  let response;
+  try {
+    response = await fetch(webhookUrl.toString(),{
+      method:'POST',
+      redirect:'error',
+      signal:AbortSignal.timeout(8000),
+      headers:{
+        'content-type':'application/json',
+        'x-prochelia-signature':'sha256=' + signature
+      },
+      body
+    });
+  } catch {
+    // Do not leak provider/network details or security codes in logs/responses.
+    return {ok:false,error:'NOTIFICATION_PROVIDER_UNAVAILABLE'};
+  }
   if (!response.ok) return {ok:false,error:'NOTIFICATION_PROVIDER_REJECTED'};
   return {ok:true,channel:'authenticated_notification_webhook'};
 }
-
 async function securityPrepareMission(request, env) {
   const auth = await getSessionUser(request, env);
   if (!requireRole(auth, ['gerante'])) return json({ok:false,error:auth?.user?'FORBIDDEN':'UNAUTHENTICATED',version:VERSION}, auth?.user?403:401);
