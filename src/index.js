@@ -517,7 +517,8 @@ async function ensureSecuritySchema(env) {
   for (const [table, expectedColumns] of Object.entries(required)) {
     // Table names come from this static allowlist, never from user input.
     const result = await env.DB.prepare(`PRAGMA table_info(${table})`).all();
-    const actualColumns = new Set((result?.results || []).map(row => row.name));
+    if (!Array.isArray(result?.results)) throw new Error('SECURITY_SCHEMA_CHECK_FAILED:' + table);
+    const actualColumns = new Set(result.results.map(row => row.name));
     const missing = expectedColumns.filter(column => !actualColumns.has(column));
     if (missing.length) {
       // Do not auto-create/alter tables or indexes from an API request.
