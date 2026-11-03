@@ -130,6 +130,24 @@ test('rate limit identity combines IP and user subject', async () => {
 });
 
 
+test('enforces account quota across IP changes independently from IP quota', async () => {
+  const db = new FakeD1();
+  const base = { db, bucket: 'account-login', limit: 2, nowSeconds: 600 };
+  assert.equal((await enforceAtomicRateLimit({ ...base, request: req('203.0.113.10'), userId: 'alice' })).ok, true);
+  assert.equal((await enforceAtomicRateLimit({ ...base, request: req('203.0.113.11'), userId: 'alice' })).ok, true);
+  const thirdAccountAttempt = await enforceAtomicRateLimit({ ...base, request: req('203.0.113.12'), userId: 'alice' });
+  assert.equal(thirdAccountAttempt.response.status, 429, 'account quota follows identity across IPs');
+});
+
+test('enforces IP quota across different accounts', async () => {
+  const db = new FakeD1();
+  const base = { db, bucket: 'shared-ip', limit: 2, nowSeconds: 700, request: req('203.0.113.77') };
+  assert.equal((await enforceAtomicRateLimit({ ...base, userId: 'alice' })).ok, true);
+  assert.equal((await enforceAtomicRateLimit({ ...base, userId: 'bob' })).ok, true);
+  const blocked = await enforceAtomicRateLimit({ ...base, userId: 'charlie' });
+  assert.equal(blocked.response.status, 429, 'IP quota applies across accounts');
+});
+
 test('counter stops growing after limit+1 during sustained abusive traffic', async () => {
  const db = new FakeD1();
  const options = { db, request: req(), bucket: 'abuse', limit: 2, nowSeconds: 500 };
