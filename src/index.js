@@ -3407,7 +3407,7 @@ async function productionSafetySchema(env){
   await env.DB.prepare(`CREATE INDEX IF NOT EXISTS idx_prod_sec_events_date ON production_security_events(event_type,created_at)`).run();
 }
 
-async function productionSubjectHash(request, route){
+export async function productionSubjectHash(request, route){
   // Cloudflare Worker: use the platform-provided CF-Connecting-IP only.
   // X-Forwarded-For is client-spoofable and must not influence rate-limit identity.
   const ip=clean(request.headers.get('CF-Connecting-IP')) || 'unknown';
