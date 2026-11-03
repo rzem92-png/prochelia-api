@@ -1324,9 +1324,18 @@ async function createOperationalCase(request, env) {
   const body=await readJson(request)||{};
   const caseType=clean(body.case_type); if(!caseType)return json({ok:false,error:'CASE_TYPE_REQUIRED',version:VERSION},400);
   const phase=String(await getSetting(env,'project_phase','TEST')).toUpperCase();
-  const impact=String(body.impact_level||'LOW').toUpperCase();
+  // Reject untrusted enum values; never let caller-provided impact downgrade risk.
+  const requestedImpact=String(body.impact_level||'LOW').toUpperCase();
+  const impact=['LOW','MEDIUM','HIGH','CRITICAL'].includes(requestedImpact)?requestedImpact:'HIGH';
   const priority=CASE_PRIORITIES[impact]||10;
-  const rec=await copilotRecommend(env,{caseType,impact,phase,context:body.context||{}});
+  // The client may submit facts only. Operational targets/actions are not accepted
+  // as executable context without a separate manager-reviewed workflow.
+  const context=body.context && typeof body.context==='object' && !Array.isArray(body.context) ? body.context : {};
+  const safeContext={};
+  for(const k of ['description','reference','category','reported_at']) {
+    if(context[k]!==undefined) safeContext[k]=String(context[k]).slice(0,500);
+  }
+  const rec=await copilotRecommend(env,{caseType,impact,phase,context:safeContext});
   const id=crypto.randomUUID();
   // Fail closed: Copilot automation is permitted only in TEST. PREPRODUCTION
   // and PRODUCTION require explicit manager approval for every case.
@@ -1338,7 +1347,7 @@ async function createOperationalCase(request, env) {
     rec.solution = { ...(rec.solution || {}), automatic: false, gated_by_phase: phase };
   }
   await env.DB.prepare(`INSERT INTO operational_cases(id,case_type,source,phase,priority,status,auto_mode,client_id,company_id,intervenant_id,mission_id,impact_level,description,context_json,proposed_solution_json,requires_manager) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
-    .bind(id,caseType,'API',phase,priority,status,rec.mode,clean(body.client_id)||null,clean(body.company_id)||null,clean(body.intervenant_id)||null,clean(body.mission_id)||null,impact,clean(body.description)||null,JSON.stringify(body.context||{}),JSON.stringify(rec),requiresManager).run();
+    .bind(id,caseType,'API',phase,priority,status,rec.mode,clean(body.client_id)||null,clean(body.company_id)||null,clean(body.intervenant_id)||null,clean(body.mission_id)||null,impact,clean(body.description)||null,JSON.stringify(safeContext),JSON.stringify(rec),requiresManager).run();
   await env.DB.prepare(`INSERT INTO copilot_log(id,case_id,action_type,recommendation,confidence,mode) VALUES(?,?,?,?,?,?)`)
     .bind(crypto.randomUUID(),id,rec.action,JSON.stringify(rec.solution),rec.confidence,rec.mode).run();
   await journal(env,'copilot',null,'CASE_CREATED','operational_case',id,'OK',{caseType,impact});
