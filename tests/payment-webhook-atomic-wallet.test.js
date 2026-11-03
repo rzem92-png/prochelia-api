@@ -31,3 +31,14 @@ test('admin cannot manually forge paid, failed, or refunded payment outcomes',()
   assert.match(finalizer,/if\(outcome!=='held'\) return json\(\{ok:false,error:'PSP_WEBHOOK_REQUIRED',version:VERSION\},409\)/);
   assert.match(finalizer,/PSP-confirmed financial outcomes/);
 });
+
+const disputeStart=source.indexOf('async function paymentAdminResolve');
+const disputeEnd=source.indexOf('async function handleBase',disputeStart);
+const disputeResolver=source.slice(disputeStart,disputeEnd);
+
+test('admin dispute resolution records decision but cannot forge PSP payment state',()=>{
+  assert.match(disputeResolver,/payment_state_unchanged:true/);
+  assert.match(disputeResolver,/payment_status:'held'/);
+  assert.match(disputeResolver,/PSP_WEBHOOK_OR_RECONCILIATION/);
+  assert.doesNotMatch(disputeResolver,/UPDATE payment_transactions SET status=/);
+});
