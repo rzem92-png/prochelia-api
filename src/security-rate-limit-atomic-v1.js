@@ -133,10 +133,6 @@ export async function enforceAtomicRateLimit({
       return { ok: false, response: jsonResponse({ ok: false, error: 'RATE_LIMIT_UNAVAILABLE' }, 503) };
     }
     const count = Math.max(...counts);
-    const count = Number(row?.request_count);
-    if (!Number.isSafeInteger(count) || count < 1) {
-      return { ok: false, response: jsonResponse({ ok: false, error: 'RATE_LIMIT_UNAVAILABLE' }, 503) };
-    }
 
     if (count > limit) {
       const retryAfter = Math.max(1, start + windowSeconds - nowSeconds);
