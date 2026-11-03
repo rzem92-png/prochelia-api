@@ -27,3 +27,7 @@ test('Stripe signatures reject stale timestamps and use constant-time comparison
 test('configured Stripe provider cannot fall back to generic webhook signature format', () => {
   assert.match(dispatch, /provider==='stripe'\) return verifyStripeWebhookSignature/);
 });
+
+test('Stripe timestamp parser accepts decimal digits (not a literal backslash-d)', () => {
+  assert.ok(stripe.includes('/^\\d{1,12}$/'), 'timestamp must use the digit regex');
+});
