@@ -3356,7 +3356,7 @@ handle = async function(request,env){
     if((u.pathname==='/api/support/cases/resolve')&&request.method==='POST') return supportResolve(request,env);
     if((u.pathname==='/api/support/dashboard')&&request.method==='GET') return supportDashboard(request,env);
     return __procheliaComplementHandle(request,env);
-  }catch(e){return json({ok:false,error:'MASTER_COMPLEMENT_ERROR',version:VERSION,message:String(e.message||e)},500)}
+  }catch(e){return json({ok:false,error:'INTERNAL_ERROR',version:VERSION},500)}
 };
 
 /* ============================================================================
