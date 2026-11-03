@@ -3816,8 +3816,14 @@ async function runNationalBackup(env,trigger='MANUAL'){
       }
       if(!tableRows){
         const key=`prochelia/backups/${day}/${runId}/${table}/empty.json.enc`,enc=await backupEncrypt('',secret);
+        const checksum=await backupHash(enc);
         await env.BACKUP_BUCKET.put(key,enc,{httpMetadata:{contentType:'application/octet-stream'}});
-        await env.DB.prepare(`INSERT INTO backup_objects(id,backup_run_id,object_key,table_name,row_count,byte_size,checksum,encrypted) VALUES(?,?,?,?,?,?,?,1)`).bind(crypto.randomUUID(),runId,key,table,0,new TextEncoder().encode(enc).byteLength,await backupHash(enc)).run();
+        // Empty-table archives receive the same read-after-write integrity check.
+        const uploaded=await env.BACKUP_BUCKET.get(key);
+        if(!uploaded) throw new Error('BACKUP_OBJECT_READ_AFTER_WRITE_FAILED');
+        const uploadedBody=await uploaded.text();
+        if(await backupHash(uploadedBody)!==checksum) throw new Error('BACKUP_OBJECT_CHECKSUM_MISMATCH');
+        await env.DB.prepare(`INSERT INTO backup_objects(id,backup_run_id,object_key,table_name,row_count,byte_size,checksum,encrypted) VALUES(?,?,?,?,?,?,?,1)`).bind(crypto.randomUUID(),runId,key,table,0,new TextEncoder().encode(enc).byteLength,checksum).run();
         objects++;
       }
     }
