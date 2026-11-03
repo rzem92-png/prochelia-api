@@ -126,6 +126,14 @@ class StripeWebhookSafetySourceTests(unittest.TestCase):
         self.assertIn("reason:!tx?'transaction_not_found':'provider_mismatch'", SOURCE)
         self.assertIn("internal_transaction_id,amount_cents,currency,status", SOURCE)
 
+    def test_stripe_dispute_amount_is_validated_and_invalid_case_held(self):
+        self.assertIn("validDisputeAmount=Number.isSafeInteger(disputedCents)", SOURCE)
+        self.assertIn("disputedCents>0&&disputedCents<=Number(tx.gross_cents||0)", SOURCE)
+        self.assertIn("STRIPE_DISPUTE_AMOUNT_INVALID_HELD", SOURCE)
+        self.assertIn("DISPUTE_AMOUNT_INVALID_HELD_RECONCILIATION_REQUIRED", SOURCE)
+        self.assertIn("status IN ('paid','held','refund_pending_reconciliation')", SOURCE)
+        self.assertIn("STRIPE_DISPUTE_ID_MISSING", SOURCE)
+
     def test_dispute_mismatch_holds_transaction_and_creates_reconciliation(self):
         self.assertIn("STRIPE_DISPUTE_MISMATCH_HELD", SOURCE)
         self.assertIn("DISPUTE_MISMATCH_HELD_RECONCILIATION_REQUIRED", SOURCE)
