@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import worker from "../src/index.js";
+import { handleV7Route } from "../src/v7-routes.js";
 
 test("V7 payment check never treats client-supplied status as authoritative", async () => {
   const request = new Request("https://prochelia-api-preview.example/api/v7/check/payment", {
@@ -9,7 +9,7 @@ test("V7 payment check never treats client-supplied status as authoritative", as
     body: JSON.stringify({ payment: { status: "PAID", amount: 999999, missionId: "attacker-controlled" } })
   });
 
-  const response = await worker.fetch(request, {});
+  const response = await handleV7Route(request, {}, "/api/v7/check/payment");
   assert.equal(response.status, 409);
 
   const body = await response.json();
