@@ -145,3 +145,14 @@ test('V7 finance calculator rounds valid monetary outputs to cents', async () =>
   assert.equal(data.intervenantAmount, 90);
   assert.equal(data.grossMargin, 8.5);
 });
+
+
+test('V7 finance calculator rejects arithmetic overflow from finite inputs', async () => {
+  const response = await handleV7Route(req('/api/v7/finance/calculate', {
+    clientAmount: 1, commissionRate: 1, paymentFees: Number.MAX_VALUE, otherFees: Number.MAX_VALUE
+  }), env, '/api/v7/finance/calculate');
+  assert.equal(response.status, 400);
+  const data = await response.json();
+  assert.equal(data.ok, false);
+  assert.equal(data.error, 'FINANCE_RESULT_OVERFLOW');
+});
