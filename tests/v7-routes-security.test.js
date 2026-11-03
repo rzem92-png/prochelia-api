@@ -3,12 +3,24 @@ import assert from "node:assert/strict";
 import { handleV7Route } from "../src/v7-routes.js";
 
 const denied = [
+  "/api/v7/check/account",
   "/api/v7/check/permissions",
+  "/api/v7/check/intervenant",
+  "/api/v7/check/document",
+  "/api/v7/check/expiration",
+  "/api/v7/check/transport",
+  "/api/v7/check/mission",
+  "/api/v7/check/mission-transition",
+  "/api/v7/check/availability",
+  "/api/v7/check/conflict",
+  "/api/v7/check/pricing",
   "/api/v7/check/qr",
   "/api/v7/check/payment",
   "/api/v7/check/pre-mission",
   "/api/v7/security/idempotency",
-  "/api/v7/security/audit"
+  "/api/v7/security/audit",
+  "/api/v7/finance/calculate",
+  "/api/v7/strategy/indicators"
 ];
 
 for (const path of denied) {
