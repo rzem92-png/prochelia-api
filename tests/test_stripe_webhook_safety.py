@@ -110,6 +110,10 @@ class StripeWebhookSafetySourceTests(unittest.TestCase):
         self.assertIn("status='refund_pending_reconciliation' LIMIT 1", SOURCE)
         self.assertIn("bind(auth.user.id).first()", SOURCE)
 
+    def test_payouts_block_held_transactions_pending_financial_review(self):
+        self.assertIn("PAYOUT_BLOCKED_BY_HELD_TRANSACTION", SOURCE)
+        self.assertIn("status IN ('refund_pending_reconciliation','held')", SOURCE)
+
     def test_background_job_claim_is_atomic_and_skips_lost_races(self):
         self.assertIn("const claim=await env.DB.prepare(`UPDATE background_jobs SET status='RUNNING'", SOURCE)
         self.assertIn("if(Number(claim?.meta?.changes||0)!==1) continue;", SOURCE)
