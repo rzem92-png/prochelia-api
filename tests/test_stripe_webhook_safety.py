@@ -114,6 +114,12 @@ class StripeWebhookSafetySourceTests(unittest.TestCase):
         self.assertIn("PAYOUT_BLOCKED_BY_HELD_TRANSACTION", SOURCE)
         self.assertIn("status IN ('refund_pending_reconciliation','held')", SOURCE)
 
+    def test_payout_reservation_rechecks_financial_locks_atomically(self):
+        payout = SOURCE[SOURCE.index("async function payoutRequest"):SOURCE.index("async function ", SOURCE.index("async function payoutRequest")+20)]
+        self.assertIn("AND NOT EXISTS (SELECT 1 FROM payment_transactions pt", payout)
+        self.assertIn("AND NOT EXISTS (SELECT 1 FROM payment_disputes pd", payout)
+        self.assertIn("AND NOT EXISTS (SELECT 1 FROM payment_reconciliation pr", payout)
+
     def test_background_job_claim_is_atomic_and_skips_lost_races(self):
         self.assertIn("const claim=await env.DB.prepare(`UPDATE background_jobs SET status='RUNNING'", SOURCE)
         self.assertIn("if(Number(claim?.meta?.changes||0)!==1) continue;", SOURCE)
