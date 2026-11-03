@@ -736,79 +736,18 @@ async function securityVerifyCode(request, env) {
   const auth=await getSessionUser(request,env);
   if(!requireRole(auth,['intervenant'])) return json({ok:false,error:auth?.user?'FORBIDDEN':'UNAUTHENTICATED',version:VERSION},auth?.user?403:401);
   await ensureSecuritySchema(env);
-  const body=await readJson(request), missionId=clean(body?.mission_id), purpose=clean(body?.purpose), code=clean(body?.code);
-  if(!missionId||!['ARRIVAL','END'].includes(purpose)||!/^[0-9]{6}$/.test(code)) return json({ok:false,error:'INVALID_SECURITY_CODE_REQUEST',version:VERSION},400);
-  const sec=await env.DB.prepare('SELECT * FROM mission_security WHERE mission_id=? AND intervenant_id=? LIMIT 1').bind(missionId,auth.user.id).first();
+  const body=await readJson(request), missionId=clean(body?.mission_id), purpose=clean(body?.purpose);
+  if(!missionId||!['ARRIVAL','END'].includes(purpose)||!/^[0-9]{6}$/.test(clean(body?.code))) {
+    return json({ok:false,error:'INVALID_SECURITY_CODE_REQUEST',version:VERSION},400);
+  }
+  const sec=await env.DB.prepare('SELECT id FROM mission_security WHERE mission_id=? AND intervenant_id=? LIMIT 1').bind(missionId,auth.user.id).first();
   if(!sec) return json({ok:false,error:'MISSION_NOT_ASSIGNED_OR_NOT_PREPARED',version:VERSION},404);
-  const identity = await requireVerifiedIntervenant(env, auth.user.id);
-  if(!identity) {
-    await securityAudit(env,'SECURITY_IDENTITY_RECHECK_FAILED',missionId,auth.user.id,auth.user.role,'DENIED',{});
-    return json({ok:false,error:'INTERVENANT_IDENTITY_NOT_VERIFIED',version:VERSION},403);
-  }
-  if(!sec.last_presence_at) {
-    await securityAudit(env,'SECURITY_PRESENCE_REQUIRED',missionId,auth.user.id,auth.user.role,'DENIED',{purpose});
-    return json({ok:false,error:'PRESENCE_CHECK_REQUIRED',version:VERSION,message:'La présence de l’intervenant doit être enregistrée avant la validation du code.'},428);
-  }
-  // No spoofable User-Agent/client-hint fingerprint is accepted as proof of device possession.
-  // This endpoint stays fail-closed until secure device enrollment/token validation exists.
+  const identity=await requireVerifiedIntervenant(env,auth.user.id);
+  if(!identity) return json({ok:false,error:'INTERVENANT_IDENTITY_NOT_VERIFIED',version:VERSION},403);
+  // Security-critical action is disabled until real device possession proof is implemented.
+  // User-Agent and client hints are spoofable and must never authorize code consumption.
   await securityAudit(env,'SECURITY_CODE_BLOCKED_DEVICE_AUTH_NOT_IMPLEMENTED',missionId,auth.user.id,auth.user.role,'DENIED',{purpose});
   return json({ok:false,error:'SECURE_DEVICE_ENROLLMENT_REQUIRED',version:VERSION},503);
-  const device=await deviceHash(request,auth.user.id);
-  const trusted = await env.DB.prepare(`SELECT id,status,expires_at FROM trusted_devices WHERE user_id=? AND device_hash=? AND status='active' AND expires_at>CURRENT_TIMESTAMP LIMIT 1`).bind(auth.user.id,device).first();
-  if(!trusted || sec.last_device_id !== device) {
-    await securityAudit(env,'SECURITY_DEVICE_RECHECK_FAILED',missionId,auth.user.id,auth.user.role,'DENIED',{purpose});
-    return json({ok:false,error:'DEVICE_NOT_TRUSTED_FOR_MISSION',version:VERSION},403);
-  }
-  const now=new Date().toISOString();
-  if(sec.locked_until && sec.locked_until>now) return json({ok:false,error:'SECURITY_TEMPORARILY_LOCKED',version:VERSION,locked_until:sec.locked_until},423);
-  const used=purpose==='ARRIVAL'?sec.arrival_used_at:sec.end_used_at;
-  const expires=purpose==='ARRIVAL'?sec.arrival_expires_at:sec.end_expires_at;
-  const stored=purpose==='ARRIVAL'?sec.arrival_code_hash:sec.end_code_hash;
-  if(used) return json({ok:false,error:'SECURITY_CODE_ALREADY_USED',version:VERSION},409);
-  if(purpose==='END' && sec.status !== 'in_progress') return json({ok:false,error:'MISSION_NOT_IN_PROGRESS',version:VERSION},409);
-  if(purpose==='ARRIVAL' && sec.status !== 'prepared') return json({ok:false,error:'MISSION_NOT_READY_FOR_ARRIVAL',version:VERSION},409);
-  if(!expires||expires<=now) return json({ok:false,error:'SECURITY_CODE_EXPIRED',version:VERSION},410);
-  const expected=await sha256Base64url(code), ok=expected===stored;
-  await env.DB.prepare(`INSERT INTO mission_security_attempts (id,security_id,purpose,actor_user_id,device_id,result,reason) VALUES (?,?,?,?,?,?,?)`).bind(crypto.randomUUID(),sec.id,purpose,auth.user.id,device,ok?'SUCCESS':'FAIL',ok?'CODE_MATCH':'CODE_MISMATCH').run();
-  if(!ok){
-    const attempts=await env.DB.prepare(`SELECT COUNT(*) AS total FROM mission_security_attempts WHERE security_id=? AND purpose=? AND result='FAIL' AND created_at >= datetime('now','-15 minutes')`).bind(sec.id,purpose).first();
-    const count=Number(attempts?.total||0);
-    if(count>=SECURITY_MAX_ATTEMPTS){
-      const locked=new Date(Date.now()+SECURITY_LOCK_SECONDS*1000).toISOString();
-      await env.DB.prepare('UPDATE mission_security SET locked_until=?,updated_at=CURRENT_TIMESTAMP WHERE id=?').bind(locked,sec.id).run();
-      await securityAudit(env,'SECURITY_CODE_LOCK',missionId,auth.user.id,auth.user.role,'BLOCKED',{purpose,attempts:count});
-      return json({ok:false,error:'SECURITY_TOO_MANY_ATTEMPTS',version:VERSION,locked_until:locked},423);
-    }
-    await securityAudit(env,'SECURITY_CODE_FAILED',missionId,auth.user.id,auth.user.role,'DENIED',{purpose,attempts:count});
-    return json({ok:false,error:'SECURITY_CODE_INVALID',version:VERSION,remaining_attempts:Math.max(0,SECURITY_MAX_ATTEMPTS-count)},401);
-  }
-  // Atomically consume the one-time code. The conditional UPDATE is the
-  // concurrency boundary: two simultaneous requests cannot both transition
-  // the same mission state successfully.
-  let consumed;
-  if(purpose==='ARRIVAL'){
-    consumed = await env.DB.prepare(`UPDATE mission_security
-      SET arrival_used_at=CURRENT_TIMESTAMP,arrival_started_at=CURRENT_TIMESTAMP,
-          status='in_progress',updated_at=CURRENT_TIMESTAMP
-      WHERE id=? AND arrival_used_at IS NULL AND status='prepared'
-        AND arrival_code_hash=? AND arrival_expires_at>CURRENT_TIMESTAMP`)
-      .bind(sec.id,stored).run();
-  }else{
-    consumed = await env.DB.prepare(`UPDATE mission_security
-      SET end_used_at=CURRENT_TIMESTAMP,ended_at=CURRENT_TIMESTAMP,
-          status='completed',updated_at=CURRENT_TIMESTAMP
-      WHERE id=? AND end_used_at IS NULL AND status='in_progress'
-        AND end_code_hash=? AND end_expires_at>CURRENT_TIMESTAMP`)
-      .bind(sec.id,stored).run();
-  }
-  // Fail closed if D1 reports zero rows (already consumed/state changed).
-  const changedRows = Number(consumed?.meta?.changes ?? 0);
-  if(changedRows !== 1){
-    await securityAudit(env,'SECURITY_CODE_ATOMIC_CONSUME_CONFLICT',missionId,auth.user.id,auth.user.role,'DENIED',{purpose});
-    return json({ok:false,error:'SECURITY_CODE_ALREADY_CONSUMED_OR_STATE_CHANGED',version:VERSION},409);
-  }
-  await securityAudit(env,`SECURITY_CODE_${purpose}_SUCCESS`,missionId,auth.user.id,auth.user.role,'OK',{purpose,device_bound:true});
-  return json({ok:true,version:VERSION,mission_id:missionId,purpose,status:purpose==='ARRIVAL'?'in_progress':'completed',identity_control:'VERIFIED_ACCOUNT_REQUIRED',presence_control:'RECORDED',code:'CONSUMED'},200);
 }
 
 async function securityResendCodes(request, env) {
