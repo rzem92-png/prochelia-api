@@ -480,30 +480,23 @@ export async function handleV7Route(
     // =================================================
     // CONTRÔLE PAIEMENT
     // =================================================
-
+    // Security boundary: client-supplied payment status is never proof
+    // of settlement. Only a verified PSP webhook / server-side ledger
+    // may confirm payment. Keep this endpoint non-authoritative.
     if (
       path === "/api/v7/check/payment" &&
       method === "POST"
     ) {
-
-      const body =
-        await request.json();
-
-      const result =
-        procheliaV7.checkPayment(
-          body.payment
-        );
-
       return Response.json(
-
-        result,
-
         {
-          status:
-            result.ok
-              ? 200
-              : 400
-        }
+          ok: false,
+          version: procheliaV7.version,
+          paymentConfirmed: false,
+          authoritative: false,
+          error: "PAYMENT_STATUS_NOT_AUTHORITATIVE",
+          next: "Use verified PSP webhook and reconciled server-side ledger."
+        },
+        { status: 409 }
       );
     }
 
