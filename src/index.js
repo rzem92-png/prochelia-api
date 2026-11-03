@@ -3375,7 +3375,9 @@ async function productionSafetySchema(env){
 }
 
 async function productionSubjectHash(request, route){
-  const ip=clean(request.headers.get('CF-Connecting-IP')) || clean(request.headers.get('X-Forwarded-For')) || 'unknown';
+  // CF-Connecting-IP is only trustworthy when the Worker is reached through
+  // Cloudflare's edge. Never fall back to client-controlled X-Forwarded-For.
+  const ip=clean(request.headers.get('CF-Connecting-IP')) || 'unknown';
   return sha256Hex(`${ip}|${route}`);
 }
 
@@ -3397,12 +3399,16 @@ async function productionRateLimit(request,env){
   const now=Math.floor(Date.now()/1000);
   const start=new Date(Math.floor(now/windowSeconds)*windowSeconds*1000).toISOString();
   await ensureFinalHardeningSchema(env);
-  const existing=await env.DB.prepare(`SELECT request_count FROM security_rate_limits WHERE bucket=? AND subject_hash=? AND window_start=? LIMIT 1`).bind(bucket,subject,start).first();
-  const count=Number(existing?.request_count||0)+1;
-  if(existing){
-    await env.DB.prepare(`UPDATE security_rate_limits SET request_count=? WHERE bucket=? AND subject_hash=? AND window_start=?`).bind(count,bucket,subject,start).run();
-  }else{
-    await env.DB.prepare(`INSERT INTO security_rate_limits(id,bucket,subject_hash,window_start,request_count) VALUES(?,?,?,?,1)`).bind(crypto.randomUUID(),bucket,subject,start).run();
+  // Atomic increment: prevents concurrent requests from losing increments.
+  // The table's UNIQUE(bucket, subject_hash, window_start) constraint is required.
+  const increment=await env.DB.prepare(`INSERT INTO security_rate_limits(id,bucket,subject_hash,window_start,request_count)
+    VALUES(?,?,?,?,1)
+    ON CONFLICT(bucket,subject_hash,window_start)
+    DO UPDATE SET request_count=security_rate_limits.request_count+1
+    RETURNING request_count`).bind(crypto.randomUUID(),bucket,subject,start).first();
+  const count=Number(increment?.request_count);
+  if(!Number.isSafeInteger(count)||count<1){
+    return {ok:false,response:json({ok:false,error:'RATE_LIMIT_UNAVAILABLE',version:VERSION},503)};
   }
   if(count>limit){
     await productionSafetySchema(env);
