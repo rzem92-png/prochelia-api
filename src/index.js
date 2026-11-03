@@ -3498,6 +3498,19 @@ async function stripeWebhook(request, env) {
         // Dispute notifications are financially consequential even when their
         // amount/currency/session mapping is inconsistent: freeze the affected
         // transaction and create a reconciliation case before acknowledging.
+        if(refundEvent.has(event.type)) {
+          // A refund with a mismatched charge amount/currency/session is still
+          // an external financial action. Lock the transaction and quarantine
+          // it instead of merely logging a mismatch and releasing payout funds.
+          const chargeId=clean(obj?.id)||clean(event?.id);
+          const refunded=Number(obj?.amount_refunded??-1);
+          const validRefund=Number.isSafeInteger(refunded)&&refunded>0&&refunded<=Number(tx.gross_cents||0);
+          await env.DB.prepare(`UPDATE payment_transactions SET status='held',refund_cents=CASE WHEN ? THEN MAX(refund_cents,?) ELSE refund_cents END,updated_at=CURRENT_TIMESTAMP WHERE id=? AND status IN ('paid','held','refund_pending_reconciliation')`)
+            .bind(validRefund?1:0,validRefund?refunded:0,tx.id).run();
+          if(chargeId) await env.DB.prepare(`INSERT OR IGNORE INTO payment_reconciliation (id,provider,external_id,internal_transaction_id,amount_cents,currency,status) VALUES (?,?,?,?,?,?, 'unmatched')`)
+            .bind(crypto.randomUUID(),'stripe',chargeId,tx.id,validRefund?refunded:0,String(obj?.currency||'eur').toUpperCase()).run();
+          await paymentAudit(env,'STRIPE_REFUND_MAPPING_MISMATCH_HELD',{transaction_id:tx.id,mission_id:tx.mission_id,user_id:tx.intervenant_id,metadata:{event_id:event.id,charge_id:chargeId||null,amount_refunded_cents:refunded,gross_cents:Number(tx.gross_cents||0),currency,expected_currency:String(tx.currency||'EUR').toLowerCase(),reason:!validRefund?'refund_amount_invalid_or_out_of_bounds':'refund_currency_or_payment_mapping_mismatch'}},'BLOCKED');
+        }
         if(disputeEvent.has(event.type)) {
           const disputeId=clean(obj?.id);
           const disputedAmount=Number(obj?.amount??-1);
