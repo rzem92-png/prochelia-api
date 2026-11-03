@@ -3467,7 +3467,13 @@ async function handle(request,env){
       // Fail closed for V7 operations that inspect or mutate private/business
       // state. Pure status/email/phone validation remains public; every
       // mission, financial, QR, audit, and strategic operation requires a session.
+      // Private/business validation must fail closed. Only harmless status and
+      // format-only checks are intentionally public; these routes never grant
+      // authority, but can otherwise become business-state/permission oracles.
       const v7Protected = new Set([
+        '/api/v7/check/permissions',
+        '/api/v7/check/mission',
+        '/api/v7/check/mission-transition',
         '/api/v7/check/availability',
         '/api/v7/check/conflict',
         '/api/v7/check/pricing',
