@@ -3858,7 +3858,9 @@ async function nationalScaleStatus(env){
 async function backupStatus(env){
   await ensureNationalContinuitySchema(env);
   const r=await env.DB.prepare(`SELECT * FROM backup_runs ORDER BY started_at DESC LIMIT 20`).all();
-  return {ok:true,configured:!!env.BACKUP_BUCKET&&!!env.BACKUP_ENCRYPTION_KEY,automatic:true,frequency:'DAILY',retentionDays:90,runs:r.results||[]};
+  // 90 days is the intended policy, not an enforced purge yet.
+  // Expose that distinction so operators never mistake policy metadata for deletion.
+  return {ok:true,configured:!!env.BACKUP_BUCKET&&!!env.BACKUP_ENCRYPTION_KEY,automatic:true,frequency:'DAILY',retentionDays:90,retentionEnforced:false,retentionStatus:'POLICY_ONLY_NOT_ENFORCED',runs:r.results||[]};
 }
 
 const __procheliaNationalHandle = handle;
