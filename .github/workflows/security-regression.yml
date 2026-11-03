@@ -4,9 +4,11 @@ on:
   push:
     branches:
       - preprod/security-regression-tests
+      - preprod/mission-code-atomic-consumption-ci
   pull_request:
     branches:
       - preprod/backup-integrity-restore-gates
+      - preprod/security-regression-tests
   workflow_dispatch:
 
 permissions:
