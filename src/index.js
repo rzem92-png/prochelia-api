@@ -1943,10 +1943,11 @@ async function pricingQuote(request, env) {
     strategic.psp_cost_cents,
     strategic.software_cost_cents,
     strategic.estimated_margin_cents,
-    strategic.travel?.total_cost_cents,
-    strategic.travel?.real_cost_cents_per_km
+    strategic.travel?.total_cost_cents
   ];
-  if(computedCents.some(value=>!Number.isSafeInteger(value))) {
+  if(computedCents.some(value=>!Number.isSafeInteger(value)) ||
+     (strategic.travel?.real_cost_cents_per_km !== undefined &&
+      !Number.isFinite(strategic.travel.real_cost_cents_per_km))) {
     return json({ok:false,error:'QUOTE_ARITHMETIC_OVERFLOW',version:VERSION},409);
   }
   const quote={
