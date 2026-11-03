@@ -616,22 +616,17 @@ export async function handleV7Route(
     return null;
 
   } catch (error) {
-
+    // Avoid returning parser/internal exception text to untrusted callers.
+    const invalidJson = error instanceof SyntaxError;
     return Response.json(
-
       {
         ok: false,
-
-        version:
-          procheliaV7.version,
-
-        error:
-          error?.message ||
-          "Erreur V7"
+        version: procheliaV7.version,
+        error: invalidJson ? "INVALID_JSON" : "V7_INTERNAL_ERROR"
       },
-
       {
-        status: 500
+        status: invalidJson ? 400 : 500,
+        headers: { "cache-control": "no-store" }
       }
     );
   }
