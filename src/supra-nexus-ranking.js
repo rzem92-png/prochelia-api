@@ -2,7 +2,7 @@
 // This is a ranking proposal only. It cannot assign a mission, change prices, or execute payment.
 const WEIGHTS = Object.freeze({
   skillFit: 0.30, availabilityFit: 0.20, reliability: 0.15,
-  quality: 0.10, distanceFit: 0.10, priceFairness: 0.10, fairExposure: 0.05
+  quality: 0.15, distanceFit: 0.10, priceFairness: 0.05, fairExposure: 0.05
 });
 const SCORE_FIELDS = Object.keys(WEIGHTS);
 const MAX_CANDIDATES = 500;
@@ -43,14 +43,14 @@ export function rankNexusProviders(request = {}) {
         !validScore(c.recentExposure) || !Number.isFinite(c.distanceKm) || c.distanceKm < 0 ||
         c.distanceKm > MAX_DISTANCE_KM || !Number.isSafeInteger(c.quoteCents) || c.quoteCents <= 0 ||
         c.quoteCents > MAX_PRICE_CENTS) return invalid("INVALID_CANDIDATE_FIELDS");
-    if (!c.verified || !c.available || c.distanceKm > request.maxDistanceKm || c.quoteCents > request.budgetCents) continue;
+    if (!c.verified || !c.available || c.distanceKm > request.maxDistanceKm ||\n        c.quoteCents > request.budgetCents || c.quoteCents < c.minimumViableQuoteCents) continue;
     const skills = c.skills.map(s => typeof s === "string" ? s.trim().toLowerCase() : "");
     if (skills.some(s => !s || s.length > 80)) return invalid("INVALID_CANDIDATE_SKILLS");
     const skillFit = required.length === 0 ? 100 : required.filter(s => skills.includes(s)).length / required.length * 100;
     if (skillFit < 100) continue; // hard competency gate; no score can compensate
     const availabilityFit = 100; // hard availability gate passed; schedule fit must be server-derived
     const distanceFit = 100 * (1 - c.distanceKm / request.maxDistanceKm);
-    const priceFairness = 100 * (1 - c.quoteCents / request.budgetCents);
+    // Do not reward the cheapest quote. Pricing is eligible only above a server-calculated\n    // provider/platform minimum; the score rewards proximity to the client budget only weakly.\n    const priceFairness = 100 * (1 - Math.min(1, Math.abs(request.budgetCents - c.quoteCents) / request.budgetCents));
     // Exposure is an anti-popularity signal: less recent exposure earns a modest boost.
     // No demographic, health, religion, ethnicity, or other sensitive attribute is used.
     const fairExposure = c.smallLocalProvider ? 100 * (1 - c.recentExposure / 100) : 0;
@@ -59,7 +59,7 @@ export function rankNexusProviders(request = {}) {
     const score = SCORE_FIELDS.reduce((sum, key) => sum + components[key] * WEIGHTS[key], 0);
     eligible.push({
       providerId:c.id, score:Number(score.toFixed(4)), components,
-      reasonCodes:["VERIFIED","AVAILABLE","SKILLS_MATCH","WITHIN_DISTANCE","WITHIN_CLIENT_BUDGET",
+      reasonCodes:["VERIFIED","AVAILABLE","SKILLS_MATCH","WITHIN_DISTANCE","WITHIN_CLIENT_BUDGET","ABOVE_SERVER_MINIMUM_VIABLE_QUOTE",
         ...(c.smallLocalProvider ? ["LOCAL_SMALL_PROVIDER_EXPOSURE_BALANCE"] : [])],
       quoteCents:c.quoteCents, distanceKm:c.distanceKm,
       smallLocalProvider:c.smallLocalProvider
