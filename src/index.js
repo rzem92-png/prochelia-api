@@ -3407,8 +3407,12 @@ async function productionSafetySchema(env){
   await env.DB.prepare(`CREATE INDEX IF NOT EXISTS idx_prod_sec_events_date ON production_security_events(event_type,created_at)`).run();
 }
 
-async function productionSubjectHash(request, route){
-  const ip=clean(request.headers.get('CF-Connecting-IP')) || clean(request.headers.get('X-Forwarded-For')) || 'unknown';
+async function productionSubjectHash(request, route, env){
+  // CF-Connecting-IP is trustworthy only when the Worker is behind Cloudflare.
+  // Do not let a client-controlled X-Forwarded-For header reset its own quota.
+  const cfIp=clean(request.headers.get('CF-Connecting-IP'));
+  const trustedIp=env?.TRUST_CF_CONNECTING_IP === 'true' && cfIp ? cfIp : null;
+  const ip=trustedIp || 'unknown';
   return sha256Hex(`${ip}|${route}`);
 }
 
@@ -3440,7 +3444,7 @@ async function productionRateLimit(request,env){
   const limit=sensitive ? 20 : 120;
   const windowSeconds=60;
   const bucket=`${sensitive?'SENSITIVE':'GENERAL'}:${path}`;
-  const subject=await productionSubjectHash(request,path);
+  const subject=await productionSubjectHash(request,path,env);
   const now=Math.floor(Date.now()/1000);
   const start=new Date(Math.floor(now/windowSeconds)*windowSeconds*1000).toISOString();
   await ensureFinalHardeningSchema(env);
