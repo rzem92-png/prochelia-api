@@ -23,3 +23,43 @@ for (const path of ["/api/core/schema", "/api/missions/schema"]) {
     assert.equal((await response.json()).error, "UNAUTHENTICATED");
   });
 }
+
+test("login rejects oversized JSON payloads before parsing", async () => {
+  const env = {
+    DB: {
+      prepare() {
+        return { bind() { return this; }, first: async () => null };
+      }
+    }
+  };
+  const response = await worker.fetch(
+    new Request(base + "/api/auth/login", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ email: "user@example.com", password: "A".repeat(5000) })
+    }),
+    env
+  );
+  assert.equal(response.status, 401);
+  assert.equal((await response.json()).error, "INVALID_CREDENTIALS");
+});
+
+test("login returns generic credentials error for unknown account", async () => {
+  const env = {
+    DB: {
+      prepare() {
+        return { bind() { return this; }, first: async () => null };
+      }
+    }
+  };
+  const response = await worker.fetch(
+    new Request(base + "/api/auth/login", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ email: "nobody@example.com", password: "ValidPassword123" })
+    }),
+    env
+  );
+  assert.equal(response.status, 401);
+  assert.equal((await response.json()).error, "INVALID_CREDENTIALS");
+});
