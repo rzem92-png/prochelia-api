@@ -4,9 +4,11 @@ on:
   push:
     branches:
       - staging-prochelia-v14
+      - preprod/expert-df7373c-finance-hardening
   pull_request:
     branches:
       - staging-prochelia-v14
+      - preprod/expert-df7373c-finance-hardening
   workflow_dispatch:
 
 permissions:
