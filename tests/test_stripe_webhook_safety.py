@@ -10,6 +10,11 @@ SOURCE = (Path(__file__).resolve().parents[1] / "src" / "index.js").read_text()
 
 
 class StripeWebhookSafetySourceTests(unittest.TestCase):
+    def test_unmatched_financial_webhook_result_initialized_before_branch(self):
+        block = SOURCE[SOURCE.index("const financialEvent="):SOURCE.index("if(txId && (paidEvent.has(event.type)")]
+        self.assertLess(block.index("let result='IGNORED'"), block.index("if(financialEvent&&!txId)"))
+        self.assertIn("result='FINANCIAL_EVENT_UNMATCHED_RECONCILIATION_REQUIRED'", block)
+
     def test_unmatched_dispute_and_dispute_closed_are_reconciled(self):
         self.assertIn("event.type==='charge.dispute.closed'", SOURCE)
         self.assertIn("STRIPE_DISPUTE_UNMATCHED", SOURCE)
