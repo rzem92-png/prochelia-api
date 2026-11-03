@@ -137,25 +137,11 @@ export async function handleV7Route(
       path === "/api/v7/check/permissions" &&
       method === "POST"
     ) {
-
-      const body =
-        await request.json();
-
-      const result =
-        procheliaV7.checkPermissions(
-          body
-        );
-
+      // Never authorize from a role/permissions object supplied by the caller.
+      // Authorization must be derived from a verified server-side session.
       return Response.json(
-
-        result,
-
-        {
-          status:
-            result.ok
-              ? 200
-              : 403
-        }
+        { ok: false, version: procheliaV7.version, error: "AUTHORIZATION_CONTEXT_REQUIRED" },
+        { status: 403, headers: { "cache-control": "no-store" } }
       );
     }
 
