@@ -761,10 +761,21 @@ async function securityVerifyCode(request, env) {
     await securityAudit(env,'SECURITY_CODE_FAILED',missionId,auth.user.id,auth.user.role,'DENIED',{purpose,attempts:count});
     return json({ok:false,error:'SECURITY_CODE_INVALID',version:VERSION,remaining_attempts:Math.max(0,SECURITY_MAX_ATTEMPTS-count)},401);
   }
+  // Atomic single-use transition: the earlier SELECT is advisory only.
+  // Concurrent requests must compete on the authoritative status/used columns.
+  let consumed;
   if(purpose==='ARRIVAL'){
-    await env.DB.prepare(`UPDATE mission_security SET arrival_used_at=CURRENT_TIMESTAMP,arrival_started_at=CURRENT_TIMESTAMP,status='in_progress',updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(sec.id).run();
+    consumed=await env.DB.prepare(`UPDATE mission_security
+      SET arrival_used_at=CURRENT_TIMESTAMP,arrival_started_at=CURRENT_TIMESTAMP,status='in_progress',updated_at=CURRENT_TIMESTAMP
+      WHERE id=? AND status='prepared' AND arrival_used_at IS NULL AND locked_until IS NULL`).bind(sec.id).run();
   }else{
-    await env.DB.prepare(`UPDATE mission_security SET end_used_at=CURRENT_TIMESTAMP,ended_at=CURRENT_TIMESTAMP,status='completed',updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(sec.id).run();
+    consumed=await env.DB.prepare(`UPDATE mission_security
+      SET end_used_at=CURRENT_TIMESTAMP,ended_at=CURRENT_TIMESTAMP,status='completed',updated_at=CURRENT_TIMESTAMP
+      WHERE id=? AND status='in_progress' AND end_used_at IS NULL AND locked_until IS NULL`).bind(sec.id).run();
+  }
+  if(Number(consumed?.meta?.changes||0)!==1){
+    await securityAudit(env,'SECURITY_CODE_CONSUME_RACE',missionId,auth.user.id,auth.user.role,'DENIED',{purpose});
+    return json({ok:false,error:'SECURITY_CODE_ALREADY_CONSUMED_OR_STATE_CHANGED',version:VERSION},409);
   }
   await securityAudit(env,`SECURITY_CODE_${purpose}_SUCCESS`,missionId,auth.user.id,auth.user.role,'OK',{purpose,device_bound:true});
   return json({ok:true,version:VERSION,mission_id:missionId,purpose,status:purpose==='ARRIVAL'?'in_progress':'completed',identity_control:'VERIFIED_ACCOUNT_REQUIRED',presence_control:'RECORDED',code:'CONSUMED'},200);
