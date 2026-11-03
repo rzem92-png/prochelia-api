@@ -37,7 +37,8 @@ export function rankNexusProviders(request = {}) {
   const eligible = [];
   for (const c of request.providerCandidates) {
     if (!c || typeof c !== "object" || Array.isArray(c) ||
-        typeof c.id !== "string" || !c.id.trim() || c.id.length > 128 || ids.has(c.id)) return invalid("INVALID_CANDIDATE");
+        typeof c.id !== "string" || !c.id.trim() || c.id !== c.id.trim() || c.id.length > 128 || ids.has(c.id)) return invalid("INVALID_CANDIDATE");
+    // IDs are opaque server identifiers: reject whitespace aliases instead of normalizing them.
     ids.add(c.id);
     if (!Array.isArray(c.skills) || typeof c.available !== "boolean" || typeof c.verified !== "boolean" ||
         typeof c.smallLocalProvider !== "boolean" || !validScore(c.reliability) || !validScore(c.quality) ||
