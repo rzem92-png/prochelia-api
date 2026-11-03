@@ -3873,7 +3873,7 @@ async function productionSubjectHash(request, route){
   const ip=clean(request.headers.get('CF-Connecting-IP'));
   // Missing trusted edge identity must not collapse all visitors into one shared bucket.
   if(!ip) throw new Error('TRUSTED_CLIENT_IP_REQUIRED');
-  return sha256Hex(`${ip}|${route}`);
+  return sha256Base64url(`${ip}|${route}`);
 }
 
 async function productionRateLimit(request,env){
