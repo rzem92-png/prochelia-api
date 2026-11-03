@@ -1396,33 +1396,31 @@ async function executeCaseBusinessAction(env, c, rec, actorId=null, automatic=fa
     results.push({action:'MISSION_VERIFY_AND_NOTIFY',...queued});
   }
 
+  // Assignment/rescheduling are sensitive mission mutations. Never execute them
+  // directly from a Copilot case: enqueue for a separately authenticated provider
+  // workflow with ownership, eligibility and concurrency validation.
   if (action === 'SEARCH_REPLACEMENT' || c.case_type === 'absence_intervenant' || c.case_type === 'retard_intervenant') {
     const replacementId = clean(context.replacement_intervenant_id || context.replacement_id);
     if (replacementId && c.mission_id) {
-      const cols = await getTableColumns(env,'missions');
-      if (cols.includes('intervenant_id')) {
-        await env.DB.prepare('UPDATE missions SET intervenant_id=? WHERE id=?').bind(replacementId,c.mission_id).run();
-        results.push({action:'ASSIGN_REPLACEMENT',mission_id:c.mission_id,intervenant_id:replacementId,status:'EXECUTED'});
-      } else {
-        const queued=await enqueueAction(env,c.id,'ASSIGN_REPLACEMENT',{mission_id:c.mission_id,intervenant_id:replacementId},`${c.id}:replacement:${replacementId}`);
-        results.push({action:'ASSIGN_REPLACEMENT',...queued,reason:'MISSION_SCHEMA_NEEDS_REVIEW'});
-      }
+      const queued=await enqueueAction(env,c.id,'ASSIGN_REPLACEMENT_REVIEW',{
+        mission_id:c.mission_id,intervenant_id:replacementId,case_id:c.id,
+        requires_ownership_check:true,requires_eligibility_check:true
+      },c.id+':replacement-review:'+replacementId);
+      results.push({action:'ASSIGN_REPLACEMENT_REVIEW',...queued,status:'WAITING_PROVIDER'});
     } else {
-      const queued=await enqueueAction(env,c.id,'SEARCH_REPLACEMENT',{mission_id:c.mission_id||null,criteria:context.replacement_criteria||{},case_type:c.case_type},`${c.id}:search-replacement`);
+      const queued=await enqueueAction(env,c.id,'SEARCH_REPLACEMENT',{
+        mission_id:c.mission_id||null,criteria:context.replacement_criteria||{},case_type:c.case_type
+      },c.id+':search-replacement');
       results.push({action:'SEARCH_REPLACEMENT',...queued});
     }
   }
 
   if (context.reschedule_start_at && c.mission_id) {
-    const cols=await getTableColumns(env,'missions');
-    const target = cols.includes('start_at') ? 'start_at' : (cols.includes('scheduled_at') ? 'scheduled_at' : null);
-    if (target) {
-      await env.DB.prepare(`UPDATE missions SET ${target}=? WHERE id=?`).bind(String(context.reschedule_start_at),c.mission_id).run();
-      results.push({action:'RESCHEDULE_MISSION',mission_id:c.mission_id,field:target,status:'EXECUTED'});
-    } else {
-      const queued=await enqueueAction(env,c.id,'RESCHEDULE_MISSION',{mission_id:c.mission_id,start_at:context.reschedule_start_at},`${c.id}:reschedule:${context.reschedule_start_at}`);
-      results.push({action:'RESCHEDULE_MISSION',...queued,reason:'MISSION_SCHEMA_NEEDS_REVIEW'});
-    }
+    const queued=await enqueueAction(env,c.id,'RESCHEDULE_MISSION_REVIEW',{
+      mission_id:c.mission_id,start_at:String(context.reschedule_start_at),case_id:c.id,
+      requires_ownership_check:true,requires_schedule_validation:true
+    },c.id+':reschedule-review:'+String(context.reschedule_start_at));
+    results.push({action:'RESCHEDULE_MISSION_REVIEW',...queued,status:'WAITING_PROVIDER'});
   }
 
   if (context.client_notification || c.client_id || c.company_id) {
@@ -1443,10 +1441,7 @@ async function executeCaseBusinessAction(env, c, rec, actorId=null, automatic=fa
 async function processActionOutbox(request, env) {
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
   await ensureOperationalSchema(env);
-  // Recover stale worker leases after a crash (PROCESSING for >5 minutes).
-  // Recovery is conditional and the subsequent claim remains compare-and-set.
-  await env.DB.prepare(`UPDATE action_outbox SET status='PENDING',last_error='Recovered stale PROCESSING lease.',updated_at=CURRENT_TIMESTAMP WHERE status='PROCESSING' AND updated_at < datetime('now','-5 minutes')`).run();
-  const rows=await env.DB.prepare(`SELECT id,action_type FROM action_outbox WHERE status='PENDING' ORDER BY created_at ASC LIMIT 50`).all();
+  // Do not automatically reclaim stale PROCESSING rows: a slow live worker\n  // could still be executing and cause duplicate side effects. Stale rows require\n  // audited manual recovery after checking provider idempotency/worker status.\n  const rows=await env.DB.prepare(`SELECT id,action_type FROM action_outbox WHERE status='PENDING' ORDER BY created_at ASC LIMIT 50`).all();
   const processed=[];
   for(const row of (rows.results||[])) {
     // Atomic claim (compare-and-set): only one worker can move PENDING to PROCESSING.
@@ -1457,7 +1452,7 @@ async function processActionOutbox(request, env) {
     }
     try {
       // Provider-dependent actions are held, never marked as completed without a real adapter.
-      const external = ['PSP_REFUND_REVIEW','NOTIFY_CLIENT','SEARCH_REPLACEMENT','RESCHEDULE_MISSION','ASSIGN_REPLACEMENT'].includes(String(row.action_type));
+      const external = ['PSP_REFUND_REVIEW','NOTIFY_CLIENT','SEARCH_REPLACEMENT','RESCHEDULE_MISSION','ASSIGN_REPLACEMENT','ASSIGN_REPLACEMENT_REVIEW','RESCHEDULE_MISSION_REVIEW'].includes(String(row.action_type));
       if(external) {
         await env.DB.prepare(`UPDATE action_outbox SET status='WAITING_PROVIDER',last_error=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='PROCESSING'`).bind('External adapter/provider required for final execution.',row.id).run();
         processed.push({id:row.id,status:'WAITING_PROVIDER',action_type:row.action_type});
