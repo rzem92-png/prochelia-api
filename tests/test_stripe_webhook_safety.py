@@ -188,5 +188,21 @@ class StripeWebhookSafetySourceTests(unittest.TestCase):
         self.assertIn("iterations < 100000 || iterations > 1000000", SOURCE)
         self.assertIn("hash: 'SHA-256'", SOURCE)
 
+    def test_refund_cumulative_amount_is_monotonic_and_never_auto_releases(self):
+        refund = SOURCE[SOURCE.index("} else if(refundEvent.has(event.type)) {"):SOURCE.index("} else if(disputeEvent.has(event.type)) {")]
+        self.assertIn("refund_cents=MAX(refund_cents,?)", refund)
+        self.assertIn("status='refund_pending_reconciliation'", refund)
+        self.assertIn("status IN ('paid','held','refund_pending_reconciliation')", refund)
+        self.assertIn("STRIPE_REFUND_REQUIRES_RECONCILIATION", refund)
+        self.assertNotIn("status='paid'", refund)
+        self.assertNotIn("wallets SET available_cents", refund)
+
+    def test_refund_event_amount_is_cumulative_and_bounded_by_gross(self):
+        refund = SOURCE[SOURCE.index("} else if(refundEvent.has(event.type)) {"):SOURCE.index("} else if(disputeEvent.has(event.type)) {")]
+        self.assertIn("obj?.amount_refunded", refund)
+        self.assertIn("Number.isSafeInteger(refundedCents)", refund)
+        self.assertIn("refundedCents<=Number(tx.gross_cents||0)", refund)
+        self.assertIn("refund_amount_out_of_bounds", refund)
+
 if __name__ == "__main__":
     unittest.main()
