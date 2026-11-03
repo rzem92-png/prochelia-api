@@ -67,3 +67,18 @@ test("uses exact arithmetic when the PSP fee multiplication exceeds Number safe 
   assert.equal(r.estimatedContributionCents, 0);
   assert.equal(r.bookingAllowedByPriceGuard, true);
 });
+
+test("uses exact intermediate numerator when final cent amount remains safe", () => {
+  const r = calculatePriceFloor({
+    providerPayoutCents: 1_000_000_000_000,
+    variableCostCents: 0,
+    fixedPspFeeCents: 0,
+    pspRateBps: 0,
+    riskReserveCents: 0,
+    targetContributionCents: 0
+  });
+  assert.equal(r.ok, true);
+  assert.equal(r.minClientPriceCents, 1_000_000_000_000);
+  assert.equal(r.estimatedPspFeeCents, 0);
+  assert.equal(r.estimatedContributionCents, 0);
+});
