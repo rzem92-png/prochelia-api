@@ -17,7 +17,7 @@ concurrency:
 
 jobs:
   isolated-preview:
-    if: github.ref == 'refs/heads/feat/supra-intelligence-governance-v1' && inputs.confirmation == 'DEPLOY_PREVIEW_ONLY'
+    if: (github.ref == 'refs/heads/feat/supra-intelligence-governance-v1' || github.ref == 'refs/heads/fix/nexus-minimum-viable-quote-gate') && inputs.confirmation == 'DEPLOY_PREVIEW_ONLY'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     environment: supra-preview
