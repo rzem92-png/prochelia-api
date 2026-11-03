@@ -996,8 +996,11 @@ async function verifyWebhookSignature(request, env, rawBody) {
 }
 
 async function paymentWebhook(request, env) {
-  await ensurePaymentSchema(env);
-  const raw=await request.text();
+  // Authenticate and bound the raw payload BEFORE any database/schema operation.
+  // Unauthenticated callers must not trigger D1 writes/DDL or exhaust DB resources.
+  const bounded=await readBoundedRequestBody(request, 1_048_576);
+  if(!bounded.ok) return json({ok:false,error:bounded.reason==='TOO_LARGE'?'WEBHOOK_PAYLOAD_TOO_LARGE':'WEBHOOK_PAYLOAD_INVALID',version:VERSION},bounded.reason==='TOO_LARGE'?413:400);
+  const raw=bounded.text;
   if(!(await verifyWebhookSignature(request,env,raw))) return json({ok:false,error:'INVALID_WEBHOOK_SIGNATURE',version:VERSION},401);
   let event; try{event=JSON.parse(raw)}catch{return json({ok:false,error:'INVALID_WEBHOOK_JSON',version:VERSION},400);}
   const provider=clean(event?.provider)||paymentProvider(env), eventId=clean(event?.id), type=clean(event?.type);
@@ -1018,6 +1021,8 @@ async function paymentWebhook(request, env) {
   }
   if(paymentEvents.includes(type)&&!txId) return json({ok:false,error:'PAYMENT_TRANSACTION_REFERENCE_REQUIRED',version:VERSION},400);
   if(payoutEvents.includes(type)&&!payoutId) return json({ok:false,error:'PAYOUT_REFERENCE_REQUIRED',version:VERSION},400);
+  // Schema/D1 access only occurs after payload size, signature and event shape are validated.
+  await ensurePaymentSchema(env);
   const payloadHash=await sha256Base64url(raw);
   const inserted=await env.DB.prepare(`INSERT OR IGNORE INTO payment_webhook_events (id,provider,event_id,event_type,signature_valid,payload_hash) VALUES (?,?,?,?,1,?)`).bind(crypto.randomUUID(),provider,eventId,type,payloadHash).run();
   const existing=await env.DB.prepare('SELECT * FROM payment_webhook_events WHERE provider=? AND event_id=? LIMIT 1').bind(provider,eventId).first();
