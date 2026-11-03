@@ -1,0 +1,51 @@
+name: Validate Nexus ranking gate
+
+on:
+  push:
+    branches:
+      - fix/nexus-minimum-viable-quote-gate
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "src/supra-nexus-ranking.js"
+      - "tests/supra-nexus-*.test.mjs"
+      - "tests/supra-*.test.mjs"
+      - "package.json"
+      - "wrangler.jsonc"
+      - "wrangler.preview.jsonc"
+      - ".github/workflows/nexus-ranking-ci.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nexus-ranking-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  nexus-ranking:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22"
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+      - name: Syntax/build checks
+        run: npm run build
+      - name: Nexus and SUPRA regression tests
+        run: npm run test:supra
+      - name: Full API regression suite
+        run: npm test
+      - name: Preview Worker bundle dry-run
+        run: npm run check:worker:preview
+      - name: Production Worker bundle dry-run (no deployment)
+        run: npm run check:worker
