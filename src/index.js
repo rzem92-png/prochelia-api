@@ -1150,7 +1150,7 @@ async function paymentWebhook(request, env) {
         // Final payout transition and wallet settlement/release must be atomic.
         // Conditional state transition is the idempotency gate for duplicate or
         // concurrent webhook deliveries; changes() gates the wallet mutation.
-        const payoutUpdate=env.DB.prepare(`UPDATE payout_requests SET status=?,provider_payout_id=COALESCE(?,provider_payout_id),failure_code=?,failure_message=?,completed_at=CASE WHEN ?='completed' THEN CURRENT_TIMESTAMP ELSE completed_at END,updated_at=CURRENT_TIMESTAMP WHERE id=? AND status NOT IN ('completed','failed','canceled')`)
+        const payoutUpdate=env.DB.prepare(`UPDATE payout_requests SET status=?,provider_payout_id=COALESCE(?,provider_payout_id),failure_code=?,failure_message=?,completed_at=CASE WHEN ?='completed' THEN CURRENT_TIMESTAMP ELSE completed_at END,updated_at=CURRENT_TIMESTAMP WHERE id=? AND status NOT IN ('completed','failed','canceled') AND amount_cents>0 AND EXISTS (SELECT 1 FROM wallets w WHERE w.id=payout_requests.wallet_id AND w.reserved_cents>=payout_requests.amount_cents)`)
           .bind(newStatus,clean(event?.data?.provider_payout_id)||null,clean(event?.data?.failure_code)||null,clean(event?.data?.failure_message)||null,newStatus,payoutId);
         const walletUpdate=newStatus==='completed'
           ? env.DB.prepare(`UPDATE wallets SET reserved_cents=MAX(0,reserved_cents-?),paid_cents=paid_cents+?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND changes()=1`).bind(payout.amount_cents,payout.amount_cents,payout.wallet_id)
