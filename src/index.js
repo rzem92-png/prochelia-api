@@ -3230,11 +3230,15 @@ async function financeProblemResolve(request,env) {
   const role=String(auth.user.role||'').toUpperCase();
   const owner=String(row.user_id)===String(auth.user.id);
   const manager=['GERANTE','ADMIN','FINANCE'].includes(role);
-  if(!owner&&!manager)return json({ok:false,error:'FORBIDDEN',version:VERSION},403);
   const approved=Boolean(b.approve);
+  // A user may escalate their own case, but only finance managers can approve it.
+  if(approved&&!manager)return json({ok:false,error:'FORBIDDEN',version:VERSION},403);
+  if(!approved&&!owner&&!manager)return json({ok:false,error:'FORBIDDEN',version:VERSION},403);
   const resolution=clean(b.resolution)||row.proposed_solution||'Résolution contrôlée par le Copilote.';
   const status=approved?'RESOLVED':'ESCALATED';
-  await env.DB.prepare(`UPDATE finance_resolution_cases SET status=?,resolution=?,resolved_at=CURRENT_TIMESTAMP WHERE id=?`).bind(status,resolution,id).run();
+  const allowedStates=approved?['OPEN','AUTO_RESOLUTION_PROPOSED']:['OPEN','AUTO_RESOLUTION_PROPOSED'];
+  const update=await env.DB.prepare(`UPDATE finance_resolution_cases SET status=?,resolution=?,resolved_at=CURRENT_TIMESTAMP WHERE id=? AND status IN ('OPEN','AUTO_RESOLUTION_PROPOSED')`).bind(status,resolution,id).run();
+  if(!update?.meta?.changes)return json({ok:false,error:'CASE_ALREADY_RESOLVED_OR_NOT_OPEN',version:VERSION},409);
   await journal(env,auth.user.role,auth.user.id,'FINANCE_PROBLEM_RESOLVE','finance_resolution_cases',id,status,{approved});
   return json({ok:true,version:VERSION,case_id:id,status,resolution});
 }
