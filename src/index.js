@@ -3199,13 +3199,44 @@ async function financeExport(request,env) {
 async function financeEntryCreate(request,env) {
   const a=await financeAuth(request,env); if(a.response)return a.response;
   const {auth}=a, b=await readJson(request)||{};
-  const amount=Math.round(Number(b.amount_eur)*100);
-  if(!Number.isFinite(amount)||amount<=0||!b.entry_type) return json({ok:false,error:'INVALID_FINANCE_ENTRY',version:VERSION},400);
+  // This endpoint is a personal workspace memo only, never a payment/ledger mutation.
+  if(typeof b.amount_eur!=='number'||!Number.isFinite(b.amount_eur)||b.amount_eur<=0||b.amount_eur>10000000)
+    return json({ok:false,error:'INVALID_FINANCE_AMOUNT',version:VERSION},400);
+  const amount=Math.round(b.amount_eur*100);
+  if(!Number.isSafeInteger(amount)||amount<=0)
+    return json({ok:false,error:'INVALID_FINANCE_AMOUNT',version:VERSION},400);
+  if(typeof b.entry_type!=='string'||!/^[A-Z0-9_:-]{1,50}$/i.test(b.entry_type))
+    return json({ok:false,error:'INVALID_ENTRY_TYPE',version:VERSION},400);
+  const direction=String(b.direction??'IN').toUpperCase();
+  if(!['IN','OUT'].includes(direction))
+    return json({ok:false,error:'INVALID_DIRECTION',version:VERSION},400);
+  const currency=String(b.currency??'EUR').toUpperCase();
+  if(!/^[A-Z]{3}$/.test(currency))
+    return json({ok:false,error:'INVALID_CURRENCY',version:VERSION},400);
+  const label=typeof b.label==='string'?b.label.trim():'';
+  if(label.length>240)return json({ok:false,error:'LABEL_TOO_LONG',version:VERSION},400);
+  const referenceType=typeof b.reference_type==='string'?b.reference_type.trim():'';
+  const referenceId=typeof b.reference_id==='string'?b.reference_id.trim():'';
+  if(referenceType.length>80||referenceId.length>160)
+    return json({ok:false,error:'REFERENCE_TOO_LONG',version:VERSION},400);
+  if(b.metadata!==undefined&&(b.metadata===null||typeof b.metadata!=='object'||Array.isArray(b.metadata)))
+    return json({ok:false,error:'INVALID_METADATA',version:VERSION},400);
+  let metadataJson;
+  try { metadataJson=JSON.stringify(b.metadata??{}); } catch (_) {
+    return json({ok:false,error:'INVALID_METADATA',version:VERSION},400);
+  }
+  if(metadataJson.length>4000)return json({ok:false,error:'METADATA_TOO_LARGE',version:VERSION},400);
   const id=crypto.randomUUID();
-  await env.DB.prepare(`INSERT INTO finance_workspace_entries(id,user_id,role,entry_type,direction,amount_cents,currency,label,reference_type,reference_id,metadata_json) VALUES(?,?,?,?,?,?,?,?,?,?,?)`)
-    .bind(id,auth.user.id,auth.user.role,String(b.entry_type),String(b.direction||'IN').toUpperCase()==='OUT'?'OUT':'IN',amount,b.currency||'EUR',clean(b.label)||null,clean(b.reference_type)||null,clean(b.reference_id)||null,JSON.stringify(b.metadata||{})).run();
-  await journal(env,auth.user.role,auth.user.id,'FINANCE_ENTRY_CREATE','finance_workspace_entries',id,'OK',{entry_type:b.entry_type});
-  return json({ok:true,version:VERSION,id});
+  const results=await env.DB.batch([
+    env.DB.prepare(`INSERT INTO finance_workspace_entries(id,user_id,role,entry_type,direction,amount_cents,currency,label,reference_type,reference_id,metadata_json) VALUES(?,?,?,?,?,?,?,?,?,?,?)`)
+      .bind(id,auth.user.id,auth.user.role,b.entry_type,direction,amount,currency,label||null,referenceType||null,referenceId||null,metadataJson),
+    env.DB.prepare(`INSERT INTO activity_journal(id,actor_type,actor_id,action,entity_type,entity_id,result,metadata_json)
+      SELECT ?,?,?,?,?,?,?,? WHERE changes()=1`)
+      .bind(crypto.randomUUID(),auth.user.role,auth.user.id,'FINANCE_ENTRY_CREATE','finance_workspace_entries',id,'OK',JSON.stringify({entry_type:b.entry_type,direction,currency}))
+  ]);
+  if(!results?.[0]?.success||!results?.[1]?.success)
+    return json({ok:false,error:'FINANCE_ENTRY_WRITE_FAILED',version:VERSION},500);
+  return json({ok:true,version:VERSION,id,workspace_only:true});
 }
 
 async function financeProblemCreate(request,env) {
