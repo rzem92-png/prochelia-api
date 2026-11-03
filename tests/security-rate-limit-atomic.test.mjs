@@ -141,3 +141,31 @@ test('CORS preflight rejects unapproved request headers', async () => {
   assert.equal(response.status, 400);
   assert.equal((await response.json()).error, 'CORS_HEADER_NOT_ALLOWED');
 });
+
+
+test('approved CORS preflight is answered without requiring D1', async () => {
+  const origin = 'https://feat-supra-control-center-v1.prochelia.pages.dev';
+  const response = await worker.fetch(new Request('https://prochelia-api-preview.rzem92.workers.dev/api/auth/login', {
+    method: 'OPTIONS',
+    headers: {
+      Origin: origin,
+      'Access-Control-Request-Method': 'POST',
+      'Access-Control-Request-Headers': 'content-type, x-idempotency-key'
+    }
+  }), { CORS_ORIGIN: origin });
+  assert.equal(response.status, 204);
+  assert.equal(response.headers.get('access-control-allow-origin'), origin);
+  assert.equal(response.headers.get('access-control-allow-credentials'), 'true');
+  assert.match(response.headers.get('vary') || '', /Origin/);
+});
+
+test('diagnostic endpoints reject unsupported methods before database access', async () => {
+  for (const path of ['/api/health', '/api/readiness', '/api/info']) {
+    const response = await worker.fetch(new Request('https://prochelia-api-preview.rzem92.workers.dev' + path, {
+      method: 'POST',
+      headers: { Origin: 'https://feat-supra-control-center-v1.prochelia.pages.dev' }
+    }), { CORS_ORIGIN: 'https://feat-supra-control-center-v1.prochelia.pages.dev' });
+    assert.equal(response.status, 405, path);
+    assert.equal(response.headers.get('allow'), 'GET, HEAD', path);
+  }
+});
