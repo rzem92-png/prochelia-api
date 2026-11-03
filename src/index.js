@@ -2436,9 +2436,9 @@ async function executeQueuedAction(env, action) {
     const current=await env.DB.prepare('SELECT status FROM action_outbox WHERE id=? LIMIT 1').bind(action.id).first();
     return {ok:false,status:current?.status||'UNKNOWN',error:'ACTION_ALREADY_CLAIMED_OR_TERMINAL'};
   }
-  const payload = JSON.parse(action.payload_json||'{}');
   const now = new Date().toISOString();
   try {
+    const payload = JSON.parse(action.payload_json||'{}');
     let result = {performed:false,action:action.action_type};
     if (action.action_type === 'NOTIFY') {
       const channel = payload.channel || 'IN_APP';
@@ -2513,7 +2513,7 @@ async function operationalExecute(request, env) {
   await env.DB.prepare(`UPDATE operational_cases SET status=?,resolution_json=?,updated_at=CURRENT_TIMESTAMP,resolved_at=? WHERE id=? AND status='EXECUTING'`)
     .bind(allDone?'RESOLVED':'EXECUTION_FAILED',JSON.stringify({approved_by:gate.auth.user.id,results}),allDone?new Date().toISOString():null,c.id).run();
   await journal(env,'gerante',gate.auth.user.id,'CASE_EXECUTED','operational_case',c.id,allDone?'OK':'PARTIAL',{results});
-  return json({ok:true,version:VERSION,case_id:c.id,status:allDone?'RESOLVED':'IN_PROGRESS',results});
+  return json({ok:allDone,version:VERSION,case_id:c.id,status:allDone?'RESOLVED':'EXECUTION_FAILED',results},allDone?200:409);
 }
 
 async function scoreClients(request, env) {
