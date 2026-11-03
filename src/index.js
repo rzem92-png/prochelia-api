@@ -3791,13 +3791,21 @@ async function runNationalBackup(env,trigger='MANUAL'){
       let offset=0, tableRows=0;
       while(true){
         const safe=table.replace(/"/g,'""');
-        const r=await env.DB.prepare(`SELECT * FROM "${safe}" LIMIT ? OFFSET ?`).bind(500,offset).all();
+        // Deterministic ordering prevents rows from shifting unpredictably between pages.
+        // This is NOT a transactional snapshot; concurrent writes still require reconciliation.
+        const r=await env.DB.prepare(`SELECT * FROM "${safe}" ORDER BY rowid LIMIT ? OFFSET ?`).bind(500,offset).all();
         const rows=r.results||[]; if(!rows.length) break;
         const plain=rows.map(x=>JSON.stringify(x)).join('\n')+'\n';
         const enc=await backupEncrypt(plain,secret);
         const key=`prochelia/backups/${day}/${runId}/${table}/part-${String(offset/500).padStart(8,'0')}.json.enc`;
+        const checksum=await backupHash(enc);
         await env.BACKUP_BUCKET.put(key,enc,{httpMetadata:{contentType:'application/octet-stream'}});
-        await env.DB.prepare(`INSERT INTO backup_objects(id,backup_run_id,object_key,table_name,row_count,byte_size,checksum,encrypted) VALUES(?,?,?,?,?,?,?,1)`).bind(crypto.randomUUID(),runId,key,table,rows.length,new TextEncoder().encode(enc).byteLength,await backupHash(enc)).run();
+        // Verify the object is actually readable and byte-identical before recording it.
+        const uploaded=await env.BACKUP_BUCKET.get(key);
+        if(!uploaded) throw new Error('BACKUP_OBJECT_READ_AFTER_WRITE_FAILED');
+        const uploadedBody=await uploaded.text();
+        if(await backupHash(uploadedBody)!==checksum) throw new Error('BACKUP_OBJECT_CHECKSUM_MISMATCH');
+        await env.DB.prepare(`INSERT INTO backup_objects(id,backup_run_id,object_key,table_name,row_count,byte_size,checksum,encrypted) VALUES(?,?,?,?,?,?,?,1)`).bind(crypto.randomUUID(),runId,key,table,rows.length,new TextEncoder().encode(enc).byteLength,checksum).run();
         objects++; rowsTotal+=rows.length; tableRows+=rows.length; offset+=rows.length;
         if(rows.length<500) break;
       }
