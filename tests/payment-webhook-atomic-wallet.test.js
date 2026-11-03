@@ -53,3 +53,10 @@ test('V7 never treats caller-provided payment status as PSP confirmation',()=>{
     assert.equal(result.verificationRequired,'SERVER_PSP_WEBHOOK_OR_RECONCILIATION');
   }
 });
+
+test('V7 QR validation fails closed for caller-supplied payloads',()=>{
+  const result=procheliaV7.checkQr({id:'mission-123'},{missionId:'mission-123',signature:'fake'});
+  assert.equal(result.ok,false);
+  assert.equal(result.qrValidated,false);
+  assert.equal(result.verificationRequired,'SERVER_SIGNED_EXPIRING_SINGLE_USE_QR');
+});
