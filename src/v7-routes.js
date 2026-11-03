@@ -6,6 +6,30 @@
 // =====================================================
 
 import { procheliaV7 } from "./v7.js";
+import { readBoundedRequestBody } from "./request-body.js";
+
+const V7_MAX_BODY_BYTES = 16_384;
+
+async function readV7Json(request) {
+  const bounded = await readBoundedRequestBody(request, V7_MAX_BODY_BYTES);
+  if (!bounded.ok) {
+    const error = new Error(bounded.reason || "INVALID_REQUEST_BODY");
+    error.status = bounded.reason === "TOO_LARGE" ? 413 : 400;
+    throw error;
+  }
+  if (!bounded.text) {
+    const error = new Error("EMPTY_JSON_BODY");
+    error.status = 400;
+    throw error;
+  }
+  try {
+    return JSON.parse(bounded.text);
+  } catch {
+    const error = new Error("INVALID_JSON_BODY");
+    error.status = 400;
+    throw error;
+  }
+}
 
 export async function handleV7Route(
   request,
@@ -61,7 +85,7 @@ export async function handleV7Route(
     ) {
 
       const body =
-        await request.json();
+        await readV7Json(request);
 
       const valid =
         procheliaV7.isValidEmail(
@@ -661,17 +685,11 @@ export async function handleV7Route(
 
       {
         ok: false,
-
-        version:
-          procheliaV7.version,
-
-        error:
-          error?.message ||
-          "Erreur V7"
+        version: procheliaV7.version,
+        error: error?.status ? (error.message || "INVALID_REQUEST_BODY") : "V7_INTERNAL_ERROR"
       },
-
       {
-        status: 500
+        status: error?.status || 500
       }
     );
   }
