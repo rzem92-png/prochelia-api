@@ -43,7 +43,8 @@ export function rankNexusProviders(request = {}) {
         !validScore(c.recentExposure) || !Number.isFinite(c.distanceKm) || c.distanceKm < 0 ||
         c.distanceKm > MAX_DISTANCE_KM || !Number.isSafeInteger(c.quoteCents) || c.quoteCents <= 0 ||
         c.quoteCents > MAX_PRICE_CENTS) return invalid("INVALID_CANDIDATE_FIELDS");
-    if (!c.verified || !c.available || c.distanceKm > request.maxDistanceKm ||\n        c.quoteCents > request.budgetCents || c.quoteCents < c.minimumViableQuoteCents) continue;
+    if (!c.verified || !c.available || c.distanceKm > request.maxDistanceKm ||
+        c.quoteCents > request.budgetCents || c.quoteCents < c.minimumViableQuoteCents) continue;
     const skills = c.skills.map(s => typeof s === "string" ? s.trim().toLowerCase() : "");
     if (skills.some(s => !s || s.length > 80)) return invalid("INVALID_CANDIDATE_SKILLS");
     const skillFit = required.length === 0 ? 100 : required.filter(s => skills.includes(s)).length / required.length * 100;
