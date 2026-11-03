@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { claimActionExecution } from "../src/index.js";
+import { claimActionExecution, quarantineStaleOutboxActions } from "../src/index.js";
 
 function fakeDB(initialStatus = "PENDING") {
   const state = { status: initialStatus };
@@ -52,4 +52,22 @@ test("unknown outbox action fails closed", async () => {
   const DB = fakeDB("NOT_FOUND");
   const result = await claimActionExecution({ DB }, "missing");
   assert.deepEqual(result, { claimed: false, status: "NOT_FOUND" });
+});
+
+test("stale RUNNING actions are quarantined rather than retried", async () => {
+  let sqlSeen = "";
+  const DB = {
+    prepare(sql) {
+      sqlSeen = sql;
+      return {
+        async run() { return { meta: { changes: 2 } }; }
+      };
+    }
+  };
+  const count = await quarantineStaleOutboxActions({ DB });
+  assert.equal(count, 2);
+  assert.match(sqlSeen, /status='UNCERTAIN'/);
+  assert.match(sqlSeen, /status='RUNNING'/);
+  assert.match(sqlSeen, /datetime\('now','-5 minutes'\)/);
+  assert.match(sqlSeen, /Manual reconciliation required/);
 });
