@@ -79,8 +79,12 @@ export async function enforceAtomicRateLimit({
 }) {
   try {
     if (!db) return { ok: false, response: jsonResponse({ ok: false, error: 'RATE_LIMIT_UNAVAILABLE' }, 503) };
-    if (!bucket || !Number.isSafeInteger(limit) || limit < 1 ||
-        !Number.isSafeInteger(windowSeconds) || windowSeconds < 1) {
+    if (typeof bucket !== 'string' || bucket.length < 1 || bucket.length > 128 ||
+        !Number.isSafeInteger(limit) || limit < 1 || limit > 1000000 ||
+        !Number.isSafeInteger(windowSeconds) || windowSeconds < 1 || windowSeconds > 86400 ||
+        !Number.isSafeInteger(nowSeconds) || nowSeconds < 0 ||
+        (userId !== null && (typeof userId !== 'string' || userId.length < 1 || userId.length > 256)) ||
+        (sessionHash !== null && (typeof sessionHash !== 'string' || sessionHash.length < 1 || sessionHash.length > 256))) {
       return { ok: false, response: jsonResponse({ ok: false, error: 'RATE_LIMIT_CONFIG_INVALID' }, 503) };
     }
 
