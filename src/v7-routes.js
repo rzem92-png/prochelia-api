@@ -18,6 +18,13 @@ export async function handleV7Route(
     const method =
       request.method.toUpperCase();
 
+    if (method === "POST" && (request.headers.get("content-type") || "").split(";")[0].trim().toLowerCase() !== "application/json") {
+      return Response.json(
+        { ok: false, version: procheliaV7.version, error: "JSON_CONTENT_TYPE_REQUIRED" },
+        { status: 415, headers: { "cache-control": "no-store" } }
+      );
+    }
+
     // Stream-limit request bodies instead of clone().text(), which could buffer
     // an attacker-controlled oversized payload before checking its length.
     if (method === "POST") {
