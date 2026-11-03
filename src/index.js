@@ -1103,6 +1103,7 @@ async function paymentWebhook(request, env) {
     if(Number(existingEvent.processed||0)===1) return json({ok:true,version:VERSION,duplicate:true,event_id:eventId},200);
     return json({ok:false,error:'WEBHOOK_EVENT_PENDING_RECONCILIATION',version:VERSION,event_id:eventId},503);
   }
+  let payoutFinalizationConflict=false;
   const txId=clean(event?.data?.transaction_id), payoutId=clean(event?.data?.payout_id);
   if(txId){
     const tx=await env.DB.prepare('SELECT * FROM payment_transactions WHERE id=? LIMIT 1').bind(txId).first();
@@ -1171,12 +1172,16 @@ async function paymentWebhook(request, env) {
         const settled=await env.DB.batch([walletUpdate,payoutUpdate]);
         if(Number(settled?.[0]?.meta?.changes||0)!==1 || Number(settled?.[1]?.meta?.changes||0)!==1){
           await paymentAudit(env,'PAYOUT_FINALIZATION_CONFLICT',{payout_id:payoutId,metadata:{provider,event_id:eventId,event_type:type}},'RECONCILIATION_REQUIRED');
+          payoutFinalizationConflict=true;
         }
       } else {
         await env.DB.prepare(`UPDATE payout_requests SET status=?,provider_payout_id=COALESCE(?,provider_payout_id),updated_at=CURRENT_TIMESTAMP WHERE id=? AND status NOT IN ('completed','failed','canceled')`).bind(newStatus,clean(event?.data?.provider_payout_id)||null,payoutId).run();
       }
     }
   }
+  // Do not ACK/mark complete when payout state and wallet settlement did not both transition.
+  // Keep this event pending so retries are fail-closed and reconciliation can investigate.
+  if(payoutFinalizationConflict) return json({ok:false,error:'PAYOUT_FINALIZATION_REQUIRES_RECONCILIATION',version:VERSION,event_id:eventId},503);
   await env.DB.prepare('UPDATE payment_webhook_events SET processed=1,processed_at=CURRENT_TIMESTAMP WHERE provider=? AND event_id=?').bind(provider,eventId).run();
   await paymentAudit(env,'PSP_WEBHOOK_PROCESSED',{transaction_id:txId,payout_id:payoutId,metadata:{provider,event_id:eventId,event_type:type}},'OK');
   return json({ok:true,version:VERSION,processed:true,event_id:eventId},200);
