@@ -2157,7 +2157,7 @@ async function executeQueuedAction(env, action) {
   } catch(e) {
     await env.DB.prepare(`UPDATE action_outbox SET status='FAILED',last_error=?,attempts=attempts+1,updated_at=CURRENT_TIMESTAMP WHERE id=?`)
       .bind(String(e.message||e),action.id).run();
-    return {ok:false,error:'ACTION_EXECUTION_FAILED',message:e.message};
+    return {ok:false,error:'ACTION_EXECUTION_FAILED'};
   }
 }
 
