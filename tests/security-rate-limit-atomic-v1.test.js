@@ -12,9 +12,9 @@ class FakeD1 {
           async first() {
             if (self.fail) throw new Error('simulated D1 outage');
             assert.match(sql, /INSERT INTO security_rate_limits_v2/);
-            const [bucket, subject, windowStart] = args;
+            const [bucket, subject, windowStart, _expiresAt, limit] = args;
             const key = [bucket, subject, windowStart].join('|');
-            const count = (self.rows.get(key) ?? 0) + 1;
+            const count = Math.min((self.rows.get(key) ?? 0) + 1, limit + 1);
             self.rows.set(key, count);
             return { request_count: count };
           }
@@ -123,4 +123,13 @@ test('rate limit identity combines IP and user subject', async () => {
  await enforceAtomicRateLimit({ ...base, request: req('203.0.113.11'), userId: 'user-a' });
  await enforceAtomicRateLimit({ ...base, request: req('203.0.113.10'), userId: 'user-b' });
  assert.equal(db.rows.size, 3);
+});
+
+
+test('counter stops growing after limit+1 during sustained abusive traffic', async () => {
+ const db = new FakeD1();
+ const options = { db, request: req(), bucket: 'abuse', limit: 2, nowSeconds: 500 };
+ const results = await Promise.all(Array.from({ length: 100 }, () => enforceAtomicRateLimit(options)));
+ assert.equal(results.filter(r => r.ok).length, 2);
+ assert.equal([...db.rows.values()][0], 3, 'counter should remain capped at limit+1');
 });
