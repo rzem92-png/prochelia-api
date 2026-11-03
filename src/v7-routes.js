@@ -13,6 +13,36 @@ export async function handleV7Route(
   path
 ) {
 
+  // V7 helper routes are reachable before the main authenticated route layer.
+  // They must never be used as authoritative permission/payment/QR/audit checks.
+  // Fail closed until these endpoints are wired to server-side session + RBAC.
+  const protectedHelperPaths = new Set([
+    "/api/v7/check/permissions",
+    "/api/v7/check/qr",
+    "/api/v7/check/payment",
+    "/api/v7/check/pre-mission",
+    "/api/v7/security/idempotency",
+    "/api/v7/security/audit"
+  ]);
+
+  if (protectedHelperPaths.has(path)) {
+    return Response.json(
+      {
+        ok: false,
+        error: "AUTHENTICATED_SERVER_VALIDATION_REQUIRED",
+        message: "Cette route de contrôle ne peut pas servir de preuve d'autorisation. Validation serveur authentifiée requise.",
+        version: procheliaV7.version
+      },
+      {
+        status: 403,
+        headers: {
+          "cache-control": "no-store",
+          "x-content-type-options": "nosniff"
+        }
+      }
+    );
+  }
+
   try {
 
     const method =
