@@ -48,7 +48,7 @@ function request({ authorization = `Bearer ${TOKEN}`, body = {
 }
 
 test("bootstrap fails closed when token is not configured", async () => {
-  const { env } = bootstrapEnv({ token: undefined });
+  const { env } = bootstrapEnv({ token: null });
   const response = await worker.fetch(request(), env);
   assert.equal(response.status, 503);
   assert.equal((await response.json()).error, "BOOTSTRAP_NOT_CONFIGURED");
