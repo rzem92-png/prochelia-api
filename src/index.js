@@ -1933,6 +1933,22 @@ async function pricingQuote(request, env) {
     discountCents:0,regulatedMaxCents:regulatedMax,intervenantFloorCents:intervenantFloor,
     pspPercent,pspFixedCents:pspFixed,softwareCostCents:software,targetMarginPercent:targetMargin
   });
+  // Guard the persisted quote against unsafe integer-cent arithmetic.
+  // A valid catalog integer can still overflow after phase/urgency/time multipliers.
+  const computedCents=[
+    strategic.service_price_cents,
+    strategic.client_price_cents,
+    strategic.intervenant_amount_cents,
+    strategic.commission_cents,
+    strategic.psp_cost_cents,
+    strategic.software_cost_cents,
+    strategic.estimated_margin_cents,
+    strategic.travel?.total_cost_cents,
+    strategic.travel?.real_cost_cents_per_km
+  ];
+  if(computedCents.some(value=>!Number.isSafeInteger(value))) {
+    return json({ok:false,error:'QUOTE_ARITHMETIC_OVERFLOW',version:VERSION},409);
+  }
   const quote={
     phase,clientType,serviceCode,distance,duration,scheduled_local_date:calendar.localDate,
     client_price_cents:strategic.client_price_cents,
