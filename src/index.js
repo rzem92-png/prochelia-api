@@ -3495,8 +3495,20 @@ async function stripeWebhook(request, env) {
       const sessionMatches=!isCheckout || !tx.provider_payment_id || String(tx.provider_payment_id)===sessionId;
       const amountMatches=amount<0 || (disputeEvent.has(event.type) ? currency===String(tx.currency||'EUR').toLowerCase() : (amount===Number(tx.gross_cents) && currency===String(tx.currency||'EUR').toLowerCase()));
       if(!sessionMatches || !amountMatches) {
-        await paymentAudit(env,'STRIPE_WEBHOOK_MISMATCH',{transaction_id:tx.id,mission_id:tx.mission_id,metadata:{event_id:event.id,event_type:event.type}},'BLOCKED');
-        result='MISMATCH_BLOCKED';
+        // Dispute notifications are financially consequential even when their
+        // amount/currency/session mapping is inconsistent: freeze the affected
+        // transaction and create a reconciliation case before acknowledging.
+        if(disputeEvent.has(event.type)) {
+          const disputeId=clean(obj?.id);
+          const disputedAmount=Number(obj?.amount??-1);
+          const validDisputeAmount=Number.isSafeInteger(disputedAmount)&&disputedAmount>0&&disputedAmount<=Number(tx.gross_cents||0);
+          await env.DB.prepare(`UPDATE payment_transactions SET status='held',updated_at=CURRENT_TIMESTAMP WHERE id=? AND status IN ('paid','held','refund_pending_reconciliation')`).bind(tx.id).run();
+          if(disputeId) await env.DB.prepare(`INSERT OR IGNORE INTO payment_reconciliation (id,provider,external_id,internal_transaction_id,amount_cents,currency,status) VALUES (?,?,?,?,?,?, 'unmatched')`)
+            .bind(crypto.randomUUID(),'stripe',disputeId,tx.id,validDisputeAmount?disputedAmount:0,String(obj?.currency||'eur').toUpperCase()).run();
+          await paymentAudit(env,'STRIPE_DISPUTE_MISMATCH_HELD',{transaction_id:tx.id,mission_id:tx.mission_id,user_id:tx.intervenant_id,metadata:{event_id:event.id,event_type:event.type,stripe_dispute_id:disputeId||null,amount_cents:disputedAmount,currency,reason:!validDisputeAmount?'dispute_amount_invalid_or_out_of_bounds':'dispute_mapping_mismatch'}},'BLOCKED');
+        }
+        await paymentAudit(env,'STRIPE_WEBHOOK_MISMATCH',{transaction_id:tx.id,mission_id:tx.mission_id,metadata:{event_id:event.id,event_type:event.type,amount,currency}},'BLOCKED');
+        result=disputeEvent.has(event.type)?'DISPUTE_MISMATCH_HELD_RECONCILIATION_REQUIRED':'MISMATCH_BLOCKED';
       } else if(paidEvent.has(event.type) && (!isCheckout || obj.payment_status==='paid')) {
         // Wallet creation is idempotent. The conditional payment transition
         // gates the wallet credit across different Stripe event IDs.
