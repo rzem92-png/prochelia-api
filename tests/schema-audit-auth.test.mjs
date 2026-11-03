@@ -46,13 +46,7 @@ for (const path of ["/api/core/schema", "/api/missions/schema"]) {
 }
 
 test("login rejects oversized JSON payloads before parsing", async () => {
-  const env = {
-    DB: {
-      prepare() {
-        return { bind() { return this; }, first: async () => null };
-      }
-    }
-  };
+  const env = loginTestEnv();
   const response = await worker.fetch(
     new Request(base + "/api/auth/login", {
       method: "POST",
@@ -66,13 +60,7 @@ test("login rejects oversized JSON payloads before parsing", async () => {
 });
 
 test("login returns generic credentials error for unknown account", async () => {
-  const env = {
-    DB: {
-      prepare() {
-        return { bind() { return this; }, first: async () => null };
-      }
-    }
-  };
+  const env = loginTestEnv();
   const response = await worker.fetch(
     new Request(base + "/api/auth/login", {
       method: "POST",
