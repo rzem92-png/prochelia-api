@@ -78,3 +78,25 @@ test("mission validation endpoint remains closed until ownership-bound server va
   assert.equal(response.status, 403);
   assert.equal((await response.json()).error, "AUTHENTICATED_VALIDATION_REQUIRED");
 });
+
+test("V7 JSON validators reject oversized request bodies before parsing", async () => {
+  const response = await worker.fetch(new Request("https://api.example/api/v7/check/email", {
+    method: "POST",
+    headers: { origin, "content-type": "application/json" },
+    body: JSON.stringify({ email: "x@example.com", padding: "x".repeat(20_000) })
+  }), {});
+
+  assert.equal(response.status, 413);
+  assert.equal((await response.json()).error, "TOO_LARGE");
+});
+
+test("V7 JSON validators return 400 for malformed JSON instead of an internal error", async () => {
+  const response = await worker.fetch(new Request("https://api.example/api/v7/check/email", {
+    method: "POST",
+    headers: { origin, "content-type": "application/json" },
+    body: "{not-json"
+  }), {});
+
+  assert.equal(response.status, 400);
+  assert.equal((await response.json()).error, "INVALID_JSON_BODY");
+});
