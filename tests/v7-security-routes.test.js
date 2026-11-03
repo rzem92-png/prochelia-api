@@ -69,3 +69,14 @@ test('V7 rejects oversized payloads before JSON parsing', async () => {
   assert.equal(data.error, 'PAYLOAD_TOO_LARGE');
   assert.equal(response.headers.get('cache-control'), 'no-store');
 });
+
+
+test('V7 rejects POST requests with non-JSON content type', async () => {
+  const response = await handleV7Route(new Request('https://preprod.example.test/api/v7/check/email', {
+    method: 'POST', headers: { 'content-type': 'text/plain' }, body: 'not json'
+  }), env, '/api/v7/check/email');
+  assert.equal(response.status, 415);
+  const data = await response.json();
+  assert.equal(data.error, 'JSON_CONTENT_TYPE_REQUIRED');
+  assert.equal(response.headers.get('cache-control'), 'no-store');
+});
