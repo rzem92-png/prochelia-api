@@ -141,7 +141,15 @@ function getCookie(request, name) {
     const idx = part.indexOf('=');
     if (idx < 0) continue;
     const key = part.slice(0, idx).trim();
-    if (key === name) return decodeURIComponent(part.slice(idx + 1).trim());
+    if (key !== name) continue;
+    const value = part.slice(idx + 1).trim();
+    try {
+      return decodeURIComponent(value);
+    } catch {
+      // Malformed client-controlled cookie must fail closed as absent,
+      // not throw and turn an authentication request into a Worker 500.
+      return null;
+    }
   }
   return null;
 }
