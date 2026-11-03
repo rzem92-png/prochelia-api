@@ -30,7 +30,11 @@ test("health endpoint reports healthy only after SELECT 1 succeeds", async () =>
   const response = await worker.fetch(new Request(url), env);
   assert.equal(response.status, 200);
   assert.equal(response.headers.get("cache-control"), "no-store");
-  assert.match(response.headers.get("content-type") || "", /application\/json/i);
+  assert.equal(response.headers.get("x-content-type-options"), "nosniff");
+  assert.equal(response.headers.get("x-frame-options"), "DENY");
+  assert.equal(response.headers.get("referrer-policy"), "no-referrer");
+  assert.match(response.headers.get("content-security-policy") || "", /frame-ancestors 'none'/);
+    assert.match(response.headers.get("content-type") || "", /application\/json/i);
   assert.equal(sqlSeen.trim(), "SELECT 1 AS ok");
   const body = await response.json();
   assert.equal(body.ok, true);
