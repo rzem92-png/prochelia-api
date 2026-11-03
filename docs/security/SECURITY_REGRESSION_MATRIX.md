@@ -19,3 +19,21 @@ Scope: automated static regression checks only. These checks do not constitute a
 - No production credentials, real user data, production endpoints, R2 writes, or D1 writes are permitted.
 - Run runtime security tests only against disposable local/test resources.
 - Never claim "no vulnerabilities" based on static checks alone.
+
+
+## Device-binding hardening — required before preproduction sign-off
+
+Current implementation derives `deviceHash` from the authenticated user ID and HTTP `User-Agent` / `sec-ch-ua` headers. These headers are client-controlled and spoofable. The current `trusted_devices` row is therefore not proof of possession of a trusted device; treat this as a security gap, not strong device authentication.
+
+Required remediation (not yet implemented; client compatibility and schema migration need review):
+
+- Issue a cryptographically random device credential only after an authenticated, verified-intervenant flow; use at least 256 bits of entropy.
+- Return the raw credential once, over HTTPS, and store only a server-side digest (never log or audit the raw credential).
+- Require the credential on both presence and code-verification requests; reject missing, malformed, revoked, expired, or wrong-user credentials.
+- Bind the mission presence record to the trusted-device row ID, not a spoofable browser fingerprint.
+- Add explicit revocation/rotation, bounded expiry, rate limits, and security audit events that omit secrets.
+- Do not silently enroll a device on the presence endpoint. Device enrollment must be a separately authorized flow.
+- Add runtime tests for token theft/replay, cross-user use, revoked/expired token, simultaneous requests, and mission ownership.
+- Maintain fail-closed behavior until the frontend securely stores and transmits the token and the database schema is reviewed/migrated in preproduction.
+
+**Release gate:** device binding based on browser headers must not be represented as anti-hacking/device authentication. This item blocks a claim of security sign-off for mission presence/code workflows.
