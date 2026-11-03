@@ -3441,11 +3441,23 @@ async function stripeWebhook(request, env) {
     .bind(String(event.id)).run();
   if(!claim.meta?.changes) return json({ok:true,version:VERSION,processing:true,event_id:event.id,retry_after_seconds:300},202);
   const obj=event.data.object;
-  const txId=clean(obj?.metadata?.prochelia_transaction_id)||clean(obj?.client_reference_id);
+  // Only trusted server-created metadata maps a PSP event to an internal transaction.
+  // client_reference_id is intentionally not used: Checkout currently sets it to the client user ID.
+  const txId=clean(obj?.metadata?.prochelia_transaction_id);
   const paidEvent=new Set(['checkout.session.completed','checkout.session.async_payment_succeeded','payment_intent.succeeded']);
   const failedEvent=new Set(['checkout.session.async_payment_failed','payment_intent.payment_failed']);
   const refundEvent=new Set(['charge.refunded']);
   const disputeEvent=new Set(['charge.dispute.created','charge.dispute.closed']);
+  const financialEvent=paidEvent.has(event.type)||failedEvent.has(event.type)||refundEvent.has(event.type)||disputeEvent.has(event.type);
+  if(financialEvent&&!txId){
+    const externalId=clean(obj?.id);
+    if(externalId){
+      await env.DB.prepare(`INSERT OR IGNORE INTO payment_reconciliation (id,provider,external_id,internal_transaction_id,amount_cents,currency,status) VALUES (?,?,?,?,?,?, 'unmatched')`)
+        .bind(crypto.randomUUID(),'stripe',externalId,null,Math.max(0,Number(obj?.amount_total??obj?.amount_received??obj?.amount_refunded??obj?.amount??0)),String(obj?.currency||'eur').toUpperCase()).run();
+      await paymentAudit(env,'STRIPE_EVENT_UNMATCHED',{metadata:{event_id:event.id,event_type:event.type,external_id:externalId,reason:'trusted_transaction_metadata_missing'}},'REVIEW_REQUIRED');
+    }
+    result='FINANCIAL_EVENT_UNMATCHED_RECONCILIATION_REQUIRED';
+  }
   let result='IGNORED';
   if((disputeEvent.has(event.type) || event.type==='charge.dispute.closed') && !txId) {
     const disputeId=clean(obj?.id);
