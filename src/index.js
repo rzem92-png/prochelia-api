@@ -365,7 +365,16 @@ async function bootstrap(request, env) {
   }
 
   const supplied = request.headers.get('authorization') || '';
-  if (supplied !== `Bearer ${env.BOOTSTRAP_TOKEN}`) {
+  const expectedAuthorization = `Bearer ${env.BOOTSTRAP_TOKEN}`;
+  // Constant-time byte comparison for the bootstrap bearer credential.
+  const suppliedBytes = new TextEncoder().encode(supplied);
+  const expectedBytes = new TextEncoder().encode(expectedAuthorization);
+  let authorizationDiff = suppliedBytes.length ^ expectedBytes.length;
+  const compareLength = Math.max(suppliedBytes.length, expectedBytes.length);
+  for (let i = 0; i < compareLength; i++) {
+    authorizationDiff |= (suppliedBytes[i] || 0) ^ (expectedBytes[i] || 0);
+  }
+  if (authorizationDiff !== 0) {
     return json({ ok: false, error: 'UNAUTHORIZED', version: VERSION }, 401);
   }
 
