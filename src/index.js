@@ -3382,7 +3382,8 @@ async function productionSubjectHash(request, route){
 }
 
 async function productionRateLimit(request,env){
-  if(!isMutatingMethod(request.method)) return {ok:true};
+  const method=request.method.toUpperCase();
+  const mutating=isMutatingMethod(method);
   const path=new URL(request.url).pathname;
   const sensitive =
     path.startsWith('/api/auth/') ||
@@ -3391,8 +3392,13 @@ async function productionRateLimit(request,env){
     path.startsWith('/api/support/') ||
     path==='/api/complaints' ||
     path==='/api/jobs/process' ||
-    path==='/api/system/backup/run';
-  const limit=sensitive ? 20 : 120;
+    path==='/api/system/backup/run' ||
+    path==='/api/system/final-audit' ||
+    path==='/api/system/production-check';
+  // Sensitive reads are throttled too (enumeration/credential probing).
+  // Keep ordinary GETs outside this D1 limiter to avoid unnecessary write load.
+  if(!mutating && !(sensitive && ['GET','HEAD'].includes(method))) return {ok:true};
+  const limit=sensitive ? (mutating ? 20 : 60) : 120;
   const windowSeconds=60;
   const bucket=`${sensitive?'SENSITIVE':'GENERAL'}:${path}`;
   const subject=await productionSubjectHash(request,path);
