@@ -22,3 +22,12 @@ test('payout status transition is guarded against duplicate terminal webhook pro
 test('wallet payout movements cannot decrement reserved funds below requested amount',()=>{
   assert.match(webhook,/reserved_cents>=\?/);
 });
+
+const finalizerStart=source.indexOf('async function finalizeMissionPayment');
+const finalizerEnd=source.indexOf('async function payoutRequest',finalizerStart);
+const finalizer=source.slice(finalizerStart,finalizerEnd);
+
+test('admin cannot manually forge paid, failed, or refunded payment outcomes',()=>{
+  assert.match(finalizer,/if\(outcome!=='held'\) return json\(\{ok:false,error:'PSP_WEBHOOK_REQUIRED',version:VERSION\},409\)/);
+  assert.match(finalizer,/PSP-confirmed financial outcomes/);
+});
