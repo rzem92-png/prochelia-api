@@ -1006,7 +1006,7 @@ async function verifyStripeWebhookSignature(request,env,rawBody) {
   let timestamp=null; const signatures=[];
   for(const part of header.split(',')){
     const [key,value]=part.trim().split('=',2);
-    if(key==='t'&&/^\\d{1,12}$/.test(value||'')) timestamp=Number(value);
+    if(key==='t'&&/^\d{1,12}$/.test(value||'')) timestamp=Number(value);
     if(key==='v1'&&/^[a-f0-9]{64}$/i.test(value||'')) signatures.push(value.toLowerCase());
   }
   if(!Number.isSafeInteger(timestamp)||!signatures.length) return false;
