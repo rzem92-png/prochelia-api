@@ -93,3 +93,24 @@ test('fails closed when trusted Cloudflare client IP is missing', async () => {
   assert.equal((await result.response.json()).error, 'RATE_LIMIT_CLIENT_ID_UNAVAILABLE');
   assert.equal(db.rows.size, 0);
 });
+
+
+test('rejects oversized bucket and malformed identity configuration', async () => {
+  const db = new FakeD1();
+  const base = { db, request: req(), limit: 3, nowSeconds: 100 };
+  const cases = [
+    { bucket: 'x'.repeat(129) },
+    { bucket: 'login', userId: 123 },
+    { bucket: 'login', sessionHash: '' },
+    { bucket: 'login', nowSeconds: Number.MAX_SAFE_INTEGER + 1 },
+    { bucket: 'login', windowSeconds: 86401 },
+    { bucket: 'login', limit: 1000001 }
+  ];
+  for (const overrides of cases) {
+    const result = await enforceAtomicRateLimit({ ...base, bucket: 'login', ...overrides });
+    assert.equal(result.ok, false);
+    assert.equal(result.response.status, 503);
+    assert.equal((await result.response.json()).error, 'RATE_LIMIT_CONFIG_INVALID');
+  }
+  assert.equal(db.rows.size, 0);
+});
