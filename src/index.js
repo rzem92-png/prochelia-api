@@ -1037,12 +1037,13 @@ async function paymentAdminResolve(request, env) {
   const body=await readJson(request), disputeId=clean(body?.dispute_id), resolution=clean(body?.resolution);
   if(!disputeId||!['release','partial_refund','full_refund','cancel'].includes(resolution)) return json({ok:false,error:'INVALID_DISPUTE_RESOLUTION',version:VERSION},400);
   const d=await env.DB.prepare('SELECT * FROM payment_disputes WHERE id=? LIMIT 1').bind(disputeId).first();
-  if(!d||d.status==='resolved') return json({ok:false,error:'DISPUTE_NOT_FOUND_OR_ALREADY_RESOLVED',version:VERSION},409);
-  await env.DB.prepare(`UPDATE payment_disputes SET status='resolved',resolution=?,resolved_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(resolution,disputeId).run();
-  if(d.transaction_id){
-    const newStatus=resolution==='release'?'paid':resolution==='full_refund'?'refunded':resolution==='cancel'?'canceled':'held';
-    await env.DB.prepare('UPDATE payment_transactions SET status=?,updated_at=CURRENT_TIMESTAMP WHERE id=?').bind(newStatus,d.transaction_id).run();
-  }
+  if(!d||d.status!=='open') return json({ok:false,error:'DISPUTE_NOT_FOUND_OR_ALREADY_RESOLVED',version:VERSION},409);
+  const newStatus=resolution==='release'?'paid':resolution==='full_refund'?'refunded':resolution==='cancel'?'canceled':'held';
+  const statements=[env.DB.prepare(`UPDATE payment_disputes SET status='resolved',resolution=?,resolved_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='open'`).bind(resolution,disputeId)];
+  if(d.transaction_id) statements.push(env.DB.prepare(`UPDATE payment_transactions SET status=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='held' AND changes()=1`).bind(newStatus,d.transaction_id));
+  const result=await env.DB.batch(statements);
+  if(result?.[0]?.meta?.changes!==1 || (d.transaction_id && result?.[1]?.meta?.changes!==1))
+    return json({ok:false,error:'DISPUTE_RESOLUTION_CONFLICT',version:VERSION},409);
   await paymentAudit(env,'PAYMENT_DISPUTE_RESOLVED',{transaction_id:d.transaction_id,mission_id:d.mission_id,user_id:auth.user.id,metadata:{dispute_id:disputeId,resolution}},'OK');
   return json({ok:true,version:VERSION,dispute_id:disputeId,status:'resolved',resolution},200);
 }
