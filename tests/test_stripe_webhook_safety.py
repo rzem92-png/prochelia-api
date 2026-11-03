@@ -114,5 +114,26 @@ class StripeWebhookSafetySourceTests(unittest.TestCase):
         self.assertIn("const raw=await readBoundedText(request,MAX_JSON_BODY_BYTES)", SOURCE)
         self.assertIn("WEBHOOK_BODY_TOO_LARGE_OR_INVALID", SOURCE)
 
+    def test_session_cookie_has_secure_browser_flags(self):
+        self.assertIn("; HttpOnly; Secure; SameSite=Lax", SOURCE)
+        self.assertIn("function sessionCookie(token", SOURCE)
+
+    def test_session_tokens_are_random_and_only_hash_persisted(self):
+        self.assertIn("const token = base64url(randomBytes(32))", SOURCE)
+        self.assertIn("const tokenHash = await sha256Base64url(token)", SOURCE)
+        self.assertIn("token_hash", SOURCE)
+        self.assertIn("WHERE s.token_hash = ?", SOURCE)
+        self.assertNotIn("INSERT INTO sessions (id, user_id, token, expires_at)", SOURCE)
+
+    def test_session_auth_checks_expiration_and_active_account_each_request(self):
+        self.assertIn("s.expires_at > CURRENT_TIMESTAMP", SOURCE)
+        self.assertIn("if (row.status !== 'active') return null", SOURCE)
+        self.assertIn("JOIN users u ON u.id = s.user_id", SOURCE)
+
+    def test_password_hashing_is_pbkdf2_and_iteration_bounded(self):
+        self.assertIn("PBKDF2_ITERATIONS = 100000", SOURCE)
+        self.assertIn("iterations < 100000 || iterations > 1000000", SOURCE)
+        self.assertIn("hash: 'SHA-256'", SOURCE)
+
 if __name__ == "__main__":
     unittest.main()
