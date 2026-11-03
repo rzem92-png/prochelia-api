@@ -34,3 +34,14 @@ test('V7 audit and idempotency disabled responses are non-cacheable', async () =
     assert.equal(response.headers.get('cache-control'), 'no-store');
   }
 });
+
+
+test('V7 permissions endpoint never trusts caller-supplied admin role', async () => {
+  const response = await handleV7Route(req('/api/v7/check/permissions', {
+    role: 'GERANTE', permission: 'payments.refund', permissions: { 'payments.refund': true }
+  }), env, '/api/v7/check/permissions');
+  assert.equal(response.status, 403);
+  const data = await response.json();
+  assert.equal(data.error, 'AUTHORIZATION_CONTEXT_REQUIRED');
+  assert.equal(response.headers.get('cache-control'), 'no-store');
+});
