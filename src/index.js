@@ -3763,7 +3763,9 @@ async function ensureNationalContinuitySchema(env){
 
 function b64(u8){let s='';for(let i=0;i<u8.length;i+=0x8000)s+=String.fromCharCode(...u8.subarray(i,i+0x8000));return btoa(s)}
 async function backupEncrypt(text,secret){
-  if(!secret) throw new Error('BACKUP_ENCRYPTION_KEY_REQUIRED');
+  if(typeof secret!=='string'||!secret) throw new Error('BACKUP_ENCRYPTION_KEY_REQUIRED');
+  // Fail closed on short configuration secrets; use a random secret of at least 32 UTF-8 bytes.
+  if(new TextEncoder().encode(secret).byteLength<32) throw new Error('BACKUP_ENCRYPTION_KEY_TOO_WEAK');
   const h=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(secret));
   const key=await crypto.subtle.importKey('raw',h,{name:'AES-GCM'},false,['encrypt']);
   const iv=crypto.getRandomValues(new Uint8Array(12));
