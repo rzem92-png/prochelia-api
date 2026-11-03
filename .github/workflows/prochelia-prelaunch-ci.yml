@@ -8,6 +8,7 @@ on:
     branches:
       - main
       - prelaunch
+      - prelaunch/v14.5.7-consolidation-audit
 
 permissions:
   contents: read
