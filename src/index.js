@@ -3453,6 +3453,7 @@ async function stripeWebhook(request, env) {
   const refundEvent=new Set(['charge.refunded']);
   const disputeEvent=new Set(['charge.dispute.created','charge.dispute.closed']);
   const financialEvent=paidEvent.has(event.type)||failedEvent.has(event.type)||refundEvent.has(event.type)||disputeEvent.has(event.type);
+  let result='IGNORED';
   if(financialEvent&&!txId){
     const externalId=clean(obj?.id);
     if(externalId){
@@ -3462,7 +3463,6 @@ async function stripeWebhook(request, env) {
     }
     result='FINANCIAL_EVENT_UNMATCHED_RECONCILIATION_REQUIRED';
   }
-  let result='IGNORED';
   if((disputeEvent.has(event.type) || event.type==='charge.dispute.closed') && !txId) {
     const disputeId=clean(obj?.id);
     if(disputeId) {
