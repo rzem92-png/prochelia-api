@@ -1,4 +1,4 @@
-name: PROCHÉLIA security limiter unit tests
+name: PROCHÉLIA security and regression tests
 
 on:
   push:
@@ -13,9 +13,9 @@ permissions:
   contents: read
 
 jobs:
-  rate-limit-unit-tests:
+  security-regression-tests:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
     steps:
       - name: Checkout pinned action
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -26,5 +26,5 @@ jobs:
         with:
           node-version: '22'
           package-manager-cache: false
-      - name: Run focused unit tests
-        run: node --test tests/security-rate-limit-atomic-v1.test.js tests/v7-security-routes.test.js
+      - name: Run complete Node test suite
+        run: node --test tests/*.test.js
