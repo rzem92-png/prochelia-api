@@ -2674,7 +2674,10 @@ async function processBackgroundJobs(request,env) {
   const results=[];
   for(const job of rows.results||[]) {
     try {
-      await env.DB.prepare(`UPDATE background_jobs SET status='RUNNING',locked_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='PENDING'`).bind(job.id).run();
+      // Claim the job atomically. Concurrent workers may have selected the same
+      // PENDING row; only the worker that changed exactly one row may execute it.
+      const claim=await env.DB.prepare(`UPDATE background_jobs SET status='RUNNING',locked_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='PENDING'`).bind(job.id).run();
+      if(Number(claim?.meta?.changes||0)!==1) continue;
       let result={performed:false,reason:'JOB_TYPE_NOT_IMPLEMENTED'};
       const payload=JSON.parse(job.payload_json||'{}');
       if(job.job_type==='PROCESS_ACTION_OUTBOX') result={performed:true,delegation:'Use /api/ops/outbox/process'};

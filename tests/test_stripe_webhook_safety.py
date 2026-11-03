@@ -94,6 +94,9 @@ class StripeWebhookSafetySourceTests(unittest.TestCase):
         self.assertIn("external_id LIKE 'dp_%'", SOURCE)
         self.assertIn("status='unmatched'", SOURCE)
 
+    def test_background_job_claim_is_atomic_and_skips_lost_races(self):
+        self.assertIn("const claim=await env.DB.prepare(`UPDATE background_jobs SET status='RUNNING'", SOURCE)
+        self.assertIn("if(Number(claim?.meta?.changes||0)!==1) continue;", SOURCE)
 
 if __name__ == "__main__":
     unittest.main()
