@@ -3501,13 +3501,22 @@ async function stripeWebhook(request, env) {
         if(['pending','processing','created'].includes(String(tx.status||'').toLowerCase())) await env.DB.prepare(`UPDATE payment_transactions SET status='failed',updated_at=CURRENT_TIMESTAMP WHERE id=? AND status IN ('pending','processing','created')`).bind(tx.id).run();
         result='PAYMENT_FAILED';
       } else if(refundEvent.has(event.type)) {
-        // Stripe confirms the external refund, but the internal wallet ledger
-        // has no reversal entry yet. Quarantine instead of marking reconciled.
-        // This avoids a false "refunded" state with funds still spendable.
-        const refundedCents=Math.max(0,Number(obj?.amount_refunded ?? amount));
-        await env.DB.prepare(`UPDATE payment_transactions SET status='refund_pending_reconciliation',refund_cents=MAX(refund_cents,?),updated_at=CURRENT_TIMESTAMP WHERE id=? AND status IN ('paid','held','refund_pending_reconciliation')`).bind(refundedCents,tx.id).run();
-        await paymentAudit(env,'STRIPE_REFUND_REQUIRES_RECONCILIATION',{transaction_id:tx.id,mission_id:tx.mission_id,user_id:tx.intervenant_id,metadata:{event_id:event.id,refund_cents:refundedCents,reason:'wallet_ledger_reversal_not_implemented'}},'REVIEW_REQUIRED');
-        result='REFUND_PENDING_RECONCILIATION';
+        // Validate the PSP refund amount against the transaction before changing
+        // local financial state. Invalid/over-refunds are quarantined as held.
+        const refundedRaw=Number(obj?.amount_refunded ?? amount);
+        const refundedCents=Number.isSafeInteger(refundedRaw)?refundedRaw:-1;
+        if(refundedCents<=0 || refundedCents>Number(tx.gross_cents||0)) {
+          await env.DB.prepare(`UPDATE payment_transactions SET status='held',updated_at=CURRENT_TIMESTAMP WHERE id=? AND status IN ('paid','held','refund_pending_reconciliation')`).bind(tx.id).run();
+          await paymentAudit(env,'STRIPE_REFUND_AMOUNT_INVALID',{transaction_id:tx.id,mission_id:tx.mission_id,user_id:tx.intervenant_id,metadata:{event_id:event.id,refund_cents:refundedCents,gross_cents:Number(tx.gross_cents||0),reason:'refund_amount_out_of_bounds'}},'BLOCKED');
+          result='REFUND_AMOUNT_INVALID_HELD';
+        } else {
+          // Stripe confirms the external refund, but internal wallet ledger
+          // reversal is not yet implemented. Quarantine instead of claiming
+          // reconciliation or allowing provider payout.
+          await env.DB.prepare(`UPDATE payment_transactions SET status='refund_pending_reconciliation',refund_cents=MAX(refund_cents,?),updated_at=CURRENT_TIMESTAMP WHERE id=? AND status IN ('paid','held','refund_pending_reconciliation')`).bind(refundedCents,tx.id).run();
+          await paymentAudit(env,'STRIPE_REFUND_REQUIRES_RECONCILIATION',{transaction_id:tx.id,mission_id:tx.mission_id,user_id:tx.intervenant_id,metadata:{event_id:event.id,refund_cents:refundedCents,reason:'wallet_ledger_reversal_not_implemented'}},'REVIEW_REQUIRED');
+          result='REFUND_PENDING_RECONCILIATION';
+        }
       } else if(event.type==='charge.dispute.closed') {
         // Stripe's outcome closes the PSP case, but is not by itself proof that
         // the internal wallet/payout ledger has been reconciled. Keep the payout
