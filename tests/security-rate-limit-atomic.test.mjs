@@ -15,6 +15,8 @@ const limiter = source.slice(limiterStart, limiterEnd);
 test('rate-limit identity uses Cloudflare edge IP and never trusts X-Forwarded-For', () => {
   assert.match(subjectHash, /CF-Connecting-IP/);
   assert.doesNotMatch(subjectHash, /X-Forwarded-For/i);
+  assert.match(subjectHash, /TRUSTED_CLIENT_IP_REQUIRED/);
+  assert.doesNotMatch(subjectHash, /\|unknown/);
 });
 
 test('counter uses atomic D1 UPSERT with RETURNING instead of read-modify-write', () => {
