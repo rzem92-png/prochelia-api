@@ -10,6 +10,15 @@ SOURCE = (Path(__file__).resolve().parents[1] / "src" / "index.js").read_text()
 
 
 class StripeWebhookSafetySourceTests(unittest.TestCase):
+    def test_webhook_signature_comparison_is_timing_safe_and_bounded(self):
+        start = SOURCE.index("function timingSafeTextEqual")
+        end = SOURCE.index("async function paymentWebhook", start)
+        block = SOURCE[start:end]
+        self.assertIn("left.length^right.length", block)
+        self.assertIn("diff|=", block)
+        self.assertIn("signature.length>256", block)
+        self.assertIn("timingSafeTextEqual(supplied,expected)", block)
+
     def test_duplicate_webhook_event_id_with_changed_payload_is_conflict(self):
         start = SOURCE.index("const inserted=await env.DB.prepare(")
         end = SOURCE.index("const txId=clean(event?.data?.transaction_id)", start)
