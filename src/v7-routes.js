@@ -24,7 +24,7 @@ export async function handleV7Route(
       const maxBodyBytes = 32 * 1024;
       const declaredLengthHeader = request.headers.get("content-length");
       if (declaredLengthHeader !== null) {
-        if (!/^\\d+$/.test(declaredLengthHeader) || Number(declaredLengthHeader) > maxBodyBytes) {
+        if (!/^\d+$/.test(declaredLengthHeader) || Number(declaredLengthHeader) > maxBodyBytes) {
           return Response.json(
             { ok: false, version: procheliaV7.version, error: "PAYLOAD_TOO_LARGE" },
             { status: 413, headers: { "cache-control": "no-store" } }
