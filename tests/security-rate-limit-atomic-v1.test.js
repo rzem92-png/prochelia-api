@@ -102,7 +102,7 @@ test('rejects unsafe timestamp arithmetic before database access', async () => {
 
 test('rejects malformed or oversized edge client identity', async () => {
   const db = new FakeD1();
-  for (const ip of [' 203.0.113.1', '203.0.113.1 ', 'x'.repeat(65)]) {
+  for (const ip of [' 203.0.113.1', '203.0.113.1 ', 'x'.repeat(65), '203.0.113.1,198.51.100.2', 'not-an-ip', '203.0.113.1\\n']) {
     const result = await enforceAtomicRateLimit({
       db, request: req(ip), bucket: 'edge-ip', limit: 2, nowSeconds: 100
     });
