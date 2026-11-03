@@ -875,6 +875,9 @@ async function finalizeMissionPayment(request, env) {
   await ensurePaymentSchema(env);
   const body=await readJson(request), txId=clean(body?.transaction_id), outcome=clean(body?.outcome);
   if(!txId||!['paid','failed','refunded','held'].includes(outcome)) return json({ok:false,error:'INVALID_PAYMENT_FINALIZATION',version:VERSION},400);
+  // Administrative requests must never forge PSP-confirmed financial outcomes.
+  // Only a hold may be applied manually; paid/failed/refunded are PSP webhook states.
+  if(outcome!=='held') return json({ok:false,error:'PSP_WEBHOOK_REQUIRED',version:VERSION},409);
   const tx=await env.DB.prepare('SELECT * FROM payment_transactions WHERE id=? LIMIT 1').bind(txId).first();
   if(!tx) return json({ok:false,error:'TRANSACTION_NOT_FOUND',version:VERSION},404);
   if(['paid','refunded','failed'].includes(tx.status) && tx.status!==outcome) return json({ok:false,error:'PAYMENT_STATE_CONFLICT',version:VERSION,status:tx.status},409);
