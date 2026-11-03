@@ -1328,15 +1328,23 @@ async function createOperationalCase(request, env) {
   const priority=CASE_PRIORITIES[impact]||10;
   const rec=await copilotRecommend(env,{caseType,impact,phase,context:body.context||{}});
   const id=crypto.randomUUID();
-  const requiresManager=rec.mode==='MANAGER_APPROVAL' ? 1 : 0;
-  const status=rec.action==='AUTO_RESOLVE' ? 'AUTO_PENDING' : 'OPEN';
+  // Fail closed: Copilot automation is permitted only in TEST. PREPRODUCTION
+  // and PRODUCTION require explicit manager approval for every case.
+  const autoAllowed = phase === 'TEST' && rec.action === 'AUTO_RESOLVE' && impact !== 'HIGH' && impact !== 'CRITICAL';
+  const requiresManager = autoAllowed ? 0 : 1;
+  const status = autoAllowed ? 'AUTO_PENDING' : 'OPEN';
+  if (!autoAllowed && rec.action === 'AUTO_RESOLVE') {
+    rec.mode = 'MANAGER_APPROVAL';
+    rec.solution = { ...(rec.solution || {}), automatic: false, gated_by_phase: phase };
+  }
   await env.DB.prepare(`INSERT INTO operational_cases(id,case_type,source,phase,priority,status,auto_mode,client_id,company_id,intervenant_id,mission_id,impact_level,description,context_json,proposed_solution_json,requires_manager) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
     .bind(id,caseType,'API',phase,priority,status,rec.mode,clean(body.client_id)||null,clean(body.company_id)||null,clean(body.intervenant_id)||null,clean(body.mission_id)||null,impact,clean(body.description)||null,JSON.stringify(body.context||{}),JSON.stringify(rec),requiresManager).run();
   await env.DB.prepare(`INSERT INTO copilot_log(id,case_id,action_type,recommendation,confidence,mode) VALUES(?,?,?,?,?,?)`)
     .bind(crypto.randomUUID(),id,rec.action,JSON.stringify(rec.solution),rec.confidence,rec.mode).run();
   await journal(env,'copilot',null,'CASE_CREATED','operational_case',id,'OK',{caseType,impact});
-  if(rec.action==='AUTO_RESOLVE') await executeOperationalCase(env,id,null,true);
-  return json({ok:true,version:VERSION,case_id:id,recommendation:rec,status:rec.action==='AUTO_RESOLVE'?'AUTO_EXECUTED':'WAITING_MANAGER'},201);
+  let autoResult = null;
+  if (autoAllowed) autoResult = await executeOperationalCase(env,id,null,true);
+  return json({ok:true,version:VERSION,case_id:id,recommendation:rec,status:autoAllowed ? (autoResult?.ok ? 'AUTO_EXECUTED' : 'AUTO_BLOCKED') : 'WAITING_MANAGER',automation_allowed:autoAllowed,phase},201);
 }
 
 
@@ -1416,38 +1424,64 @@ async function executeCaseBusinessAction(env, c, rec, actorId=null, automatic=fa
 async function processActionOutbox(request, env) {
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
   await ensureOperationalSchema(env);
-  const rows=await env.DB.prepare(`SELECT * FROM action_outbox WHERE status='PENDING' ORDER BY created_at ASC LIMIT 50`).all();
+  const rows=await env.DB.prepare(`SELECT id,action_type FROM action_outbox WHERE status='PENDING' ORDER BY created_at ASC LIMIT 50`).all();
   const processed=[];
   for(const row of (rows.results||[])) {
-    const payload=row.payload_json?JSON.parse(row.payload_json):{};
-    // Provider-dependent actions stay queued until the corresponding adapter/secret is configured.
-    const external = ['PSP_REFUND_REVIEW','NOTIFY_CLIENT','SEARCH_REPLACEMENT','RESCHEDULE_MISSION','ASSIGN_REPLACEMENT'].includes(String(row.action_type));
-    if(external) {
-      await env.DB.prepare(`UPDATE action_outbox SET status='WAITING_PROVIDER',last_error=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind('External adapter/provider required for final execution.',row.id).run();
-      processed.push({id:row.id,status:'WAITING_PROVIDER',action_type:row.action_type});
+    // Atomic claim (compare-and-set): only one worker can move PENDING to PROCESSING.
+    const claim=await env.DB.prepare(`UPDATE action_outbox SET status='PROCESSING',attempts=COALESCE(attempts,0)+1,updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='PENDING'`).bind(row.id).run();
+    if(Number(claim?.meta?.changes||0)!==1) {
+      processed.push({id:row.id,status:'SKIPPED_ALREADY_CLAIMED'});
       continue;
     }
-    await env.DB.prepare(`UPDATE action_outbox SET status='COMPLETED',processed_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(row.id).run();
-    processed.push({id:row.id,status:'COMPLETED',action_type:row.action_type,payload});
+    try {
+      // Provider-dependent actions are held, never marked as completed without a real adapter.
+      const external = ['PSP_REFUND_REVIEW','NOTIFY_CLIENT','SEARCH_REPLACEMENT','RESCHEDULE_MISSION','ASSIGN_REPLACEMENT'].includes(String(row.action_type));
+      if(external) {
+        await env.DB.prepare(`UPDATE action_outbox SET status='WAITING_PROVIDER',last_error=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='PROCESSING'`).bind('External adapter/provider required for final execution.',row.id).run();
+        processed.push({id:row.id,status:'WAITING_PROVIDER',action_type:row.action_type});
+        continue;
+      }
+      await env.DB.prepare(`UPDATE action_outbox SET status='COMPLETED',processed_at=CURRENT_TIMESTAMP,last_error=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='PROCESSING'`).bind(row.id).run();
+      processed.push({id:row.id,status:'COMPLETED',action_type:row.action_type});
+    } catch (err) {
+      await env.DB.prepare(`UPDATE action_outbox SET status='PENDING',last_error=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='PROCESSING'`).bind('Processing failed; safe retry required.',row.id).run();
+      processed.push({id:row.id,status:'RETRY_PENDING',action_type:row.action_type});
+    }
   }
   await journal(env,'gerante',gate.auth.user.id,'ACTION_OUTBOX_PROCESSED','system',null,'OK',{count:processed.length});
   return json({ok:true,version:VERSION,processed},200);
 }
 
 async function executeOperationalCase(env, caseId, approverId=null, automatic=false) {
+  const phase=String(await getSetting(env,'project_phase','TEST')).toUpperCase();
+  if(automatic && phase!=='TEST') return {ok:false,error:'AUTOMATION_BLOCKED_BY_PHASE',phase};
   const c=await env.DB.prepare('SELECT * FROM operational_cases WHERE id=? LIMIT 1').bind(caseId).first();
   if(!c)return {ok:false,error:'CASE_NOT_FOUND'};
   if(c.status==='RESOLVED')return {ok:true,already:true};
+  if(c.status==='EXECUTING')return {ok:false,error:'CASE_ALREADY_CLAIMED'};
   const rec=c.proposed_solution_json?JSON.parse(c.proposed_solution_json):{};
+  if(automatic && (rec.action!=='AUTO_RESOLVE' || ['HIGH','CRITICAL'].includes(String(c.impact_level||'').toUpperCase()) || c.requires_manager)) {
+    return {ok:false,error:'AUTOMATION_POLICY_DENIED'};
+  }
   if(c.requires_manager && !automatic && !approverId) return {ok:false,error:'MANAGER_APPROVAL_REQUIRED'};
-  const businessResults = await executeCaseBusinessAction(env,c,rec,approverId,automatic);
-  const resolution={executed:true,automatic,action:rec.action||'RESOLVE',steps:rec.solution?.steps||[],business_results:businessResults,executed_at:new Date().toISOString()};
-  await env.DB.prepare(`INSERT INTO case_actions(id,case_id,action_code,mode,status,payload_json,result_json,completed_at) VALUES(?,?,?,?,?,?,?,CURRENT_TIMESTAMP)`)
-    .bind(crypto.randomUUID(),caseId,rec.action||'RESOLVE',automatic?'AUTO':'MANAGER','COMPLETED',JSON.stringify(rec),JSON.stringify(resolution)).run();
-  await env.DB.prepare(`UPDATE operational_cases SET status='RESOLVED',resolution_json=?,requires_manager=0,updated_at=CURRENT_TIMESTAMP,resolved_at=CURRENT_TIMESTAMP WHERE id=?`).bind(JSON.stringify(resolution),caseId).run();
-  await env.DB.prepare(`UPDATE copilot_log SET approved_by=COALESCE(?,approved_by),result=? WHERE case_id=? AND id=(SELECT id FROM copilot_log WHERE case_id=? ORDER BY created_at DESC LIMIT 1)`).bind(approverId,JSON.stringify(resolution),caseId,caseId).run();
-  await journal(env,automatic?'copilot':'gerante',approverId,automatic?'AUTO_CASE_RESOLVED':'CASE_RESOLVED','operational_case',caseId,'OK',resolution);
-  return {ok:true,case_id:caseId,resolution};
+  const allowedStatuses=automatic ? ['AUTO_PENDING'] : ['OPEN','WAITING_MANAGER','AUTO_PENDING'];
+  const placeholders=allowedStatuses.map(()=>'?').join(',');
+  const claim=await env.DB.prepare(`UPDATE operational_cases SET status='EXECUTING',updated_at=CURRENT_TIMESTAMP WHERE id=? AND status IN (${placeholders})${automatic?' AND requires_manager=0':''}`).bind(caseId,...allowedStatuses).run();
+  if(Number(claim?.meta?.changes||0)!==1) return {ok:false,error:'CASE_ALREADY_CLAIMED_OR_NOT_APPROVABLE'};
+  try {
+    const businessResults = await executeCaseBusinessAction(env,c,rec,approverId,automatic);
+    const resolution={executed:true,automatic,action:rec.action||'RESOLVE',steps:rec.solution?.steps||[],business_results:businessResults,executed_at:new Date().toISOString()};
+    await env.DB.prepare(`INSERT INTO case_actions(id,case_id,action_code,mode,status,payload_json,result_json,completed_at) VALUES(?,?,?,?,?,?,?,CURRENT_TIMESTAMP)`)
+      .bind(crypto.randomUUID(),caseId,rec.action||'RESOLVE',automatic?'AUTO':'MANAGER','COMPLETED',JSON.stringify(rec),JSON.stringify(resolution)).run();
+    const finish=await env.DB.prepare(`UPDATE operational_cases SET status='RESOLVED',resolution_json=?,requires_manager=0,updated_at=CURRENT_TIMESTAMP,resolved_at=CURRENT_TIMESTAMP WHERE id=? AND status='EXECUTING'`).bind(JSON.stringify(resolution),caseId).run();
+    if(Number(finish?.meta?.changes||0)!==1) throw new Error('CASE_FINALIZE_CAS_FAILED');
+    await env.DB.prepare(`UPDATE copilot_log SET approved_by=COALESCE(?,approved_by),result=? WHERE case_id=? AND id=(SELECT id FROM copilot_log WHERE case_id=? ORDER BY created_at DESC LIMIT 1)`).bind(approverId,JSON.stringify(resolution),caseId,caseId).run();
+    await journal(env,automatic?'copilot':'gerante',approverId,automatic?'AUTO_CASE_RESOLVED':'CASE_RESOLVED','operational_case',caseId,'OK',resolution);
+    return {ok:true,case_id:caseId,resolution};
+  } catch(err) {
+    await env.DB.prepare(`UPDATE operational_cases SET status=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='EXECUTING'`).bind(automatic?'AUTO_PENDING':(c.status||'OPEN'),caseId).run();
+    throw err;
+  }
 }
 
 async function approveOperationalCase(request, env) {
