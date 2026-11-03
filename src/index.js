@@ -725,12 +725,11 @@ async function securityPresence(request, env) {
   if(!missionId) return json({ok:false,error:'MISSION_ID_REQUIRED',version:VERSION},400);
   const sec=await env.DB.prepare('SELECT * FROM mission_security WHERE mission_id=? AND intervenant_id=? LIMIT 1').bind(missionId,auth.user.id).first();
   if(!sec) return json({ok:false,error:'MISSION_NOT_ASSIGNED_OR_NOT_PREPARED',version:VERSION},404);
-  const device=await deviceHash(request,auth.user.id);
-  await env.DB.prepare(`INSERT INTO trusted_devices (id,user_id,device_hash,expires_at) VALUES (?,?,?,datetime('now',?)) ON CONFLICT(user_id,device_hash) DO UPDATE SET last_seen_at=CURRENT_TIMESTAMP,expires_at=excluded.expires_at,status='active'`)
-    .bind(crypto.randomUUID(),auth.user.id,device,`+${SECURITY_DEVICE_TTL_SECONDS} seconds`).run();
-  await env.DB.prepare(`UPDATE mission_security SET last_presence_at=CURRENT_TIMESTAMP,last_device_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(device,sec.id).run();
-  await securityAudit(env,'MISSION_PRESENCE_RECORDED',missionId,auth.user.id,auth.user.role,'OK',{device_bound:true});
-  return json({ok:true,version:VERSION,mission_id:missionId,presence:'RECORDED',device_bound:true},200);
+  // User-Agent/client hints are attacker-controlled: do not treat them as device authentication.
+  // Fail closed until a cryptographically random device credential is provisioned
+  // and validated by a dedicated enrollment flow.
+  await securityAudit(env,'MISSION_PRESENCE_BLOCKED_DEVICE_AUTH_NOT_IMPLEMENTED',missionId,auth.user.id,auth.user.role,'DENIED',{});
+  return json({ok:false,error:'SECURE_DEVICE_ENROLLMENT_REQUIRED',version:VERSION},503);
 }
 
 async function securityVerifyCode(request, env) {
@@ -750,6 +749,10 @@ async function securityVerifyCode(request, env) {
     await securityAudit(env,'SECURITY_PRESENCE_REQUIRED',missionId,auth.user.id,auth.user.role,'DENIED',{purpose});
     return json({ok:false,error:'PRESENCE_CHECK_REQUIRED',version:VERSION,message:'La présence de l’intervenant doit être enregistrée avant la validation du code.'},428);
   }
+  // No spoofable User-Agent/client-hint fingerprint is accepted as proof of device possession.
+  // This endpoint stays fail-closed until secure device enrollment/token validation exists.
+  await securityAudit(env,'SECURITY_CODE_BLOCKED_DEVICE_AUTH_NOT_IMPLEMENTED',missionId,auth.user.id,auth.user.role,'DENIED',{purpose});
+  return json({ok:false,error:'SECURE_DEVICE_ENROLLMENT_REQUIRED',version:VERSION},503);
   const device=await deviceHash(request,auth.user.id);
   const trusted = await env.DB.prepare(`SELECT id,status,expires_at FROM trusted_devices WHERE user_id=? AND device_hash=? AND status='active' AND expires_at>CURRENT_TIMESTAMP LIMIT 1`).bind(auth.user.id,device).first();
   if(!trusted || sec.last_device_id !== device) {
