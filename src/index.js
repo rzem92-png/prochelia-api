@@ -1600,7 +1600,7 @@ async function handleConsolidated(request, env) {
   const url=new URL(request.url);
   const consolidatedPath = ['/api/consolidated/info','/api/ops/dashboard','/api/journal','/api/cases','/api/cases/approve','/api/metiers','/api/metiers/suggest','/api/pricing/quote','/api/finance/summary','/api/complaints','/api/settings/phase'].includes(url.pathname);
   if (consolidatedPath) {
-    try { await ensureConsolidatedSchema(env); } catch (e) { return json({ok:false,error:'CONSOLIDATED_SCHEMA_ERROR',version:VERSION,message:e.message},500); }
+    try { await ensureConsolidatedSchema(env); } catch (e) { return json({ok:false,error:'INTERNAL_ERROR',version:VERSION},500); }
   }
   if(url.pathname==='/api/consolidated/info' && request.method==='GET') return consolidatedInfo(env);
   if(url.pathname==='/api/ops/dashboard' && request.method==='GET') return getOperationsDashboard(request,env);
@@ -1980,7 +1980,7 @@ async function handleStrategic(request, env) {
 
   if (strategicPaths.includes(url.pathname)) {
     try { await ensureStrategicSchema(env); }
-    catch (e) { return json({ok:false,error:'STRATEGIC_SCHEMA_ERROR',version:VERSION,message:e.message},500); }
+    catch (e) { return json({ok:false,error:'INTERNAL_ERROR',version:VERSION},500); }
   }
 
   if (url.pathname === '/api/strategic/promotions/recommend' && request.method === 'POST')
@@ -2301,7 +2301,7 @@ async function handleV139(request, env) {
     '/api/quality','/api/capacity/dashboard','/api/finance/forecast','/api/system/audit'
   ];
   if(operationalPaths.includes(url.pathname)){
-    try{await ensureOperationalSchema(env);}catch(e){return json({ok:false,error:'OPERATIONAL_SCHEMA_ERROR',version:VERSION,message:e.message},500);}
+    try{await ensureOperationalSchema(env);}catch(e){return json({ok:false,error:'INTERNAL_ERROR',version:VERSION},500);}
   }
   if(url.pathname==='/api/ops/case/execute'&&request.method==='POST')return operationalExecute(request,env);
   if(url.pathname==='/api/ops/outbox/process'&&request.method==='POST')return processActionOutbox(request,env);
@@ -3101,7 +3101,7 @@ handle = async function(request,env){
       return json(await runNationalBackup(env,'MANUAL'));
     }
     return __procheliaNationalHandle(request,env);
-  }catch(e){return json({ok:false,error:'NATIONAL_CONTINUITY_ERROR',message:String(e.message||e)},500)}
+  }catch(e){return json({ok:false,error:'INTERNAL_ERROR',version:VERSION},500)}
 };
 
 /* ============================================================================
