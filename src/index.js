@@ -3797,7 +3797,9 @@ async function productionSafetySchema(env){
 async function productionSubjectHash(request, route){
   // Trust only Cloudflare's edge-provided client IP. X-Forwarded-For is client-spoofable
   // unless a separately verified proxy chain is configured; never use it here.
-  const ip=clean(request.headers.get('CF-Connecting-IP')) || 'unknown';
+  const ip=clean(request.headers.get('CF-Connecting-IP'));
+  // Missing trusted edge identity must not collapse all visitors into one shared bucket.
+  if(!ip) throw new Error('TRUSTED_CLIENT_IP_REQUIRED');
   return sha256Hex(`${ip}|${route}`);
 }
 
