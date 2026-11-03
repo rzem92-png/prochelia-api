@@ -3875,6 +3875,13 @@ handle = async function(request,env){
     const preflightUrl = new URL(request.url);
     const preflightPath = preflightUrl.pathname;
     const preflightMethod = request.method.toUpperCase();
+    // PSP webhook is authenticated using its raw-body HMAC before any D1-backed
+    // rate limiter/schema helper. Rate limiting for this endpoint must be done
+    // at the edge (Cloudflare rate limiting/WAF), not with unauthenticated D1.
+    if (preflightPath === '/api/payments/webhook') {
+      if (preflightMethod !== 'POST') return json({ok:false,error:'METHOD_NOT_ALLOWED',version:VERSION},405,{'allow':'POST'});
+      return applyCorsHeaders(request,env,await paymentWebhook(request,env));
+    }
     const getOnlyDiagnostics = new Set(['/api/health','/api/readiness','/api/info']);
     // Apply browser-origin rejection before rate limiting or any D1 access.
     // This keeps forbidden cross-origin writes a deterministic 403 even when
