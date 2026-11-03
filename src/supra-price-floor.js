@@ -47,11 +47,14 @@ export function calculatePriceFloor(input = {}) {
   if (minClientPriceCents === null) {
     return { ok: false, error: "PRICE_OVERFLOW", executionAllowed: false };
   }
-  const pspFeeCents = input.fixedPspFeeCents +
-    ceilDiv(minClientPriceCents * input.pspRateBps, MAX_BPS);
-  if (!Number.isSafeInteger(pspFeeCents)) {
+  // BigInt prevents unsafe intermediate multiplication from silently becoming NaN/null/0.
+  const rateFeeBig = (BigInt(minClientPriceCents) * BigInt(input.pspRateBps) +
+    BigInt(MAX_BPS - 1)) / BigInt(MAX_BPS);
+  const pspFeeBig = BigInt(input.fixedPspFeeCents) + rateFeeBig;
+  if (pspFeeBig > BigInt(MAX_CENTS)) {
     return { ok: false, error: "PRICE_OVERFLOW", executionAllowed: false };
   }
+  const pspFeeCents = Number(pspFeeBig);
   const contributionCents = minClientPriceCents - input.providerPayoutCents -
     input.variableCostCents - pspFeeCents - input.riskReserveCents;
   const viable = input.maxClientPriceCents === undefined ||
