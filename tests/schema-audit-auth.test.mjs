@@ -64,7 +64,7 @@ test("login returns generic credentials error for unknown account", async () => 
   const response = await worker.fetch(
     new Request(base + "/api/auth/login", {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: { "content-type": "application/json", "CF-Connecting-IP": "203.0.113.11" },
       body: JSON.stringify({ email: "nobody@example.com", password: "ValidPassword123" })
     }),
     env
