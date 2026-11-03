@@ -1377,11 +1377,21 @@ async function handleBase(request, env) {
 
 const PROJECT_PHASES = {
   TEST:       {automation:'ASSISTED', pricingFactor:0.90, autoSimple:true},
-  LANCEMENT:  {automation:'SEMI_AUTO', pricingFactor:0.94, autoSimple:true},
+  PREPRODUCTION:{automation:'ASSISTED', pricingFactor:0.92, autoSimple:false},
+  PRODUCTION: {automation:'MANAGER_GATED', pricingFactor:1.00, autoSimple:false},
+  LANCEMENT:  {automation:'SEMI_AUTO', pricingFactor:0.94, autoSimple:false},
   AVANCE:     {automation:'AUTO', pricingFactor:1.00, autoSimple:true},
   EXPERT:     {automation:'AUTO_PLUS', pricingFactor:1.03, autoSimple:true},
   NATIONAL:   {automation:'INDUSTRIAL', pricingFactor:1.05, autoSimple:true}
 };
+
+// Only explicitly mature phases may run low-impact Copilot actions autonomously.
+// Unknown phases and TEST/PREPRODUCTION/PRODUCTION always fail closed.
+const AUTO_EXECUTION_PHASES = new Set(['AVANCE','EXPERT','NATIONAL']);
+function canAutoExecuteInPhase(phase) {
+  const normalized = String(phase || '').trim().toUpperCase();
+  return AUTO_EXECUTION_PHASES.has(normalized) && PROJECT_PHASES[normalized]?.autoSimple === true;
+}
 
 const CASE_PRIORITIES = { LOW:10, MEDIUM:30, HIGH:60, CRITICAL:100 };
 const SIMPLE_CASES = new Set([
@@ -1470,7 +1480,11 @@ async function copilotRecommend(env, input) {
     action='RESOLVE_CASE';
     solution={steps:['collect_evidence','reconcile_mission','reconcile_finance','calculate_impact','propose_resolution','notify','audit'],automatic:false};
   }
-  return { action, mode: solution.automatic ? 'AUTO' : 'MANAGER_APPROVAL', confidence: simple ? 0.95 : 0.82, solution, context, phase };
+  if (action === 'AUTO_RESOLVE' && !canAutoExecuteInPhase(phase)) {
+    action = 'ANALYZE_AND_PROPOSE';
+    solution = { steps:['detect','validate_rules','propose','manager_approval','audit'], automatic:false };
+  }
+  return { action, mode: solution.automatic && canAutoExecuteInPhase(phase) ? 'AUTO' : 'MANAGER_APPROVAL', confidence: simple ? 0.95 : 0.82, solution, context, phase };
 }
 
 async function createOperationalCase(request, env) {
@@ -1482,15 +1496,22 @@ async function createOperationalCase(request, env) {
   const priority=CASE_PRIORITIES[impact]||10;
   const rec=await copilotRecommend(env,{caseType,impact,phase,context:body.context||{}});
   const id=crypto.randomUUID();
-  const requiresManager=rec.mode==='MANAGER_APPROVAL' ? 1 : 0;
-  const status=rec.action==='AUTO_RESOLVE' ? 'AUTO_PENDING' : 'OPEN';
+  const autoEligible = rec.action === 'AUTO_RESOLVE' && canAutoExecuteInPhase(phase) &&
+    SIMPLE_CASES.has(caseType) && !SENSITIVE_CASES.has(caseType) && !['HIGH','CRITICAL'].includes(impact);
+  if (rec.action === 'AUTO_RESOLVE' && !autoEligible) {
+    rec.action = 'ANALYZE_AND_PROPOSE';
+    rec.mode = 'MANAGER_APPROVAL';
+    rec.solution = { steps:['detect','validate_rules','propose','manager_approval','audit'], automatic:false };
+  }
+  const requiresManager=autoEligible ? 0 : 1;
+  const status=autoEligible ? 'AUTO_PENDING' : 'OPEN';
   await env.DB.prepare(`INSERT INTO operational_cases(id,case_type,source,phase,priority,status,auto_mode,client_id,company_id,intervenant_id,mission_id,impact_level,description,context_json,proposed_solution_json,requires_manager) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
     .bind(id,caseType,'API',phase,priority,status,rec.mode,clean(body.client_id)||null,clean(body.company_id)||null,clean(body.intervenant_id)||null,clean(body.mission_id)||null,impact,clean(body.description)||null,JSON.stringify(body.context||{}),JSON.stringify(rec),requiresManager).run();
   await env.DB.prepare(`INSERT INTO copilot_log(id,case_id,action_type,recommendation,confidence,mode) VALUES(?,?,?,?,?,?)`)
     .bind(crypto.randomUUID(),id,rec.action,JSON.stringify(rec.solution),rec.confidence,rec.mode).run();
   await journal(env,'copilot',null,'CASE_CREATED','operational_case',id,'OK',{caseType,impact});
-  if(rec.action==='AUTO_RESOLVE') await executeOperationalCase(env,id,null,true);
-  return json({ok:true,version:VERSION,case_id:id,recommendation:rec,status:rec.action==='AUTO_RESOLVE'?'AUTO_EXECUTED':'WAITING_MANAGER'},201);
+  if(autoEligible) await executeOperationalCase(env,id,null,true);
+  return json({ok:true,version:VERSION,case_id:id,recommendation:rec,status:autoEligible?'AUTO_EXECUTED':'WAITING_MANAGER'},201);
 }
 
 
@@ -1573,15 +1594,28 @@ async function processActionOutbox(request, env) {
   const rows=await env.DB.prepare(`SELECT * FROM action_outbox WHERE status='PENDING' ORDER BY created_at ASC LIMIT 50`).all();
   const processed=[];
   for(const row of (rows.results||[])) {
+    // Atomic reservation: only one concurrent worker may transition this row
+    // from PENDING to PROCESSING. D1 serializes the conditional write.
+    const claim=await env.DB.prepare(`UPDATE action_outbox
+      SET status='PROCESSING',attempts=attempts+1,last_error=NULL,updated_at=CURRENT_TIMESTAMP
+      WHERE id=? AND status='PENDING'`).bind(row.id).run();
+    if(Number(claim?.meta?.changes||0)!==1) {
+      processed.push({id:row.id,status:'SKIPPED_ALREADY_CLAIMED'});
+      continue;
+    }
     const payload=row.payload_json?JSON.parse(row.payload_json):{};
     // Provider-dependent actions stay queued until the corresponding adapter/secret is configured.
     const external = ['PSP_REFUND_REVIEW','NOTIFY_CLIENT','SEARCH_REPLACEMENT','RESCHEDULE_MISSION','ASSIGN_REPLACEMENT'].includes(String(row.action_type));
     if(external) {
-      await env.DB.prepare(`UPDATE action_outbox SET status='WAITING_PROVIDER',last_error=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind('External adapter/provider required for final execution.',row.id).run();
+      await env.DB.prepare(`UPDATE action_outbox SET status='WAITING_PROVIDER',last_error=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='PROCESSING'`).bind('External adapter/provider required for final execution.',row.id).run();
       processed.push({id:row.id,status:'WAITING_PROVIDER',action_type:row.action_type});
       continue;
     }
-    await env.DB.prepare(`UPDATE action_outbox SET status='COMPLETED',processed_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(row.id).run();
+    const completed=await env.DB.prepare(`UPDATE action_outbox SET status='COMPLETED',processed_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='PROCESSING'`).bind(row.id).run();
+    if(Number(completed?.meta?.changes||0)!==1) {
+      processed.push({id:row.id,status:'SKIPPED_STATE_CHANGED',action_type:row.action_type});
+      continue;
+    }
     processed.push({id:row.id,status:'COMPLETED',action_type:row.action_type,payload});
   }
   await journal(env,'gerante',gate.auth.user.id,'ACTION_OUTBOX_PROCESSED','system',null,'OK',{count:processed.length});
@@ -1591,14 +1625,31 @@ async function processActionOutbox(request, env) {
 async function executeOperationalCase(env, caseId, approverId=null, automatic=false) {
   const c=await env.DB.prepare('SELECT * FROM operational_cases WHERE id=? LIMIT 1').bind(caseId).first();
   if(!c)return {ok:false,error:'CASE_NOT_FOUND'};
-  if(c.status==='RESOLVED')return {ok:true,already:true};
+  if(['RESOLVED','CLOSED'].includes(String(c.status)))return {ok:true,already:true};
+  if(c.status==='EXECUTING') return {ok:false,error:'CASE_ALREADY_EXECUTING'};
   const rec=c.proposed_solution_json?JSON.parse(c.proposed_solution_json):{};
-  if(c.requires_manager && !automatic && !approverId) return {ok:false,error:'MANAGER_APPROVAL_REQUIRED'};
+  if(automatic) {
+    const currentPhase=String(await getSetting(env,'project_phase','TEST')).toUpperCase();
+    const autoAllowed=canAutoExecuteInPhase(c.phase) && canAutoExecuteInPhase(currentPhase) &&
+      String(c.phase).toUpperCase()===currentPhase && !Number(c.requires_manager) &&
+      rec.action==='AUTO_RESOLVE' && SIMPLE_CASES.has(String(c.case_type)) &&
+      !SENSITIVE_CASES.has(String(c.case_type)) && !['HIGH','CRITICAL'].includes(String(c.impact_level).toUpperCase());
+    if(!autoAllowed) return {ok:false,error:'AUTO_EXECUTION_BLOCKED_BY_POLICY'};
+  } else if(c.requires_manager && !approverId) {
+    return {ok:false,error:'MANAGER_APPROVAL_REQUIRED'};
+  }
+  // Claim the case before any side effect. Concurrent approval/automation requests
+  // can only win this conditional transition once.
+  const allowedStatuses=automatic ? ['AUTO_PENDING'] : ['OPEN','AUTO_PENDING'];
+  const claim=await env.DB.prepare(`UPDATE operational_cases SET status='EXECUTING',updated_at=CURRENT_TIMESTAMP
+    WHERE id=? AND status IN (${allowedStatuses.map(()=>'?').join(',')})`).bind(caseId,...allowedStatuses).run();
+  if(Number(claim?.meta?.changes||0)!==1) return {ok:false,error:'CASE_ALREADY_EXECUTED_OR_IN_PROGRESS'};
   const businessResults = await executeCaseBusinessAction(env,c,rec,approverId,automatic);
   const resolution={executed:true,automatic,action:rec.action||'RESOLVE',steps:rec.solution?.steps||[],business_results:businessResults,executed_at:new Date().toISOString()};
   await env.DB.prepare(`INSERT INTO case_actions(id,case_id,action_code,mode,status,payload_json,result_json,completed_at) VALUES(?,?,?,?,?,?,?,CURRENT_TIMESTAMP)`)
     .bind(crypto.randomUUID(),caseId,rec.action||'RESOLVE',automatic?'AUTO':'MANAGER','COMPLETED',JSON.stringify(rec),JSON.stringify(resolution)).run();
-  await env.DB.prepare(`UPDATE operational_cases SET status='RESOLVED',resolution_json=?,requires_manager=0,updated_at=CURRENT_TIMESTAMP,resolved_at=CURRENT_TIMESTAMP WHERE id=?`).bind(JSON.stringify(resolution),caseId).run();
+  const finalized=await env.DB.prepare(`UPDATE operational_cases SET status='RESOLVED',resolution_json=?,requires_manager=0,updated_at=CURRENT_TIMESTAMP,resolved_at=CURRENT_TIMESTAMP WHERE id=? AND status='EXECUTING'`).bind(JSON.stringify(resolution),caseId).run();
+  if(Number(finalized?.meta?.changes||0)!==1) return {ok:false,error:'CASE_FINALIZATION_CONFLICT'};
   await env.DB.prepare(`UPDATE copilot_log SET approved_by=COALESCE(?,approved_by),result=? WHERE case_id=? AND id=(SELECT id FROM copilot_log WHERE case_id=? ORDER BY created_at DESC LIMIT 1)`).bind(approverId,JSON.stringify(resolution),caseId,caseId).run();
   await journal(env,automatic?'copilot':'gerante',approverId,automatic?'AUTO_CASE_RESOLVED':'CASE_RESOLVED','operational_case',caseId,'OK',resolution);
   return {ok:true,case_id:caseId,resolution};
