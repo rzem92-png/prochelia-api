@@ -1063,7 +1063,8 @@ async function verifyWebhookSignature(request, env, rawBody) {
 
 async function paymentWebhook(request, env) {
   await ensurePaymentSchema(env);
-  const raw=await request.text();
+  const raw=await readBoundedText(request,MAX_JSON_BODY_BYTES);
+  if(raw===null) return json({ok:false,error:'WEBHOOK_BODY_TOO_LARGE_OR_INVALID',version:VERSION},413);
   if(!(await verifyWebhookSignature(request,env,raw))) return json({ok:false,error:'INVALID_WEBHOOK_SIGNATURE',version:VERSION},401);
   let event; try{event=JSON.parse(raw)}catch{return json({ok:false,error:'INVALID_WEBHOOK_JSON',version:VERSION},400);}
   const provider=clean(event?.provider)||paymentProvider(env), eventId=clean(event?.id), type=clean(event?.type);
