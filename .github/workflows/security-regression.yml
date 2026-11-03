@@ -40,7 +40,7 @@ jobs:
             const j=s.indexOf(b,i); if(j<0) throw Error('Missing end anchor: '+b);
             return s.slice(i,j);
           }
-          const bootstrap=section('async function bootstrap','async function login');
+          const bootstrap=section('async function bootstrap(request, env)','async function authStatus');
           const session=section('async function getSession','function requireRole');
           const role=section('function requireRole','async function getPrestations');
           const csrf=section('function isAllowedOrigin','// ================================================================');
