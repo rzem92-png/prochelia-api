@@ -82,3 +82,14 @@ test('concurrent increments are not lost in the simulated atomic D1 primitive', 
   assert.equal(results.filter(x => x.ok).length, 100);
   assert.equal([...db.rows.values()][0], 100);
 });
+
+
+test('fails closed when trusted Cloudflare client IP is missing', async () => {
+  const db = new FakeD1();
+  const request = new Request('https://example.test/api/auth/login');
+  const result = await enforceAtomicRateLimit({ db, request, bucket: 'login', limit: 5, nowSeconds: 100 });
+  assert.equal(result.ok, false);
+  assert.equal(result.response.status, 503);
+  assert.equal((await result.response.json()).error, 'RATE_LIMIT_CLIENT_ID_UNAVAILABLE');
+  assert.equal(db.rows.size, 0);
+});
