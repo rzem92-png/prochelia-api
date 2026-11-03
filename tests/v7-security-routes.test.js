@@ -57,3 +57,15 @@ test('V7 malformed JSON returns a safe 400 without parser details', async () => 
   assert.equal(response.headers.get('cache-control'), 'no-store');
   assert.equal(Object.hasOwn(data, 'message'), false);
 });
+
+
+test('V7 rejects oversized payloads before JSON parsing', async () => {
+  const body = JSON.stringify({ email: 'a'.repeat(40 * 1024) });
+  const response = await handleV7Route(new Request('https://preprod.example.test/api/v7/check/email', {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body
+  }), env, '/api/v7/check/email');
+  assert.equal(response.status, 413);
+  const data = await response.json();
+  assert.equal(data.error, 'PAYLOAD_TOO_LARGE');
+  assert.equal(response.headers.get('cache-control'), 'no-store');
+});
