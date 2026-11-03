@@ -3281,9 +3281,9 @@ async function supportCreate(request,env){
   await journal(env,a.role,a.auth.user.id,'SUPPORT_CASE_CREATE','support_cases',id,'OK',{scenario,severity,auto});
   let autoResult=null;
   if(auto){
-    autoResult=await supportAutoResolve(env,id,a.auth.user.id,a.role,scenario,b);
+    // Never pass requester-controlled data as proof of a completed downstream action.\n    autoResult=await supportAutoResolve(env,id,a.auth.user.id,a.role,scenario,{});
   }
-  return json({ok:true,version:VERSION,case_id:id,scenario,automatic_resolution:!!auto,auto_result:autoResult,manager_approval_required:!auto});
+  return json({ok:true,version:VERSION,case_id:id,scenario,automatic_resolution:false,auto_eligible:!!auto,auto_result:autoResult,manager_approval_required:requiresManager || !auto});
 }
 
 async function supportAutoResolve(env,caseId,actorId,actorRole,scenario,context={}){
@@ -3292,7 +3292,7 @@ async function supportAutoResolve(env,caseId,actorId,actorRole,scenario,context=
   // Sécurité de production : le Copilote ne doit jamais déclarer une résolution
   // simplement parce qu'il a généré une proposition. Une résolution automatique
   // n'est clôturée que lorsqu'une action downstream vérifiable a confirmé son succès.
-  const verified=String(context?.execution_verified||'').toLowerCase()==='true' || context?.execution_verified===true;
+  // Completion proof must come from a trusted server-side executor, not a client payload.\n  // No verified executor is wired here yet: fail closed and keep the case open.\n  const verified=false;
   const resolution={scenario,actions:['verify_context','apply_only_reversible_or_preapproved_action','notify_requester','journal'],context:context||{}};
   if(!verified){
     await env.DB.prepare(`UPDATE support_cases SET status='WAITING_ACTION',resolution=?,resolved_at=NULL WHERE id=?`).bind(JSON.stringify({...resolution,status:'ACTION_REQUIRED'}),caseId).run();
