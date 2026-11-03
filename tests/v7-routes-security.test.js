@@ -49,3 +49,42 @@ test("the helper status endpoint remains informational", async () => {
   const body = await response.json();
   assert.equal(body.status, "ready");
 });
+
+for (const path of denied) {
+  test(`blocked authority route denies GET as well: ${path}`, async () => {
+    const response = await handleV7Route(
+      new Request("https://example.test" + path, { method: "GET" }),
+      {},
+      path
+    );
+    assert.equal(response.status, 403);
+    assert.equal(response.headers.get("cache-control"), "no-store");
+    assert.equal(response.headers.get("x-content-type-options"), "nosniff");
+    const body = await response.json();
+    assert.equal(body.error, "AUTHENTICATED_SERVER_VALIDATION_REQUIRED");
+  });
+}
+
+test("blocked authority route is not affected by caller-supplied validation claims", async () => {
+  const path = "/api/v7/check/payment";
+  const forged = {
+    authenticated: true,
+    role: "admin",
+    paymentVerified: true,
+    signatureValid: true,
+    missionValidated: true
+  };
+  const response = await handleV7Route(
+    new Request("https://example.test" + path, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(forged)
+    }),
+    {},
+    path
+  );
+  assert.equal(response.status, 403);
+  const body = await response.json();
+  assert.equal(body.ok, false);
+  assert.equal(body.error, "AUTHENTICATED_SERVER_VALIDATION_REQUIRED");
+});
