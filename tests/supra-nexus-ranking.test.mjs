@@ -3,9 +3,9 @@ import assert from "node:assert/strict";
 import {rankNexusProviders} from "../src/supra-nexus-ranking.js";
 const request={requiredSkills:["accompagnement"],maxDistanceKm:20,budgetCents:5000,
  providerCandidates:[
-  {id:"local-low-exposure",skills:["accompagnement"],available:true,verified:true,reliability:80,quality:80,distanceKm:5,quoteCents:3000,smallLocalProvider:true,recentExposure:10},
+  {id:"local-low-exposure",skills:["accompagnement"],available:true,verified:true,reliability:80,quality:80,distanceKm:5,quoteCents:3000,minimumViableQuoteCents:2500,smallLocalProvider:true,recentExposure:10},
   {id:"popular",skills:["accompagnement"],available:true,verified:true,reliability:90,quality:90,distanceKm:3,quoteCents:3000,smallLocalProvider:false,recentExposure:90},
-  {id:"unverified",skills:["accompagnement"],available:true,verified:false,reliability:100,quality:100,distanceKm:1,quoteCents:1000,smallLocalProvider:true,recentExposure:0}
+  {id:"unverified",skills:["accompagnement"],available:true,verified:false,reliability:100,quality:100,distanceKm:1,quoteCents:1000,minimumViableQuoteCents:2500,smallLocalProvider:true,recentExposure:0}
  ]};
 test("Nexus ranks only verified, available, qualified, in-budget candidates",()=>{
  const r=rankNexusProviders(request); assert.equal(r.ok,true); assert.equal(r.eligibleCount,2);
@@ -31,4 +31,11 @@ test("does not allow high score to override verification, availability, budget o
 test("ranking is deterministic for equal scores",()=>{
  const a={...request,providerCandidates:[{...request.providerCandidates[0],id:"b"},{...request.providerCandidates[0],id:"a"}]};
  assert.deepEqual(rankNexusProviders(a).rankings.map(x=>x.providerId),["a","b"]);
+});
+
+test("rejects quotes below server-calculated minimum and does not reward underpricing",()=>{
+ const underpriced={...request.providerCandidates[0],id:"below-floor",quoteCents:2000,minimumViableQuoteCents:2500};
+ const normal={...request.providerCandidates[0],id:"fair-price",quoteCents:3500,minimumViableQuoteCents:2500};
+ const r=rankNexusProviders({...request,providerCandidates:[underpriced,normal]});
+ assert.deepEqual(r.rankings.map(x=>x.providerId),["fair-price"]);
 });
