@@ -4,10 +4,13 @@ import worker from "../src/index.js";
 
 const origin = "https://prochelia.pages.dev";
 const noSessionDb = {
-  prepare() {
+  prepare(sql) {
     return {
       bind() { return this; },
-      async first() { return null; }
+      async first() {
+        return String(sql).includes('security_rate_limits') ? { request_count: 1 } : null;
+      },
+      async run() { return { success: true }; }
     };
   }
 };
@@ -15,7 +18,7 @@ const noSessionDb = {
 test("private V7 audit endpoint rejects unauthenticated callers before route logic", async () => {
   const response = await worker.fetch(new Request("https://api.example/api/v7/security/audit", {
     method: "POST",
-    headers: { origin, "content-type": "application/json" },
+    headers: { origin, "cf-connecting-ip": "203.0.113.10", "content-type": "application/json" },
     body: JSON.stringify({ action: "ATTEMPT" })
   }), { DB: noSessionDb });
 
