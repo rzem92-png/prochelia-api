@@ -70,7 +70,7 @@ export function rankNexusProviders(request = {}) {
       smallLocalProvider:c.smallLocalProvider
     });
   }
-  eligible.sort((a,b)=>b.score-a.score || a.providerId.localeCompare(b.providerId));
+  eligible.sort((a,b)=>b.score-a.score || (a.providerId < b.providerId ? -1 : a.providerId > b.providerId ? 1 : 0));
   return {
     ok:true, algorithm:"NEXUS_SUPRA_FAIR_RANKING_V1", rankings:eligible,
     weights:{...WEIGHTS}, candidateCount:request.providerCandidates.length,
