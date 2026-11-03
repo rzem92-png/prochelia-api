@@ -1240,11 +1240,15 @@ async function handleBase(request, env) {
 
   if (url.pathname === '/api/core/schema') {
     if (request.method !== 'GET') return json({ ok: false, error: 'METHOD_NOT_ALLOWED', version: VERSION }, 405);
+    const gate = await requireAuthRole(request, env, ['gerante']);
+    if (gate.error) return gate.error;
     return coreAccountsSchema(env);
   }
 
   if (url.pathname === '/api/missions/schema') {
     if (request.method !== 'GET') return json({ ok: false, error: 'METHOD_NOT_ALLOWED', version: VERSION }, 405);
+    const gate = await requireAuthRole(request, env, ['gerante']);
+    if (gate.error) return gate.error;
     return missionsSchema(env);
   }
 
