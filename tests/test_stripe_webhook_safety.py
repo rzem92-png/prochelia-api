@@ -11,12 +11,13 @@ SOURCE = (Path(__file__).resolve().parents[1] / "src" / "index.js").read_text()
 
 class StripeWebhookSafetySourceTests(unittest.TestCase):
     def test_payout_webhook_finalization_checks_wallet_reservation(self):
-        start = SOURCE.index("const payoutUpdate=env.DB.prepare")
-        end = SOURCE.index("const walletUpdate=", start)
+        start = SOURCE.index("const walletUpdate=newStatus==='completed'")
+        end = SOURCE.index("const settled=await env.DB.batch", start)
         block = SOURCE[start:end]
-        self.assertIn("amount_cents>0", block)
-        self.assertIn("EXISTS (SELECT 1 FROM wallets", block)
-        self.assertIn("w.reserved_cents>=payout_requests.amount_cents", block)
+        self.assertIn("reserved_cents>=?", block)
+        self.assertIn("p.amount_cents>0", block)
+        self.assertIn("p.status NOT IN ('completed','failed','canceled')", block)
+        self.assertIn("AND changes()=1", block)
 
     def test_webhook_signature_comparison_is_timing_safe_and_bounded(self):
         start = SOURCE.index("function timingSafeTextEqual")
