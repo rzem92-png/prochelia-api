@@ -8,7 +8,7 @@ import { normalizeIdentityDecision, isCurrentIdentityEvidence } from "./identity
 // Les écritures de missions restent volontairement désactivées tant que la chaîne
 // authentification/RBAC/idempotence/contrôles métier n'a pas été validée.
 
-const VERSION = 'V14.3.0-PREPRODUCTION-2026-10-19';
+const VERSION = 'V14.5.7-EXPERT-PREPRODUCTION-2026-11-03';
 const SECURITY_CODE_TTL_SECONDS = 15 * 60;
 const SECURITY_MAX_ATTEMPTS = 5;
 const SECURITY_LOCK_SECONDS = 15 * 60;
