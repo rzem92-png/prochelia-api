@@ -17,7 +17,7 @@ const corsWrapper = sourceOf('const __procheliaCorsHandle = handle;', '\n};');
 test('mutating browser requests reject untrusted Origin before D1/rate-limit access', () => {
   assert.match(originGuard, /if\(!origin\) return true/);
   assert.match(originGuard, /allowed\.includes\(origin\)/);
-  assert.match(source, /isMutatingMethod\(preflightMethod\).*securityOriginAllowed\(request,env\).*ORIGIN_NOT_ALLOWED/);
+  assert.match(source, /isMutatingMethod\(preflightMethod\)[\s\S]*?securityOriginAllowed\(request,env\)[\s\S]*?ORIGIN_NOT_ALLOWED/);
   assert.ok(source.indexOf('securityOriginAllowed(request,env)) {') < source.indexOf('const rate=await productionRateLimit(request,env);'));
 });
 
