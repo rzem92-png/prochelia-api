@@ -19,8 +19,9 @@ function invalid(reason) {
  * { requiredSkills:string[], maxDistanceKm:number, budgetCents:number,
  *   providerCandidates:[{id,skills:string[],available:boolean,verified:boolean,
  *     reliability:0..100,quality:0..100,distanceKm:number,quoteCents:number,
- *     smallLocalProvider:boolean, recentExposure:0..100}] }
- * Server must populate eligibility/verification/availability; never trust client claims.
+ *     minimumViableQuoteCents:number,smallLocalProvider:boolean,recentExposure:0..100}] }
+ * Server must populate eligibility/verification/availability and minimumViableQuoteCents
+ * from trusted pricing rules; never trust client claims or client-supplied floors.
  */
 export function rankNexusProviders(request = {}) {
   if (!request || typeof request !== "object" || Array.isArray(request) ||
@@ -42,7 +43,8 @@ export function rankNexusProviders(request = {}) {
         typeof c.smallLocalProvider !== "boolean" || !validScore(c.reliability) || !validScore(c.quality) ||
         !validScore(c.recentExposure) || !Number.isFinite(c.distanceKm) || c.distanceKm < 0 ||
         c.distanceKm > MAX_DISTANCE_KM || !Number.isSafeInteger(c.quoteCents) || c.quoteCents <= 0 ||
-        c.quoteCents > MAX_PRICE_CENTS) return invalid("INVALID_CANDIDATE_FIELDS");
+        c.quoteCents > MAX_PRICE_CENTS || !Number.isSafeInteger(c.minimumViableQuoteCents) ||
+        c.minimumViableQuoteCents <= 0 || c.minimumViableQuoteCents > MAX_PRICE_CENTS) return invalid("INVALID_CANDIDATE_FIELDS");
     if (!c.verified || !c.available || c.distanceKm > request.maxDistanceKm ||
         c.quoteCents > request.budgetCents || c.quoteCents < c.minimumViableQuoteCents) continue;
     const skills = c.skills.map(s => typeof s === "string" ? s.trim().toLowerCase() : "");
