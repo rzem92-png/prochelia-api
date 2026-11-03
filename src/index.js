@@ -306,7 +306,11 @@ async function postMissions(request, env) {
 
 async function login(request, env) {
   if (!env.DB) return json({ ok: false, database: false, version: VERSION }, 503);
-  const body = await readJson(request);
+  // Bound login payloads to reduce abuse and avoid parsing oversized JSON.
+  const bounded = await readBoundedRequestBody(request, 4096);
+  if (!bounded.ok) return json({ ok: false, error: 'INVALID_CREDENTIALS', version: VERSION }, 401);
+  let body = null;
+  try { body = JSON.parse(bounded.text); } catch {}
   const email = normalizeEmail(body?.email);
   const password = body?.password;
   if (!validEmail(email) || !validPassword(password)) {
@@ -318,7 +322,11 @@ async function login(request, env) {
        FROM users WHERE email = ? LIMIT 1`
   ).bind(email).first();
 
-  if (!user || user.status !== 'active' || !user.password_hash || !(await verifyPassword(password, user.password_hash))) {
+  // Run the same PBKDF2 work for unknown/inactive accounts to reduce account
+  // enumeration via response timing. This is NOT a substitute for edge rate limits.
+  const dummyHash = 'pbkdf2$100000$AAAAAAAAAAAAAAAAAAAAAA$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
+  const passwordValid = await verifyPassword(password, user?.password_hash || dummyHash);
+  if (!user || user.status !== 'active' || !user.password_hash || !passwordValid) {
     return json({ ok: false, error: 'INVALID_CREDENTIALS', version: VERSION }, 401);
   }
 
