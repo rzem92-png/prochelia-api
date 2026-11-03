@@ -570,32 +570,15 @@ export async function handleV7Route(
       path === "/api/v7/security/idempotency" &&
       method === "POST"
     ) {
-
-      const body =
-        await request.json();
-
-      const result =
-        procheliaV7.checkIdempotency(
-
-          body.idempotencyKey
-
-        );
-
+      // A format check is not durable replay protection. Disable this
+      // endpoint until the key is reserved atomically with the business write.
       return Response.json(
-
-        result,
-
-        {
-          status:
-            result.ok
-              ? 200
-              : 400
-        }
+        { ok: false, version: procheliaV7.version, error: "IDEMPOTENCY_NOT_ENFORCED" },
+        { status: 501, headers: { "cache-control": "no-store" } }
       );
     }
 
 
-    // =================================================
     // AUDIT
     // =================================================
 
@@ -603,31 +586,14 @@ export async function handleV7Route(
       path === "/api/v7/security/audit" &&
       method === "POST"
     ) {
-
-      const body =
-        await request.json();
-
-      // SECURITY NOTE: this is a client-originated payload; never treat it as a trusted durable audit record.
-      const result =
-        procheliaV7.auditEvent(
-          body
-        );
-
-      return Response.json({
-
-        ok: true,
-
-        version:
-          procheliaV7.version,
-
-        audit:
-          result
-
-      });
+      // Client-supplied audit events are untrusted and are not durable logs.
+      return Response.json(
+        { ok: false, version: procheliaV7.version, error: "AUDIT_ENDPOINT_DISABLED" },
+        { status: 403, headers: { "cache-control": "no-store" } }
+      );
     }
 
 
-    // =================================================
     // INDICATEURS STRATÉGIQUES
     // =================================================
 
