@@ -10,6 +10,14 @@ SOURCE = (Path(__file__).resolve().parents[1] / "src" / "index.js").read_text()
 
 
 class StripeWebhookSafetySourceTests(unittest.TestCase):
+    def test_generic_accounting_entry_is_disabled_until_double_entry_controls_exist(self):
+        start = SOURCE.index("action.action_type === 'ACCOUNTING_ENTRY'")
+        end = SOURCE.index("reason:'ACTION_TYPE_NOT_IMPLEMENTED'", start)
+        block = SOURCE[start:end]
+        self.assertIn("ACCOUNTING_LEDGER_ENTRY_REQUIRES_VALIDATED_DOUBLE_ENTRY", block)
+        self.assertIn("requires_provider:true", block)
+        self.assertNotIn("INSERT INTO accounting_ledger", block)
+
     def test_finance_summary_counts_refund_pending_as_unsettled(self):
         summary = SOURCE[SOURCE.index('async function financeSummary('):SOURCE.index('\nasync function complaintCreate', SOURCE.index('async function financeSummary('))]
         self.assertIn("status IN ('pending','processing','held','refund_pending_reconciliation')", summary)
