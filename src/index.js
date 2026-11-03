@@ -3774,6 +3774,18 @@ async function backupHash(text){
   const d=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(text));
   return [...new Uint8Array(d)].map(x=>x.toString(16).padStart(2,'0')).join('');
 }
+async function backupOrderBy(env,table){
+  const safe=String(table).replace(/"/g,'""');
+  const info=await env.DB.prepare(`PRAGMA table_info("${safe}")`).all();
+  const columns=info.results||[];
+  const primary=columns.filter(c=>Number(c.pk)>0).sort((a,b)=>Number(a.pk)-Number(b.pk));
+  if(primary.length){
+    return primary.map(c=>`"${String(c.name).replace(/"/g,'""')}" ASC`).join(', ');
+  }
+  // Ordinary SQLite tables expose rowid. If unavailable, fail closed instead
+  // of silently producing unstable LIMIT/OFFSET pages.
+  return 'rowid';
+}
 async function backupTables(env){
   // Backup control-plane tables are intentionally excluded: they mutate while
   // the backup runs and would make the archive self-referential/inconsistent.
@@ -3796,9 +3808,10 @@ async function runNationalBackup(env,trigger='MANUAL'){
       let offset=0, tableRows=0;
       while(true){
         const safe=table.replace(/"/g,'""');
-        // Deterministic ordering prevents rows from shifting unpredictably between pages.
+        // Primary-key ordering supports WITHOUT ROWID tables; rowid is fallback.
         // This is NOT a transactional snapshot; concurrent writes still require reconciliation.
-        const r=await env.DB.prepare(`SELECT * FROM "${safe}" ORDER BY rowid LIMIT ? OFFSET ?`).bind(500,offset).all();
+        const orderBy=await backupOrderBy(env,table);
+        const r=await env.DB.prepare(`SELECT * FROM "${safe}" ORDER BY ${orderBy} LIMIT ? OFFSET ?`).bind(500,offset).all();
         const rows=r.results||[]; if(!rows.length) break;
         const plain=rows.map(x=>JSON.stringify(x)).join('\n')+'\n';
         const enc=await backupEncrypt(plain,secret);
