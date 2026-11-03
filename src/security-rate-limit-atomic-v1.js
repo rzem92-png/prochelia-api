@@ -86,10 +86,18 @@ export async function enforceAtomicRateLimit({
 
     // Cloudflare overwrites CF-Connecting-IP at its edge. This Worker must not
     // be directly exposed behind arbitrary proxies that can spoof this header.
-    const edgeIp = request.headers.get('CF-Connecting-IP') || 'unknown';
-    const identity = userId ? `user:${userId}`
-      : sessionHash ? `session:${sessionHash}`
-      : `ip:${edgeIp}`;
+    if (!(request instanceof Request)) {
+      return { ok: false, response: jsonResponse({ ok: false, error: 'RATE_LIMIT_REQUEST_INVALID' }, 503) };
+    }
+    const edgeIp = request.headers.get('CF-Connecting-IP');
+    // Missing edge identity must never collapse unrelated clients into a shared
+    // "unknown" bucket. Fail closed instead of granting or misapplying quota.
+    if (!edgeIp || edgeIp.trim() === '') {
+      return { ok: false, response: jsonResponse({ ok: false, error: 'RATE_LIMIT_CLIENT_ID_UNAVAILABLE' }, 503) };
+    }
+    const identity = typeof userId === 'string' && userId.length > 0 ? `user:${userId}`
+      : typeof sessionHash === 'string' && sessionHash.length > 0 ? `session:${sessionHash}`
+      : `ip:${edgeIp.trim()}`;
     const subjectHash = await sha256Hex(identity);
     const start = Math.floor(nowSeconds / windowSeconds) * windowSeconds;
     const expiresAt = start + windowSeconds + 86400; // 24h cleanup grace
