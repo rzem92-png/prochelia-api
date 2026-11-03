@@ -3328,15 +3328,22 @@ async function supportResolve(request,env){
   const a=await supportAuth(request,env); if(a.response)return a.response;
   if(a.role!=='GERANTE'&&a.role!=='ADMIN') return json({ok:false,error:'MANAGER_APPROVAL_REQUIRED',version:VERSION},403);
   await ensureProcheliaMasterComplementSchema(env);
-  const b=await readJson(request)||{}; const id=clean(b.case_id);
-  if(!id)return json({ok:false,error:'CASE_ID_REQUIRED',version:VERSION},400);
-  const row=await env.DB.prepare(`SELECT * FROM support_cases WHERE id=? LIMIT 1`).bind(id).first();
+  const b=await readJson(request);
+  if(!b || typeof b!=='object' || Array.isArray(b)) return json({ok:false,error:'INVALID_BODY',version:VERSION},400);
+  const id=clean(b.case_id);
+  if(typeof id!=='string' || !id || id.length>128)return json({ok:false,error:'CASE_ID_INVALID',version:VERSION},400);
+  const resolution=clean(b.resolution);
+  if(resolution!=null && (typeof resolution!=='string' || resolution.length>2000)) return json({ok:false,error:'RESOLUTION_INVALID',version:VERSION},400);
+  const row=await env.DB.prepare(`SELECT id,status FROM support_cases WHERE id=? LIMIT 1`).bind(id).first();
   if(!row)return json({ok:false,error:'CASE_NOT_FOUND',version:VERSION},404);
-  const resolution=clean(b.resolution)||'Résolution validée par la Gérante après contrôle du dossier.';
-  await env.DB.prepare(`UPDATE support_cases SET status='RESOLVED',resolution=?,resolved_at=CURRENT_TIMESTAMP,requires_manager=0 WHERE id=?`).bind(resolution,id).run();
-  await supportEvent(env,id,a.role,a.auth.user.id,'MANAGER_RESOLVED',{resolution});
-  await journal(env,a.role,a.auth.user.id,'SUPPORT_CASE_MANAGER_RESOLVE','support_cases',id,'RESOLVED',{resolution});
-  return json({ok:true,version:VERSION,case_id:id,status:'RESOLVED',resolution});
+  if(row.status==='RESOLVED') return json({ok:false,error:'CASE_ALREADY_RESOLVED',version:VERSION},409);
+  const finalResolution=resolution||'Résolution validée par la Gérante après contrôle du dossier.';
+  // Conditional transition prevents concurrent managers from silently overwriting a resolved case.
+  const result=await env.DB.prepare(`UPDATE support_cases SET status='RESOLVED',resolution=?,resolved_at=CURRENT_TIMESTAMP,requires_manager=0 WHERE id=? AND status<>'RESOLVED'`).bind(finalResolution,id).run();
+  if(Number(result?.meta?.changes||0)!==1) return json({ok:false,error:'CASE_STATE_CONFLICT',version:VERSION},409);
+  await supportEvent(env,id,a.role,a.auth.user.id,'MANAGER_RESOLVED',{resolution:finalResolution});
+  await journal(env,a.role,a.auth.user.id,'SUPPORT_CASE_MANAGER_RESOLVE','support_cases',id,'RESOLVED',{resolution:finalResolution});
+  return json({ok:true,version:VERSION,case_id:id,status:'RESOLVED',resolution:finalResolution});
 }
 
 async function supportDashboard(request,env){
