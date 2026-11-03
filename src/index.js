@@ -1026,7 +1026,10 @@ async function payoutRequest(request, env) {
   let batchResults;
   try {
     batchResults=await env.DB.batch([
-      env.DB.prepare(`UPDATE wallets SET available_cents=available_cents-?,reserved_cents=reserved_cents+?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND user_id=? AND available_cents>=?`).bind(amount,amount,wallet.id,auth.user.id,amount),
+      env.DB.prepare(`UPDATE wallets SET available_cents=available_cents-?,reserved_cents=reserved_cents+?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND user_id=? AND available_cents>=?
+        AND NOT EXISTS (SELECT 1 FROM payment_transactions pt WHERE pt.intervenant_id=? AND pt.status IN ('refund_pending_reconciliation','held'))
+        AND NOT EXISTS (SELECT 1 FROM payment_disputes pd WHERE pd.intervenant_id=? AND pd.status NOT IN ('resolved','closed'))
+        AND NOT EXISTS (SELECT 1 FROM payment_reconciliation pr WHERE pr.provider='stripe' AND pr.status='unmatched' AND pr.external_id LIKE 'dp_%')`).bind(amount,amount,wallet.id,auth.user.id,amount,auth.user.id,auth.user.id),
       env.DB.prepare(`INSERT INTO payout_requests (id,idempotency_key,wallet_id,user_id,amount_cents,mode,provider,status) SELECT ?,?,?,?,?,?,?,'requested' WHERE changes()=1`).bind(payoutId,idem,wallet.id,auth.user.id,amount,mode,paymentProvider(env))
     ]);
   } catch (err) {
