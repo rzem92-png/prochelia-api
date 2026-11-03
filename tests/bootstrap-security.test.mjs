@@ -98,3 +98,15 @@ test("bootstrap creates one manager and refuses token reuse", async () => {
   assert.equal((await second.json()).error, "BOOTSTRAP_ALREADY_USED");
   assert.equal(state.users.length, 1);
 });
+
+test("concurrent bootstrap requests create at most one initial manager", async () => {
+  const { env, state } = bootstrapEnv();
+  const responses = await Promise.all([
+    worker.fetch(request(), env),
+    worker.fetch(request(), env)
+  ]);
+  const statuses = responses.map(response => response.status).sort((a, b) => a - b);
+  assert.deepEqual(statuses, [201, 409]);
+  assert.equal(state.users.length, 1);
+  assert.equal(state.bootstrapWrites, 2);
+});
