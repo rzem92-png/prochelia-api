@@ -3555,19 +3555,30 @@ async function stripeWebhook(request, env) {
           result='DISPUTE_CLOSED_PENDING_RECONCILIATION';
         }
       } else if(disputeEvent.has(event.type)) {
-        // Record the Stripe dispute itself, not only a local payment hold.
-        // payoutRequest checks this table, so PSP-originated disputes block payouts too.
+        // Treat PSP dispute fields as untrusted. Freeze first; persist a dispute
+        // only when its amount is a positive safe integer within the payment.
         const stripeDisputeId=clean(obj?.id);
-        const disputedCents=Math.max(0,Number(obj?.amount||0));
+        const disputedCents=Number(obj?.amount ?? -1);
+        const validDisputeAmount=Number.isSafeInteger(disputedCents)&&disputedCents>0&&disputedCents<=Number(tx.gross_cents||0);
         if(stripeDisputeId) {
-          await env.DB.batch([
-            env.DB.prepare(`UPDATE payment_transactions SET status='held',updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='paid'`).bind(tx.id),
-            env.DB.prepare(`INSERT OR IGNORE INTO payment_disputes (id,mission_id,transaction_id,client_id,intervenant_id,status,reason,amount_cents) VALUES (?,?,?,?,?,?,?,?)`)
-              .bind('stripe_'+stripeDisputeId,tx.mission_id,tx.id,tx.client_id,tx.intervenant_id,'open',clean(obj?.reason)||'stripe_dispute',disputedCents)
-          ]);
-          await paymentAudit(env,'STRIPE_DISPUTE_OPENED',{transaction_id:tx.id,mission_id:tx.mission_id,user_id:tx.intervenant_id,metadata:{stripe_dispute_id:stripeDisputeId,amount_cents:disputedCents,event_id:event.id}},'REVIEW_REQUIRED');
+          await env.DB.prepare(`UPDATE payment_transactions SET status='held',updated_at=CURRENT_TIMESTAMP WHERE id=? AND status IN ('paid','held','refund_pending_reconciliation')`).bind(tx.id).run();
+          if(validDisputeAmount) {
+            await env.DB.prepare(`INSERT OR IGNORE INTO payment_disputes (id,mission_id,transaction_id,client_id,intervenant_id,status,reason,amount_cents) VALUES (?,?,?,?,?,?,?,?)`)
+              .bind('stripe_'+stripeDisputeId,tx.mission_id,tx.id,tx.client_id,tx.intervenant_id,'open',clean(obj?.reason)||'stripe_dispute',disputedCents).run();
+            await paymentAudit(env,'STRIPE_DISPUTE_OPENED',{transaction_id:tx.id,mission_id:tx.mission_id,user_id:tx.intervenant_id,metadata:{stripe_dispute_id:stripeDisputeId,amount_cents:disputedCents,event_id:event.id}},'REVIEW_REQUIRED');
+            result='DISPUTE_HELD';
+          } else {
+            await env.DB.prepare(`INSERT OR IGNORE INTO payment_reconciliation (id,provider,external_id,internal_transaction_id,amount_cents,currency,status) VALUES (?,?,?,?,?,?, 'unmatched')`)
+              .bind(crypto.randomUUID(),'stripe',stripeDisputeId,tx.id,0,String(obj?.currency||'eur').toUpperCase()).run();
+            await paymentAudit(env,'STRIPE_DISPUTE_AMOUNT_INVALID_HELD',{transaction_id:tx.id,mission_id:tx.mission_id,user_id:tx.intervenant_id,metadata:{stripe_dispute_id:stripeDisputeId,amount_cents:disputedCents,gross_cents:Number(tx.gross_cents||0),event_id:event.id,reason:'dispute_amount_out_of_bounds'}},'BLOCKED');
+            result='DISPUTE_AMOUNT_INVALID_HELD_RECONCILIATION_REQUIRED';
+          }
+        } else {
+          await env.DB.prepare(`INSERT OR IGNORE INTO payment_reconciliation (id,provider,external_id,internal_transaction_id,amount_cents,currency,status) VALUES (?,?,?,?,?,?, 'unmatched')`)
+            .bind(crypto.randomUUID(),'stripe',String(event.id),tx.id,0,String(obj?.currency||'eur').toUpperCase()).run();
+          await paymentAudit(env,'STRIPE_DISPUTE_ID_MISSING',{transaction_id:tx.id,mission_id:tx.mission_id,user_id:tx.intervenant_id,metadata:{event_id:event.id}},'BLOCKED');
+          result='DISPUTE_ID_MISSING_RECONCILIATION_REQUIRED';
         }
-        result='DISPUTE_HELD';
       }
       await paymentAudit(env,'STRIPE_WEBHOOK_PROCESSED',{transaction_id:tx.id,mission_id:tx.mission_id,metadata:{event_id:event.id,event_type:event.type,result}},'OK');
     }
