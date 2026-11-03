@@ -200,7 +200,7 @@ class StripeWebhookSafetySourceTests(unittest.TestCase):
     def test_refund_event_amount_is_cumulative_and_bounded_by_gross(self):
         refund = SOURCE[SOURCE.index("} else if(refundEvent.has(event.type)) {"):SOURCE.index("} else if(disputeEvent.has(event.type)) {")]
         self.assertIn("obj?.amount_refunded", refund)
-        self.assertIn("Number.isSafeInteger(refundedCents)", refund)
+        self.assertIn("Number.isSafeInteger(refundedRaw)", refund)
         self.assertIn("refundedCents<=Number(tx.gross_cents||0)", refund)
         self.assertIn("refund_amount_out_of_bounds", refund)
 
