@@ -1085,8 +1085,12 @@ async function paymentWebhook(request, env) {
     // A duplicate delivery is safe to acknowledge only after the original
     // event completed. A prior execution may have failed after claiming the
     // event but before applying its business mutation; never silently ACK it.
-    const existingEvent=await env.DB.prepare('SELECT processed FROM payment_webhook_events WHERE provider=? AND event_id=? LIMIT 1').bind(provider,eventId).first();
-    if(Number(existingEvent?.processed||0)===1) return json({ok:true,version:VERSION,duplicate:true,event_id:eventId},200);
+    const existingEvent=await env.DB.prepare('SELECT processed,payload_hash,event_type FROM payment_webhook_events WHERE provider=? AND event_id=? LIMIT 1').bind(provider,eventId).first();
+    // Reusing an event ID with different signed content is a conflict, not a
+    // harmless retry. Never let the second payload inherit the first ACK.
+    if(!existingEvent || existingEvent.payload_hash!==payloadHash || existingEvent.event_type!==type)
+      return json({ok:false,error:'WEBHOOK_EVENT_ID_PAYLOAD_CONFLICT',version:VERSION,event_id:eventId},409);
+    if(Number(existingEvent.processed||0)===1) return json({ok:true,version:VERSION,duplicate:true,event_id:eventId},200);
     return json({ok:false,error:'WEBHOOK_EVENT_PENDING_RECONCILIATION',version:VERSION,event_id:eventId},503);
   }
   const txId=clean(event?.data?.transaction_id), payoutId=clean(event?.data?.payout_id);
