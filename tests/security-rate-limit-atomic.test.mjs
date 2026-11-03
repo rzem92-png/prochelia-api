@@ -77,3 +77,17 @@ test('mission security code can be consumed again after the lockout timestamp ex
   assert.match(verify, /locked_until IS NULL OR locked_until<=\?/);
   assert.match(verify, /\.bind\(sec\.id,now\)\.run\(\)/);
 });
+
+const postMissionStart = source.indexOf('async function postMissions(');
+const postMissionEnd = source.indexOf('\nasync function ', postMissionStart + 10);
+assert.notEqual(postMissionStart, -1, 'postMissions must exist');
+assert.notEqual(postMissionEnd, -1, 'postMissions must have a following function');
+const postMission = source.slice(postMissionStart, postMissionEnd);
+
+test('disabled mission writes fail closed without parsing or consuming attacker-controlled request bodies', () => {
+  assert.match(postMission, /async function postMissions\(_request, env\)/);
+  assert.doesNotMatch(postMission, /readJson\(|readBoundedRequestBody\(|request\.json\(/);
+  assert.match(postMission, /write_enabled: false/);
+  assert.match(postMission, /}, 503\)/);
+  assert.match(postMission, /MISSION_API_ENABLED === 'true' \? 'WRITE_GATE_NOT_ACTIVATED'/);
+});
