@@ -51,3 +51,19 @@ test("calculation is read-only and cannot execute bookings or payouts", () => {
   assert.equal(r.executionAllowed, false);
   assert.equal(r.bookingAllowedByPriceGuard, true);
 });
+
+test("uses exact arithmetic when the PSP fee multiplication exceeds Number safe precision", () => {
+  const r = calculatePriceFloor({
+    providerPayoutCents: 900_000_000_000,
+    variableCostCents: 0,
+    fixedPspFeeCents: 0,
+    pspRateBps: 9999,
+    riskReserveCents: 0,
+    targetContributionCents: 0
+  });
+  assert.equal(r.ok, true);
+  assert.equal(r.minClientPriceCents, 9_000_000_000_000_000);
+  assert.equal(r.estimatedPspFeeCents, 8_999_100_000_000_000);
+  assert.equal(r.estimatedContributionCents, 0);
+  assert.equal(r.bookingAllowedByPriceGuard, true);
+});
