@@ -27,6 +27,12 @@ class StripeWebhookSafetySourceTests(unittest.TestCase):
         self.assertIn("STRIPE_REFUND_REQUIRES_RECONCILIATION", SOURCE)
         self.assertIn("wallet_ledger_reversal_not_implemented", SOURCE)
 
+    def test_invalid_refund_amount_is_held_and_audited(self):
+        self.assertIn("STRIPE_REFUND_AMOUNT_INVALID", SOURCE)
+        self.assertIn("REFUND_AMOUNT_INVALID_HELD", SOURCE)
+        self.assertIn("refundedCents>Number(tx.gross_cents||0)", SOURCE)
+        self.assertIn("refund_amount_out_of_bounds", SOURCE)
+
     def test_webhook_event_replay_is_payload_bound_and_claimed(self):
         self.assertIn("WEBHOOK_EVENT_PAYLOAD_MISMATCH", SOURCE)
         self.assertIn("processed=2", SOURCE)
