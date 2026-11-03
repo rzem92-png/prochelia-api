@@ -60,3 +60,8 @@ test('V7 QR validation fails closed for caller-supplied payloads',()=>{
   assert.equal(result.qrValidated,false);
   assert.equal(result.verificationRequired,'SERVER_SIGNED_EXPIRING_SINGLE_USE_QR');
 });
+
+test('webhook fails closed and leaves event retryable when referenced payment or payout is missing',()=>{
+  assert.match(webhook,/if\(!tx\) return json\(\{ok:false,error:'PAYMENT_TRANSACTION_NOT_FOUND',version:VERSION\},503\)/);
+  assert.match(webhook,/if\(!payout\) return json\(\{ok:false,error:'PAYOUT_NOT_FOUND',version:VERSION\},503\)/);
+});
