@@ -1654,13 +1654,12 @@ async function executeOperationalCase(env, caseId, approverId=null, automatic=fa
   // Claim the case before any side effect. Concurrent approval/automation requests
   // can only win this conditional transition once.
   const allowedStatuses=automatic ? ['AUTO_PENDING'] : ['OPEN','AUTO_PENDING'];
-  // For automatic execution, bind the phase guard into the same conditional
-  // UPDATE as the case claim. This closes the phase-change TOCTOU window
-  // between the earlier policy read and the claim itself.
+  // Atomically bind automatic claim to the current project phase to prevent
+  // phase-change TOCTOU between policy validation and case reservation.
   const phaseClaimClause=automatic
     ? ` AND EXISTS (SELECT 1 FROM platform_settings
         WHERE key='project_phase'
-          AND UPPER(TRIM(json_extract(value_json,'
+          AND UPPER(TRIM(json_extract(value_json, '
   let businessResults;
   try {
     businessResults = await executeCaseBusinessAction(env,c,rec,approverId,automatic);
