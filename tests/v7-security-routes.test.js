@@ -80,3 +80,13 @@ test('V7 rejects POST requests with non-JSON content type', async () => {
   assert.equal(data.error, 'JSON_CONTENT_TYPE_REQUIRED');
   assert.equal(response.headers.get('cache-control'), 'no-store');
 });
+
+
+test('all V7 responses receive baseline security headers', async () => {
+  const response = await handleV7Route(new Request('https://preprod.example.test/api/v7/status'), env, '/api/v7/status');
+  assert.equal(response.headers.get('x-content-type-options'), 'nosniff');
+  assert.equal(response.headers.get('x-frame-options'), 'DENY');
+  assert.equal(response.headers.get('referrer-policy'), 'no-referrer');
+  assert.equal(response.headers.get('cache-control'), 'no-store');
+  assert.equal(response.headers.get('strict-transport-security'), 'max-age=31536000; includeSubDomains');
+});
