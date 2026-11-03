@@ -51,7 +51,8 @@ export function rankNexusProviders(request = {}) {
     if (skillFit < 100) continue; // hard competency gate; no score can compensate
     const availabilityFit = 100; // hard availability gate passed; schedule fit must be server-derived
     const distanceFit = 100 * (1 - c.distanceKm / request.maxDistanceKm);
-    // Do not reward the cheapest quote. Pricing is eligible only above a server-calculated\n    // provider/platform minimum; the score rewards proximity to the client budget only weakly.\n    const priceFairness = 100 * (1 - Math.min(1, Math.abs(request.budgetCents - c.quoteCents) / request.budgetCents));
+    // Do not reward the cheapest quote. Quotes below the server-side floor are rejected.
+    const priceFairness = 100 * (1 - Math.min(1, Math.abs(request.budgetCents - c.quoteCents) / request.budgetCents));
     // Exposure is an anti-popularity signal: less recent exposure earns a modest boost.
     // No demographic, health, religion, ethnicity, or other sensitive attribute is used.
     const fairExposure = c.smallLocalProvider ? 100 * (1 - c.recentExposure / 100) : 0;
