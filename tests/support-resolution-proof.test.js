@@ -19,3 +19,11 @@ test('support input validates severity and bounds description', () => {
 test('client cannot assert tenant/mission/complaint relationship on support case', () => {
   assert.match(source, /\.bind\(id,a\.role,a\.auth\.user\.id,null,null,null,category,severity,'OPEN'/);
 });
+
+test('support manager resolution validates body and uses conditional state transition', () => {
+  assert.match(source, /CASE_ID_INVALID/);
+  assert.match(source, /RESOLUTION_INVALID/);
+  assert.match(source, /CASE_ALREADY_RESOLVED/);
+  assert.match(source, /WHERE id=\? AND status<>'RESOLVED'/);
+  assert.match(source, /CASE_STATE_CONFLICT/);
+});
