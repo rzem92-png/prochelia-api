@@ -1147,15 +1147,31 @@ async function paymentWebhook(request, env) {
     if(payout&&newStatus){
       const finalStatuses=['completed','failed','canceled'];
       if(finalStatuses.includes(newStatus)) {
-        // Final payout transition and wallet settlement/release must be atomic.
-        // Conditional state transition is the idempotency gate for duplicate or
-        // concurrent webhook deliveries; changes() gates the wallet mutation.
-        const payoutUpdate=env.DB.prepare(`UPDATE payout_requests SET status=?,provider_payout_id=COALESCE(?,provider_payout_id),failure_code=?,failure_message=?,completed_at=CASE WHEN ?='completed' THEN CURRENT_TIMESTAMP ELSE completed_at END,updated_at=CURRENT_TIMESTAMP WHERE id=? AND status NOT IN ('completed','failed','canceled') AND amount_cents>0 AND EXISTS (SELECT 1 FROM wallets w WHERE w.id=payout_requests.wallet_id AND w.reserved_cents>=payout_requests.amount_cents)`)
-          .bind(newStatus,clean(event?.data?.provider_payout_id)||null,clean(event?.data?.failure_code)||null,clean(event?.data?.failure_message)||null,newStatus,payoutId);
+        // D1 batch is transactional, but a conditional UPDATE affecting zero rows does
+        // not throw. Mutate the wallet first only when the payout is still non-terminal
+        // and its exact reservation exists; the payout transition then requires the
+        // wallet update to have changed exactly one row. Concurrent batches are serialized
+        // by D1; duplicate events see the terminal payout and cannot release funds twice.
         const walletUpdate=newStatus==='completed'
-          ? env.DB.prepare(`UPDATE wallets SET reserved_cents=MAX(0,reserved_cents-?),paid_cents=paid_cents+?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND changes()=1`).bind(payout.amount_cents,payout.amount_cents,payout.wallet_id)
-          : env.DB.prepare(`UPDATE wallets SET reserved_cents=MAX(0,reserved_cents-?),available_cents=available_cents+?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND changes()=1`).bind(payout.amount_cents,payout.amount_cents,payout.wallet_id);
-        await env.DB.batch([payoutUpdate,walletUpdate]);
+          ? env.DB.prepare(`UPDATE wallets SET reserved_cents=reserved_cents-?,paid_cents=paid_cents+?,updated_at=CURRENT_TIMESTAMP
+              WHERE id=? AND reserved_cents>=? AND EXISTS (
+                SELECT 1 FROM payout_requests p
+                WHERE p.id=? AND p.wallet_id=wallets.id AND p.amount_cents=? AND p.amount_cents>0
+                  AND p.status NOT IN ('completed','failed','canceled')
+              )`).bind(payout.amount_cents,payout.amount_cents,payout.wallet_id,payout.amount_cents,payoutId,payout.amount_cents)
+          : env.DB.prepare(`UPDATE wallets SET reserved_cents=reserved_cents-?,available_cents=available_cents+?,updated_at=CURRENT_TIMESTAMP
+              WHERE id=? AND reserved_cents>=? AND EXISTS (
+                SELECT 1 FROM payout_requests p
+                WHERE p.id=? AND p.wallet_id=wallets.id AND p.amount_cents=? AND p.amount_cents>0
+                  AND p.status NOT IN ('completed','failed','canceled')
+              )`).bind(payout.amount_cents,payout.amount_cents,payout.wallet_id,payout.amount_cents,payoutId,payout.amount_cents);
+        const payoutUpdate=env.DB.prepare(`UPDATE payout_requests SET status=?,provider_payout_id=COALESCE(?,provider_payout_id),failure_code=?,failure_message=?,completed_at=CASE WHEN ?='completed' THEN CURRENT_TIMESTAMP ELSE completed_at END,updated_at=CURRENT_TIMESTAMP
+          WHERE id=? AND status NOT IN ('completed','failed','canceled') AND amount_cents>0 AND changes()=1`)
+          .bind(newStatus,clean(event?.data?.provider_payout_id)||null,clean(event?.data?.failure_code)||null,clean(event?.data?.failure_message)||null,newStatus,payoutId);
+        const settled=await env.DB.batch([walletUpdate,payoutUpdate]);
+        if(Number(settled?.[0]?.meta?.changes||0)!==1 || Number(settled?.[1]?.meta?.changes||0)!==1){
+          await paymentAudit(env,'PAYOUT_FINALIZATION_CONFLICT',{payout_id:payoutId,metadata:{provider,event_id:eventId,event_type:type}},'RECONCILIATION_REQUIRED');
+        }
       } else {
         await env.DB.prepare(`UPDATE payout_requests SET status=?,provider_payout_id=COALESCE(?,provider_payout_id),updated_at=CURRENT_TIMESTAMP WHERE id=? AND status NOT IN ('completed','failed','canceled')`).bind(newStatus,clean(event?.data?.provider_payout_id)||null,payoutId).run();
       }

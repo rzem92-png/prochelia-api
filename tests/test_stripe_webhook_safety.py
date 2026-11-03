@@ -142,9 +142,16 @@ class StripeWebhookSafetySourceTests(unittest.TestCase):
         self.assertIn("reserved_cents=reserved_cents+?", SOURCE)
 
     def test_payout_terminal_webhook_only_settles_once(self):
-        self.assertIn("status NOT IN ('completed','failed','canceled')", SOURCE)
-        self.assertIn("WHERE id=? AND changes()=1", SOURCE)
-        self.assertIn("reserved_cents=MAX(0,reserved_cents-?)", SOURCE)
+        start = SOURCE.index("// D1 batch is transactional, but a conditional UPDATE")
+        end = SOURCE.index("      } else {", start)
+        block = SOURCE[start:end]
+        self.assertIn("reserved_cents=reserved_cents-?", block)
+        self.assertIn("reserved_cents>=?", block)
+        self.assertIn("p.status NOT IN ('completed','failed','canceled')", block)
+        self.assertIn("AND changes()=1", block)
+        self.assertIn("env.DB.batch([walletUpdate,payoutUpdate])", block)
+        self.assertLess(block.index("const walletUpdate="), block.index("const payoutUpdate="))
+        self.assertIn("PAYOUT_FINALIZATION_CONFLICT", block)
 
     def test_payouts_fail_closed_on_unmatched_stripe_dispute(self):
         self.assertIn("external_id LIKE 'dp_%'", SOURCE)
