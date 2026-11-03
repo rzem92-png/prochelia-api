@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { claimActionExecution, quarantineStaleOutboxActions } from "../src/index.js";
+import { claimActionExecution, quarantineStaleOutboxActions, incrementRateLimitCounter } from "../src/index.js";
 
 function fakeDB(initialStatus = "PENDING") {
   const state = { status: initialStatus };
@@ -70,4 +70,35 @@ test("stale RUNNING actions are quarantined rather than retried", async () => {
   assert.match(sqlSeen, /status='RUNNING'/);
   assert.match(sqlSeen, /datetime\('now','-5 minutes'\)/);
   assert.match(sqlSeen, /Manual reconciliation required/);
+});
+
+test("rate-limit increments use one atomic upsert with RETURNING", async () => {
+  let captured = "";
+  const DB = {
+    prepare(sql) {
+      captured = sql;
+      return {
+        bind(...args) {
+          assert.equal(args[1], "bucket");
+          assert.equal(args[2], "subject");
+          assert.equal(args[3], "window");
+          return this;
+        },
+        async first() { return { request_count: 21 }; }
+      };
+    }
+  };
+  const count = await incrementRateLimitCounter({ DB }, "bucket", "subject", "window");
+  assert.equal(count, 21);
+  assert.match(captured, /ON CONFLICT\(bucket,subject_hash,window_start\)/);
+  assert.match(captured, /request_count=security_rate_limits\.request_count\+1/);
+  assert.match(captured, /RETURNING request_count/);
+});
+
+test("rate-limit counter fails closed on invalid database return", async () => {
+  const DB = { prepare() { return { bind() { return this; }, async first() { return null; } }; } };
+  await assert.rejects(
+    incrementRateLimitCounter({ DB }, "b", "s", "w"),
+    /RATE_LIMIT_COUNTER_INVALID/
+  );
 });
