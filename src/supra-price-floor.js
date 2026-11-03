@@ -37,18 +37,18 @@ export function calculatePriceFloor(input = {}) {
   if (!Number.isSafeInteger(base)) {
     return { ok: false, error: "PRICE_OVERFLOW", executionAllowed: false };
   }
-  // Price >= base + rate*price. Solve using integer arithmetic and round upward.
-  const denominator = MAX_BPS - input.pspRateBps;
-  const numerator = base * MAX_BPS;
-  if (!Number.isSafeInteger(numerator)) {
+  // Solve price >= base + rate*price with exact integer arithmetic.
+  // BigInt avoids rejecting a valid safe-cent result merely because base*10,000
+  // exceeds Number.MAX_SAFE_INTEGER during an intermediate calculation.
+  const denominator = BigInt(MAX_BPS - input.pspRateBps);
+  const numerator = BigInt(base) * BigInt(MAX_BPS);
+  const minPriceBig = (numerator + denominator - 1n) / denominator;
+  if (minPriceBig > BigInt(MAX_CENTS)) {
     return { ok: false, error: "PRICE_OVERFLOW", executionAllowed: false };
   }
-  const minClientPriceCents = ceilDiv(numerator, denominator);
-  if (minClientPriceCents === null) {
-    return { ok: false, error: "PRICE_OVERFLOW", executionAllowed: false };
-  }
-  // BigInt prevents unsafe intermediate multiplication from silently becoming NaN/null/0.
-  const rateFeeBig = (BigInt(minClientPriceCents) * BigInt(input.pspRateBps) +
+  const minClientPriceCents = Number(minPriceBig);
+  // Exact rounded-up PSP fee; reject rather than silently overflow.
+  const rateFeeBig = (minPriceBig * BigInt(input.pspRateBps) +
     BigInt(MAX_BPS - 1)) / BigInt(MAX_BPS);
   const pspFeeBig = BigInt(input.fixedPspFeeCents) + rateFeeBig;
   if (pspFeeBig > BigInt(MAX_CENTS)) {
