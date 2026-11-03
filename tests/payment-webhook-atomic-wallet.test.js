@@ -65,3 +65,17 @@ test('webhook fails closed and leaves event retryable when referenced payment or
   assert.match(webhook,/if\(!tx\) return json\(\{ok:false,error:'PAYMENT_TRANSACTION_NOT_FOUND',version:VERSION\},503\)/);
   assert.match(webhook,/if\(!payout\) return json\(\{ok:false,error:'PAYOUT_NOT_FOUND',version:VERSION\},503\)/);
 });
+
+test('webhook rejects event-ID reuse with a different payload or type',()=>{
+  assert.match(webhook,/prior\.payload_hash!==payloadHash \|\| prior\.event_type!==type/);
+  assert.match(webhook,/WEBHOOK_EVENT_ID_CONFLICT/);
+});
+
+test('payment webhook cannot rewrite terminal transaction states',()=>{
+  assert.match(webhook,/WHERE id=\? AND status NOT IN \('paid','failed','refunded'\)/);
+});
+
+test('webhook payload is bounded and signature is checked before JSON processing',()=>{
+  assert.match(webhook,/total>65536/);
+  assert.ok(webhook.indexOf('verifyWebhookSignature(request,env,raw)') < webhook.indexOf('JSON.parse(raw)'));
+});
