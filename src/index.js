@@ -979,6 +979,13 @@ async function paymentWebhook(request, env) {
   let event; try{event=JSON.parse(raw)}catch{return json({ok:false,error:'INVALID_WEBHOOK_JSON',version:VERSION},400);}
   const provider=clean(event?.provider)||paymentProvider(env), eventId=clean(event?.id), type=clean(event?.type);
   if(!eventId||eventId.length>256||!type||type.length>128||provider!==paymentProvider(env)) return json({ok:false,error:'INVALID_WEBHOOK_EVENT',version:VERSION},400);
+  // Reject unknown event types and malformed event routing before reserving an event ID.
+  const paymentEventTypes=new Set(['payment_succeeded','charge_succeeded','payment_failed','charge_failed','payment_refunded']);
+  const payoutEventTypes=new Set(['payout_processing','payout_paid','payout_failed','payout_canceled']);
+  const txId=clean(event?.data?.transaction_id), payoutId=clean(event?.data?.payout_id);
+  if(paymentEventTypes.has(type) && (!txId || payoutId)) return json({ok:false,error:'INVALID_PAYMENT_WEBHOOK_REFERENCE',version:VERSION},400);
+  if(payoutEventTypes.has(type) && (!payoutId || txId)) return json({ok:false,error:'INVALID_PAYOUT_WEBHOOK_REFERENCE',version:VERSION},400);
+  if(!paymentEventTypes.has(type) && !payoutEventTypes.has(type)) return json({ok:false,error:'UNSUPPORTED_WEBHOOK_EVENT',version:VERSION},400);
   const payloadHash=await sha256Base64url(raw);
   const inserted=await env.DB.prepare(`INSERT OR IGNORE INTO payment_webhook_events (id,provider,event_id,event_type,signature_valid,payload_hash) VALUES (?,?,?,?,1,?)`).bind(crypto.randomUUID(),provider,eventId,type,payloadHash).run();
   if(!inserted.meta?.changes) {
@@ -990,7 +997,6 @@ async function paymentWebhook(request, env) {
       return json({ok:true,version:VERSION,duplicate:true,event_id:eventId},200);
     if(!prior) return json({ok:false,error:'WEBHOOK_EVENT_STATE_UNAVAILABLE',version:VERSION},503);
   }
-  const txId=clean(event?.data?.transaction_id), payoutId=clean(event?.data?.payout_id);
   if(txId){
     const tx=await env.DB.prepare('SELECT * FROM payment_transactions WHERE id=? LIMIT 1').bind(txId).first();
     const statusMap={payment_succeeded:'paid',charge_succeeded:'paid',payment_failed:'failed',charge_failed:'failed',payment_refunded:'refunded'};
