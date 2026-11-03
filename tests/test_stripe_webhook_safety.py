@@ -142,6 +142,15 @@ class StripeWebhookSafetySourceTests(unittest.TestCase):
         self.assertIn("WHERE changes()=1", SOURCE)
         self.assertIn("reserved_cents=reserved_cents+?", SOURCE)
 
+    def test_payout_finalization_conflict_keeps_webhook_pending(self):
+        start = SOURCE.index("let payoutFinalizationConflict=false")
+        end = SOURCE.index("UPDATE payment_webhook_events SET processed=1", start)
+        block = SOURCE[start:end]
+        self.assertIn("payoutFinalizationConflict=true", block)
+        self.assertIn("PAYOUT_FINALIZATION_REQUIRES_RECONCILIATION", block)
+        self.assertIn("if(payoutFinalizationConflict)", block)
+        self.assertIn("},503)", block)
+
     def test_payout_terminal_webhook_only_settles_once(self):
         start = SOURCE.index("// D1 batch is transactional, but a conditional UPDATE")
         end = SOURCE.index("      } else {", start)
