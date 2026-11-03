@@ -10,6 +10,10 @@ SOURCE = (Path(__file__).resolve().parents[1] / "src" / "index.js").read_text()
 
 
 class StripeWebhookSafetySourceTests(unittest.TestCase):
+    def test_finance_summary_counts_refund_pending_as_unsettled(self):
+        summary = SOURCE[SOURCE.index('async function financeSummary('):SOURCE.index('\nasync function complaintCreate', SOURCE.index('async function financeSummary('))]
+        self.assertIn("status IN ('pending','processing','held','refund_pending_reconciliation')", summary)
+
     def test_unmatched_financial_webhook_result_initialized_before_branch(self):
         block = SOURCE[SOURCE.index("const financialEvent="):SOURCE.index("if(txId && (paidEvent.has(event.type)")]
         self.assertLess(block.index("let result='IGNORED'"), block.index("if(financialEvent&&!txId)"))
