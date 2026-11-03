@@ -2864,7 +2864,15 @@ async function financeExport(request,env) {
 
 async function financeEntryCreate(request,env) {
   const a=await financeAuth(request,env); if(a.response)return a.response;
-  const {auth}=a, b=await readJson(request)||{};
+  const {auth}=a;
+  // Explicit privilege boundary: finance workspace visibility is not permission
+  // to create ledger entries. Only finance operators may write accounting data.
+  const role=String(auth.user.role||'').toUpperCase();
+  if(!['GERANTE','ADMIN','FINANCE'].includes(role)) {
+    await journal(env,auth.user.role,auth.user.id,'FINANCE_ENTRY_CREATE','finance_workspace_entries',null,'DENIED',{reason:'ROLE_NOT_ALLOWED'});
+    return json({ok:false,error:'FORBIDDEN',version:VERSION},403);
+  }
+  const b=await readJson(request)||{};
   const amount=Math.round(Number(b.amount_eur)*100);
   if(!Number.isFinite(amount)||amount<=0||!b.entry_type) return json({ok:false,error:'INVALID_FINANCE_ENTRY',version:VERSION},400);
   const id=crypto.randomUUID();
@@ -2897,7 +2905,12 @@ async function financeProblemResolve(request,env) {
   const owner=String(row.user_id)===String(auth.user.id);
   const manager=['GERANTE','ADMIN','FINANCE'].includes(role);
   if(!owner&&!manager)return json({ok:false,error:'FORBIDDEN',version:VERSION},403);
+  // Case owners may escalate, but only a finance manager can approve/resolve.
   const approved=Boolean(b.approve);
+  if(approved&&!manager) {
+    await journal(env,auth.user.role,auth.user.id,'FINANCE_PROBLEM_RESOLVE','finance_resolution_cases',id,'DENIED',{reason:'MANAGER_APPROVAL_REQUIRED'});
+    return json({ok:false,error:'FORBIDDEN',version:VERSION},403);
+  }
   const resolution=clean(b.resolution)||row.proposed_solution||'Résolution contrôlée par le Copilote.';
   const status=approved?'RESOLVED':'ESCALATED';
   await env.DB.prepare(`UPDATE finance_resolution_cases SET status=?,resolution=?,resolved_at=CURRENT_TIMESTAMP WHERE id=?`).bind(status,resolution,id).run();
