@@ -2427,6 +2427,15 @@ async function queueAction(env, actionType, entityType, entityId, payload, idem)
 
 async function executeQueuedAction(env, action) {
   if (!action) return {ok:false,error:'ACTION_NOT_FOUND'};
+  // Legacy operational endpoint must share the same one-time reservation semantics
+  // as the modern outbox worker. Never re-run DONE/FAILED/PROCESSING rows.
+  const claim=await env.DB.prepare(`UPDATE action_outbox
+    SET status='PROCESSING',attempts=attempts+1,last_error=NULL,updated_at=CURRENT_TIMESTAMP
+    WHERE id=? AND status='PENDING'`).bind(action.id).run();
+  if(Number(claim?.meta?.changes||0)!==1) {
+    const current=await env.DB.prepare('SELECT status FROM action_outbox WHERE id=? LIMIT 1').bind(action.id).first();
+    return {ok:false,status:current?.status||'UNKNOWN',error:'ACTION_ALREADY_CLAIMED_OR_TERMINAL'};
+  }
   const payload = JSON.parse(action.payload_json||'{}');
   const now = new Date().toISOString();
   try {
@@ -2471,12 +2480,12 @@ async function executeQueuedAction(env, action) {
     } else result={performed:false,reason:'ACTION_TYPE_NOT_IMPLEMENTED'};
 
     const finalStatus = result.performed ? 'DONE' : (result.requires_provider ? 'WAITING_PROVIDER' : 'FAILED');
-    await env.DB.prepare(`UPDATE action_outbox SET status=?,result_json=?,attempts=attempts+1,updated_at=CURRENT_TIMESTAMP,executed_at=? WHERE id=?`)
+    await env.DB.prepare(`UPDATE action_outbox SET status=?,result_json=?,updated_at=CURRENT_TIMESTAMP,executed_at=? WHERE id=? AND status='PROCESSING'`)
       .bind(finalStatus,JSON.stringify(result),result.performed?now:null,action.id).run();
     return {ok:true,status:finalStatus,result};
   } catch(e) {
-    await env.DB.prepare(`UPDATE action_outbox SET status='FAILED',last_error=?,attempts=attempts+1,updated_at=CURRENT_TIMESTAMP WHERE id=?`)
-      .bind(String(e.message||e),action.id).run();
+    await env.DB.prepare(`UPDATE action_outbox SET status='FAILED',last_error=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='PROCESSING'`)
+      .bind(String(e.message||e).slice(0,500),action.id).run();
     return {ok:false,error:'ACTION_EXECUTION_FAILED',message:e.message};
   }
 }
@@ -2489,17 +2498,20 @@ async function operationalExecute(request, env) {
   if(!b.case_id)return json({ok:false,error:'CASE_ID_REQUIRED',version:VERSION},400);
   const c=await env.DB.prepare('SELECT * FROM operational_cases WHERE id=? LIMIT 1').bind(b.case_id).first();
   if(!c)return json({ok:false,error:'CASE_NOT_FOUND',version:VERSION},404);
+  if(['RESOLVED','CLOSED','EXECUTING'].includes(String(c.status))) return json({ok:false,error:'CASE_ALREADY_EXECUTED_OR_IN_PROGRESS',version:VERSION},409);
   const solution=JSON.parse(c.proposed_solution_json||'{}');
   const actions=Array.isArray(b.actions)?b.actions:(Array.isArray(solution.actions)?solution.actions:[]);
   if(!actions.length)return json({ok:false,error:'NO_ACTIONS_DEFINED',version:VERSION},400);
+  const caseClaim=await env.DB.prepare(`UPDATE operational_cases SET status='EXECUTING',updated_at=CURRENT_TIMESTAMP WHERE id=? AND status IN ('OPEN','AUTO_PENDING','IN_PROGRESS')`).bind(c.id).run();
+  if(Number(caseClaim?.meta?.changes||0)!==1) return json({ok:false,error:'CASE_ALREADY_EXECUTED_OR_IN_PROGRESS',version:VERSION},409);
   const results=[];
   for(const a of actions){
     const q=await queueAction(env,a.action_type||a.type,c.mission_id?'MISSION':'CASE',a.entity_id||c.mission_id,{...a},a.idempotency_key);
     results.push(await executeQueuedAction(env,q));
   }
   const allDone=results.every(x=>x.ok && ['DONE'].includes(x.status));
-  await env.DB.prepare(`UPDATE operational_cases SET status=?,resolution_json=?,updated_at=CURRENT_TIMESTAMP,resolved_at=? WHERE id=?`)
-    .bind(allDone?'RESOLVED':'IN_PROGRESS',JSON.stringify({approved_by:gate.auth.user.id,results}),allDone?new Date().toISOString():null,c.id).run();
+  await env.DB.prepare(`UPDATE operational_cases SET status=?,resolution_json=?,updated_at=CURRENT_TIMESTAMP,resolved_at=? WHERE id=? AND status='EXECUTING'`)
+    .bind(allDone?'RESOLVED':'EXECUTION_FAILED',JSON.stringify({approved_by:gate.auth.user.id,results}),allDone?new Date().toISOString():null,c.id).run();
   await journal(env,'gerante',gate.auth.user.id,'CASE_EXECUTED','operational_case',c.id,allDone?'OK':'PARTIAL',{results});
   return json({ok:true,version:VERSION,case_id:c.id,status:allDone?'RESOLVED':'IN_PROGRESS',results});
 }
