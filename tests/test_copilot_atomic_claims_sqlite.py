@@ -104,18 +104,15 @@ class CopilotAtomicClaimSqliteTests(unittest.TestCase):
                AND EXISTS (
                  SELECT 1 FROM platform_settings
                   WHERE key='project_phase'
-                    AND UPPER(TRIM(json_extract(value_json,'
-        self.db.close()
-
-
-if __name__ == "__main__":
-    unittest.main()
-))) = ?
+                    AND UPPER(TRIM(json_extract(value_json, '$'))) = ?
                )
         """
-        # If the phase changes after the policy read but before the claim,
-        # the SQL claim must reject the old phase.
-        self.db.execute("UPDATE platform_settings SET value_json='""PRODUCTION""' WHERE key='project_phase'")
+        # The current phase may change after the policy read. The conditional
+        # UPDATE must reject the stale phase and accept only the live one.
+        self.db.execute(
+            "UPDATE platform_settings SET value_json=? WHERE key='project_phase'",
+            ('"PRODUCTION"',),
+        )
         self.db.commit()
         rejected = self.db.execute(sql, ("EXPERT",))
         self.db.commit()
@@ -125,7 +122,10 @@ if __name__ == "__main__":
             "AUTO_PENDING",
         )
 
-        self.db.execute("UPDATE platform_settings SET value_json='""EXPERT""' WHERE key='project_phase'")
+        self.db.execute(
+            "UPDATE platform_settings SET value_json=? WHERE key='project_phase'",
+            ('"EXPERT"',),
+        )
         self.db.commit()
         accepted = self.db.execute(sql, ("EXPERT",))
         self.db.commit()
