@@ -71,3 +71,8 @@ test('mission security code transition never trusts the earlier SELECT as the fi
   assert.match(transition, /end_used_at IS NULL/);
   assert.doesNotMatch(transition, /UPDATE mission_security SET status=\?/);
 });
+
+test('mission security code can be consumed again after the lockout timestamp expires', () => {
+  assert.match(verify, /locked_until IS NULL OR locked_until<=\?/);
+  assert.match(verify, /\.bind\(sec\.id,now\)\.run\(\)/);
+});
