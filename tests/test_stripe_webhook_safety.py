@@ -126,6 +126,13 @@ class StripeWebhookSafetySourceTests(unittest.TestCase):
         self.assertIn("reason:!tx?'transaction_not_found':'provider_mismatch'", SOURCE)
         self.assertIn("internal_transaction_id,amount_cents,currency,status", SOURCE)
 
+    def test_refund_mapping_mismatch_freezes_transaction_and_quarantines(self):
+        self.assertIn("STRIPE_REFUND_MAPPING_MISMATCH_HELD", SOURCE)
+        self.assertIn("status='held',refund_cents=CASE WHEN ?", SOURCE)
+        self.assertIn("refundEvent.has(event.type)", SOURCE)
+        self.assertIn("refund_currency_or_payment_mapping_mismatch", SOURCE)
+        self.assertIn("INSERT OR IGNORE INTO payment_reconciliation", SOURCE)
+
     def test_stripe_dispute_amount_is_validated_and_invalid_case_held(self):
         self.assertIn("validDisputeAmount=Number.isSafeInteger(disputedCents)", SOURCE)
         self.assertIn("disputedCents>0&&disputedCents<=Number(tx.gross_cents||0)", SOURCE)
