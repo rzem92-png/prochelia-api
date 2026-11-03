@@ -106,3 +106,38 @@ test('disabled mission writes fail closed without parsing or consuming attacker-
   assert.match(postMission, /}, 503\)/);
   assert.match(postMission, /MISSION_API_ENABLED === 'true' \? 'WRITE_GATE_NOT_ACTIVATED'/);
 });
+
+
+test('browser mutations reject unapproved Origin before touching D1', async () => {
+  const response = await worker.fetch(new Request('https://prochelia-api-preview.rzem92.workers.dev/api/auth/logout', {
+    method: 'POST',
+    headers: { Origin: 'https://evil.example', 'Content-Type': 'application/json' },
+    body: '{}'
+  }), {});
+  assert.equal(response.status, 403);
+  assert.equal((await response.json()).error, 'ORIGIN_NOT_ALLOWED');
+});
+
+test('cookie-authenticated mutation requires Origin to prevent CSRF', async () => {
+  const response = await worker.fetch(new Request('https://prochelia-api-preview.rzem92.workers.dev/api/auth/logout', {
+    method: 'POST',
+    headers: { Cookie: 'prochelia_session=attacker-controlled', 'Content-Type': 'application/json' },
+    body: '{}'
+  }), { CORS_ORIGIN: 'https://feat-supra-control-center-v1.prochelia.pages.dev' });
+  assert.equal(response.status, 403);
+  assert.equal((await response.json()).error, 'CSRF_ORIGIN_REQUIRED');
+});
+
+test('CORS preflight rejects unapproved request headers', async () => {
+  const origin = 'https://feat-supra-control-center-v1.prochelia.pages.dev';
+  const response = await worker.fetch(new Request('https://prochelia-api-preview.rzem92.workers.dev/api/auth/login', {
+    method: 'OPTIONS',
+    headers: {
+      Origin: origin,
+      'Access-Control-Request-Method': 'POST',
+      'Access-Control-Request-Headers': 'content-type, x-evil-header'
+    }
+  }), { CORS_ORIGIN: origin });
+  assert.equal(response.status, 400);
+  assert.equal((await response.json()).error, 'CORS_HEADER_NOT_ALLOWED');
+});
