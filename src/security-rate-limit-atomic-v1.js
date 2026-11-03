@@ -116,10 +116,13 @@ export async function enforceAtomicRateLimit({
         (bucket, subject_hash, window_start, request_count, expires_at)
       VALUES (?, ?, ?, 1, ?)
       ON CONFLICT(bucket, subject_hash, window_start)
-      DO UPDATE SET request_count = request_count + 1,
+      DO UPDATE SET request_count = CASE
+                      WHEN request_count <= ? THEN request_count + 1
+                      ELSE request_count
+                    END,
                     expires_at = excluded.expires_at
       RETURNING request_count
-    `).bind(bucket, subjectHash, start, expiresAt).first();
+    `).bind(bucket, subjectHash, start, expiresAt, limit).first();
 
     const count = Number(row?.request_count);
     if (!Number.isSafeInteger(count) || count < 1) {
