@@ -1053,17 +1053,27 @@ function v7CalculateFinance({
   }
 
   const roundMoney = (value) => Math.round((value + Number.EPSILON) * 100) / 100;
-  const commission = roundMoney(client * rate / 100);
-  const intervenant = roundMoney(client - commission);
-  const margin = roundMoney(commission - payment - other);
+  const commissionRaw = client * rate / 100;
+  const intervenantRaw = client - commissionRaw;
+  const marginRaw = commissionRaw - payment - other;
+  if (![commissionRaw, intervenantRaw, marginRaw].every(Number.isFinite)) {
+    return v7Result(false, {}, "FINANCE_RESULT_OVERFLOW");
+  }
+  const commission = roundMoney(commissionRaw);
+  const intervenant = roundMoney(intervenantRaw);
+  const margin = roundMoney(marginRaw);
+  const roundedInputs = [client, payment, other].map(roundMoney);
+  if (![...roundedInputs, commission, intervenant, margin].every(Number.isFinite)) {
+    return v7Result(false, {}, "FINANCE_RESULT_OVERFLOW");
+  }
 
   return v7Result(true, {
-    clientAmount: roundMoney(client),
+    clientAmount: roundedInputs[0],
     commissionRate: rate,
     commissionAmount: commission,
     intervenantAmount: intervenant,
-    paymentFees: roundMoney(payment),
-    otherFees: roundMoney(other),
+    paymentFees: roundedInputs[1],
+    otherFees: roundedInputs[2],
     grossMargin: margin
   });
 }
