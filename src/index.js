@@ -3775,8 +3775,13 @@ async function backupHash(text){
   return [...new Uint8Array(d)].map(x=>x.toString(16).padStart(2,'0')).join('');
 }
 async function backupTables(env){
+  // Backup control-plane tables are intentionally excluded: they mutate while
+  // the backup runs and would make the archive self-referential/inconsistent.
+  // Their run/object inventory remains in D1 and must be exported separately
+  // by operational procedures if a full control-plane restore is required.
+  const excluded=new Set(['backup_runs','backup_objects']);
   const r=await env.DB.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name`).all();
-  return (r.results||[]).map(x=>String(x.name));
+  return (r.results||[]).map(x=>String(x.name)).filter(name=>!excluded.has(name));
 }
 async function runNationalBackup(env,trigger='MANUAL'){
   await ensureNationalContinuitySchema(env);
