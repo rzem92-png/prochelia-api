@@ -45,3 +45,9 @@ test("bounds skill arrays to prevent oversized ranking requests",()=>{
  const oversized={...request.providerCandidates[0],skills:Array.from({length:101},(_,i)=>"skill-"+i)};
  assert.equal(rankNexusProviders({...request,providerCandidates:[oversized]}).error,"INVALID_CANDIDATE_FIELDS");
 });
+
+test("tie-break uses locale-independent lexical order for mixed case IDs",()=>{
+ const candidates=["z","A","a","B"].map(id=>({...request.providerCandidates[0],id}));
+ const r=rankNexusProviders({...request,providerCandidates:candidates});
+ assert.deepEqual(r.rankings.map(x=>x.providerId),["A","B","a","z"]);
+});
