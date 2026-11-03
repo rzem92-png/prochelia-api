@@ -3,6 +3,9 @@ import assert from "node:assert/strict";
 import worker from "../src/index.js";
 
 const origin = "https://prochelia.pages.dev";
+// Isolated D1 test double: supplies only the binding required by the
+// request-security/rate-limit middleware. It has no persistent state and
+// cannot reach any Cloudflare D1 database.
 const noSessionDb = {
   prepare(sql) {
     return {
@@ -84,7 +87,7 @@ test("V7 JSON validators reject oversized request bodies before parsing", async 
     method: "POST",
     headers: { origin, "content-type": "application/json" },
     body: JSON.stringify({ email: "x@example.com", padding: "x".repeat(20_000) })
-  }), {});
+  }), { DB: noSessionDb });
 
   assert.equal(response.status, 413);
   assert.equal((await response.json()).error, "TOO_LARGE");
@@ -95,7 +98,7 @@ test("V7 JSON validators return 400 for malformed JSON instead of an internal er
     method: "POST",
     headers: { origin, "content-type": "application/json" },
     body: "{not-json"
-  }), {});
+  }), { DB: noSessionDb });
 
   assert.equal(response.status, 400);
   assert.equal((await response.json()).error, "INVALID_JSON_BODY");
