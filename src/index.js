@@ -3477,6 +3477,16 @@ async function stripeWebhook(request, env) {
   }
   if(txId && (paidEvent.has(event.type)||failedEvent.has(event.type)||refundEvent.has(event.type)||disputeEvent.has(event.type))) {
     const tx=await env.DB.prepare('SELECT * FROM payment_transactions WHERE id=? LIMIT 1').bind(txId).first();
+    // Fail closed for trusted metadata that references an unknown or non-Stripe
+    // transaction. Persist a reconciliation record rather than silently ACKing
+    // the financial event as if it had been matched.
+    if(!tx || String(tx.provider||'').toLowerCase()!=='stripe') {
+      const externalId=clean(obj?.id)||clean(obj?.payment_intent)||clean(obj?.charge);
+      if(externalId) await env.DB.prepare(`INSERT OR IGNORE INTO payment_reconciliation (id,provider,external_id,internal_transaction_id,amount_cents,currency,status) VALUES (?,?,?,?,?,?, 'unmatched')`)
+        .bind(crypto.randomUUID(),'stripe',externalId,txId,Math.max(0,Number(obj?.amount_total??obj?.amount_received??obj?.amount_refunded??obj?.amount??0)),String(obj?.currency||'eur').toUpperCase()).run();
+      await paymentAudit(env,'STRIPE_EVENT_TRANSACTION_INVALID',{transaction_id:txId,metadata:{event_id:event.id,event_type:event.type,external_id:externalId||null,reason:!tx?'transaction_not_found':'provider_mismatch'}},'REVIEW_REQUIRED');
+      result='FINANCIAL_EVENT_TRANSACTION_INVALID_RECONCILIATION_REQUIRED';
+    }
     if(tx && String(tx.provider||'').toLowerCase()==='stripe') {
       const sessionId=String(obj?.id||'');
       const amount=Number(obj?.amount_total ?? obj?.amount_received ?? obj?.amount ?? -1);
