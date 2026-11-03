@@ -83,6 +83,7 @@ export async function enforceAtomicRateLimit({
         !Number.isSafeInteger(limit) || limit < 1 || limit > 1000000 ||
         !Number.isSafeInteger(windowSeconds) || windowSeconds < 1 || windowSeconds > 86400 ||
         !Number.isSafeInteger(nowSeconds) || nowSeconds < 0 ||
+        nowSeconds > Number.MAX_SAFE_INTEGER - windowSeconds - 86400 ||
         (userId !== null && (typeof userId !== 'string' || userId.length < 1 || userId.length > 256)) ||
         (sessionHash !== null && (typeof sessionHash !== 'string' || sessionHash.length < 1 || sessionHash.length > 256))) {
       return { ok: false, response: jsonResponse({ ok: false, error: 'RATE_LIMIT_CONFIG_INVALID' }, 503) };
@@ -96,7 +97,7 @@ export async function enforceAtomicRateLimit({
     const edgeIp = request.headers.get('CF-Connecting-IP');
     // Missing edge identity must never collapse unrelated clients into a shared
     // "unknown" bucket. Fail closed instead of granting or misapplying quota.
-    if (!edgeIp || edgeIp.trim() === '') {
+    if (!edgeIp || edgeIp.trim() === '' || edgeIp.length > 64 || edgeIp !== edgeIp.trim()) {
       return { ok: false, response: jsonResponse({ ok: false, error: 'RATE_LIMIT_CLIENT_ID_UNAVAILABLE' }, 503) };
     }
     // Enforce independent IP and authenticated-subject quotas. Composite keys
