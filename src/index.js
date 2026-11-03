@@ -4034,6 +4034,12 @@ handle = async function(request,env){
     if ((preflightPath === '/api/system/final-audit' || preflightPath === '/api/system/production-check') && preflightMethod !== 'POST') {
       return json({ok:false,error:'METHOD_NOT_ALLOWED',version:VERSION},405,{'allow':'POST'});
     }
+    // Mission creation is intentionally disabled. Return its explicit closed-gate
+    // response before the generic write-rate-limit/D1 requirement; do not parse
+    // the body or touch storage for a route that cannot create a mission.
+    if (preflightPath === '/api/missions' && preflightMethod === 'POST') {
+      return postMissions(request,env);
+    }
     // Fail closed with a truthful service-unavailable response when a write
     // needs the persistent rate limiter but D1 is not bound.
     if (isMutatingMethod(preflightMethod) && !env?.DB) {
