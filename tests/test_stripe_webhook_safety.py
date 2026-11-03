@@ -22,7 +22,7 @@ class StripeWebhookSafetySourceTests(unittest.TestCase):
         start = SOURCE.index("const inserted=await env.DB.prepare(")
         end = SOURCE.index("const txId=clean(event?.data?.transaction_id)", start)
         block = SOURCE[start:end]
-        self.assertIn("SELECT processed FROM payment_webhook_events", block)
+        self.assertIn("SELECT processed,payload_hash,event_type FROM payment_webhook_events", block)
         self.assertIn("WEBHOOK_EVENT_PENDING_RECONCILIATION", block)
         self.assertIn("Number(existingEvent?.processed||0)===1", block)
 
