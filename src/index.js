@@ -3464,6 +3464,25 @@ async function handle(request,env){
       return json({ ok: false, error: 'AUTHENTICATED_VALIDATION_REQUIRED', version: VERSION, write_enabled: false }, 403);
     }
     if (url.pathname.startsWith('/api/v7/')) {
+      // Fail closed for V7 operations that inspect or mutate private/business
+      // state. Pure status/email/phone validation remains public; every
+      // mission, financial, QR, audit, and strategic operation requires a session.
+      const v7Protected = new Set([
+        '/api/v7/check/availability',
+        '/api/v7/check/conflict',
+        '/api/v7/check/pricing',
+        '/api/v7/check/qr',
+        '/api/v7/check/payment',
+        '/api/v7/finance/calculate',
+        '/api/v7/check/pre-mission',
+        '/api/v7/security/idempotency',
+        '/api/v7/security/audit',
+        '/api/v7/strategy/indicators'
+      ]);
+      if (v7Protected.has(url.pathname)) {
+        const gate = await requireAuthRole(request, env);
+        if (gate.error) return gate.error;
+      }
       const v7Response = await handleV7Route(request, env, url.pathname);
       if (v7Response) return v7Response;
     }
