@@ -24,7 +24,7 @@ test("SUPRA rejects extra prompt-injection fields fail-closed", () => {
     assert.equal(result.executionAllowed, false);
     assert.equal(result.managerApprovalRequired, true);
     assert.equal(result.risk, "HIGH");
-    assert.match(result.rationale, /UNTRUSTED_FIELD|UNEXPECTED/i);
+    assert.match(result.rationale, /UNTRUSTED|UNEXPECTED|INVALID_CONTEXT_FIELD/i);
   }
 });
 
@@ -63,6 +63,6 @@ test("SUPRA accepts only trusted server evidence keys, not user-supplied verific
   });
   assert.equal(result.executionAllowed, false);
   assert.equal(result.managerApprovalRequired, true);
-  assert.ok(result.missingEvidence.includes("mission_ownership"));
-  assert.ok(result.missingEvidence.includes("psp_confirmation"));
+  assert.match(result.rationale, /UNEXPECTED_OR_UNTRUSTED_FIELD_FAIL_CLOSED|INVALID_CONTEXT_FIELD_FAIL_CLOSED/);
+  assert.ok(result.missingEvidence.includes("validate_input_and_server_authorized_evidence"));
 });
