@@ -42,3 +42,14 @@ test('admin dispute resolution records decision but cannot forge PSP payment sta
   assert.match(disputeResolver,/PSP_WEBHOOK_OR_RECONCILIATION/);
   assert.doesNotMatch(disputeResolver,/UPDATE payment_transactions SET status=/);
 });
+
+import procheliaV7 from '../src/v7.js';
+
+test('V7 never treats caller-provided payment status as PSP confirmation',()=>{
+  for (const status of ['PAID','SUCCEEDED','SUCCESS','COMPLETED']) {
+    const result=procheliaV7.checkPayment({status});
+    assert.equal(result.ok,false);
+    assert.equal(result.paymentConfirmed,false);
+    assert.equal(result.verificationRequired,'SERVER_PSP_WEBHOOK_OR_RECONCILIATION');
+  }
+});
