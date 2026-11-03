@@ -88,6 +88,31 @@ test('concurrent increments are not lost in the simulated atomic D1 primitive', 
 });
 
 
+test('rejects unsafe timestamp arithmetic before database access', async () => {
+  const db = new FakeD1();
+  const result = await enforceAtomicRateLimit({
+    db, request: req(), bucket: 'timestamp', limit: 2,
+    nowSeconds: Number.MAX_SAFE_INTEGER - 1, windowSeconds: 60
+  });
+  assert.equal(result.ok, false);
+  assert.equal(result.response.status, 503);
+  assert.equal((await result.response.json()).error, 'RATE_LIMIT_CONFIG_INVALID');
+  assert.equal(db.rows.size, 0);
+});
+
+test('rejects malformed or oversized edge client identity', async () => {
+  const db = new FakeD1();
+  for (const ip of [' 203.0.113.1', '203.0.113.1 ', 'x'.repeat(65)]) {
+    const result = await enforceAtomicRateLimit({
+      db, request: req(ip), bucket: 'edge-ip', limit: 2, nowSeconds: 100
+    });
+    assert.equal(result.ok, false);
+    assert.equal(result.response.status, 503);
+    assert.equal((await result.response.json()).error, 'RATE_LIMIT_CLIENT_ID_UNAVAILABLE');
+  }
+  assert.equal(db.rows.size, 0);
+});
+
 test('fails closed when trusted Cloudflare client IP is missing', async () => {
   const db = new FakeD1();
   const request = new Request('https://example.test/api/auth/login');
