@@ -1,0 +1,69 @@
+name: PROCHÉLIA security regression checks
+
+on:
+  push:
+    branches:
+      - preprod/security-regression-tests
+  pull_request:
+    branches:
+      - preprod/backup-integrity-restore-gates
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: prochelia-security-regression-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  static-security-regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Syntax
+        run: node --check src/index.js
+      - name: Security invariants
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const s=fs.readFileSync('src/index.js','utf8');
+          const doc=fs.readFileSync('docs/security/SECURITY_REGRESSION_MATRIX.md','utf8');
+          function section(a,b){
+            const i=s.indexOf(a); if(i<0) throw Error('Missing anchor: '+a);
+            const j=s.indexOf(b,i); if(j<0) throw Error('Missing end anchor: '+b);
+            return s.slice(i,j);
+          }
+          const bootstrap=section('async function bootstrap','async function login');
+          const session=section('async function getSession','function requireRole');
+          const role=section('function requireRole','async function getPrestations');
+          const csrf=section('function isAllowedOrigin','// ================================================================');
+          const backupStatus=section('async function backupStatus','const __procheliaNationalHandle');
+          const backup=section('async function runNationalBackup','async function nationalScaleStatus');
+
+          if(!/BOOTSTRAP_NOT_CONFIGURED/.test(bootstrap)||!/UNAUTHORIZED/.test(bootstrap))
+            throw Error('Bootstrap must fail closed without configured secret or valid token');
+          if(!/expires_at > CURRENT_TIMESTAMP/.test(session)||!/status !== 'active'/.test(session))
+            throw Error('Session expiry/inactive checks missing');
+          if(!/if\(!auth\?\.user\) return false/.test(role)||!/roles\.includes/.test(role))
+            throw Error('Role authorization must fail closed');
+          if(!/hasSessionCookie/.test(csrf)||!/allowed\.includes\(origin\)/.test(csrf))
+            throw Error('Cookie-backed CSRF or exact Origin allow-list guard missing');
+          if(/\*\s*['"]?/.test(csrf) && /Access-Control-Allow-Origin/.test(csrf))
+            throw Error('Potential wildcard CORS origin');
+          if(!/retentionEnforced:false/.test(backupStatus))
+            throw Error('Retention must remain disabled until restore verification');
+          if(/\b(?:delete|purge)\s*\(/i.test(backup)||/\bDELETE\s+FROM\b/i.test(backup))
+            throw Error('Destructive deletion in backup path');
+          if(!/BACKUP_OBJECT_CHECKSUM_MISMATCH/.test(backup)||!/BACKUP_OBJECT_READ_AFTER_WRITE_FAILED/.test(backup))
+            throw Error('Backup integrity checks missing');
+          if(!/static regression checks only/i.test(doc)||!/no production credentials/i.test(doc))
+            throw Error('Security regression scope/safety documentation missing');
+          console.log('Security regression invariants passed');
+          NODE
