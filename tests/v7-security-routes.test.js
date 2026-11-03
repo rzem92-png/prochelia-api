@@ -90,3 +90,28 @@ test('all V7 responses receive baseline security headers', async () => {
   assert.equal(response.headers.get('cache-control'), 'no-store');
   assert.equal(response.headers.get('strict-transport-security'), 'max-age=31536000; includeSubDomains');
 });
+
+
+test('V7 security headers are also present on rejected/error responses', async () => {
+  const cases = [
+    ['/api/v7/security/audit', 403],
+    ['/api/v7/security/idempotency', 501],
+    ['/api/v7/check/permissions', 403]
+  ];
+  for (const [path, expectedStatus] of cases) {
+    const response = await handleV7Route(req(path), env, path);
+    assert.equal(response.status, expectedStatus);
+    assert.equal(response.headers.get('x-content-type-options'), 'nosniff');
+    assert.equal(response.headers.get('x-frame-options'), 'DENY');
+    assert.equal(response.headers.get('referrer-policy'), 'no-referrer');
+    assert.equal(response.headers.get('permissions-policy'), 'geolocation=(self),camera=(),microphone=()');
+    assert.equal(response.headers.get('cache-control'), 'no-store');
+    assert.equal(response.headers.get('strict-transport-security'), 'max-age=31536000; includeSubDomains');
+  }
+});
+
+test('V7 non-HTTPS responses do not emit HSTS', async () => {
+  const response = await handleV7Route(new Request('http://preprod.example.test/api/v7/status'), env, '/api/v7/status');
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get('strict-transport-security'), null);
+});
