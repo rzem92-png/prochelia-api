@@ -109,5 +109,10 @@ class StripeWebhookSafetySourceTests(unittest.TestCase):
         self.assertIn("WHERE id=? AND status IN ('pending','processing','created')", SOURCE)
         self.assertNotIn("WHERE id=?`).bind(tx.id).run();", SOURCE)
 
+    def test_generic_payment_webhook_body_is_bounded(self):
+        self.assertIn("async function paymentWebhook(request, env)", SOURCE)
+        self.assertIn("const raw=await readBoundedText(request,MAX_JSON_BODY_BYTES)", SOURCE)
+        self.assertIn("WEBHOOK_BODY_TOO_LARGE_OR_INVALID", SOURCE)
+
 if __name__ == "__main__":
     unittest.main()
