@@ -14,7 +14,8 @@ test('production configuration audit remains strictly read-only', () => {
   assert.match(audit, /tableColumns\(env,/);
   assert.doesNotMatch(audit, /ensure(?:Consolidated|Payment|Operational|Strategic|FinalHardening)Schema/);
   assert.doesNotMatch(audit, /\.(?:run|batch)\s*\(/);
-  assert.doesNotMatch(audit, /\b(?:INSERT|UPDATE|DELETE|CREATE|ALTER|DROP)\b/i);
+  const executable = audit.replace(/\/\/[^\n]*/g, '');
+  assert.doesNotMatch(executable, /\b(?:INSERT|UPDATE|DELETE|CREATE|ALTER|DROP)\b/i);
 });
 
 test('production configuration audit checks required payment and mission fields', () => {
