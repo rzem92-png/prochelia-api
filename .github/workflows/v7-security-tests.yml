@@ -7,6 +7,7 @@ on:
       - "src/v7-routes.js"
       - "src/v7.js"
       - "tests/v7-routes-security.test.js"
+      - "tests/outbox-concurrency.test.js"
       - ".github/workflows/v7-security-tests.yml"
   push:
     branches:
@@ -33,4 +34,4 @@ jobs:
           node --check src/index.js
           node --check src/v7-routes.js
       - name: Run V7 security tests
-        run: node --test tests/v7-routes-security.test.js
+        run: node --test tests/v7-routes-security.test.js tests/outbox-concurrency.test.js
