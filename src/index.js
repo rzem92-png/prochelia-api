@@ -374,7 +374,13 @@ async function bootstrap(request, env) {
     return json({ ok: false, error: 'BOOTSTRAP_ALREADY_USED', version: VERSION }, 409);
   }
 
-  const body = await readJson(request);
+  // Bound bootstrap payloads before JSON parsing to avoid oversized-body memory/CPU abuse.
+  const bounded = await readBoundedRequestBody(request, 4096);
+  if (!bounded.ok) {
+    return json({ ok: false, error: 'INVALID_BOOTSTRAP_DATA', version: VERSION }, 400);
+  }
+  let body = null;
+  try { body = JSON.parse(bounded.text); } catch {}
   const email = normalizeEmail(body?.email);
   const firstName = clean(body?.first_name);
   const lastName = clean(body?.last_name);
