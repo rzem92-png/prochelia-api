@@ -69,8 +69,10 @@ export async function ensureAtomicRateLimitSchema(db) {
  * @param {string} options.bucket Stable route/operation bucket
  * @param {number} options.limit Maximum requests per window
  * @param {number} [options.windowSeconds=60]
- * @param {string|null} [options.userId] Authenticated user ID, if available
- * @param {string|null} [options.sessionHash] Hash of session identifier, never raw session
+ * @param {string|null} [options.userId] Authenticated user ID from server-side auth context ONLY.
+ *   Never pass userId from request JSON, URL, query, or client-controlled headers.
+ * @param {string|null} [options.sessionHash] Hash of the opaque session token from a server-validated session ONLY.
+ *   Never pass raw cookies/tokens or client-supplied values.
  * @param {number} [options.nowSeconds] Test-only clock injection
  */
 export async function enforceAtomicRateLimit({
