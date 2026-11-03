@@ -12,7 +12,7 @@ function sourceOf(startMarker, endMarker) {
 }
 
 const originGuard = sourceOf('function securityOriginAllowed(request,env){', '\n\n// ================================================================');
-const corsWrapper = sourceOf('const __procheliaCorsHandle = handle;', '\n\nexport default');
+const corsWrapper = sourceOf('const __procheliaCorsHandle = handle;', '\n};');
 
 test('mutating browser requests reject untrusted Origin before D1/rate-limit access', () => {
   assert.match(originGuard, /if\(!origin\) return true/);
