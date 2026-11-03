@@ -13,9 +13,11 @@ on:
     branches:
       - "preprod/**"
     paths:
+      - "src/index.js"
       - "src/v7-routes.js"
       - "src/v7.js"
       - "tests/v7-routes-security.test.js"
+      - "tests/outbox-concurrency.test.js"
       - ".github/workflows/v7-security-tests.yml"
 
 permissions:
