@@ -78,8 +78,11 @@ jobs:
               if (body?.ok !== true) throw new Error('Health response ok flag is not true');
               if (body?.database !== true) throw new Error('Preview D1 health check did not pass');
               if (body?.service !== 'PROCHÉLIA API') throw new Error('Unexpected API service identifier');
-              if (typeof body?.version !== 'string' || body.version.length < 1 || body.version.length > 100) {
-                throw new Error('Missing or invalid API version');
+              const source = await (await import('node:fs/promises')).readFile('src/index.js', 'utf8');
+              const expectedVersion = source.match(/const VERSION = ['\"]([^'\"]+)['\"]/)?.[1];
+              if (!expectedVersion) throw new Error('Could not extract expected version from src/index.js');
+              if (body?.version !== expectedVersion) {
+                throw new Error(`Runtime version mismatch: expected=${expectedVersion}; actual=${body?.version}`);
               }
               if (response.headers.get('cache-control')?.toLowerCase().includes('no-store') !== true) {
                 throw new Error('Health response missing cache-control: no-store');
