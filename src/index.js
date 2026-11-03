@@ -785,7 +785,8 @@ async function securityVerifyCode(request, env) {
       .bind(sec.id,stored).run();
   }
   // Fail closed if D1 reports zero rows (already consumed/state changed).
-  if(Number(consumed?.meta?.changes)!==1){
+  const changedRows = Number(consumed?.meta?.changes ?? 0);
+  if(changedRows !== 1){
     await securityAudit(env,'SECURITY_CODE_ATOMIC_CONSUME_CONFLICT',missionId,auth.user.id,auth.user.role,'DENIED',{purpose});
     return json({ok:false,error:'SECURITY_CODE_ALREADY_CONSUMED_OR_STATE_CHANGED',version:VERSION},409);
   }
