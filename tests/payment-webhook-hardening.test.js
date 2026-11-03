@@ -23,3 +23,11 @@ test('webhook event ID cannot be reused for a different signed payload', () => {
   assert.match(webhook, /prior\.payload_hash!==payloadHash/);
   assert.match(webhook, /WEBHOOK_EVENT_ID_CONFLICT/);
 });
+
+
+test('webhook HMAC comparison uses constant-time helper', () => {
+  assert.match(source, /function constantTimeEqual\(a, b\)/);
+  assert.match(source, /for\(let i=0;i<length;i\+\+\) diff\|=\(left\[i\]\|\|0\)\^\(right\[i\]\|\|0\)/);
+  assert.match(source, /return constantTimeEqual\(supplied,expected\)/);
+  assert.match(source, /signature\.length>256/);
+});
