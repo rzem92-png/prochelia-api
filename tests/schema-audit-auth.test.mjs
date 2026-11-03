@@ -4,6 +4,27 @@ import worker from "../src/index.js";
 
 const base = "https://prochelia-api-preview.rzem92.workers.dev";
 
+// Minimal D1 mock for the production mutation rate-limit middleware.
+// DDL/cleanup statements are no-ops; only the atomic limiter query returns a counter.
+function loginTestEnv() {
+  return {
+    DB: {
+      prepare(sql) {
+        return {
+          bind() { return this; },
+          async first() {
+            if (String(sql).includes("RETURNING request_count")) return { request_count: 1 };
+            return null;
+          },
+          async run() { return { meta: { changes: 0 } }; },
+          async all() { return { results: [] }; }
+        };
+      },
+      async batch() { return []; }
+    }
+  };
+}
+
 test("malformed session cookie fails closed without crashing auth", async () => {
   const response = await worker.fetch(
     new Request(base + "/api/auth/me", {
