@@ -127,7 +127,7 @@ test('V7 finance calculator rejects negative amounts and out-of-range commission
   ];
   for (const [payload, error] of cases) {
     const response = await handleV7Route(req('/api/v7/finance/calculate', payload), env, '/api/v7/finance/calculate');
-    assert.equal(response.status, 200, 'calculator validation response keeps route status');
+    assert.equal(response.status, 400, 'invalid financial input returns a client error');
     const data = await response.json();
     assert.equal(data.ok, false);
     assert.equal(data.error, error);
