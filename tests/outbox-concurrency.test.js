@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { claimActionExecution, quarantineStaleOutboxActions, incrementRateLimitCounter } from "../src/index.js";
+import { claimActionExecution, quarantineStaleOutboxActions, incrementRateLimitCounter, productionSubjectHash } from "../src/index.js";
 
 function fakeDB(initialStatus = "PENDING") {
   const state = { status: initialStatus };
@@ -101,4 +101,16 @@ test("rate-limit counter fails closed on invalid database return", async () => {
     incrementRateLimitCounter({ DB }, "b", "s", "w"),
     /RATE_LIMIT_COUNTER_INVALID/
   );
+});
+
+test("rate-limit identity ignores spoofable X-Forwarded-For", async () => {
+  const a = new Request("https://example.test/api/auth/login", {
+    headers: { "CF-Connecting-IP": "203.0.113.7", "X-Forwarded-For": "1.1.1.1" }
+  });
+  const b = new Request("https://example.test/api/auth/login", {
+    headers: { "CF-Connecting-IP": "203.0.113.7", "X-Forwarded-For": "8.8.8.8" }
+  });
+  const hashA = await productionSubjectHash(a, "/api/auth/login");
+  const hashB = await productionSubjectHash(b, "/api/auth/login");
+  assert.equal(hashA, hashB);
 });
