@@ -3814,7 +3814,7 @@ async function productionRateLimit(request,env){
     path==='/api/system/backup/run';
   const limit=sensitive ? 20 : 120;
   const windowSeconds=60;
-  const bucket=`${sensitive?'SENSITIVE':'GENERAL'}:${path`;
+  const bucket=`${sensitive?'SENSITIVE':'GENERAL'}:${path}`;
   const now=Math.floor(Date.now()/1000);
   const start=new Date(Math.floor(now/windowSeconds)*windowSeconds*1000).toISOString();
   const retryAfter=Math.max(1,windowSeconds-(now%windowSeconds));
