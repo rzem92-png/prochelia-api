@@ -767,11 +767,11 @@ async function securityVerifyCode(request, env) {
   if(purpose==='ARRIVAL'){
     consumed=await env.DB.prepare(`UPDATE mission_security
       SET arrival_used_at=CURRENT_TIMESTAMP,arrival_started_at=CURRENT_TIMESTAMP,status='in_progress',updated_at=CURRENT_TIMESTAMP
-      WHERE id=? AND status='prepared' AND arrival_used_at IS NULL AND locked_until IS NULL`).bind(sec.id).run();
+      WHERE id=? AND status='prepared' AND arrival_used_at IS NULL AND (locked_until IS NULL OR locked_until<=?)`).bind(sec.id,now).run();
   }else{
     consumed=await env.DB.prepare(`UPDATE mission_security
       SET end_used_at=CURRENT_TIMESTAMP,ended_at=CURRENT_TIMESTAMP,status='completed',updated_at=CURRENT_TIMESTAMP
-      WHERE id=? AND status='in_progress' AND end_used_at IS NULL AND locked_until IS NULL`).bind(sec.id).run();
+      WHERE id=? AND status='in_progress' AND end_used_at IS NULL AND (locked_until IS NULL OR locked_until<=?)`).bind(sec.id,now).run();
   }
   if(Number(consumed?.meta?.changes||0)!==1){
     await securityAudit(env,'SECURITY_CODE_CONSUME_RACE',missionId,auth.user.id,auth.user.role,'DENIED',{purpose});
