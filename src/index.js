@@ -296,8 +296,9 @@ async function validateMission(env, body) {
   }, errors.length ? 409 : 200);
 }
 
-async function postMissions(request, env) {
-  const body = await readJson(request);
+async function postMissions(_request, env) {
+  // Fail closed without consuming/parsing an untrusted body while writes are disabled.
+  // MISSION_API_ENABLED is intentionally not a bypass for this server-side gate.
   return json({
     ok: false,
     error: env.MISSION_API_ENABLED === 'true' ? 'WRITE_GATE_NOT_ACTIVATED' : 'MISSION_API_NOT_ACTIVATED',
