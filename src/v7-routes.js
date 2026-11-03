@@ -607,6 +607,7 @@ export async function handleV7Route(
       const body =
         await request.json();
 
+      // SECURITY NOTE: this is a client-originated payload; never treat it as a trusted durable audit record.
       const result =
         procheliaV7.auditEvent(
           body
