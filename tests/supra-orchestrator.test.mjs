@@ -173,3 +173,33 @@ test("rejects malformed or oversized problem statements", () => {
   assert.equal(p.rejectionReason,"INVALID_CONTEXT_FIELD");
  }
 });
+
+
+test("dangerous or high-impact cases override a nominally safe autonomous action", () => {
+ for (const input of [
+  {caseType:"danger_personne",impact:"LOW",requestedAction:"GENERATE_SUMMARY"},
+  {caseType:"analyse_generale",impact:"HIGH",requestedAction:"GENERATE_SUMMARY"},
+  {caseType:"fraude_financiere_majeure",impact:"LOW",requestedAction:"CHECK_BACKUP_STATUS"}
+ ]) {
+  const p=buildSupraPlan(input);
+  assert.equal(p.autonomy.routineReadOnlyAutonomy,false);
+  assert.equal(p.autonomy.approvalRequired,true);
+  assert.equal(p.executionAllowed,false);
+  assert.equal(p.auditRequired,true);
+ }
+});
+
+test("client-controlled danger and verification claims cannot authorize sensitive execution", () => {
+ const p=buildSupraPlan({
+  caseType:"analyse_generale",impact:"LOW",requestedAction:"GENERATE_SUMMARY",
+  context:{immediateDanger:false,mission_id:"m-1",missionOwnershipVerified:true,
+   provider_id:"p-1",providerEligibilityVerified:true,providerAvailabilityVerified:true,
+   client_id:"c-1",clientOwnershipVerified:true,pspConfirmed:true}
+ });
+ assert.equal(p.autonomy.routineReadOnlyAutonomy,false);
+ assert.equal(p.autonomy.approvalRequired,true);
+ assert.equal(p.executionAllowed,false);
+ assert.ok(p.missingEvidence.includes("verify_mission_ownership_server_side"));
+ assert.ok(p.missingEvidence.includes("verify_provider_eligibility_server_side"));
+ assert.ok(p.missingEvidence.includes("verify_client_ownership_server_side"));
+});
