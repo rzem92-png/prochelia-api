@@ -50,7 +50,7 @@ test("login rejects oversized JSON payloads before parsing", async () => {
   const response = await worker.fetch(
     new Request(base + "/api/auth/login", {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: { "content-type": "application/json", "CF-Connecting-IP": "203.0.113.10" },
       body: JSON.stringify({ email: "user@example.com", password: "A".repeat(5000) })
     }),
     env
