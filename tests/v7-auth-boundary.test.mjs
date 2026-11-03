@@ -59,3 +59,22 @@ test("private mission and permission validators reject unauthenticated requests"
     assert.equal((await response.json()).error, "UNAUTHENTICATED");
   }
 });
+
+test("mission validation endpoint remains closed until ownership-bound server validation is implemented", async () => {
+  const response = await worker.fetch(new Request("https://api.example/api/missions/validate", {
+    method: "POST",
+    headers: {
+      origin,
+      "cf-connecting-ip": "203.0.113.12",
+      "content-type": "application/json"
+    },
+    body: JSON.stringify({
+      mission_id: "mission-guessable-id",
+      client_id: "victim-client",
+      intervenant_id: "victim-provider"
+    })
+  }), { DB: noSessionDb });
+
+  assert.equal(response.status, 403);
+  assert.equal((await response.json()).error, "AUTHENTICATED_VALIDATION_REQUIRED");
+});
