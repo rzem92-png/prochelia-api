@@ -1322,7 +1322,11 @@ async function copilotRecommend(env, input) {
 async function createOperationalCase(request, env) {
   const gate=await requireAuthRole(request,env,['gerante','client','intervenant','entreprise']); if(gate.error)return gate.error;
   const body=await readJson(request)||{};
-  const caseType=clean(body.case_type); if(!caseType)return json({ok:false,error:'CASE_TYPE_REQUIRED',version:VERSION},400);
+  const caseType=clean(body.case_type);
+  if(typeof caseType!=='string' || !caseType || caseType.length>80 || !/^[a-zA-Z0-9_:-]+$/.test(caseType))
+    return json({ok:false,error:'INVALID_CASE_TYPE',version:VERSION},400);
+  if(body.description!==undefined && (typeof body.description!=='string' || body.description.length>1500))
+    return json({ok:false,error:'INVALID_DESCRIPTION',version:VERSION},400);
   const phase=String(await getSetting(env,'project_phase','TEST')).toUpperCase();
   // Reject untrusted enum values; never let caller-provided impact downgrade risk.
   const requestedImpact=String(body.impact_level||'LOW').toUpperCase();
@@ -1347,7 +1351,13 @@ async function createOperationalCase(request, env) {
     rec.solution = { ...(rec.solution || {}), automatic: false, gated_by_phase: phase };
   }
   await env.DB.prepare(`INSERT INTO operational_cases(id,case_type,source,phase,priority,status,auto_mode,client_id,company_id,intervenant_id,mission_id,impact_level,description,context_json,proposed_solution_json,requires_manager) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
-    .bind(id,caseType,'API',phase,priority,status,rec.mode,clean(body.client_id)||null,clean(body.company_id)||null,clean(body.intervenant_id)||null,clean(body.mission_id)||null,impact,clean(body.description)||null,JSON.stringify(safeContext),JSON.stringify(rec),requiresManager).run();
+    .bind(id,caseType,'API',phase,priority,status,rec.mode,
+      gate.auth.user.role==='gerante' ? (clean(body.client_id)||null) : null,
+      gate.auth.user.role==='gerante' ? (clean(body.company_id)||null) : null,
+      gate.auth.user.role==='gerante' ? (clean(body.intervenant_id)||null) : null,
+      gate.auth.user.role==='gerante' ? (clean(body.mission_id)||null) : null,
+      impact,typeof body.description==='string' ? body.description.trim().slice(0,1500) : null,
+      JSON.stringify(safeContext),JSON.stringify(rec),requiresManager).run();
   await env.DB.prepare(`INSERT INTO copilot_log(id,case_id,action_type,recommendation,confidence,mode) VALUES(?,?,?,?,?,?)`)
     .bind(crypto.randomUUID(),id,rec.action,JSON.stringify(rec.solution),rec.confidence,rec.mode).run();
   await journal(env,'copilot',null,'CASE_CREATED','operational_case',id,'OK',{caseType,impact});
