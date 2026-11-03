@@ -3230,16 +3230,25 @@ async function financeProblemResolve(request,env) {
   const role=String(auth.user.role||'').toUpperCase();
   const owner=String(row.user_id)===String(auth.user.id);
   const manager=['GERANTE','ADMIN','FINANCE'].includes(role);
-  const approved=Boolean(b.approve);
-  // A user may escalate their own case, but only finance managers can approve it.
+  if(typeof b.approve!=='boolean')return json({ok:false,error:'APPROVE_MUST_BE_BOOLEAN',version:VERSION},400);
+  const approved=b.approve;
+  // Owners may escalate only; approvals require a finance manager.
   if(approved&&!manager)return json({ok:false,error:'FORBIDDEN',version:VERSION},403);
   if(!approved&&!owner&&!manager)return json({ok:false,error:'FORBIDDEN',version:VERSION},403);
-  const resolution=clean(b.resolution)||row.proposed_solution||'Résolution contrôlée par le Copilote.';
+  const suppliedResolution=typeof b.resolution==='string'?b.resolution.trim():'';
+  if(suppliedResolution.length>2000)return json({ok:false,error:'RESOLUTION_TOO_LONG',version:VERSION},400);
+  const resolution=suppliedResolution||clean(row.proposed_solution)||'Résolution contrôlée par le Copilote.';
   const status=approved?'RESOLVED':'ESCALATED';
-  const allowedStates=approved?['OPEN','AUTO_RESOLUTION_PROPOSED']:['OPEN','AUTO_RESOLUTION_PROPOSED'];
-  const update=await env.DB.prepare(`UPDATE finance_resolution_cases SET status=?,resolution=?,resolved_at=CURRENT_TIMESTAMP WHERE id=? AND status IN ('OPEN','AUTO_RESOLUTION_PROPOSED')`).bind(status,resolution,id).run();
-  if(!update?.meta?.changes)return json({ok:false,error:'CASE_ALREADY_RESOLVED_OR_NOT_OPEN',version:VERSION},409);
-  await journal(env,auth.user.role,auth.user.id,'FINANCE_PROBLEM_RESOLVE','finance_resolution_cases',id,status,{approved});
+  // D1 batch is transactional. The audit insert is conditional on the preceding
+  // UPDATE changing exactly one row, so stale/concurrent requests cannot log success.
+  const statements=[
+    env.DB.prepare(`UPDATE finance_resolution_cases SET status=?,resolution=?,resolved_at=CURRENT_TIMESTAMP WHERE id=? AND status IN ('OPEN','AUTO_RESOLUTION_PROPOSED')`).bind(status,resolution,id),
+    env.DB.prepare(`INSERT INTO activity_journal(id,actor_type,actor_id,action,entity_type,entity_id,result,metadata_json)
+      SELECT ?,?,?,?,?,?,?,? WHERE changes()=1`).bind(crypto.randomUUID(),auth.user.role,auth.user.id,'FINANCE_PROBLEM_RESOLVE','finance_resolution_cases',id,status,JSON.stringify({approved}))
+  ];
+  const results=await env.DB.batch(statements);
+  if(!results?.[0]?.meta?.changes)return json({ok:false,error:'CASE_ALREADY_RESOLVED_OR_NOT_OPEN',version:VERSION},409);
+  if(!results?.[1]?.success)return json({ok:false,error:'FINANCE_AUDIT_WRITE_FAILED',version:VERSION},500);
   return json({ok:true,version:VERSION,case_id:id,status,resolution});
 }
 
