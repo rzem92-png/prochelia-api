@@ -99,19 +99,17 @@ export async function enforceAtomicRateLimit({
     if (!edgeIp || edgeIp.trim() === '') {
       return { ok: false, response: jsonResponse({ ok: false, error: 'RATE_LIMIT_CLIENT_ID_UNAVAILABLE' }, 503) };
     }
-    // Bind subject/session quota to the trusted edge IP as well. This prevents
-    // an attacker from bypassing an IP quota by cycling account IDs, while
-    // keeping the subject/session dimension for authenticated abuse detection.
+    // Enforce independent IP and authenticated-subject quotas. Composite keys
+    // alone are insufficient: changing IP must not reset an account quota.
     const subject = typeof userId === 'string' && userId.length > 0 ? `user:${userId}`
       : typeof sessionHash === 'string' && sessionHash.length > 0 ? `session:${sessionHash}`
-      : 'anonymous';
-    const identity = `ip:${edgeIp.trim()}|subject:${subject}`;
-    const subjectHash = await sha256Hex(identity);
+      : null;
+    const ipHash = await sha256Hex(`ip:${edgeIp.trim()}`);
+    const subjectHash = subject ? await sha256Hex(subject) : null;
     const start = Math.floor(nowSeconds / windowSeconds) * windowSeconds;
     const expiresAt = start + windowSeconds + 86400; // 24h cleanup grace
 
-    // Atomic UPSERT + RETURNING: no read-modify-write race between requests.
-    const row = await db.prepare(`
+    const makeStatement = (hash) => db.prepare(`
       INSERT INTO security_rate_limits_v2
         (bucket, subject_hash, window_start, request_count, expires_at)
       VALUES (?, ?, ?, 1, ?)
@@ -122,8 +120,19 @@ export async function enforceAtomicRateLimit({
                     END,
                     expires_at = excluded.expires_at
       RETURNING request_count
-    `).bind(bucket, subjectHash, start, expiresAt, limit).first();
+    `).bind(bucket, hash, start, expiresAt, limit);
 
+    // D1 batch runs the independent counters atomically. IP quota protects
+    // shared/anonymous traffic; subject quota follows a user across IP changes.
+    const statements = [makeStatement(ipHash)];
+    if (subjectHash) statements.push(makeStatement(subjectHash));
+    const batchResults = await db.batch(statements);
+    const counts = batchResults.map(result => Number(result?.results?.[0]?.request_count));
+    if (counts.length !== statements.length ||
+        counts.some(count => !Number.isSafeInteger(count) || count < 1)) {
+      return { ok: false, response: jsonResponse({ ok: false, error: 'RATE_LIMIT_UNAVAILABLE' }, 503) };
+    }
+    const count = Math.max(...counts);
     const count = Number(row?.request_count);
     if (!Number.isSafeInteger(count) || count < 1) {
       return { ok: false, response: jsonResponse({ ok: false, error: 'RATE_LIMIT_UNAVAILABLE' }, 503) };
