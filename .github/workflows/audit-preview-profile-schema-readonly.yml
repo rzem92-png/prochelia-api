@@ -1,0 +1,88 @@
+name: PROCHÉLIA — audit schéma profil D1 préproduction (lecture seule)
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_read_only:
+        description: "Confirmer : inspection de schéma D1 Preview uniquement, sans écriture"
+        required: true
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: prochelia-preview-profile-schema-readonly
+  cancel-in-progress: false
+
+jobs:
+  inspect:
+    if: ${{ inputs.confirm_read_only == true }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      ACCOUNT_ID: f2a79e9fa41566a8ec80fb24c02c60eb
+      DB_NAME: prochelia-preview-db
+      DB_ID: 6adb95e5-e542-4bec-9008-fbea01042305
+    steps:
+      - name: Verify token and pin exact D1 target
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -n "${CLOUDFLARE_API_TOKEN:-}" || { echo "::error::Missing Cloudflare token"; exit 1; }
+          token="${CLOUDFLARE_API_TOKEN#Bearer }"
+          token="${token#bearer }"
+          token="$(printf '%s' "$token" | tr -d '\r\n')"
+          status="$(curl --silent --show-error --output "$RUNNER_TEMP/token.json" --write-out '%{http_code}' -H "Authorization: Bearer $token" "https://api.cloudflare.com/client/v4/user/tokens/verify")"
+          [[ "$status" == "200" ]] && [[ "$(jq -r '.success // false' "$RUNNER_TEMP/token.json")" == "true" ]] && [[ "$(jq -r '.result.status // ""' "$RUNNER_TEMP/token.json")" == "active" ]] || { echo "::error::Cloudflare token inactive or invalid"; exit 1; }
+          status="$(curl --silent --show-error --output "$RUNNER_TEMP/d1.json" --write-out '%{http_code}' -H "Authorization: Bearer $token" "https://api.cloudflare.com/client/v4/accounts/$ACCOUNT_ID/d1/database?name=$DB_NAME")"
+          [[ "$status" == "200" ]] || { echo "::error::Cannot verify D1 target"; exit 1; }
+          count="$(jq --arg n "$DB_NAME" --arg id "$DB_ID" '[.result[]? | select(.name == $n and .uuid == $id)] | length' "$RUNNER_TEMP/d1.json")"
+          [[ "$count" == "1" ]] || { echo "::error::Preview database name/UUID mismatch; aborting"; exit 1; }
+          echo "Exact Preview D1 target verified."
+
+      - name: Install Wrangler
+        uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+          package-manager-cache: false
+
+      - name: Read users table definition and user-related schema (SELECT only)
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          export CLOUDFLARE_API_TOKEN
+          umask 077
+          mkdir -p "$RUNNER_TEMP/profile-schema"
+          config="$RUNNER_TEMP/profile-schema/wrangler.json"
+          cat > "$config" <<EOF
+          {
+            "name": "prochelia-profile-schema-readonly",
+            "compatibility_date": "2026-09-25",
+            "d1_databases": [
+              { "binding": "DB", "database_name": "$DB_NAME", "database_id": "$DB_ID" }
+            ]
+          }
+          EOF
+          npx --yes wrangler@4 d1 execute "$DB_NAME" --remote --config "$config" --command="SELECT name, sql FROM sqlite_master WHERE type='table' AND name IN ('users','sessions','clients','intervenants','user_preferences') ORDER BY name;" --json > "$RUNNER_TEMP/profile-schema/tables.json"
+          jq -e . "$RUNNER_TEMP/profile-schema/tables.json" >/dev/null
+          npx --yes wrangler@4 d1 execute "$DB_NAME" --remote --config "$config" --command="PRAGMA table_info(users);" --json > "$RUNNER_TEMP/profile-schema/users-columns.json"
+          jq -e . "$RUNNER_TEMP/profile-schema/users-columns.json" >/dev/null
+          npx --yes wrangler@4 d1 execute "$DB_NAME" --remote --config "$config" --command="PRAGMA foreign_key_list(users);" --json > "$RUNNER_TEMP/profile-schema/users-foreign-keys.json"
+          jq -e . "$RUNNER_TEMP/profile-schema/users-foreign-keys.json" >/dev/null
+          echo "Schema inspected. No row-level user data queried; no writes performed."
+
+      - name: Publish schema-only report
+        uses: actions/upload-artifact@v6
+        with:
+          name: prochelia-preview-profile-schema-readonly-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/profile-schema/tables.json
+            ${{ runner.temp }}/profile-schema/users-columns.json
+            ${{ runner.temp }}/profile-schema/users-foreign-keys.json
+          if-no-files-found: error
+          retention-days: 3
