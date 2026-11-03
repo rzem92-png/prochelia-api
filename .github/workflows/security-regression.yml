@@ -51,7 +51,7 @@ jobs:
             throw Error('Bootstrap must fail closed without configured secret or valid token');
           if(!/expires_at > CURRENT_TIMESTAMP/.test(session)||!/status !== 'active'/.test(session))
             throw Error('Session expiry/inactive checks missing');
-          if(!/if\(!auth\?\.user\) return false/.test(role)||!/roles\.includes/.test(role))
+          if(!/if\s*\(!auth\?\.user\)\s*return false/.test(role)||!/roles\.includes/.test(role))
             throw Error('Role authorization must fail closed');
           if(!/hasSessionCookie/.test(csrf)||!/allowed\.includes\(origin\)/.test(csrf))
             throw Error('Cookie-backed CSRF or exact Origin allow-list guard missing');
