@@ -40,3 +40,19 @@ test("PSP webhook route rejects non-POST method",async()=>{
   assert.equal(response.status,405);
   assert.equal(guard.calls(),0);
 });
+
+test("webhook rejects same-length forged HMAC signature before D1",async()=>{
+  const guard=dbMustNotBeTouched();
+  const body=JSON.stringify({id:"evt_forged",type:"payment_succeeded",provider:"test"});
+  const response=await worker.fetch(new Request(url,{method:"POST",headers:{"content-type":"application/json","x-prochelia-signature":"A".repeat(43)},body}),{DB:guard.db,PAYMENT_WEBHOOK_SECRET:"test-secret",PAYMENT_PROVIDER:"test"});
+  assert.equal(response.status,401,await response.clone().text());
+  assert.equal(guard.calls(),0);
+});
+
+test("webhook rejects forged sha256-prefixed HMAC candidate before D1",async()=>{
+  const guard=dbMustNotBeTouched();
+  const body=JSON.stringify({id:"evt_forged2",type:"payment_succeeded",provider:"test"});
+  const response=await worker.fetch(new Request(url,{method:"POST",headers:{"content-type":"application/json","x-webhook-signature":"sha256="+"B".repeat(43)},body}),{DB:guard.db,PAYMENT_WEBHOOK_SECRET:"test-secret",PAYMENT_PROVIDER:"test"});
+  assert.equal(response.status,401,await response.clone().text());
+  assert.equal(guard.calls(),0);
+});
