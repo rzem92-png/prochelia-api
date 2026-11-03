@@ -27,4 +27,4 @@ jobs:
           node-version: '22'
           package-manager-cache: false
       - name: Run focused unit tests
-        run: node --test tests/security-rate-limit-atomic-v1.test.js
+        run: node --test tests/security-rate-limit-atomic-v1.test.js tests/v7-security-routes.test.js
