@@ -1424,6 +1424,9 @@ async function executeCaseBusinessAction(env, c, rec, actorId=null, automatic=fa
 async function processActionOutbox(request, env) {
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
   await ensureOperationalSchema(env);
+  // Recover stale worker leases after a crash (PROCESSING for >5 minutes).
+  // Recovery is conditional and the subsequent claim remains compare-and-set.
+  await env.DB.prepare(`UPDATE action_outbox SET status='PENDING',last_error='Recovered stale PROCESSING lease.',updated_at=CURRENT_TIMESTAMP WHERE status='PROCESSING' AND updated_at < datetime('now','-5 minutes')`).run();
   const rows=await env.DB.prepare(`SELECT id,action_type FROM action_outbox WHERE status='PENDING' ORDER BY created_at ASC LIMIT 50`).all();
   const processed=[];
   for(const row of (rows.results||[])) {
