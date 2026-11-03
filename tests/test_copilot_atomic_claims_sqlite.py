@@ -95,7 +95,7 @@ class CopilotAtomicClaimSqliteTests(unittest.TestCase):
               key TEXT PRIMARY KEY, value_json TEXT NOT NULL
             );
             INSERT INTO platform_settings(key,value_json)
-              VALUES('project_phase','"EXPERT"');
+              VALUES('project_phase','\"EXPERT\"');
             UPDATE operational_cases SET status='AUTO_PENDING';
         """)
         sql = """
@@ -104,32 +104,27 @@ class CopilotAtomicClaimSqliteTests(unittest.TestCase):
                AND EXISTS (
                  SELECT 1 FROM platform_settings
                   WHERE key='project_phase'
-                    AND UPPER(TRIM(json_extract(value_json, '
-
-
-if __name__ == "__main__":
-    unittest.main()
-))) = ?
+                    AND UPPER(TRIM(json_extract(value_json, '$'))) = ?
                )
         """
         self.db.execute(
-            "UPDATE platform_settings SET value_json=? WHERE key='project_phase'",
-            ('"PRODUCTION"',),
+            \"UPDATE platform_settings SET value_json=? WHERE key='project_phase'\",
+            ('\"PRODUCTION\"',),
         )
         self.db.commit()
-        rejected = self.db.execute(sql, ("EXPERT",))
+        rejected = self.db.execute(sql, (\"EXPERT\",))
         self.db.commit()
         self.assertEqual(rejected.rowcount, 0)
         self.assertEqual(
-            self.db.execute("SELECT status FROM operational_cases WHERE id='case-1'").fetchone()[0],
-            "AUTO_PENDING",
+            self.db.execute(\"SELECT status FROM operational_cases WHERE id='case-1'\").fetchone()[0],
+            \"AUTO_PENDING\",
         )
         self.db.execute(
-            "UPDATE platform_settings SET value_json=? WHERE key='project_phase'",
-            ('"EXPERT"',),
+            \"UPDATE platform_settings SET value_json=? WHERE key='project_phase'\",
+            ('\"EXPERT\"',),
         )
         self.db.commit()
-        accepted = self.db.execute(sql, ("EXPERT",))
+        accepted = self.db.execute(sql, (\"EXPERT\",))
         self.db.commit()
         self.assertEqual(accepted.rowcount, 1)
 
