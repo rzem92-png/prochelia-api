@@ -1510,8 +1510,13 @@ async function createOperationalCase(request, env) {
   await env.DB.prepare(`INSERT INTO copilot_log(id,case_id,action_type,recommendation,confidence,mode) VALUES(?,?,?,?,?,?)`)
     .bind(crypto.randomUUID(),id,rec.action,JSON.stringify(rec.solution),rec.confidence,rec.mode).run();
   await journal(env,'copilot',null,'CASE_CREATED','operational_case',id,'OK',{caseType,impact});
-  if(autoEligible) await executeOperationalCase(env,id,null,true);
-  return json({ok:true,version:VERSION,case_id:id,recommendation:rec,status:autoEligible?'AUTO_EXECUTED':'WAITING_MANAGER'},201);
+  let automaticExecution = null;
+  if(autoEligible) automaticExecution = await executeOperationalCase(env,id,null,true);
+  return json({
+    ok:true,version:VERSION,case_id:id,recommendation:rec,
+    status:autoEligible && automaticExecution?.ok ? 'AUTO_EXECUTED' : (autoEligible ? 'AUTO_EXECUTION_FAILED' : 'WAITING_MANAGER'),
+    execution:automaticExecution
+  },201);
 }
 
 
@@ -1603,20 +1608,27 @@ async function processActionOutbox(request, env) {
       processed.push({id:row.id,status:'SKIPPED_ALREADY_CLAIMED'});
       continue;
     }
-    const payload=row.payload_json?JSON.parse(row.payload_json):{};
-    // Provider-dependent actions stay queued until the corresponding adapter/secret is configured.
-    const external = ['PSP_REFUND_REVIEW','NOTIFY_CLIENT','SEARCH_REPLACEMENT','RESCHEDULE_MISSION','ASSIGN_REPLACEMENT'].includes(String(row.action_type));
-    if(external) {
-      await env.DB.prepare(`UPDATE action_outbox SET status='WAITING_PROVIDER',last_error=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='PROCESSING'`).bind('External adapter/provider required for final execution.',row.id).run();
-      processed.push({id:row.id,status:'WAITING_PROVIDER',action_type:row.action_type});
-      continue;
+    let payload;
+    try {
+      payload=row.payload_json?JSON.parse(row.payload_json):{};
+      // Provider-dependent actions stay queued until the corresponding adapter/secret is configured.
+      const external = ['PSP_REFUND_REVIEW','NOTIFY_CLIENT','SEARCH_REPLACEMENT','RESCHEDULE_MISSION','ASSIGN_REPLACEMENT'].includes(String(row.action_type));
+      if(external) {
+        await env.DB.prepare(`UPDATE action_outbox SET status='WAITING_PROVIDER',last_error=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='PROCESSING'`).bind('External adapter/provider required for final execution.',row.id).run();
+        processed.push({id:row.id,status:'WAITING_PROVIDER',action_type:row.action_type});
+        continue;
+      }
+      const completed=await env.DB.prepare(`UPDATE action_outbox SET status='COMPLETED',processed_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='PROCESSING'`).bind(row.id).run();
+      if(Number(completed?.meta?.changes||0)!==1) {
+        processed.push({id:row.id,status:'SKIPPED_STATE_CHANGED',action_type:row.action_type});
+        continue;
+      }
+      processed.push({id:row.id,status:'COMPLETED',action_type:row.action_type,payload});
+    } catch(error) {
+      // Avoid automatic retry: a failure may follow a partial external side effect.
+      await env.DB.prepare(`UPDATE action_outbox SET status='FAILED',last_error=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='PROCESSING'`).bind(String(error?.message||error).slice(0,500),row.id).run();
+      processed.push({id:row.id,status:'FAILED_REQUIRES_REVIEW',action_type:row.action_type});
     }
-    const completed=await env.DB.prepare(`UPDATE action_outbox SET status='COMPLETED',processed_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='PROCESSING'`).bind(row.id).run();
-    if(Number(completed?.meta?.changes||0)!==1) {
-      processed.push({id:row.id,status:'SKIPPED_STATE_CHANGED',action_type:row.action_type});
-      continue;
-    }
-    processed.push({id:row.id,status:'COMPLETED',action_type:row.action_type,payload});
   }
   await journal(env,'gerante',gate.auth.user.id,'ACTION_OUTBOX_PROCESSED','system',null,'OK',{count:processed.length});
   return json({ok:true,version:VERSION,processed},200);
@@ -1644,7 +1656,16 @@ async function executeOperationalCase(env, caseId, approverId=null, automatic=fa
   const claim=await env.DB.prepare(`UPDATE operational_cases SET status='EXECUTING',updated_at=CURRENT_TIMESTAMP
     WHERE id=? AND status IN (${allowedStatuses.map(()=>'?').join(',')})`).bind(caseId,...allowedStatuses).run();
   if(Number(claim?.meta?.changes||0)!==1) return {ok:false,error:'CASE_ALREADY_EXECUTED_OR_IN_PROGRESS'};
-  const businessResults = await executeCaseBusinessAction(env,c,rec,approverId,automatic);
+  let businessResults;
+  try {
+    businessResults = await executeCaseBusinessAction(env,c,rec,approverId,automatic);
+  } catch (error) {
+    // Fail closed: do not mark the case resolved if a business action failed.
+    // No automatic retry here because partial side effects may already have happened.
+    await env.DB.prepare(`UPDATE operational_cases SET status='EXECUTION_FAILED',updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='EXECUTING'`).bind(caseId).run();
+    await journal(env,automatic?'copilot':'gerante',approverId,'CASE_EXECUTION_FAILED','operational_case',caseId,'ERROR',{error:String(error?.message||error).slice(0,500)});
+    return {ok:false,error:'CASE_EXECUTION_FAILED_REQUIRES_REVIEW'};
+  }
   const resolution={executed:true,automatic,action:rec.action||'RESOLVE',steps:rec.solution?.steps||[],business_results:businessResults,executed_at:new Date().toISOString()};
   await env.DB.prepare(`INSERT INTO case_actions(id,case_id,action_code,mode,status,payload_json,result_json,completed_at) VALUES(?,?,?,?,?,?,?,CURRENT_TIMESTAMP)`)
     .bind(crypto.randomUUID(),caseId,rec.action||'RESOLVE',automatic?'AUTO':'MANAGER','COMPLETED',JSON.stringify(rec),JSON.stringify(resolution)).run();
