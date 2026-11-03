@@ -18,6 +18,25 @@ export async function handleV7Route(
     const method =
       request.method.toUpperCase();
 
+    // Bound untrusted payloads before JSON parsing to reduce memory/CPU abuse.
+    // V7 currently accepts only small validation payloads, not file uploads.
+    if (method === "POST") {
+      const declaredLength = Number(request.headers.get("content-length"));
+      const maxBodyBytes = 32 * 1024;
+      if (Number.isFinite(declaredLength) && declaredLength > maxBodyBytes) {
+        return Response.json(
+          { ok: false, version: procheliaV7.version, error: "PAYLOAD_TOO_LARGE" },
+          { status: 413, headers: { "cache-control": "no-store" } }
+        );
+      }
+      const actualBody = await request.clone().text();
+      if (new TextEncoder().encode(actualBody).byteLength > maxBodyBytes) {
+        return Response.json(
+          { ok: false, version: procheliaV7.version, error: "PAYLOAD_TOO_LARGE" },
+          { status: 413, headers: { "cache-control": "no-store" } }
+        );
+      }
+    }
 
     // =================================================
     // STATUT V7
