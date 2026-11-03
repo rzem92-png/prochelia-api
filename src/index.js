@@ -3411,7 +3411,7 @@ export async function productionSubjectHash(request, route){
   // Cloudflare Worker: use the platform-provided CF-Connecting-IP only.
   // X-Forwarded-For is client-spoofable and must not influence rate-limit identity.
   const ip=clean(request.headers.get('CF-Connecting-IP')) || 'unknown';
-  return sha256Hex(`${ip}|${route}`);
+  return sha256Base64url(`${ip}|${route}`);
 }
 
 // Atomic fixed-window counter: SELECT-then-UPDATE can lose increments under concurrency.
