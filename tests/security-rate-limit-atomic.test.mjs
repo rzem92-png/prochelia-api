@@ -52,10 +52,10 @@ assert.notEqual(verifyEnd, -1, 'securityVerifyCode must have a following functio
 const verify = source.slice(verifyStart, verifyEnd);
 
 test('mission security code consumption is conditional and atomic in D1', () => {
-  assert.match(verify, /UPDATE mission_security[\\s\\S]*WHERE id=\\? AND status='prepared' AND arrival_used_at IS NULL/);
-  assert.match(verify, /UPDATE mission_security[\\s\\S]*WHERE id=\\? AND status='in_progress' AND end_used_at IS NULL/);
-  assert.match(verify, /locked_until IS NULL OR locked_until<=\\?/);
-  assert.match(verify, /Number\\(consumed\\?\\.meta\\?\\.changes\\|\\|0\\)!==1/);
+  assert.ok(verify.includes("WHERE id=? AND status='prepared' AND arrival_used_at IS NULL"));
+  assert.ok(verify.includes("WHERE id=? AND status='in_progress' AND end_used_at IS NULL"));
+  assert.ok(verify.includes("locked_until IS NULL OR locked_until<=?"));
+  assert.ok(verify.includes("Number(consumed?.meta?.changes||0)!==1"));
 });
 
 test('losing a concurrent single-use code race returns 409 and is audited', () => {
