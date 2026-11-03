@@ -4,7 +4,7 @@ import {rankNexusProviders} from "../src/supra-nexus-ranking.js";
 const request={requiredSkills:["accompagnement"],maxDistanceKm:20,budgetCents:5000,
  providerCandidates:[
   {id:"local-low-exposure",skills:["accompagnement"],available:true,verified:true,reliability:80,quality:80,distanceKm:5,quoteCents:3000,minimumViableQuoteCents:2500,smallLocalProvider:true,recentExposure:10},
-  {id:"popular",skills:["accompagnement"],available:true,verified:true,reliability:90,quality:90,distanceKm:3,quoteCents:3000,smallLocalProvider:false,recentExposure:90},
+  {id:"popular",skills:["accompagnement"],available:true,verified:true,reliability:90,quality:90,distanceKm:3,quoteCents:3000,minimumViableQuoteCents:2500,smallLocalProvider:false,recentExposure:90},
   {id:"unverified",skills:["accompagnement"],available:true,verified:false,reliability:100,quality:100,distanceKm:1,quoteCents:1000,minimumViableQuoteCents:2500,smallLocalProvider:true,recentExposure:0}
  ]};
 test("Nexus ranks only verified, available, qualified, in-budget candidates",()=>{
