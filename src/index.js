@@ -2100,8 +2100,26 @@ async function queueAction(env, actionType, entityType, entityId, payload, idem)
   return await env.DB.prepare('SELECT * FROM action_outbox WHERE id=?').bind(id).first();
 }
 
+// Atomic single-worker claim: only one concurrent request may execute a PENDING action.
+export async function claimActionExecution(env, actionId) {
+  const claimed = await env.DB.prepare(
+    "UPDATE action_outbox SET status='RUNNING',updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='PENDING'"
+  ).bind(actionId).run();
+  const changes = Number(claimed?.meta?.changes ?? claimed?.changes ?? 0);
+  if (changes === 1) return {claimed:true};
+  const current = await env.DB.prepare("SELECT status FROM action_outbox WHERE id=? LIMIT 1").bind(actionId).first();
+  return {claimed:false,status:current?.status || 'NOT_FOUND'};
+}
+
 async function executeQueuedAction(env, action) {
   if (!action) return {ok:false,error:'ACTION_NOT_FOUND'};
+  const claim = await claimActionExecution(env, action.id);
+  if (!claim.claimed) {
+    if (claim.status === 'DONE' || claim.status === 'COMPLETED') {
+      return {ok:true,status:claim.status,already:true};
+    }
+    return {ok:false,status:claim.status,error:'ACTION_NOT_CLAIMED'};
+  }
   const payload = JSON.parse(action.payload_json||'{}');
   const now = new Date().toISOString();
   try {
