@@ -984,22 +984,59 @@ async function payoutRequest(request, env) {
   return json({ok:true,version:VERSION,payout_id:payoutId,status:'requested',amount_cents:amount,mode,provider:paymentProvider(env),next:paymentsConfigured(env)?'PSP_PAYOUT_REQUIRED':'PAYMENT_PROVIDER_NOT_CONFIGURED'},201);
 }
 
-async function verifyWebhookSignature(request, env, rawBody) {
+function constantTimeStringEqual(a,b) {
+  if(typeof a!=='string'||typeof b!=='string') return false;
+  const aa=new TextEncoder().encode(a), bb=new TextEncoder().encode(b);
+  let diff=aa.length^bb.length;
+  const n=Math.max(aa.length,bb.length);
+  for(let i=0;i<n;i++) diff|=(aa[i]||0)^(bb[i]||0);
+  return diff===0;
+}
+
+async function hmacSha256Hex(secret,message) {
+  const key=await crypto.subtle.importKey('raw',new TextEncoder().encode(secret),{name:'HMAC',hash:'SHA-256'},false,['sign']);
+  const mac=new Uint8Array(await crypto.subtle.sign('HMAC',key,new TextEncoder().encode(message)));
+  return Array.from(mac,b=>b.toString(16).padStart(2,'0')).join('');
+}
+
+async function verifyStripeWebhookSignature(request,env,rawBody) {
   const secret=env.PAYMENT_WEBHOOK_SECRET;
-  if(!secret) return false;
+  const header=request.headers.get('stripe-signature')||'';
+  if(!secret||!header||rawBody.length>1024*1024) return false;
+  let timestamp=null; const signatures=[];
+  for(const part of header.split(',')){
+    const [key,value]=part.trim().split('=',2);
+    if(key==='t'&&/^\d{1,12}$/.test(value||'')) timestamp=Number(value);
+    if(key==='v1'&&/^[a-f0-9]{64}$/i.test(value||'')) signatures.push(value.toLowerCase());
+  }
+  if(!Number.isSafeInteger(timestamp)||!signatures.length) return false;
+  // Reject stale/future deliveries outside Stripe's normal replay tolerance.
+  if(Math.abs(Math.floor(Date.now()/1000)-timestamp)>300) return false;
+  const expected=await hmacSha256Hex(secret,`${timestamp}.${rawBody}`);
+  return signatures.some(sig=>constantTimeStringEqual(sig,expected));
+}
+
+async function verifyWebhookSignature(request, env, rawBody) {
+  const provider=String(paymentProvider(env)||'').toLowerCase();
+  if(provider==='stripe') return verifyStripeWebhookSignature(request,env,rawBody);
+  // Non-Stripe integrations must use their explicitly documented adapter format.
+  const secret=env.PAYMENT_WEBHOOK_SECRET;
+  if(!secret||rawBody.length>1024*1024) return false;
   const signature=request.headers.get('x-prochelia-signature') || request.headers.get('x-webhook-signature') || '';
   if(!signature) return false;
   const key=await crypto.subtle.importKey('raw',new TextEncoder().encode(secret),{name:'HMAC',hash:'SHA-256'},false,['sign']);
   const mac=new Uint8Array(await crypto.subtle.sign('HMAC',key,new TextEncoder().encode(rawBody)));
   const expected=base64url(mac);
-  return signature===expected || signature===`sha256=${expected}`;
+  return constantTimeStringEqual(signature,expected) || constantTimeStringEqual(signature,`sha256=${expected}`);
 }
 
 async function paymentWebhook(request, env) {
-  await ensurePaymentSchema(env);
+  // Authenticate raw bytes before any database/schema side effect: unauthenticated
+  // webhook traffic must not be able to trigger D1 work or schema initialization.
   const raw=await request.text();
   if(!(await verifyWebhookSignature(request,env,raw))) return json({ok:false,error:'INVALID_WEBHOOK_SIGNATURE',version:VERSION},401);
   let event; try{event=JSON.parse(raw)}catch{return json({ok:false,error:'INVALID_WEBHOOK_JSON',version:VERSION},400);}
+  await ensurePaymentSchema(env);
   const provider=clean(event?.provider)||paymentProvider(env), eventId=clean(event?.id), type=clean(event?.type);
   if(!eventId||!type) return json({ok:false,error:'INVALID_WEBHOOK_EVENT',version:VERSION},400);
   // This deployment has one configured PSP adapter. Never let a signed payload
@@ -3795,7 +3832,10 @@ async function productionSafetySchema(env){
 }
 
 async function productionSubjectHash(request, route){
-  const ip=clean(request.headers.get('CF-Connecting-IP')) || clean(request.headers.get('X-Forwarded-For')) || 'unknown';
+  // Trust only Cloudflare's edge-provided client IP; forwarding headers supplied by clients are untrusted.
+  const ip=clean(request.headers.get('CF-Connecting-IP'));
+  // Missing trusted edge identity must not collapse all visitors into one shared bucket.
+  if(!ip) throw new Error('TRUSTED_CLIENT_IP_REQUIRED');
   return sha256Hex(`${ip}|${route}`);
 }
 
@@ -3813,26 +3853,36 @@ async function productionRateLimit(request,env){
   const limit=sensitive ? 20 : 120;
   const windowSeconds=60;
   const bucket=`${sensitive?'SENSITIVE':'GENERAL'}:${path}`;
-  const subject=await productionSubjectHash(request,path);
   const now=Math.floor(Date.now()/1000);
   const start=new Date(Math.floor(now/windowSeconds)*windowSeconds*1000).toISOString();
-  await ensureFinalHardeningSchema(env);
-  const existing=await env.DB.prepare(`SELECT request_count FROM security_rate_limits WHERE bucket=? AND subject_hash=? AND window_start=? LIMIT 1`).bind(bucket,subject,start).first();
-  const count=Number(existing?.request_count||0)+1;
-  if(existing){
-    await env.DB.prepare(`UPDATE security_rate_limits SET request_count=? WHERE bucket=? AND subject_hash=? AND window_start=?`).bind(count,bucket,subject,start).run();
-  }else{
-    await env.DB.prepare(`INSERT INTO security_rate_limits(id,bucket,subject_hash,window_start,request_count) VALUES(?,?,?,?,1)`).bind(crypto.randomUUID(),bucket,subject,start).run();
+  const retryAfter=Math.max(1,windowSeconds-(now%windowSeconds));
+  try {
+    if(!env?.DB) throw new Error('DATABASE_REQUIRED');
+    const subject=await productionSubjectHash(request,path);
+    await ensureFinalHardeningSchema(env);
+    // Atomic counter: concurrent requests cannot overwrite one another's increments.
+    const increment=await env.DB.prepare(`INSERT INTO security_rate_limits(id,bucket,subject_hash,window_start,request_count)
+      VALUES(?,?,?,?,1)
+      ON CONFLICT(bucket,subject_hash,window_start)
+      DO UPDATE SET request_count=security_rate_limits.request_count+1
+      RETURNING request_count`).bind(crypto.randomUUID(),bucket,subject,start).first();
+    const count=Number(increment?.request_count);
+    if(!Number.isSafeInteger(count)||count<1) throw new Error('RATE_LIMIT_COUNTER_INVALID');
+    if(count>limit){
+      // Enforcement must not depend on audit-log availability.
+      try {
+        await productionSafetySchema(env);
+        await env.DB.prepare(`INSERT INTO production_security_events(id,event_type,route,subject_hash,decision,details_json) VALUES(?,?,?,?,?,?)`)
+          .bind(crypto.randomUUID(),'RATE_LIMIT',path,subject,'BLOCKED',JSON.stringify({limit,windowSeconds})).run();
+      } catch { /* keep the block even if audit persistence is temporarily unavailable */ }
+      return {ok:false,response:json({ok:false,error:'RATE_LIMITED',version:VERSION,retry_after_seconds:retryAfter},429,{'retry-after':String(retryAfter)})};
+    }
+    return {ok:true};
+  } catch {
+    // Fail closed: never process a protected mutation when limiter storage is unavailable.
+    return {ok:false,response:json({ok:false,error:'RATE_LIMIT_UNAVAILABLE',version:VERSION},503,{'cache-control':'no-store'})};
   }
-  if(count>limit){
-    await productionSafetySchema(env);
-    await env.DB.prepare(`INSERT INTO production_security_events(id,event_type,route,subject_hash,decision,details_json) VALUES(?,?,?,?,?,?)`)
-      .bind(crypto.randomUUID(),'RATE_LIMIT',path,subject,'BLOCKED',JSON.stringify({limit,windowSeconds})).run();
-    return {ok:false,response:json({ok:false,error:'RATE_LIMITED',version:VERSION,retry_after_seconds:Math.max(1,windowSeconds-(now%windowSeconds))},429,{'retry-after':String(Math.max(1,windowSeconds-(now%windowSeconds)))})};
-  }
-  return {ok:true};
 }
-
 async function strictProductionAudit(request,env){
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
   const result=await productionConfigCheck(env);
