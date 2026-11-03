@@ -39,3 +39,9 @@ test("rejects quotes below server-calculated minimum and does not reward underpr
  const r=rankNexusProviders({...request,providerCandidates:[underpriced,normal]});
  assert.deepEqual(r.rankings.map(x=>x.providerId),["fair-price"]);
 });
+
+test("bounds skill arrays to prevent oversized ranking requests",()=>{
+ assert.equal(rankNexusProviders({...request,requiredSkills:Array.from({length:51},(_,i)=>"skill-"+i)}).error,"INVALID_REQUEST");
+ const oversized={...request.providerCandidates[0],skills:Array.from({length:101},(_,i)=>"skill-"+i)};
+ assert.equal(rankNexusProviders({...request,providerCandidates:[oversized]}).error,"INVALID_CANDIDATE_FIELDS");
+});
