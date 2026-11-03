@@ -903,69 +903,23 @@ function v7CheckPricing({
 // QR CODE
 // =====================================================
 
-function v7CheckQr(
-  mission,
-  qr
-) {
-
+function v7CheckQr(mission, qr) {
+  // Caller-provided QR data is untrusted. This legacy helper has no access
+  // to the signing secret, database nonce, expiry, or atomic consume operation.
+  // Therefore it must never claim validation or authorize mission start.
   if (!mission) {
-
-    return v7Result(
-      false,
-      {},
-      "Mission introuvable"
-    );
+    return v7Result(false, {}, "Mission introuvable");
   }
-
   if (!qr) {
-
-    return v7Result(
-      false,
-      {},
-      "QR code absent"
-    );
+    return v7Result(false, {}, "QR code absent");
   }
-
-  if (
-    qr.missionId &&
-    String(
-      qr.missionId
-    ) !==
-    String(
-      mission.id
-    )
-  ) {
-
-    return v7Result(
-      false,
-      {},
-      "QR code non associé à cette mission"
-    );
-  }
-
-  if (
-    qr.mission_id &&
-    String(
-      qr.mission_id
-    ) !==
-    String(
-      mission.id
-    )
-  ) {
-
-    return v7Result(
-      false,
-      {},
-      "QR code non associé à cette mission"
-    );
-  }
-
   return v7Result(
-    true,
+    false,
     {
-      qrValidated:
-        true
-    }
+      qrValidated: false,
+      verificationRequired: "SERVER_SIGNED_EXPIRING_SINGLE_USE_QR"
+    },
+    "QR code à vérifier côté serveur"
   );
 }
 
