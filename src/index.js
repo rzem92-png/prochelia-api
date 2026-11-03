@@ -996,10 +996,12 @@ async function verifyWebhookSignature(request, env, rawBody) {
 }
 
 async function paymentWebhook(request, env) {
-  await ensurePaymentSchema(env);
+  // Authenticate raw bytes before any database/schema side effect: unauthenticated
+  // webhook traffic must not be able to trigger D1 work or schema initialization.
   const raw=await request.text();
   if(!(await verifyWebhookSignature(request,env,raw))) return json({ok:false,error:'INVALID_WEBHOOK_SIGNATURE',version:VERSION},401);
   let event; try{event=JSON.parse(raw)}catch{return json({ok:false,error:'INVALID_WEBHOOK_JSON',version:VERSION},400);}
+  await ensurePaymentSchema(env);
   const provider=clean(event?.provider)||paymentProvider(env), eventId=clean(event?.id), type=clean(event?.type);
   if(!eventId||!type) return json({ok:false,error:'INVALID_WEBHOOK_EVENT',version:VERSION},400);
   // This deployment has one configured PSP adapter. Never let a signed payload
