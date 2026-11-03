@@ -2670,6 +2670,13 @@ async function enqueueBackgroundJob(env, jobType, payload={}, maxAttempts=5) {
 async function processBackgroundJobs(request,env) {
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
   await ensureFinalHardeningSchema(env); await ensureOperationalSchema(env);
+  // Recover jobs abandoned by a crashed worker after a 15-minute lease.
+  // Each expired lease consumes an attempt and terminally fails at max_attempts.
+  await env.DB.prepare(`UPDATE background_jobs SET attempts=attempts+1,
+    status=CASE WHEN attempts+1>=max_attempts THEN 'FAILED' ELSE 'PENDING' END,
+    run_after=CASE WHEN attempts+1>=max_attempts THEN run_after ELSE datetime('now','+60 seconds') END,
+    locked_at=NULL,last_error=COALESCE(last_error,'Worker lease expired'),updated_at=CURRENT_TIMESTAMP
+    WHERE status='RUNNING' AND locked_at<=datetime('now','-15 minutes')`).run();
   const rows=await env.DB.prepare(`SELECT * FROM background_jobs WHERE status='PENDING' AND run_after<=CURRENT_TIMESTAMP ORDER BY created_at LIMIT 25`).all();
   const results=[];
   for(const job of rows.results||[]) {
@@ -2689,8 +2696,10 @@ async function processBackgroundJobs(request,env) {
       results.push({id:job.id,status:done?'DONE':'WAITING_PROVIDER',result});
     } catch(e) {
       const attempts=Number(job.attempts||0)+1;
-      const status=attempts>=Number(job.max_attempts||5)?'FAILED':'PENDING';
-      await env.DB.prepare(`UPDATE background_jobs SET status=?,attempts=?,last_error=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(status,attempts,String(e.message||e),job.id).run();
+      const maxAttempts=Math.max(1,Number(job.max_attempts||5));
+      const status=attempts>=maxAttempts?'FAILED':'PENDING';
+      const retrySeconds=Math.min(3600,30*Math.pow(2,Math.min(attempts-1,7)));
+      await env.DB.prepare(`UPDATE background_jobs SET status=?,attempts=?,last_error=?,run_after=CASE WHEN ?='PENDING' THEN datetime('now',?) ELSE run_after END,locked_at=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='RUNNING'`).bind(status,attempts,String(e.message||e),status,`+${retrySeconds} seconds`,job.id).run();
       results.push({id:job.id,status,error:String(e.message||e)});
     }
   }

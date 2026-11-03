@@ -98,5 +98,11 @@ class StripeWebhookSafetySourceTests(unittest.TestCase):
         self.assertIn("const claim=await env.DB.prepare(`UPDATE background_jobs SET status='RUNNING'", SOURCE)
         self.assertIn("if(Number(claim?.meta?.changes||0)!==1) continue;", SOURCE)
 
+    def test_background_jobs_recover_expired_worker_leases_and_backoff(self):
+        self.assertIn("status='RUNNING' AND locked_at<=datetime('now','-15 minutes')", SOURCE)
+        self.assertIn("status=CASE WHEN attempts+1>=max_attempts THEN 'FAILED' ELSE 'PENDING' END", SOURCE)
+        self.assertIn("Math.min(3600,30*Math.pow(2,Math.min(attempts-1,7)))", SOURCE)
+        self.assertIn("WHERE id=? AND status='RUNNING'", SOURCE)
+
 if __name__ == "__main__":
     unittest.main()
