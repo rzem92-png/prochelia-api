@@ -126,6 +126,12 @@ class StripeWebhookSafetySourceTests(unittest.TestCase):
         self.assertIn("reason:!tx?'transaction_not_found':'provider_mismatch'", SOURCE)
         self.assertIn("internal_transaction_id,amount_cents,currency,status", SOURCE)
 
+    def test_dispute_mismatch_holds_transaction_and_creates_reconciliation(self):
+        self.assertIn("STRIPE_DISPUTE_MISMATCH_HELD", SOURCE)
+        self.assertIn("DISPUTE_MISMATCH_HELD_RECONCILIATION_REQUIRED", SOURCE)
+        self.assertIn("validDisputeAmount=Number.isSafeInteger(disputedAmount)", SOURCE)
+        self.assertIn("UPDATE payment_transactions SET status='held'", SOURCE)
+
     def test_background_job_claim_is_atomic_and_skips_lost_races(self):
         self.assertIn("const claim=await env.DB.prepare(`UPDATE background_jobs SET status='RUNNING'", SOURCE)
         self.assertIn("if(Number(claim?.meta?.changes||0)!==1) continue;", SOURCE)
