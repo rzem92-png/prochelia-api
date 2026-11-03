@@ -25,7 +25,7 @@ function invalid(reason) {
  */
 export function rankNexusProviders(request = {}) {
   if (!request || typeof request !== "object" || Array.isArray(request) ||
-      !Array.isArray(request.requiredSkills) || !Array.isArray(request.providerCandidates) ||
+      !Array.isArray(request.requiredSkills) || request.requiredSkills.length > 50 || !Array.isArray(request.providerCandidates) ||
       request.providerCandidates.length > MAX_CANDIDATES ||
       !Number.isFinite(request.maxDistanceKm) || request.maxDistanceKm <= 0 ||
       request.maxDistanceKm > MAX_DISTANCE_KM ||
@@ -40,7 +40,7 @@ export function rankNexusProviders(request = {}) {
         typeof c.id !== "string" || !c.id.trim() || c.id !== c.id.trim() || c.id.length > 128 || ids.has(c.id)) return invalid("INVALID_CANDIDATE");
     // IDs are opaque server identifiers: reject whitespace aliases instead of normalizing them.
     ids.add(c.id);
-    if (!Array.isArray(c.skills) || typeof c.available !== "boolean" || typeof c.verified !== "boolean" ||
+    if (!Array.isArray(c.skills) || c.skills.length > 100 || typeof c.available !== "boolean" || typeof c.verified !== "boolean" ||
         typeof c.smallLocalProvider !== "boolean" || !validScore(c.reliability) || !validScore(c.quality) ||
         !validScore(c.recentExposure) || !Number.isFinite(c.distanceKm) || c.distanceKm < 0 ||
         c.distanceKm > MAX_DISTANCE_KM || !Number.isSafeInteger(c.quoteCents) || c.quoteCents <= 0 ||
