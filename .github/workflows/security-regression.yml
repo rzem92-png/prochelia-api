@@ -43,7 +43,7 @@ jobs:
           const bootstrap=section('async function bootstrap(request, env)','async function authStatus');
           const session=section('async function getSession','function requireRole');
           const role=section('function requireRole','async function getPrestations');
-          const csrf=section('function isAllowedOrigin','// ================================================================');
+          const csrf=section('function securityOriginAllowed','// ================================================================');
           const backupStatus=section('async function backupStatus','const __procheliaNationalHandle');
           const backup=section('async function runNationalBackup','async function nationalScaleStatus');
 
