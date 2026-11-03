@@ -2511,7 +2511,7 @@ async function operationalExecute(request, env) {
       const target=clean(a?.entity_id)||clean(c.mission_id);
       if(!c.mission_id||!target||target!==String(c.mission_id))return json({ok:false,error:'MISSION_ACTION_SCOPE_MISMATCH',version:VERSION},403);
     }
-    if(type==='ASSIGN_REPLACEMENT'&&!clean(a?.intervenant_id||a?.replacement_intervenant_id))return json({ok:false,error:'REPLACEMENT_INTERVENANT_REQUIRED',version:VERSION},400);
+    if(type==='ASSIGN_REPLACEMENT'&&!clean(a?.intervenant_id))return json({ok:false,error:'REPLACEMENT_INTERVENANT_REQUIRED',version:VERSION},400);
     if(type==='RESCHEDULE_MISSION'&&!clean(a?.scheduled_at||a?.date||a?.time))return json({ok:false,error:'RESCHEDULE_TIME_REQUIRED',version:VERSION},400);
   }
   const caseClaim=await env.DB.prepare(`UPDATE operational_cases SET status='EXECUTING',updated_at=CURRENT_TIMESTAMP WHERE id=? AND status IN ('OPEN','AUTO_PENDING','IN_PROGRESS')`).bind(c.id).run();
