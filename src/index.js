@@ -3266,24 +3266,28 @@ async function interfaceConfigEndpoint(request,env){
 async function supportCreate(request,env){
   const a=await supportAuth(request,env); if(a.response)return a.response;
   await ensureProcheliaMasterComplementSchema(env);
-  const b=await readJson(request)||{};
+  const b=await readJson(request);
+  if(!b || typeof b!=='object' || Array.isArray(b)) return json({ok:false,error:'INVALID_BODY',version:VERSION},400);
   const category=clean(b.category)||'GENERAL';
   const severity=String(b.severity||'LOW').toUpperCase();
+  if(typeof category!=='string' || category.length<1 || category.length>64 || !/^[A-Z0-9_ -]+$/i.test(category)) return json({ok:false,error:'INVALID_CATEGORY',version:VERSION},400);
+  if(!['LOW','MEDIUM','HIGH','CRITICAL'].includes(severity)) return json({ok:false,error:'INVALID_SEVERITY',version:VERSION},400);
+  const description=clean(b.description);
+  if(description!=null && (typeof description!=='string' || description.length>4000)) return json({ok:false,error:'DESCRIPTION_TOO_LONG_OR_INVALID',version:VERSION},400);
   const scenario=supportScenarioFor(category,severity);
   const rule=await env.DB.prepare(`SELECT * FROM copilot_resolution_rules WHERE scenario_key=? LIMIT 1`).bind(scenario).first();
-  const auto=Number(rule?.auto_allowed||0)===1 && String(severity)!=='CRITICAL' && String(severity)!=='HIGH';
+  // Only LOW severity can ever be eligible for automation. Eligibility is not resolution.
+  const auto=severity==='LOW' && Number(rule?.auto_allowed||0)===1;
   const requiresManager=Number(rule?.manager_approval_required||1)===1 || !auto;
   const id=crypto.randomUUID();
   const proposed=rule?JSON.parse(rule.steps_json||'[]'):{steps:['collect_evidence','copilot_analysis','notify','audit']};
+  // Client-supplied company/mission/complaint IDs are not trusted ownership claims.
+  // Keep them unset until server-side relationship/tenant validation is implemented.
   await env.DB.prepare(`INSERT INTO support_cases(id,source_role,requester_id,company_id,mission_id,complaint_id,category,severity,status,description,proposed_resolution,requires_manager) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`)
-    .bind(id,a.role,a.auth.user.id,b.company_id||null,b.mission_id||null,b.complaint_id||null,category,severity,auto?'PROCESSING':'OPEN',clean(b.description)||null,JSON.stringify({scenario,steps:proposed.steps||proposed}),requiresManager?1:0).run();
-  await supportEvent(env,id,a.role,a.auth.user.id,'CREATED',{scenario,auto,requiresManager});
-  await journal(env,a.role,a.auth.user.id,'SUPPORT_CASE_CREATE','support_cases',id,'OK',{scenario,severity,auto});
-  let autoResult=null;
-  if(auto){
-    // Never pass requester-controlled data as proof of a completed downstream action.\n    autoResult=await supportAutoResolve(env,id,a.auth.user.id,a.role,scenario,{});
-  }
-  return json({ok:true,version:VERSION,case_id:id,scenario,automatic_resolution:false,auto_eligible:!!auto,auto_result:autoResult,manager_approval_required:requiresManager || !auto});
+    .bind(id,a.role,a.auth.user.id,null,null,null,category,severity,'OPEN',description||null,JSON.stringify({scenario,steps:proposed.steps||proposed}),1).run();
+  await supportEvent(env,id,a.role,a.auth.user.id,'CREATED',{scenario,auto_eligible:auto,requiresManager:true});
+  await journal(env,a.role,a.auth.user.id,'SUPPORT_CASE_CREATE','support_cases',id,'OK',{scenario,severity,auto_eligible:auto});
+  return json({ok:true,version:VERSION,case_id:id,scenario,automatic_resolution:false,auto_eligible:auto,auto_result:{status:'WAITING_ACTION',closed:false,reason:'NO_VERIFIED_DOWNSTREAM_ACTION'},manager_approval_required:true});
 }
 
 async function supportAutoResolve(env,caseId,actorId,actorRole,scenario,context={}){
