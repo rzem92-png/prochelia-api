@@ -945,14 +945,34 @@ async function verifyWebhookSignature(request, env, rawBody) {
 
 async function paymentWebhook(request, env) {
   await ensurePaymentSchema(env);
-  const raw=await request.text();
+  const declaredLength=Number(request.headers.get('content-length')||0);
+  if(Number.isFinite(declaredLength)&&declaredLength>65536) return json({ok:false,error:'WEBHOOK_PAYLOAD_TOO_LARGE',version:VERSION},413);
+  let raw='';
+  try {
+    if(request.body){
+      const reader=request.body.getReader(), decoder=new TextDecoder();
+      let total=0, chunks=[];
+      while(true){
+        const {done,value}=await reader.read(); if(done) break;
+        total+=value.byteLength;
+        if(total>65536){await reader.cancel();return json({ok:false,error:'WEBHOOK_PAYLOAD_TOO_LARGE',version:VERSION},413);}
+        chunks.push(decoder.decode(value,{stream:true}));
+      }
+      chunks.push(decoder.decode()); raw=chunks.join('');
+    }
+  } catch { return json({ok:false,error:'WEBHOOK_BODY_READ_FAILED',version:VERSION},400); }
   if(!(await verifyWebhookSignature(request,env,raw))) return json({ok:false,error:'INVALID_WEBHOOK_SIGNATURE',version:VERSION},401);
   let event; try{event=JSON.parse(raw)}catch{return json({ok:false,error:'INVALID_WEBHOOK_JSON',version:VERSION},400);}
   const provider=clean(event?.provider)||paymentProvider(env), eventId=clean(event?.id), type=clean(event?.type);
-  if(!eventId||!type) return json({ok:false,error:'INVALID_WEBHOOK_EVENT',version:VERSION},400);
+  if(!eventId||eventId.length>256||!type||type.length>128||provider!==paymentProvider(env)) return json({ok:false,error:'INVALID_WEBHOOK_EVENT',version:VERSION},400);
   const payloadHash=await sha256Base64url(raw);
   const inserted=await env.DB.prepare(`INSERT OR IGNORE INTO payment_webhook_events (id,provider,event_id,event_type,signature_valid,payload_hash) VALUES (?,?,?,?,1,?)`).bind(crypto.randomUUID(),provider,eventId,type,payloadHash).run();
-  if(!inserted.meta?.changes) return json({ok:true,version:VERSION,duplicate:true,event_id:eventId},200);
+  if(!inserted.meta?.changes) {
+    const prior=await env.DB.prepare('SELECT payload_hash,event_type FROM payment_webhook_events WHERE provider=? AND event_id=? LIMIT 1').bind(provider,eventId).first();
+    if(prior && (prior.payload_hash!==payloadHash || prior.event_type!==type))
+      return json({ok:false,error:'WEBHOOK_EVENT_ID_CONFLICT',version:VERSION},409);
+    return json({ok:true,version:VERSION,duplicate:true,event_id:eventId},200);
+  }
   const txId=clean(event?.data?.transaction_id), payoutId=clean(event?.data?.payout_id);
   if(txId){
     const tx=await env.DB.prepare('SELECT * FROM payment_transactions WHERE id=? LIMIT 1').bind(txId).first();
