@@ -123,7 +123,7 @@ test('V7 finance calculator rejects negative amounts and out-of-range commission
     [{ paymentFees: -0.01 }, 'FINANCE_NEGATIVE_AMOUNT'],
     [{ commissionRate: 100.01 }, 'COMMISSION_RATE_OUT_OF_RANGE'],
     [{ commissionRate: -0.01 }, 'COMMISSION_RATE_OUT_OF_RANGE'],
-    [{ clientAmount: 'NaN' }, 'FINANCE_INPUT_NOT_FINITE']
+    [{ clientAmount: 'NaN' }, 'FINANCE_INPUT_INVALID_TYPE']
   ];
   for (const [payload, error] of cases) {
     const response = await handleV7Route(req('/api/v7/finance/calculate', payload), env, '/api/v7/finance/calculate');
