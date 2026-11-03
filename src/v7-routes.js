@@ -566,7 +566,8 @@ async function handleV7RouteInternal(
         );
 
       return Response.json(
-        result
+        result,
+        { status: result.ok ? 200 : 400 }
       );
     }
 
