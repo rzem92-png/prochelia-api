@@ -1657,12 +1657,12 @@ async function executeOperationalCase(env, caseId, approverId=null, automatic=fa
   // Atomically bind automatic claim to the current project phase to prevent
   // phase-change TOCTOU between policy validation and case reservation.
   const phaseClaimClause=automatic
-    ? \` AND EXISTS (SELECT 1 FROM platform_settings
+    ? ` AND EXISTS (SELECT 1 FROM platform_settings
         WHERE key='project_phase'
-          AND UPPER(TRIM(json_extract(value_json, '$'))) = ?)\`
+          AND UPPER(TRIM(json_extract(value_json, '$'))) = ?)`
     : '';
-  const claim=await env.DB.prepare(\`UPDATE operational_cases SET status='EXECUTING',updated_at=CURRENT_TIMESTAMP
-    WHERE id=? AND status IN (\${allowedStatuses.map(()=>'?').join(',')})\${phaseClaimClause}\`)
+  const claim=await env.DB.prepare(`UPDATE operational_cases SET status='EXECUTING',updated_at=CURRENT_TIMESTAMP
+    WHERE id=? AND status IN (${allowedStatuses.map(()=>'?').join(',')})${phaseClaimClause}`)
     .bind(caseId,...allowedStatuses,...(automatic?[currentPhase]:[])).run();
   if(Number(claim?.meta?.changes||0)!==1) return {ok:false,error:'CASE_ALREADY_EXECUTED_OR_IN_PROGRESS'};
   let businessResults;
