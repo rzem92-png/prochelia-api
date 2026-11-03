@@ -3795,7 +3795,9 @@ async function productionSafetySchema(env){
 }
 
 async function productionSubjectHash(request, route){
-  const ip=clean(request.headers.get('CF-Connecting-IP')) || clean(request.headers.get('X-Forwarded-For')) || 'unknown';
+  // Trust only Cloudflare's edge-provided client IP. X-Forwarded-For is client-spoofable
+  // unless a separately verified proxy chain is configured; never use it here.
+  const ip=clean(request.headers.get('CF-Connecting-IP')) || 'unknown';
   return sha256Hex(`${ip}|${route}`);
 }
 
@@ -3812,27 +3814,37 @@ async function productionRateLimit(request,env){
     path==='/api/system/backup/run';
   const limit=sensitive ? 20 : 120;
   const windowSeconds=60;
-  const bucket=`${sensitive?'SENSITIVE':'GENERAL'}:${path}`;
-  const subject=await productionSubjectHash(request,path);
+  const bucket=`${sensitive?'SENSITIVE':'GENERAL'}:${path`;
   const now=Math.floor(Date.now()/1000);
   const start=new Date(Math.floor(now/windowSeconds)*windowSeconds*1000).toISOString();
-  await ensureFinalHardeningSchema(env);
-  const existing=await env.DB.prepare(`SELECT request_count FROM security_rate_limits WHERE bucket=? AND subject_hash=? AND window_start=? LIMIT 1`).bind(bucket,subject,start).first();
-  const count=Number(existing?.request_count||0)+1;
-  if(existing){
-    await env.DB.prepare(`UPDATE security_rate_limits SET request_count=? WHERE bucket=? AND subject_hash=? AND window_start=?`).bind(count,bucket,subject,start).run();
-  }else{
-    await env.DB.prepare(`INSERT INTO security_rate_limits(id,bucket,subject_hash,window_start,request_count) VALUES(?,?,?,?,1)`).bind(crypto.randomUUID(),bucket,subject,start).run();
+  const retryAfter=Math.max(1,windowSeconds-(now%windowSeconds));
+  try {
+    if(!env?.DB) throw new Error('DATABASE_REQUIRED');
+    const subject=await productionSubjectHash(request,path);
+    await ensureFinalHardeningSchema(env);
+    // Atomic counter: concurrent requests cannot overwrite one another's increments.
+    const increment=await env.DB.prepare(`INSERT INTO security_rate_limits(id,bucket,subject_hash,window_start,request_count)
+      VALUES(?,?,?,?,1)
+      ON CONFLICT(bucket,subject_hash,window_start)
+      DO UPDATE SET request_count=security_rate_limits.request_count+1
+      RETURNING request_count`).bind(crypto.randomUUID(),bucket,subject,start).first();
+    const count=Number(increment?.request_count);
+    if(!Number.isSafeInteger(count)||count<1) throw new Error('RATE_LIMIT_COUNTER_INVALID');
+    if(count>limit){
+      // Enforcement must not depend on audit-log availability.
+      try {
+        await productionSafetySchema(env);
+        await env.DB.prepare(`INSERT INTO production_security_events(id,event_type,route,subject_hash,decision,details_json) VALUES(?,?,?,?,?,?)`)
+          .bind(crypto.randomUUID(),'RATE_LIMIT',path,subject,'BLOCKED',JSON.stringify({limit,windowSeconds})).run();
+      } catch { /* keep the block even if audit persistence is temporarily unavailable */ }
+      return {ok:false,response:json({ok:false,error:'RATE_LIMITED',version:VERSION,retry_after_seconds:retryAfter},429,{'retry-after':String(retryAfter)})};
+    }
+    return {ok:true};
+  } catch {
+    // Fail closed: never process a protected mutation when limiter storage is unavailable.
+    return {ok:false,response:json({ok:false,error:'RATE_LIMIT_UNAVAILABLE',version:VERSION},503,{'cache-control':'no-store'})};
   }
-  if(count>limit){
-    await productionSafetySchema(env);
-    await env.DB.prepare(`INSERT INTO production_security_events(id,event_type,route,subject_hash,decision,details_json) VALUES(?,?,?,?,?,?)`)
-      .bind(crypto.randomUUID(),'RATE_LIMIT',path,subject,'BLOCKED',JSON.stringify({limit,windowSeconds})).run();
-    return {ok:false,response:json({ok:false,error:'RATE_LIMITED',version:VERSION,retry_after_seconds:Math.max(1,windowSeconds-(now%windowSeconds))},429,{'retry-after':String(Math.max(1,windowSeconds-(now%windowSeconds)))})};
-  }
-  return {ok:true};
 }
-
 async function strictProductionAudit(request,env){
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
   const result=await productionConfigCheck(env);
