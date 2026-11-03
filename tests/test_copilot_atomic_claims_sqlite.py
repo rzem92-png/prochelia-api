@@ -90,15 +90,10 @@ class CopilotAtomicClaimSqliteTests(unittest.TestCase):
             self.assertEqual(self.claim_case(), 0, status)
 
     def test_auto_case_claim_checks_phase_inside_atomic_update(self):
-        self.db.executescript("""
-            CREATE TABLE platform_settings(
-              key TEXT PRIMARY KEY, value_json TEXT NOT NULL
-            );
-            INSERT INTO platform_settings(key,value_json)
-              VALUES('project_phase','\"EXPERT\"');
-            UPDATE operational_cases SET status='AUTO_PENDING';
-        """)
-        sql = """
+        self.db.execute('CREATE TABLE platform_settings(key TEXT PRIMARY KEY, value_json TEXT NOT NULL)')
+        self.db.execute('INSERT INTO platform_settings VALUES(?,?)', ('project_phase', '"EXPERT"'))
+        self.db.execute("UPDATE operational_cases SET status='AUTO_PENDING'")
+        sql = '''
             UPDATE operational_cases SET status='EXECUTING'
              WHERE id='case-1' AND status='AUTO_PENDING'
                AND EXISTS (
@@ -106,25 +101,16 @@ class CopilotAtomicClaimSqliteTests(unittest.TestCase):
                   WHERE key='project_phase'
                     AND UPPER(TRIM(json_extract(value_json, '$'))) = ?
                )
-        """
-        self.db.execute(
-            \"UPDATE platform_settings SET value_json=? WHERE key='project_phase'\",
-            ('\"PRODUCTION\"',),
-        )
+        '''
+        self.db.execute('UPDATE platform_settings SET value_json=? WHERE key=?', ('"PRODUCTION"', 'project_phase'))
         self.db.commit()
-        rejected = self.db.execute(sql, (\"EXPERT\",))
+        rejected = self.db.execute(sql, ('EXPERT',))
         self.db.commit()
         self.assertEqual(rejected.rowcount, 0)
-        self.assertEqual(
-            self.db.execute(\"SELECT status FROM operational_cases WHERE id='case-1'\").fetchone()[0],
-            \"AUTO_PENDING\",
-        )
-        self.db.execute(
-            \"UPDATE platform_settings SET value_json=? WHERE key='project_phase'\",
-            ('\"EXPERT\"',),
-        )
+        self.assertEqual(self.db.execute("SELECT status FROM operational_cases WHERE id='case-1'").fetchone()[0], 'AUTO_PENDING')
+        self.db.execute('UPDATE platform_settings SET value_json=? WHERE key=?', ('"EXPERT"', 'project_phase'))
         self.db.commit()
-        accepted = self.db.execute(sql, (\"EXPERT\",))
+        accepted = self.db.execute(sql, ('EXPERT',))
         self.db.commit()
         self.assertEqual(accepted.rowcount, 1)
 
