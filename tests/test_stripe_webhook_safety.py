@@ -104,5 +104,10 @@ class StripeWebhookSafetySourceTests(unittest.TestCase):
         self.assertIn("Math.min(3600,30*Math.pow(2,Math.min(attempts-1,7)))", SOURCE)
         self.assertIn("WHERE id=? AND status='RUNNING'", SOURCE)
 
+    def test_failed_stripe_event_only_transitions_pending_states(self):
+        self.assertIn("['pending','processing','created'].includes(String(tx.status||'').toLowerCase())", SOURCE)
+        self.assertIn("WHERE id=? AND status IN ('pending','processing','created')", SOURCE)
+        self.assertNotIn("WHERE id=?`).bind(tx.id).run();", SOURCE)
+
 if __name__ == "__main__":
     unittest.main()
