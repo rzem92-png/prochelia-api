@@ -120,6 +120,12 @@ class StripeWebhookSafetySourceTests(unittest.TestCase):
         self.assertIn("AND NOT EXISTS (SELECT 1 FROM payment_disputes pd", payout)
         self.assertIn("AND NOT EXISTS (SELECT 1 FROM payment_reconciliation pr", payout)
 
+    def test_invalid_stripe_transaction_mapping_is_quarantined(self):
+        self.assertIn("STRIPE_EVENT_TRANSACTION_INVALID", SOURCE)
+        self.assertIn("FINANCIAL_EVENT_TRANSACTION_INVALID_RECONCILIATION_REQUIRED", SOURCE)
+        self.assertIn("reason:!tx?'transaction_not_found':'provider_mismatch'", SOURCE)
+        self.assertIn("internal_transaction_id,amount_cents,currency,status", SOURCE)
+
     def test_background_job_claim_is_atomic_and_skips_lost_races(self):
         self.assertIn("const claim=await env.DB.prepare(`UPDATE background_jobs SET status='RUNNING'", SOURCE)
         self.assertIn("if(Number(claim?.meta?.changes||0)!==1) continue;", SOURCE)
