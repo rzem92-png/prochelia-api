@@ -7,7 +7,7 @@
 
 import { procheliaV7 } from "./v7.js";
 
-export async function handleV7Route(
+async function handleV7RouteInternal(
   request,
   env,
   path
@@ -684,4 +684,19 @@ export async function handleV7Route(
       }
     );
   }
+}
+
+
+// Central response hardening for every V7 route, including early returns.
+export async function handleV7Route(request, env, path) {
+  const response = await handleV7RouteInternal(request, env, path);
+  if (!response) return response;
+  const headers = new Headers(response.headers);
+  headers.set("x-content-type-options", "nosniff");
+  headers.set("x-frame-options", "DENY");
+  headers.set("referrer-policy", "no-referrer");
+  headers.set("permissions-policy", "geolocation=(self),camera=(),microphone=()");
+  headers.set("cache-control", "no-store");
+  if (request.url.startsWith("https://")) headers.set("strict-transport-security", "max-age=31536000; includeSubDomains");
+  return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
 }
