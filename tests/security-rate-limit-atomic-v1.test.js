@@ -114,3 +114,13 @@ test('rejects oversized bucket and malformed identity configuration', async () =
   }
   assert.equal(db.rows.size, 0);
 });
+
+
+test('rate limit identity combines IP and user subject', async () => {
+ const db = new FakeD1();
+ const base = { db, bucket: 'account-action', limit: 20, nowSeconds: 400 };
+ await enforceAtomicRateLimit({ ...base, request: req('203.0.113.10'), userId: 'user-a' });
+ await enforceAtomicRateLimit({ ...base, request: req('203.0.113.11'), userId: 'user-a' });
+ await enforceAtomicRateLimit({ ...base, request: req('203.0.113.10'), userId: 'user-b' });
+ assert.equal(db.rows.size, 3);
+});
