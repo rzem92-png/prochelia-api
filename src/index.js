@@ -932,15 +932,26 @@ async function payoutRequest(request, env) {
   return json({ok:true,version:VERSION,payout_id:payoutId,status:'requested',amount_cents:amount,mode,provider:paymentProvider(env),next:paymentsConfigured(env)?'PSP_PAYOUT_REQUIRED':'PAYMENT_PROVIDER_NOT_CONFIGURED'},201);
 }
 
+// Compare MACs without an early exit on the first differing byte.
+function constantTimeEqual(a, b) {
+  const left=new TextEncoder().encode(String(a));
+  const right=new TextEncoder().encode(String(b));
+  let diff=left.length ^ right.length;
+  const length=Math.max(left.length,right.length);
+  for(let i=0;i<length;i++) diff|=(left[i]||0)^(right[i]||0);
+  return diff===0;
+}
+
 async function verifyWebhookSignature(request, env, rawBody) {
   const secret=env.PAYMENT_WEBHOOK_SECRET;
   if(!secret) return false;
   const signature=request.headers.get('x-prochelia-signature') || request.headers.get('x-webhook-signature') || '';
-  if(!signature) return false;
+  if(!signature || signature.length>256) return false;
   const key=await crypto.subtle.importKey('raw',new TextEncoder().encode(secret),{name:'HMAC',hash:'SHA-256'},false,['sign']);
   const mac=new Uint8Array(await crypto.subtle.sign('HMAC',key,new TextEncoder().encode(rawBody)));
   const expected=base64url(mac);
-  return signature===expected || signature===`sha256=${expected}`;
+  const supplied=signature.startsWith('sha256=')?signature.slice(7):signature;
+  return constantTimeEqual(supplied,expected);
 }
 
 async function paymentWebhook(request, env) {
