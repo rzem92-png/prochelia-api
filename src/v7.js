@@ -1037,69 +1037,36 @@ function v7CalculateFinance({
   paymentFees = 0,
   otherFees = 0
 } = {}) {
+  const values = [clientAmount, commissionRate, paymentFees, otherFees].map(Number);
+  const [client, rate, payment, other] = values;
 
-  const client =
-    Number(
-      clientAmount
-    ) || 0;
+  // This endpoint is a calculator, never a payment authority. Reject invalid
+  // inputs rather than silently coercing NaN/Infinity or negative amounts.
+  if (!values.every(Number.isFinite)) {
+    return v7Result(false, {}, "FINANCE_INPUT_NOT_FINITE");
+  }
+  if (client < 0 || payment < 0 || other < 0) {
+    return v7Result(false, {}, "FINANCE_NEGATIVE_AMOUNT");
+  }
+  if (rate < 0 || rate > 100) {
+    return v7Result(false, {}, "COMMISSION_RATE_OUT_OF_RANGE");
+  }
 
-  const rate =
-    Number(
-      commissionRate
-    ) || 0;
+  const roundMoney = (value) => Math.round((value + Number.EPSILON) * 100) / 100;
+  const commission = roundMoney(client * rate / 100);
+  const intervenant = roundMoney(client - commission);
+  const margin = roundMoney(commission - payment - other);
 
-  const payment =
-    Number(
-      paymentFees
-    ) || 0;
-
-  const other =
-    Number(
-      otherFees
-    ) || 0;
-
-  const commission =
-    client *
-    rate /
-    100;
-
-  const intervenant =
-    client -
-    commission;
-
-  const margin =
-    commission -
-    payment -
-    other;
-
-  return v7Result(
-    true,
-    {
-
-      clientAmount:
-        client,
-
-      commissionRate:
-        rate,
-
-      commissionAmount:
-        commission,
-
-      intervenantAmount:
-        intervenant,
-
-      paymentFees:
-        payment,
-
-      otherFees:
-        other,
-
-      grossMargin:
-        margin
-    }
-  );
+  return v7Result(true, {
+    clientAmount: roundMoney(client),
+    commissionRate: rate,
+    commissionAmount: commission,
+    intervenantAmount: intervenant,
+    paymentFees: roundMoney(payment),
+    otherFees: roundMoney(other),
+    grossMargin: margin
+  });
 }
-
 
 // =====================================================
 // IDEMPOTENCE
