@@ -156,3 +156,19 @@ test('V7 finance calculator rejects arithmetic overflow from finite inputs', asy
   assert.equal(data.ok, false);
   assert.equal(data.error, 'FINANCE_RESULT_OVERFLOW');
 });
+
+
+test('V7 finance calculator requires client amount and rejects coercible string inputs', async () => {
+  const cases = [
+    [{}, 'FINANCE_CLIENT_AMOUNT_REQUIRED'],
+    [{ clientAmount: '25.00' }, 'FINANCE_INPUT_INVALID_TYPE'],
+    [{ clientAmount: 25, paymentFees: '1.2' }, 'FINANCE_INPUT_INVALID_TYPE']
+  ];
+  for (const [payload, error] of cases) {
+    const response = await handleV7Route(req('/api/v7/finance/calculate', payload), env, '/api/v7/finance/calculate');
+    assert.equal(response.status, 400);
+    const data = await response.json();
+    assert.equal(data.ok, false);
+    assert.equal(data.error, error);
+  }
+});
