@@ -18,23 +18,51 @@ export async function handleV7Route(
     const method =
       request.method.toUpperCase();
 
-    // Bound untrusted payloads before JSON parsing to reduce memory/CPU abuse.
-    // V7 currently accepts only small validation payloads, not file uploads.
+    // Stream-limit request bodies instead of clone().text(), which could buffer
+    // an attacker-controlled oversized payload before checking its length.
     if (method === "POST") {
-      const declaredLength = Number(request.headers.get("content-length"));
       const maxBodyBytes = 32 * 1024;
-      if (Number.isFinite(declaredLength) && declaredLength > maxBodyBytes) {
-        return Response.json(
-          { ok: false, version: procheliaV7.version, error: "PAYLOAD_TOO_LARGE" },
-          { status: 413, headers: { "cache-control": "no-store" } }
-        );
+      const declaredLengthHeader = request.headers.get("content-length");
+      if (declaredLengthHeader !== null) {
+        if (!/^\\d+$/.test(declaredLengthHeader) || Number(declaredLengthHeader) > maxBodyBytes) {
+          return Response.json(
+            { ok: false, version: procheliaV7.version, error: "PAYLOAD_TOO_LARGE" },
+            { status: 413, headers: { "cache-control": "no-store" } }
+          );
+        }
       }
-      const actualBody = await request.clone().text();
-      if (new TextEncoder().encode(actualBody).byteLength > maxBodyBytes) {
-        return Response.json(
-          { ok: false, version: procheliaV7.version, error: "PAYLOAD_TOO_LARGE" },
-          { status: 413, headers: { "cache-control": "no-store" } }
-        );
+      if (request.body) {
+        const reader = request.body.getReader();
+        const chunks = [];
+        let total = 0;
+        try {
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            total += value.byteLength;
+            if (total > maxBodyBytes) {
+              await reader.cancel();
+              return Response.json(
+                { ok: false, version: procheliaV7.version, error: "PAYLOAD_TOO_LARGE" },
+                { status: 413, headers: { "cache-control": "no-store" } }
+              );
+            }
+            chunks.push(value);
+          }
+        } finally {
+          reader.releaseLock();
+        }
+        const boundedBody = new Uint8Array(total);
+        let offset = 0;
+        for (const chunk of chunks) {
+          boundedBody.set(chunk, offset);
+          offset += chunk.byteLength;
+        }
+        request = new Request(request.url, {
+          method: request.method,
+          headers: request.headers,
+          body: boundedBody
+        });
       }
     }
 
