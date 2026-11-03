@@ -89,6 +89,48 @@ class CopilotAtomicClaimSqliteTests(unittest.TestCase):
             self.db.commit()
             self.assertEqual(self.claim_case(), 0, status)
 
+    def test_auto_case_claim_checks_phase_inside_atomic_update(self):
+        self.db.executescript("""
+            CREATE TABLE platform_settings(
+              key TEXT PRIMARY KEY, value_json TEXT NOT NULL
+            );
+            INSERT INTO platform_settings(key,value_json)
+              VALUES('project_phase','"EXPERT"');
+            UPDATE operational_cases SET status='AUTO_PENDING';
+        """)
+        sql = """
+            UPDATE operational_cases SET status='EXECUTING'
+             WHERE id='case-1' AND status='AUTO_PENDING'
+               AND EXISTS (
+                 SELECT 1 FROM platform_settings
+                  WHERE key='project_phase'
+                    AND UPPER(TRIM(json_extract(value_json,'
+        self.db.close()
+
+
+if __name__ == "__main__":
+    unittest.main()
+))) = ?
+               )
+        """
+        # If the phase changes after the policy read but before the claim,
+        # the SQL claim must reject the old phase.
+        self.db.execute("UPDATE platform_settings SET value_json='""PRODUCTION""' WHERE key='project_phase'")
+        self.db.commit()
+        rejected = self.db.execute(sql, ("EXPERT",))
+        self.db.commit()
+        self.assertEqual(rejected.rowcount, 0)
+        self.assertEqual(
+            self.db.execute("SELECT status FROM operational_cases WHERE id='case-1'").fetchone()[0],
+            "AUTO_PENDING",
+        )
+
+        self.db.execute("UPDATE platform_settings SET value_json='""EXPERT""' WHERE key='project_phase'")
+        self.db.commit()
+        accepted = self.db.execute(sql, ("EXPERT",))
+        self.db.commit()
+        self.assertEqual(accepted.rowcount, 1)
+
     def tearDown(self):
         self.db.close()
 
