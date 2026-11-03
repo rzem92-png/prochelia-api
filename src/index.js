@@ -984,15 +984,50 @@ async function payoutRequest(request, env) {
   return json({ok:true,version:VERSION,payout_id:payoutId,status:'requested',amount_cents:amount,mode,provider:paymentProvider(env),next:paymentsConfigured(env)?'PSP_PAYOUT_REQUIRED':'PAYMENT_PROVIDER_NOT_CONFIGURED'},201);
 }
 
-async function verifyWebhookSignature(request, env, rawBody) {
+function constantTimeStringEqual(a,b) {
+  if(typeof a!=='string'||typeof b!=='string') return false;
+  const aa=new TextEncoder().encode(a), bb=new TextEncoder().encode(b);
+  let diff=aa.length^bb.length;
+  const n=Math.max(aa.length,bb.length);
+  for(let i=0;i<n;i++) diff|=(aa[i]||0)^(bb[i]||0);
+  return diff===0;
+}
+
+async function hmacSha256Hex(secret,message) {
+  const key=await crypto.subtle.importKey('raw',new TextEncoder().encode(secret),{name:'HMAC',hash:'SHA-256'},false,['sign']);
+  const mac=new Uint8Array(await crypto.subtle.sign('HMAC',key,new TextEncoder().encode(message)));
+  return Array.from(mac,b=>b.toString(16).padStart(2,'0')).join('');
+}
+
+async function verifyStripeWebhookSignature(request,env,rawBody) {
   const secret=env.PAYMENT_WEBHOOK_SECRET;
-  if(!secret) return false;
+  const header=request.headers.get('stripe-signature')||'';
+  if(!secret||!header||rawBody.length>1024*1024) return false;
+  let timestamp=null; const signatures=[];
+  for(const part of header.split(',')){
+    const [key,value]=part.trim().split('=',2);
+    if(key==='t'&&/^\\d{1,12}$/.test(value||'')) timestamp=Number(value);
+    if(key==='v1'&&/^[a-f0-9]{64}$/i.test(value||'')) signatures.push(value.toLowerCase());
+  }
+  if(!Number.isSafeInteger(timestamp)||!signatures.length) return false;
+  // Reject stale/future deliveries outside Stripe's normal replay tolerance.
+  if(Math.abs(Math.floor(Date.now()/1000)-timestamp)>300) return false;
+  const expected=await hmacSha256Hex(secret,`${timestamp}.${rawBody}`);
+  return signatures.some(sig=>constantTimeStringEqual(sig,expected));
+}
+
+async function verifyWebhookSignature(request, env, rawBody) {
+  const provider=String(paymentProvider(env)||'').toLowerCase();
+  if(provider==='stripe') return verifyStripeWebhookSignature(request,env,rawBody);
+  // Non-Stripe integrations must use their explicitly documented adapter format.
+  const secret=env.PAYMENT_WEBHOOK_SECRET;
+  if(!secret||rawBody.length>1024*1024) return false;
   const signature=request.headers.get('x-prochelia-signature') || request.headers.get('x-webhook-signature') || '';
   if(!signature) return false;
   const key=await crypto.subtle.importKey('raw',new TextEncoder().encode(secret),{name:'HMAC',hash:'SHA-256'},false,['sign']);
   const mac=new Uint8Array(await crypto.subtle.sign('HMAC',key,new TextEncoder().encode(rawBody)));
   const expected=base64url(mac);
-  return signature===expected || signature===`sha256=${expected}`;
+  return constantTimeStringEqual(signature,expected) || constantTimeStringEqual(signature,`sha256=${expected}`);
 }
 
 async function paymentWebhook(request, env) {
