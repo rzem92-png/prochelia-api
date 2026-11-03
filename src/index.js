@@ -2818,7 +2818,7 @@ async function handleV139(request, env) {
     '/api/quality','/api/capacity/dashboard','/api/finance/forecast','/api/system/audit'
   ];
   if(operationalPaths.includes(url.pathname)){
-    try{await ensureOperationalSchema(env);}catch(e){return json({ok:false,error:'OPERATIONAL_SCHEMA_ERROR',version:VERSION,message:e.message},500);}
+    try{await ensureOperationalSchema(env);}catch(e){return json({ok:false,error:'OPERATIONAL_SCHEMA_ERROR',version:VERSION},500);}
   }
   if(url.pathname==='/api/ops/case/execute'&&request.method==='POST')return operationalExecute(request,env);
   if(url.pathname==='/api/ops/outbox/process'&&request.method==='POST')return processActionOutbox(request,env);
@@ -3605,7 +3605,7 @@ handle = async function(request,env){
       return json(await runNationalBackup(env,'MANUAL'));
     }
     return __procheliaNationalHandle(request,env);
-  }catch(e){return json({ok:false,error:'NATIONAL_CONTINUITY_ERROR',message:String(e.message||e)},500)}
+  }catch(e){return json({ok:false,error:'NATIONAL_CONTINUITY_ERROR',version:VERSION},500)}
 };
 
 /* ============================================================================
@@ -3860,7 +3860,7 @@ handle = async function(request,env){
     if((u.pathname==='/api/support/cases/resolve')&&request.method==='POST') return supportResolve(request,env);
     if((u.pathname==='/api/support/dashboard')&&request.method==='GET') return supportDashboard(request,env);
     return __procheliaComplementHandle(request,env);
-  }catch(e){return json({ok:false,error:'MASTER_COMPLEMENT_ERROR',version:VERSION,message:String(e.message||e)},500)}
+  }catch(e){return json({ok:false,error:'MASTER_COMPLEMENT_ERROR',version:VERSION},500)}
 };
 
 /* ============================================================================
