@@ -115,3 +115,33 @@ test('V7 non-HTTPS responses do not emit HSTS', async () => {
   assert.equal(response.status, 200);
   assert.equal(response.headers.get('strict-transport-security'), null);
 });
+
+
+test('V7 finance calculator rejects negative amounts and out-of-range commission', async () => {
+  const cases = [
+    [{ clientAmount: -1 }, 'FINANCE_NEGATIVE_AMOUNT'],
+    [{ paymentFees: -0.01 }, 'FINANCE_NEGATIVE_AMOUNT'],
+    [{ commissionRate: 100.01 }, 'COMMISSION_RATE_OUT_OF_RANGE'],
+    [{ commissionRate: -0.01 }, 'COMMISSION_RATE_OUT_OF_RANGE'],
+    [{ clientAmount: 'NaN' }, 'FINANCE_INPUT_NOT_FINITE']
+  ];
+  for (const [payload, error] of cases) {
+    const response = await handleV7Route(req('/api/v7/finance/calculate', payload), env, '/api/v7/finance/calculate');
+    assert.equal(response.status, 200, 'calculator validation response keeps route status');
+    const data = await response.json();
+    assert.equal(data.ok, false);
+    assert.equal(data.error, error);
+    assert.equal(response.headers.get('cache-control'), 'no-store');
+  }
+});
+
+test('V7 finance calculator rounds valid monetary outputs to cents', async () => {
+  const response = await handleV7Route(req('/api/v7/finance/calculate', {
+    clientAmount: 100.01, commissionRate: 10, paymentFees: 1.01, otherFees: 0.50
+  }), env, '/api/v7/finance/calculate');
+  const data = await response.json();
+  assert.equal(data.ok, true);
+  assert.equal(data.commissionAmount, 10.01);
+  assert.equal(data.intervenantAmount, 90);
+  assert.equal(data.grossMargin, 8.5);
+});
