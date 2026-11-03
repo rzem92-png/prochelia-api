@@ -1323,9 +1323,20 @@ async function executeCaseBusinessAction(env, c, rec, actorId=null, automatic=fa
   return results;
 }
 
+// Stale RUNNING actions are moved to UNCERTAIN, never auto-replayed.
+// The external side effect may have happened before a Worker crash; manual reconciliation
+// or provider-side idempotency is required before any retry.
+export async function quarantineStaleOutboxActions(env) {
+  const result = await env.DB.prepare(
+    "UPDATE action_outbox SET status='UNCERTAIN',last_error='Execution lease expired; side effect may have occurred. Manual reconciliation required.',updated_at=CURRENT_TIMESTAMP WHERE status='RUNNING' AND updated_at <= datetime('now','-5 minutes')"
+  ).run();
+  return Number(result?.meta?.changes ?? result?.changes ?? 0);
+}
+
 async function processActionOutbox(request, env) {
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
   await ensureOperationalSchema(env);
+  const quarantined=await quarantineStaleOutboxActions(env);
   const rows=await env.DB.prepare(`SELECT * FROM action_outbox WHERE status='PENDING' ORDER BY created_at ASC LIMIT 50`).all();
   const processed=[];
   for(const row of (rows.results||[])) {
@@ -1341,7 +1352,7 @@ async function processActionOutbox(request, env) {
     processed.push({id:row.id,status:'COMPLETED',action_type:row.action_type,payload});
   }
   await journal(env,'gerante',gate.auth.user.id,'ACTION_OUTBOX_PROCESSED','system',null,'OK',{count:processed.length});
-  return json({ok:true,version:VERSION,processed},200);
+  return json({ok:true,version:VERSION,quarantined_uncertain:quarantined,processed},200);
 }
 
 async function executeOperationalCase(env, caseId, approverId=null, automatic=false) {
