@@ -1,6 +1,21 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import worker from '../src/index.js';
+
+test('disabled mission creation endpoint returns 503 for malformed JSON without needing D1', async () => {
+  const origin = 'https://feat-supra-control-center-v1.prochelia.pages.dev';
+  const response = await worker.fetch(new Request('https://prochelia-api-preview.rzem92.workers.dev/api/missions', {
+    method: 'POST',
+    headers: { Origin: origin, 'Content-Type': 'application/json' },
+    body: '{ malformed-json'
+  }), { CORS_ORIGIN: origin });
+  assert.equal(response.status, 503);
+  const body = await response.json();
+  assert.equal(body.write_enabled, false);
+  assert.match(body.error, /MISSION_API_NOT_ACTIVATED|WRITE_GATE_NOT_ACTIVATED/);
+});
+
 
 const source = readFileSync(new URL('../src/index.js', import.meta.url), 'utf8');
 const subjectStart = source.indexOf('async function productionSubjectHash');
