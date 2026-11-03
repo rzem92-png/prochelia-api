@@ -125,6 +125,12 @@ async function sha256Base64url(value) {
 // Utilisé par le limiteur de débit pour pseudonymiser l'IP et la route.
 // Le helper était référencé plus bas mais absent du fichier source, ce qui
 // faisait échouer les requêtes mutantes avant même le routage métier.
+async function hmacSha256Base64url(secret, value) {
+  const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+  const signature = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(value));
+  return base64url(new Uint8Array(signature));
+}
+
 async function sha256Hex(value) {
   const data = new TextEncoder().encode(String(value));
   const digest = await crypto.subtle.digest('SHA-256', data);
@@ -655,10 +661,18 @@ async function deliverSecurityCodes(env, payload) {
     end_code:payload.end_code,
     end_expires_at:payload.end_expires_at
   });
-  const signature = await sha256Base64url(secret + '.' + body);
-  const response = await fetch(webhook,{
+  // HMAC-SHA-256 provides keyed authentication; plain SHA256(secret + body) is not HMAC.
+  let webhookUrl;
+  try {
+    webhookUrl = new URL(webhook);
+    if (webhookUrl.protocol !== 'https:' || webhookUrl.username || webhookUrl.password) return {ok:false,error:'SECURITY_CODE_WEBHOOK_URL_INVALID'};
+  } catch {
+    return {ok:false,error:'SECURITY_CODE_WEBHOOK_URL_INVALID'};
+  }
+  const signature = await hmacSha256Base64url(secret, body);
+  const response = await fetch(webhookUrl.toString(),{
     method:'POST',
-    headers:{'content-type':'application/json','x-prochelia-signature':signature},
+    headers:{'content-type':'application/json','x-prochelia-signature':'sha256=' + signature},
     body
   });
   if (!response.ok) return {ok:false,error:'NOTIFICATION_PROVIDER_REJECTED'};
