@@ -45,3 +45,15 @@ test('V7 permissions endpoint never trusts caller-supplied admin role', async ()
   assert.equal(data.error, 'AUTHORIZATION_CONTEXT_REQUIRED');
   assert.equal(response.headers.get('cache-control'), 'no-store');
 });
+
+
+test('V7 malformed JSON returns a safe 400 without parser details', async () => {
+  const response = await handleV7Route(new Request('https://preprod.example.test/api/v7/check/email', {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: '{'
+  }), env, '/api/v7/check/email');
+  assert.equal(response.status, 400);
+  const data = await response.json();
+  assert.equal(data.error, 'INVALID_JSON');
+  assert.equal(response.headers.get('cache-control'), 'no-store');
+  assert.equal(Object.hasOwn(data, 'message'), false);
+});
