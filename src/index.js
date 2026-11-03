@@ -992,7 +992,14 @@ async function verifyWebhookSignature(request, env, rawBody) {
   const key=await crypto.subtle.importKey('raw',new TextEncoder().encode(secret),{name:'HMAC',hash:'SHA-256'},false,['sign']);
   const mac=new Uint8Array(await crypto.subtle.sign('HMAC',key,new TextEncoder().encode(rawBody)));
   const expected=base64url(mac);
-  return signature===expected || signature===`sha256=${expected}`;
+  // Constant-time comparison for equal-length candidate signatures.
+  const safeEqual=(a,b)=>{
+    if(typeof a!=='string'||typeof b!=='string'||a.length!==b.length) return false;
+    let diff=0;
+    for(let i=0;i<a.length;i++) diff|=a.charCodeAt(i)^b.charCodeAt(i);
+    return diff===0;
+  };
+  return safeEqual(signature,expected) || safeEqual(signature,`sha256=${expected}`);
 }
 
 async function paymentWebhook(request, env) {
