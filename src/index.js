@@ -3642,6 +3642,9 @@ handle = async function(request,env){
       return json(await backupStatus(env));
     }
     if(request.method==='POST'&&url.pathname==='/api/system/backup/run'){
+      // This wrapper executes before the primary handler's mutation-origin gate.
+      // Explicitly enforce CSRF protection here; cookie auth alone is insufficient.
+      if(!securityOriginAllowed(request,env)) return json({ok:false,error:'ORIGIN_NOT_ALLOWED',version:VERSION},403);
       const a=await getAuth(request,env).catch(()=>null); if(!a||a.role!=='GERANTE') return json({ok:false,error:'FORBIDDEN'},403);
       return json(await runNationalBackup(env,'MANUAL'));
     }
