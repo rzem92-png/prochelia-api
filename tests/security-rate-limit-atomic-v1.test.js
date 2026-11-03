@@ -8,19 +8,23 @@ class FakeD1 {
     const self = this;
     return {
       bind(...args) {
-        return {
-          async first() {
-            if (self.fail) throw new Error('simulated D1 outage');
-            assert.match(sql, /INSERT INTO security_rate_limits_v2/);
-            const [bucket, subject, windowStart, _expiresAt, limit] = args;
-            const key = [bucket, subject, windowStart].join('|');
-            const count = Math.min((self.rows.get(key) ?? 0) + 1, limit + 1);
-            self.rows.set(key, count);
-            return { request_count: count };
-          }
+        const execute = async () => {
+          if (self.fail) throw new Error('simulated D1 outage');
+          assert.match(sql, /INSERT INTO security_rate_limits_v2/);
+          const [bucket, subject, windowStart, _expiresAt, limit] = args;
+          const key = [bucket, subject, windowStart].join('|');
+          const count = Math.min((self.rows.get(key) ?? 0) + 1, limit + 1);
+          self.rows.set(key, count);
+          return { request_count: count };
         };
+        return { first: execute, all: async () => ({ results: [await execute()] }) };
       }
     };
+  }
+  async batch(statements) {
+    const results = [];
+    for (const statement of statements) results.push(await statement.all());
+    return results;
   }
 }
 
@@ -55,7 +59,7 @@ test('isolates buckets and time windows', async () => {
   await enforceAtomicRateLimit({ ...base, bucket: 'bucket-a' });
   await enforceAtomicRateLimit({ ...base, bucket: 'bucket-b' });
   await enforceAtomicRateLimit({ ...base, bucket: 'bucket-a', nowSeconds: 180 });
-  assert.equal(db.rows.size, 3);
+  assert.equal(db.rows.size, 4, 'IP counters and per-user counters must be independent');
 });
 
 test('fails closed if D1 is absent or throws', async () => {
