@@ -1,0 +1,38 @@
+name: PROCHÉLIA preproduction security CI
+
+on:
+  push:
+    branches:
+      - preprod/security-hardening-integration-tests-v1
+  pull_request:
+    branches:
+      - main
+      - preprod/security-hardening-integration-tests-v1
+
+permissions:
+  contents: read
+
+concurrency:
+  group: prochelia-security-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  security-and-regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+      - name: Build and syntax checks
+        run: npm run build
+      - name: Run complete regression suite
+        run: npm test
+      - name: Wrangler preview dry-run
+        run: npm run check:worker:preview
