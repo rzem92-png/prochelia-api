@@ -169,3 +169,14 @@ test('diagnostic endpoints reject unsupported methods before database access', a
     assert.equal(response.headers.get('allow'), 'GET, HEAD', path);
   }
 });
+
+
+test('manual backup endpoint requires approved browser Origin when session cookie is present', async () => {
+  const response = await worker.fetch(new Request('https://prochelia-api-preview.rzem92.workers.dev/api/system/backup/run', {
+    method: 'POST',
+    headers: { Cookie: 'prochelia_session=attacker-controlled', 'Content-Type': 'application/json' },
+    body: '{}'
+  }), { CORS_ORIGIN: 'https://feat-supra-control-center-v1.prochelia.pages.dev' });
+  assert.equal(response.status, 403);
+  assert.equal((await response.json()).error, 'CSRF_ORIGIN_REQUIRED');
+});
