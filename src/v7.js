@@ -979,50 +979,20 @@ function v7CheckPayment(
 ) {
 
   if (!payment) {
-
-    return v7Result(
-      false,
-      {},
-      "Paiement absent"
-    );
+    return v7Result(false, {}, "Paiement absent");
   }
 
-  const status =
-    String(
-      payment.status ||
-      ""
-    ).toUpperCase();
-
-  const confirmed = [
-    "PAID",
-    "SUCCEEDED",
-    "SUCCESS",
-    "COMPLETED"
-  ];
-
-  if (
-    !confirmed.includes(
-      status
-    )
-  ) {
-
-    return v7Result(
-      false,
-      {
-        status:
-          payment.status ||
-          "UNKNOWN"
-      },
-      "Paiement non confirmé par le prestataire"
-    );
-  }
-
+  // This legacy helper receives an arbitrary object. A status such as PAID
+  // supplied by a client is not proof of PSP settlement and must never
+  // authorize a mission, wallet credit, or payout.
   return v7Result(
-    true,
+    false,
     {
-      paymentConfirmed:
-        true
-    }
+      status: String(payment.status || "UNKNOWN"),
+      paymentConfirmed: false,
+      verificationRequired: "SERVER_PSP_WEBHOOK_OR_RECONCILIATION"
+    },
+    "Paiement à vérifier côté serveur auprès du prestataire"
   );
 }
 
