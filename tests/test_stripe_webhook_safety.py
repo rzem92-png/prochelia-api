@@ -107,7 +107,7 @@ class StripeWebhookSafetySourceTests(unittest.TestCase):
 
     def test_payouts_block_while_refund_wallet_reconciliation_is_pending(self):
         self.assertIn("PAYOUT_BLOCKED_BY_PENDING_REFUND_RECONCILIATION", SOURCE)
-        self.assertIn("status='refund_pending_reconciliation' LIMIT 1", SOURCE)
+        self.assertIn("status IN ('refund_pending_reconciliation','held')", SOURCE)
         self.assertIn("bind(auth.user.id).first()", SOURCE)
 
     def test_payouts_block_held_transactions_pending_financial_review(self):
