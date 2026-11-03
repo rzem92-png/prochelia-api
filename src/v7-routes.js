@@ -17,12 +17,24 @@ export async function handleV7Route(
   // They must never be used as authoritative permission/payment/QR/audit checks.
   // Fail closed until these endpoints are wired to server-side session + RBAC.
   const protectedHelperPaths = new Set([
+    "/api/v7/check/account",
     "/api/v7/check/permissions",
+    "/api/v7/check/intervenant",
+    "/api/v7/check/document",
+    "/api/v7/check/expiration",
+    "/api/v7/check/transport",
+    "/api/v7/check/mission",
+    "/api/v7/check/mission-transition",
+    "/api/v7/check/availability",
+    "/api/v7/check/conflict",
+    "/api/v7/check/pricing",
     "/api/v7/check/qr",
     "/api/v7/check/payment",
     "/api/v7/check/pre-mission",
     "/api/v7/security/idempotency",
-    "/api/v7/security/audit"
+    "/api/v7/security/audit",
+    "/api/v7/finance/calculate",
+    "/api/v7/strategy/indicators"
   ]);
 
   if (protectedHelperPaths.has(path)) {
