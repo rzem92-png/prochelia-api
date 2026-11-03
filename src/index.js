@@ -2502,6 +2502,18 @@ async function operationalExecute(request, env) {
   const solution=JSON.parse(c.proposed_solution_json||'{}');
   const actions=Array.isArray(b.actions)?b.actions:(Array.isArray(solution.actions)?solution.actions:[]);
   if(!actions.length)return json({ok:false,error:'NO_ACTIONS_DEFINED',version:VERSION},400);
+  if(actions.length>20)return json({ok:false,error:'TOO_MANY_ACTIONS',version:VERSION,max_actions:20},413);
+  const allowedActionTypes=new Set(['NOTIFY','RESCHEDULE_MISSION','ASSIGN_REPLACEMENT','REFUND','PAYOUT','ACCOUNTING_ENTRY']);
+  for(const a of actions){
+    const type=String(a?.action_type||a?.type||'').toUpperCase();
+    if(!allowedActionTypes.has(type))return json({ok:false,error:'ACTION_TYPE_NOT_ALLOWED',version:VERSION,action_type:type},400);
+    if(['RESCHEDULE_MISSION','ASSIGN_REPLACEMENT'].includes(type)){
+      const target=clean(a?.entity_id)||clean(c.mission_id);
+      if(!c.mission_id||!target||target!==String(c.mission_id))return json({ok:false,error:'MISSION_ACTION_SCOPE_MISMATCH',version:VERSION},403);
+    }
+    if(type==='ASSIGN_REPLACEMENT'&&!clean(a?.intervenant_id||a?.replacement_intervenant_id))return json({ok:false,error:'REPLACEMENT_INTERVENANT_REQUIRED',version:VERSION},400);
+    if(type==='RESCHEDULE_MISSION'&&!clean(a?.scheduled_at||a?.date||a?.time))return json({ok:false,error:'RESCHEDULE_TIME_REQUIRED',version:VERSION},400);
+  }
   const caseClaim=await env.DB.prepare(`UPDATE operational_cases SET status='EXECUTING',updated_at=CURRENT_TIMESTAMP WHERE id=? AND status IN ('OPEN','AUTO_PENDING','IN_PROGRESS')`).bind(c.id).run();
   if(Number(caseClaim?.meta?.changes||0)!==1) return json({ok:false,error:'CASE_ALREADY_EXECUTED_OR_IN_PROGRESS',version:VERSION},409);
   const results=[];
