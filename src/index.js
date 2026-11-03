@@ -2939,7 +2939,24 @@ async function handle(request,env){
     }
     if (url.pathname.startsWith('/api/v7/')) {
       const v7Response = await handleV7Route(request, env, url.pathname);
-      if (v7Response) return v7Response;
+      if (v7Response) {
+        // Keep the same baseline security headers on early V7 returns.
+        // Returning here previously bypassed the common response-header layer below.
+        const headers = new Headers(v7Response.headers);
+        headers.set('x-content-type-options', 'nosniff');
+        headers.set('x-frame-options', 'DENY');
+        headers.set('referrer-policy', 'no-referrer');
+        headers.set('permissions-policy', 'geolocation=(self),camera=(),microphone=()');
+        headers.set('cache-control', 'no-store');
+        if (request.url.startsWith('https://')) {
+          headers.set('strict-transport-security', 'max-age=31536000; includeSubDomains');
+        }
+        return new Response(v7Response.body, {
+          status: v7Response.status,
+          statusText: v7Response.statusText,
+          headers
+        });
+      }
     }
     const fw=await handleFinanceWorkspace(request,env); if(fw) return fw;
     const cr=await handleCommercialRecruitment(request,env); if(cr) return cr;
