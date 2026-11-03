@@ -1010,6 +1010,10 @@ async function payoutRequest(request, env) {
   // Fail closed: prevent withdrawals while a provider/client dispute remains unresolved.
   const openDispute=await env.DB.prepare(`SELECT id FROM payment_disputes WHERE intervenant_id=? AND status NOT IN ('resolved','closed') LIMIT 1`).bind(auth.user.id).first();
   if(openDispute) return json({ok:false,error:'PAYOUT_BLOCKED_BY_OPEN_DISPUTE',version:VERSION,dispute_id:openDispute.id},423);
+  // Block payouts for unresolved refunds: Stripe may have refunded the client
+  // while the internal wallet still contains the provider's credited amount.
+  const pendingRefund=await env.DB.prepare(`SELECT id FROM payment_transactions WHERE intervenant_id=? AND status='refund_pending_reconciliation' LIMIT 1`).bind(auth.user.id).first();
+  if(pendingRefund) return json({ok:false,error:'PAYOUT_BLOCKED_BY_PENDING_REFUND_RECONCILIATION',version:VERSION,transaction_id:pendingRefund.id},423);
   // Fail closed globally when a Stripe dispute could not yet be matched to a transaction/provider.
   const unmatchedStripeDispute=await env.DB.prepare(`SELECT id,external_id FROM payment_reconciliation WHERE provider='stripe' AND status='unmatched' AND external_id LIKE 'dp_%' LIMIT 1`).first();
   if(unmatchedStripeDispute) return json({ok:false,error:'PAYOUT_BLOCKED_BY_UNMATCHED_STRIPE_DISPUTE',version:VERSION,reconciliation_id:unmatchedStripeDispute.id},423);
