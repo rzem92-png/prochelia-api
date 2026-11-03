@@ -23,6 +23,10 @@ function json(data, status = 200, extraHeaders = {}) {
     headers: {
       'content-type': 'application/json; charset=UTF-8',
       'cache-control': 'no-store',
+      'x-content-type-options': 'nosniff',
+      'x-frame-options': 'DENY',
+      'referrer-policy': 'no-referrer',
+      'content-security-policy': "default-src 'none'; frame-ancestors 'none'",
       ...extraHeaders
     }
   });
