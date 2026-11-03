@@ -3405,7 +3405,7 @@ async function stripeWebhook(request, env) {
           result='PAYMENT_CONFIRMED';
         }
       } else if(failedEvent.has(event.type)) {
-        if(!['paid','refunded'].includes(tx.status)) await env.DB.prepare(`UPDATE payment_transactions SET status='failed',updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(tx.id).run();
+        if(['pending','processing','created'].includes(String(tx.status||'').toLowerCase())) await env.DB.prepare(`UPDATE payment_transactions SET status='failed',updated_at=CURRENT_TIMESTAMP WHERE id=? AND status IN ('pending','processing','created')`).bind(tx.id).run();
         result='PAYMENT_FAILED';
       } else if(refundEvent.has(event.type)) {
         // Stripe confirms the external refund, but the internal wallet ledger
