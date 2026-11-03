@@ -10,6 +10,14 @@ SOURCE = (Path(__file__).resolve().parents[1] / "src" / "index.js").read_text()
 
 
 class StripeWebhookSafetySourceTests(unittest.TestCase):
+    def test_duplicate_webhook_event_id_with_changed_payload_is_conflict(self):
+        start = SOURCE.index("const inserted=await env.DB.prepare(")
+        end = SOURCE.index("const txId=clean(event?.data?.transaction_id)", start)
+        block = SOURCE[start:end]
+        self.assertIn("payload_hash,event_type", block)
+        self.assertIn("WEBHOOK_EVENT_ID_PAYLOAD_CONFLICT", block)
+        self.assertIn("existingEvent.payload_hash!==payloadHash", block)
+
     def test_duplicate_webhook_is_not_acknowledged_before_processed(self):
         start = SOURCE.index("const inserted=await env.DB.prepare(")
         end = SOURCE.index("const txId=clean(event?.data?.transaction_id)", start)
