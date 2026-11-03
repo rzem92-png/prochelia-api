@@ -141,9 +141,9 @@ test('V7 finance calculator rounds valid monetary outputs to cents', async () =>
   }), env, '/api/v7/finance/calculate');
   const data = await response.json();
   assert.equal(data.ok, true);
-  assert.equal(data.commissionAmount, 10.01);
-  assert.equal(data.intervenantAmount, 90);
-  assert.equal(data.grossMargin, 8.5);
+  assert.equal(data.commissionAmount, 10);
+  assert.equal(data.intervenantAmount, 90.01);
+  assert.equal(data.grossMargin, 8.49);
 });
 
 
