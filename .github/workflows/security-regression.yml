@@ -65,5 +65,14 @@ jobs:
             throw Error('Backup integrity checks missing');
           if(!/static regression checks only/i.test(doc)||!/no production credentials/i.test(doc))
             throw Error('Security regression scope/safety documentation missing');
-          console.log('Security regression invariants passed');
+          const verify=section('async function securityVerifyCode','async function securityResendCodes');
+          if(!/arrival_used_at IS NULL/.test(verify)||!/end_used_at IS NULL/.test(verify))
+            throw Error('One-time code consumption must be conditional on unused state');
+          if(!/arrival_code_hash=\?/.test(verify)||!/end_code_hash=\?/.test(verify))
+            throw Error('Atomic consume must bind the stored code hash');
+          if(!/arrival_expires_at>CURRENT_TIMESTAMP/.test(verify)||!/end_expires_at>CURRENT_TIMESTAMP/.test(verify))
+            throw Error('Atomic consume must enforce code expiry in SQL');
+          if(!/changedRows !== 1/.test(verify))
+            throw Error('Atomic consume must fail closed unless exactly one row changes');
+                    console.log('Security regression invariants passed');
           NODE
