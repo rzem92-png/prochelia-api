@@ -45,7 +45,9 @@ test("rejects quote above client budget even if above server floor", () => {
   assert.equal(result.eligibleCount,0);
 });
 
-test("fails closed on malformed request and duplicate provider IDs", () => {
+test("fails closed on malformed request, duplicate IDs, and whitespace ID aliases", () => {
   assert.equal(rankNexusProviders(null).ok,false);
   assert.equal(rankNexusProviders(request([candidate(), candidate()])).error,"INVALID_CANDIDATE");
+  assert.equal(rankNexusProviders(request([candidate({id:" provider-1"})])).error,"INVALID_CANDIDATE");
+  assert.equal(rankNexusProviders(request([candidate({id:"provider-1"}), candidate({id:"provider-1 "})])).error,"INVALID_CANDIDATE");
 });
