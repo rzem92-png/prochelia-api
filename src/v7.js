@@ -1031,13 +1031,21 @@ function v7CheckPayment(
 // CALCUL FINANCIER
 // =====================================================
 
-function v7CalculateFinance({
-  clientAmount = 0,
-  commissionRate = 0,
-  paymentFees = 0,
-  otherFees = 0
-} = {}) {
-  const values = [clientAmount, commissionRate, paymentFees, otherFees].map(Number);
+function v7CalculateFinance(input = {}) {
+  const {
+    clientAmount,
+    commissionRate = 0,
+    paymentFees = 0,
+    otherFees = 0
+  } = input;
+
+  if (clientAmount === undefined || clientAmount === null || clientAmount === "") {
+    return v7Result(false, {}, "FINANCE_CLIENT_AMOUNT_REQUIRED");
+  }
+  if ([clientAmount, commissionRate, paymentFees, otherFees].some(value => typeof value !== "number")) {
+    return v7Result(false, {}, "FINANCE_INPUT_INVALID_TYPE");
+  }
+  const values = [clientAmount, commissionRate, paymentFees, otherFees];
   const [client, rate, payment, other] = values;
 
   // This endpoint is a calculator, never a payment authority. Reject invalid
