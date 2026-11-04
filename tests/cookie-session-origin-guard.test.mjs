@@ -8,7 +8,7 @@ test('cookie-authenticated mutating requests without Origin are rejected; PSP we
   assert.notEqual(start, -1);
   const wrapper = source.slice(start);
   assert.match(wrapper, /const mutating = isMutatingMethod\(request\.method\)/);
-  assert.match(wrapper, /hasSessionCookie && !isProviderWebhook && !origin/);
+  assert.match(wrapper, /hasSessionCookie && !isProviderWebhook && \(!origin \|\| !securityOriginAllowed\(request,env\)\)/);
   assert.match(wrapper, /ORIGIN_REQUIRED_FOR_SESSION_WRITE/);
   assert.match(wrapper, /pathname === '\/api\/payments\/webhook'/);
 });
