@@ -17,17 +17,22 @@ test('V7 mission lifecycle allows only explicit transitions', () => {
   }
 });
 
-test('V7 lifecycle forbids self-transition and terminal-state reopening', () => {
+test('V7 lifecycle rejects every transition outside the explicit allowlist', () => {
   for (const current of Object.keys(transitions)) {
-    assert.equal(procheliaV7.checkMissionTransition(current,current).ok,false);
-  }
-  for (const terminal of ['completed','cancelled','rejected']) {
-    for (const next of Object.keys(transitions)) assert.equal(procheliaV7.checkMissionTransition(terminal,next).ok,false, terminal+' -> '+next);
+    for (const next of Object.keys(transitions)) {
+      const expected = transitions[current].includes(next);
+      assert.equal(procheliaV7.checkMissionTransition(current,next).ok,expected, current+' -> '+next);
+    }
   }
 });
 
 test('V7 lifecycle normalizes statuses and rejects unknown values', () => {
-  assert.equal(procheliaV7.checkMissionTransition(' REQUESTED ',' Proposed ').ok,true);
+  const normalized=procheliaV7.checkMissionTransition(' REQUESTED ',' Proposed ');
+  assert.equal(normalized.ok,true);
+  assert.equal(normalized.currentStatus,'requested');
+  assert.equal(normalized.nextStatus,'proposed');
   assert.equal(procheliaV7.checkMissionTransition('not_a_status','confirmed').ok,false);
   assert.equal(procheliaV7.checkMissionTransition('requested','not_a_status').ok,false);
+  assert.equal(procheliaV7.checkMissionTransition('', 'proposed').ok,false);
+  assert.equal(procheliaV7.checkMissionTransition('requested', '').ok,false);
 });
