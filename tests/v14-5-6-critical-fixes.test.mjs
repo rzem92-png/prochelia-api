@@ -607,3 +607,13 @@ test('Generic PSP invalid refund amounts are rejected terminally and never mutat
   assert.match(invalidRefund, /retryable:false/);
   assert.match(invalidRefund, /INVALID_WEBHOOK_REFUND_AMOUNT/);
 });
+
+test('Generic PSP cumulative refunds are monotonic, idempotent, and cannot reverse more than credited', () => {
+  const webhook = source.slice(source.indexOf('async function paymentWebhook'), source.indexOf('async function openPaymentDispute'));
+  assert.match(webhook, /Math\\.max\\(Number\\(tx\\.refund_cents\\|\\|0\\),rawRefund\\)/);
+  assert.match(webhook, /WHERE idempotency_key=\\?/);
+  assert.match(webhook, /payment:\\$\\{txId\\}:refund:\\$\\{refundCents\\}/);
+  assert.match(webhook, /SUM\\(-available_delta_cents\\) FROM payment_wallet_ledger l WHERE l\\.transaction_id=t\\.id AND l\\.entry_type='REFUND_REVERSAL'/);
+  assert.match(webhook, /MAX\\(0,ROUND\\(t\\.net_intervenant_cents\\*1\\.0\\*t\\.refund_cents\\/NULLIF\\(t\\.gross_cents,0\\)\\)-/);
+  assert.match(webhook, /COALESCE\\(refund_cents,0\\)<\\?/);
+});
