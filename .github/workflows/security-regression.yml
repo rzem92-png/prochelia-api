@@ -5,10 +5,13 @@ on:
     branches:
       - preprod/security-regression-tests
       - preprod/mission-code-atomic-consumption-ci
+      - preprod/security-status-regression-ci
   pull_request:
     branches:
       - preprod/backup-integrity-restore-gates
       - preprod/security-regression-tests
+      - preprod/mission-code-atomic-consumption-ci
+      - preprod/security-status-minimal-disclosure
   workflow_dispatch:
 
 permissions:
@@ -76,5 +79,12 @@ jobs:
             throw Error('Atomic consume must enforce code expiry in SQL');
           if(!/changedRows !== 1/.test(verify))
             throw Error('Atomic consume must fail closed unless exactly one row changes');
-                    console.log('Security regression invariants passed');
+                    const status=section('async function securityStatus','/* ============================================================');
+          if(/COUNT\\(\\*\\) AS total FROM security_audit/.test(status)||/audit_events/.test(status))
+            throw Error('Security status must not disclose global audit volume');
+          if(/user:auth\\.user\\}/.test(status))
+            throw Error('Security status must not return full user object');
+          if(!status.includes('user:{id:auth.user.id,role:auth.user.role}'))
+            throw Error('Security status must return minimal user identity only');
+          console.log('Security regression invariants passed');
           NODE
