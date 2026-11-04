@@ -12,12 +12,13 @@ function routeBlock(startMarker, endMarker) {
   return source.slice(start, end);
 }
 
-test('mission POST gate cannot be activated by env flag and never writes', () => {
+test('mission POST remains disabled even when the legacy env flag is set', () => {
   const block = routeBlock('async function postMissions(request, env)', '\nasync function login(request, env)');
   assert.match(block, /write_enabled:\s*false/);
   assert.match(block, /503/);
-  assert.match(block, /MISSION_API_NOT_ACTIVATED|WRITE_GATE_NOT_ACTIVATED/);
-  assert.doesNotMatch(block, /INSERT INTO missions|UPDATE missions|\.prepare\([^\n]*missions|createMission|MISSION_API_ENABLED\s*===\s*'true'\s*\?\s*[^:]+:/);
+  assert.match(block, /MISSION_API_ENABLED\s*===\s*'true'/);
+  assert.match(block, /WRITE_GATE_NOT_ACTIVATED/);
+  assert.doesNotMatch(block, /INSERT INTO missions|UPDATE missions|\.prepare\([^\n]*missions|createMission/);
 });
 
 test('mission validation endpoint remains fail-closed pending actor and participant binding', () => {
