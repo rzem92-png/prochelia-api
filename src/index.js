@@ -920,18 +920,20 @@ async function paymentStatus(request, env) {
 // Pure idempotency guards are unit-tested independently of D1. They must
 // match the caller's identity and all immutable business parameters.
 export function isSameMissionPaymentOperation(existing, expected) {
+  // Strict comparisons avoid treating malformed persisted values (for example,
+  // numeric strings) as the same financial operation. D1 INTEGERs are numbers.
   return !!existing && existing.type === 'MISSION_CHARGE'
     && existing.mission_id === expected.mission_id
     && existing.client_id === expected.client_id
     && existing.intervenant_id === expected.intervenant_id
-    && Number(existing.gross_cents) === expected.gross_cents
-    && Number(existing.commission_cents) === expected.commission_cents
+    && existing.gross_cents === expected.gross_cents
+    && existing.commission_cents === expected.commission_cents
     && existing.currency === 'EUR';
 }
 
 export function isSamePayoutOperation(existing, expected) {
   return !!existing && existing.user_id === expected.user_id
-    && Number(existing.amount_cents) === expected.amount_cents
+    && existing.amount_cents === expected.amount_cents
     && existing.mode === expected.mode
     && existing.currency === 'EUR';
 }
