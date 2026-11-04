@@ -698,6 +698,13 @@ async function securityPresence(request, env) {
   return json({ok:true,version:VERSION,mission_id:missionId,presence:'RECORDED',device_bound:true},200);
 }
 
+function constantTimeStringEqual(a, b) {
+  if (typeof a !== 'string' || typeof b !== 'string' || a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return diff === 0;
+}
+
 async function securityVerifyCode(request, env) {
   const auth=await getSessionUser(request,env);
   if(!requireRole(auth,['intervenant'])) return json({ok:false,error:auth?.user?'FORBIDDEN':'UNAUTHENTICATED',version:VERSION},auth?.user?403:401);
@@ -730,7 +737,7 @@ async function securityVerifyCode(request, env) {
   if(purpose==='END' && sec.status !== 'in_progress') return json({ok:false,error:'MISSION_NOT_IN_PROGRESS',version:VERSION},409);
   if(purpose==='ARRIVAL' && sec.status !== 'prepared') return json({ok:false,error:'MISSION_NOT_READY_FOR_ARRIVAL',version:VERSION},409);
   if(!expires||expires<=now) return json({ok:false,error:'SECURITY_CODE_EXPIRED',version:VERSION},410);
-  const expected=await sha256Base64url(code), ok=expected===stored;
+  const expected=await sha256Base64url(code), ok=constantTimeStringEqual(expected,stored);
   await env.DB.prepare(`INSERT INTO mission_security_attempts (id,security_id,purpose,actor_user_id,device_id,result,reason) VALUES (?,?,?,?,?,?,?)`).bind(crypto.randomUUID(),sec.id,purpose,auth.user.id,device,ok?'SUCCESS':'FAIL',ok?'CODE_MATCH':'CODE_MISMATCH').run();
   if(!ok){
     const attempts=await env.DB.prepare(`SELECT COUNT(*) AS total FROM mission_security_attempts WHERE security_id=? AND purpose=? AND result='FAIL' AND created_at >= datetime('now','-15 minutes')`).bind(sec.id,purpose).first();
@@ -744,10 +751,13 @@ async function securityVerifyCode(request, env) {
     await securityAudit(env,'SECURITY_CODE_FAILED',missionId,auth.user.id,auth.user.role,'DENIED',{purpose,attempts:count});
     return json({ok:false,error:'SECURITY_CODE_INVALID',version:VERSION,remaining_attempts:Math.max(0,SECURITY_MAX_ATTEMPTS-count)},401);
   }
-  if(purpose==='ARRIVAL'){
-    await env.DB.prepare(`UPDATE mission_security SET arrival_used_at=CURRENT_TIMESTAMP,arrival_started_at=CURRENT_TIMESTAMP,status='in_progress',updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(sec.id).run();
-  }else{
-    await env.DB.prepare(`UPDATE mission_security SET end_used_at=CURRENT_TIMESTAMP,ended_at=CURRENT_TIMESTAMP,status='completed',updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(sec.id).run();
+  // Conditional update is the single-use gate: concurrent requests cannot both consume the same code.
+  const consumed = purpose==='ARRIVAL'
+    ? await env.DB.prepare(`UPDATE mission_security SET arrival_used_at=CURRENT_TIMESTAMP,arrival_started_at=CURRENT_TIMESTAMP,status='in_progress',updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='prepared' AND arrival_used_at IS NULL AND arrival_expires_at>CURRENT_TIMESTAMP`).bind(sec.id).run()
+    : await env.DB.prepare(`UPDATE mission_security SET end_used_at=CURRENT_TIMESTAMP,ended_at=CURRENT_TIMESTAMP,status='completed',updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='in_progress' AND end_used_at IS NULL AND end_expires_at>CURRENT_TIMESTAMP`).bind(sec.id).run();
+  if (!consumed.meta?.changes) {
+    await securityAudit(env,'SECURITY_CODE_CONCURRENT_OR_STALE_REJECTED',missionId,auth.user.id,auth.user.role,'DENIED',{purpose});
+    return json({ok:false,error:'SECURITY_CODE_ALREADY_USED_OR_STATE_CHANGED',version:VERSION},409);
   }
   await securityAudit(env,`SECURITY_CODE_${purpose}_SUCCESS`,missionId,auth.user.id,auth.user.role,'OK',{purpose,device_bound:true});
   return json({ok:true,version:VERSION,mission_id:missionId,purpose,status:purpose==='ARRIVAL'?'in_progress':'completed',identity_control:'VERIFIED_ACCOUNT_REQUIRED',presence_control:'RECORDED',code:'CONSUMED'},200);
