@@ -144,7 +144,7 @@ function getCookie(request, name) {
 }
 
 function sessionCookie(token, maxAge = SESSION_TTL_SECONDS) {
-  return `${SESSION_COOKIE}=${encodeURIComponent(token)}; Max-Age=${maxAge}; Path=/; HttpOnly; Secure; SameSite=Lax`;
+  return `${SESSION_COOKIE}=${encodeURIComponent(token)}; Max-Age=${maxAge}; Path=/; HttpOnly; Secure; SameSite=None`;
 }
 
 async function createSession(env, userId) {
@@ -228,6 +228,75 @@ async function missionsSchema(env) {
     write_enabled: false, post_missions: 'DISABLED',
     note: 'Lecture seule tant que l’authentification/RBAC serveur n’est pas configurée.'
   });
+}
+
+async function listClients(request,env) {
+  if (!env.DB) return json({ok:false,error:'DATABASE_UNAVAILABLE',version:VERSION},503);
+  const gate=await requireAuthRole(request,env,['gerante','admin','client']);
+  if(gate.error) return gate.error;
+  const role=gate.auth.user.role;
+  const base=`SELECT c.id AS id,c.user_id AS user_id,u.first_name,u.last_name,u.email,u.phone,u.status,c.address,c.city,c.postal_code,c.notes
+    FROM clients c JOIN users u ON u.id=c.user_id`;
+  const result=role==='client'
+    ? await env.DB.prepare(base+` WHERE c.user_id=? ORDER BY u.last_name,u.first_name`).bind(gate.auth.user.id).all()
+    : await env.DB.prepare(base+` ORDER BY u.last_name,u.first_name`).all();
+  const clients=(result.results||[]).map(row=>({
+    id:row.id,userId:row.user_id,prenom:row.first_name,nom:row.last_name,
+    email:row.email,telephone:row.phone,ville:row.city||'',
+    adresse:row.address||'',codePostal:row.postal_code||'',notes:row.notes||'',
+    statut:row.status==='active'?'Actif':'À vérifier'
+  }));
+  return json({ok:true,source:'D1',version:VERSION,total:clients.length,clients});
+}
+
+async function listIntervenants(request,env) {
+  if (!env.DB) return json({ok:false,error:'DATABASE_UNAVAILABLE',version:VERSION},503);
+  const gate=await requireAuthRole(request,env,['gerante','admin','client','intervenant']);
+  if(gate.error) return gate.error;
+  const role=gate.auth.user.role;
+  const base=`SELECT i.id AS id,i.user_id AS user_id,u.first_name,u.last_name,u.email,u.phone,u.status AS user_status,
+      i.professional_status,i.description,i.service_area,i.hourly_rate,i.validation_status
+    FROM intervenants i JOIN users u ON u.id=i.user_id`;
+  let result;
+  if(role==='client') {
+    result=await env.DB.prepare(base+` WHERE u.status='active' AND LOWER(i.validation_status) IN ('approved','validated','valide','validé') ORDER BY u.first_name`).all();
+  } else if(role==='intervenant') {
+    result=await env.DB.prepare(base+` WHERE i.user_id=? LIMIT 1`).bind(gate.auth.user.id).all();
+  } else {
+    result=await env.DB.prepare(base+` ORDER BY u.last_name,u.first_name`).all();
+  }
+  const rows=result.results||[];
+  const ids=rows.map(row=>row.id).filter(Boolean);
+  let availability=[];
+  if(ids.length) {
+    const marks=ids.map(()=>'?').join(',');
+    const slots=await env.DB.prepare(`SELECT intervenant_id,start_at,end_at,status FROM disponibilites
+      WHERE intervenant_id IN (${marks}) AND status='available' AND date(start_at)>=date('now')
+      ORDER BY start_at LIMIT 500`).bind(...ids).all();
+    availability=slots.results||[];
+  }
+  const byProvider=new Map();
+  for(const slot of availability) {
+    const list=byProvider.get(slot.intervenant_id)||[];
+    list.push({start_at:slot.start_at,end_at:slot.end_at,status:slot.status});
+    byProvider.set(slot.intervenant_id,list);
+  }
+  const clientView=role==='client';
+  const intervenants=rows.map(row=>{
+    const slots=byProvider.get(row.id)||[];
+    const validated=['approved','validated','valide','validé'].includes(String(row.validation_status||'').toLowerCase());
+    return {
+      id:row.id,userId:row.user_id,prenom:row.first_name,nom:row.last_name,
+      email:clientView?null:row.email,telephone:clientView?null:row.phone,
+      ville:row.service_area||'',zoneIntervention:row.service_area||'',
+      activite:row.professional_status||'',description:row.description||'',
+      metiers:[],qualifications:[],tarif:row.hourly_rate==null?null:Number(row.hourly_rate),
+      statut:validated?'Validé':'À vérifier',
+      disponibilites:slots.length?slots.slice(0,5).map(x=>x.start_at+' → '+x.end_at).join(' · '):'À définir',
+      disponibiliteSlots:slots
+    };
+  });
+  return json({ok:true,source:'D1',version:VERSION,total:intervenants.length,intervenants});
 }
 
 function validatePayload(body) {
@@ -1032,6 +1101,16 @@ async function handleBase(request, env) {
     return health(env);
   }
 
+  if (url.pathname === '/api/clients') {
+    if (request.method !== 'GET') return json({ok:false,error:'METHOD_NOT_ALLOWED',version:VERSION},405);
+    return listClients(request,env);
+  }
+
+  if (url.pathname === '/api/intervenants') {
+    if (request.method !== 'GET') return json({ok:false,error:'METHOD_NOT_ALLOWED',version:VERSION},405);
+    return listIntervenants(request,env);
+  }
+
   if (url.pathname === '/api/prestations') {
     if (request.method !== 'GET') return json({ ok: false, error: 'METHOD_NOT_ALLOWED', version: VERSION }, 405);
     return getPrestations(env);
@@ -1109,7 +1188,7 @@ async function handleBase(request, env) {
       version: VERSION,
       database: !!env.DB,
       routes: [
-        '/api/health','/api/prestations','/api/core/schema',
+        '/api/health','/api/clients','/api/intervenants','/api/prestations','/api/core/schema',
         '/api/missions/schema','/api/missions/validate','/api/missions',
         '/api/auth/status','/api/auth/login','/api/auth/logout','/api/auth/me',
         '/api/auth/bootstrap','/api/security/identity/start','/api/security/identity/approve','/api/security/mission/prepare','/api/security/presence','/api/security/code/verify','/api/security/resend','/api/security/client-code','/api/security/status','/api/payments/onboard','/api/payments/status','/api/payments/mission/create','/api/payments/mission/finalize','/api/payments/payout','/api/payments/webhook','/api/payments/dispute','/api/payments/dispute/resolve','/api/readiness','/api/info'
@@ -2957,6 +3036,7 @@ async function handle(request,env){
     if(request.url.startsWith('https://')) headers.set('strict-transport-security','max-age=31536000; includeSubDomains');
     return new Response(response.body,{status:response.status,statusText:response.statusText,headers});
   } catch(error) {
+    console.error('PROCHELIA_API_INTERNAL_ERROR',error instanceof Error ? error.message : String(error));
     return json({ok:false,error:'INTERNAL_ERROR',version:VERSION},500);
   }
 }
@@ -3421,46 +3501,87 @@ async function strictProductionAudit(request,env){
   return json({ok:true,version:VERSION,production_gate:overall?'OPEN':'CLOSED',ready_for_real_traffic:overall,checks,blocking:blocking.map(x=>x.code),note:overall?'Configuration gate passed. A real production launch still requires sandbox/acceptance tests for PSP, notifications, identity/security, backups/restore and critical user journeys.':'Production traffic remains blocked until the listed blocking controls are configured and tested.'});
 }
 
+function applyCorsHeaders(request,env,response){
+  const origin=request.headers.get('origin');
+  if(!origin || !securityOriginAllowed(request,env)) return response;
+  const headers=new Headers(response.headers);
+  headers.set('access-control-allow-origin',origin);
+  headers.set('access-control-allow-credentials','true');
+  headers.set('access-control-expose-headers','Retry-After');
+  const vary=headers.get('vary');
+  headers.set('vary',vary ? vary + ', Origin' : 'Origin');
+  return new Response(response.body,{status:response.status,statusText:response.statusText,headers});
+}
+
 const __procheliaProductionSafetyHandle = handle;
 handle = async function(request,env){
+  const origin=request.headers.get('origin');
+  if(origin && !securityOriginAllowed(request,env)){
+    return json({ok:false,error:'ORIGIN_NOT_ALLOWED',version:VERSION},403);
+  }
+
+  // Cross-origin browser preflight must complete without touching D1,
+  // rate-limit tables, session state or any business handler.
+  if(request.method.toUpperCase()==='OPTIONS'){
+    const methods=new Set(['GET','HEAD','POST','OPTIONS']);
+    const requestedMethod=(request.headers.get('access-control-request-method')||'').toUpperCase();
+    if(requestedMethod && !methods.has(requestedMethod)){
+      return json({ok:false,error:'CORS_METHOD_NOT_ALLOWED',version:VERSION},405,{'allow':'GET, HEAD, POST, OPTIONS'});
+    }
+    const allowedHeaders=new Set(['accept','content-type','authorization','x-idempotency-key','x-csrf-token']);
+    const requestedHeaders=(request.headers.get('access-control-request-headers')||'')
+      .split(',').map(x=>x.trim().toLowerCase()).filter(Boolean);
+    if(requestedHeaders.some(x=>!allowedHeaders.has(x))){
+      return json({ok:false,error:'CORS_HEADER_NOT_ALLOWED',version:VERSION},400);
+    }
+    const headers=new Headers({
+      'access-control-allow-methods':'GET, HEAD, POST, OPTIONS',
+      'access-control-allow-headers':'Accept, Content-Type, Authorization, X-Idempotency-Key, X-CSRF-Token',
+      'access-control-max-age':'600',
+      'cache-control':'no-store',
+      'vary':'Origin, Access-Control-Request-Method, Access-Control-Request-Headers'
+    });
+    if(origin){
+      headers.set('access-control-allow-origin',origin);
+      headers.set('access-control-allow-credentials','true');
+    }
+    return new Response(null,{status:204,headers});
+  }
+
+  let response;
   try{
-    // Rejeter d'abord les méthodes non prises en charge sur les endpoints
-    // de diagnostic : une requête invalide ne doit pas dépendre de D1 ni
-    // déclencher le middleware de limitation de débit.
     const preflightUrl = new URL(request.url);
     const preflightPath = preflightUrl.pathname;
     const preflightMethod = request.method.toUpperCase();
     const getOnlyDiagnostics = new Set(['/api/health','/api/readiness','/api/info']);
-    // Apply browser-origin rejection before rate limiting or any D1 access.
-    // This keeps forbidden cross-origin writes a deterministic 403 even when
-    // the database is unavailable, instead of masking them as a generic 500.
-    if (isMutatingMethod(preflightMethod) && !securityOriginAllowed(request,env)) {
-      return json({ok:false,error:'ORIGIN_NOT_ALLOWED',version:VERSION},403);
+    const getOnlyProfileRoutes = new Set(['/api/clients','/api/intervenants']);
+    if (getOnlyProfileRoutes.has(preflightPath) && preflightMethod !== 'GET') {
+      return applyCorsHeaders(request,env,json({ok:false,error:'METHOD_NOT_ALLOWED',version:VERSION},405,{'allow':'GET'}));
     }
-    // Block anonymous mission validation before rate limiting touches D1.
     if (preflightPath === '/api/missions/validate') {
-      if (preflightMethod !== 'POST') return json({ok:false,error:'METHOD_NOT_ALLOWED',version:VERSION},405,{'allow':'POST'});
-      return json({ok:false,error:'AUTHENTICATED_VALIDATION_REQUIRED',version:VERSION,write_enabled:false},403);
+      if (preflightMethod !== 'POST') return applyCorsHeaders(request,env,json({ok:false,error:'METHOD_NOT_ALLOWED',version:VERSION},405,{'allow':'POST'}));
+      return applyCorsHeaders(request,env,json({ok:false,error:'AUTHENTICATED_VALIDATION_REQUIRED',version:VERSION,write_enabled:false},403));
     }
     if (getOnlyDiagnostics.has(preflightPath) && preflightMethod !== 'GET' && preflightMethod !== 'HEAD') {
-      return json({ok:false,error:'METHOD_NOT_ALLOWED',version:VERSION},405,{'allow':'GET, HEAD'});
+      return applyCorsHeaders(request,env,json({ok:false,error:'METHOD_NOT_ALLOWED',version:VERSION},405,{'allow':'GET, HEAD'}));
     }
     if (getOnlyDiagnostics.has(preflightPath) && preflightMethod === 'HEAD') {
-      const response = await __procheliaProductionSafetyHandle(new Request(request.url,{method:'GET',headers:request.headers}),env);
-      return new Response(null,{status:response.status,headers:response.headers});
+      const headResponse = await __procheliaProductionSafetyHandle(new Request(request.url,{method:'GET',headers:request.headers}),env);
+      return applyCorsHeaders(request,env,new Response(null,{status:headResponse.status,headers:headResponse.headers}));
     }
-    // Fail closed with a truthful service-unavailable response when a write
-    // needs the persistent rate limiter but D1 is not bound.
     if (isMutatingMethod(preflightMethod) && !env?.DB) {
-      return json({ok:false,error:'DATABASE_UNAVAILABLE',database:false,version:VERSION},503);
+      return applyCorsHeaders(request,env,json({ok:false,error:'DATABASE_UNAVAILABLE',database:false,version:VERSION},503));
     }
     const rate=await productionRateLimit(request,env);
-    if(!rate.ok) return rate.response;
-    const u=new URL(request.url);
-    if(u.pathname==='/api/system/final-audit' && request.method==='GET') return strictProductionAudit(request,env);
-    if(u.pathname==='/api/system/production-check' && request.method==='GET') return strictProductionAudit(request,env);
-    return __procheliaProductionSafetyHandle(request,env);
+    if(!rate.ok) response=rate.response;
+    else {
+      const u=new URL(request.url);
+      if(u.pathname==='/api/system/final-audit' && request.method==='GET') response=await strictProductionAudit(request,env);
+      else if(u.pathname==='/api/system/production-check' && request.method==='GET') response=await strictProductionAudit(request,env);
+      else response=await __procheliaProductionSafetyHandle(request,env);
+    }
   }catch(e){
-    return json({ok:false,error:'PRODUCTION_SAFETY_ERROR',version:VERSION},500);
+    response=json({ok:false,error:'PRODUCTION_SAFETY_ERROR',version:VERSION},500);
   }
+  return applyCorsHeaders(request,env,response);
 };
