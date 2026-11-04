@@ -1300,6 +1300,9 @@ async function paymentWebhook(request, env) {
   let event; try{event=JSON.parse(raw)}catch{return json({ok:false,error:'INVALID_WEBHOOK_JSON',version:VERSION},400);}
   const provider=clean(event?.provider)||paymentProvider(env), eventId=clean(event?.id), type=clean(event?.type);
   if(!eventId||!type) return json({ok:false,error:'INVALID_WEBHOOK_EVENT',version:VERSION},400);
+  // Provider identity is pinned to configuration. A valid HMAC alone must not
+  // allow an event to be stored under an arbitrary provider namespace.
+  if(provider!==paymentProvider(env)) return json({ok:false,error:'WEBHOOK_PROVIDER_MISMATCH',version:VERSION},403);
   // The current verifier uses a PROCHÉLIA HMAC format, not Stripe's native
   // Stripe-Signature/timestamp verification. Never accept it as a Stripe webhook.
   if(String(provider).toLowerCase()==='stripe') return json({ok:false,error:'STRIPE_WEBHOOK_ADAPTER_NOT_IMPLEMENTED',version:VERSION,message:'Le vérificateur Stripe officiel doit être raccordé avant d’accepter les événements Stripe.'},503);
