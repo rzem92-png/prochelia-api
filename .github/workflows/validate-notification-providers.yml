@@ -1,0 +1,34 @@
+name: "PROCHÉLIA API — notification providers tests"
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "src/notifications/**"
+      - "tests/notification-providers.test.mjs"
+      - ".github/workflows/validate-notification-providers.yml"
+  push:
+    branches: ["feature/multichannel-notifications-v1"]
+    paths:
+      - "src/notifications/**"
+      - "tests/notification-providers.test.mjs"
+      - ".github/workflows/validate-notification-providers.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  notification-providers:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Syntax-check notification provider
+        run: node --check src/notifications/providers.js
+      - name: Run mocked provider tests (no external API calls)
+        run: node --test tests/notification-providers.test.mjs
+      - name: Confirm no live credentials or sends
+        run: echo "Provider tests use mocked fetch; no real provider credentials or messages."
