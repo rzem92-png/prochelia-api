@@ -1402,20 +1402,29 @@ async function openPaymentDispute(request, env) {
   if(!requireRole(auth,['client','gerante'])) return json({ok:false,error:auth?.user?'FORBIDDEN':'UNAUTHENTICATED',version:VERSION},auth?.user?403:401);
   await ensurePaymentSchema(env);
   const body=await readJson(request), missionId=clean(body?.mission_id), reason=clean(body?.reason), amount=moneyCents(body?.amount_eur);
-  if(!missionId||!reason||amount===null) return json({ok:false,error:'INVALID_DISPUTE',version:VERSION},400);
+  if(!missionId||!reason||amount===null||amount<=0||reason.length>2000) return json({ok:false,error:'INVALID_DISPUTE',version:VERSION},400);
   const tx=await env.DB.prepare(`SELECT * FROM payment_transactions WHERE mission_id=? ORDER BY created_at DESC LIMIT 1`).bind(missionId).first();
   if(!tx) return json({ok:false,error:'PAYMENT_NOT_FOUND_FOR_MISSION',version:VERSION},404);
-  // A client may dispute only their own transaction. The manager role can
-  // investigate operationally, but cannot use this endpoint to impersonate a client.
   if(String(auth.user.role||'')==='client' && String(tx.client_id)!==String(auth.user.id)) {
     return json({ok:false,error:'FORBIDDEN_MISSION_PAYMENT_OWNERSHIP',version:VERSION},403);
   }
   if(!Number.isSafeInteger(Number(tx.gross_cents)) || amount>Number(tx.gross_cents)) {
     return json({ok:false,error:'DISPUTE_AMOUNT_EXCEEDS_PAYMENT',version:VERSION},400);
   }
-  if(tx.status==='paid') await env.DB.prepare(`UPDATE payment_transactions SET status='held',updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(tx.id).run();
+  // Reject existing open disputes and non-paid transactions. The subsequent
+  // conditional UPDATE + INSERT batch is the authoritative race-safe gate.
+  const existing=await env.DB.prepare(`SELECT id FROM payment_disputes WHERE transaction_id=? AND status='open' LIMIT 1`).bind(tx.id).first();
+  if(existing) return json({ok:false,error:'DISPUTE_ALREADY_OPEN',version:VERSION},409);
+  if(tx.status!=='paid') return json({ok:false,error:'PAYMENT_NOT_DISPUTABLE',version:VERSION},409);
   const id=crypto.randomUUID();
-  await env.DB.prepare(`INSERT INTO payment_disputes (id,mission_id,transaction_id,client_id,intervenant_id,status,reason,amount_cents) VALUES (?,?,?,?,?,?,?,?)`).bind(id,missionId,tx.id,tx.client_id,tx.intervenant_id,'open',reason,amount).run();
+  const batch=await env.DB.batch([
+    env.DB.prepare(`UPDATE payment_transactions SET status='held',updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='paid'`).bind(tx.id),
+    env.DB.prepare(`INSERT INTO payment_disputes (id,mission_id,transaction_id,client_id,intervenant_id,status,reason,amount_cents)
+      SELECT ?,?,?,?,?,?,?,? WHERE changes()=1`).bind(id,missionId,tx.id,tx.client_id,tx.intervenant_id,'open',reason,amount)
+  ]);
+  if(Number(batch?.[0]?.meta?.changes||0)!==1 || Number(batch?.[1]?.meta?.changes||0)!==1) {
+    return json({ok:false,error:'DISPUTE_CONCURRENT_STATE_CHANGE',version:VERSION},409);
+  }
   await paymentAudit(env,'PAYMENT_DISPUTE_OPENED',{transaction_id:tx.id,mission_id:missionId,user_id:auth.user.id,metadata:{amount_cents:amount,reason}},'OK');
   return json({ok:true,version:VERSION,dispute_id:id,status:'open',payment_status:'held'},201);
 }
