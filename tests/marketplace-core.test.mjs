@@ -87,3 +87,23 @@ test('order state machine includes partial refunds and disputes as explicit stat
   assert.equal(canTransitionOrder('REFUND_PENDING', 'PARTIALLY_REFUNDED').ok, true);
   assert.equal(canTransitionOrder('PARTIALLY_REFUNDED', 'REFUNDED').ok, false);
 });
+
+test('marketplace economics rejects overflow in allocation and negative overflow edge cases', () => {
+  assert.throws(() => calculateMarketplaceEconomics({
+    customerPaidCents: Number.MAX_SAFE_INTEGER,
+    providerPayoutCents: Number.MAX_SAFE_INTEGER,
+    platformFeeCents: 1,
+    taxCollectedCents: 0
+  }), /ALLOCATION_OVERFLOW/);
+});
+
+test('marketplace economics rejects non-finite and malformed optional monetary inputs', () => {
+  for (const bad of [NaN, Infinity, -1, 1.25, Number.MAX_SAFE_INTEGER + 1, '100']) {
+    assert.throws(() => calculateMarketplaceEconomics({
+      customerPaidCents: 1000,
+      providerPayoutCents: 500,
+      platformFeeCents: 500,
+      pspFeeCents: bad
+    }), /PSP_FEE_CENTS_MUST_BE_NON_NEGATIVE_SAFE_INTEGER/);
+  }
+});
