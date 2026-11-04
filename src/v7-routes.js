@@ -672,9 +672,9 @@ export async function handleV7Route(
         version:
           procheliaV7.version,
 
-        error:
-          error?.message ||
-          "Erreur V7"
+        // Never expose exception messages, SQL details, stack fragments or provider
+        // internals to public callers. Keep diagnostics server-side.
+        error: "V7_INTERNAL_ERROR"
       },
 
       {
