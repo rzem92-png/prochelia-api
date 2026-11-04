@@ -22,6 +22,7 @@ def ledger(key, delta, refund):
 db.execute("""INSERT INTO payment_wallet_ledger
 (id,idempotency_key,transaction_id,user_id,entry_type,available_delta_cents,currency)
 VALUES('credit','payment:tx-1:credit','tx-1','provider-1','PAYMENT_CREDIT',500,'EUR')""")
+db.commit()  # commit baseline before explicit BEGIN in refund scenarios
 
 def apply_cumulative_refund(amount):
     prior = db.execute("SELECT refund_cents FROM payment_transactions WHERE id='tx-1'").fetchone()[0]
