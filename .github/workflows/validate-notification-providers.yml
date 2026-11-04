@@ -1,21 +1,23 @@
-name: "PROCHÉLIA API — notification providers and webhook security tests"
+name: "PROCHÉLIA API — notification providers and security tests"
 
 on:
   pull_request:
     branches: ["main", "integration/auth-cors-profile-routes-v1"]
     paths:
       - "src/notifications/**"
-      - "src/security/webhook-hmac.js"
+      - "src/security/**"
       - "tests/notification-providers.test.mjs"
       - "tests/webhook-hmac.test.mjs"
+      - "tests/mission-code.test.mjs"
       - ".github/workflows/validate-notification-providers.yml"
   push:
     branches: ["feature/multichannel-notifications-v1"]
     paths:
       - "src/notifications/**"
-      - "src/security/webhook-hmac.js"
+      - "src/security/**"
       - "tests/notification-providers.test.mjs"
       - "tests/webhook-hmac.test.mjs"
+      - "tests/mission-code.test.mjs"
       - ".github/workflows/validate-notification-providers.yml"
 
 permissions:
@@ -30,13 +32,16 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-      - name: Syntax-check isolated security modules
+      - name: Syntax-check modules
         run: |
           node --check src/notifications/providers.js
           node --check src/security/webhook-hmac.js
-      - name: Run mocked provider tests (no external API calls)
+          node --check src/security/mission-code.js
+      - name: Run mocked provider tests
         run: node --test tests/notification-providers.test.mjs
-      - name: Run webhook HMAC security tests
+      - name: Run webhook HMAC tests
         run: node --test tests/webhook-hmac.test.mjs
-      - name: Confirm no live credentials or sends
-        run: echo "Tests use local crypto and mocked fetch; no real provider credentials or messages."
+      - name: Run mission code tests
+        run: node --test tests/mission-code.test.mjs
+      - name: Confirm no live provider sends
+        run: echo "Tests use local crypto and mocked fetch only."
