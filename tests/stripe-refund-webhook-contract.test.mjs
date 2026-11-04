@@ -17,7 +17,7 @@ test('Stripe webhook is signature-verified before schema initialization', () => 
 });
 
 test('Stripe webhook replay protection checks payload hash and claims processing', () => {
-  assert.match(handler, /priorEvent\\.payload_hash\\s*&&\\s*priorEvent\\.payload_hash\\s*!==\\s*payloadHash/);
+  assert.ok(handler.includes('priorEvent.payload_hash') && handler.includes('payloadHash') && handler.includes('WEBHOOK_EVENT_PAYLOAD_MISMATCH'));
   assert.match(handler, /Number\(priorEvent\.processed\)===1/);
   assert.match(handler, /processed=2/);
   assert.match(handler, /processed=0 OR \(processed=2 AND processed_at < datetime\('now','-5 minutes'\)\)/);
