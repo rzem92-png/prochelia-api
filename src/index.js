@@ -1315,6 +1315,22 @@ async function paymentWebhook(request, env) {
   const claim=await env.DB.prepare(`UPDATE payment_webhook_events SET processed=2,processed_at=CURRENT_TIMESTAMP WHERE provider=? AND event_id=? AND (processed=0 OR (processed=2 AND processed_at<datetime('now','-5 minutes')))`).bind(provider,eventId).run();
   if(!claim.meta?.changes) return json({ok:true,version:VERSION,processing:true,event_id:eventId,retry_after_seconds:300},202);
   const txId=clean(event?.data?.transaction_id), payoutId=clean(event?.data?.payout_id);
+  // Never acknowledge a financial event whose referenced object is missing:
+  // leave it retryable so reconciliation can repair the reference.
+  if(txId){
+    const referencedTx=await env.DB.prepare('SELECT id FROM payment_transactions WHERE id=? LIMIT 1').bind(txId).first();
+    if(!referencedTx){
+      await env.DB.prepare("UPDATE payment_webhook_events SET processed=0,processed_at=NULL WHERE provider=? AND event_id=? AND processed=2").bind(provider,eventId).run();
+      return json({ok:false,error:'WEBHOOK_TRANSACTION_NOT_FOUND',version:VERSION,retryable:true},404);
+    }
+  }
+  if(payoutId){
+    const referencedPayout=await env.DB.prepare('SELECT id FROM payout_requests WHERE id=? LIMIT 1').bind(payoutId).first();
+    if(!referencedPayout){
+      await env.DB.prepare("UPDATE payment_webhook_events SET processed=0,processed_at=NULL WHERE provider=? AND event_id=? AND processed=2").bind(provider,eventId).run();
+      return json({ok:false,error:'WEBHOOK_PAYOUT_NOT_FOUND',version:VERSION,retryable:true},404);
+    }
+  }
   if(txId){
     const tx=await env.DB.prepare('SELECT * FROM payment_transactions WHERE id=? LIMIT 1').bind(txId).first();
     if(tx){
