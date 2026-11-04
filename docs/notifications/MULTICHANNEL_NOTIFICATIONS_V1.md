@@ -1,114 +1,72 @@
-# PROCHÉLIA — architecture de notifications multicanales v1
+# PROCHÉLIA — Notifications e-mail gratuit + WhatsApp
 
-**Statut :** spécification intégrée sur branche de fonctionnalité, non déployée.  
-**Objectif :** e-mail, SMS au coût maîtrisé, WhatsApp Business et Viber, avec consentement, sécurité et routage par canal.
+**Scope décidé :** e-mail (Resend Free) et WhatsApp Business Platform (Meta Cloud API). SMS et Viber sont exclus de la première version.  
+**Branche:** `feature/multichannel-notifications-v1`  
+**Statut:** adaptateurs isolés en développement; aucun déploiement ni message réel.
 
-## Décision d’architecture
+## Fournisseurs
 
-Créer une interface métier unique `NotificationService` et des adaptateurs isolés :
-- `EmailProvider` : Resend en pilote (API transactionnelle). Brevo peut rester un adaptateur de remplacement.
-- `SmsProvider` : interface interchangeable. Ne pas figer un fournisseur avant comparaison réelle des prix France + pays cible, frais de numéro, sender ID, taxes, échecs et coûts de vérification.
-- `WhatsAppProvider` : WhatsApp Business Platform via BSP (Vonage/Twilio/Bird à comparer) ; modèles approuvés pour messages initiés par l’entreprise.
-- `ViberProvider` : Viber Business Messages via fournisseur/BSP compatible (tarifs et disponibilité à valider par pays et compte).
-- `NotificationRouter` : décide du canal selon type de notification, pays, consentement, disponibilité, coût et statut de délivrance.
+### E-mail transactionnel
+- Resend Free en premier choix (activation OTP, récupération du compte, confirmations et notifications non marketing).
+- L’offre gratuite et les quotas sont à revalider au moment du lancement.
+- Variables Cloudflare Worker Secrets : `RESEND_API_KEY`.
+- Variable non-secrète : `EMAIL_FROM` (adresse expéditeur vérifiée).
+- Domaine d’envoi à authentifier (SPF/DKIM, DMARC recommandé).
+- L’envoi gratuit dépend de la limite du compte; ne jamais garantir l’absence de coût au-delà du quota.
 
-## Politique d’usage / coût
+### WhatsApp
+- Meta WhatsApp Business Platform Cloud API directement, sans ajouter un BSP payant par défaut.
+- Variables Cloudflare Worker Secrets : `WHATSAPP_ACCESS_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_APP_SECRET` (webhook validation à implémenter).
+- Variable : `WHATSAPP_API_VERSION` (version Graph API validée), jamais utiliser une version obsolète sans vérification.
+- L’entreprise doit créer/valider le compte Business, le numéro, les permissions et les templates WhatsApp nécessaires.
+- WhatsApp nécessite un opt-in clair. Les messages initiés par l’entreprise hors fenêtre de service client requièrent un template approuvé. Respecter la fenêtre de 24 heures, règles de templates, opt-out et coûts applicables.
+- Pas de message réel tant que compte Meta, numéro, templates et secrets ne sont pas validés.
 
-1. E-mail gratuit ou à très faible coût par défaut pour activation de compte, récupération de mot de passe, reçus et notifications non urgentes.
-2. SMS **fallback uniquement** pour OTP ou urgence de sécurité quand l’e-mail/WhatsApp n’est pas disponible, ou quand l’utilisateur a choisi le SMS. Limiter les envois par compte, IP, numéro, pays et fenêtre de temps.
-3. WhatsApp : opt-in explicite, numéro vérifié, modèle adapté et statut opt-out respecté. Utiliser en priorité les messages utilitaires; ne pas envoyer de marketing sans consentement approprié.
-4. Viber : opt-in séparé; utiliser seulement si l’utilisateur a un numéro/compte joignable et que la route est disponible dans son pays. Fallback vers e-mail, puis SMS si policy l’autorise.
-5. Pas de SMS automatique en cascade après chaque échec de canal : risque de doublons et de coûts. Un seul fallback, avec idempotence et règles précises.
-6. Afficher au client un choix de canaux et une gestion des préférences. Les messages strictement nécessaires à la sécurité et aux obligations légales doivent être séparés des messages marketing.
+## Routage
 
-## OTP et authentification (sécurité)
+- OTP signup et reset password : e-mail en priorité.
+- WhatsApp n’est **pas** un canal de récupération de compte par défaut. Activation optionnelle pour notifications de réservation/sécurité après vérification du numéro et consentement explicite.
+- Aucun fallback automatique e-mail→WhatsApp pour OTP : le destinataire doit choisir et avoir consenti; éviter doubles messages.
+- WhatsApp transactionnel avec template approuvé si nécessaire. Marketing est séparé et nécessite consentement spécifique.
+- Le backend reste la seule autorité pour génération, validation, expiration et consommation des OTP.
 
-- OTP aléatoire cryptographiquement sûr; stocker uniquement un hash (HMAC avec secret serveur ou hash robuste), jamais le code en clair.
-- OTP à usage unique, lié à une finalité précise (signup, reset, vérification téléphone), expiration courte configurable (ex. 5 min), compteur de tentatives et invalidation après usage.
-- Rate limits par IP, identifiant de compte, téléphone, pays et appareil; cooldown de renvoi; plafonds quotidiens et détection d’abus/SMS pumping.
-- Ne jamais confirmer si un compte existe : réponse uniforme sur récupération de compte.
-- Le code OTP ne doit jamais être inclus dans logs, analytics, exceptions ou traces.
-- Sessions révoquées selon politique après reset du mot de passe; alertes de sécurité sans divulguer de secrets.
-- Aucun rôle Gérante/Admin assignable via inscription publique. Invitation/bootstrap administrateur protégé et audité.
-- Ne pas utiliser SMS ou WhatsApp comme facteur unique de récupération pour comptes privilégiés; exiger contrôle renforcé.
+## Sécurité
 
-## Données / RGPD
+- OTP généré par CSPRNG, stocké uniquement sous forme de hash/HMAC, durée courte, usage unique, compteur d’essais, throttling et cooldown.
+- Pas de code OTP, token, contenu sensible, e-mail ou téléphone en clair dans logs.
+- Réponse générique pour reset password (anti-enumeration).
+- Secrets dans Cloudflare Worker Secrets seulement; jamais dans code, HTML, GitHub, localStorage ou D1.
+- Les templates n’affichent pas de données sensibles sur écran verrouillé.
+- Idempotence des notifications et gestion des erreurs provider sans retry en boucle.
+- RBAC: inscription publique ne peut jamais créer un compte Gérante/Admin.
 
-- Stocker préférences de canal, consentement, source/date/texte/version du consentement, langue et événements de délivrance minimaux.
-- Séparer consentement marketing et messages transactionnels.
-- Minimiser la conservation des journaux; ne pas loguer OTP, tokens, contenu sensible, ni téléphone/e-mail complet (masquage).
-- Droit d’opposition/opt-out pour marketing; désinscription par canal; suppression/anonymisation conforme à la politique de conservation.
-- Les notifications ne doivent pas révéler détails de santé, prestations sensibles ou informations confidentielles sur écran verrouillé.
-- Évaluer transferts internationaux, DPA/sous-traitants, hébergement et clauses avant activation réelle de chaque fournisseur.
+## RGPD / consentement
 
-## Contrat API interne proposé
+- E-mail transactionnel séparé du consentement marketing.
+- WhatsApp : opt-in explicite et traçable (date, source, finalité, version du texte), opt-out accessible.
+- Minimisation des journaux et durée de conservation documentée.
+- Vérifier sous-traitance, DPA, transferts internationaux, politique de confidentialité et conformité Meta avant activation réelle.
 
-```ts
-type Channel = "email" | "sms" | "whatsapp" | "viber";
-type NotificationPurpose =
-  | "signup_otp" | "password_reset" | "phone_verification"
-  | "security_alert" | "booking_update" | "receipt" | "marketing";
+## Tests de préproduction
 
-interface NotificationRequest {
-  idempotencyKey: string;
-  userId?: string;
-  destination: string;
-  channelPreference?: Channel[];
-  purpose: NotificationPurpose;
-  locale: string;
-  templateId: string;
-  variables: Record<string, string>;
-  expiresAt?: string;
-}
+- Mock provider d’abord, sans requête externe.
+- Email: OTP, expiration, retry, quotas, erreurs API, sender non vérifié.
+- WhatsApp: opt-in absent/retiré, numéro non valide, template absent/non approuvé, erreur/timeout, webhook signature et rejeu.
+- Anti-enumeration, OTP one-time, rate-limit, cooldown, idempotence, double-submit, logs secrets.
+- Tests d’intégration réels uniquement sur compte de test Meta et adresses allowlistées, avec validation humaine.
 
-interface NotificationResult {
-  accepted: boolean;
-  provider: string;
-  channel: Channel;
-  providerMessageId?: string;
-  status: "queued" | "sent" | "delivered" | "failed" | "fallback";
-}
-```
+## Étapes de livraison
 
-- Les OTP et secrets ne passent pas par des templates frontend ni des logs.
-- Idempotency key obligatoire pour prévenir les doubles envois.
-- Le statut `accepted` signifie accepté par le fournisseur, pas délivré.
-- Webhooks fournisseur : signature vérifiée, anti-rejeu, déduplication.
+1. Provider adapters isolés (Resend + Meta Cloud API).
+2. Tests unitaires avec mocks et vérification syntaxique.
+3. Connexion à la logique OTP/reset/signup backend et routes auth — sans migrations D1 prod.
+4. Préproduction avec secrets séparés et comptes sandbox/test.
+5. Validation de bout en bout.
+6. Activation réelle après validation explicite.
 
-## Secrets et environnements
-
-- Secrets exclusivement dans Cloudflare Worker Secrets (ex. `RESEND_API_KEY`, clés SMS/BSP), jamais dans HTML, localStorage, repo ou variables publiques.
-- Config distincte dev / préproduction / production; credentials et numéros de test séparés.
-- En production, limites de dépenses, alertes d’usage, allowlist des destinations pendant les tests et kill switch par fournisseur.
-- Aucun vrai message, secret fournisseur, migration D1 ou déploiement n’est effectué par cette spécification.
-
-## Tests obligatoires avant activation
-
-- OTP correct/incorrect/expiré/réutilisé, cooldown, max attempts, resend, brute force et enumeration.
-- OTP même code non utilisable pour une autre finalité ou autre utilisateur.
-- Consentement absent/retiré, opt-out, canal indisponible, route pays non supportée.
-- Échec fournisseur, timeout, webhook dupliqué/falsifié, fallback, retry et idempotence.
-- Tests de coût/plafonds et SMS pumping; tests sans envoi réel puis canary limité après validation humaine.
-- Test de confidentialité: aucun code, token, contenu privé ni identifiant complet dans les logs.
-- Tests multilingues et templates approuvés WhatsApp/Viber.
-
-## Déploiement progressif
-
-1. Mock providers + tests unitaires.
-2. Email transactionnel en préproduction.
-3. SMS sandbox/numéros allowlistés et plafond strict.
-4. WhatsApp Business test account + templates approuvés.
-5. Viber test/sandbox si disponible.
-6. Canary contrôlé, métriques coûts/délivrance et validation humaine.
-7. Production uniquement après validation explicite.
-
-## Comparaison fournisseur à faire avant choix final
-
-Comparer les prix actuels au pays de destination, les frais opérateur, la route OTP, les frais d’échec, l’achat/location d’un numéro, l’enregistrement Sender ID, les restrictions pays, l’assistance et les exigences RGPD. Les prix publics ne sont pas une garantie de coût final.
-
-**Sources tarifaires à revalider au moment de la sélection :**
-- Twilio SMS France : https://www.twilio.com/fr-fr/sms/pricing/fr
-- Vonage Messages API : https://www.vonage.fr/communications-apis/messages/pricing/
-- Resend : https://resend.com/pricing
-- WhatsApp Business Platform : https://business.whatsapp.com/
-- Viber Business : https://www.forbusiness.viber.com/
+## Documentation officielle
+- Resend pricing: https://resend.com/pricing
+- Resend API: https://resend.com/docs/api-reference/emails/send-email
+- Meta WhatsApp Cloud API: https://developers.facebook.com/docs/whatsapp/cloud-api/
+- WhatsApp opt-in: https://developers.facebook.com/docs/whatsapp/overview/getting-opt-in/
+- WhatsApp templates: https://developers.facebook.com/docs/whatsapp/message-templates/
