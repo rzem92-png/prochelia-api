@@ -10,6 +10,7 @@ on:
       - "tests/notification-providers.test.mjs"
       - "tests/webhook-hmac.test.mjs"
       - "tests/mission-code.test.mjs"
+      - "tests/payment-idempotency.test.mjs"
       - ".github/workflows/validate-notification-providers.yml"
   push:
     branches: ["feature/multichannel-notifications-v1"]
@@ -45,5 +46,7 @@ jobs:
         run: node --test tests/webhook-hmac.test.mjs
       - name: Run mission code tests
         run: node --test tests/mission-code.test.mjs
+      - name: Run payment idempotency tests
+        run: node --test tests/payment-idempotency.test.mjs
       - name: Confirm no live provider sends
         run: echo "Tests use local crypto and mocked fetch only."
