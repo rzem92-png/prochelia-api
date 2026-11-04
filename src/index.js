@@ -1254,7 +1254,7 @@ async function payoutRequest(request, env) {
   const body=await readJson(request), amount=moneyCents(body?.amount_eur), mode=clean(body?.mode)||'standard';
   const idem=clean(request.headers.get('idempotency-key'))||clean(body?.idempotency_key);
   if(amount===null||amount<=0||!['standard','express'].includes(mode)||!idem) return json({ok:false,error:'INVALID_PAYOUT_REQUEST',version:VERSION},400);
-  const old=await env.DB.prepare('SELECT * FROM payout_requests WHERE idempotency_key=? AND user_id=? LIMIT 1').bind(idem).first();
+  const old=await env.DB.prepare('SELECT * FROM payout_requests WHERE idempotency_key=? AND user_id=? LIMIT 1').bind(idem,auth.user.id).first();
   if(old) return json({ok:true,version:VERSION,idempotent_replay:true,payout:old},200);
   const account=await env.DB.prepare(`SELECT * FROM payment_accounts WHERE user_id=? LIMIT 1`).bind(auth.user.id).first();
   if(!account||Number(account.payouts_enabled)!==1) return json({ok:false,error:'PAYOUT_ACCOUNT_NOT_READY',version:VERSION,message:'Le compte de paiement de l’intervenant doit être vérifié et activé par le PSP.'},409);
@@ -1274,7 +1274,7 @@ async function payoutRequest(request, env) {
       .bind(crypto.randomUUID(),`payout:${idem}:reserved`,JSON.stringify({mode}),idem,`payout:${idem}:reserved`)
   ]);
   if(Number(batch?.[0]?.meta?.changes||0)!==1){
-    const replay=await env.DB.prepare('SELECT * FROM payout_requests WHERE idempotency_key=? LIMIT 1').bind(idem).first();
+    const replay=await env.DB.prepare('SELECT * FROM payout_requests WHERE idempotency_key=? AND user_id=? LIMIT 1').bind(idem,auth.user.id).first();
     if(replay)return json({ok:true,version:VERSION,idempotent_replay:true,payout:replay},200);
     return json({ok:false,error:'PAYOUT_RESERVATION_RACE_OR_INSUFFICIENT_BALANCE',version:VERSION},409);
   }
