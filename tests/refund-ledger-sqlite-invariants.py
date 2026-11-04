@@ -57,7 +57,7 @@ assert db.execute("SELECT available_cents FROM wallets WHERE user_id='provider-1
 # Duplicate idempotency key is ignored.
 ledger('payment:tx-1:refund:600',-100,600)
 assert db.execute("SELECT COUNT(*) FROM payment_wallet_ledger WHERE idempotency_key='payment:tx-1:refund:600'").fetchone()[0]==1
-# Full refund reaches the exact total reversal and never reverses more than provider net.
+db.commit()  # close SQLite's implicit transaction after the duplicate insert attempt\n# Full refund reaches the exact total reversal and never reverses more than provider net.
 apply_cumulative_refund(1000)
 assert db.execute("SELECT refund_cents,status FROM payment_transactions WHERE id='tx-1'").fetchone()==(1000,'refunded')
 assert db.execute("SELECT available_cents FROM wallets WHERE user_id='provider-1'").fetchone()[0]==0
