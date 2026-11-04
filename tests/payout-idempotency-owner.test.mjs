@@ -26,3 +26,13 @@ test('payout idempotency collision without same-owner replay fails closed', asyn
   assert.match(fn, /if\(replay\)return json\(\{ok:true,version:VERSION,idempotent_replay:true,payout:replay\},200\);/);
   assert.match(fn, /return json\(\{ok:false,error:'PAYOUT_RESERVATION_RACE_OR_INSUFFICIENT_BALANCE',version:VERSION\},409\);/);
 });
+
+test('payout ownership regression test is included exactly once in prelaunch suite', async () => {
+  const pkg = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
+  const script = pkg.scripts?.['test:prelaunch'] || '';
+  const occurrences = script.split('tests/payout-idempotency-owner.test.mjs').length - 1;
+  assert.equal(occurrences, 1);
+  assert.match(script, /tests\/payment-dispute-ownership\.test\.mjs/);
+  assert.match(script, /tests\/mission-security-ownership-contracts\.test\.mjs/);
+  assert.match(script, /tests\/refund-webhook-monotonic-ledger\.test\.mjs/);
+});
