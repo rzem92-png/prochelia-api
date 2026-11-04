@@ -1516,8 +1516,10 @@ async function handleBase(request, env) {
   }
   if (url.pathname === '/api/payments/mission/create') {
     if (request.method !== 'POST') return json({ok:false,error:'METHOD_NOT_ALLOWED',version:VERSION},405,{'allow':'POST'});
-    if (String(env.MISSION_API_ENABLED).toLowerCase() !== 'true') return json({ok:false,error:'MISSION_API_DISABLED',version:VERSION,write_enabled:false},423);
-    return createMissionPayment(request,env);
+    // Fail closed: this legacy endpoint accepts client-supplied amount/commission
+    // and only creates a local pending record; it does not invoke a PSP charge.
+    // Do not let an environment flag make it appear financially operational.
+    return json({ok:false,error:'MISSION_PAYMENT_FLOW_NOT_IMPLEMENTED',version:VERSION,write_enabled:false,reason:'Requires authoritative mission pricing, client/provider ownership binding, PSP charge confirmation and idempotent webhook reconciliation.'},423);
   }
   if (url.pathname === '/api/payments/mission/finalize') {
     if (request.method !== 'POST') return json({ok:false,error:'METHOD_NOT_ALLOWED',version:VERSION},405,{'allow':'POST'});
