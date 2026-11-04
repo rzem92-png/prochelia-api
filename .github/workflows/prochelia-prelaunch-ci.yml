@@ -1,0 +1,30 @@
+name: PROCHÉLIA Prelaunch CI
+
+on:
+  push:
+    branches:
+      - fix/read-only-production-config-audit
+  pull_request:
+    branches:
+      - main
+      - prelaunch
+      - prelaunch/v14.5.7-consolidation-audit
+
+permissions:
+  contents: read
+
+jobs:
+  prelaunch-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+      - name: Run prelaunch tests
+        run: npm run test:prelaunch
