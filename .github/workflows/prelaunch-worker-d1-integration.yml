@@ -47,6 +47,8 @@ jobs:
           done
       - name: Seed synthetic test account in ephemeral local D1
         run: npx --yes wrangler@4 d1 execute prochelia-preview-db --local --file tests/fixtures/d1-auth-test-user.sql
+      - name: Seed synthetic role/profile records in ephemeral local D1
+        run: npx --yes wrangler@4 d1 execute prochelia-preview-db --local --file tests/fixtures/d1-profile-ownership.sql
       - name: Start local Workers runtime with D1 binding
         shell: bash
         run: |
