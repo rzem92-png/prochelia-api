@@ -29,6 +29,8 @@ jobs:
           node --check security/clamav-gateway/server.mjs
       - name: Complete prelaunch regression suite
         run: npm run test:prelaunch
+      - name: Refund ledger SQLite invariants
+        run: python3 tests/refund-ledger-sqlite-invariants.py
       - name: Wallet ledger SQLite invariants
         run: |
           python3 - <<'PY'
