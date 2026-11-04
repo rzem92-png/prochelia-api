@@ -1831,7 +1831,7 @@ async function createOperationalCase(request, env) {
   const caseType=clean(body.case_type); if(!caseType)return json({ok:false,error:'CASE_TYPE_REQUIRED',version:VERSION},400);
   // Caller-supplied IDs are not proof of ownership. Until canonical user/profile
   // relations are enforced, only gerante may link cases to entity records.
-  const role=String(gate.user?.role || gate.role || '').toLowerCase();
+  const role=String(gate.auth?.user?.role || '').toLowerCase();
   const hasLinkedIds=['client_id','company_id','intervenant_id','mission_id'].some(k=>clean(body[k]));
   if(role!=='gerante' && hasLinkedIds)
     return json({ok:false,error:'CASE_ENTITY_LINK_FORBIDDEN',version:VERSION},403);
