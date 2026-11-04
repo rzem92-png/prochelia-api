@@ -642,8 +642,16 @@ async function ensureSecuritySchema(env) {
 }
 
 function securityCode() {
-  const n = new DataView(randomBytes(4).buffer).getUint32(0) % 1000000;
-  return String(n).padStart(6, '0');
+  // Rejection sampling avoids modulo bias for six-digit security codes.
+  // 2^32 is not divisible by 1,000,000, so reject the incomplete tail.
+  const range = 0x100000000;
+  const limit = Math.floor(range / 1000000) * 1000000;
+  let value;
+  do {
+    const bytes = randomBytes(4);
+    value = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getUint32(0);
+  } while (value >= limit);
+  return String(value % 1000000).padStart(6, '0');
 }
 
 async function securityAudit(env, eventType, missionId, userId, role, result, metadata = {}) {
