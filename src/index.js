@@ -1405,6 +1405,14 @@ async function openPaymentDispute(request, env) {
   if(!missionId||!reason||amount===null) return json({ok:false,error:'INVALID_DISPUTE',version:VERSION},400);
   const tx=await env.DB.prepare(`SELECT * FROM payment_transactions WHERE mission_id=? ORDER BY created_at DESC LIMIT 1`).bind(missionId).first();
   if(!tx) return json({ok:false,error:'PAYMENT_NOT_FOUND_FOR_MISSION',version:VERSION},404);
+  // A client may dispute only their own transaction. The manager role can
+  // investigate operationally, but cannot use this endpoint to impersonate a client.
+  if(String(auth.user.role||'')==='client' && String(tx.client_id)!==String(auth.user.id)) {
+    return json({ok:false,error:'FORBIDDEN_MISSION_PAYMENT_OWNERSHIP',version:VERSION},403);
+  }
+  if(!Number.isSafeInteger(Number(tx.gross_cents)) || amount>Number(tx.gross_cents)) {
+    return json({ok:false,error:'DISPUTE_AMOUNT_EXCEEDS_PAYMENT',version:VERSION},400);
+  }
   if(tx.status==='paid') await env.DB.prepare(`UPDATE payment_transactions SET status='held',updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(tx.id).run();
   const id=crypto.randomUUID();
   await env.DB.prepare(`INSERT INTO payment_disputes (id,mission_id,transaction_id,client_id,intervenant_id,status,reason,amount_cents) VALUES (?,?,?,?,?,?,?,?)`).bind(id,missionId,tx.id,tx.client_id,tx.intervenant_id,'open',reason,amount).run();
