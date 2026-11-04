@@ -1300,6 +1300,17 @@ async function paymentWebhook(request, env) {
   let event; try{event=JSON.parse(raw)}catch{return json({ok:false,error:'INVALID_WEBHOOK_JSON',version:VERSION},400);}
   const provider=clean(event?.provider)||paymentProvider(env), eventId=clean(event?.id), type=clean(event?.type);
   if(!eventId||!type) return json({ok:false,error:'INVALID_WEBHOOK_EVENT',version:VERSION},400);
+  // Validate the event contract before persisting/claiming it. Unknown event
+  // types must never be acknowledged as successfully processed.
+  const transactionEventTypes=new Set(['payment_succeeded','charge_succeeded','payment_failed','charge_failed','payment_refunded']);
+  const payoutEventTypes=new Set(['payout_processing','payout_paid','payout_failed','payout_canceled']);
+  const txId=clean(event?.data?.transaction_id), payoutId=clean(event?.data?.payout_id);
+  if(!transactionEventTypes.has(type)&&!payoutEventTypes.has(type))
+    return json({ok:false,error:'UNSUPPORTED_WEBHOOK_EVENT_TYPE',version:VERSION},400);
+  if(transactionEventTypes.has(type)&&(!txId||payoutId))
+    return json({ok:false,error:'INVALID_WEBHOOK_TRANSACTION_REFERENCE',version:VERSION},400);
+  if(payoutEventTypes.has(type)&&(!payoutId||txId))
+    return json({ok:false,error:'INVALID_WEBHOOK_PAYOUT_REFERENCE',version:VERSION},400);
   // Provider identity is pinned to configuration. A valid HMAC alone must not
   // allow an event to be stored under an arbitrary provider namespace.
   if(provider!==paymentProvider(env)) return json({ok:false,error:'WEBHOOK_PROVIDER_MISMATCH',version:VERSION},403);
@@ -1314,7 +1325,6 @@ async function paymentWebhook(request, env) {
   if(Number(priorEvent.processed)===1) return json({ok:true,version:VERSION,duplicate:true,event_id:eventId},200);
   const claim=await env.DB.prepare(`UPDATE payment_webhook_events SET processed=2,processed_at=CURRENT_TIMESTAMP WHERE provider=? AND event_id=? AND (processed=0 OR (processed=2 AND processed_at<datetime('now','-5 minutes')))`).bind(provider,eventId).run();
   if(!claim.meta?.changes) return json({ok:true,version:VERSION,processing:true,event_id:eventId,retry_after_seconds:300},202);
-  const txId=clean(event?.data?.transaction_id), payoutId=clean(event?.data?.payout_id);
   // Never acknowledge a financial event whose referenced object is missing:
   // leave it retryable so reconciliation can repair the reference.
   if(txId){
