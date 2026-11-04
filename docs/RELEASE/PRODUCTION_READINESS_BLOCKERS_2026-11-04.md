@@ -21,9 +21,10 @@ Status: development/preproduction only. This is not production approval.
 ## CI and preview deployment evidence — 2026-11-04
 - GitHub Actions workflow run 41915516473 completed successfully for the notification/security test job. It passed syntax checks, mocked notification provider tests, webhook HMAC tests, mission-code tests, and payment-idempotency tests.
 - This is a unit/CI result only. It does not establish D1 concurrency, PSP sandbox, end-to-end, security review, or production readiness.
-- Cloudflare PR preview comments reported failed builds for commits cefda83bfcd16bfe38a4bfbe82641cf2b0235c5e and 357f4872f324ff29a71ea1516114a5843e66a595. The associated build logs must be inspected and corrected before preview acceptance.
-- Do not treat a Cloudflare preview failure as a successful preview or infer the exact root cause without build logs.
-- Latest observed PR head is 797c6f07389d943284099d903371c20bb14262a1; GitHub workflow run is green, but the combined commit status endpoint returned no status records. Confirm exact workflow SHA association before using this as release evidence.
+- Cloudflare builds 85fc18e4-253b-483d-b29e-b45822021f4c (commit cefda83...) and 697d0294-225e-447e-b3ad-c0ab5bee173a (commit 357f487...) both fail because the Workers preview command requires a Wrangler previews block.
+- Cloudflare Wrangler's suggested preview D1 binding referenced database id 04f52830-ef5a-4f17-a640-42bbc2381bba. **Do not copy that ID into previews until its environment is verified to be isolated and non-production.** Never bind PR previews to production D1.
+- The build trigger currently runs `npx wrangler preview` (Wrangler 4.157.0), an open-beta command. Confirm intended preview architecture, configure a dedicated isolated D1 database and preview binding, pin/test Wrangler, and then rerun preview.
+- Latest observed PR head is 797c6f07389d943284099d903371c20bb14262a1; workflow run 41915516473 is green, but combined commit status returned no status records. Confirm exact workflow SHA association before using this as release evidence.
 
 ## Do not
 - merge the draft PR;
