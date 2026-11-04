@@ -1328,17 +1328,28 @@ async function paymentWebhook(request, env) {
   // Never acknowledge a financial event whose referenced object is missing:
   // leave it retryable so reconciliation can repair the reference.
   if(txId){
-    const referencedTx=await env.DB.prepare('SELECT id FROM payment_transactions WHERE id=? LIMIT 1').bind(txId).first();
+    const referencedTx=await env.DB.prepare('SELECT id,provider FROM payment_transactions WHERE id=? LIMIT 1').bind(txId).first();
     if(!referencedTx){
       await env.DB.prepare("UPDATE payment_webhook_events SET processed=0,processed_at=NULL WHERE provider=? AND event_id=? AND processed=2").bind(provider,eventId).run();
       return json({ok:false,error:'WEBHOOK_TRANSACTION_NOT_FOUND',version:VERSION,retryable:true},404);
     }
+    // Bind the event's configured provider to the persisted transaction.
+    // Prevent cross-provider callbacks from mutating a transaction by ID.
+    if(String(referencedTx.provider||'')!==String(provider)){
+      await env.DB.prepare("UPDATE payment_webhook_events SET processed=0,processed_at=NULL WHERE provider=? AND event_id=? AND processed=2").bind(provider,eventId).run();
+      return json({ok:false,error:'WEBHOOK_TRANSACTION_PROVIDER_MISMATCH',version:VERSION,retryable:false},409);
+    }
   }
   if(payoutId){
-    const referencedPayout=await env.DB.prepare('SELECT id FROM payout_requests WHERE id=? LIMIT 1').bind(payoutId).first();
+    const referencedPayout=await env.DB.prepare('SELECT id,provider FROM payout_requests WHERE id=? LIMIT 1').bind(payoutId).first();
     if(!referencedPayout){
       await env.DB.prepare("UPDATE payment_webhook_events SET processed=0,processed_at=NULL WHERE provider=? AND event_id=? AND processed=2").bind(provider,eventId).run();
       return json({ok:false,error:'WEBHOOK_PAYOUT_NOT_FOUND',version:VERSION,retryable:true},404);
+    }
+    // Same provider-object binding for payout status and wallet reservation release.
+    if(String(referencedPayout.provider||'')!==String(provider)){
+      await env.DB.prepare("UPDATE payment_webhook_events SET processed=0,processed_at=NULL WHERE provider=? AND event_id=? AND processed=2").bind(provider,eventId).run();
+      return json({ok:false,error:'WEBHOOK_PAYOUT_PROVIDER_MISMATCH',version:VERSION,retryable:false},409);
     }
   }
   if(txId){
