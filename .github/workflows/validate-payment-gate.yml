@@ -1,0 +1,49 @@
+name: "PROCHÉLIA API — verrouillage paiements sans PSP"
+
+on:
+  push:
+    branches: ["fix/payment-gate-after-cors"]
+    paths:
+      - "src/index.js"
+      - ".github/workflows/validate-payment-gate.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "src/index.js"
+      - ".github/workflows/validate-payment-gate.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Vérifier la syntaxe Worker
+        run: node --check src/index.js
+      - name: Vérifier que les paiements ne peuvent pas déplacer d'argent
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const source = fs.readFileSync('src/index.js', 'utf8');
+          const checks = {
+            allPaymentRoutesClosed: source.includes("error:'PAYMENT_ADAPTER_NOT_IMPLEMENTED'"),
+            paymentsWritesAdvertisedFalse: source.includes("writes: { missions: false, payments: false"),
+            adapterBlocksProductionGate: source.includes("code:'PAYMENT_ADAPTER',status:'NOT_IMPLEMENTED'") && source.includes("'PAYMENT_ADAPTER'"),
+            moneyMovementDisabled: source.includes("money_movement:false"),
+            webhookNotAcceptedWithoutAdapter: source.includes("'/api/payments/webhook': ['POST']")
+          };
+          for (const [name, ok] of Object.entries(checks)) console.log((ok ? 'PASS ' : 'FAIL ') + name);
+          if (Object.values(checks).some(ok => !ok)) process.exit(1);
+          NODE
+      - name: Confirmer l'absence de déploiement
+        run: |
+          echo "Validation syntaxique et statique uniquement."
+          echo "Aucun accès Cloudflare, aucune requête D1, aucun mouvement d'argent, aucun déploiement."
