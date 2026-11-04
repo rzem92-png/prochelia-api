@@ -130,32 +130,24 @@ export async function handleV7Route(
 
 
     // =================================================
-    // CONTRÔLE PERMISSIONS
+    // CONTRÔLE PERMISSIONS — NON AUTORITATIF / DÉSACTIVÉ
     // =================================================
-
+    // A role/permission object supplied by a caller is untrusted input.
+    // Never return a grant based on client-provided role or permissions.
+    // Authorization must be enforced server-side from the authenticated
+    // session and persisted RBAC/ownership data at each protected endpoint.
     if (
       path === "/api/v7/check/permissions" &&
       method === "POST"
     ) {
-
-      const body =
-        await request.json();
-
-      const result =
-        procheliaV7.checkPermissions(
-          body
-        );
-
       return Response.json(
-
-        result,
-
         {
-          status:
-            result.ok
-              ? 200
-              : 403
-        }
+          ok: false,
+          version: procheliaV7.version,
+          error: "SERVER_AUTHORIZATION_REQUIRED",
+          authoritative: false
+        },
+        { status: 403 }
       );
     }
 
