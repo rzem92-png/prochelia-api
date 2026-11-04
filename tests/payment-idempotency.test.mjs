@@ -35,3 +35,16 @@ test('payout idempotency prevents cross-user and parameter replay', () => {
   assert.equal(isSamePayoutOperation({...payout, mode: 'express'}, payoutRequest), false);
   assert.equal(isSamePayoutOperation({...payout, currency: 'USD'}, payoutRequest), false);
 });
+
+test('financial idempotency rejects malformed persisted amount types', () => {
+  assert.equal(isSameMissionPaymentOperation({...mission, gross_cents: '12500'}, missionRequest), false);
+  assert.equal(isSameMissionPaymentOperation({...mission, commission_cents: '1500'}, missionRequest), false);
+  assert.equal(isSamePayoutOperation({...payout, amount_cents: '5000'}, payoutRequest), false);
+});
+
+test('financial idempotency rejects missing or altered currency and amounts', () => {
+  assert.equal(isSameMissionPaymentOperation({...mission, currency: null}, missionRequest), false);
+  assert.equal(isSameMissionPaymentOperation({...mission, gross_cents: 0}, missionRequest), false);
+  assert.equal(isSamePayoutOperation({...payout, currency: null}, payoutRequest), false);
+  assert.equal(isSamePayoutOperation({...payout, amount_cents: 0}, payoutRequest), false);
+});
