@@ -1,4 +1,6 @@
 import { handleV7Route } from "./v7-routes.js";
+import { generateMissionCode } from "./security/mission-code.js";
+import { signWebhook } from "./security/webhook-hmac.js";
 // PROCHÉLIA — INDEX BACKEND CONSOLIDÉ UNIQUE
 // Référence de consolidation : V14.1 Finance + sécurité/RBAC existants.
 // Généré le 19/10/2026. À déployer uniquement après recette avec la vraie base D1.
@@ -558,8 +560,7 @@ async function ensureSecuritySchema(env) {
 }
 
 function securityCode() {
-  const n = new DataView(randomBytes(4).buffer).getUint32(0) % 1000000;
-  return String(n).padStart(6, '0');
+  return generateMissionCode();
 }
 
 async function securityAudit(env, eventType, missionId, userId, role, result, metadata = {}) {
@@ -633,10 +634,10 @@ async function deliverSecurityCodes(env, payload) {
     end_code:payload.end_code,
     end_expires_at:payload.end_expires_at
   });
-  const signature = await sha256Base64url(secret + '.' + body);
+  const signed = await signWebhook(secret, body);
   const response = await fetch(webhook,{
     method:'POST',
-    headers:{'content-type':'application/json','x-prochelia-signature':signature},
+    headers:{'content-type':'application/json','x-prochelia-signature':signed.signature,'x-prochelia-timestamp':signed.timestamp},
     body
   });
   if (!response.ok) return {ok:false,error:'NOTIFICATION_PROVIDER_REJECTED'};
