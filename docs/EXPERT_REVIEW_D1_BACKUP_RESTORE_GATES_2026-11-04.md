@@ -44,3 +44,22 @@ Audit statique basé sur les fichiers de la branche QA. Aucun CI, test distant, 
 
 ## Mise à jour revue 2026-11-04
 La comparaison des branches a corrigé le faux positif initial sur Wrangler : migration workflow checkout la branche prelaunch qui contient la config staging attendue. Le document ne constitue pas une autorisation d'exécuter les workflows. La sauvegarde/restauration doit encore passer un test réel isolé, avec preuves CI et vérification du résultat. Aucun run Cloudflare n'a été déclenché par cette revue.
+
+
+## Nouveau contrôle de cohérence migrations / restore v2 — 2026-11-04
+
+Une comparaison du workflow de migration de la branche `prelaunch/v14.5.7-consolidation-audit` avec le workflow `restore-preview-d1-test-v2.yml` de la branche QA a détecté un écart bloquant à résoudre avant un test restore v2 :
+
+- Le workflow de migration prelaunch vérifie les migrations `0001` à `0005`, notamment `0005_security_rate_limits.sql` (V14.5.8).
+- Le workflow restore v2 valide ensuite `migration_count == 4` dans `d1_migrations`.
+
+Ce compteur est probablement obsolète si les cinq migrations sont enregistrées dans `d1_migrations`. Il faut vérifier la convention Cloudflare D1 migrations (fichier effectivement appliqué / état DB) et faire correspondre l'assertion à la manifest versionnée. Ne pas modifier la valeur mécaniquement : la restauration doit échouer si archive pré/post-migration incohérente. Le contrôle de date post-30/10/2026 ne suffit pas à prouver la version de schéma.
+
+### Contrôle supplémentaire requis
+- [ ] Comparer la liste des fichiers migration à la table `d1_migrations` attendue.
+- [ ] Assert exact migration names/version (pas seulement un count), si le format Cloudflare le permet.
+- [ ] Vérifier que la migration 0005 crée `security_rate_limits` et que le restore v2 exige cette table.
+- [ ] Vérifier les tables/counts de référence à partir du schéma/migrations, plutôt que des constantes non documentées.
+- [ ] Exécuter uniquement sur la base restore-test v2 isolée après validation de l'UUID et du contenu de l'archive.
+
+**Statut : bloquant pour déclarer la restauration v2 validée ; aucun workflow restore ni migration lancé par cet audit.**
