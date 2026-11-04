@@ -928,7 +928,19 @@ async function createMissionPayment(request, env) {
   const idem=clean(request.headers.get('idempotency-key'))||clean(body?.idempotency_key);
   if(!idem) return json({ok:false,error:'IDEMPOTENCY_KEY_REQUIRED',version:VERSION},400);
   const old=await env.DB.prepare('SELECT * FROM payment_transactions WHERE idempotency_key=? LIMIT 1').bind(idem).first();
-  if(old) return json({ok:true,version:VERSION,idempotent_replay:true,transaction:old},200);
+  if(old) {
+    // An idempotency key is scoped to one exact business operation. Never disclose
+    // or acknowledge a different transaction just because a caller reused its key.
+    const sameOperation = old.type === 'MISSION_CHARGE'
+      && old.mission_id === missionId
+      && old.client_id === clientId
+      && old.intervenant_id === intervenantId
+      && Number(old.gross_cents) === gross
+      && Number(old.commission_cents) === commission
+      && old.currency === 'EUR';
+    if(!sameOperation) return json({ok:false,error:'IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_REQUEST',version:VERSION},409);
+    return json({ok:true,version:VERSION,idempotent_replay:true,transaction:old},200);
+  }
   const net=gross-commission;
   const txId=crypto.randomUUID();
   await env.DB.prepare(`INSERT INTO payment_transactions
@@ -969,7 +981,15 @@ async function payoutRequest(request, env) {
   const idem=clean(request.headers.get('idempotency-key'))||clean(body?.idempotency_key);
   if(amount===null||amount<=0||!['standard','express'].includes(mode)||!idem) return json({ok:false,error:'INVALID_PAYOUT_REQUEST',version:VERSION},400);
   const old=await env.DB.prepare('SELECT * FROM payout_requests WHERE idempotency_key=? LIMIT 1').bind(idem).first();
-  if(old) return json({ok:true,version:VERSION,idempotent_replay:true,payout:old},200);
+  if(old) {
+    // Prevent cross-account replay and key reuse for a different amount/mode.
+    const sameOperation = old.user_id === auth.user.id
+      && Number(old.amount_cents) === amount
+      && old.mode === mode
+      && old.currency === 'EUR';
+    if(!sameOperation) return json({ok:false,error:'IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_REQUEST',version:VERSION},409);
+    return json({ok:true,version:VERSION,idempotent_replay:true,payout:old},200);
+  }
   const account=await env.DB.prepare(`SELECT * FROM payment_accounts WHERE user_id=? LIMIT 1`).bind(auth.user.id).first();
   if(!account||Number(account.payouts_enabled)!==1) return json({ok:false,error:'PAYOUT_ACCOUNT_NOT_READY',version:VERSION,message:'Le compte de paiement de l’intervenant doit être vérifié et activé par le PSP.'},409);
   const wallet=await env.DB.prepare('SELECT * FROM wallets WHERE user_id=? LIMIT 1').bind(auth.user.id).first();
