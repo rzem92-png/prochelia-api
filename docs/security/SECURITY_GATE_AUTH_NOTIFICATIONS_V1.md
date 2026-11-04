@@ -150,3 +150,35 @@ L'implémentation inspectée insère l'événement dans `payment_webhook_events`
 Le flux aperçu crédite le wallet intervenant lors de `payment_succeeded`. Il faut une contrainte d'unicité/ledger sur l'effet de crédit (transaction/provider-event/effet) et une opération atomique conditionnelle. La seule vérification du statut de la transaction n'est pas une garantie suffisante si plusieurs webhooks concurrents lisent le même statut avant mise à jour.
 
 **État :** risque documenté, correctif non intégré ni validé par tests d'intégration D1. Les paiements réels restent interdits.
+
+
+## Addendum — CSRF, bootstrap race and auth gate review (4 novembre 2026)
+
+### Origine navigateur / CSRF — à fermer avant auth réelle
+
+Le code consulté vérifie les origines navigateur contre une allowlist `CORS_ORIGIN` (ou deux origines Pages par défaut) et applique un contrôle d'origine aux requêtes mutantes dans le routeur. C'est une défense utile, mais **CORS n'est pas à lui seul un mécanisme CSRF** et l'absence d'en-tête `Origin` est actuellement tolérée par le helper d'origine.
+
+Avant activation avec cookie `SameSite=None; Secure; HttpOnly` :
+- inventorier chaque route mutante authentifiée et confirmer que le contrôle d'origine est exécuté avant tout effet ;
+- décider explicitement quelles requêtes sans `Origin` sont permises (API non navigateur avec authentification dédiée seulement; pas une exemption générale pour session-cookie) ;
+- mettre en place une stratégie CSRF synchronizer/double-submit liée à la session, ou une preuve équivalente, et la valider côté serveur sur chaque mutation cookie-authenticated ;
+- vérifier que `X-CSRF-Token` n'est pas seulement autorisé par le preflight mais réellement validé ;
+- tester cross-site form POST, fetch credentials, origine null, sous-domaines Pages preview, changement d'origine, requêtes sans Origin, et appels server-to-server ;
+- conserver l'allowlist stricte sans wildcard et sans réflexion d'origine arbitraire.
+
+Ne pas ajouter un token CSRF non validé qui pourrait casser l'application; concevoir, tester, puis intégrer sur une branche de préproduction.
+
+### Bootstrap premier compte — course potentielle
+
+Le bootstrap vérifie le secret puis lit le nombre de comptes avant création du premier compte. Deux requêtes concurrentes peuvent théoriquement passer le contrôle de comptage si les écritures ne sont pas protégées par un mécanisme atomique.
+
+Gate : créer un verrou/claim bootstrap atomique et unique, lié à l'état initial, ou une transaction vérifiée; vérifier que deux requêtes parallèles ne peuvent jamais créer deux administrateurs. Le secret doit être fort, temporaire, secret Worker, retiré après bootstrap et jamais logué. Tester replay, mauvais secret, compte existant, et 20 requêtes concurrentes sur D1.
+
+### Session et credential lifecycle
+
+- La session est liée à un token hash et expire après 7 jours; logout supprime le token de session courant.
+- Vérifier l'invalidation de toutes les sessions après reset/changement de mot de passe, suspension/compromission et changement de rôle.
+- Revoir la politique de rotation/renouvellement de session, la limite de sessions, la révocation globale et la gestion de compte suspendu.
+- Vérifier la limitation login par IP + compte et les messages/temps de réponse anti-enumeration.
+
+**Statut:** findings à traiter/tester; ce addendum ne signifie pas que CSRF, bootstrap concurrency ou session revocation sont corrigés.
