@@ -1027,6 +1027,36 @@ async function handleBase(request, env) {
     return securityStatus(request, env);
   }
 
+  // Payment endpoints remain deliberately closed until a real PSP adapter
+  // (Connect onboarding, charge creation, signed webhooks, refunds and payouts)
+  // has been implemented and exercised in provider test mode. Never create
+  // internal ledger entries that could be mistaken for captured money.
+  const paymentMethods = {
+    '/api/payments/status': ['GET'],
+    '/api/payments/onboard': ['POST'],
+    '/api/payments/mission/create': ['POST'],
+    '/api/payments/mission/finalize': ['POST'],
+    '/api/payments/payout': ['POST'],
+    '/api/payments/webhook': ['POST'],
+    '/api/payments/dispute': ['POST'],
+    '/api/payments/dispute/resolve': ['POST']
+  };
+  if (Object.prototype.hasOwnProperty.call(paymentMethods, url.pathname)) {
+    const allowed = paymentMethods[url.pathname];
+    if (!allowed.includes(request.method.toUpperCase())) {
+      return json({ok:false,error:'METHOD_NOT_ALLOWED',version:VERSION},405,{'allow':allowed.join(', ')});
+    }
+    return json({
+      ok:false,
+      error:'PAYMENT_ADAPTER_NOT_IMPLEMENTED',
+      version:VERSION,
+      payments_enabled:false,
+      write_enabled:false,
+      money_movement:false,
+      next:'Configure and validate a real PSP adapter in test mode before enabling payment routes.'
+    },503);
+  }
+
   if (url.pathname === '/api/health') {
     if (request.method !== 'GET') return json({ ok: false, error: 'METHOD_NOT_ALLOWED', version: VERSION }, 405);
     return health(env);
@@ -1114,7 +1144,8 @@ async function handleBase(request, env) {
         '/api/auth/status','/api/auth/login','/api/auth/logout','/api/auth/me',
         '/api/auth/bootstrap','/api/security/identity/start','/api/security/identity/approve','/api/security/mission/prepare','/api/security/presence','/api/security/code/verify','/api/security/resend','/api/security/client-code','/api/security/status','/api/payments/onboard','/api/payments/status','/api/payments/mission/create','/api/payments/mission/finalize','/api/payments/payout','/api/payments/webhook','/api/payments/dispute','/api/payments/dispute/resolve','/api/readiness','/api/info'
       ],
-      writes: { missions: false, bootstrap: true },
+      writes: { missions: false, payments: false, bootstrap: true },
+      payments: { enabled: false, adapter: 'NOT_IMPLEMENTED', money_movement: false },
       status: 'AUTH_RBAC_IDENTITY_PRESENCE_SECURITY_HARDENED_FOR_TEST'
     });
   }
@@ -3408,10 +3439,11 @@ async function strictProductionAudit(request,env){
     {code:'CORS_ORIGIN',status:finalSecretConfigured(env,'CORS_ORIGIN')?'OK':'NOT_CONFIGURED'},
     {code:'BACKUP_R2',status:env.BACKUP_BUCKET&&finalSecretConfigured(env,'BACKUP_ENCRYPTION_KEY')?'OK':'NOT_CONFIGURED'},
     {code:'NOTIFICATION_PROVIDER',status:finalSecretConfigured(env,'NOTIFICATION_PROVIDER')?'OK':'NOT_CONFIGURED'},
-    {code:'MAPS_PROVIDER',status:finalSecretConfigured(env,'MAPS_API_KEY')?'OK':'NOT_CONFIGURED'}
+    {code:'MAPS_PROVIDER',status:finalSecretConfigured(env,'MAPS_API_KEY')?'OK':'NOT_CONFIGURED'},
+    {code:'PAYMENT_ADAPTER',status:'NOT_IMPLEMENTED'}
   ];
   const checks=[...(result.checks||[]),...extra];
-  const blockingCodes=new Set(['SECRET:PAYMENT_PROVIDER','SECRET:PAYMENT_WEBHOOK_SECRET','SECURITY_CODE_DELIVERY','CORS_ORIGIN','BACKUP_R2']);
+  const blockingCodes=new Set(['SECRET:PAYMENT_PROVIDER','SECRET:PAYMENT_WEBHOOK_SECRET','PAYMENT_ADAPTER','SECURITY_CODE_DELIVERY','CORS_ORIGIN','BACKUP_R2']);
   const blocking=checks.filter(x=>blockingCodes.has(x.code)&&x.status!=='OK');
   const overall=blocking.length===0 && result.blocking===0;
   for(const c of extra){
