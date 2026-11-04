@@ -1,0 +1,33 @@
+name: Refund regression tests
+
+on:
+  pull_request:
+    branches:
+      - fix/refund-webhook-amount-validation-2026-11-04
+    paths:
+      - 'src/index.js'
+      - 'tests/v14-5-6-critical-fixes.test.mjs'
+      - 'package.json'
+      - '.github/workflows/refund-regression-tests.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: refund-regression-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  refund-regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Run refund and critical regression tests
+        run: npm run test:prelaunch
