@@ -5,6 +5,7 @@ on:
     branches: ["main", "integration/auth-cors-profile-routes-v1"]
     paths:
       - "src/notifications/**"
+      - "src/index.js"
       - "src/security/**"
       - "tests/notification-providers.test.mjs"
       - "tests/webhook-hmac.test.mjs"
@@ -34,6 +35,7 @@ jobs:
           node-version: "22"
       - name: Syntax-check modules
         run: |
+          node --check src/index.js
           node --check src/notifications/providers.js
           node --check src/security/webhook-hmac.js
           node --check src/security/mission-code.js
