@@ -1,0 +1,63 @@
+name: PROCHÉLIA Workers + local D1 integration
+on:
+  push:
+    branches:
+      - prelaunch/v14.5.7-consolidation-audit
+    paths:
+      - "src/**"
+      - "migrations/**"
+      - "tests/workers-d1-runtime.integration.mjs"
+      - "tests/fixtures/d1-auth-baseline.sql"
+      - ".github/workflows/prelaunch-worker-d1-integration.yml"
+      - "wrangler.jsonc"
+  pull_request:
+    branches:
+      - prelaunch/v14.5.7-consolidation-audit
+    paths:
+      - "src/**"
+      - "migrations/**"
+      - "tests/workers-d1-runtime.integration.mjs"
+      - "tests/fixtures/d1-auth-baseline.sql"
+      - ".github/workflows/prelaunch-worker-d1-integration.yml"
+      - "wrangler.jsonc"
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: prochelia-workers-local-d1-integration
+  cancel-in-progress: false
+jobs:
+  worker-local-d1:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          package-manager-cache: false
+      - name: Apply auth baseline to ephemeral local D1
+        run: npx --yes wrangler@4 d1 execute prochelia-preview-db --local --file tests/fixtures/d1-auth-baseline.sql
+      - name: Apply core and business migrations to ephemeral local D1
+        shell: bash
+        run: |
+          set -euo pipefail
+          for migration in migrations/0001_core_business_schema.sql migrations/0002_server_pricing.sql migrations/0003_route_address_provenance.sql migrations/0004_atomic_wallet_ledger.sql migrations/0005_security_rate_limits.sql; do
+            npx --yes wrangler@4 d1 execute prochelia-preview-db --local --file "$migration"
+          done
+      - name: Start local Workers runtime with D1 binding
+        shell: bash
+        run: |
+          set -euo pipefail
+          nohup npx --yes wrangler@4 dev --local --ip 127.0.0.1 --port 8787 --log-level error > /tmp/prochelia-wrangler.log 2>&1 &
+          echo $! > /tmp/prochelia-wrangler.pid
+          for attempt in $(seq 1 60); do
+            if curl --silent --fail http://127.0.0.1:8787/api/health > /tmp/prochelia-health.json; then
+              break
+            fi
+            sleep 2
+          done
+          cat /tmp/prochelia-wrangler.log
+          test -s /tmp/prochelia-health.json
+      - name: Exercise Worker routes against local D1
+        run: node tests/workers-d1-runtime.integration.mjs
