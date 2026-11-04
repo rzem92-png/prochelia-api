@@ -135,3 +135,18 @@ Le code de limitation observé dans `productionRateLimit()` fait actuellement un
 - Première insertion concurrente sur une clé inexistante : pas d'erreur 500, compteur final exact.
 - Clé de fenêtre suivante : compteur indépendant, expiration/nettoyage sans supprimer les traces d'audit.
 - Limites par IP et par compte : pas de contournement trivial via changement de route ou de casse/normalisation d'identifiant.
+
+
+## Addendum — paiements, idempotence et reprise (4 novembre 2026)
+
+### Webhook PSP — crash après réservation d'événement
+
+L'implémentation inspectée insère l'événement dans `payment_webhook_events` avec `INSERT OR IGNORE`, puis applique les effets métier. En cas d'arrêt/crash après l'insertion et avant la fin du traitement, la livraison suivante peut être considérée comme doublon alors que les effets métier n'ont pas été appliqués. La colonne `processed` existe mais ne suffit pas à gérer cette reprise.
+
+**Gate bloquant avant paiements réels :** adopter un état durable (`received/processing/processed/failed_retryable/failed_terminal`), horodatage/lease et nombre de tentatives; ne répondre succès au PSP qu'après traitement durable, ou fournir une reprise des événements non traités. Le handler doit être idempotent au niveau des effets (ledger/transaction), pas uniquement de l'identifiant d'événement. Détecter même event ID avec payload hash différent et le placer en anomalie/audit. Tester crash simulé avant/après chaque écriture, livraison répétée, deux workers simultanés, timeout et reprise.
+
+### Crédit wallet — risque de double effet
+
+Le flux aperçu crédite le wallet intervenant lors de `payment_succeeded`. Il faut une contrainte d'unicité/ledger sur l'effet de crédit (transaction/provider-event/effet) et une opération atomique conditionnelle. La seule vérification du statut de la transaction n'est pas une garantie suffisante si plusieurs webhooks concurrents lisent le même statut avant mise à jour.
+
+**État :** risque documenté, correctif non intégré ni validé par tests d'intégration D1. Les paiements réels restent interdits.
