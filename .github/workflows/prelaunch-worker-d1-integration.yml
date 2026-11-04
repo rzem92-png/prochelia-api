@@ -45,6 +45,8 @@ jobs:
           for migration in migrations/0001_core_business_schema.sql migrations/0002_server_pricing.sql migrations/0003_route_address_provenance.sql migrations/0004_atomic_wallet_ledger.sql migrations/0005_security_rate_limits.sql; do
             npx --yes wrangler@4 d1 execute prochelia-preview-db --local --file "$migration"
           done
+      - name: Seed synthetic test account in ephemeral local D1
+        run: npx --yes wrangler@4 d1 execute prochelia-preview-db --local --file tests/fixtures/d1-auth-test-user.sql
       - name: Start local Workers runtime with D1 binding
         shell: bash
         run: |
