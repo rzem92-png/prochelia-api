@@ -54,3 +54,14 @@ Detailed evidence and required test cases: docs/payments/P0_PAYMENT_PAYOUT_CONCU
 Architecture/test contract: docs/payments/WALLET_LEDGER_ATOMICITY_DESIGN.md.
 
 **No real-money feature should be activated until these P0s are fixed and proven with Cloudflare D1 concurrency/crash tests and PSP sandbox reconciliation.**
+
+## Addendum — continuation checkpoint (2026-11-04)
+
+- Security regression contract added: `docs/security/AUTH_SECURITY_REGRESSION_MATRIX_2026-11-04.md` (commit `7e9f2d32564479e68352f86ad1becc4752efcf56`). It defines origin/CSRF, bootstrap race, session revocation, RBAC and zero-side-effect denial tests. **These tests are a contract; they have not yet been executed against isolated D1/browser runtime.**
+- Financial atomicity contract added: `docs/payments/P0_FINANCIAL_ATOMICITY_IMPLEMENTATION_CONTRACT_2026-11-04.md` (commit `f72014fd1d180914530c90edc89497e09bb5ff10`). It covers ledger effect uniqueness, D1 batch/rollback proof, state machines, PSP reconciliation and required concurrent/crash tests. **No payment implementation or migration was changed by this document.**
+- CI run **41916952481** completed successfully for commit `7e9f2d32564479e68352f86ad1becc4752efcf56`. This validates the existing configured workflow only; it does not execute the newly documented D1/CSRF/concurrency test matrix.
+- Cloudflare build **7b989ee7-07c0-44f4-9be4-4d74aa236911** succeeded for `7e9f2d...` (documentation-only branch commit).
+- Cloudflare build **92969e8e-bf95-442d-b56d-be6894ba6006** for `f72014...` was still queued at the last check.
+- Draft PR #88 remains unmerged. No production Worker, production D1, live PSP, live payout or real notifications were touched.
+
+**Next engineering gate:** implementation—not further documentation alone—of isolated D1 atomic financial effects and auth/CSRF/bootstrap race tests, with test evidence and failure injection. Keep release status **BLOCKED** until the results are green.
