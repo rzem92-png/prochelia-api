@@ -117,3 +117,21 @@ Do not merge or deploy until:
 8. explicit release authorization is recorded.
 
 Passing mocked provider tests only validates adapter behavior. It does **not** validate OTP security, WhatsApp consent, webhook authenticity, D1 behavior, or production readiness.
+
+
+## Addendum — review de concurrence (4 novembre 2026)
+
+### Rate limiting D1 — BLOQUANT avant trafic réel
+
+Le code de limitation observé dans `productionRateLimit()` fait actuellement un `SELECT request_count`, puis un `UPDATE` ou `INSERT` séparé. Cette séquence n'est pas atomique : deux requêtes simultanées peuvent lire le même compteur et écraser l'incrément de l'autre; lors du premier hit, deux `INSERT` peuvent aussi se heurter à la contrainte unique. Un attaquant peut exploiter ce comportement pour dépasser le seuil ou provoquer des erreurs 500.
+
+**Remédiation requise :** remplacer le read-modify-write par un incrément SQL atomique (`INSERT ... ON CONFLICT ... DO UPDATE SET request_count=request_count+1`) sur une clé unique `(bucket, subject_hash, window_start)`, puis lire le compteur; vérifier le comportement D1 en test concurrentiel. Si une seule opération atomique de comptage + décision n'est pas garantie, utiliser un mécanisme durable adapté (par exemple Durable Object) pour les limites strictes. Les limites IP seules ne suffisent pas : ajouter clés par compte/acteur et route, avec limites distinctes pour OTP/login, mission-code, webhook et paiements.
+
+**État :** constat documenté, correctif de code non intégré ici; ne pas déclarer le rate limiting robuste tant que le patch et les tests de concurrence ne sont pas passés.
+
+### Tests à ajouter au gate
+
+- Au moins 100 requêtes concurrentes dans la même fenêtre : aucun incrément perdu et aucun dépassement silencieux.
+- Première insertion concurrente sur une clé inexistante : pas d'erreur 500, compteur final exact.
+- Clé de fenêtre suivante : compteur indépendant, expiration/nettoyage sans supprimer les traces d'audit.
+- Limites par IP et par compte : pas de contournement trivial via changement de route ou de casse/normalisation d'identifiant.
