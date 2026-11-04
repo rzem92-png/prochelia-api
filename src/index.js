@@ -1383,8 +1383,16 @@ async function paymentWebhook(request, env) {
             .bind(crypto.randomUUID(),`payment:${txId}:refund:${tx.refund_cents}`,JSON.stringify({provider,event_id:eventId,source:'out_of_order_refund_reconciliation'}),txId,`payment:${txId}:refund:${tx.refund_cents}`)
         ]);
       } else if(newStatus==='refunded'){
-        const rawRefund=event?.data?.refund_cents??event?.data?.amount_refunded??tx.gross_cents;
-        const refundCents=Math.max(Number(tx.refund_cents||0),Math.min(Number(tx.gross_cents||0),Number(rawRefund||0)));
+        // Refund amount is cumulative in this webhook contract. Reject malformed
+        // values instead of coercing NaN/negative/fractional amounts or silently
+        // clamping over-refunds; that could hide PSP/internal reconciliation drift.
+        const refundField=event?.data?.refund_cents??event?.data?.amount_refunded;
+        const rawRefund=refundField===undefined||refundField===null?tx.gross_cents:Number(refundField);
+        if(!Number.isSafeInteger(rawRefund)||rawRefund<0||rawRefund>Number(tx.gross_cents||0)){
+          await env.DB.prepare("UPDATE payment_webhook_events SET processed=1,processed_at=CURRENT_TIMESTAMP WHERE provider=? AND event_id=? AND processed=2").bind(provider,eventId).run();
+          return json({ok:false,error:'INVALID_WEBHOOK_REFUND_AMOUNT',version:VERSION,retryable:false},400);
+        }
+        const refundCents=Math.max(Number(tx.refund_cents||0),rawRefund);
         const refundStatus=refundCents>=Number(tx.gross_cents||0)?'refunded':'partially_refunded';
         const refundKey=`payment:${txId}:refund:${refundCents}`;
         await env.DB.batch([
