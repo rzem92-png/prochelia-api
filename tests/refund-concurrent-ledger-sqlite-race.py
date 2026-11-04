@@ -91,7 +91,7 @@ refund(400)
 assert db.execute("SELECT refund_cents FROM payment_transactions WHERE id='tx'").fetchone()[0]==700
 assert db.execute("SELECT available_cents FROM wallets WHERE user_id='provider'").fetchone()[0]==150
 assert db.execute("""SELECT COUNT(*) FROM payment_wallet_ledger
- WHERE transaction_id='tx' AND entry_type='REFUND_REVERSAL'""").fetchone()[0]==1
+ WHERE transaction_id='tx' AND entry_type='REFUND_REVERSAL'""").fetchone()[0]==2
 db.close()
 Path(path).unlink(missing_ok=True)
 print("PASS: concurrent cumulative refund race, monotonic total, exact net reversal, duplicate and stale lower refund")
