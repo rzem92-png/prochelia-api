@@ -40,7 +40,8 @@ test('mission security code verification is scoped to the logged-in provider and
   assert.match(fn, /PRESENCE_CHECK_REQUIRED/);
   assert.match(fn, /trusted_devices/);
   assert.match(fn, /SECURITY_MAX_ATTEMPTS/);
-  assert.match(fn, /SECURITY_CODE_TTL_SECONDS/);
+  assert.match(fn, /SECURITY_CODE_EXPIRED/);
+  assert.match(fn, /SECURITY_LOCK_SECONDS/);
   assert.match(fn, /securityAudit/);
 });
 
