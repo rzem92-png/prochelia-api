@@ -600,8 +600,8 @@ test('Persistent rate limiter increments each bucket atomically under concurrent
 test('Invalid refund webhook amounts are rejected terminally without ledger mutation', () => {
   const webhook = source.slice(source.indexOf('async function paymentWebhook'), source.indexOf('async function openPaymentDispute'));
   const invalidRefund = webhook.slice(webhook.indexOf('INVALID_WEBHOOK_REFUND_AMOUNT') - 600, webhook.indexOf('INVALID_WEBHOOK_REFUND_AMOUNT') + 200);
-  assert.match(webhook, /Number\\.isSafeInteger\\(rawRefund\\)/);
-  assert.match(webhook, /rawRefund<0\\|\\|rawRefund>Number\\(tx\\.gross_cents\\|\\|0\\)/);
+  assert.match(webhook, /Number\.isSafeInteger\(rawRefund\)/);
+  assert.match(webhook, /rawRefund<0\|\|rawRefund>Number\(tx\.gross_cents\|\|0\)/);
   assert.match(invalidRefund, /processed=1,processed_at=CURRENT_TIMESTAMP/);
   assert.match(invalidRefund, /retryable:false/);
   assert.match(invalidRefund, /INVALID_WEBHOOK_REFUND_AMOUNT/);
@@ -609,10 +609,10 @@ test('Invalid refund webhook amounts are rejected terminally without ledger muta
 
 test('Cumulative refunds stay monotonic, idempotent, and bounded by credited amount', () => {
   const webhook = source.slice(source.indexOf('async function paymentWebhook'), source.indexOf('async function openPaymentDispute'));
-  assert.match(webhook, /Math\\.max\\(Number\\(tx\\.refund_cents\\|\\|0\\),rawRefund\\)/);
-  assert.match(webhook, /WHERE idempotency_key=\\?/);
-  assert.match(webhook, /payment:\\$\\{txId\\}:refund:\\$\\{refundCents\\}/);
-  assert.match(webhook, /SUM\\(-available_delta_cents\\) FROM payment_wallet_ledger l WHERE l\\.transaction_id=t\\.id AND l\\.entry_type='REFUND_REVERSAL'/);
-  assert.match(webhook, /MAX\\(0,ROUND\\(t\\.net_intervenant_cents\\*1\\.0\\*t\\.refund_cents\\/NULLIF\\(t\\.gross_cents,0\\)\\)-/);
-  assert.match(webhook, /COALESCE\\(refund_cents,0\\)<\\?/);
+  assert.match(webhook, /Math\.max\(Number\(tx\.refund_cents\|\|0\),rawRefund\)/);
+  assert.match(webhook, /WHERE idempotency_key=\?/);
+  assert.match(webhook, /payment:\$\{txId\}:refund:\$\{refundCents\}/);
+  assert.match(webhook, /SUM\(-available_delta_cents\) FROM payment_wallet_ledger l WHERE l\.transaction_id=t\.id AND l\.entry_type='REFUND_REVERSAL'/);
+  assert.match(webhook, /MAX\(0,ROUND\(t\.net_intervenant_cents\*1\.0\*t\.refund_cents\/NULLIF\(t\.gross_cents,0\)\)-/);
+  assert.match(webhook, /COALESCE\(refund_cents,0\)<\?/);
 });
