@@ -148,3 +148,24 @@ test("candidate workload limits prevent unbounded quadratic composition", () => 
     request, candidates: Array.from({ length: 10001 }, (_, i) => provider(String(i)))
   }), /candidate limit exceeded/);
 });
+
+test("NEXUS composition rejects safe-integer overflow when combining provider prices", () => {
+  const candidates = [
+    provider("cleaner", { skills: ["cleaning"], priceCents: Number.MAX_SAFE_INTEGER }),
+    provider("shopper", { skills: ["shopping"], priceCents: 1 })
+  ];
+  assert.throws(() => composeNexusScenarios({
+    request: { ...request, budgetCents: undefined },
+    candidates
+  }), /scenario price overflow/);
+});
+
+test("NEXUS ranking rejects non-finite distances and unsafe request budgets", () => {
+  assert.throws(() => rankNexusOpportunities({
+    request, candidates: [provider("bad-distance", { distanceKm: Infinity })]
+  }), /distanceKm/);
+  assert.throws(() => rankNexusOpportunities({
+    request: { ...request, budgetCents: Number.MAX_SAFE_INTEGER + 1 },
+    candidates: [provider("valid")]
+  }), /budgetCents/);
+});
