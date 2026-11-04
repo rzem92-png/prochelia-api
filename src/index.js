@@ -1389,7 +1389,7 @@ async function paymentWebhook(request, env) {
         const refundField=event?.data?.refund_cents??event?.data?.amount_refunded;
         const rawRefund=refundField===undefined||refundField===null?tx.gross_cents:Number(refundField);
         if(!Number.isSafeInteger(rawRefund)||rawRefund<0||rawRefund>Number(tx.gross_cents||0)){
-          await env.DB.prepare("UPDATE payment_webhook_events SET processed=0,processed_at=NULL WHERE provider=? AND event_id=? AND processed=2").bind(provider,eventId).run();
+          await env.DB.prepare("UPDATE payment_webhook_events SET processed=1,processed_at=CURRENT_TIMESTAMP WHERE provider=? AND event_id=? AND processed=2").bind(provider,eventId).run();
           return json({ok:false,error:'INVALID_WEBHOOK_REFUND_AMOUNT',version:VERSION,retryable:false},400);
         }
         const refundCents=Math.max(Number(tx.refund_cents||0),rawRefund);
