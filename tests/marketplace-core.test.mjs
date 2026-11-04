@@ -107,3 +107,36 @@ test('marketplace economics rejects non-finite and malformed optional monetary i
     }), /PSP_FEE_CENTS_MUST_BE_NON_NEGATIVE_SAFE_INTEGER/);
   }
 });
+
+test('order lifecycle allows cancellation only before work starts and refund finalization only from refund pending', () => {
+  for (const status of ['DRAFT', 'QUOTED', 'AWAITING_PAYMENT', 'ACCEPTED']) {
+    assert.equal(canTransitionOrder(status, 'CANCELLED').ok, true, status);
+  }
+  for (const status of ['PAID', 'IN_PROGRESS', 'FULFILLED', 'REFUND_PENDING', 'PARTIALLY_REFUNDED', 'REFUNDED']) {
+    assert.equal(canTransitionOrder(status, 'CANCELLED').ok, false, status);
+  }
+  assert.equal(canTransitionOrder('REFUND_PENDING', 'REFUNDED').ok, true);
+  assert.equal(canTransitionOrder('REFUND_PENDING', 'PARTIALLY_REFUNDED').ok, true);
+  assert.equal(canTransitionOrder('PARTIALLY_REFUNDED', 'REFUND_PENDING').ok, true);
+  assert.equal(canTransitionOrder('PARTIALLY_REFUNDED', 'REFUNDED').ok, false);
+});
+
+test('order lifecycle prevents work from starting while disputed and prevents terminal state resurrection', () => {
+  for (const target of ['ACCEPTED', 'IN_PROGRESS', 'PAID', 'QUOTED', 'AWAITING_PAYMENT']) {
+    assert.equal(canTransitionOrder('DISPUTED', target).ok, false, target);
+  }
+  for (const terminal of ['CANCELLED', 'REFUNDED']) {
+    for (const target of getOrderStatuses()) {
+      assert.equal(canTransitionOrder(terminal, target).ok, false, terminal + ' -> ' + target);
+    }
+  }
+});
+
+test('order lifecycle accepts dispute from payment and fulfillment states but not unpaid draft states', () => {
+  for (const status of ['PAID', 'ACCEPTED', 'IN_PROGRESS', 'FULFILLED', 'REFUND_PENDING', 'PARTIALLY_REFUNDED']) {
+    assert.equal(canTransitionOrder(status, 'DISPUTED').ok, true, status);
+  }
+  for (const status of ['DRAFT', 'QUOTED', 'AWAITING_PAYMENT', 'CANCELLED', 'REFUNDED']) {
+    assert.equal(canTransitionOrder(status, 'DISPUTED').ok, false, status);
+  }
+});
