@@ -1,0 +1,42 @@
+name: PROCHÉLIA — prelaunch regression suite
+
+on:
+  pull_request:
+    branches:
+      - prelaunch/v14.5.7-consolidation-audit
+    paths:
+      - "src/**"
+      - "tests/**"
+      - "package.json"
+      - ".github/workflows/prelaunch-regression-suite.yml"
+  push:
+    branches:
+      - prelaunch/v14.5.7-consolidation-audit
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: prochelia-prelaunch-regression-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  regression:
+    name: Node.js prelaunch regression tests (no deployment)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout exact commit
+        uses: actions/checkout@v4
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          package-manager-cache: false
+      - name: Verify Node/npm versions
+        run: |
+          node --version
+          npm --version
+      - name: Run complete prelaunch regression suite
+        run: npm run test:prelaunch
