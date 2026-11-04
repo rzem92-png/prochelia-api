@@ -4,38 +4,43 @@ import { readFile } from 'node:fs/promises';
 
 const source = await readFile(new URL('../src/index.js', import.meta.url), 'utf8');
 
-function routeBlock(path, nextPath) {
-  const start = source.indexOf(`if (url.pathname === '${path}')`);
-  assert.notEqual(start, -1, `route exists: ${path}`);
-  const end = source.indexOf(`if (url.pathname === '${nextPath}')`, start + 1);
-  assert.notEqual(end, -1, `next route boundary exists: ${nextPath}`);
+function block(startText, endText) {
+  const start = source.indexOf(startText);
+  assert.notEqual(start, -1, `start exists: ${startText}`);
+  const end = source.indexOf(endText, start + startText.length);
+  assert.notEqual(end, -1, `end exists: ${endText}`);
   return source.slice(start, end);
 }
 
-test('payment mission create and finalize public routes stay disabled until PSP flow is complete', () => {
-  const create = routeBlock('/api/payments/mission/create','/api/payments/mission/finalize');
-  assert.match(create, /MISSION_PAYMENT_FLOW_NOT_IMPLEMENTED/);
-  assert.match(create, /write_enabled:false/);
-  assert.doesNotMatch(create, /createMissionPayment\(request,env\)/);
-
-  const finalize = routeBlock('/api/payments/mission/finalize','/api/payments/payout');
-  assert.match(finalize, /MISSION_PAYMENT_FINALIZE_NOT_IMPLEMENTED/);
-  assert.match(finalize, /write_enabled:false/);
-  assert.doesNotMatch(finalize, /finalizeMissionPayment\(request,env\)/);
+test('mission payment creation remains disabled at the public route', () => {
+  const createRoute = block("if (url.pathname === '/api/payments/mission/create')", "if (url.pathname === '/api/payments/mission/finalize')");
+  assert.match(createRoute, /MISSION_PAYMENT_FLOW_NOT_IMPLEMENTED/);
+  assert.match(createRoute, /write_enabled:false/);
+  assert.doesNotMatch(createRoute, /createMissionPayment\(request,env\)/);
 });
 
-test('payout endpoint retains explicit disabled-by-default feature gate', () => {
-  const payout = routeBlock('/api/payments/payout','/api/payments/dispute');
-  assert.match(payout, /PAYOUTS_ENABLED/);
+test('financial settlement and refunds require PSP events; manager endpoint can only hold', () => {
+  const finalize = block('async function finalizeMissionPayment(request, env)', '\nasync function payoutRequest');
+  assert.match(finalize, /requireRole\(auth,\['gerante'\]\)/);
+  assert.match(finalize, /outcome!=='held'/);
+  assert.match(finalize, /PSP_EVENT_REQUIRED_FOR_FINANCIAL_TRANSITION/);
+  assert.match(finalize, /status='held'/);
+  assert.doesNotMatch(finalize, /status='paid'|status='refunded'/);
+});
+
+test('payout feature is disabled by default before payment schema or wallet mutation', () => {
+  const payout = block('async function payoutRequest(request, env)', '\nasync function verifyWebhookSignature');
+  const gate = payout.indexOf("if(String(env.PAYOUTS_ENABLED).toLowerCase()!=='true')");
+  const schema = payout.indexOf('await ensurePaymentSchema(env)');
+  assert.ok(gate >= 0 && schema > gate, 'payouts must fail closed before D1 schema/wallet work');
   assert.match(payout, /PAYOUTS_DISABLED_UNTIL_CONNECT_ACCEPTANCE/);
-  assert.match(payout, /423/);
-  assert.doesNotMatch(payout, /PAYOUTS_ENABLED.*true.*payoutRequest/s);
+  assert.match(payout, /\},423\)/);
 });
 
-test('Stripe webhook and payment provider route are not conflated', () => {
-  const providerWebhook = routeBlock('/api/payments/provider-webhook','/api/security/mission/prepare');
-  assert.match(providerWebhook, /paymentWebhook\(request,env\)/);
-  assert.doesNotMatch(providerWebhook, /stripeWebhook\(request,env\)/);
+test('Stripe webhook is separate from legacy provider webhook route', () => {
+  const providerRoute = block("if (url.pathname === '/api/payments/provider-webhook')", "if (url.pathname === '/api/security/mission/prepare')");
+  assert.match(providerRoute, /paymentWebhook\(request,env\)/);
+  assert.doesNotMatch(providerRoute, /stripeWebhook\(request,env\)/);
   assert.match(source, /stripeWebhook\(request,env\)/);
   assert.match(source, /STRIPE_WEBHOOK_NOT_CONFIGURED/);
 });
