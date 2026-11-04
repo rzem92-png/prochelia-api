@@ -1034,10 +1034,17 @@ async function paymentWebhook(request, env) {
   if(!inserted.meta?.changes){
     // A reused provider event ID must represent the exact same signed payload.
     // Do not silently acknowledge a conflicting payload as a harmless replay.
-    const prior=await env.DB.prepare(`SELECT payload_hash,event_type FROM payment_webhook_events WHERE provider=? AND event_id=? LIMIT 1`).bind(provider,eventId).first();
+    const prior=await env.DB.prepare(`SELECT payload_hash,event_type,processed FROM payment_webhook_events WHERE provider=? AND event_id=? LIMIT 1`).bind(provider,eventId).first();
     if(!prior || prior.payload_hash!==payloadHash || prior.event_type!==type){
       await paymentAudit(env,'PSP_WEBHOOK_EVENT_ID_COLLISION',{metadata:{provider,event_id:eventId,event_type:type}},'SECURITY_REJECTED');
       return json({ok:false,error:'WEBHOOK_EVENT_ID_COLLISION',version:VERSION},409,{'cache-control':'no-store'});
+    }
+    // Do not ACK an event whose effects may have been interrupted. This is
+    // intentionally fail-closed: recovery must be handled by a reconciler/lease
+    // workflow; blindly reprocessing here could double-credit under concurrency.
+    if(Number(prior.processed)!==1){
+      await paymentAudit(env,'PSP_WEBHOOK_DUPLICATE_UNPROCESSED',{metadata:{provider,event_id:eventId,event_type:type}},'RETRY_REQUIRED');
+      return json({ok:false,error:'WEBHOOK_EVENT_PENDING_RECOVERY',version:VERSION,event_id:eventId},503,{'cache-control':'no-store','retry-after':'30'});
     }
     return json({ok:true,version:VERSION,duplicate:true,event_id:eventId},200);
   }
