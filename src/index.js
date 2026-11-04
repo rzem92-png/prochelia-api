@@ -1343,6 +1343,14 @@ async function paymentWebhook(request, env) {
   }
   if(txId){
     const tx=await env.DB.prepare('SELECT * FROM payment_transactions WHERE id=? LIMIT 1').bind(txId).first();
+    const statusMap={payment_succeeded:'paid',charge_succeeded:'paid',payment_failed:'failed',charge_failed:'failed',payment_refunded:'refunded'};
+    // A successful charge must have a beneficiary before the transaction can
+    // be marked paid. Otherwise the webhook would be acknowledged while the
+    // provider wallet/ledger receives no credit (silent financial loss).
+    if(tx && statusMap[type]==='paid' && !clean(tx.intervenant_id)){
+      await env.DB.prepare("UPDATE payment_webhook_events SET processed=0,processed_at=NULL WHERE provider=? AND event_id=? AND processed=2").bind(provider,eventId).run();
+      return json({ok:false,error:'PAYMENT_BENEFICIARY_MISSING',version:VERSION,retryable:true},409);
+    }
     if(tx){
       const statusMap={payment_succeeded:'paid',charge_succeeded:'paid',payment_failed:'failed',charge_failed:'failed',payment_refunded:'refunded'};
       const newStatus=statusMap[type];
