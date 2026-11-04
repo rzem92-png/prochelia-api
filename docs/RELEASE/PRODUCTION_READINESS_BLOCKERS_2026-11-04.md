@@ -18,13 +18,16 @@ Status: development/preproduction only. This is not production approval.
 6. Payment reconciliation: compare provider records to internal transaction/wallet ledger and handle mismatch queues.
 7. Production readiness: legal/RGPD review, restore test, monitoring/alerting, rollback and end-to-end user journeys remain.
 
-## CI and preview deployment evidence — 2026-11-04
-- GitHub Actions workflow run 41915516473 completed successfully for the notification/security test job. It passed syntax checks, mocked notification provider tests, webhook HMAC tests, mission-code tests, and payment-idempotency tests.
-- This is a unit/CI result only. It does not establish D1 concurrency, PSP sandbox, end-to-end, security review, or production readiness.
-- Cloudflare builds 85fc18e4-253b-483d-b29e-b45822021f4c (commit cefda83...) and 697d0294-225e-447e-b3ad-c0ab5bee173a (commit 357f487...) both fail because the Workers preview command requires a Wrangler previews block.
-- Cloudflare Wrangler's suggested preview D1 binding referenced database id 04f52830-ef5a-4f17-a640-42bbc2381bba. **Do not copy that ID into previews until its environment is verified to be isolated and non-production.** Never bind PR previews to production D1.
-- The build trigger currently runs `npx wrangler preview` (Wrangler 4.157.0), an open-beta command. Confirm intended preview architecture, configure a dedicated isolated D1 database and preview binding, pin/test Wrangler, and then rerun preview.
-- Latest observed PR head is 797c6f07389d943284099d903371c20bb14262a1; workflow run 41915516473 is green, but combined commit status returned no status records. Confirm exact workflow SHA association before using this as release evidence.
+## CI and preview deployment evidence — 2026-11-04 (latest)
+
+- GitHub Actions workflow run **41916221208** is completed successfully for current PR head `4d6adf5c0e3fee1c4e7419693d18647c039837d6`. Steps passed: module syntax checks, mocked provider tests, webhook HMAC tests, mission-code tests, payment-idempotency tests, and guard confirming no live provider sends.
+- This is unit/CI evidence only. It does not establish Cloudflare D1 concurrency/crash safety, PSP sandbox, E2E, penetration/security review, legal/RGPD review or production readiness.
+- Cloudflare preview builds for earlier commits failed because Wrangler preview lacked a `previews` D1 binding.
+- Corrected `wrangler.jsonc` on the feature branch: normal Worker binding remains `prochelia-db` (`04f52830-ef5a-4f17-a640-42bbc2381bba`); preview-only binding now targets the separate database `prochelia-preview-db` (`6adb95e5-e542-4bec-9008-fbea01042305`). Metadata and schema inspection confirmed this preview database exists; no SQL writes or migrations were executed.
+- Cloudflare build **d8667b8d-b1ed-495e-a06c-803ef630b5ec** succeeded for commit `4d6adf5c0e3fee1c4e7419693d18647c039837d6`. Preview URL: https://feature-multichannel-notifications-v1-prochelia-api.rzem92.workers.dev . Unique build URL: https://9f451448-prochelia-api.rzem92.workers.dev .
+- Wrangler 4.157.0 warns that `wrangler preview` is open beta. Treat this as a successful preview deployment build, not as validation of API health or application flows. Health endpoint was not verified through an independent runtime probe in this check.
+- Preview uses a separate D1 binding, but the database still requires review for test data hygiene, privacy, and no real customer data. Do not load production data into preview.
+
 
 ## Do not
 - merge the draft PR;
