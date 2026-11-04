@@ -5025,8 +5025,8 @@ handle = async function(request,env){
     part.trim().startsWith(SESSION_COOKIE + '=')
   );
   const isProviderWebhook = new URL(request.url).pathname === '/api/payments/webhook';
-  if (mutating && hasSessionCookie && !isProviderWebhook && !origin) {
-    return json({ok:false,error:'ORIGIN_REQUIRED_FOR_SESSION_WRITE',version:VERSION},403);
+  if (mutating && hasSessionCookie && !isProviderWebhook && (!origin || !securityOriginAllowed(request,env))) {
+    return json({ok:false,error:origin?'ORIGIN_NOT_ALLOWED':'ORIGIN_REQUIRED_FOR_SESSION_WRITE',version:VERSION},403);
   }
   if (request.method === 'OPTIONS') {
     if (!origin || !securityOriginAllowed(request,env)) {
