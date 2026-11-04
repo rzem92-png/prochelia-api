@@ -917,6 +917,25 @@ async function paymentStatus(request, env) {
   return json({ok:true,version:VERSION,provider:paymentProvider(env),payments_configured:paymentsConfigured(env),wallet:{currency:wallet.currency,available_cents:wallet.available_cents,pending_cents:wallet.pending_cents,paid_cents:wallet.paid_cents,reserved_cents:wallet.reserved_cents},payout_account:account?{status:account.status,onboarding_status:account.onboarding_status,payouts_enabled:!!account.payouts_enabled}:null,pending_payouts:Number(pending?.total||0)},200);
 }
 
+// Pure idempotency guards are unit-tested independently of D1. They must
+// match the caller's identity and all immutable business parameters.
+export function isSameMissionPaymentOperation(existing, expected) {
+  return !!existing && existing.type === 'MISSION_CHARGE'
+    && existing.mission_id === expected.mission_id
+    && existing.client_id === expected.client_id
+    && existing.intervenant_id === expected.intervenant_id
+    && Number(existing.gross_cents) === expected.gross_cents
+    && Number(existing.commission_cents) === expected.commission_cents
+    && existing.currency === 'EUR';
+}
+
+export function isSamePayoutOperation(existing, expected) {
+  return !!existing && existing.user_id === expected.user_id
+    && Number(existing.amount_cents) === expected.amount_cents
+    && existing.mode === expected.mode
+    && existing.currency === 'EUR';
+}
+
 async function createMissionPayment(request, env) {
   const auth=await getSessionUser(request,env);
   if(!requireRole(auth,['gerante'])) return json({ok:false,error:auth?.user?'FORBIDDEN':'UNAUTHENTICATED',version:VERSION},auth?.user?403:401);
@@ -931,13 +950,7 @@ async function createMissionPayment(request, env) {
   if(old) {
     // An idempotency key is scoped to one exact business operation. Never disclose
     // or acknowledge a different transaction just because a caller reused its key.
-    const sameOperation = old.type === 'MISSION_CHARGE'
-      && old.mission_id === missionId
-      && old.client_id === clientId
-      && old.intervenant_id === intervenantId
-      && Number(old.gross_cents) === gross
-      && Number(old.commission_cents) === commission
-      && old.currency === 'EUR';
+    const sameOperation = isSameMissionPaymentOperation(old,{mission_id:missionId,client_id:clientId,intervenant_id:intervenantId,gross_cents:gross,commission_cents:commission});
     if(!sameOperation) return json({ok:false,error:'IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_REQUEST',version:VERSION},409);
     return json({ok:true,version:VERSION,idempotent_replay:true,transaction:old},200);
   }
@@ -983,10 +996,7 @@ async function payoutRequest(request, env) {
   const old=await env.DB.prepare('SELECT * FROM payout_requests WHERE idempotency_key=? LIMIT 1').bind(idem).first();
   if(old) {
     // Prevent cross-account replay and key reuse for a different amount/mode.
-    const sameOperation = old.user_id === auth.user.id
-      && Number(old.amount_cents) === amount
-      && old.mode === mode
-      && old.currency === 'EUR';
+    const sameOperation = isSamePayoutOperation(old,{user_id:auth.user.id,amount_cents:amount,mode});
     if(!sameOperation) return json({ok:false,error:'IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_REQUEST',version:VERSION},409);
     return json({ok:true,version:VERSION,idempotent_replay:true,payout:old},200);
   }
