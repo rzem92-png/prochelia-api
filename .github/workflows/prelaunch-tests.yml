@@ -1,0 +1,40 @@
+name: PROCHÉLIA Prelaunch Tests
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: prelaunch-tests-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  unit-and-regression:
+    name: Unit and regression tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package.json
+
+      - name: Verify Node version
+        run: node --version
+
+      - name: Syntax check API entrypoint
+        run: node --check index.js
+
+      - name: Run prelaunch test suite
+        run: npm run test:prelaunch
