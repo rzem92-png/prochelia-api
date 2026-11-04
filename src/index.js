@@ -4147,11 +4147,22 @@ async function stripeWebhook(request, env) {
         }
       } else if(disputeEvent.has(event.type)) {
         const disputeId=String(obj?.id||event.id);
-        await env.DB.prepare(`INSERT OR IGNORE INTO payment_disputes(id,mission_id,transaction_id,client_id,intervenant_id,status,reason,amount_cents,created_at,updated_at) VALUES(?,?,?,?,?,'open',?,?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`)
-          .bind('stripe:'+disputeId,tx.mission_id,tx.id,tx.client_id,tx.intervenant_id,clean(obj?.reason)||'stripe_dispute',Math.max(0,Number(obj?.amount||0))).run();
-        if(tx.status==='paid') await env.DB.prepare(`UPDATE payment_transactions SET status='held',updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(tx.id).run();
-        await paymentAudit(env,'STRIPE_DISPUTE_RECORDED',{transaction_id:tx.id,mission_id:tx.mission_id,metadata:{event_id:event.id,dispute_id:disputeId,amount_cents:Number(obj?.amount||0),reason:clean(obj?.reason)||null}},'OK');
-        result='DISPUTE_HELD';
+        const disputeAmountCents=Number(obj?.amount);
+        const disputeCurrency=String(obj?.currency||'').toLowerCase();
+        const disputeAmountValid=Number.isSafeInteger(disputeAmountCents)
+          && disputeAmountCents>0
+          && disputeAmountCents<=Number(tx.gross_cents||0)
+          && disputeCurrency===String(tx.currency||'EUR').toLowerCase();
+        if(!disputeAmountValid) {
+          await paymentAudit(env,'STRIPE_DISPUTE_AMOUNT_INVALID',{transaction_id:tx.id,mission_id:tx.mission_id,metadata:{event_id:event.id,dispute_id:disputeId,amount_cents:Number.isSafeInteger(disputeAmountCents)?disputeAmountCents:null,currency:disputeCurrency||null,gross_cents:Number(tx.gross_cents||0),transaction_currency:String(tx.currency||'EUR').toLowerCase()}},'BLOCKED');
+          result='DISPUTE_AMOUNT_INVALID';
+        } else {
+          await env.DB.prepare(`INSERT OR IGNORE INTO payment_disputes(id,mission_id,transaction_id,client_id,intervenant_id,status,reason,amount_cents,created_at,updated_at) VALUES(?,?,?,?,?,'open',?,?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`)
+            .bind('stripe:'+disputeId,tx.mission_id,tx.id,tx.client_id,tx.intervenant_id,clean(obj?.reason)||'stripe_dispute',disputeAmountCents).run();
+          if(tx.status==='paid') await env.DB.prepare(`UPDATE payment_transactions SET status='held',updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(tx.id).run();
+          await paymentAudit(env,'STRIPE_DISPUTE_RECORDED',{transaction_id:tx.id,mission_id:tx.mission_id,metadata:{event_id:event.id,dispute_id:disputeId,amount_cents:disputeAmountCents,currency:disputeCurrency,reason:clean(obj?.reason)||null}},'OK');
+          result='DISPUTE_HELD';
+        }
       }
       await paymentAudit(env,'STRIPE_WEBHOOK_PROCESSED',{transaction_id:tx.id,mission_id:tx.mission_id,metadata:{event_id:event.id,event_type:event.type,result}},'OK');
     }
