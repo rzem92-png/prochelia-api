@@ -596,3 +596,14 @@ test('Persistent rate limiter increments each bucket atomically under concurrent
   assert.doesNotMatch(limiter, /UPDATE security_rate_limits SET request_count=/);
   assert.match(limiter, /RATE_LIMIT_COUNTER_UNAVAILABLE/);
 });
+
+
+test('Generic PSP invalid refund amounts are rejected terminally and never mutate ledger', () => {
+  const webhook = source.slice(source.indexOf('async function paymentWebhook'), source.indexOf('async function openPaymentDispute'));
+  const invalidRefund = webhook.slice(webhook.indexOf('INVALID_WEBHOOK_REFUND_AMOUNT') - 600, webhook.indexOf('INVALID_WEBHOOK_REFUND_AMOUNT') + 200);
+  assert.match(webhook, /Number\.isSafeInteger\(rawRefund\)/);
+  assert.match(webhook, /rawRefund<0\|\|rawRefund>Number\(tx\.gross_cents\|\|0\)/);
+  assert.match(invalidRefund, /processed=1,processed_at=CURRENT_TIMESTAMP/);
+  assert.match(invalidRefund, /retryable:false/);
+  assert.match(invalidRefund, /INVALID_WEBHOOK_REFUND_AMOUNT/);
+});
