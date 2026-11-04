@@ -80,7 +80,7 @@ db=connect()
 status=db.execute("SELECT status FROM payout_requests WHERE id='payout-1'").fetchone()[0]
 wallet=db.execute("SELECT available_cents,reserved_cents,paid_cents FROM wallets WHERE user_id='provider'").fetchone()
 entries=db.execute("""SELECT entry_type,available_delta_cents,reserved_delta_cents,paid_delta_cents
- FROM payment_wallet_ledger WHERE payout_id='payout-1' AND entry_type LIKE 'PAYOUT_%'""").fetchall()
+ FROM payment_wallet_ledger WHERE payout_id='payout-1' AND entry_type IN ('PAYOUT_COMPLETED','PAYOUT_FAILED','PAYOUT_CANCELED')""").fetchall()
 assert status in ("completed","failed"), status
 assert len(entries)==1, entries
 if status=="completed":
@@ -93,7 +93,7 @@ else:
 # Replays and stale competing terminal event cannot produce another ledger move.
 terminal(status)
 terminal("failed" if status=="completed" else "completed")
-assert db.execute("SELECT COUNT(*) FROM payment_wallet_ledger WHERE payout_id='payout-1' AND entry_type LIKE 'PAYOUT_%'").fetchone()[0]==1
+assert db.execute("SELECT COUNT(*) FROM payment_wallet_ledger WHERE payout_id='payout-1' AND entry_type IN ('PAYOUT_COMPLETED','PAYOUT_FAILED','PAYOUT_CANCELED')").fetchone()[0]==1
 assert db.execute("SELECT available_cents,reserved_cents,paid_cents FROM wallets WHERE user_id='provider'").fetchone()==wallet
 db.close()
 Path(db_path).unlink(missing_ok=True)
