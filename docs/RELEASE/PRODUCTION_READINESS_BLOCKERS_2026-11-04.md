@@ -5,7 +5,7 @@ Status: development/preproduction only. This is not production approval.
 
 ## Current branch work
 - Atomic rate-limit counter: D1 UPSERT + RETURNING; fails closed if the counter result is invalid.
-- Payment webhook event replay: same provider/event ID with same payload hash is acknowledged as duplicate.
+- Payment webhook event replay: same provider/event ID with same payload hash is acknowledged only if already processed; an unprocessed duplicate now fails closed with HTTP 503 / Retry-After (recovery worker still missing).
 - Conflicting payload hash or event type for the same event ID: rejected with HTTP 409 and audit event.
 - CI workflow includes src/index.js syntax check when backend entrypoint changes.
 
