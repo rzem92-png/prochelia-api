@@ -1336,7 +1336,7 @@ async function paymentWebhook(request, env) {
     // Bind the event's configured provider to the persisted transaction.
     // Prevent cross-provider callbacks from mutating a transaction by ID.
     if(String(referencedTx.provider||'')!==String(provider)){
-      await env.DB.prepare("UPDATE payment_webhook_events SET processed=0,processed_at=NULL WHERE provider=? AND event_id=? AND processed=2").bind(provider,eventId).run();
+      await env.DB.prepare("UPDATE payment_webhook_events SET processed=1,processed_at=CURRENT_TIMESTAMP WHERE provider=? AND event_id=? AND processed=2").bind(provider,eventId).run();
       return json({ok:false,error:'WEBHOOK_TRANSACTION_PROVIDER_MISMATCH',version:VERSION,retryable:false},409);
     }
   }
@@ -1348,7 +1348,7 @@ async function paymentWebhook(request, env) {
     }
     // Same provider-object binding for payout status and wallet reservation release.
     if(String(referencedPayout.provider||'')!==String(provider)){
-      await env.DB.prepare("UPDATE payment_webhook_events SET processed=0,processed_at=NULL WHERE provider=? AND event_id=? AND processed=2").bind(provider,eventId).run();
+      await env.DB.prepare("UPDATE payment_webhook_events SET processed=1,processed_at=CURRENT_TIMESTAMP WHERE provider=? AND event_id=? AND processed=2").bind(provider,eventId).run();
       return json({ok:false,error:'WEBHOOK_PAYOUT_PROVIDER_MISMATCH',version:VERSION,retryable:false},409);
     }
   }
