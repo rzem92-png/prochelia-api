@@ -1,5 +1,8 @@
 name: PROCHÉLIA prelaunch audit checks
 on:
+  pull_request:
+    branches:
+      - prelaunch/v14.5.7-consolidation-audit
   push:
     branches:
       - prelaunch/v14.5.7-consolidation-audit
