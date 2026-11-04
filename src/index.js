@@ -5016,6 +5016,18 @@ handle = async function(request,env){
 const __procheliaCorsHandle = handle;
 handle = async function(request,env){
   const origin = request.headers.get('origin');
+  // Cookie-authenticated browser writes must carry an explicit allowlisted Origin.
+  // Requests without Origin are not safe to accept with a SameSite=None session
+  // cookie (CSRF). Keep provider webhooks and non-cookie API clients unaffected.
+  const mutating = isMutatingMethod(request.method);
+  const cookieHeader = request.headers.get('cookie') || '';
+  const hasSessionCookie = cookieHeader.split(';').some(part =>
+    part.trim().startsWith(SESSION_COOKIE + '=')
+  );
+  const isProviderWebhook = new URL(request.url).pathname === '/api/payments/webhook';
+  if (mutating && hasSessionCookie && !isProviderWebhook && !origin) {
+    return json({ok:false,error:'ORIGIN_REQUIRED_FOR_SESSION_WRITE',version:VERSION},403);
+  }
   if (request.method === 'OPTIONS') {
     if (!origin || !securityOriginAllowed(request,env)) {
       return json({ok:false,error:'ORIGIN_NOT_ALLOWED',version:VERSION},403);
