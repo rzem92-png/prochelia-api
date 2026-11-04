@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
 const source = readFileSync(new URL('../src/index.js', import.meta.url), 'utf8');
-const start = source.indexOf('async function stripeWebhook(');
-const end = source.indexOf('\nasync function stripeCheckout', start);
+const start = source.indexOf('async function paymentWebhook(');
+const end = source.indexOf('\nasync function stripeWebhook(', start);
 const webhook = source.slice(start, end);
 
 test('refund webhook contract rejects unsafe, negative and over-gross cumulative amounts', () => {
