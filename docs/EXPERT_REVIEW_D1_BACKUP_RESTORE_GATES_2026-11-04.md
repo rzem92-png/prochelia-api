@@ -63,3 +63,51 @@ Ce compteur est probablement obsolète si les cinq migrations sont enregistrées
 - [ ] Exécuter uniquement sur la base restore-test v2 isolée après validation de l'UUID et du contenu de l'archive.
 
 **Statut : bloquant pour déclarer la restauration v2 validée ; aucun workflow restore ni migration lancé par cet audit.**
+
+
+## Revue sécurité des PR #87 et #88 — 2026-11-04
+
+Cette revue est statique, basée sur les patches GitHub. Elle ne remplace pas l'exécution CI/D1 et ne valide aucune mise en production.
+
+### PR #87 — CORS, cookie de session et profils
+
+**Points favorables observés**
+- Preflight OPTIONS est traité avant rate-limit/D1.
+- Origine non autorisée rejetée.
+- Méthodes et headers preflight sont limités.
+- Route client : le rôle client est filtré par `c.user_id` de la session.
+- Route intervenant côté client : liste limitée aux profils actifs/validés et email/téléphone masqués.
+- Tests couvrent ces principaux cas.
+
+**Garde de merge à conserver**
+1. Le cookie passe de `SameSite=Lax` à `SameSite=None`. Cela rend le cookie utilisable en contexte cross-site mais augmente l'importance de la défense CSRF. Avant merge, vérifier le contrôle CSRF sur chaque mutation authentifiée : token imprévisible lié à la session, validation côté serveur, Origin/Referer strict, rejet par défaut. Le simple fait d'autoriser `X-CSRF-Token` dans CORS ne prouve pas que le token est vérifié.
+2. Ajouter un test CSRF négatif pour les routes sensibles (missions, profil, paiement, payout, résolution litige), et un test positif avec token valide.
+3. Les routes de listing client/intervenant renvoient actuellement des listes sans pagination. Ajouter pagination bornée (limit/max + cursor) avant usage avec volumes réels ; ne pas exposer notes/adresses de client à des rôles qui n'en ont pas besoin.
+4. Vérifier que le mapping de statut des clients n'affiche pas tous les statuts non-actifs comme simplement « À vérifier » si suspension/bloquage doit être explicite.
+5. Contrôler que les noms/colonnes D1 de disponibilité sont conformes au schéma de la branche cible et que le filtrage des dates est timezone-aware.
+
+**Statut PR #87 : à garder draft jusqu'à tests CSRF et pagination / revue de minimisation des données.**
+
+### PR #88 — providers email/WhatsApp
+
+**Points favorables observés**
+- Les adapters ne journalisent pas les credentials/payloads.
+- WhatsApp n'autorise que les templates.
+- L'adapter indique clairement que l'idempotence Meta doit être assurée en amont.
+- Tests utilisent fetch simulé et ne font pas d'envoi réel.
+
+**Blocages avant activation**
+1. Le helper HMAC PROCHÉLIA `v1=<hex>` ne doit pas être présenté comme validation des webhooks Meta. Meta WhatsApp utilise sa propre signature (notamment `X-Hub-Signature-256`, HMAC-SHA256 sur le corps brut avec App Secret) et le challenge de vérification GET. Implémenter un handler spécifique Meta, vérifier le corps brut, comparer en constant-time et gérer challenge/subscribe; ne jamais accepter la signature générique comme alternative.
+2. Resend et Meta nécessitent timeout/AbortSignal et traitement de réponses non-JSON / erreurs réseau sans fuite de secret.
+3. Avant appel adapter : validation et normalisation strictes des numéros, templates/langue/composants autorisés, consentement (opt-in WhatsApp), préférence/canal, quotas, dedupe durable de notification.
+4. Les retries ne doivent pas réémettre de messages non-idempotents (WhatsApp) après un timeout ambigu : conserver l'état « résultat inconnu », réconciliation et politique de retry contrôlée.
+5. Tester secret absent, HTTP 429, 4xx/5xx, timeout, JSON invalide, doublon, opt-out, template interdit, consentement expiré, redaction logs et event replay.
+6. Garder secrets provider uniquement en Worker secrets, non dans wrangler JSON, code, logs ou frontend. Aucun test d'envoi réel sans sandbox/validation humaine.
+
+**Statut PR #88 : provider adapters en préproduction seulement; webhook Meta non validé; pas d'activation live.**
+
+### Synthèse décisionnelle
+- PR #87 : pas de merge sans preuve CSRF côté serveur et revue pagination/minimisation.
+- PR #88 : pas d'activation WhatsApp live sans webhook Meta spécifique et dedupe durable.
+- Ces observations ne sont pas des tests passés. CI des patches et tests d'intégration sont requis.
+- Aucun merge, secret Cloudflare, migration, message réel ou déploiement n'a été exécuté par cette revue.
