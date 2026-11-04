@@ -2,7 +2,7 @@ name: "PROCHÉLIA API — notification providers and webhook security tests"
 
 on:
   pull_request:
-    branches: [main]
+    branches: ["main", "integration/auth-cors-profile-routes-v1"]
     paths:
       - "src/notifications/**"
       - "src/security/webhook-hmac.js"
