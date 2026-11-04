@@ -36,6 +36,8 @@ jobs:
         run: python3 tests/refund-ledger-sqlite-invariants.py
       - name: Stripe webhook event claim SQLite invariants
         run: python3 tests/stripe-webhook-event-claim-sqlite.py
+      - name: Concurrent refund ledger SQLite race model
+        run: python3 tests/refund-concurrent-ledger-sqlite-race.py
       - name: Wallet ledger SQLite invariants
         run: |
           python3 - <<'PY'
