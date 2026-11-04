@@ -36,3 +36,25 @@ test('payout ownership regression test is included exactly once in prelaunch sui
   assert.match(script, /tests\/mission-security-ownership-contracts\.test\.mjs/);
   assert.match(script, /tests\/refund-webhook-monotonic-ledger\.test\.mjs/);
 });
+
+test('payout idempotency key remains globally unique at the D1 schema layer', async () => {
+  const source = await readFile(new URL('../src/index.js', import.meta.url), 'utf8');
+  const start = source.indexOf('CREATE TABLE IF NOT EXISTS payout_requests');
+  const end = source.indexOf('`)', start);
+  assert.notEqual(start, -1, 'payout_requests schema must be declared');
+  assert.notEqual(end, -1, 'payout_requests schema block must be closed');
+  const schema = source.slice(start, end);
+  assert.match(schema, /idempotency_key TEXT NOT NULL UNIQUE/);
+  assert.match(schema, /user_id TEXT NOT NULL/);
+  assert.match(schema, /wallet_id TEXT NOT NULL/);
+});
+
+test('wallet schema enforces one wallet per user', async () => {
+  const source = await readFile(new URL('../src/index.js', import.meta.url), 'utf8');
+  const start = source.indexOf('CREATE TABLE IF NOT EXISTS wallets');
+  const end = source.indexOf('`)', start);
+  assert.notEqual(start, -1, 'wallet schema must be declared');
+  assert.notEqual(end, -1, 'wallet schema block must be closed');
+  const schema = source.slice(start, end);
+  assert.match(schema, /user_id TEXT NOT NULL UNIQUE/);
+});
