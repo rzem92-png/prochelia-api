@@ -1829,22 +1829,30 @@ async function createOperationalCase(request, env) {
   const gate=await requireAuthRole(request,env,['gerante','client','intervenant','entreprise']); if(gate.error)return gate.error;
   const body=await readJson(request)||{};
   const caseType=clean(body.case_type); if(!caseType)return json({ok:false,error:'CASE_TYPE_REQUIRED',version:VERSION},400);
+  // Caller-supplied IDs are not proof of ownership. Until canonical user/profile
+  // relations are enforced, only gerante may link cases to entity records.
+  const role=String(gate.user?.role || gate.role || '').toLowerCase();
+  const hasLinkedIds=['client_id','company_id','intervenant_id','mission_id'].some(k=>clean(body[k]));
+  if(role!=='gerante' && hasLinkedIds)
+    return json({ok:false,error:'CASE_ENTITY_LINK_FORBIDDEN',version:VERSION},403);
+  // Do not let non-admin callers downgrade case impact to trigger automation.
+  const impact=role==='gerante' ? String(body.impact_level||'LOW').toUpperCase() : 'MEDIUM';
+  if(!Object.prototype.hasOwnProperty.call(CASE_PRIORITIES,impact))
+    return json({ok:false,error:'INVALID_CASE_IMPACT',version:VERSION},400);
   const phase=String(await getSetting(env,'project_phase','TEST')).toUpperCase();
-  const impact=String(body.impact_level||'LOW').toUpperCase();
-  const priority=CASE_PRIORITIES[impact]||10;
+  const priority=CASE_PRIORITIES[impact];
   const rec=await copilotRecommend(env,{caseType,impact,phase,context:body.context||{}});
   const id=crypto.randomUUID();
   const requiresManager=rec.mode==='MANAGER_APPROVAL' ? 1 : 0;
   const status=rec.action==='AUTO_RESOLVE' ? 'AUTO_PENDING' : 'OPEN';
   await env.DB.prepare(`INSERT INTO operational_cases(id,case_type,source,phase,priority,status,auto_mode,client_id,company_id,intervenant_id,mission_id,impact_level,description,context_json,proposed_solution_json,requires_manager) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
-    .bind(id,caseType,'API',phase,priority,status,rec.mode,clean(body.client_id)||null,clean(body.company_id)||null,clean(body.intervenant_id)||null,clean(body.mission_id)||null,impact,clean(body.description)||null,JSON.stringify(body.context||{}),JSON.stringify(rec),requiresManager).run();
+    .bind(id,caseType,'API',phase,priority,status,rec.mode,role==='gerante'?(clean(body.client_id)||null):null,role==='gerante'?(clean(body.company_id)||null):null,role==='gerante'?(clean(body.intervenant_id)||null):null,role==='gerante'?(clean(body.mission_id)||null):null,impact,clean(body.description)||null,JSON.stringify(body.context||{}),JSON.stringify(rec),requiresManager).run();
   await env.DB.prepare(`INSERT INTO copilot_log(id,case_id,action_type,recommendation,confidence,mode) VALUES(?,?,?,?,?,?)`)
     .bind(crypto.randomUUID(),id,rec.action,JSON.stringify(rec.solution),rec.confidence,rec.mode).run();
   await journal(env,'copilot',null,'CASE_CREATED','operational_case',id,'OK',{caseType,impact});
   if(rec.action==='AUTO_RESOLVE') await executeOperationalCase(env,id,null,true);
   return json({ok:true,version:VERSION,case_id:id,recommendation:rec,status:rec.action==='AUTO_RESOLVE'?'AUTO_EXECUTED':'WAITING_MANAGER'},201);
 }
-
 
 async function getTableColumns(env, table) {
   if (!env.DB) return [];
