@@ -1936,7 +1936,12 @@ async function executeOperationalCase(env, caseId, approverId=null, automatic=fa
   if(!c)return {ok:false,error:'CASE_NOT_FOUND'};
   if(c.status==='RESOLVED')return {ok:true,already:true};
   const rec=c.proposed_solution_json?JSON.parse(c.proposed_solution_json):{};
-  if(c.requires_manager && !automatic && !approverId) return {ok:false,error:'MANAGER_APPROVAL_REQUIRED'};
+  // Internal callers cannot use `automatic=true` to bypass manager approval.
+  // Automatic execution is restricted to the central low-impact allowlist.
+  if(automatic && !canAutoResolveSupportScenario(c.case_type,c.impact_level,true))
+    return {ok:false,error:'AUTOMATIC_ACTION_NOT_ALLOWED'};
+  if(c.requires_manager && (automatic || !approverId))
+    return {ok:false,error:'MANAGER_APPROVAL_REQUIRED'};
   const businessResults = await executeCaseBusinessAction(env,c,rec,approverId,automatic);
   // Enqueuing an action is not proof that it ran. Keep the case open until a
   // trusted downstream adapter returns a verified receipt and all required work
