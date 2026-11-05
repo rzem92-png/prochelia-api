@@ -60,6 +60,6 @@ export function stripeWebhookAmountMatches({ eventType, amount, currency, grossC
   const normalizedCurrency = String(currency || '').toLowerCase();
   const expectedCurrency = String(transactionCurrency || 'EUR').toLowerCase();
   if (!Number.isSafeInteger(cents) || !Number.isSafeInteger(gross) || gross <= 0 || !normalizedCurrency || normalizedCurrency !== expectedCurrency) return false;
-  if (eventType === 'charge.dispute.created') return cents > 0 && cents <= gross;
+  if (eventType === 'charge.dispute.created' || eventType === 'charge.dispute.closed') return cents > 0 && cents <= gross;
   return cents === gross;
 }
