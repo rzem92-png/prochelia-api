@@ -65,3 +65,11 @@ test('Stripe webhook amount validation allows bounded partial disputes but rejec
   assert.equal(stripeWebhookAmountMatches({...base,eventType:'charge.refunded',amount:10000}),true);
   assert.equal(stripeWebhookAmountMatches({...base,eventType:'charge.refunded',amount:10000,currency:'usd'}),false);
 });
+
+
+test('Stripe PaymentIntent lookup fails closed on HTTP error, fetch exception, invalid JSON, or missing metadata',async()=>{
+  assert.equal(await resolveStripeTransactionId('pi_test123','sk_test',async()=>({ok:false,json:async()=>({})})),null);
+  assert.equal(await resolveStripeTransactionId('pi_test123','sk_test',async()=>{throw new Error('network down')}),null);
+  assert.equal(await resolveStripeTransactionId('pi_test123','sk_test',async()=>({ok:true,json:async()=>{throw new Error('bad json')}})),null);
+  assert.equal(await resolveStripeTransactionId('pi_test123','sk_test',async()=>({ok:true,json:async()=>({id:'pi_test123',metadata:{}})})),null);
+});
