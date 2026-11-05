@@ -502,3 +502,13 @@ test("production rate limiter uses atomic UPSERT and performs no runtime DDL", (
   assert.ok(!fn.includes('productionSafetySchema('));
   assert.ok(!fn.includes('SELECT request_count FROM security_rate_limits'));
 });
+
+test("webhook HMAC signature comparison avoids early mismatch exits", () => {
+  const start=source.indexOf("function constantTimeStringEqual(a,b)");
+  const end=source.indexOf("\\nasync function verifyWebhookSignature",start);
+  const helper=source.slice(start,end);
+  assert.ok(start>=0 && end>start);
+  assert.ok(helper.includes("diff|=a.charCodeAt(i)^b.charCodeAt(i)"));
+  assert.ok(helper.includes("for(let i=0;i<a.length;i++)"));
+  assert.ok(helper.includes("return diff===0"));
+});
