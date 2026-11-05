@@ -1057,6 +1057,9 @@ async function openPaymentDispute(request, env) {
   if(!missionId||!reason||amount===null) return json({ok:false,error:'INVALID_DISPUTE',version:VERSION},400);
   const tx=await env.DB.prepare(`SELECT * FROM payment_transactions WHERE mission_id=? ORDER BY created_at DESC LIMIT 1`).bind(missionId).first();
   if(!tx) return json({ok:false,error:'PAYMENT_NOT_FOUND_FOR_MISSION',version:VERSION},404);
+  // Disputes must concern a captured/held payment and cannot exceed its gross amount.
+  if(!['paid','held'].includes(tx.status)) return json({ok:false,error:'PAYMENT_NOT_DISPUTABLE',version:VERSION,status:tx.status},409);
+  if(amount<=0 || amount>Number(tx.gross_cents)) return json({ok:false,error:'DISPUTE_AMOUNT_OUT_OF_RANGE',version:VERSION,max_amount_cents:Number(tx.gross_cents)},400);
   // A client may open a dispute only for a payment tied to their own account.
   if(auth.user.role==='client' && String(tx.client_id)!==String(auth.user.id)) return json({ok:false,error:'FORBIDDEN',version:VERSION},403);
   if(tx.status==='paid') await env.DB.prepare(`UPDATE payment_transactions SET status='held',updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(tx.id).run();
