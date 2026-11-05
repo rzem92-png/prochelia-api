@@ -1008,8 +1008,8 @@ async function paymentWebhook(request, env) {
         await env.DB.prepare(`UPDATE payout_requests SET status='processing',provider_payout_id=COALESCE(?,provider_payout_id),updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='requested'`)
           .bind(clean(event?.data?.provider_payout_id)||null,payoutId).run();
       } else {
-        const terminalUpdate=env.DB.prepare(`UPDATE payout_requests SET status=?,provider_payout_id=COALESCE(?,provider_payout_id),failure_code=?,failure_message=?,completed_at=CASE WHEN ?='completed' THEN CURRENT_TIMESTAMP ELSE completed_at END,updated_at=CURRENT_TIMESTAMP WHERE id=? AND status IN ('requested','processing')`)
-          .bind(newStatus,clean(event?.data?.provider_payout_id)||null,clean(event?.data?.failure_code)||null,clean(event?.data?.failure_message)||null,newStatus,payoutId);
+        const terminalUpdate=env.DB.prepare(`UPDATE payout_requests SET status=?,provider_payout_id=COALESCE(?,provider_payout_id),failure_code=?,failure_message=?,completed_at=CASE WHEN ?='completed' THEN CURRENT_TIMESTAMP ELSE completed_at END,updated_at=CURRENT_TIMESTAMP WHERE id=? AND status IN ('requested','processing') AND EXISTS (SELECT 1 FROM wallets WHERE id=? AND reserved_cents>=?)`)
+          .bind(newStatus,clean(event?.data?.provider_payout_id)||null,clean(event?.data?.failure_code)||null,clean(event?.data?.failure_message)||null,newStatus,payoutId,payout.wallet_id,payout.amount_cents);
         let walletUpdate=null;
         if(newStatus==='completed'){
           walletUpdate=env.DB.prepare(`UPDATE wallets SET reserved_cents=reserved_cents-?,paid_cents=paid_cents+?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND reserved_cents>=? AND changes()=1`)
