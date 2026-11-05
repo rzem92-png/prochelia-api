@@ -3219,7 +3219,7 @@ async function stripeWebhook(request, env) {
             }
           }
         }
-        result='PAYMENT_CONFIRMED';
+        if(result!=='PAYMENT_CONFIRMED_WALLET_CREDIT_PENDING') result='PAYMENT_CONFIRMED';
       } else if(failedEvent.has(event.type)) {
         if(!['paid','refunded'].includes(tx.status)) await env.DB.prepare(`UPDATE payment_transactions SET status='failed',updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(tx.id).run();
         result='PAYMENT_FAILED';
