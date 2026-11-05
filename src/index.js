@@ -1057,6 +1057,8 @@ async function openPaymentDispute(request, env) {
   if(!missionId||!reason||amount===null) return json({ok:false,error:'INVALID_DISPUTE',version:VERSION},400);
   const tx=await env.DB.prepare(`SELECT * FROM payment_transactions WHERE mission_id=? ORDER BY created_at DESC LIMIT 1`).bind(missionId).first();
   if(!tx) return json({ok:false,error:'PAYMENT_NOT_FOUND_FOR_MISSION',version:VERSION},404);
+  // A client may open a dispute only for a payment tied to their own account.
+  if(auth.user.role==='client' && String(tx.client_id)!==String(auth.user.id)) return json({ok:false,error:'FORBIDDEN',version:VERSION},403);
   if(tx.status==='paid') await env.DB.prepare(`UPDATE payment_transactions SET status='held',updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(tx.id).run();
   const id=crypto.randomUUID();
   await env.DB.prepare(`INSERT INTO payment_disputes (id,mission_id,transaction_id,client_id,intervenant_id,status,reason,amount_cents) VALUES (?,?,?,?,?,?,?,?)`).bind(id,missionId,tx.id,tx.client_id,tx.intervenant_id,'open',reason,amount).run();
@@ -1108,7 +1110,7 @@ async function handleBase(request, env) {
   }
   if (url.pathname === '/api/payments/dispute') {
     if (request.method !== 'POST') return json({ok:false,error:'METHOD_NOT_ALLOWED',version:VERSION},405,{'allow':'POST'});
-    return paymentDispute(request,env);
+    return openPaymentDispute(request,env);
   }
   if (url.pathname === '/api/payments/dispute/resolve') {
     if (request.method !== 'POST') return json({ok:false,error:'METHOD_NOT_ALLOWED',version:VERSION},405,{'allow':'POST'});
