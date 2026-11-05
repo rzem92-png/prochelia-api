@@ -3374,6 +3374,17 @@ async function stripeWebhook(request, env) {
         const refundedCents=Math.max(0,Math.min(Number(tx.gross_cents)||0,Number(obj?.amount_refunded ?? amount)));
         const refundStatus=refundedCents >= Number(tx.gross_cents) ? 'refunded' : 'partially_refunded';
         await env.DB.prepare(`UPDATE payment_transactions SET status=CASE WHEN MAX(refund_cents,?)>=gross_cents THEN 'refunded' ELSE 'partially_refunded' END,refund_cents=MAX(refund_cents,?),updated_at=CURRENT_TIMESTAMP WHERE id=? AND status NOT IN ('failed','cancelled')`).bind(refundedCents,refundedCents,tx.id).run();
+        // Record the persisted cumulative refund in reconciliation. Use a
+        // deterministic external key per charge + cumulative cents so retries
+        // and duplicate webhook deliveries remain idempotent. No wallet debit
+        // or payout adjustment is performed automatically.
+        const refundState=await env.DB.prepare('SELECT refund_cents,status FROM payment_transactions WHERE id=? LIMIT 1').bind(tx.id).first();
+        const persistedRefundCents=Math.max(0,Number(refundState?.refund_cents||0));
+        const stripeChargeId=clean(obj?.id);
+        if(stripeChargeId && persistedRefundCents>0) {
+          await env.DB.prepare(`INSERT OR IGNORE INTO payment_reconciliation(id,provider,external_id,internal_transaction_id,amount_cents,currency,status)
+            VALUES(?,?,?,?,?,?, 'pending')`).bind(crypto.randomUUID(),'stripe',`${stripeChargeId}:refund:${persistedRefundCents}`,tx.id,persistedRefundCents,String(obj?.currency||tx.currency||'EUR').toUpperCase()).run();
+        }
         result=refundStatus==='refunded'?'REFUND_RECORDED':'PARTIAL_REFUND_RECORDED';
       } else if(disputeEvent.has(event.type)) {
         // Stripe dispute lifecycle. Closed disputes are not financial settlement:
