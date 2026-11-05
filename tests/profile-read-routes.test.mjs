@@ -87,6 +87,8 @@ test("client sees approved providers without email or phone", async()=>{
   assert.equal(body.intervenants[0].id,"provider-1");
   assert.equal(body.intervenants[0].email,null);
   assert.equal(body.intervenants[0].telephone,null);
+  assert.equal(body.intervenants[0].nom,null,"surname must be hidden from client-facing provider listing");
+  assert.equal(body.intervenants[0].prenom,"Alex");
 });
 
 test("provider receives only their own profile", async()=>{
