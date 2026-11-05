@@ -845,7 +845,10 @@ async function paymentOnboard(request, env) {
   await ensurePaymentSchema(env);
   const body = await readJson(request);
   const provider = paymentProvider(env);
-  const accountId = clean(body?.provider_account_id) || null;
+  // A PSP account identifier must only be assigned by a trusted server-side
+  // onboarding callback, never accepted from an intervenant-controlled payload.
+  if (clean(body?.provider_account_id)) return json({ok:false,error:'PROVIDER_ACCOUNT_ID_SERVER_ASSIGNED',version:VERSION},400);
+  const accountId = null;
   const existing = await env.DB.prepare('SELECT * FROM payment_accounts WHERE user_id=? LIMIT 1').bind(auth.user.id).first();
   if (existing) return json({ok:true,version:VERSION,account:existing,action:'REUSE_EXISTING'},200);
   const id=crypto.randomUUID();
@@ -931,9 +934,10 @@ async function payoutRequest(request, env) {
   if(amount===null||amount<=0||!['standard','express'].includes(mode)||!idem) return json({ok:false,error:'INVALID_PAYOUT_REQUEST',version:VERSION},400);
   const old=await env.DB.prepare('SELECT * FROM payout_requests WHERE idempotency_key=? LIMIT 1').bind(idem).first();
   if(old) {
-    // Idempotency keys are globally unique in this schema: never disclose another
-    // intervenant's payout details when a key is reused across accounts.
-    if(String(old.user_id)!==String(auth.user.id)) return json({ok:false,error:'IDEMPOTENCY_KEY_CONFLICT',version:VERSION},409);
+    // Idempotency keys are globally unique: prevent cross-user disclosure and
+    // prevent replaying the same key for a different payout amount or mode.
+    if(String(old.user_id)!==String(auth.user.id) || Number(old.amount_cents)!==amount || String(old.mode)!==mode)
+      return json({ok:false,error:'IDEMPOTENCY_KEY_CONFLICT',version:VERSION},409);
     return json({ok:true,version:VERSION,idempotent_replay:true,payout:old},200);
   }
   const account=await env.DB.prepare(`SELECT * FROM payment_accounts WHERE user_id=? LIMIT 1`).bind(auth.user.id).first();
