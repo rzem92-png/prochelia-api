@@ -138,3 +138,12 @@ Correction committed to the QA branch in `restore-preview-d1-test-v2.yml`:
 - expected holiday rows remains **55**.
 
 This is a static reconciliation only. It does **not** establish that migration 0005 was applied to the live preview D1 or that a backup/restore succeeded. Before executing restore, obtain a fresh encrypted backup after the migration, confirm the isolated target DB name+UUID, and run the manual restore workflow only with explicit confirmation. Production D1 remains prohibited.
+
+
+### Restore manifest validation strengthened — 2026-11-05
+
+The v2 restore workflow now checks the **five exact migration filenames** in `d1_migrations` (not only a total row count), plus a total of five migration records and 55 holiday rows. This reduces the risk that five unrelated migration entries pass a count-only check.
+
+Commit: `0ef54f91ec2cf22154c5bb0667e46c0e5af68803`.
+
+Static-only review; no restore workflow run, remote D1 query, or migration execution was performed. The expected table count (25) still needs confirmation against a real post-migration preview export and the exact restored schema.
