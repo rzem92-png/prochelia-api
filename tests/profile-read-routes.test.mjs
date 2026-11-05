@@ -113,3 +113,19 @@ test("public API contract advertises both profile routes", async()=>{
   assert.ok(body.routes.includes("/api/clients"));
   assert.ok(body.routes.includes("/api/intervenants"));
 });
+
+test("provider role is forbidden from reading client directory", async()=>{
+  const response=await get("/api/clients",makeEnv("intervenant","user-provider-1"));
+  assert.equal(response.status,403);
+  const body=await response.json();
+  assert.equal(body.error,"FORBIDDEN");
+});
+
+test("unknown role is forbidden from both profile directories", async()=>{
+  for(const route of ["/api/clients","/api/intervenants"]){
+    const response=await get(route,makeEnv("support","user-support-1"));
+    assert.equal(response.status,403,route);
+    const body=await response.json();
+    assert.equal(body.error,"FORBIDDEN",route);
+  }
+});
