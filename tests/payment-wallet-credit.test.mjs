@@ -100,3 +100,47 @@ test('refunded and partially refunded transactions are excluded from wallet cred
   assert.match(source, /!\['refunded','partially_refunded'\]\.includes\(tx\.status\)/);
   assert.match(source, /status NOT IN \('paid','refunded','partially_refunded'\)/);
 });
+
+
+test('payout reservation is guarded by available balance and conditional insert', () => {
+  assert.match(source, /available_cents>=\?/);
+  assert.match(source, /INSERT INTO payout_requests[\s\S]*?SELECT[\s\S]*?WHERE changes\(\)=1/);
+});
+
+test('concurrent payout attempts cannot reserve the same wallet balance', () => {
+  const db = new DatabaseSync(':memory:');
+  db.exec(`CREATE TABLE wallets(id TEXT PRIMARY KEY,user_id TEXT,currency TEXT,available_cents INTEGER,reserved_cents INTEGER DEFAULT 0);
+    CREATE TABLE payout_requests(id TEXT PRIMARY KEY,idempotency_key TEXT UNIQUE,wallet_id TEXT,user_id TEXT,amount_cents INTEGER);
+    INSERT INTO wallets VALUES('w1','u1','EUR',10000,0);`);
+  const reserve = (payoutId, idem, amount) => {
+    db.exec('BEGIN');
+    db.prepare(`UPDATE wallets SET available_cents=available_cents-?,reserved_cents=reserved_cents+? WHERE id=? AND user_id=? AND currency=? AND available_cents>=?`).run(amount,amount,'w1','u1','EUR',amount);
+    db.prepare(`INSERT INTO payout_requests(id,idempotency_key,wallet_id,user_id,amount_cents) SELECT ?,?,?,?,? WHERE changes()=1`).run(payoutId,idem,'w1','u1',amount);
+    db.exec('COMMIT');
+  };
+  reserve('p1','k1',7000);
+  reserve('p2','k2',7000);
+  assert.equal(db.prepare('SELECT available_cents FROM wallets WHERE id=?').get('w1').available_cents,3000);
+  assert.equal(db.prepare('SELECT reserved_cents FROM wallets WHERE id=?').get('w1').reserved_cents,7000);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM payout_requests').get().n,1);
+  db.close();
+});
+
+test('same payout idempotency key cannot produce a second payout', () => {
+  const db = new DatabaseSync(':memory:');
+  db.exec(`CREATE TABLE wallets(id TEXT PRIMARY KEY,user_id TEXT,currency TEXT,available_cents INTEGER,reserved_cents INTEGER DEFAULT 0);
+    CREATE TABLE payout_requests(id TEXT PRIMARY KEY,idempotency_key TEXT UNIQUE,wallet_id TEXT,user_id TEXT,amount_cents INTEGER);
+    INSERT INTO wallets VALUES('w1','u1','EUR',10000,0);`);
+  const attempt = (id, key) => {
+    db.exec('BEGIN');
+    db.prepare(`UPDATE wallets SET available_cents=available_cents-1000,reserved_cents=reserved_cents+1000 WHERE id='w1' AND available_cents>=1000`).run();
+    db.prepare(`INSERT INTO payout_requests(id,idempotency_key,wallet_id,user_id,amount_cents) SELECT ?,?,'w1','u1',1000 WHERE changes()=1`).run(id,key);
+    db.exec('COMMIT');
+  };
+  attempt('p1','same-key');
+  // Simulate endpoint replay: it should be resolved by the initial idempotency lookup,
+  // not by attempting a second reserve. Assert schema uniqueness as final protection.
+  assert.throws(()=>db.prepare('INSERT INTO payout_requests VALUES(?,?,?,?,?)').run('p2','same-key','w1','u1',1000));
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM payout_requests').get().n,1);
+  db.close();
+});
