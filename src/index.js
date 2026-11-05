@@ -763,6 +763,11 @@ async function ensurePaymentSchema(env) {
       paid_cents INTEGER NOT NULL DEFAULT 0, reserved_cents INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     )`,
+    `CREATE TABLE IF NOT EXISTS payment_wallet_credit_ledger (
+      transaction_id TEXT PRIMARY KEY, user_id TEXT NOT NULL, amount_cents INTEGER NOT NULL,
+      currency TEXT NOT NULL DEFAULT 'EUR', applied INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, applied_at TEXT
+    )`,
     `CREATE TABLE IF NOT EXISTS payment_transactions (
       id TEXT PRIMARY KEY, idempotency_key TEXT NOT NULL UNIQUE, mission_id TEXT,
       client_id TEXT, intervenant_id TEXT, type TEXT NOT NULL, status TEXT NOT NULL,
