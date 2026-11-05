@@ -137,3 +137,17 @@ test("configured CORS allowlist replaces built-in origins", async () => {
   assert.equal(response.status, 403);
   assert.equal(response.headers.get("access-control-allow-origin"), null);
 });
+
+test("CORS preflight rejects unsupported mutation methods", async () => {
+  for (const method of ["PUT", "PATCH", "DELETE"]) {
+    const response = await worker.fetch(new Request(endpoint, {
+      method: "OPTIONS",
+      headers: {
+        Origin: allowedOrigin,
+        "Access-Control-Request-Method": method
+      }
+    }), {});
+    assert.equal(response.status, 405, method);
+    assert.equal(response.headers.get("allow"), "GET, HEAD, POST, OPTIONS", method);
+  }
+});
