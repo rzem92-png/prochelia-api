@@ -1001,9 +1001,9 @@ async function verifyWebhookSignature(request, env, rawBody) {
 }
 
 async function paymentWebhook(request, env) {
-  await ensurePaymentSchema(env);
   const raw=await request.text();
   if(!(await verifyWebhookSignature(request,env,raw))) return json({ok:false,error:'INVALID_WEBHOOK_SIGNATURE',version:VERSION},401);
+  await ensurePaymentSchema(env);
   let event; try{event=JSON.parse(raw)}catch{return json({ok:false,error:'INVALID_WEBHOOK_JSON',version:VERSION},400);}
   const provider=clean(event?.provider)||paymentProvider(env), eventId=clean(event?.id), type=clean(event?.type);
   if(!eventId||!type) return json({ok:false,error:'INVALID_WEBHOOK_EVENT',version:VERSION},400);
@@ -3336,10 +3336,10 @@ async function stripeWebhook(request, env) {
   if(request.method!=='POST') return json({ok:false,error:'METHOD_NOT_ALLOWED',version:VERSION},405,{'allow':'POST'});
   if(!env.DB) return json({ok:false,error:'DATABASE_REQUIRED',version:VERSION},503);
   if(!env.STRIPE_WEBHOOK_SECRET) return json({ok:false,error:'STRIPE_WEBHOOK_NOT_CONFIGURED',version:VERSION},503);
-  await ensurePaymentSchema(env);
   const raw=await request.text();
   const valid=await verifyStripeSignature(raw,request.headers.get('stripe-signature'),env.STRIPE_WEBHOOK_SECRET);
   if(!valid) return json({ok:false,error:'INVALID_STRIPE_SIGNATURE',version:VERSION},401);
+  await ensurePaymentSchema(env);
   let event; try{event=JSON.parse(raw);}catch{return json({ok:false,error:'INVALID_STRIPE_EVENT_JSON',version:VERSION},400);}
   if(!event?.id || !event?.type || !event?.data?.object) return json({ok:false,error:'INVALID_STRIPE_EVENT',version:VERSION},400);
   const payloadHash=await sha256Base64url(raw);
