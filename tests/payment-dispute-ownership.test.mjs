@@ -29,3 +29,13 @@ test('Stripe webhook remains fail-closed until native Stripe signature verificat
   assert.match(source, /if\(!\(await verifyWebhookSignature\(request,env,raw\)\)\)\s*return json\(\{ok:false,error:'INVALID_WEBHOOK_SIGNATURE'/);
   assert.match(source, /if\(String\(provider\)\.toLowerCase\(\)==='stripe'\)\s*return json\(\{ok:false,error:'STRIPE_WEBHOOK_ADAPTER_NOT_IMPLEMENTED'/);
 });
+
+test('intervenant cannot choose a PSP provider account id during onboarding', () => {
+  assert.match(source, /if\s*\(clean\(body\?\.provider_account_id\)\)\s*return json\(\{ok:false,error:'PROVIDER_ACCOUNT_ID_SERVER_ASSIGNED'/);
+  assert.match(source, /const accountId\s*=\s*null/);
+});
+
+test('payout idempotency key cannot replay a different amount or payout mode', () => {
+  assert.match(source, /Number\(old\.amount_cents\)!==amount\s*\|\|\s*String\(old\.mode\)!==mode/);
+  assert.match(source, /error:'IDEMPOTENCY_KEY_CONFLICT'/);
+});
