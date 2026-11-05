@@ -58,7 +58,8 @@ test('mission payment creation rejects zero gross amount while allowing zero com
 
 test('mission payment write route remains disabled unless explicitly enabled', () => {
   assert.ok(source.includes("if (String(env.MISSION_API_ENABLED).toLowerCase() !== 'true') return json({ok:false,error:'MISSION_API_DISABLED',version:VERSION,write_enabled:false},423);"));
-  assert.ok(source.includes("async function createMissionPayment(request, env) {"));\n  assert.ok(source.includes("requireRole(auth,['gerante'])"));
+  assert.ok(source.includes("async function createMissionPayment(request, env) {"));
+  assert.ok(source.includes("requireRole(auth,['gerante'])"));
 });
 test('manual finalization cannot assert PSP paid or refunded outcomes', () => {
   assert.match(source, /if\(outcome==='paid'\|\|outcome==='refunded'\)\s*return\s+json\(\{ok:false,error:'PSP_WEBHOOK_CONFIRMATION_REQUIRED'/);
