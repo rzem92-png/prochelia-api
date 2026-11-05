@@ -174,6 +174,7 @@ test('Stripe checkout uses a stable transaction-scoped idempotency key', () => {
 
 
 test('Stripe webhook blocks success events with missing amount or currency instead of bypassing validation', () => {
-  assert.match(source, /const amountMatches=Number\\.isSafeInteger\\(amount\\) && amount>=0 && !!currency && amount===Number\\(tx\\.gross_cents\\) && currency===String\\(tx\\.currency\\|\\|'EUR'\\)\\.toLowerCase\\(\\)/);
-  assert.doesNotMatch(source, /const amountMatches=amount<0 \\|\\|/);
+  assert.ok(source.includes("const amountMatches=Number.isSafeInteger(amount) && amount>=0 && !!currency"));
+  assert.ok(source.includes("amount===Number(tx.gross_cents) && currency===String(tx.currency||'EUR').toLowerCase()"));
+  assert.ok(!source.includes("const amountMatches=amount<0 ||"));
 });
