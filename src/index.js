@@ -1013,7 +1013,14 @@ async function verifyWebhookSignature(request, env, rawBody) {
 
 async function paymentWebhook(request, env) {
   await ensurePaymentSchema(env);
-  const raw=await request.text();
+  // Bound untrusted webhook input before HMAC/JSON processing to prevent memory DoS.
+  // Preserve the exact UTF-8 body text used by the provider signature.
+  const bounded=await readBoundedRequestBody(request,64*1024);
+  if(!bounded.ok) {
+    const status=bounded.reason==='TOO_LARGE'?413:400;
+    return json({ok:false,error:bounded.reason==='TOO_LARGE'?'WEBHOOK_BODY_TOO_LARGE':'INVALID_WEBHOOK_BODY',version:VERSION},status);
+  }
+  const raw=bounded.text;
   if(!(await verifyWebhookSignature(request,env,raw))) return json({ok:false,error:'INVALID_WEBHOOK_SIGNATURE',version:VERSION},401);
   let event; try{event=JSON.parse(raw)}catch{return json({ok:false,error:'INVALID_WEBHOOK_JSON',version:VERSION},400);}
   const provider=clean(event?.provider)||paymentProvider(env), eventId=clean(event?.id), type=clean(event?.type);
