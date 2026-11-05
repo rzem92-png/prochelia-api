@@ -1001,11 +1001,25 @@ async function paymentWebhook(request, env) {
     const statusMap={payout_processing:'processing',payout_paid:'completed',payout_failed:'failed',payout_canceled:'canceled'};
     const newStatus=statusMap[type];
     if(payout&&newStatus){
-      const alreadyFinal=['completed','failed','canceled'].includes(payout.status);
-      if(!alreadyFinal){
-        if(newStatus==='completed') await env.DB.prepare(`UPDATE wallets SET reserved_cents=MAX(0,reserved_cents-?),paid_cents=paid_cents+?,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(payout.amount_cents,payout.amount_cents,payout.wallet_id).run();
-        if(['failed','canceled'].includes(newStatus)) await env.DB.prepare(`UPDATE wallets SET reserved_cents=MAX(0,reserved_cents-?),available_cents=available_cents+?,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(payout.amount_cents,payout.amount_cents,payout.wallet_id).run();
-        await env.DB.prepare(`UPDATE payout_requests SET status=?,provider_payout_id=COALESCE(?,provider_payout_id),failure_code=?,failure_message=?,completed_at=CASE WHEN ?='completed' THEN CURRENT_TIMESTAMP ELSE completed_at END,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(newStatus,clean(event?.data?.provider_payout_id)||null,clean(event?.data?.failure_code)||null,clean(event?.data?.failure_message)||null,newStatus,payoutId).run();
+      // A provider may send distinct event IDs for the same payout outcome.
+      // The payout state transition is the idempotency gate: wallet changes
+      // happen in the same D1 batch only if this transition changed one row.
+      if(newStatus==='processing'){
+        await env.DB.prepare(`UPDATE payout_requests SET status='processing',provider_payout_id=COALESCE(?,provider_payout_id),updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='requested'`)
+          .bind(clean(event?.data?.provider_payout_id)||null,payoutId).run();
+      } else {
+        const terminalUpdate=env.DB.prepare(`UPDATE payout_requests SET status=?,provider_payout_id=COALESCE(?,provider_payout_id),failure_code=?,failure_message=?,completed_at=CASE WHEN ?='completed' THEN CURRENT_TIMESTAMP ELSE completed_at END,updated_at=CURRENT_TIMESTAMP WHERE id=? AND status IN ('requested','processing')`)
+          .bind(newStatus,clean(event?.data?.provider_payout_id)||null,clean(event?.data?.failure_code)||null,clean(event?.data?.failure_message)||null,newStatus,payoutId);
+        let walletUpdate=null;
+        if(newStatus==='completed'){
+          walletUpdate=env.DB.prepare(`UPDATE wallets SET reserved_cents=reserved_cents-?,paid_cents=paid_cents+?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND reserved_cents>=? AND changes()=1`)
+            .bind(payout.amount_cents,payout.amount_cents,payout.wallet_id,payout.amount_cents);
+        } else if(['failed','canceled'].includes(newStatus)){
+          walletUpdate=env.DB.prepare(`UPDATE wallets SET reserved_cents=reserved_cents-?,available_cents=available_cents+?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND reserved_cents>=? AND changes()=1`)
+            .bind(payout.amount_cents,payout.amount_cents,payout.wallet_id,payout.amount_cents);
+        }
+        if(walletUpdate) await env.DB.batch([terminalUpdate,walletUpdate]);
+        else await terminalUpdate.run();
       }
     }
   }
