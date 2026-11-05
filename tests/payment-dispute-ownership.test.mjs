@@ -132,3 +132,14 @@ test('payout creation is blocked pending refund ledger reconciliation', () => {
   assert.match(source, /PAYOUT_BLOCKED_PENDING_REFUND_RECONCILIATION/);
   assert.match(source, /SELECT id,mission_id,status,refund_cents FROM payment_transactions WHERE intervenant_id=\? AND status IN \('refunded','partially_refunded'\) LIMIT 1/);
 });
+
+test('Stripe dispute closure with missing local dispute record releases webhook claim for retry', () => {
+  const start=source.indexOf("const closedDisputeUpdate=await env.DB.prepare(`UPDATE payment_disputes SET status=?,resolution=?");
+  assert.notEqual(start,-1);
+  const end=source.indexOf("result=won?'DISPUTE_WON_RESOLVED'",start);
+  const handler=source.slice(start,end);
+  assert.match(handler,/Number\(closedDisputeUpdate\?\.meta\?\.changes\|\|0\)!==1/);
+  assert.match(handler,/processed=0,processed_at=NULL WHERE provider='stripe' AND event_id=\?/);
+  assert.match(handler,/error:'STRIPE_DISPUTE_RECORD_NOT_FOUND'/);
+  assert.match(handler,/},503\)/);
+});
