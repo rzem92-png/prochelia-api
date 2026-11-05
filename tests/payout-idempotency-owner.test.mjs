@@ -125,7 +125,7 @@ test('payout reservation is conditional, ledger posting follows successful inser
   assert.match(batch, /FROM payout_requests WHERE idempotency_key=\? AND status='requested' AND changes\(\)=1/);
   assert.match(batch, /NOT EXISTS\(SELECT 1 FROM payment_wallet_ledger WHERE idempotency_key=\?\)/);
   assert.match(batch, /\.bind\(payoutId,idem,wallet\.id,auth\.user\.id,amount,mode/);
-  assert.match(fn, /prepare\('SELECT \\* FROM wallets WHERE user_id=\\? LIMIT 1'\)\.bind\(auth\.user\.id\)/);
+  assert.ok(fn.includes("prepare('SELECT * FROM wallets WHERE user_id=? LIMIT 1').bind(auth.user.id)"), 'wallet lookup must bind the authenticated user');
   assert.match(fn, /if\(Number\(batch\?\.\[0\]\?\.meta\?\.changes\|\|0\)\)!==1\)/);
 });
 
