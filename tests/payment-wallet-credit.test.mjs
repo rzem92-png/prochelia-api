@@ -173,8 +173,10 @@ test('Stripe checkout uses a stable transaction-scoped idempotency key', () => {
 });
 
 
-test('Stripe webhook blocks success events with missing amount or currency instead of bypassing validation', () => {
-  assert.ok(source.includes("const amountMatches=Number.isSafeInteger(amount) && amount>=0 && !!currency"));
-  assert.ok(source.includes("amount===Number(tx.gross_cents) && currency===String(tx.currency||'EUR').toLowerCase()"));
-  assert.ok(!source.includes("const amountMatches=amount<0 ||"));
+test('Stripe webhook amount validation is delegated to the strict shared validator', () => {
+  assert.ok(source.includes('stripeWebhookAmountMatches({eventType:event.type,amount,currency,grossCents:tx.gross_cents,transactionCurrency:tx.currency||\'EUR\'}'));
+  const adapter = readFileSync(new URL('../src/stripe-adapter.js', import.meta.url), 'utf8');
+  assert.ok(adapter.includes('export function stripeWebhookAmountMatches'));
+  assert.ok(adapter.includes("eventType === 'charge.dispute.created'"));
+  assert.ok(!source.includes('const amountMatches=amount<0 ||'));
 });
