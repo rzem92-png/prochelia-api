@@ -39,3 +39,13 @@ test('payout idempotency key cannot replay a different amount or payout mode', (
   assert.match(source, /Number\(old\.amount_cents\)!==amount\s*\|\|\s*String\(old\.mode\)!==mode/);
   assert.match(source, /error:'IDEMPOTENCY_KEY_CONFLICT'/);
 });
+
+test('payment webhook cannot mutate a transaction from another provider', () => {
+  assert.match(source, /WEBHOOK_PROVIDER_TRANSACTION_MISMATCH/);
+  assert.match(source, /String\(tx\.provider\|\|''\)\.toLowerCase\(\)!==String\(provider\|\|''\)\.toLowerCase\(\)/);
+});
+
+test('payout webhook cannot mutate a payout from another provider', () => {
+  assert.match(source, /WEBHOOK_PROVIDER_PAYOUT_MISMATCH/);
+  assert.match(source, /String\(payout\.provider\|\|''\)\.toLowerCase\(\)!==String\(provider\|\|''\)\.toLowerCase\(\)/);
+});
