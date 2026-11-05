@@ -3517,6 +3517,12 @@ async function strictProductionAudit(request,env){
 const __procheliaProductionSafetyHandle = handle;
 handle = async function(request,env){
   const origin=request.headers.get('origin');
+  const fetchSite=(request.headers.get('sec-fetch-site')||'').toLowerCase();
+  // Defense in depth: browser Fetch Metadata blocks cross-site state-changing
+  // requests even when Origin is missing/stripped. Do not apply to GET/HEAD.
+  if(isMutatingMethod(request.method) && fetchSite==='cross-site'){
+    return json({ok:false,error:'CROSS_SITE_REQUEST_BLOCKED',version:VERSION},403);
+  }
   if(origin && !securityOriginAllowed(request,env)){
     return json({ok:false,error:'ORIGIN_NOT_ALLOWED',version:VERSION},403);
   }
