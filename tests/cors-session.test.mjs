@@ -125,3 +125,15 @@ test("unapproved Origin blocks a mutating request before database access", async
   assert.equal(response.status, 403);
   assert.equal((await response.json()).error, "ORIGIN_NOT_ALLOWED");
 });
+
+test("configured CORS allowlist replaces built-in origins", async () => {
+  const response = await worker.fetch(new Request(endpoint, {
+    method: "OPTIONS",
+    headers: {
+      Origin: allowedOrigin,
+      "Access-Control-Request-Method": "POST"
+    }
+  }), { CORS_ORIGIN: "https://custom-prochelia.example" });
+  assert.equal(response.status, 403);
+  assert.equal(response.headers.get("access-control-allow-origin"), null);
+});
