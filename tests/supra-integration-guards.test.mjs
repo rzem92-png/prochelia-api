@@ -433,3 +433,12 @@ test("production audit/check routes are POST-only and reject GET before invoking
   assert.match(source, /if\(url\.pathname==='\/api\/system\/final-audit'\) \{ if\(request\.method!=='POST'\) return json\(\{ok:false,error:'METHOD_NOT_ALLOWED',version:VERSION\},405\); return finalProductionAudit\(request,env\); \}/);
   assert.match(source, /if\(url\.pathname==='\/api\/system\/production-check'\) \{ if\(request\.method!=='POST'\) return json\(\{ok:false,error:'METHOD_NOT_ALLOWED',version:VERSION\},405\); return finalProductionAudit\(request,env\); \}/);
 });
+
+test("production readiness audit never initializes schema or writes integration/config registry", () => {
+  const audit = source.slice(source.indexOf("async function productionConfigCheck"), source.indexOf("async function finalProductionAudit"));
+  assert.doesNotMatch(audit, /ensure(?:Consolidated|Payment|Operational|Strategic|FinalHardening)Schema/);
+  assert.doesNotMatch(audit, /registerIntegration\(/);
+  assert.doesNotMatch(audit, /INSERT INTO system_config_checks/);
+  assert.match(audit, /TABLE:\$\{t\}/);
+  assert.match(audit, /return \{overall,checks,blocking:blocking\.length,externalNotConfigured:externalNotConfigured\.length\}/);
+});
