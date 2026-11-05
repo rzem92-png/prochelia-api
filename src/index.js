@@ -1,4 +1,6 @@
 import { handleV7Route } from "./v7-routes.js";
+import { generateMissionCode } from "./security/mission-code.js";
+import { signWebhook } from "./security/webhook-hmac.js";
 // PROCHÉLIA — INDEX BACKEND CONSOLIDÉ UNIQUE
 // Référence de consolidation : V14.1 Finance + sécurité/RBAC existants.
 // Généré le 19/10/2026. À déployer uniquement après recette avec la vraie base D1.
@@ -558,8 +560,7 @@ async function ensureSecuritySchema(env) {
 }
 
 function securityCode() {
-  const n = new DataView(randomBytes(4).buffer).getUint32(0) % 1000000;
-  return String(n).padStart(6, '0');
+  return generateMissionCode();
 }
 
 async function securityAudit(env, eventType, missionId, userId, role, result, metadata = {}) {
@@ -633,10 +634,10 @@ async function deliverSecurityCodes(env, payload) {
     end_code:payload.end_code,
     end_expires_at:payload.end_expires_at
   });
-  const signature = await sha256Base64url(secret + '.' + body);
+  const signed = await signWebhook(secret, body);
   const response = await fetch(webhook,{
     method:'POST',
-    headers:{'content-type':'application/json','x-prochelia-signature':signature},
+    headers:{'content-type':'application/json','x-prochelia-signature':signed.signature,'x-prochelia-timestamp':signed.timestamp},
     body
   });
   if (!response.ok) return {ok:false,error:'NOTIFICATION_PROVIDER_REJECTED'};
@@ -697,6 +698,13 @@ async function securityPresence(request, env) {
   return json({ok:true,version:VERSION,mission_id:missionId,presence:'RECORDED',device_bound:true},200);
 }
 
+function constantTimeStringEqual(a, b) {
+  if (typeof a !== 'string' || typeof b !== 'string' || a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return diff === 0;
+}
+
 async function securityVerifyCode(request, env) {
   const auth=await getSessionUser(request,env);
   if(!requireRole(auth,['intervenant'])) return json({ok:false,error:auth?.user?'FORBIDDEN':'UNAUTHENTICATED',version:VERSION},auth?.user?403:401);
@@ -729,7 +737,7 @@ async function securityVerifyCode(request, env) {
   if(purpose==='END' && sec.status !== 'in_progress') return json({ok:false,error:'MISSION_NOT_IN_PROGRESS',version:VERSION},409);
   if(purpose==='ARRIVAL' && sec.status !== 'prepared') return json({ok:false,error:'MISSION_NOT_READY_FOR_ARRIVAL',version:VERSION},409);
   if(!expires||expires<=now) return json({ok:false,error:'SECURITY_CODE_EXPIRED',version:VERSION},410);
-  const expected=await sha256Base64url(code), ok=expected===stored;
+  const expected=await sha256Base64url(code), ok=constantTimeStringEqual(expected,stored);
   await env.DB.prepare(`INSERT INTO mission_security_attempts (id,security_id,purpose,actor_user_id,device_id,result,reason) VALUES (?,?,?,?,?,?,?)`).bind(crypto.randomUUID(),sec.id,purpose,auth.user.id,device,ok?'SUCCESS':'FAIL',ok?'CODE_MATCH':'CODE_MISMATCH').run();
   if(!ok){
     const attempts=await env.DB.prepare(`SELECT COUNT(*) AS total FROM mission_security_attempts WHERE security_id=? AND purpose=? AND result='FAIL' AND created_at >= datetime('now','-15 minutes')`).bind(sec.id,purpose).first();
@@ -743,10 +751,13 @@ async function securityVerifyCode(request, env) {
     await securityAudit(env,'SECURITY_CODE_FAILED',missionId,auth.user.id,auth.user.role,'DENIED',{purpose,attempts:count});
     return json({ok:false,error:'SECURITY_CODE_INVALID',version:VERSION,remaining_attempts:Math.max(0,SECURITY_MAX_ATTEMPTS-count)},401);
   }
-  if(purpose==='ARRIVAL'){
-    await env.DB.prepare(`UPDATE mission_security SET arrival_used_at=CURRENT_TIMESTAMP,arrival_started_at=CURRENT_TIMESTAMP,status='in_progress',updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(sec.id).run();
-  }else{
-    await env.DB.prepare(`UPDATE mission_security SET end_used_at=CURRENT_TIMESTAMP,ended_at=CURRENT_TIMESTAMP,status='completed',updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(sec.id).run();
+  // Conditional update is the single-use gate: concurrent requests cannot both consume the same code.
+  const consumed = purpose==='ARRIVAL'
+    ? await env.DB.prepare(`UPDATE mission_security SET arrival_used_at=CURRENT_TIMESTAMP,arrival_started_at=CURRENT_TIMESTAMP,status='in_progress',updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='prepared' AND arrival_used_at IS NULL AND arrival_expires_at>CURRENT_TIMESTAMP`).bind(sec.id).run()
+    : await env.DB.prepare(`UPDATE mission_security SET end_used_at=CURRENT_TIMESTAMP,ended_at=CURRENT_TIMESTAMP,status='completed',updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='in_progress' AND end_used_at IS NULL AND end_expires_at>CURRENT_TIMESTAMP`).bind(sec.id).run();
+  if (!consumed.meta?.changes) {
+    await securityAudit(env,'SECURITY_CODE_CONCURRENT_OR_STALE_REJECTED',missionId,auth.user.id,auth.user.role,'DENIED',{purpose});
+    return json({ok:false,error:'SECURITY_CODE_ALREADY_USED_OR_STATE_CHANGED',version:VERSION},409);
   }
   await securityAudit(env,`SECURITY_CODE_${purpose}_SUCCESS`,missionId,auth.user.id,auth.user.role,'OK',{purpose,device_bound:true});
   return json({ok:true,version:VERSION,mission_id:missionId,purpose,status:purpose==='ARRIVAL'?'in_progress':'completed',identity_control:'VERIFIED_ACCOUNT_REQUIRED',presence_control:'RECORDED',code:'CONSUMED'},200);
@@ -906,6 +917,27 @@ async function paymentStatus(request, env) {
   return json({ok:true,version:VERSION,provider:paymentProvider(env),payments_configured:paymentsConfigured(env),wallet:{currency:wallet.currency,available_cents:wallet.available_cents,pending_cents:wallet.pending_cents,paid_cents:wallet.paid_cents,reserved_cents:wallet.reserved_cents},payout_account:account?{status:account.status,onboarding_status:account.onboarding_status,payouts_enabled:!!account.payouts_enabled}:null,pending_payouts:Number(pending?.total||0)},200);
 }
 
+// Pure idempotency guards are unit-tested independently of D1. They must
+// match the caller's identity and all immutable business parameters.
+export function isSameMissionPaymentOperation(existing, expected) {
+  // Strict comparisons avoid treating malformed persisted values (for example,
+  // numeric strings) as the same financial operation. D1 INTEGERs are numbers.
+  return !!existing && existing.type === 'MISSION_CHARGE'
+    && existing.mission_id === expected.mission_id
+    && existing.client_id === expected.client_id
+    && existing.intervenant_id === expected.intervenant_id
+    && existing.gross_cents === expected.gross_cents
+    && existing.commission_cents === expected.commission_cents
+    && existing.currency === 'EUR';
+}
+
+export function isSamePayoutOperation(existing, expected) {
+  return !!existing && existing.user_id === expected.user_id
+    && existing.amount_cents === expected.amount_cents
+    && existing.mode === expected.mode
+    && existing.currency === 'EUR';
+}
+
 async function createMissionPayment(request, env) {
   const auth=await getSessionUser(request,env);
   if(!requireRole(auth,['gerante'])) return json({ok:false,error:auth?.user?'FORBIDDEN':'UNAUTHENTICATED',version:VERSION},auth?.user?403:401);
@@ -917,7 +949,13 @@ async function createMissionPayment(request, env) {
   const idem=clean(request.headers.get('idempotency-key'))||clean(body?.idempotency_key);
   if(!idem) return json({ok:false,error:'IDEMPOTENCY_KEY_REQUIRED',version:VERSION},400);
   const old=await env.DB.prepare('SELECT * FROM payment_transactions WHERE idempotency_key=? LIMIT 1').bind(idem).first();
-  if(old) return json({ok:true,version:VERSION,idempotent_replay:true,transaction:old},200);
+  if(old) {
+    // An idempotency key is scoped to one exact business operation. Never disclose
+    // or acknowledge a different transaction just because a caller reused its key.
+    const sameOperation = isSameMissionPaymentOperation(old,{mission_id:missionId,client_id:clientId,intervenant_id:intervenantId,gross_cents:gross,commission_cents:commission});
+    if(!sameOperation) return json({ok:false,error:'IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_REQUEST',version:VERSION},409);
+    return json({ok:true,version:VERSION,idempotent_replay:true,transaction:old},200);
+  }
   const net=gross-commission;
   const txId=crypto.randomUUID();
   await env.DB.prepare(`INSERT INTO payment_transactions
@@ -958,7 +996,12 @@ async function payoutRequest(request, env) {
   const idem=clean(request.headers.get('idempotency-key'))||clean(body?.idempotency_key);
   if(amount===null||amount<=0||!['standard','express'].includes(mode)||!idem) return json({ok:false,error:'INVALID_PAYOUT_REQUEST',version:VERSION},400);
   const old=await env.DB.prepare('SELECT * FROM payout_requests WHERE idempotency_key=? LIMIT 1').bind(idem).first();
-  if(old) return json({ok:true,version:VERSION,idempotent_replay:true,payout:old},200);
+  if(old) {
+    // Prevent cross-account replay and key reuse for a different amount/mode.
+    const sameOperation = isSamePayoutOperation(old,{user_id:auth.user.id,amount_cents:amount,mode});
+    if(!sameOperation) return json({ok:false,error:'IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_REQUEST',version:VERSION},409);
+    return json({ok:true,version:VERSION,idempotent_replay:true,payout:old},200);
+  }
   const account=await env.DB.prepare(`SELECT * FROM payment_accounts WHERE user_id=? LIMIT 1`).bind(auth.user.id).first();
   if(!account||Number(account.payouts_enabled)!==1) return json({ok:false,error:'PAYOUT_ACCOUNT_NOT_READY',version:VERSION,message:'Le compte de paiement de l’intervenant doit être vérifié et activé par le PSP.'},409);
   const wallet=await env.DB.prepare('SELECT * FROM wallets WHERE user_id=? LIMIT 1').bind(auth.user.id).first();
@@ -990,7 +1033,23 @@ async function paymentWebhook(request, env) {
   if(!eventId||!type) return json({ok:false,error:'INVALID_WEBHOOK_EVENT',version:VERSION},400);
   const payloadHash=await sha256Base64url(raw);
   const inserted=await env.DB.prepare(`INSERT OR IGNORE INTO payment_webhook_events (id,provider,event_id,event_type,signature_valid,payload_hash) VALUES (?,?,?,?,1,?)`).bind(crypto.randomUUID(),provider,eventId,type,payloadHash).run();
-  if(!inserted.meta?.changes) return json({ok:true,version:VERSION,duplicate:true,event_id:eventId},200);
+  if(!inserted.meta?.changes){
+    // A reused provider event ID must represent the exact same signed payload.
+    // Do not silently acknowledge a conflicting payload as a harmless replay.
+    const prior=await env.DB.prepare(`SELECT payload_hash,event_type,processed FROM payment_webhook_events WHERE provider=? AND event_id=? LIMIT 1`).bind(provider,eventId).first();
+    if(!prior || prior.payload_hash!==payloadHash || prior.event_type!==type){
+      await paymentAudit(env,'PSP_WEBHOOK_EVENT_ID_COLLISION',{metadata:{provider,event_id:eventId,event_type:type}},'SECURITY_REJECTED');
+      return json({ok:false,error:'WEBHOOK_EVENT_ID_COLLISION',version:VERSION},409,{'cache-control':'no-store'});
+    }
+    // Do not ACK an event whose effects may have been interrupted. This is
+    // intentionally fail-closed: recovery must be handled by a reconciler/lease
+    // workflow; blindly reprocessing here could double-credit under concurrency.
+    if(Number(prior.processed)!==1){
+      await paymentAudit(env,'PSP_WEBHOOK_DUPLICATE_UNPROCESSED',{metadata:{provider,event_id:eventId,event_type:type}},'RETRY_REQUIRED');
+      return json({ok:false,error:'WEBHOOK_EVENT_PENDING_RECOVERY',version:VERSION,event_id:eventId},503,{'cache-control':'no-store','retry-after':'30'});
+    }
+    return json({ok:true,version:VERSION,duplicate:true,event_id:eventId},200);
+  }
   const txId=clean(event?.data?.transaction_id), payoutId=clean(event?.data?.payout_id);
   if(txId){
     const tx=await env.DB.prepare('SELECT * FROM payment_transactions WHERE id=? LIMIT 1').bind(txId).first();
@@ -3477,12 +3536,17 @@ async function productionRateLimit(request,env){
   const now=Math.floor(Date.now()/1000);
   const start=new Date(Math.floor(now/windowSeconds)*windowSeconds*1000).toISOString();
   await ensureFinalHardeningSchema(env);
-  const existing=await env.DB.prepare(`SELECT request_count FROM security_rate_limits WHERE bucket=? AND subject_hash=? AND window_start=? LIMIT 1`).bind(bucket,subject,start).first();
-  const count=Number(existing?.request_count||0)+1;
-  if(existing){
-    await env.DB.prepare(`UPDATE security_rate_limits SET request_count=? WHERE bucket=? AND subject_hash=? AND window_start=?`).bind(count,bucket,subject,start).run();
-  }else{
-    await env.DB.prepare(`INSERT INTO security_rate_limits(id,bucket,subject_hash,window_start,request_count) VALUES(?,?,?,?,1)`).bind(crypto.randomUUID(),bucket,subject,start).run();
+  // Atomic increment: avoid SELECT→UPDATE lost increments and concurrent first-hit INSERT races.
+  // D1/SQLite serializes the UPSERT against the UNIQUE(bucket,subject_hash,window_start) key.
+  const increment=await env.DB.prepare(`INSERT INTO security_rate_limits(id,bucket,subject_hash,window_start,request_count)
+    VALUES(?,?,?,?,1)
+    ON CONFLICT(bucket,subject_hash,window_start)
+    DO UPDATE SET request_count=security_rate_limits.request_count+1
+    RETURNING request_count`).bind(crypto.randomUUID(),bucket,subject,start).first();
+  const count=Number(increment?.request_count); 
+  if(!Number.isSafeInteger(count)||count<1){
+    // Fail closed: a rate-limit backend anomaly must not silently allow a mutating request.
+    return {ok:false,response:json({ok:false,error:'RATE_LIMIT_UNAVAILABLE',version:VERSION},503,{'cache-control':'no-store'})};
   }
   if(count>limit){
     await productionSafetySchema(env);
