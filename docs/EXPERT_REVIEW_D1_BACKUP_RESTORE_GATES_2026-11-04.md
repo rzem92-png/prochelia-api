@@ -111,3 +111,17 @@ Cette revue est statique, basée sur les patches GitHub. Elle ne remplace pas l'
 - PR #88 : pas d'activation WhatsApp live sans webhook Meta spécifique et dedupe durable.
 - Ces observations ne sont pas des tests passés. CI des patches et tests d'intégration sont requis.
 - Aucun merge, secret Cloudflare, migration, message réel ou déploiement n'a été exécuté par cette revue.
+
+
+## Revalidation session-cookie CSRF finding — 2026-11-05
+
+Static inspection of PR #87 branch `integration/auth-cors-profile-routes-v1` confirms the session cookie is configured as `HttpOnly; Secure; SameSite=None`. The CORS preflight allowlist includes `X-CSRF-Token`, but inspection of the Worker source and its current CORS/profile test files did not find a CSRF token validation contract or negative tests. CORS allowlisting alone is not CSRF protection; browsers can send cross-site requests even when the attacker cannot read the response.
+
+**Required P0 before PR #87 merge or browser-authenticated mutation enablement:**
+- define a server-validated CSRF token bound to the authenticated session (or use a reviewed synchronizer/double-submit design with appropriate cookie constraints);
+- reject unsafe methods when token is absent, invalid, expired, or session-mismatched;
+- validate `Origin` for browser mutation requests and apply a carefully defined `Referer` fallback; reject missing origin where browser-only route policy requires it;
+- test allowed origin + valid token, allowed origin + missing token, allowed origin + wrong token, disallowed origin, token/session mismatch, and mutations on missions/profiles/payment/payout/refund/dispute;
+- avoid weakening the cookie or bypassing CSRF validation for convenience.
+
+Do not treat this static finding as proof of exploitability in every route; it is a merge blocker until a consistent server-side defense and test coverage are demonstrated. No code was changed on PR #87 by this review.
