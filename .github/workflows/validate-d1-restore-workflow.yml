@@ -1,0 +1,31 @@
+name: PROCHÉLIA — garde-fous statiques D1 backup/restore
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/backup-preview-d1.yml"
+      - ".github/workflows/restore-preview-d1-test-v2.yml"
+      - "wrangler.restore-test-v2.jsonc"
+      - "scripts/validate-d1-restore-workflow.sh"
+  push:
+    branches:
+      - "qa/restore-and-security-gates-2026-11-04"
+    paths:
+      - ".github/workflows/backup-preview-d1.yml"
+      - ".github/workflows/restore-preview-d1-test-v2.yml"
+      - "wrangler.restore-test-v2.jsonc"
+      - "scripts/validate-d1-restore-workflow.sh"
+
+permissions:
+  contents: read
+
+jobs:
+  static-restore-safety:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Validate restore workflow safety invariants
+        shell: bash
+        run: bash scripts/validate-d1-restore-workflow.sh
