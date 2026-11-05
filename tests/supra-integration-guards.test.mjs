@@ -442,3 +442,11 @@ test("production readiness audit never initializes schema or writes integration/
   assert.match(audit, /TABLE:\$\{t\}/);
   assert.match(audit, /return \{overall,checks,blocking:blocking\.length,externalNotConfigured:externalNotConfigured\.length\}/);
 });
+
+test("configuration audit never grants real-traffic authorization by itself", () => {
+  const route = source.slice(source.indexOf("async function finalProductionAudit"), source.indexOf("async function copilotNextActions"));
+  assert.match(route, /ready_for_real_traffic:false/);
+  assert.match(route, /release_authorization_required:true/);
+  assert.match(route, /CONFIGURATION_CHECKS_PASSED/);
+  assert.doesNotMatch(route, /ready_for_real_traffic:result\.overall/);
+});
