@@ -23,3 +23,9 @@ test('mission payment idempotency key cannot be replayed with different paramete
   assert.match(source, /const sameIntent=String\(old\.mission_id\)===missionId[\s\S]*?Number\(old\.commission_cents\)===commission[\s\S]*?old\.type==='MISSION_CHARGE'/);
   assert.match(source, /if\(!sameIntent\) return json\(\{ok:false,error:'IDEMPOTENCY_KEY_CONFLICT'/);
 });
+
+test('Stripe webhook remains fail-closed until native Stripe signature verification exists', () => {
+  assert.match(source, /async function verifyWebhookSignature\s*\(/);
+  assert.match(source, /if\(!\(await verifyWebhookSignature\(request,env,raw\)\)\)\s*return json\(\{ok:false,error:'INVALID_WEBHOOK_SIGNATURE'/);
+  assert.match(source, /if\(String\(provider\)\.toLowerCase\(\)==='stripe'\)\s*return json\(\{ok:false,error:'STRIPE_WEBHOOK_ADAPTER_NOT_IMPLEMENTED'/);
+});
