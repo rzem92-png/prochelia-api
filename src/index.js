@@ -3196,12 +3196,12 @@ async function stripeWebhook(request, env) {
         await paymentAudit(env,'STRIPE_WEBHOOK_MISMATCH',{transaction_id:tx.id,mission_id:tx.mission_id,metadata:{event_id:event.id,event_type:event.type}},'BLOCKED');
         result='MISMATCH_BLOCKED';
       } else if(paidEvent.has(event.type) && (!isCheckout || obj.payment_status==='paid')) {
-        if(tx.status!=='refunded') {
+        if(!['refunded','partially_refunded'].includes(tx.status)) {
           // Replays may also apply an existing pending wallet credit ledger entry.
           // D1 batch is transactional. The credit ledger is gated by changes() from
           // the preceding payment-status transition to prevent duplicate concurrent credits.
           const paymentStatements=[
-            env.DB.prepare(`UPDATE payment_transactions SET status='paid',provider='stripe',provider_payment_id=COALESCE(?,provider_payment_id),updated_at=CURRENT_TIMESTAMP WHERE id=? AND status NOT IN ('paid','refunded')`).bind(sessionId||null,tx.id)
+            env.DB.prepare(`UPDATE payment_transactions SET status='paid',provider='stripe',provider_payment_id=COALESCE(?,provider_payment_id),updated_at=CURRENT_TIMESTAMP WHERE id=? AND status NOT IN ('paid','refunded','partially_refunded')`).bind(sessionId||null,tx.id)
           ];
           if(tx.intervenant_id) {
             paymentStatements.push(
@@ -3225,8 +3225,13 @@ async function stripeWebhook(request, env) {
         if(!['paid','refunded'].includes(tx.status)) await env.DB.prepare(`UPDATE payment_transactions SET status='failed',updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(tx.id).run();
         result='PAYMENT_FAILED';
       } else if(refundEvent.has(event.type)) {
-        await env.DB.prepare(`UPDATE payment_transactions SET status='refunded',refund_cents=MAX(refund_cents,?),updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(Math.max(0,Number(obj?.amount_refunded ?? amount)),tx.id).run();
-        result='REFUND_RECORDED';
+        // Stripe charge.amount_refunded is cumulative. Preserve monotonic refund totals
+        // and distinguish partial from full refunds; never reverse provider wallet funds
+        // automatically because they may already have been paid out.
+        const refundedCents=Math.max(0,Math.min(Number(tx.gross_cents)||0,Number(obj?.amount_refunded ?? amount)));
+        const refundStatus=refundedCents >= Number(tx.gross_cents) ? 'refunded' : 'partially_refunded';
+        await env.DB.prepare(`UPDATE payment_transactions SET status=CASE WHEN MAX(refund_cents,?)>=gross_cents THEN 'refunded' ELSE 'partially_refunded' END,refund_cents=MAX(refund_cents,?),updated_at=CURRENT_TIMESTAMP WHERE id=? AND status NOT IN ('failed','cancelled')`).bind(refundedCents,refundedCents,tx.id).run();
+        result=refundStatus==='refunded'?'REFUND_RECORDED':'PARTIAL_REFUND_RECORDED';
       } else if(disputeEvent.has(event.type)) {
         if(tx.status==='paid') await env.DB.prepare(`UPDATE payment_transactions SET status='held',updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(tx.id).run();
         result='DISPUTE_HELD';
