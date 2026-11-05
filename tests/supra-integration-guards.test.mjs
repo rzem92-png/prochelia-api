@@ -496,9 +496,9 @@ test("production rate limiter uses atomic UPSERT and performs no runtime DDL", (
   const end=source.indexOf("\\nasync function strictProductionAudit",start);
   const fn=source.slice(start,end);
   assert.ok(start>=0 && end>start);
-  assert.match(fn,/ON CONFLICT\\(bucket,subject_hash,window_start\\)/);
-  assert.match(fn,/request_count=security_rate_limits\\.request_count\\+1/);
-  assert.match(fn,/RETURNING request_count/);
-  assert.doesNotMatch(fn,/productionSafetySchema\\(/);
-  assert.doesNotMatch(fn,/SELECT request_count FROM security_rate_limits/);
+  assert.ok(fn.includes('ON CONFLICT(bucket,subject_hash,window_start)'));
+  assert.ok(fn.includes('request_count=security_rate_limits.request_count+1'));
+  assert.ok(fn.includes('RETURNING request_count'));
+  assert.ok(!fn.includes('productionSafetySchema('));
+  assert.ok(!fn.includes('SELECT request_count FROM security_rate_limits'));
 });
