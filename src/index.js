@@ -3527,13 +3527,16 @@ const __procheliaProductionSafetyHandle = handle;
 handle = async function(request,env){
   const origin=request.headers.get('origin');
   const fetchSite=(request.headers.get('sec-fetch-site')||'').toLowerCase();
-  // Defense in depth: browser Fetch Metadata blocks cross-site state-changing
-  // requests even when Origin is missing/stripped. Do not apply to GET/HEAD.
-  if(isMutatingMethod(request.method) && fetchSite==='cross-site'){
-    return json({ok:false,error:'CROSS_SITE_REQUEST_BLOCKED',version:VERSION},403);
-  }
+  // Validate Origin before Fetch Metadata. The app and API may intentionally
+  // live on different registrable domains (Pages + Workers), so trusted
+  // credentialed cross-site requests must be allowed by the exact Origin
+  // allowlist. Cross-site mutations without a trusted Origin fail closed.
   if(origin && !securityOriginAllowed(request,env)){
     return json({ok:false,error:'ORIGIN_NOT_ALLOWED',version:VERSION},403);
+  }
+  if(isMutatingMethod(request.method) && fetchSite==='cross-site' &&
+     (!origin || !securityOriginAllowed(request,env))){
+    return json({ok:false,error:'CROSS_SITE_REQUEST_BLOCKED',version:VERSION},403);
   }
 
   // Cross-origin browser preflight must complete without touching D1,
