@@ -59,10 +59,9 @@ export function rankSupraProposals(proposals, options = {}) {
       // Risk labels are authoritative for the ranking decision: high requires
       // manager approval (A3), critical requires mandatory human review (A4).
       riskTypes: proposalRisk === "critical" ? ["security"] : [],
-      externalSideEffect: proposalRisk === "high" || p.externalSideEffect === true,
       irreversible: p.irreversible === true,
       externalCommitment: p.externalCommitment === true,
-      externalSideEffect: p.externalSideEffect === true,
+      externalSideEffect: proposalRisk === "high" || p.externalSideEffect === true,
       moneyMovement: p.moneyMovement === true,
       personalDataChange: p.personalDataChange === true,
       preapproved: p.preapproved === true,
