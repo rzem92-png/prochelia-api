@@ -3252,8 +3252,11 @@ async function stripeWebhook(request, env) {
   const disputeEvent=new Set(['charge.dispute.created']);
   // Charge/Dispute objects may not carry Checkout metadata. Resolve via Stripe API;
   // if lookup fails, reset event claim and return 503 so provider retries.
-  if(!txId && (refundEvent.has(event.type)||disputeEvent.has(event.type)) && obj?.payment_intent && env.STRIPE_SECRET_KEY) {
-    txId=await resolveStripeTransactionId(String(obj.payment_intent),env.STRIPE_SECRET_KEY);
+  const paymentIntentId = typeof obj?.payment_intent === 'string'
+    ? obj.payment_intent
+    : (typeof obj?.payment_intent?.id === 'string' ? obj.payment_intent.id : null);
+  if(!txId && (refundEvent.has(event.type)||disputeEvent.has(event.type)) && paymentIntentId && env.STRIPE_SECRET_KEY) {
+    txId=await resolveStripeTransactionId(paymentIntentId,env.STRIPE_SECRET_KEY);
     if(!txId) {
       await env.DB.prepare(`UPDATE payment_webhook_events SET processed=0,processed_at=NULL WHERE provider='stripe' AND event_id=?`).bind(String(event.id)).run();
       return json({ok:false,error:'STRIPE_PAYMENT_INTENT_LOOKUP_FAILED',version:VERSION,event_id:event.id},503);
