@@ -49,3 +49,16 @@ export async function resolveStripeTransactionId(paymentIntentId, secret, fetchI
   const txId = intent?.metadata?.prochelia_transaction_id;
   return typeof txId === 'string' && txId.trim() ? txId.trim() : null;
 }
+
+// Stripe webhook amounts are expressed in the smallest currency unit. A dispute
+// represents the disputed portion (which may be partial); payment/refund Charge
+// objects must still match the original transaction gross amount.
+export function stripeWebhookAmountMatches({ eventType, amount, currency, grossCents, transactionCurrency = 'EUR' }) {
+  const cents = Number(amount);
+  const gross = Number(grossCents);
+  const normalizedCurrency = String(currency || '').toLowerCase();
+  const expectedCurrency = String(transactionCurrency || 'EUR').toLowerCase();
+  if (!Number.isSafeInteger(cents) || !Number.isSafeInteger(gross) || gross <= 0 || !normalizedCurrency || normalizedCurrency !== expectedCurrency) return false;
+  if (eventType === 'charge.dispute.created') return cents > 0 && cents <= gross;
+  return cents === gross;
+}
