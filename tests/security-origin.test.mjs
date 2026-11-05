@@ -96,6 +96,6 @@ test('session cookie keeps HttpOnly, Secure and SameSite=Lax flags', () => {
   assert.match(cookie, /HttpOnly/);
   assert.match(cookie, /Secure/);
   assert.match(cookie, /SameSite=Lax/);
-  assert.match(cookie, /Path=\\//);
+  assert.ok(cookie.includes('Path=/'));
   assert.match(cookie, /Max-Age=60/);
 });
