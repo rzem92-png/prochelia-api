@@ -159,3 +159,13 @@ Static-only review; no restore workflow run, remote D1 query, or migration execu
 Commits : `c707527b2dfa9ecd41478b62062ae62066998902`, `6a24e9f9142641090110c8a4708df308bb3c84f9`, `c87a98f8ce56f8ad11d955dcfcc4d52e5c56440c`.
 
 **Limites inchangées :** aucun backup, restore, D1 query distante, migration ou déploiement n’a été lancé. La rétention 30 jours de l’artefact Actions n’est pas une stratégie d’archivage durable ; une archive R2 avec politique de rétention, clés et restauration testée reste à mettre en place.
+
+
+### Intégrité d’archive renforcée — SHA-256 du dump SQL — 2026-11-05
+
+- Le workflow de sauvegarde calcule le SHA-256 du dump SQL en clair, vérifie le round-trip de chiffrement/déchiffrement, puis inscrit le hash dans le manifeste `README.txt` avec la base source et l’horodatage.
+- Le workflow de restauration exige un hash SHA-256 de 64 caractères hexadécimaux et compare le dump déchiffré au hash du manifeste avant toute importation.
+- Commit backup : `0434f25d8a38cdeaeaa7a715acfc1b2d9240ec33`.
+- Commit restore : `23edbbf63a9628d839c63ac4d6bd7ee282c230ae`.
+
+Cette vérification complète le contrôle d’intégrité GPG et réduit les risques de fichier incomplet/corrompu. Elle ne remplace pas une signature indépendante du manifeste ni un test réel de restauration. Aucun secret, backup réel, export D1 ou import distant n’a été manipulé dans cette session.
