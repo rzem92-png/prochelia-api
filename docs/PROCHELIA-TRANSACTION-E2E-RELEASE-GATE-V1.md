@@ -21,6 +21,9 @@ Exigence de livraison obligatoire. Aucun statut « opérationnel de bout en bout
 15. Rapprochement comptable : mission, commande, paiement, frais PSP, commission, taxes, remboursement, payout, facture/avoir et ledger; écarts détectés et signalés. Ne pas confondre GMV, chiffre d'affaires plateforme, revenus intervenants et fonds en transit.
 
 ## Scénarios obligatoires
+
+- Accès interdit à la mission d’autrui (contrôle d’autorisation côté serveur, y compris ID substitué).
+
 - Happy path de bout en bout.
 - Client ou intervenant abandonne en cours de parcours.
 - Réservation concurrente du même créneau; une seule doit réussir.
