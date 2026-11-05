@@ -40,6 +40,29 @@ test("unapproved browser origin is rejected", async () => {
   assert.equal(response.headers.get("access-control-allow-origin"), null);
 });
 
+test("cross-site mutation is blocked by Fetch Metadata before D1/rate-limit", async () => {
+  const env = new Proxy({}, {
+    get(_target, property) {
+      if (property === "DB") throw new Error("Cross-site request must be blocked before D1");
+      return undefined;
+    }
+  });
+  const response = await worker.fetch(new Request(endpoint, {
+    method: "POST",
+    headers: {
+      "Sec-Fetch-Site": "cross-site",
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({ email: "test@example.com", password: "not-a-real-password" })
+  }), env);
+  assert.equal(response.status, 403);
+  assert.deepEqual(await response.json(), {
+    ok: false,
+    error: "CROSS_SITE_REQUEST_BLOCKED",
+    version: "V14.0.0"
+  });
+});
+
 test("unapproved preflight header is rejected", async () => {
   const response = await worker.fetch(new Request(endpoint, {
     method: "OPTIONS",
