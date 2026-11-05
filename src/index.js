@@ -3838,24 +3838,34 @@ async function productionRateLimit(request,env){
   const subject=await productionSubjectHash(request,path);
   const now=Math.floor(Date.now()/1000);
   const start=new Date(Math.floor(now/windowSeconds)*windowSeconds*1000).toISOString();
-  // Rate limiting must not perform implicit DDL on a live request.
-  // Schema installation belongs to an explicit, reviewed migration.
+
+  // No DDL in request path. Explicit migration must install the UNIQUE key.
   const rateLimitTable=await env.DB.prepare("SELECT 1 AS present FROM sqlite_master WHERE type='table' AND name='security_rate_limits' LIMIT 1").first();
   if(!rateLimitTable?.present){
     return {ok:false,response:json({ok:false,error:'RATE_LIMIT_SCHEMA_NOT_INITIALIZED',version:VERSION},503)};
   }
-  const existing=await env.DB.prepare(`SELECT request_count FROM security_rate_limits WHERE bucket=? AND subject_hash=? AND window_start=? LIMIT 1`).bind(bucket,subject,start).first();
-  const count=Number(existing?.request_count||0)+1;
-  if(existing){
-    await env.DB.prepare(`UPDATE security_rate_limits SET request_count=? WHERE bucket=? AND subject_hash=? AND window_start=?`).bind(count,bucket,subject,start).run();
-  }else{
-    await env.DB.prepare(`INSERT INTO security_rate_limits(id,bucket,subject_hash,window_start,request_count) VALUES(?,?,?,?,1)`).bind(crypto.randomUUID(),bucket,subject,start).run();
+
+  // Atomic increment avoids the SELECT-then-UPDATE race under parallel requests.
+  const row=await env.DB.prepare(`INSERT INTO security_rate_limits(id,bucket,subject_hash,window_start,request_count)
+    VALUES(?,?,?,?,1)
+    ON CONFLICT(bucket,subject_hash,window_start)
+    DO UPDATE SET request_count=security_rate_limits.request_count+1
+    RETURNING request_count`).bind(crypto.randomUUID(),bucket,subject,start).first();
+  if(!row || !Number.isSafeInteger(Number(row.request_count)) || Number(row.request_count)<1){
+    return {ok:false,response:json({ok:false,error:'RATE_LIMIT_COUNTER_UNAVAILABLE',version:VERSION},503)};
   }
+  const count=Number(row.request_count);
   if(count>limit){
-    await productionSafetySchema(env);
-    await env.DB.prepare(`INSERT INTO production_security_events(id,event_type,route,subject_hash,decision,details_json) VALUES(?,?,?,?,?,?)`)
-      .bind(crypto.randomUUID(),'RATE_LIMIT',path,subject,'BLOCKED',JSON.stringify({limit,windowSeconds})).run();
-    return {ok:false,response:json({ok:false,error:'RATE_LIMITED',version:VERSION,retry_after_seconds:Math.max(1,windowSeconds-(now%windowSeconds))},429,{'retry-after':String(Math.max(1,windowSeconds-(now%windowSeconds)))})};
+    // Enforcement remains active even if the separate security-event table is not installed.
+    const eventTable=await env.DB.prepare("SELECT 1 AS present FROM sqlite_master WHERE type='table' AND name='production_security_events' LIMIT 1").first();
+    if(eventTable?.present){
+      try {
+        await env.DB.prepare(`INSERT INTO production_security_events(id,event_type,route,subject_hash,decision,details_json) VALUES(?,?,?,?,?,?)`)
+          .bind(crypto.randomUUID(),'RATE_LIMIT',path,subject,'BLOCKED',JSON.stringify({limit,windowSeconds})).run();
+      } catch { /* best-effort audit; do not weaken/undo rate-limit enforcement */ }
+    }
+    const retry=Math.max(1,windowSeconds-(now%windowSeconds));
+    return {ok:false,response:json({ok:false,error:'RATE_LIMITED',version:VERSION,retry_after_seconds:retry},429,{'retry-after':String(retry)})};
   }
   return {ok:true};
 }
