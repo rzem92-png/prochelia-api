@@ -366,6 +366,16 @@ test("SUPRA planner delegates body reads to the independently tested bounded str
 });
 
 
+test("malformed percent-encoded session cookies are rejected without throwing", () => {
+  const start=source.indexOf("function getCookie(request, name)");
+  const end=source.indexOf("function sessionCookie",start);
+  const helper=source.slice(start,end);
+  assert.ok(start>=0 && end>start);
+  assert.match(helper,/try\s*\{\s*return decodeURIComponent\(/);
+  assert.match(helper,/catch\s*\{\s*return null;/);
+  assert.match(helper,/if \(key !== name\) continue;/);
+});
+
 test("production audit is an explicit POST action, never an unauthenticated GET side effect", () => {
   const start=source.indexOf("const __procheliaProductionSafetyHandle = handle;");
   const wrapper=source.slice(start);
