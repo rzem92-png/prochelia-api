@@ -997,6 +997,10 @@ async function paymentWebhook(request, env) {
   if(txId){
     const tx=await env.DB.prepare('SELECT * FROM payment_transactions WHERE id=? LIMIT 1').bind(txId).first();
     if(tx){
+      // Prevent a correctly signed event from another configured provider from
+      // mutating a transaction belonging to a different PSP.
+      if(String(tx.provider||'').toLowerCase()!==String(provider||'').toLowerCase())
+        return json({ok:false,error:'WEBHOOK_PROVIDER_TRANSACTION_MISMATCH',version:VERSION,transaction_id:txId},409);
       const statusMap={payment_succeeded:'paid',charge_succeeded:'paid',payment_failed:'failed',charge_failed:'failed',payment_refunded:'refunded'};
       const newStatus=statusMap[type];
       if(newStatus){
@@ -1023,6 +1027,9 @@ async function paymentWebhook(request, env) {
     const statusMap={payout_processing:'processing',payout_paid:'completed',payout_failed:'failed',payout_canceled:'canceled'};
     const newStatus=statusMap[type];
     if(payout&&newStatus){
+      // A payout event must originate from the same provider recorded on payout.
+      if(String(payout.provider||'').toLowerCase()!==String(provider||'').toLowerCase())
+        return json({ok:false,error:'WEBHOOK_PROVIDER_PAYOUT_MISMATCH',version:VERSION,payout_id:payoutId},409);
       // Do not acknowledge a terminal PSP event when the internal reservation
       // is missing/inconsistent. Leave it retryable for reconciliation.
       if(newStatus!=='processing' && ['requested','processing'].includes(payout.status)){
