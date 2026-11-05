@@ -28,6 +28,8 @@ fi
 
 grep -Fq "0005_security_rate_limits.sql" "$restore" || fail "Expected migration manifest missing"
 grep -Fq 'migration_count == 5 and .expected_migration_count == 5' "$restore" || fail "Migration count verification missing"
-grep -Fq 'length == 25' "$restore" || fail "Table-count check missing"
+grep -Fq 'length >= 23' "$restore" || fail "Minimum table-count guard missing"
+grep -Fq 'required_table_count == 23' "$restore" || fail "Required core tables verification missing"
+grep -Fq 'minimum 23 tables' "$restore" || fail "Non-brittle table count message missing"
 grep -Fq 'retention-days: 30' "$backup" || fail "Backup artifact retention setting missing"
 echo "PASS: D1 backup/restore workflow static safety gates"
