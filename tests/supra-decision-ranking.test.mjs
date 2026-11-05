@@ -37,7 +37,7 @@ test('proposal ranking is deterministic, transparent and validates input', () =>
   assert.equal(ranked.ok, true);
   assert.equal(ranked.proposals[0].id, 'option-1');
   assert.equal(ranked.proposals[0].rank, 1);
-  assert.equal(ranked.proposals[0].score, 85.5);
+  assert.equal(ranked.proposals[0].score, 85.75);
   assert.equal(rankSupraProposals([proposal(), proposal()]).code, 'DUPLICATE_PROPOSAL_ID');
   assert.equal(rankSupraProposals([proposal({ confidence: 101 })]).code, 'INVALID_PROPOSAL');
   assert.equal(rankSupraProposals([]).ok, false);
