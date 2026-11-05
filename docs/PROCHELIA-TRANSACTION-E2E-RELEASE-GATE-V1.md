@@ -22,6 +22,9 @@ Exigence de livraison obligatoire. Aucun statut « opérationnel de bout en bout
 
 ## Scénarios obligatoires
 
+- Test adversarial : accéder à la mission d’autrui (refus côté serveur, y compris ID substitué).
+
+
 - Accès interdit à la mission d’autrui (contrôle d’autorisation côté serveur, y compris ID substitué).
 
 - Happy path de bout en bout.
