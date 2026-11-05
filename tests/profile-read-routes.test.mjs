@@ -14,7 +14,8 @@ const clients = [
 ];
 const providers = [
   {id:"provider-1",user_id:"user-provider-1",first_name:"Alex",last_name:"Test",email:"alex@example.test",phone:"0600000011",user_status:"active",professional_status:"Aide à domicile",description:"Profil validé",service_area:"Meudon",hourly_rate:22,validation_status:"approved"},
-  {id:"provider-2",user_id:"user-provider-2",first_name:"Marc",last_name:"Test",email:"marc@example.test",phone:"0600000012",user_status:"active",professional_status:"Ménage",description:"Profil en attente",service_area:"Sèvres",hourly_rate:20,validation_status:"pending"}
+  {id:"provider-2",user_id:"user-provider-2",first_name:"Marc",last_name:"Test",email:"marc@example.test",phone:"0600000012",user_status:"active",professional_status:"Ménage",description:"Profil en attente",service_area:"Sèvres",hourly_rate:20,validation_status:"pending"},
+  {id:"provider-3",user_id:"user-provider-3",first_name:"Nora",last_name:"Inactive",email:"nora@example.test",phone:"0600000013",user_status:"inactive",professional_status:"Aide à domicile",description:"Compte désactivé",service_area:"Meudon",hourly_rate:21,validation_status:"approved"}
 ];
 
 function makeEnv(role="gerante", userId="user-manager") {
@@ -128,4 +129,12 @@ test("unknown role is forbidden from both profile directories", async()=>{
     const body=await response.json();
     assert.equal(body.error,"FORBIDDEN",route);
   }
+});
+
+test("client directory excludes pending and inactive providers", async()=>{
+  const response=await get("/api/intervenants",makeEnv("client","user-client-1"));
+  const body=await response.json();
+  assert.equal(response.status,200,JSON.stringify(body));
+  assert.deepEqual(body.intervenants.map(x=>x.id),["provider-1"]);
+  assert.ok(!body.intervenants.some(x=>x.id==="provider-2" || x.id==="provider-3"));
 });
