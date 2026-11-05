@@ -148,7 +148,7 @@ test('same payout idempotency key cannot produce a second payout', () => {
 test('unprocessed webhook delivery can retry and payload mismatch is rejected', () => {
   assert.match(source, /if\(prior\?\.processed\) return json\(\{ok:true,version:VERSION,duplicate:true,event_id:eventId\},200\)/);
   assert.match(source, /WEBHOOK_EVENT_ID_PAYLOAD_CONFLICT/);
-  assert.match(source, /Previously received but unprocessed event is retried/);
+  assert.match(source, /previously received but unprocessed event is retried/i);
 });
 
 test('payment success transition and wallet credit are guarded together', () => {
