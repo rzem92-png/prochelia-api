@@ -1,0 +1,26 @@
+name: PROCHÉLIA Security Origin Regression
+
+on:
+  push:
+    branches:
+      - staging-prochelia-v14
+  pull_request:
+    branches:
+      - staging-prochelia-v14
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  security-origin-regression:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout staging
+        uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Run Origin / CSRF regression tests
+        run: node --test tests/security-origin.test.mjs
