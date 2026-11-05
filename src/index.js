@@ -995,7 +995,10 @@ async function paymentWebhook(request, env) {
         if(!alreadyFinal){
           if(newStatus==='paid'){
             const wallet=await env.DB.prepare('SELECT * FROM wallets WHERE user_id=? LIMIT 1').bind(tx.intervenant_id).first();
-            if(wallet) await env.DB.batch([
+            // Do not acknowledge/mark the event processed if the beneficiary wallet
+            // is missing: leave the event retryable and the payment unconfirmed.
+            if(!wallet) return json({ok:false,error:'WALLET_NOT_READY',version:VERSION,transaction_id:txId},409);
+            await env.DB.batch([
               env.DB.prepare(`UPDATE payment_transactions SET status='paid',provider_payment_id=COALESCE(?,provider_payment_id),updated_at=CURRENT_TIMESTAMP WHERE id=? AND status NOT IN ('paid','failed','refunded')`).bind(clean(event?.data?.provider_payment_id)||null,txId),
               env.DB.prepare(`UPDATE wallets SET available_cents=available_cents+?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND changes()=1`).bind(tx.net_intervenant_cents,wallet.id)
             ]);
