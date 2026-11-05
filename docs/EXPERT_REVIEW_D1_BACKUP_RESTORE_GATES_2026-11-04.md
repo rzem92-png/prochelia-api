@@ -147,3 +147,15 @@ The v2 restore workflow now checks the **five exact migration filenames** in `d1
 Commit: `0ef54f91ec2cf22154c5bb0667e46c0e5af68803`.
 
 Static-only review; no restore workflow run, remote D1 query, or migration execution was performed. The expected table count (25) still needs confirmation against a real post-migration preview export and the exact restored schema.
+
+
+### Garde-fous supplémentaires — 2026-11-05 (configuration explicite et rétention)
+
+- Ajout de `wrangler.restore-test-v2.jsonc`, configuration isolée nom/UUID dédiée à la D1 `prochelia-restore-test-v2`.
+- Les commandes Wrangler du workflow de restauration v2 utilisent maintenant explicitement cette configuration, au lieu de dépendre implicitement du fichier Wrangler par défaut de la branche.
+- Le workflow contrôle aussi les valeurs nom/UUID de cette configuration avant l’opération.
+- La rétention de l’artefact de sauvegarde chiffré GitHub Actions passe de 7 à 30 jours.
+
+Commits : `c707527b2dfa9ecd41478b62062ae62066998902`, `6a24e9f9142641090110c8a4708df308bb3c84f9`, `c87a98f8ce56f8ad11d955dcfcc4d52e5c56440c`.
+
+**Limites inchangées :** aucun backup, restore, D1 query distante, migration ou déploiement n’a été lancé. La rétention 30 jours de l’artefact Actions n’est pas une stratégie d’archivage durable ; une archive R2 avec politique de rétention, clés et restauration testée reste à mettre en place.
