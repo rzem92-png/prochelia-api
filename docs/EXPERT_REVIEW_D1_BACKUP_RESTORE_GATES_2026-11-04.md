@@ -169,3 +169,12 @@ Commits : `c707527b2dfa9ecd41478b62062ae62066998902`, `6a24e9f9142641090110c8a47
 - Commit restore : `23edbbf63a9628d839c63ac4d6bd7ee282c230ae`.
 
 Cette vérification complète le contrôle d’intégrité GPG et réduit les risques de fichier incomplet/corrompu. Elle ne remplace pas une signature indépendante du manifeste ni un test réel de restauration. Aucun secret, backup réel, export D1 ou import distant n’a été manipulé dans cette session.
+
+
+### CI de garde-fous statiques backup/restore ajouté — 2026-11-05
+
+- Script `scripts/validate-d1-restore-workflow.sh` ajouté : contrôles du nom/UUID de la base de test, de la config Wrangler dédiée, du pinning des commandes D1, du hash SHA-256, de la liste de migrations, du nombre de tables et de la rétention.
+- Workflow `.github/workflows/validate-d1-restore-workflow.yml` ajouté pour exécuter ces contrôles sur les modifications des fichiers de sauvegarde/restauration.
+- Commits : `d43153c088d2523957b7cced0b47d9ed0a82f7bf` (script), `edcc8252d974432a770cad6dd468fc120ab6abed` (workflow).
+
+**CI en attente de confirmation GitHub Actions :** aucun run n’est visible à l’instant pour le head actuel. Ces contrôles statiques ne sont pas présentés comme exécutés ou réussis.
