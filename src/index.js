@@ -977,7 +977,13 @@ async function paymentWebhook(request, env) {
   if(String(provider).toLowerCase()==='stripe') return json({ok:false,error:'STRIPE_WEBHOOK_ADAPTER_NOT_IMPLEMENTED',version:VERSION,message:'Le vérificateur Stripe officiel doit être raccordé avant d’accepter les événements Stripe.'},503);
   const payloadHash=await sha256Base64url(raw);
   const inserted=await env.DB.prepare(`INSERT OR IGNORE INTO payment_webhook_events (id,provider,event_id,event_type,signature_valid,payload_hash) VALUES (?,?,?,?,1,?)`).bind(crypto.randomUUID(),provider,eventId,type,payloadHash).run();
-  if(!inserted.meta?.changes) return json({ok:true,version:VERSION,duplicate:true,event_id:eventId},200);
+  if(!inserted.meta?.changes){
+    const prior=await env.DB.prepare('SELECT processed,payload_hash FROM payment_webhook_events WHERE provider=? AND event_id=? LIMIT 1').bind(provider,eventId).first();
+    if(prior && String(prior.payload_hash||'')!==String(payloadHash)) return json({ok:false,error:'WEBHOOK_EVENT_ID_PAYLOAD_CONFLICT',version:VERSION},409);
+    // A previously received but unprocessed event is retried. Financial state
+    // transitions below are conditional/idempotent, so retry is safe.
+    if(prior?.processed) return json({ok:true,version:VERSION,duplicate:true,event_id:eventId},200);
+  }
   const txId=clean(event?.data?.transaction_id), payoutId=clean(event?.data?.payout_id);
   if(txId){
     const tx=await env.DB.prepare('SELECT * FROM payment_transactions WHERE id=? LIMIT 1').bind(txId).first();
@@ -987,10 +993,14 @@ async function paymentWebhook(request, env) {
       if(newStatus){
         const alreadyFinal = ['paid','failed','refunded'].includes(tx.status);
         if(!alreadyFinal){
-          await env.DB.prepare('UPDATE payment_transactions SET status=?,provider_payment_id=COALESCE(?,provider_payment_id),updated_at=CURRENT_TIMESTAMP WHERE id=?').bind(newStatus,clean(event?.data?.provider_payment_id)||null,txId).run();
           if(newStatus==='paid'){
             const wallet=await env.DB.prepare('SELECT * FROM wallets WHERE user_id=? LIMIT 1').bind(tx.intervenant_id).first();
-            if(wallet) await env.DB.prepare('UPDATE wallets SET available_cents=available_cents+?,updated_at=CURRENT_TIMESTAMP WHERE id=?').bind(tx.net_intervenant_cents,wallet.id).run();
+            if(wallet) await env.DB.batch([
+              env.DB.prepare(`UPDATE payment_transactions SET status='paid',provider_payment_id=COALESCE(?,provider_payment_id),updated_at=CURRENT_TIMESTAMP WHERE id=? AND status NOT IN ('paid','failed','refunded')`).bind(clean(event?.data?.provider_payment_id)||null,txId),
+              env.DB.prepare(`UPDATE wallets SET available_cents=available_cents+?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND changes()=1`).bind(tx.net_intervenant_cents,wallet.id)
+            ]);
+          } else {
+            await env.DB.prepare('UPDATE payment_transactions SET status=?,provider_payment_id=COALESCE(?,provider_payment_id),updated_at=CURRENT_TIMESTAMP WHERE id=? AND status NOT IN (\'paid\',\'failed\',\'refunded\')').bind(newStatus,clean(event?.data?.provider_payment_id)||null,txId).run();
           }
         }
       }
