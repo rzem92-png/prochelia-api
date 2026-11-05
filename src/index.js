@@ -286,7 +286,7 @@ async function listIntervenants(request,env) {
     const slots=byProvider.get(row.id)||[];
     const validated=['approved','validated','valide','validé'].includes(String(row.validation_status||'').toLowerCase());
     return {
-      id:row.id,userId:row.user_id,prenom:row.first_name,nom:row.last_name,
+      id:row.id,userId:row.user_id,prenom:row.first_name,nom:clientView?null:row.last_name,
       email:clientView?null:row.email,telephone:clientView?null:row.phone,
       ville:row.service_area||'',zoneIntervention:row.service_area||'',
       activite:row.professional_status||'',description:row.description||'',
