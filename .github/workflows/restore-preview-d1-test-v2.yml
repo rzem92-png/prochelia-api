@@ -79,7 +79,8 @@ jobs:
           test -s "$RUNNER_TEMP/prochelia-restore/README.txt"
           grep -Fx 'database=prochelia-preview-db' "$RUNNER_TEMP/prochelia-restore/README.txt"
           created="$(sed -n 's/^created_utc=//p' "$RUNNER_TEMP/prochelia-restore/README.txt")"
-          [[ -n "$created" ]]
+          expected_sha="$(sed -n 's/^sha256_sql=//p' "$RUNNER_TEMP/prochelia-restore/README.txt")"
+          [[ -n "$created" && "$expected_sha" =~ ^[a-fA-F0-9]{64}$ ]] || { echo "::error::Manifest incomplet ou hash SHA-256 invalide."; exit 1; }
           archive_epoch="$(date -u -d "$created" +%s)"
           (( archive_epoch > cutoff && archive_epoch <= run_epoch + 300 )) || { echo "::error::Horodatage de l’archive incohérent ou antérieur aux migrations."; exit 1; }
           echo "Archive de préproduction postérieure aux migrations confirmée."
@@ -94,6 +95,8 @@ jobs:
           sql="$RUNNER_TEMP/prochelia-restore/prochelia-preview.sql"
           printf '%s' "$BACKUP_ENCRYPTION_KEY" | gpg --batch --yes --pinentry-mode loopback --passphrase-fd 0 --decrypt "$encrypted" > "$sql"
           test -s "$sql"
+          actual_sha="$(sha256sum "$sql" | cut -d ' ' -f 1)"
+          [[ "$actual_sha" == "$expected_sha" ]] || { echo "::error::Le hash SHA-256 de l’export déchiffré ne correspond pas au manifeste."; exit 1; }
           grep -Eiq 'CREATE TABLE|INSERT INTO|CREATE INDEX|PRAGMA' "$sql" || { echo "::error::Export SQL invalide."; exit 1; }
           chmod 600 "$sql"
           for table in d1_migrations pricing_holidays users missions pricing_policies payment_wallet_ledger security_rate_limits; do
