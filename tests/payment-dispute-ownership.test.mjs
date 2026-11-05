@@ -64,3 +64,10 @@ test('mission payment write route remains disabled unless explicitly enabled', (
 test('manual finalization cannot assert PSP paid or refunded outcomes', () => {
   assert.match(source, /if\(outcome==='paid'\|\|outcome==='refunded'\)\s*return\s+json\(\{ok:false,error:'PSP_WEBHOOK_CONFIRMATION_REQUIRED'/);
 });
+
+\ntest('mission payment amount and parties are derived from the persisted mission, not request body', () => {
+  assert.ok(source.includes("'SELECT id, client_id, intervenant_id, price_client, commission FROM missions WHERE id=? LIMIT 1'"));
+  assert.ok(source.includes("const clientId=clean(mission.client_id), intervenantId=clean(mission.intervenant_id);"));
+  assert.ok(source.includes("const gross=moneyCents(mission.price_client), commission=moneyCents(mission.commission);"));
+  assert.ok(!source.includes("moneyCents(body?.gross_eur), commission=moneyCents(body?.commission_eur)"));
+});
