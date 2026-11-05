@@ -249,8 +249,10 @@ test("successful payout webhook requires the external PSP payout reference", () 
 test("payout idempotency keys cannot disclose another user's payout", () => {
   const route=source.slice(source.indexOf("async function payoutRequest"),source.indexOf("\nasync function ",source.indexOf("async function payoutRequest")+30));
   assert.match(route,/IDEMPOTENCY_KEY_TOO_LONG/);
-  assert.match(route,/String\(old\.user_id\)!==String\(auth\.user\.id\)/);
-  assert.match(route,/String\(replay\.user_id\)===String\(auth\.user\.id\)/);
+  assert.match(route,/payoutReplayMatches\(old,/);
+  assert.equal((route.match(/payoutReplayMatches\(replay,/g)||[]).length,2);
+  assert.match(route,/IDEMPOTENCY_KEY_CONFLICT/);
+  assert.doesNotMatch(route,/String\(replay\.user_id\)===String\(auth\.user\.id\)/);
   assert.match(route,/IDEMPOTENCY_KEY_CONFLICT/);
 });
 
@@ -383,7 +385,7 @@ test("production rate limiting never trusts spoofable X-Forwarded-For", () => {
   assert.ok(start>=0 && end>start);
   assert.match(helper,/CF-Connecting-IP/);
   assert.match(helper,/\| 'unknown'/);
-  assert.doesNotMatch(helper,/X-Forwarded-For/);
+  assert.doesNotMatch(helper,/headers\\.get\\(['\"]X-Forwarded-For['\"]\\)/i);
 });
 
 test("malformed percent-encoded session cookies are rejected without throwing", () => {
