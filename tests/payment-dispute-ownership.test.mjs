@@ -208,3 +208,25 @@ test('reconciliation review writes audit before mutating review status', () => {
   assert.ok(auditAt>=0 && updateAt>auditAt,'audit should be persisted before status transition');
   assert.match(handler,/PAYMENT_RECONCILIATION_REVIEW_CONFLICT/);
 });
+
+test('payout fail-closed guards cover dispute, refund and held states before wallet reservation', () => {
+  const start=source.indexOf('async function payoutRequest');
+  const end=source.indexOf('async function verifyWebhookSignature',start);
+  const handler=source.slice(start,end);
+  const dispute=handler.indexOf('PAYOUT_BLOCKED_BY_ACTIVE_DISPUTE');
+  const refund=handler.indexOf('PAYOUT_BLOCKED_PENDING_REFUND_RECONCILIATION');
+  const held=handler.indexOf('PAYOUT_BLOCKED_HELD_TRANSACTION_PENDING_RECONCILIATION');
+  const reserve=handler.indexOf('UPDATE wallets SET available_cents=available_cents-?');
+  assert.ok(dispute>=0 && refund>dispute && held>refund && reserve>held,
+    'all known financial holds must be checked before reserving wallet funds');
+  assert.match(handler,/PAYOUT_ACCOUNT_NOT_READY/);
+  assert.match(handler,/available_cents>=\?/);
+});
+test('payout request cannot bypass feature flag or provider account readiness', () => {
+  const start=source.indexOf('async function payoutRequest');
+  const end=source.indexOf('async function verifyWebhookSignature',start);
+  const handler=source.slice(start,end);
+  assert.ok(handler.indexOf("PAYOUTS_ENABLED")>=0);
+  assert.match(handler,/Number\(account\.payouts_enabled\)!==1/);
+  assert.match(handler,/PAYOUT_ACCOUNT_NOT_READY/);
+});
