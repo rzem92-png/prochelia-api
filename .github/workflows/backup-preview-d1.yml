@@ -122,4 +122,4 @@ jobs:
             ${{ runner.temp }}/prochelia-backup/prochelia-preview.sql.gpg
             ${{ runner.temp }}/prochelia-backup/README.txt
           if-no-files-found: error
-          retention-days: 7
+          retention-days: 30
