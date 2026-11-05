@@ -85,7 +85,7 @@ test('Stripe webhook uses native Stripe-Signature verification and dedicated web
   const handler=source.slice(start,end);
   assert.match(handler,/verifyStripeSignature\(raw,request\.headers\.get\('stripe-signature'\),env\.STRIPE_WEBHOOK_SECRET\)/);
   assert.match(handler,/STRIPE_WEBHOOK_NOT_CONFIGURED/);
-  assert.match(source,/url\.pathname === '\/api\/payments\/webhook'/);
+  assert.match(source,/url\.pathname\s*===\s*['\"]\/api\/payments\/webhook['\"]/);
 });
 test('Stripe webhook does not fall back to generic PROCHÉLIA HMAC handler', async()=>{
   const { readFile } = await import('node:fs/promises');
