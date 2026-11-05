@@ -1014,7 +1014,10 @@ async function paymentWebhook(request, env) {
       const statusMap={payment_succeeded:'paid',charge_succeeded:'paid',payment_failed:'failed',charge_failed:'failed',payment_refunded:'refunded'};
       const newStatus=statusMap[type];
       if(newStatus){
-        const alreadyFinal = ['paid','failed','refunded'].includes(tx.status);
+        const terminalPaymentStatuses=['paid','failed','refunded'];
+        if(terminalPaymentStatuses.includes(String(tx.status)) && String(tx.status)!==String(newStatus))
+          return json({ok:false,error:'PAYMENT_TERMINAL_STATE_CONFLICT',version:VERSION,transaction_id:txId,stored_status:tx.status,received_status:newStatus},409);
+        const alreadyFinal = terminalPaymentStatuses.includes(String(tx.status));
         if(!alreadyFinal){
           if(newStatus==='paid'){
             const wallet=await env.DB.prepare('SELECT * FROM wallets WHERE user_id=? LIMIT 1').bind(tx.intervenant_id).first();
