@@ -28,6 +28,8 @@ test("Resend sends transactional payload and returns accepted provider id", asyn
 
   assert.equal(captured.url, "https://api.resend.com/emails");
   assert.equal(captured.options.headers.authorization, "Bearer test-key");
+  assert.ok(captured.options.signal instanceof AbortSignal, "provider request must have a timeout signal");
+  assert.equal(captured.options.signal.aborted, false);
   assert.equal(captured.options.headers["Idempotency-Key"], "otp:test:1");
   const body = JSON.parse(captured.options.body);
   assert.deepEqual(body.to, ["client@example.test"]);
@@ -65,6 +67,8 @@ test("WhatsApp sends template only with required configuration", async () => {
 
   assert.match(captured.url, /graph\.facebook\.com\/vXX\.X\/123\/messages$/);
   assert.equal(captured.options.headers.authorization, "Bearer token");
+  assert.ok(captured.options.signal instanceof AbortSignal, "provider request must have a timeout signal");
+  assert.equal(captured.options.signal.aborted, false);
   const body = JSON.parse(captured.options.body);
   assert.equal(body.type, "template");
   assert.equal(body.template.name, "booking_update");
