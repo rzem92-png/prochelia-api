@@ -73,3 +73,30 @@ test('replay applies a pending wallet credit after currency configuration is cor
   assert.equal(db.prepare('SELECT applied FROM payment_wallet_credit_ledger WHERE transaction_id=?').get('tx-1').applied, 1);
   db.close();
 });
+
+
+test('Stripe refund status distinguishes partial and full cumulative refunds', () => {
+  assert.match(source, /partially_refunded/);
+  const db = new DatabaseSync(':memory:');
+  db.exec(`CREATE TABLE payment_transactions(id TEXT PRIMARY KEY,status TEXT,gross_cents INTEGER,refund_cents INTEGER DEFAULT 0);
+    INSERT INTO payment_transactions VALUES('tx-refund','paid',10000,0);`);
+  const applyRefund = cents => db.prepare(`UPDATE payment_transactions SET status=CASE WHEN MAX(refund_cents,?)>=gross_cents THEN 'refunded' ELSE 'partially_refunded' END,refund_cents=MAX(refund_cents,?) WHERE id=?`).run(cents,cents,'tx-refund');
+  applyRefund(2500);
+  let tx=db.prepare('SELECT status,refund_cents FROM payment_transactions WHERE id=?').get('tx-refund');
+  assert.equal(tx.status,'partially_refunded');
+  assert.equal(tx.refund_cents,2500);
+  applyRefund(10000);
+  tx=db.prepare('SELECT status,refund_cents FROM payment_transactions WHERE id=?').get('tx-refund');
+  assert.equal(tx.status,'refunded');
+  assert.equal(tx.refund_cents,10000);
+  applyRefund(7000); // Stripe cumulative total must never decrease
+  tx=db.prepare('SELECT status,refund_cents FROM payment_transactions WHERE id=?').get('tx-refund');
+  assert.equal(tx.status,'refunded');
+  assert.equal(tx.refund_cents,10000);
+  db.close();
+});
+
+test('refunded and partially refunded transactions are excluded from wallet credit replay', () => {
+  assert.match(source, /!\['refunded','partially_refunded'\]\.includes\(tx\.status\)/);
+  assert.match(source, /status NOT IN \('paid','refunded','partially_refunded'\)/);
+});
