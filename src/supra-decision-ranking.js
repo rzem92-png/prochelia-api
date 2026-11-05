@@ -54,8 +54,11 @@ export function rankSupraProposals(proposals, options = {}) {
     if (ids.has(p.id)) return { ok: false, code: "DUPLICATE_PROPOSAL_ID" };
     ids.add(p.id);
     const score = Object.keys(defaults).reduce((sum, key) => sum + p[key] * normalized[key], 0) / totalWeight;
+    const proposalRisk = p.risk.toLowerCase();
     const autonomy = classifySupraAutonomy({
-      riskTypes: p.risk.toLowerCase() === "critical" ? ["security"] : [],
+      // Risk labels are authoritative for the ranking decision: high requires
+      // manager approval (A3), critical requires mandatory human review (A4).
+      riskTypes: proposalRisk === "critical" ? ["security"] : proposalRisk === "high" ? ["human_impact"] : [],
       irreversible: p.irreversible === true,
       externalCommitment: p.externalCommitment === true,
       externalSideEffect: p.externalSideEffect === true,
