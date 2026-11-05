@@ -175,4 +175,5 @@ test("client provider directory does not expose provider surname, email, phone, 
   assert.equal(provider.email,null);
   assert.equal(provider.telephone,null);
   assert.equal(provider.user_id,undefined);
+  assert.equal(provider.userId,undefined,'client directory must not expose internal account IDs');
 });
