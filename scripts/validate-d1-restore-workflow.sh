@@ -15,6 +15,7 @@ grep -Fq '"name": "prochelia-restore-test-v2"' "$config" || fail "Restore Wrangl
 grep -Fq '"database_id": "a3526c2a-39cb-49ab-97c4-979138145f33"' "$config" || fail "Restore Wrangler config UUID mismatch"
 grep -Fq 'database=prochelia-preview-db' "$restore" || fail "Backup source database check missing"
 grep -Fq 'sha256_sql=' "$backup" || fail "Backup SHA-256 manifest missing"
+grep -Fq 'expected_sha="$(sed -n ' "$restore" || fail "Restore must reload SHA-256 from manifest in its own step"
 grep -Fq 'actual_sha="$(sha256sum "$sql"' "$restore" || fail "Restore SHA-256 verification missing"
 grep -Fq '[[ "$actual_sha" == "$expected_sha" ]]' "$restore" || fail "Restore hash equality guard missing"
 
