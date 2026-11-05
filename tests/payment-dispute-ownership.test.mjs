@@ -115,3 +115,10 @@ test('payment disputes prevent duplicate active cases and insert conditionally',
   assert.ok(source.includes('SELECT ?,?,?,?,?,?,?,? WHERE NOT EXISTS (SELECT 1 FROM payment_disputes WHERE transaction_id=? AND status IN (\'open\',\'pending\'))'));
   assert.match(source, /const inserted=Number\(results\?\.\[1\]\?\.meta\?\.changes\|\|0\)/);
 });
+
+test('admin dispute resolution uses conditional state transition and reports conflicts', () => {
+  assert.match(source, /DISPUTE_ALREADY_RESOLVED/);
+  assert.match(source, /UPDATE payment_disputes SET status='resolved'[\s\S]*?WHERE id=\? AND status NOT IN \('resolved','cancelled','canceled'\)/);
+  assert.match(source, /DISPUTE_RESOLUTION_CONFLICT/);
+  assert.match(source, /Number\(result\?\.meta\?\.changes\|\|0\)!==1/);
+});
