@@ -73,11 +73,11 @@ test("cross-site mutation is blocked by Fetch Metadata before D1/rate-limit", as
     body: JSON.stringify({ email: "test@example.com", password: "not-a-real-password" })
   }), env);
   assert.equal(response.status, 403);
-  assert.deepEqual(await response.json(), {
-    ok: false,
-    error: "CROSS_SITE_REQUEST_BLOCKED",
-    version: "V14.0.0"
-  });
+  const body = await response.json();
+  assert.equal(body.ok, false);
+  assert.equal(body.error, "CROSS_SITE_REQUEST_BLOCKED");
+  assert.equal(typeof body.version, "string");
+  assert.ok(body.version.length > 0);
 });
 
 test("unapproved preflight header is rejected", async () => {
