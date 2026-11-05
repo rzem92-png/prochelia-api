@@ -171,3 +171,9 @@ test('Stripe checkout uses a stable transaction-scoped idempotency key', () => {
   assert.match(source, /'idempotency-key':\x60prochelia-checkout-\$\{tx\.id\}\x60/);
   assert.doesNotMatch(source, /'idempotency-key':String\(request\.headers\.get\('idempotency-key'\)/);
 });
+
+
+test('Stripe webhook blocks success events with missing amount or currency instead of bypassing validation', () => {
+  assert.match(source, /const amountMatches=Number\\.isSafeInteger\\(amount\\) && amount>=0 && !!currency && amount===Number\\(tx\\.gross_cents\\) && currency===String\\(tx\\.currency\\|\\|'EUR'\\)\\.toLowerCase\\(\\)/);
+  assert.doesNotMatch(source, /const amountMatches=amount<0 \\|\\|/);
+});
