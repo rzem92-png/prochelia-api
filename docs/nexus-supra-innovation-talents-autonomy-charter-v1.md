@@ -204,3 +204,107 @@ Phase 4 — croissance et expansion :
 4. Veille continue signifie sources autorisées et tâches programmées, pas écoute secrète.
 5. Les actions sensibles restent humaines.
 6. L'innovation et le leadership sont des objectifs à démontrer par résultats, pas des slogans garantis.
+
+
+## 16. NEXUS comme outil indispensable — valeur quotidienne, pas dépendance artificielle
+Objectif produit : devenir un outil que les membres choisissent naturellement parce qu'il leur fait gagner du temps, leur apporte des opportunités, réduit les oublis et simplifie des tâches essentielles. Ne pas créer de dépendance par manipulation, verrouillage, pénalités abusives ou rétention artificielle.
+
+### Boucle de valeur quotidienne
+1. Au démarrage, SUPRA présente un résumé utile : priorités, demandes entrantes, échéances, opportunités, risques et actions en attente.
+2. Il propose une liste courte d'actions réellement pertinentes, triées par impact, urgence, effort et confiance.
+3. Il prépare le travail répétitif : réponses, documents, annonces, campagnes, devis préremplis, plannings, relances et synthèses.
+4. Il demande une validation lorsque nécessaire, puis exécute les actions permises.
+5. Il vérifie le résultat, mesure l'effet et met à jour le tableau de bord.
+6. Il apprend les préférences explicites et permet de les corriger ou réinitialiser.
+
+### Cockpit NEXUS/SUPRA unifié
+- Vue « Aujourd'hui » : actions, échéances, messages, missions, candidatures, demandes, alertes et résultats.
+- Vue « Opportunités » : nouvelles pistes, correspondances, partenaires, prospects et projets.
+- Vue « Activité » : pipeline, réservations, missions, collaborations et historique.
+- Vue « Croissance » : conversions, visibilité, revenus, marge estimée, rétention et recommandations.
+- Vue « SUPRA » : plans proposés/en cours/terminés, validations en attente, erreurs, journaux et autorisations.
+- Vue « Confiance & sécurité » : signalements, contrôles, permissions, historique et statut des vérifications.
+- Adaptation responsive : ordinateur, tablette et mobile; interface accessible et utilisable par des profils non techniques.
+
+### Suppléments pour créer une valeur difficile à remplacer
+- Mémoire de travail contrôlée : objectifs, préférences, tâches, projets et décisions; accès, correction, export et suppression par l'utilisateur.
+- Historique actionnable : pourquoi SUPRA a recommandé une action, quelles données ont été utilisées, ce qui a été exécuté et quel résultat a été obtenu.
+- Continuité : reprendre un dossier ou une tâche sans recommencer de zéro, avec état, prochaines étapes et responsable.
+- Interopérabilité : connecter, lorsque l'utilisateur l'autorise, calendrier, messagerie, fichiers, paiement, CRM et outils de gestion; éviter l'enfermement propriétaire.
+- Mode dégradé : si un connecteur ou une IA est indisponible, conserver les données, signaler la panne, proposer une alternative et ne pas inventer l'état.
+- Portabilité : exporter profils, documents, projets et historique autorisé dans des formats courants.
+
+## 17. Agent SUPRA : architecture opérationnelle de bout en bout
+SUPRA doit être composé de capacités spécialisées coordonnées par un orchestrateur, plutôt qu'un seul agent opaque :
+- Perception/veille : sources, événements, changements et signaux autorisés.
+- Compréhension : contexte, intention, contraintes, parties prenantes et données manquantes.
+- Planification : tâches, dépendances, estimation d'impact, coût, risques et critères de réussite.
+- Exécution : outils/API/connecteurs sous permissions strictes.
+- Vérification : contrôle indépendant du résultat, réconciliation et tests post-action.
+- Mémoire : contexte utile à durée de conservation définie, accès contrôlé et provenance.
+- Gouvernance : permissions, politiques, approbations, budgets, seuils, audit et escalade.
+- Communication : expliquer l'état, les résultats, les incertitudes et les prochaines étapes.
+
+### Cycle agentique obligatoire
+Observer → déduire sans surinterpréter → proposer un plan → évaluer risque et permission → obtenir approbation si nécessaire → exécuter une étape → vérifier → journaliser → informer → poursuivre ou arrêter.
+
+L'agent doit être capable de s'arrêter et demander de l'aide. Il ne doit pas multiplier les actions si les résultats deviennent incohérents, ni réessayer une action transactionnelle sans idempotence.
+
+## 18. Résolution automatique de problèmes — standards
+Pour chaque problème détecté, SUPRA produit un dossier structuré :
+- Description et source du signal.
+- Impact estimé, urgence, périmètre et niveau de confiance.
+- Hypothèses et éléments manquants.
+- Causes possibles séparées des faits observés.
+- Solutions comparées (coût, risque, délai, réversibilité).
+- Action recommandée et permissions requises.
+- Étapes d'exécution, vérification et plan de retour arrière.
+- Résultat, preuves, journal et escalade éventuelle.
+
+Règles :
+- Priorité à la résolution la plus sûre, simple et réversible.
+- Pas de changement destructif ou externe en cas d'incertitude.
+- Ne pas annoncer un problème résolu avant vérification observable.
+- En cas d'échec, arrêter, restaurer si possible, notifier et ouvrir un dossier humain.
+- Définir des SLO/SLA réalistes, alertes et procédures d'incident selon la criticité.
+
+## 19. Innovation continue et anticipation
+- Veille marché, produits concurrents, technologies, besoins utilisateurs et changements réglementaires sur sources licites.
+- Radar de tendances : signal faible → vérification → opportunité → expérimentation → résultat.
+- Registre des hypothèses d'innovation avec preuves, coûts, risques, avantage attendu et critères d'abandon.
+- Tests utilisateurs, prototypes et expérimentation mesurée avant généralisation.
+- Revue périodique des fonctions réellement utilisées, des irritants et des besoins non satisfaits.
+- Ne pas copier automatiquement un concurrent : identifier le problème utilisateur, les contraintes et l'avantage différenciant.
+- Protéger les innovations par documentation, confidentialité, marques, droits d'auteur et conseils professionnels lorsque pertinent; aucune promesse de brevetabilité sans analyse.
+
+## 20. Anti-patterns à éviter
+- Ajouter toujours plus de fonctionnalités sans priorité ni preuve d'usage.
+- Un fil social infini qui détourne de la valeur économique.
+- Un classement opaque ou pay-to-win.
+- Une IA qui prétend avoir effectué une action sans trace.
+- Notifications excessives, dark patterns ou dépendance comportementale.
+- Agents qui agissent sans permission, budget, audit ou limite.
+- Centralisation excessive de données sans nécessité.
+- Croissance internationale prématurée sans support, conformité et liquidité locale.
+- Revendiquer « unique au monde », « autonome à 100 % », « sans erreur » ou « leader garanti » sans preuves vérifiables.
+
+## 21. Critères de validation avant chaque release
+Chaque feature doit préciser :
+- problème utilisateur et persona ciblé;
+- valeur mesurable attendue;
+- parcours UX et accessibilité;
+- modèle de données et propriétaire de la donnée;
+- contrat API et permissions;
+- états, erreurs, retries et idempotence;
+- sécurité, privacy by design et rétention;
+- tests unitaires, intégration, e2e, non-régression et abus;
+- observabilité, métriques, support et rollback;
+- coûts de calcul/IA, latence et impact sur marge;
+- validation produit, conformité et sécurité requise.
+
+Une feature n'est « prête » que lorsque ces critères sont vérifiés au niveau adapté à son risque. La documentation ne constitue pas une preuve d'implémentation.
+
+## 22. Positionnement final à tester
+« NEXUS est le réseau où talents, entreprises, services et projets se rencontrent pour créer des opportunités réelles. SUPRA, votre copilote économique transversal, veille aux signaux autorisés, organise vos priorités, prépare les actions, automatise ce qui peut l'être et vous accompagne jusqu'au résultat — avec transparence, contrôle et sécurité. »
+
+La promesse d'indispensabilité doit être validée par l'usage répété, la satisfaction, le temps économisé, les opportunités et revenus créés, la fiabilité et la confiance.
