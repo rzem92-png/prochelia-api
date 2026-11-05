@@ -81,3 +81,9 @@ test('payout request verifies idempotency payload after concurrent insert collis
   assert.ok(handler.includes("error:'IDEMPOTENCY_KEY_CONFLICT'"));
   assert.ok(handler.includes("if(String(created.id)!==payoutId) return json({ok:true,version:VERSION,idempotent_replay:true,payout:created},200);"));
 });
+
+test('payout webhook rejects conflicting terminal outcomes for reconciliation', () => {
+  assert.match(source, /const terminalPayoutStatuses=\['completed','failed','canceled'\]/);
+  assert.match(source, /terminalPayoutStatuses\.includes\(String\(payout\.status\)\)\s*&&\s*String\(payout\.status\)!==String\(newStatus\)/);
+  assert.match(source, /error:'PAYOUT_TERMINAL_STATE_CONFLICT'/);
+});
