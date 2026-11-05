@@ -93,3 +93,17 @@ test('payment webhook rejects contradictory terminal payment outcomes', () => {
   assert.match(source, /terminalPaymentStatuses\.includes\(String\(tx\.status\)\)\s*&&\s*String\(tx\.status\)!==String\(newStatus\)/);
   assert.match(source, /error:'PAYMENT_TERMINAL_STATE_CONFLICT'/);
 });
+
+test('payment webhook validates provider event amount and currency against stored charge', () => {
+  assert.match(source, /WEBHOOK_TRANSACTION_AMOUNT_MISMATCH/);
+  assert.match(source, /Number\(event\.data\.amount_cents\)!==Number\(tx\.gross_cents\)/);
+  assert.match(source, /WEBHOOK_TRANSACTION_CURRENCY_MISMATCH/);
+  assert.match(source, /String\(event\.data\.currency\)\.toUpperCase\(\)!==String\(tx\.currency\|\|'EUR'\)\.toUpperCase\(\)/);
+});
+
+test('payout webhook validates provider event amount and currency against reserved payout', () => {
+  assert.match(source, /WEBHOOK_PAYOUT_AMOUNT_MISMATCH/);
+  assert.match(source, /Number\(event\.data\.amount_cents\)!==Number\(payout\.amount_cents\)/);
+  assert.match(source, /WEBHOOK_PAYOUT_CURRENCY_MISMATCH/);
+  assert.match(source, /String\(event\.data\.currency\)\.toUpperCase\(\)!==String\(payout\.currency\|\|'EUR'\)\.toUpperCase\(\)/);
+});
