@@ -144,3 +144,14 @@ test('same payout idempotency key cannot produce a second payout', () => {
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM payout_requests').get().n,1);
   db.close();
 });
+
+test('unprocessed webhook delivery can retry and payload mismatch is rejected', () => {
+  assert.match(source, /if\(prior\?\.processed\) return json\(\{ok:true,version:VERSION,duplicate:true,event_id:eventId\},200\)/);
+  assert.match(source, /WEBHOOK_EVENT_ID_PAYLOAD_CONFLICT/);
+  assert.match(source, /Previously received but unprocessed event is retried/);
+});
+
+test('payment success transition and wallet credit are guarded together', () => {
+  assert.match(source, /UPDATE payment_transactions SET status='paid'[\s\S]*?status NOT IN \('paid','failed','refunded'\)/);
+  assert.match(source, /UPDATE wallets SET available_cents=available_cents\+\?[\s\S]*?changes\(\)=1/);
+});
