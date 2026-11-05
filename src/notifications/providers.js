@@ -14,6 +14,8 @@ function providerError(provider, status) {
   };
 }
 
+const PROVIDER_TIMEOUT_MS = 10_000;
+
 function required(value, name) {
   if (typeof value !== "string" || !value.trim()) {
     throw new Error(`NOTIFICATION_CONFIG_MISSING:${name}`);
@@ -48,6 +50,7 @@ export async function sendResendEmail(env, {
   const response = await fetch("https://api.resend.com/emails", {
     method: "POST",
     headers,
+    signal: AbortSignal.timeout(PROVIDER_TIMEOUT_MS),
     body: JSON.stringify({
       from,
       to: Array.isArray(to) ? to : [to],
@@ -96,6 +99,7 @@ export async function sendWhatsAppTemplate(env, {
         authorization: `Bearer ${token}`,
         "content-type": "application/json"
       },
+      signal: AbortSignal.timeout(PROVIDER_TIMEOUT_MS),
       body: JSON.stringify({
         messaging_product: "whatsapp",
         recipient_type: "individual",
