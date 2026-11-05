@@ -143,3 +143,14 @@ test('Stripe dispute closure with missing local dispute record releases webhook 
   assert.match(handler,/error:'STRIPE_DISPUTE_RECORD_NOT_FOUND'/);
   assert.match(handler,/},503\)/);
 });
+
+test('Stripe dispute closure cannot downgrade an already terminal dispute', () => {
+  const start=source.indexOf("const closedDisputeUpdate=await env.DB.prepare(`UPDATE payment_disputes SET status=?,resolution=?");
+  assert.notEqual(start,-1);
+  const end=source.indexOf("await paymentAudit(env,'STRIPE_WEBHOOK_PROCESSED'",start);
+  const handler=source.slice(start,end);
+  assert.match(handler,/status NOT IN \('resolved','cancelled','canceled'\)/);
+  assert.match(handler,/SELECT status FROM payment_disputes WHERE id=\? AND transaction_id=\? LIMIT 1/);
+  assert.match(handler,/result='DISPUTE_ALREADY_TERMINAL'/);
+  assert.match(handler,/error:'STRIPE_DISPUTE_STATE_CONFLICT'/);
+});
