@@ -50,3 +50,15 @@ test('approval summary requires evidence and never authorizes execution', () => 
   assert.deepEqual(result.approval.choices, ['approve', 'reject', 'request_more_evidence']);
   assert.equal(createSupraApprovalSummary(proposal(), {}).ok, false);
 });
+
+test('proposal risk labels cannot understate approval requirements', () => {
+  const high = rankSupraProposals([proposal({ risk: 'high' })]);
+  const critical = rankSupraProposals([proposal({ risk: 'critical' })]);
+  const medium = rankSupraProposals([proposal({ risk: 'medium' })]);
+  assert.equal(high.ok, true);
+  assert.equal(high.proposals[0].autonomy.level, 'A4');
+  assert.equal(high.proposals[0].requiresManagerApproval, true);
+  assert.equal(critical.proposals[0].autonomy.level, 'A4');
+  assert.equal(critical.proposals[0].requiresManagerApproval, true);
+  assert.equal(medium.proposals[0].autonomy.level, 'A1');
+});
