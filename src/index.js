@@ -879,7 +879,7 @@ async function createMissionPayment(request, env) {
   const body=await readJson(request);
   const missionId=clean(body?.mission_id), clientId=clean(body?.client_id), intervenantId=clean(body?.intervenant_id);
   const gross=moneyCents(body?.gross_eur), commission=moneyCents(body?.commission_eur);
-  if(!missionId||!clientId||!intervenantId||gross===null||commission===null||commission>gross) return json({ok:false,error:'INVALID_PAYMENT_AMOUNT_OR_PARTIES',version:VERSION},400);
+  if(!missionId||!clientId||!intervenantId||gross===null||gross<=0||commission===null||commission>gross) return json({ok:false,error:'INVALID_PAYMENT_AMOUNT_OR_PARTIES',version:VERSION},400);
   const idem=clean(request.headers.get('idempotency-key'))||clean(body?.idempotency_key);
   if(!idem) return json({ok:false,error:'IDEMPOTENCY_KEY_REQUIRED',version:VERSION},400);
   const old=await env.DB.prepare('SELECT * FROM payment_transactions WHERE idempotency_key=? LIMIT 1').bind(idem).first();
