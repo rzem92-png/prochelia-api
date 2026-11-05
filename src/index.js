@@ -1164,6 +1164,20 @@ async function paymentAdminResolve(request, env) {
   return json({ok:true,version:VERSION,dispute_id:disputeId,status:'resolved',resolution},200);
 }
 
+async function paymentReconciliationList(request, env) {
+  const auth=await getSessionUser(request,env);
+  if(!requireRole(auth,['gerante'])) return json({ok:false,error:auth?.user?'FORBIDDEN':'UNAUTHENTICATED',version:VERSION},auth?.user?403:401);
+  await ensurePaymentSchema(env);
+  const url=new URL(request.url);
+  const limitRaw=Number(url.searchParams.get('limit')||25);
+  const offsetRaw=Number(url.searchParams.get('offset')||0);
+  if(!Number.isInteger(limitRaw)||limitRaw<1||limitRaw>100||!Number.isInteger(offsetRaw)||offsetRaw<0||offsetRaw>100000)
+    return json({ok:false,error:'INVALID_PAGINATION',version:VERSION},400);
+  const rows=await env.DB.prepare(`SELECT id,provider,external_id,internal_transaction_id,internal_payout_id,amount_cents,currency,status,checked_at
+    FROM payment_reconciliation ORDER BY checked_at DESC,id DESC LIMIT ? OFFSET ?`).bind(limitRaw,offsetRaw).all();
+  return json({ok:true,version:VERSION,items:rows.results||[],limit:limitRaw,offset:offsetRaw},200);
+}
+
 async function paymentReconciliationReview(request, env) {
   const auth=await getSessionUser(request,env);
   if(!requireRole(auth,['gerante'])) return json({ok:false,error:auth?.user?'FORBIDDEN':'UNAUTHENTICATED',version:VERSION},auth?.user?403:401);
@@ -1220,6 +1234,10 @@ async function handleBase(request, env) {
   if (url.pathname === '/api/payments/dispute/resolve') {
     if (request.method !== 'POST') return json({ok:false,error:'METHOD_NOT_ALLOWED',version:VERSION},405,{'allow':'POST'});
     return paymentAdminResolve(request,env);
+  }
+  if (url.pathname === '/api/payments/reconciliation') {
+    if (request.method !== 'GET') return json({ok:false,error:'METHOD_NOT_ALLOWED',version:VERSION},405,{'allow':'GET'});
+    return paymentReconciliationList(request,env);
   }
   if (url.pathname === '/api/payments/reconciliation/review') {
     if (request.method !== 'POST') return json({ok:false,error:'METHOD_NOT_ALLOWED',version:VERSION},405,{'allow':'POST'});
