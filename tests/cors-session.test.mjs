@@ -28,6 +28,23 @@ test("CORS preflight for JSON login succeeds without accessing D1", async () => 
   assert.match(response.headers.get("access-control-allow-headers") || "", /Content-Type/);
 });
 
+test("Fetch Metadata blocks every unsafe cross-site HTTP method", async () => {
+  for (const method of ["POST", "PUT", "PATCH", "DELETE"]) {
+    const env = new Proxy({}, {
+      get(_target, property) {
+        if (property === "DB") throw new Error("Must block before D1");
+        return undefined;
+      }
+    });
+    const response = await worker.fetch(new Request(endpoint, {
+      method,
+      headers: { "Sec-Fetch-Site": "cross-site" }
+    }), env);
+    assert.equal(response.status, 403, method);
+    assert.equal((await response.json()).error, "CROSS_SITE_REQUEST_BLOCKED", method);
+  }
+});
+
 test("unapproved browser origin is rejected", async () => {
   const response = await worker.fetch(new Request(endpoint, {
     method: "OPTIONS",
