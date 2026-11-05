@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHmac } from 'node:crypto';
-import { verifyStripeSignature, stripeCheckoutPayload } from '../stripe-adapter.js';
+import { verifyStripeSignature, stripeCheckoutPayload, resolveStripeTransactionId } from '../stripe-adapter.js';
 
 const secret='whsec_test_prochelia';
 function signature(body,timestamp) {
@@ -37,4 +37,20 @@ test('Stripe checkout payload pins transaction metadata and amount in cents',()=
 test('Stripe checkout payload rejects unsafe amount and non-HTTPS redirect URLs',()=>{
   assert.throws(()=>stripeCheckoutPayload({transactionId:'tx',amountCents:49,successUrl:'https://a.test',cancelUrl:'https://b.test'}),/INVALID_CHECKOUT_INPUT/);
   assert.throws(()=>stripeCheckoutPayload({transactionId:'tx',amountCents:100,successUrl:'http://a.test',cancelUrl:'https://b.test'}),/INVALID_CHECKOUT_INPUT/);
+});
+
+
+test('Stripe Charge refund resolves transaction metadata from authenticated PaymentIntent lookup',async()=>{
+  const fetchMock=async(url,init)=>{
+    assert.match(String(url),/payment_intents\\/pi_test_123$/);
+    assert.equal(init.headers.authorization,'Bearer sk_test');
+    return {ok:true,json:async()=>({id:'pi_test_123',metadata:{prochelia_transaction_id:'tx-123'}})};
+  };
+  assert.equal(await resolveStripeTransactionId('pi_test_123','sk_test',fetchMock),'tx-123');
+});
+
+test('Stripe PaymentIntent lookup rejects mismatched id and invalid identifiers',async()=>{
+  const fetchMock=async()=>({ok:true,json:async()=>({id:'pi_other',metadata:{prochelia_transaction_id:'tx-123'}})});
+  assert.equal(await resolveStripeTransactionId('pi_test_123','sk_test',fetchMock),null);
+  assert.equal(await resolveStripeTransactionId('bad-id','sk_test',fetchMock),null);
 });
