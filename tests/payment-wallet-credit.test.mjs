@@ -61,3 +61,15 @@ test('wallet currency mismatch keeps credit pending instead of silently applying
   assert.equal(db.prepare('SELECT applied FROM payment_wallet_credit_ledger WHERE transaction_id=?').get('tx-1').applied, 0);
   db.close();
 });
+
+test('replay applies a pending wallet credit after currency configuration is corrected', () => {
+  const db = setup();
+  db.prepare('INSERT INTO wallets VALUES (?,?,?,0)').run('wallet-existing','provider-1','USD');
+  deliver(db); // credit stays pending because the existing wallet currency is mismatched
+  assert.equal(db.prepare('SELECT applied FROM payment_wallet_credit_ledger WHERE transaction_id=?').get('tx-1').applied, 0);
+  db.prepare('UPDATE wallets SET currency=? WHERE user_id=?').run('EUR','provider-1');
+  deliver(db); // replay: transaction is already paid, but pending ledger entry is applied
+  assert.equal(db.prepare('SELECT available_cents FROM wallets WHERE user_id=?').get('provider-1').available_cents, 12345);
+  assert.equal(db.prepare('SELECT applied FROM payment_wallet_credit_ledger WHERE transaction_id=?').get('tx-1').applied, 1);
+  db.close();
+});
