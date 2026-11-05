@@ -450,3 +450,11 @@ test("configuration audit never grants real-traffic authorization by itself", ()
   assert.match(route, /CONFIGURATION_CHECKS_PASSED/);
   assert.doesNotMatch(route, /ready_for_real_traffic:result\.overall/);
 });
+
+test("Copilot next-actions GET does not create schemas and fails closed when required tables are absent", () => {
+  const route = source.slice(source.indexOf("async function copilotNextActions"), source.indexOf("async function enqueueBackgroundJob"));
+  assert.doesNotMatch(route, /ensure(?:Consolidated|Operational|Strategic|FinalHardening)Schema/);
+  assert.match(route, /requiredReadTables=\['operational_cases','promotion_recommendations','action_outbox','platform_settings'\]/);
+  assert.match(route, /SCHEMA_NOT_INITIALIZED/);
+  assert.match(route, /return json\(\{ok:false,error:'SCHEMA_NOT_INITIALIZED',missing_table:table,version:VERSION\},503\)/);
+});
