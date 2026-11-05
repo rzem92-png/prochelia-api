@@ -214,3 +214,39 @@ test("CORS configured allowlist accepts exact comma-separated origins only", asy
   assert.equal(rejected.status, 403);
   assert.equal(rejected.headers.get("access-control-allow-origin"), null);
 });
+
+
+test("trusted allowlisted Pages Origin may use cross-site cookie session transport", async () => {
+  const response = await worker.fetch(new Request(endpoint, {
+    method: "POST",
+    headers: {
+      Origin: allowedOrigin,
+      "Sec-Fetch-Site": "cross-site",
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({ email: "test@example.com", password: "synthetic-password" })
+  }), {});
+  // The request must pass the Fetch Metadata gate and reach the API handler.
+  // With no D1 binding, the expected safe result is DATABASE_UNAVAILABLE.
+  assert.equal(response.status, 503);
+  assert.notEqual((await response.json()).error, "CROSS_SITE_REQUEST_BLOCKED");
+});
+
+test("cross-site mutation without Origin fails closed before database access", async () => {
+  const env = new Proxy({}, {
+    get(_target, property) {
+      if (property === "DB") throw new Error("Cross-site request must be blocked before D1");
+      return undefined;
+    }
+  });
+  const response = await worker.fetch(new Request(endpoint, {
+    method: "POST",
+    headers: {
+      "Sec-Fetch-Site": "cross-site",
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({ email: "test@example.com", password: "synthetic-password" })
+  }), env);
+  assert.equal(response.status, 403);
+  assert.equal((await response.json()).error, "CROSS_SITE_REQUEST_BLOCKED");
+});
