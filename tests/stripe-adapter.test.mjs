@@ -42,7 +42,7 @@ test('Stripe checkout payload rejects unsafe amount and non-HTTPS redirect URLs'
 
 test('Stripe Charge refund resolves transaction metadata from authenticated PaymentIntent lookup',async()=>{
   const fetchMock=async(url,init)=>{
-    assert.match(String(url),/payment_intents\\/pi_test_123$/);
+    assert.equal(String(url).endsWith('/payment_intents/pi_test_123'),true);
     assert.equal(init.headers.authorization,'Bearer sk_test');
     return {ok:true,json:async()=>({id:'pi_test_123',metadata:{prochelia_transaction_id:'tx-123'}})};
   };
