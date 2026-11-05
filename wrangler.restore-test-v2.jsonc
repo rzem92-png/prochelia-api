@@ -1,0 +1,13 @@
+{
+  // Configuration exclusivement destinée au test de restauration D1 isolé.
+  // Ne pas utiliser pour déployer un Worker.
+  "name": "prochelia-restore-test-v2",
+  "compatibility_date": "2026-09-25",
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "prochelia-restore-test-v2",
+      "database_id": "a3526c2a-39cb-49ab-97c4-979138145f33"
+    }
+  ]
+}
