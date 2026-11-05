@@ -366,6 +366,16 @@ test("SUPRA planner delegates body reads to the independently tested bounded str
 });
 
 
+test("production rate limiting fails closed instead of creating schema during a request", () => {
+  const start=source.indexOf("async function productionRateLimit(request,env)");
+  const end=source.indexOf("async function strictProductionAudit",start);
+  const route=source.slice(start,end);
+  assert.ok(start>=0 && end>start);
+  assert.match(route,/sqlite_master WHERE type='table' AND name='security_rate_limits'/);
+  assert.match(route,/RATE_LIMIT_SCHEMA_NOT_INITIALIZED/);
+  assert.doesNotMatch(route,/ensureFinalHardeningSchema\(env\)/);
+});
+
 test("production rate limiting never trusts spoofable X-Forwarded-For", () => {
   const start=source.indexOf("async function productionSubjectHash(request, route)");
   const end=source.indexOf("async function productionRateLimit",start);
