@@ -3395,17 +3395,25 @@ async function stripeWebhook(request, env) {
           const won=providerStatus==='won';
           const internalStatus=won?'resolved':'pending';
           const resolution=won?'provider_won':'provider_lost_pending_manual_reconciliation';
-          const closedDisputeUpdate=await env.DB.prepare(`UPDATE payment_disputes SET status=?,resolution=?,resolved_at=CASE WHEN ?='resolved' THEN CURRENT_TIMESTAMP ELSE NULL END,updated_at=CURRENT_TIMESTAMP WHERE id=? AND transaction_id=?`)
+          const closedDisputeUpdate=await env.DB.prepare(`UPDATE payment_disputes SET status=?,resolution=?,resolved_at=CASE WHEN ?='resolved' THEN CURRENT_TIMESTAMP ELSE NULL END,updated_at=CURRENT_TIMESTAMP WHERE id=? AND transaction_id=? AND status NOT IN ('resolved','cancelled','canceled')`)
             .bind(internalStatus,resolution,internalStatus,stripeDisputeId,tx.id).run();
-          // Stripe may deliver dispute.closed before dispute.created. Do not
-          // acknowledge a closure that has no matching local dispute record:
-          // release the webhook claim so Stripe can retry after reconciliation.
           if(Number(closedDisputeUpdate?.meta?.changes||0)!==1) {
-            await env.DB.prepare(`UPDATE payment_webhook_events SET processed=0,processed_at=NULL WHERE provider='stripe' AND event_id=?`).bind(String(event.id)).run();
-            return json({ok:false,error:'STRIPE_DISPUTE_RECORD_NOT_FOUND',version:VERSION,event_id:event.id},503);
+            const existingDispute=await env.DB.prepare('SELECT status FROM payment_disputes WHERE id=? AND transaction_id=? LIMIT 1').bind(stripeDisputeId,tx.id).first();
+            // Missing records must retry; terminal records must not be
+            // downgraded by a stale or reordered provider event.
+            if(!existingDispute) {
+              await env.DB.prepare(`UPDATE payment_webhook_events SET processed=0,processed_at=NULL WHERE provider='stripe' AND event_id=?`).bind(String(event.id)).run();
+              return json({ok:false,error:'STRIPE_DISPUTE_RECORD_NOT_FOUND',version:VERSION,event_id:event.id},503);
+            }
+            if(!['resolved','cancelled','canceled'].includes(String(existingDispute.status))) {
+              await env.DB.prepare(`UPDATE payment_webhook_events SET processed=0,processed_at=NULL WHERE provider='stripe' AND event_id=?`).bind(String(event.id)).run();
+              return json({ok:false,error:'STRIPE_DISPUTE_STATE_CONFLICT',version:VERSION,event_id:event.id},503);
+            }
+            result='DISPUTE_ALREADY_TERMINAL';
+          } else {
+            if(!won) await env.DB.prepare(`UPDATE payment_transactions SET status='held',updated_at=CURRENT_TIMESTAMP WHERE id=? AND status IN ('paid','held')`).bind(tx.id).run();
+            result=won?'DISPUTE_WON_RESOLVED':'DISPUTE_CLOSED_PAYOUT_STILL_BLOCKED';
           }
-          if(!won) await env.DB.prepare(`UPDATE payment_transactions SET status='held',updated_at=CURRENT_TIMESTAMP WHERE id=? AND status IN ('paid','held')`).bind(tx.id).run();
-          result=won?'DISPUTE_WON_RESOLVED':'DISPUTE_CLOSED_PAYOUT_STILL_BLOCKED';
         }
       }
       await paymentAudit(env,'STRIPE_WEBHOOK_PROCESSED',{transaction_id:tx.id,mission_id:tx.mission_id,metadata:{event_id:event.id,event_type:event.type,result}},'OK');
