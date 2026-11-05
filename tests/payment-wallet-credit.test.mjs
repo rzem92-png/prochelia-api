@@ -155,3 +155,8 @@ test('payment success transition and wallet credit are guarded together', () => 
   assert.match(source, /UPDATE payment_transactions SET status='paid'[\s\S]*?status NOT IN \('paid','failed','refunded'\)/);
   assert.match(source, /UPDATE wallets SET available_cents=available_cents\+\?[\s\S]*?changes\(\)=1/);
 });
+
+test('missing beneficiary wallet leaves webhook retryable instead of marking payment paid', () => {
+  assert.match(source, /if\(!wallet\) return json\(\{ok:false,error:'WALLET_NOT_READY'[\s\S]*?\},409\)/);
+  assert.match(source, /Do not acknowledge\/mark the event processed if the beneficiary wallet/);
+});
