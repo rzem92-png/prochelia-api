@@ -166,3 +166,8 @@ test('payout terminal webhook remains retryable when reservation is inconsistent
   assert.match(source, /Number\(reserved\.reserved_cents\)<Number\(payout\.amount_cents\)/);
   assert.match(source, /if\(walletUpdate\) await env\.DB\.batch\(\[terminalUpdate,walletUpdate\]\)/);
 });
+
+test('Stripe checkout uses a stable transaction-scoped idempotency key', () => {
+  assert.match(source, /'idempotency-key':\x60prochelia-checkout-\$\{tx\.id\}\x60/);
+  assert.doesNotMatch(source, /'idempotency-key':String\(request\.headers\.get\('idempotency-key'\)/);
+});
