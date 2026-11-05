@@ -107,3 +107,37 @@ test('payout response uses stable non-sensitive error codes on balance and accou
   assert.match(fn, /PAYOUT_RESERVATION_RACE_OR_INSUFFICIENT_BALANCE/);
   assert.doesNotMatch(fn, /stack|SQLITE_ERROR|exception\.message/i);
 });
+
+
+test('payout reservation is conditional, ledger posting follows successful insert, and wallet ownership is bound', async () => {
+  const source = await readFile(new URL('../src/index.js', import.meta.url), 'utf8');
+  const start = source.indexOf('async function payoutRequest');
+  const end = source.indexOf('\\nasync function verifyWebhookSignature', start);
+  assert.notEqual(start, -1);
+  assert.notEqual(end, -1);
+  const fn = source.slice(start, end);
+  const batchStart = fn.indexOf('const batch=await env.DB.batch([');
+  const batchEnd = fn.indexOf(']);', batchStart);
+  assert.ok(batchStart >= 0 && batchEnd > batchStart, 'payout + ledger should use one D1 batch');
+  const batch = fn.slice(batchStart, batchEnd);
+  assert.match(batch, /FROM wallets WHERE id=\\? AND available_cents>=\\?/);
+  assert.match(batch, /NOT EXISTS\\(SELECT 1 FROM payout_requests WHERE idempotency_key=\\?\\)/);
+  assert.match(batch, /FROM payout_requests WHERE idempotency_key=\\? AND status='requested' AND changes\\(\\)=1/);
+  assert.match(batch, /NOT EXISTS\\(SELECT 1 FROM payment_wallet_ledger WHERE idempotency_key=\\?\\)/);
+  assert.match(batch, /\\.bind\\(payoutId,idem,wallet\\.id,auth\\.user\\.id,amount,mode/);
+  assert.match(fn, /SELECT \\* FROM wallets WHERE user_id=\\? LIMIT 1\\)\\.bind\\(auth\\.user\\.id\\)/);
+  assert.match(fn, /if\\(Number\\(batch\\?\\.\\[0\\]\\?\\.meta\\?\\.changes\\|\\|0\\)\\)!==1\\)/);
+});
+
+test('payout success response is emitted only after reservation batch and audit succeed', async () => {
+  const source = await readFile(new URL('../src/index.js', import.meta.url), 'utf8');
+  const start = source.indexOf('async function payoutRequest');
+  const end = source.indexOf('\\nasync function verifyWebhookSignature', start);
+  const fn = source.slice(start, end);
+  const batch = fn.indexOf('const batch=await env.DB.batch([');
+  const audit = fn.indexOf("await paymentAudit(env,'PAYOUT_REQUESTED'");
+  const success = fn.indexOf("status:'requested',amount_cents:amount");
+  assert.ok(batch >= 0 && audit > batch && success > audit,
+    'do not return payout success before database reservation and audit');
+  assert.match(fn, /PAYOUT_RESERVATION_RACE_OR_INSUFFICIENT_BALANCE/);
+});
