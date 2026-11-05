@@ -111,6 +111,6 @@ test('payout webhook validates provider event amount and currency against reserv
 test('payment disputes prevent duplicate active cases and insert conditionally', () => {
   assert.match(source, /PAYMENT_DISPUTE_ALREADY_OPEN/);
   assert.match(source, /status IN \('open','pending'\) LIMIT 1/);
-  assert.match(source, /INSERT INTO payment_disputes[\s\S]*?SELECT \?,\?\?,\?\?,\?\?,\?\?,\? WHERE NOT EXISTS/);
+  assert.match(source, /INSERT INTO payment_disputes[\\s\\S]*?SELECT \\?,\\?,\\?,\\?,\\?,\\?,\\?,\\? WHERE NOT EXISTS/);
   assert.match(source, /const inserted=Number\(results\?\.\[1\]\?\.meta\?\.changes\|\|0\)/);
 });
