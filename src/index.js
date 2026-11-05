@@ -1192,12 +1192,15 @@ async function paymentReconciliationReview(request, env) {
   if(!row) return json({ok:false,error:'RECONCILIATION_NOT_FOUND',version:VERSION},404);
   if(['reviewed','reconciled'].includes(String(row.status).toLowerCase()))
     return json({ok:false,error:'RECONCILIATION_ALREADY_REVIEWED',version:VERSION,status:row.status},409);
+  // Audit first: if audit persistence fails, the operational status remains unchanged.
+  await paymentAudit(env,'PAYMENT_RECONCILIATION_REVIEWED',{transaction_id:row.internal_transaction_id,payout_id:row.internal_payout_id,user_id:auth.user.id,metadata:{reconciliation_id:reconciliationId,provider:row.provider,external_id:row.external_id,amount_cents:row.amount_cents,currency:row.currency,note}},'OK');
   const result=await env.DB.prepare(`UPDATE payment_reconciliation SET status='reviewed',checked_at=CURRENT_TIMESTAMP WHERE id=? AND status NOT IN ('reviewed','reconciled')`).bind(reconciliationId).run();
-  if(Number(result?.meta?.changes||0)!==1)
+  if(Number(result?.meta?.changes||0)!==1) {
+    await paymentAudit(env,'PAYMENT_RECONCILIATION_REVIEW_CONFLICT',{transaction_id:row.internal_transaction_id,payout_id:row.internal_payout_id,user_id:auth.user.id,metadata:{reconciliation_id:reconciliationId}},'CONFLICT');
     return json({ok:false,error:'RECONCILIATION_REVIEW_CONFLICT',version:VERSION},409);
+  }
   // Human review is an audit marker only. It must not release holds, alter
   // transaction/refund amounts, credit/debit wallets, or trigger PSP payouts.
-  await paymentAudit(env,'PAYMENT_RECONCILIATION_REVIEWED',{transaction_id:row.internal_transaction_id,payout_id:row.internal_payout_id,user_id:auth.user.id,metadata:{reconciliation_id:reconciliationId,provider:row.provider,external_id:row.external_id,amount_cents:row.amount_cents,currency:row.currency,note}},'OK');
   return json({ok:true,version:VERSION,reconciliation_id:reconciliationId,status:'reviewed',financial_action:false},200);
 }
 
