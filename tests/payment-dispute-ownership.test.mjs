@@ -57,7 +57,7 @@ test('mission payment creation rejects zero gross amount while allowing zero com
 
 
 test('mission payment write route remains disabled unless explicitly enabled', () => {
-  assert.match(source, /if\s*\(String\(env\.MISSION_API_ENABLED\)\.toLowerCase\(\)\s*!==\s*['"]true['"]\)\)\s*return\s+json\(\{ok:false,error:'MISSION_API_DISABLED',[\s\S]*?write_enabled:false\},423\)/);
+  assert.match(source, /if\s*\(String\(env\.MISSION_API_ENABLED\)\.toLowerCase\\(\\)\\s*!==\\s*['\"]true['\"]\\)\s*return\s+json\(\{ok:false,error:'MISSION_API_DISABLED',[\s\S]*?write_enabled:false\},423\)/);
   assert.match(source, /async function createMissionPayment\(request,\s*env\)\s*\{[\s\S]*?requireRole\(auth,\[['"]gerante['"]\]\)/);
 });
 
