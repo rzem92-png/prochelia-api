@@ -428,3 +428,8 @@ test("mission security preparation binds caller identifiers to the authoritative
   assert.ok(handler.indexOf("MISSION_ASSIGNMENT_MISMATCH") < handler.indexOf("requireVerifiedIntervenant"));
   assert.ok(handler.indexOf("MISSION_ASSIGNMENT_MISMATCH") < handler.indexOf("securityCode()"));
 });
+
+test("production audit/check routes are POST-only and reject GET before invoking the audit", () => {
+  assert.match(source, /if\(url\.pathname==='\/api\/system\/final-audit'\) \{ if\(request\.method!=='POST'\) return json\(\{ok:false,error:'METHOD_NOT_ALLOWED',version:VERSION\},405\); return finalProductionAudit\(request,env\); \}/);
+  assert.match(source, /if\(url\.pathname==='\/api\/system\/production-check'\) \{ if\(request\.method!=='POST'\) return json\(\{ok:false,error:'METHOD_NOT_ALLOWED',version:VERSION\},405\); return finalProductionAudit\(request,env\); \}/);
+});
