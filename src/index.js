@@ -1,5 +1,5 @@
 import { handleV7Route } from "./v7-routes.js";
-import { verifyStripeSignature, stripeCheckoutPayload, resolveStripeTransactionId } from "./stripe-adapter.js";
+import { verifyStripeSignature, stripeCheckoutPayload, resolveStripeTransactionId, stripeWebhookAmountMatches } from "./stripe-adapter.js";
 // PROCHÉLIA — INDEX BACKEND CONSOLIDÉ UNIQUE
 // Référence de consolidation : V14.1 Finance + sécurité/RBAC existants.
 // Généré le 19/10/2026. À déployer uniquement après recette avec la vraie base D1.
@@ -3271,7 +3271,7 @@ async function stripeWebhook(request, env) {
       const currency=String(obj?.currency||'').toLowerCase();
       const isCheckout=String(event.type).startsWith('checkout.session.');
       const sessionMatches=!isCheckout || !tx.provider_payment_id || String(tx.provider_payment_id)===sessionId;
-      const amountMatches=Number.isSafeInteger(amount) && amount>=0 && !!currency && amount===Number(tx.gross_cents) && currency===String(tx.currency||'EUR').toLowerCase();
+      const amountMatches=stripeWebhookAmountMatches({eventType:event.type,amount,currency,grossCents:tx.gross_cents,transactionCurrency:tx.currency||'EUR'});
       if(!sessionMatches || !amountMatches) {
         await paymentAudit(env,'STRIPE_WEBHOOK_MISMATCH',{transaction_id:tx.id,mission_id:tx.mission_id,metadata:{event_id:event.id,event_type:event.type}},'BLOCKED');
         result='MISMATCH_BLOCKED';
