@@ -2595,9 +2595,10 @@ async function processBackgroundJobs(request,env) {
 function isMutatingMethod(method){ return ['POST','PUT','PATCH','DELETE'].includes(method); }
 function securityOriginAllowed(request,env){
   const origin=request.headers.get('origin');
-  // Les clients non-navigateur peuvent ne pas envoyer Origin. Les requêtes navigateur
-  // avec Origin doivent correspondre à une origine explicitement autorisée.
-  if(!origin) return true;
+  // Les clients sans cookie de session peuvent omettre Origin (webhooks et API non navigateur).
+  // Une requête portant la session cookie doit toujours fournir une Origin autorisée :
+  // l'absence d'Origin ne doit pas devenir un contournement CSRF.
+  if(!origin) return !getCookie(request, SESSION_COOKIE);
   const configured=clean(env?.CORS_ORIGIN);
   const defaults=[
     'https://prochelia.pages.dev',
