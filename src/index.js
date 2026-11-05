@@ -1014,6 +1014,14 @@ async function paymentWebhook(request, env) {
     const statusMap={payout_processing:'processing',payout_paid:'completed',payout_failed:'failed',payout_canceled:'canceled'};
     const newStatus=statusMap[type];
     if(payout&&newStatus){
+      // Do not acknowledge a terminal PSP event when the internal reservation
+      // is missing/inconsistent. Leave it retryable for reconciliation.
+      if(newStatus!=='processing' && ['requested','processing'].includes(payout.status)){
+        const reserved=await env.DB.prepare('SELECT reserved_cents FROM wallets WHERE id=? LIMIT 1').bind(payout.wallet_id).first();
+        if(!reserved || Number(reserved.reserved_cents)<Number(payout.amount_cents)){
+          return json({ok:false,error:'PAYOUT_RESERVATION_NOT_READY',version:VERSION,payout_id:payoutId},409);
+        }
+      }
       // A provider may send distinct event IDs for the same payout outcome.
       // The payout state transition is the idempotency gate: wallet changes
       // happen in the same D1 batch only if this transition changed one row.
