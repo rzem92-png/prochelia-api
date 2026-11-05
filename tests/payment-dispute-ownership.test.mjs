@@ -230,3 +230,24 @@ test('payout request cannot bypass feature flag or provider account readiness', 
   assert.match(handler,/Number\(account\.payouts_enabled\)!==1/);
   assert.match(handler,/PAYOUT_ACCOUNT_NOT_READY/);
 });
+
+test('payout webhook terminal transition is conditional and wallet update follows transition', () => {
+  const start=source.indexOf('async function paymentWebhook');
+  const end=source.indexOf('async function openPaymentDispute',start);
+  const handler=source.slice(start,end);
+  assert.match(handler,/PAYOUT_TERMINAL_STATE_CONFLICT/);
+  assert.match(handler,/PAYOUT_RESERVATION_NOT_READY/);
+  const terminal=handler.indexOf("UPDATE payout_requests SET status=?");
+  const wallet=handler.indexOf("UPDATE wallets SET reserved_cents=reserved_cents-?");
+  assert.ok(terminal>=0 && wallet>terminal);
+  assert.match(handler,/AND status IN \('requested','processing'\)/);
+  assert.match(handler,/AND changes\(\)=1/);
+});
+test('webhook processing records duplicate payload conflict and signed provider event processing', () => {
+  const start=source.indexOf('async function paymentWebhook');
+  const end=source.indexOf('async function openPaymentDispute',start);
+  const handler=source.slice(start,end);
+  assert.match(handler,/WEBHOOK_EVENT_ID_PAYLOAD_CONFLICT/);
+  assert.match(handler,/INVALID_WEBHOOK_SIGNATURE/);
+  assert.match(handler,/UPDATE payment_webhook_events SET processed=1/);
+});
