@@ -160,3 +160,12 @@ test("malformed percent-encoded session cookie fails closed instead of crashing"
   assert.equal(response.status, 401);
   assert.equal((await response.json()).error, "UNAUTHENTICATED");
 });
+
+
+test("duplicate session cookie names fail closed to avoid cookie tossing ambiguity", async () => {
+  const response = await worker.fetch(new Request("https://prochelia-api.rzem92.workers.dev/api/auth/me", {
+    headers: { Cookie: "prochelia_session=first; prochelia_session=second" }
+  }), {});
+  assert.equal(response.status, 401);
+  assert.equal((await response.json()).error, "UNAUTHENTICATED");
+});
