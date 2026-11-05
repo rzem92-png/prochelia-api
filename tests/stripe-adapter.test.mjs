@@ -42,15 +42,15 @@ test('Stripe checkout payload rejects unsafe amount and non-HTTPS redirect URLs'
 
 test('Stripe Charge refund resolves transaction metadata from authenticated PaymentIntent lookup',async()=>{
   const fetchMock=async(url,init)=>{
-    assert.equal(String(url).endsWith('/payment_intents/pi_test_123'),true);
+    assert.equal(String(url).endsWith('/payment_intents/pi_test123'),true);
     assert.equal(init.headers.authorization,'Bearer sk_test');
-    return {ok:true,json:async()=>({id:'pi_test_123',metadata:{prochelia_transaction_id:'tx-123'}})};
+    return {ok:true,json:async()=>({id:'pi_test123',metadata:{prochelia_transaction_id:'tx-123'}})};
   };
-  assert.equal(await resolveStripeTransactionId('pi_test_123','sk_test',fetchMock),'tx-123');
+  assert.equal(await resolveStripeTransactionId('pi_test123','sk_test',fetchMock),'tx-123');
 });
 
 test('Stripe PaymentIntent lookup rejects mismatched id and invalid identifiers',async()=>{
   const fetchMock=async()=>({ok:true,json:async()=>({id:'pi_other',metadata:{prochelia_transaction_id:'tx-123'}})});
-  assert.equal(await resolveStripeTransactionId('pi_test_123','sk_test',fetchMock),null);
+  assert.equal(await resolveStripeTransactionId('pi_test123','sk_test',fetchMock),null);
   assert.equal(await resolveStripeTransactionId('bad-id','sk_test',fetchMock),null);
 });
