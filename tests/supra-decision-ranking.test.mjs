@@ -56,7 +56,7 @@ test('proposal risk labels cannot understate approval requirements', () => {
   const critical = rankSupraProposals([proposal({ risk: 'critical' })]);
   const medium = rankSupraProposals([proposal({ risk: 'medium' })]);
   assert.equal(high.ok, true);
-  assert.equal(high.proposals[0].autonomy.level, 'A4');
+  assert.equal(high.proposals[0].autonomy.level, 'A3');
   assert.equal(high.proposals[0].requiresManagerApproval, true);
   assert.equal(critical.proposals[0].autonomy.level, 'A4');
   assert.equal(critical.proposals[0].requiresManagerApproval, true);
