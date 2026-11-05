@@ -942,6 +942,15 @@ async function finalizeMissionPayment(request, env) {
   return json({ok:false,error:'PSP_RECONCILIATION_REQUIRED',version:VERSION,financial_state_changed:false},409);
 }
 
+function payoutReplayMatches(old, { userId, amount, mode, provider }) {
+  return Boolean(old)
+    && String(old.user_id) === String(userId)
+    && Number(old.amount_cents) === Number(amount)
+    && String(old.currency || '').toUpperCase() === 'EUR'
+    && String(old.mode || '') === String(mode)
+    && String(old.provider || '') === String(provider);
+}
+
 async function payoutRequest(request, env) {
   const auth=await getSessionUser(request,env);
   if(!requireRole(auth,['intervenant'])) return json({ok:false,error:auth?.user?'FORBIDDEN':'UNAUTHENTICATED',version:VERSION},auth?.user?403:401);
@@ -952,7 +961,7 @@ async function payoutRequest(request, env) {
   if(idem.length>180) return json({ok:false,error:'IDEMPOTENCY_KEY_TOO_LONG',version:VERSION},400);
   const old=await env.DB.prepare('SELECT * FROM payout_requests WHERE idempotency_key=? LIMIT 1').bind(idem).first();
   if(old) {
-    if(String(old.user_id)!==String(auth.user.id)) {
+    if(!payoutReplayMatches(old,{userId:auth.user.id,amount,mode,provider:paymentProvider(env)})) {
       return json({ok:false,error:'IDEMPOTENCY_KEY_CONFLICT',version:VERSION},409);
     }
     return json({ok:true,version:VERSION,idempotent_replay:true,payout:old},200);
@@ -977,13 +986,13 @@ async function payoutRequest(request, env) {
     const results=await env.DB.batch([reservation,createPayout]);
     if(Number(results?.[0]?.meta?.changes)!==1||Number(results?.[1]?.meta?.changes)!==1) {
       const replay=await env.DB.prepare('SELECT * FROM payout_requests WHERE idempotency_key=? LIMIT 1').bind(idem).first();
-      if(replay && String(replay.user_id)===String(auth.user.id)) return json({ok:true,version:VERSION,idempotent_replay:true,payout:replay},200);
+      if(replay && payoutReplayMatches(replay,{userId:auth.user.id,amount,mode,provider:paymentProvider(env)})) return json({ok:true,version:VERSION,idempotent_replay:true,payout:replay},200);
       if(replay) return json({ok:false,error:'IDEMPOTENCY_KEY_CONFLICT',version:VERSION},409);
       return json({ok:false,error:'PAYOUT_RESERVATION_NOT_CONFIRMED',version:VERSION},409);
     }
   } catch(error) {
     const replay=await env.DB.prepare('SELECT * FROM payout_requests WHERE idempotency_key=? LIMIT 1').bind(idem).first();
-    if(replay && String(replay.user_id)===String(auth.user.id)) return json({ok:true,version:VERSION,idempotent_replay:true,payout:replay},200);
+    if(replay && payoutReplayMatches(replay,{userId:auth.user.id,amount,mode,provider:paymentProvider(env)})) return json({ok:true,version:VERSION,idempotent_replay:true,payout:replay},200);
     if(replay) return json({ok:false,error:'IDEMPOTENCY_KEY_CONFLICT',version:VERSION},409);
     throw error;
   }
