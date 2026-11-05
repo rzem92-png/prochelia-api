@@ -2830,7 +2830,8 @@ async function finalProductionAudit(request,env) {
 
 async function copilotNextActions(request,env) {
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
-  await ensureConsolidatedSchema(env); await ensureOperationalSchema(env); await ensureStrategicSchema(env); await ensureFinalHardeningSchema(env);
+  const requiredReadTables=['operational_cases','promotion_recommendations','action_outbox','platform_settings'];
+  for(const table of requiredReadTables) if(!await tableExists(env,table)) return json({ok:false,error:'SCHEMA_NOT_INITIALIZED',missing_table:table,version:VERSION},503);
   const phase=await getSetting(env,'project_phase','TEST');
   const items=[];
   const cases=await env.DB.prepare(`SELECT id,case_type,priority,status,impact_level,description,proposed_solution_json FROM operational_cases WHERE status NOT IN ('RESOLVED','CLOSED') ORDER BY priority DESC,created_at ASC LIMIT 30`).all();
