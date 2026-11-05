@@ -169,3 +169,48 @@ test("duplicate session cookie names fail closed to avoid cookie tossing ambigui
   assert.equal(response.status, 401);
   assert.equal((await response.json()).error, "UNAUTHENTICATED");
 });
+
+
+test("CORS allowlist matches exact origins and rejects lookalike/null origins", async () => {
+  const rejectedOrigins = [
+    "https://prochelia.pages.dev.attacker.example",
+    "https://evil-prochelia.pages.dev",
+    "https://prochelia.pages.dev:443",
+    "null"
+  ];
+  for (const origin of rejectedOrigins) {
+    const response = await worker.fetch(new Request(endpoint, {
+      method: "OPTIONS",
+      headers: {
+        Origin: origin,
+        "Access-Control-Request-Method": "POST"
+      }
+    }), {});
+    assert.equal(response.status, 403, origin);
+    assert.equal(response.headers.get("access-control-allow-origin"), null, origin);
+  }
+});
+
+test("CORS configured allowlist accepts exact comma-separated origins only", async () => {
+  const configured = "https://app.prochelia.example, https://staging.prochelia.example";
+  for (const origin of ["https://app.prochelia.example", "https://staging.prochelia.example"]) {
+    const response = await worker.fetch(new Request(endpoint, {
+      method: "OPTIONS",
+      headers: {
+        Origin: origin,
+        "Access-Control-Request-Method": "POST"
+      }
+    }), { CORS_ORIGIN: configured });
+    assert.equal(response.status, 204, origin);
+    assert.equal(response.headers.get("access-control-allow-origin"), origin);
+  }
+  const rejected = await worker.fetch(new Request(endpoint, {
+    method: "OPTIONS",
+    headers: {
+      Origin: "https://attacker.prochelia.example",
+      "Access-Control-Request-Method": "POST"
+    }
+  }), { CORS_ORIGIN: configured });
+  assert.equal(rejected.status, 403);
+  assert.equal(rejected.headers.get("access-control-allow-origin"), null);
+});
