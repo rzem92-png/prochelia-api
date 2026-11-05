@@ -1000,6 +1000,13 @@ async function payoutRequest(request, env) {
   return json({ok:true,version:VERSION,payout_id:payoutId,status:'requested',amount_cents:amount,mode,provider:paymentProvider(env),next:paymentsConfigured(env)?'PSP_PAYOUT_REQUIRED':'PAYMENT_PROVIDER_NOT_CONFIGURED'},201);
 }
 
+function constantTimeStringEqual(a,b) {
+  if(typeof a!=='string'||typeof b!=='string'||a.length!==b.length) return false;
+  let diff=0;
+  for(let i=0;i<a.length;i++) diff|=a.charCodeAt(i)^b.charCodeAt(i);
+  return diff===0;
+}
+
 async function verifyWebhookSignature(request, env, rawBody) {
   const secret=env.PAYMENT_WEBHOOK_SECRET;
   if(!secret) return false;
@@ -1008,7 +1015,8 @@ async function verifyWebhookSignature(request, env, rawBody) {
   const key=await crypto.subtle.importKey('raw',new TextEncoder().encode(secret),{name:'HMAC',hash:'SHA-256'},false,['sign']);
   const mac=new Uint8Array(await crypto.subtle.sign('HMAC',key,new TextEncoder().encode(rawBody)));
   const expected=base64url(mac);
-  return signature===expected || signature===`sha256=${expected}`;
+  const candidate=signature.startsWith('sha256=')?signature.slice(7):signature;
+  return constantTimeStringEqual(candidate,expected);
 }
 
 async function paymentWebhook(request, env) {
