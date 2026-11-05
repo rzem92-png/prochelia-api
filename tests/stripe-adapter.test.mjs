@@ -59,6 +59,8 @@ test('Stripe PaymentIntent lookup rejects mismatched id and invalid identifiers'
 test('Stripe webhook amount validation allows bounded partial disputes but rejects mismatches',()=>{
   const base={currency:'eur',grossCents:10000,transactionCurrency:'EUR'};
   assert.equal(stripeWebhookAmountMatches({...base,eventType:'charge.dispute.created',amount:2500}),true);
+  assert.equal(stripeWebhookAmountMatches({...base,eventType:'charge.dispute.closed',amount:2500}),true);
+  assert.equal(stripeWebhookAmountMatches({...base,eventType:'charge.dispute.closed',amount:10001}),false);
   assert.equal(stripeWebhookAmountMatches({...base,eventType:'charge.dispute.created',amount:10001}),false);
   assert.equal(stripeWebhookAmountMatches({...base,eventType:'charge.dispute.created',amount:0}),false);
   assert.equal(stripeWebhookAmountMatches({...base,eventType:'charge.refunded',amount:2500}),false);
