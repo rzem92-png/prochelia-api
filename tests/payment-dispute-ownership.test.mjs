@@ -185,3 +185,16 @@ test('manual reconciliation review endpoint is POST-only and dispatched', () => 
   assert.match(source,/url\.pathname === '\/api\/payments\/reconciliation\/review'/);
   assert.match(source,/paymentReconciliationReview\(request,env\)/);
 });
+
+test('reconciliation queue is gerante-only and has bounded pagination', () => {
+  const start=source.indexOf('async function paymentReconciliationList');
+  assert.notEqual(start,-1);
+  const end=source.indexOf('async function paymentReconciliationReview',start);
+  const handler=source.slice(start,end);
+  assert.match(handler,/requireRole\(auth,\['gerante'\]\)/);
+  assert.match(handler,/limitRaw<1\|\|limitRaw>100/);
+  assert.match(handler,/offsetRaw<0\|\|offsetRaw>100000/);
+  assert.match(handler,/SELECT id,provider,external_id,internal_transaction_id/);
+  assert.doesNotMatch(handler,/SELECT \* FROM payment_reconciliation/);
+  assert.match(source,/url\.pathname === '\/api\/payments\/reconciliation'/);
+});
