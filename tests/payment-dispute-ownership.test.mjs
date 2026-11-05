@@ -198,3 +198,13 @@ test('reconciliation queue is gerante-only and has bounded pagination', () => {
   assert.doesNotMatch(handler,/SELECT \* FROM payment_reconciliation/);
   assert.match(source,/url\.pathname === '\/api\/payments\/reconciliation'/);
 });
+
+test('reconciliation review writes audit before mutating review status', () => {
+  const start=source.indexOf('async function paymentReconciliationReview');
+  const end=source.indexOf('async function handleBase',start);
+  const handler=source.slice(start,end);
+  const auditAt=handler.indexOf("paymentAudit(env,'PAYMENT_RECONCILIATION_REVIEWED'");
+  const updateAt=handler.indexOf("UPDATE payment_reconciliation SET status='reviewed'");
+  assert.ok(auditAt>=0 && updateAt>auditAt,'audit should be persisted before status transition');
+  assert.match(handler,/PAYMENT_RECONCILIATION_REVIEW_CONFLICT/);
+});
