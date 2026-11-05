@@ -251,3 +251,12 @@ test('webhook processing records duplicate payload conflict and signed provider 
   assert.match(handler,/INVALID_WEBHOOK_SIGNATURE/);
   assert.match(handler,/UPDATE payment_webhook_events SET processed=1/);
 });
+
+test('invalid provider webhook signatures are rejected before any payment schema writes', () => {
+  const start=source.indexOf('async function paymentWebhook');
+  const end=source.indexOf('async function openPaymentDispute',start);
+  const handler=source.slice(start,end);
+  const verify=handler.indexOf('verifyWebhookSignature(request,env,raw)');
+  const schema=handler.indexOf('ensurePaymentSchema(env)');
+  assert.ok(verify>=0 && schema>verify,'signature verification must precede schema initialization');
+});
