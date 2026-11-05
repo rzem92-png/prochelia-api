@@ -3049,7 +3049,7 @@ async function handle(request,env){
     if(request.url.startsWith('https://')) headers.set('strict-transport-security','max-age=31536000; includeSubDomains');
     return new Response(response.body,{status:response.status,statusText:response.statusText,headers});
   } catch(error) {
-    console.error('PROCHELIA_API_INTERNAL_ERROR',error instanceof Error ? error.message : String(error));
+    console.error('PROCHELIA_API_INTERNAL_ERROR'); // Do not log exception details: may contain PII, SQL or secrets.
     return json({ok:false,error:'INTERNAL_ERROR',version:VERSION},500);
   }
 }
