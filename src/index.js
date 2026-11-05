@@ -960,6 +960,11 @@ async function payoutRequest(request, env) {
   // potentially refunded funds a second time.
   const refundPendingReconciliation=await env.DB.prepare(`SELECT id,mission_id,status,refund_cents FROM payment_transactions WHERE intervenant_id=? AND status IN ('refunded','partially_refunded') LIMIT 1`).bind(auth.user.id).first();
   if(refundPendingReconciliation) return json({ok:false,error:'PAYOUT_BLOCKED_PENDING_REFUND_RECONCILIATION',version:VERSION,transaction_id:refundPendingReconciliation.id,mission_id:refundPendingReconciliation.mission_id,status:refundPendingReconciliation.status,refund_cents:Number(refundPendingReconciliation.refund_cents||0)},409);
+  // Even after a dispute is marked provider-won, the transaction remains held
+  // until a human/provider reconciliation releases its funds. Do not infer that
+  // wallet credits are safe to pay out from the dispute outcome alone.
+  const heldTransaction=await env.DB.prepare(`SELECT id,mission_id,status FROM payment_transactions WHERE intervenant_id=? AND status='held' LIMIT 1`).bind(auth.user.id).first();
+  if(heldTransaction) return json({ok:false,error:'PAYOUT_BLOCKED_HELD_TRANSACTION_PENDING_RECONCILIATION',version:VERSION,transaction_id:heldTransaction.id,mission_id:heldTransaction.mission_id,status:heldTransaction.status},409);
   const account=await env.DB.prepare(`SELECT * FROM payment_accounts WHERE user_id=? LIMIT 1`).bind(auth.user.id).first();
   if(!account||Number(account.payouts_enabled)!==1) return json({ok:false,error:'PAYOUT_ACCOUNT_NOT_READY',version:VERSION,message:'Le compte de paiement de l’intervenant doit être vérifié et activé par le PSP.'},409);
   const wallet=await env.DB.prepare('SELECT * FROM wallets WHERE user_id=? LIMIT 1').bind(auth.user.id).first();
