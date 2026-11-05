@@ -87,3 +87,9 @@ test('payout webhook rejects conflicting terminal outcomes for reconciliation', 
   assert.match(source, /terminalPayoutStatuses\.includes\(String\(payout\.status\)\)\s*&&\s*String\(payout\.status\)!==String\(newStatus\)/);
   assert.match(source, /error:'PAYOUT_TERMINAL_STATE_CONFLICT'/);
 });
+
+test('payment webhook rejects contradictory terminal payment outcomes', () => {
+  assert.match(source, /const terminalPaymentStatuses=\['paid','failed','refunded'\]/);
+  assert.match(source, /terminalPaymentStatuses\.includes\(String\(tx\.status\)\)\s*&&\s*String\(tx\.status\)!==String\(newStatus\)/);
+  assert.match(source, /error:'PAYMENT_TERMINAL_STATE_CONFLICT'/);
+});
