@@ -3376,10 +3376,10 @@ async function handle(request,env){
     }
     const fw=await handleFinanceWorkspace(request,env); if(fw) return fw;
     const cr=await handleCommercialRecruitment(request,env); if(cr) return cr;
-    if(url.pathname==='/api/system/final-audit' && request.method==='GET') return finalProductionAudit(request,env);
+    if(url.pathname==='/api/system/final-audit') { if(request.method!=='POST') return json({ok:false,error:'METHOD_NOT_ALLOWED',version:VERSION},405); return finalProductionAudit(request,env); }
     if(url.pathname==='/api/copilot/next-actions' && request.method==='GET') return copilotNextActions(request,env);
     if(url.pathname==='/api/jobs/process' && request.method==='POST') return processBackgroundJobs(request,env);
-    if(url.pathname==='/api/system/production-check' && request.method==='GET') return finalProductionAudit(request,env);
+    if(url.pathname==='/api/system/production-check') { if(request.method!=='POST') return json({ok:false,error:'METHOD_NOT_ALLOWED',version:VERSION},405); return finalProductionAudit(request,env); }
     const response=await handleV139(request,env);
     const headers=new Headers(response.headers);
     headers.set('x-content-type-options','nosniff');
