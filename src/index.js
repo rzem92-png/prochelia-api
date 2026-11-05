@@ -1011,6 +1011,12 @@ async function paymentWebhook(request, env) {
       // mutating a transaction belonging to a different PSP.
       if(String(tx.provider||'').toLowerCase()!==String(provider||'').toLowerCase())
         return json({ok:false,error:'WEBHOOK_PROVIDER_TRANSACTION_MISMATCH',version:VERSION,transaction_id:txId},409);
+      // Validate provider-supplied monetary facts against the persisted charge.
+      // If a custom provider includes amount/currency, they may not override DB values.
+      if(event?.data?.amount_cents!==undefined && Number(event.data.amount_cents)!==Number(tx.gross_cents))
+        return json({ok:false,error:'WEBHOOK_TRANSACTION_AMOUNT_MISMATCH',version:VERSION,transaction_id:txId},409);
+      if(event?.data?.currency!==undefined && String(event.data.currency).toUpperCase()!==String(tx.currency||'EUR').toUpperCase())
+        return json({ok:false,error:'WEBHOOK_TRANSACTION_CURRENCY_MISMATCH',version:VERSION,transaction_id:txId},409);
       const statusMap={payment_succeeded:'paid',charge_succeeded:'paid',payment_failed:'failed',charge_failed:'failed',payment_refunded:'refunded'};
       const newStatus=statusMap[type];
       if(newStatus){
@@ -1043,6 +1049,12 @@ async function paymentWebhook(request, env) {
       // A payout event must originate from the same provider recorded on payout.
       if(String(payout.provider||'').toLowerCase()!==String(provider||'').toLowerCase())
         return json({ok:false,error:'WEBHOOK_PROVIDER_PAYOUT_MISMATCH',version:VERSION,payout_id:payoutId},409);
+      // Match payout amount/currency against the internal reservation, not
+      // caller-supplied webhook values.
+      if(event?.data?.amount_cents!==undefined && Number(event.data.amount_cents)!==Number(payout.amount_cents))
+        return json({ok:false,error:'WEBHOOK_PAYOUT_AMOUNT_MISMATCH',version:VERSION,payout_id:payoutId},409);
+      if(event?.data?.currency!==undefined && String(event.data.currency).toUpperCase()!==String(payout.currency||'EUR').toUpperCase())
+        return json({ok:false,error:'WEBHOOK_PAYOUT_CURRENCY_MISMATCH',version:VERSION,payout_id:payoutId},409);
       // A contradictory terminal provider outcome must never be silently
       // acknowledged: preserve the ledger state and force reconciliation.
       const terminalPayoutStatuses=['completed','failed','canceled'];
