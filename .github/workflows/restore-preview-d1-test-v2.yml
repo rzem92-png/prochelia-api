@@ -93,6 +93,11 @@ jobs:
           set -euo pipefail
           encrypted="$RUNNER_TEMP/prochelia-restore/prochelia-preview.sql.gpg"
           sql="$RUNNER_TEMP/prochelia-restore/prochelia-preview.sql"
+          manifest="$RUNNER_TEMP/prochelia-restore/README.txt"
+          # Chaque étape GitHub Actions s'exécute dans un shell distinct :
+          # relire le hash depuis le manifeste ici (ne pas dépendre d'une variable précédente).
+          expected_sha="$(sed -n 's/^sha256_sql=//p' "$manifest")"
+          [[ "$expected_sha" =~ ^[a-fA-F0-9]{64}$ ]] || { echo "::error::Hash SHA-256 absent ou invalide dans le manifeste."; exit 1; }
           printf '%s' "$BACKUP_ENCRYPTION_KEY" | gpg --batch --yes --pinentry-mode loopback --passphrase-fd 0 --decrypt "$encrypted" > "$sql"
           test -s "$sql"
           actual_sha="$(sha256sum "$sql" | cut -d ' ' -f 1)"
