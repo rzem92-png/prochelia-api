@@ -154,3 +154,15 @@ test('Stripe dispute closure cannot downgrade an already terminal dispute', () =
   assert.match(handler,/result='DISPUTE_ALREADY_TERMINAL'/);
   assert.match(handler,/error:'STRIPE_DISPUTE_STATE_CONFLICT'/);
 });
+
+test('Stripe refunds create idempotent cumulative reconciliation records without auto-debiting wallets', () => {
+  const start=source.indexOf("} else if(refundEvent.has(event.type))");
+  assert.notEqual(start,-1);
+  const end=source.indexOf("} else if(disputeEvent.has(event.type))",start);
+  const handler=source.slice(start,end);
+  assert.match(handler,/SELECT refund_cents,status FROM payment_transactions WHERE id=\?/);
+  assert.match(handler,/INSERT OR IGNORE INTO payment_reconciliation/);
+  assert.match(handler,/stripeChargeId}:refund:\\${persistedRefundCents}/);
+  assert.match(handler,/status\)\s*VALUES\(\?,\?,\?,\?,\?,\?, 'pending'\)/);
+  assert.doesNotMatch(handler,/UPDATE wallets SET|UPDATE payment_wallet_credit_ledger SET/);
+});
