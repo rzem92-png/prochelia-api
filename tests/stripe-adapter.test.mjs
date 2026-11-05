@@ -75,3 +75,24 @@ test('Stripe PaymentIntent lookup fails closed on HTTP error, fetch exception, i
   assert.equal(await resolveStripeTransactionId('pi_test123','sk_test',async()=>({ok:true,json:async()=>{throw new Error('bad json')}})),null);
   assert.equal(await resolveStripeTransactionId('pi_test123','sk_test',async()=>({ok:true,json:async()=>({id:'pi_test123',metadata:{}})})),null);
 });
+
+test('Stripe webhook uses native Stripe-Signature verification and dedicated webhook secret', async()=>{
+  const { readFile } = await import('node:fs/promises');
+  const source=await readFile(new URL('../src/index.js',import.meta.url),'utf8');
+  const start=source.indexOf('async function stripeWebhook');
+  assert.notEqual(start,-1);
+  const end=source.indexOf('async function coreAccountsSchema',start);
+  const handler=source.slice(start,end);
+  assert.match(handler,/verifyStripeSignature\(raw,request\.headers\.get\('stripe-signature'\),env\.STRIPE_WEBHOOK_SECRET\)/);
+  assert.match(handler,/STRIPE_WEBHOOK_NOT_CONFIGURED/);
+  assert.match(source,/url\.pathname === '\/api\/payments\/webhook'/);
+});
+test('Stripe webhook does not fall back to generic PROCHÉLIA HMAC handler', async()=>{
+  const { readFile } = await import('node:fs/promises');
+  const source=await readFile(new URL('../src/index.js',import.meta.url),'utf8');
+  const start=source.indexOf('async function stripeWebhook');
+  const end=source.indexOf('async function coreAccountsSchema',start);
+  const handler=source.slice(start,end);
+  assert.doesNotMatch(handler,/verifyWebhookSignature\(request,env,raw\)/);
+  assert.match(handler,/STRIPE_WEBHOOK_NOT_CONFIGURED/);
+});
