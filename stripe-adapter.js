@@ -31,3 +31,22 @@ export function stripeCheckoutPayload({ transactionId, amountCents, currency='eu
   p.set('line_items[0][price_data][product_data][name]',productName.slice(0,120));
   return p;
 }
+
+
+// Resolve PROCHÉLIA transaction metadata from a Stripe PaymentIntent when a
+// Charge/Dispute webhook does not include it directly. Do not guess identifiers.
+export async function resolveStripeTransactionId(paymentIntentId, secret, fetchImpl = fetch) {
+  if (typeof paymentIntentId !== 'string' || !/^pi_[A-Za-z0-9]+$/.test(paymentIntentId) || !secret) return null;
+  let response;
+  try {
+    response = await fetchImpl('https://api.stripe.com/v1/payment_intents/' + encodeURIComponent(paymentIntentId), {
+      method: 'GET', headers: { authorization: 'Bearer ' + secret }
+    });
+  } catch { return null; }
+  if (!response?.ok) return null;
+  let intent;
+  try { intent = await response.json(); } catch { return null; }
+  if (intent?.id !== paymentIntentId) return null;
+  const txId = intent?.metadata?.prochelia_transaction_id;
+  return typeof txId === 'string' && txId.trim() ? txId.trim() : null;
+}
