@@ -138,7 +138,12 @@ function getCookie(request, name) {
     const idx = part.indexOf('=');
     if (idx < 0) continue;
     const key = part.slice(0, idx).trim();
-    if (key === name) return decodeURIComponent(part.slice(idx + 1).trim());
+    if (key !== name) continue;
+    const value = part.slice(idx + 1).trim();
+    // Malformed percent-encoding must be treated as an invalid cookie,
+    // never as an uncaught exception or an authentication bypass.
+    try { return decodeURIComponent(value); }
+    catch { return null; }
   }
   return null;
 }
