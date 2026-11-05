@@ -151,3 +151,12 @@ test("CORS preflight rejects unsupported mutation methods", async () => {
     assert.equal(response.headers.get("allow"), "GET, HEAD, POST, OPTIONS", method);
   }
 });
+
+
+test("malformed percent-encoded session cookie fails closed instead of crashing", async () => {
+  const response = await worker.fetch(new Request("https://prochelia-api.rzem92.workers.dev/api/auth/me", {
+    headers: { Cookie: "prochelia_session=%E0%A4%A" }
+  }), {});
+  assert.equal(response.status, 401);
+  assert.equal((await response.json()).error, "UNAUTHENTICATED");
+});
