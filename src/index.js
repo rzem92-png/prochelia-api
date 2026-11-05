@@ -134,18 +134,22 @@ async function verifyPassword(password, stored) {
 
 function getCookie(request, name) {
   const raw = request.headers.get('cookie') || '';
+  let found = false;
+  let decoded = null;
   for (const part of raw.split(';')) {
     const idx = part.indexOf('=');
     if (idx < 0) continue;
     const key = part.slice(0, idx).trim();
     if (key !== name) continue;
+    // Duplicate auth cookies are ambiguous (cookie tossing/path confusion):
+    // reject the whole cookie header rather than choosing one arbitrarily.
+    if (found) return null;
+    found = true;
     const value = part.slice(idx + 1).trim();
-    // Malformed percent-encoding must be treated as an invalid cookie,
-    // never as an uncaught exception or an authentication bypass.
-    try { return decodeURIComponent(value); }
+    try { decoded = decodeURIComponent(value); }
     catch { return null; }
   }
-  return null;
+  return found ? decoded : null;
 }
 
 function sessionCookie(token, maxAge = SESSION_TTL_SECONDS) {
