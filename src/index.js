@@ -1040,6 +1040,11 @@ async function paymentWebhook(request, env) {
       // A payout event must originate from the same provider recorded on payout.
       if(String(payout.provider||'').toLowerCase()!==String(provider||'').toLowerCase())
         return json({ok:false,error:'WEBHOOK_PROVIDER_PAYOUT_MISMATCH',version:VERSION,payout_id:payoutId},409);
+      // A contradictory terminal provider outcome must never be silently
+      // acknowledged: preserve the ledger state and force reconciliation.
+      const terminalPayoutStatuses=['completed','failed','canceled'];
+      if(terminalPayoutStatuses.includes(String(payout.status)) && String(payout.status)!==String(newStatus))
+        return json({ok:false,error:'PAYOUT_TERMINAL_STATE_CONFLICT',version:VERSION,payout_id:payoutId,stored_status:payout.status,received_status:newStatus},409);
       // Do not acknowledge a terminal PSP event when the internal reservation
       // is missing/inconsistent. Leave it retryable for reconciliation.
       if(newStatus!=='processing' && ['requested','processing'].includes(payout.status)){
