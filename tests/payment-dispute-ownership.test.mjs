@@ -127,3 +127,8 @@ test('payout creation is blocked while intervenant has an active payment dispute
   assert.match(source, /PAYOUT_BLOCKED_BY_ACTIVE_DISPUTE/);
   assert.match(source, /SELECT id,transaction_id,status FROM payment_disputes WHERE intervenant_id=\? AND status IN \('open','pending'\) LIMIT 1/);
 });
+
+test('payout creation is blocked pending refund ledger reconciliation', () => {
+  assert.match(source, /PAYOUT_BLOCKED_PENDING_REFUND_RECONCILIATION/);
+  assert.match(source, /SELECT id,mission_id,status,refund_cents FROM payment_transactions WHERE intervenant_id=\? AND status IN \('refunded','partially_refunded'\) LIMIT 1/);
+});
