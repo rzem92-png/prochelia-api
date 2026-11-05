@@ -138,3 +138,11 @@ test("client directory excludes pending and inactive providers", async()=>{
   assert.deepEqual(body.intervenants.map(x=>x.id),["provider-1"]);
   assert.ok(!body.intervenants.some(x=>x.id==="provider-2" || x.id==="provider-3"));
 });
+
+test("both profile directory routes require authentication", async()=>{
+  for(const route of ["/api/clients","/api/intervenants"]){
+    const response=await worker.fetch(new Request(base+route),{DB:{}});
+    assert.equal(response.status,401,route);
+    assert.equal((await response.json()).error,"UNAUTHENTICATED",route);
+  }
+});
