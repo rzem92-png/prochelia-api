@@ -22,5 +22,5 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Run Origin / CSRF regression tests
-        run: node --test tests/security-origin.test.mjs
+      - name: Run security and payment regression tests
+        run: node --test tests/*.test.mjs
