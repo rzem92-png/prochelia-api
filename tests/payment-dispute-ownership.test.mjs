@@ -72,3 +72,12 @@ test('mission payment amount and parties are derived from the persisted mission,
   assert.ok(source.includes("const gross=moneyCents(mission.price_client), commission=moneyCents(mission.commission);"));
   assert.ok(!source.includes("moneyCents(body?.gross_eur), commission=moneyCents(body?.commission_eur)"));
 });
+
+test('payout request verifies idempotency payload after concurrent insert collision', () => {
+  const start=source.indexOf('async function payoutRequest(request, env)');
+  const end=source.indexOf('async function verifyWebhookSignature',start);
+  const handler=source.slice(start,end);
+  assert.ok(handler.includes("String(created.user_id)!==String(auth.user.id) || Number(created.amount_cents)!==amount || String(created.mode)!==mode"));
+  assert.ok(handler.includes("error:'IDEMPOTENCY_KEY_CONFLICT'"));
+  assert.ok(handler.includes("if(String(created.id)!==payoutId) return json({ok:true,version:VERSION,idempotent_replay:true,payout:created},200);"));
+});
