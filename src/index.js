@@ -1164,6 +1164,29 @@ async function paymentAdminResolve(request, env) {
   return json({ok:true,version:VERSION,dispute_id:disputeId,status:'resolved',resolution},200);
 }
 
+async function paymentReconciliationReview(request, env) {
+  const auth=await getSessionUser(request,env);
+  if(!requireRole(auth,['gerante'])) return json({ok:false,error:auth?.user?'FORBIDDEN':'UNAUTHENTICATED',version:VERSION},auth?.user?403:401);
+  await ensurePaymentSchema(env);
+  const body=await readJson(request);
+  const reconciliationId=clean(body?.reconciliation_id);
+  const action=clean(body?.action);
+  const note=clean(body?.note);
+  if(!reconciliationId || action!=='confirm_reviewed' || !note || note.length<10 || note.length>1000)
+    return json({ok:false,error:'INVALID_RECONCILIATION_REVIEW',version:VERSION},400);
+  const row=await env.DB.prepare('SELECT * FROM payment_reconciliation WHERE id=? LIMIT 1').bind(reconciliationId).first();
+  if(!row) return json({ok:false,error:'RECONCILIATION_NOT_FOUND',version:VERSION},404);
+  if(['reviewed','reconciled'].includes(String(row.status).toLowerCase()))
+    return json({ok:false,error:'RECONCILIATION_ALREADY_REVIEWED',version:VERSION,status:row.status},409);
+  const result=await env.DB.prepare(`UPDATE payment_reconciliation SET status='reviewed',checked_at=CURRENT_TIMESTAMP WHERE id=? AND status NOT IN ('reviewed','reconciled')`).bind(reconciliationId).run();
+  if(Number(result?.meta?.changes||0)!==1)
+    return json({ok:false,error:'RECONCILIATION_REVIEW_CONFLICT',version:VERSION},409);
+  // Human review is an audit marker only. It must not release holds, alter
+  // transaction/refund amounts, credit/debit wallets, or trigger PSP payouts.
+  await paymentAudit(env,'PAYMENT_RECONCILIATION_REVIEWED',{transaction_id:row.internal_transaction_id,payout_id:row.internal_payout_id,user_id:auth.user.id,metadata:{reconciliation_id:reconciliationId,provider:row.provider,external_id:row.external_id,amount_cents:row.amount_cents,currency:row.currency,note}},'OK');
+  return json({ok:true,version:VERSION,reconciliation_id:reconciliationId,status:'reviewed',financial_action:false},200);
+}
+
 async function handleBase(request, env) {
   const url = new URL(request.url);
 
@@ -1197,6 +1220,10 @@ async function handleBase(request, env) {
   if (url.pathname === '/api/payments/dispute/resolve') {
     if (request.method !== 'POST') return json({ok:false,error:'METHOD_NOT_ALLOWED',version:VERSION},405,{'allow':'POST'});
     return paymentAdminResolve(request,env);
+  }
+  if (url.pathname === '/api/payments/reconciliation/review') {
+    if (request.method !== 'POST') return json({ok:false,error:'METHOD_NOT_ALLOWED',version:VERSION},405,{'allow':'POST'});
+    return paymentReconciliationReview(request,env);
   }
   if (url.pathname === '/api/payments/provider-webhook') {
     if (request.method !== 'POST') return json({ok:false,error:'METHOD_NOT_ALLOWED',version:VERSION},405,{'allow':'POST'});
