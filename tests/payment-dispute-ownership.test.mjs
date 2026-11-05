@@ -52,7 +52,7 @@ test('payout webhook cannot mutate a payout from another provider', () => {
 
 
 test('mission payment creation rejects zero gross amount while allowing zero commission', () => {
-  assert.match(source, /gross===null\|\|gross<=0\|\|commission===null\|\|commission>gross/);
+  assert.match(source, /gross===null\|\|gross<=0\|\|commission===null\|\|commission<0\|\|commission>gross/);
 });
 
 
