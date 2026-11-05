@@ -1108,9 +1108,22 @@ async function openPaymentDispute(request, env) {
   if(amount<=0 || amount>Number(tx.gross_cents)) return json({ok:false,error:'DISPUTE_AMOUNT_OUT_OF_RANGE',version:VERSION,max_amount_cents:Number(tx.gross_cents)},400);
   // A client may open a dispute only for a payment tied to their own account.
   if(auth.user.role==='client' && String(tx.client_id)!==String(auth.user.id)) return json({ok:false,error:'FORBIDDEN',version:VERSION},403);
-  if(tx.status==='paid') await env.DB.prepare(`UPDATE payment_transactions SET status='held',updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(tx.id).run();
+  // Prevent duplicate active disputes on the same transaction. Keep this check
+  // inside the conditional INSERT as well, so concurrent requests cannot both win.
+  const activeDispute=await env.DB.prepare(`SELECT id,status FROM payment_disputes WHERE transaction_id=? AND status IN ('open','pending') LIMIT 1`).bind(tx.id).first();
+  if(activeDispute) return json({ok:false,error:'PAYMENT_DISPUTE_ALREADY_OPEN',version:VERSION,dispute_id:activeDispute.id,status:activeDispute.status},409);
   const id=crypto.randomUUID();
-  await env.DB.prepare(`INSERT INTO payment_disputes (id,mission_id,transaction_id,client_id,intervenant_id,status,reason,amount_cents) VALUES (?,?,?,?,?,?,?,?)`).bind(id,missionId,tx.id,tx.client_id,tx.intervenant_id,'open',reason,amount).run();
+  const results=await env.DB.batch([
+    env.DB.prepare(`UPDATE payment_transactions SET status='held',updated_at=CURRENT_TIMESTAMP WHERE id=? AND status IN ('paid','held')`).bind(tx.id),
+    env.DB.prepare(`INSERT INTO payment_disputes (id,mission_id,transaction_id,client_id,intervenant_id,status,reason,amount_cents)
+      SELECT ?,?,?,?,?,?,?,? WHERE NOT EXISTS (SELECT 1 FROM payment_disputes WHERE transaction_id=? AND status IN ('open','pending'))`)
+      .bind(id,missionId,tx.id,tx.client_id,tx.intervenant_id,'open',reason,amount,tx.id)
+  ]);
+  const inserted=Number(results?.[1]?.meta?.changes||0);
+  if(inserted!==1){
+    const existing=await env.DB.prepare(`SELECT id,status FROM payment_disputes WHERE transaction_id=? AND status IN ('open','pending') LIMIT 1`).bind(tx.id).first();
+    return json({ok:false,error:'PAYMENT_DISPUTE_ALREADY_OPEN',version:VERSION,dispute_id:existing?.id||null,status:existing?.status||null},409);
+  }
   await paymentAudit(env,'PAYMENT_DISPUTE_OPENED',{transaction_id:tx.id,mission_id:missionId,user_id:auth.user.id,metadata:{amount_cents:amount,reason}},'OK');
   return json({ok:true,version:VERSION,dispute_id:id,status:'open',payment_status:'held'},201);
 }
