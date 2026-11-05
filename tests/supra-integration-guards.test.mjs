@@ -366,6 +366,16 @@ test("SUPRA planner delegates body reads to the independently tested bounded str
 });
 
 
+test("production rate limiting never trusts spoofable X-Forwarded-For", () => {
+  const start=source.indexOf("async function productionSubjectHash(request, route)");
+  const end=source.indexOf("async function productionRateLimit",start);
+  const helper=source.slice(start,end);
+  assert.ok(start>=0 && end>start);
+  assert.match(helper,/CF-Connecting-IP/);
+  assert.match(helper,/\| 'unknown'/);
+  assert.doesNotMatch(helper,/X-Forwarded-For/);
+});
+
 test("malformed percent-encoded session cookies are rejected without throwing", () => {
   const start=source.indexOf("function getCookie(request, name)");
   const end=source.indexOf("function sessionCookie",start);
