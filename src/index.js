@@ -3822,7 +3822,12 @@ async function productionRateLimit(request,env){
   const subject=await productionSubjectHash(request,path);
   const now=Math.floor(Date.now()/1000);
   const start=new Date(Math.floor(now/windowSeconds)*windowSeconds*1000).toISOString();
-  await ensureFinalHardeningSchema(env);
+  // Rate limiting must not perform implicit DDL on a live request.
+  // Schema installation belongs to an explicit, reviewed migration.
+  const rateLimitTable=await env.DB.prepare("SELECT 1 AS present FROM sqlite_master WHERE type='table' AND name='security_rate_limits' LIMIT 1").first();
+  if(!rateLimitTable?.present){
+    return {ok:false,response:json({ok:false,error:'RATE_LIMIT_SCHEMA_NOT_INITIALIZED',version:VERSION},503)};
+  }
   const existing=await env.DB.prepare(`SELECT request_count FROM security_rate_limits WHERE bucket=? AND subject_hash=? AND window_start=? LIMIT 1`).bind(bucket,subject,start).first();
   const count=Number(existing?.request_count||0)+1;
   if(existing){
