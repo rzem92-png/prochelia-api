@@ -3196,7 +3196,8 @@ async function stripeWebhook(request, env) {
         await paymentAudit(env,'STRIPE_WEBHOOK_MISMATCH',{transaction_id:tx.id,mission_id:tx.mission_id,metadata:{event_id:event.id,event_type:event.type}},'BLOCKED');
         result='MISMATCH_BLOCKED';
       } else if(paidEvent.has(event.type) && (!isCheckout || obj.payment_status==='paid')) {
-        if(tx.status!=='paid' && tx.status!=='refunded') {
+        if(tx.status!=='refunded') {
+          // Replays may also apply an existing pending wallet credit ledger entry.
           // D1 batch is transactional. The credit ledger is gated by changes() from
           // the preceding payment-status transition to prevent duplicate concurrent credits.
           const paymentStatements=[
