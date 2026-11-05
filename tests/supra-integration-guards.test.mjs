@@ -490,3 +490,15 @@ test("Copilot next-actions GET does not create schemas and fails closed when req
   assert.match(route, /SCHEMA_NOT_INITIALIZED/);
   assert.match(route, /return json\(\{ok:false,error:'SCHEMA_NOT_INITIALIZED',missing_table:table,version:VERSION\},503\)/);
 });
+
+test("production rate limiter uses atomic UPSERT and performs no runtime DDL", () => {
+  const start=source.indexOf("async function productionRateLimit(request,env)");
+  const end=source.indexOf("\\nasync function strictProductionAudit",start);
+  const fn=source.slice(start,end);
+  assert.ok(start>=0 && end>start);
+  assert.match(fn,/ON CONFLICT\\(bucket,subject_hash,window_start\\)/);
+  assert.match(fn,/request_count=security_rate_limits\\.request_count\\+1/);
+  assert.match(fn,/RETURNING request_count/);
+  assert.doesNotMatch(fn,/productionSafetySchema\\(/);
+  assert.doesNotMatch(fn,/SELECT request_count FROM security_rate_limits/);
+});
