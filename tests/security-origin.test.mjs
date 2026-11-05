@@ -88,3 +88,14 @@ test('allows known default Pages origin', () => {
     true
   );
 });
+
+test('session cookie keeps HttpOnly, Secure and SameSite=Lax flags', () => {
+  const sessionCookieSource = extractFunction(source, 'sessionCookie');
+  const makeCookie = new Function('SESSION_COOKIE', `${sessionCookieSource}; return sessionCookie;` )('prochelia_session');
+  const cookie = makeCookie('test-token', 60);
+  assert.match(cookie, /HttpOnly/);
+  assert.match(cookie, /Secure/);
+  assert.match(cookie, /SameSite=Lax/);
+  assert.match(cookie, /Path=\\//);
+  assert.match(cookie, /Max-Age=60/);
+});
