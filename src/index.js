@@ -1136,8 +1136,12 @@ async function paymentAdminResolve(request, env) {
   if(!disputeId||!['release','partial_refund','full_refund','cancel'].includes(resolution)) return json({ok:false,error:'INVALID_DISPUTE_RESOLUTION',version:VERSION},400);
   if(['release','partial_refund','full_refund'].includes(resolution)) return json({ok:false,error:'PSP_ACTION_REQUIRED',version:VERSION,message:'La résolution financière doit être exécutée par le PSP puis confirmée par webhook signé. Cette route ne modifie pas un paiement.'},409);
   const d=await env.DB.prepare('SELECT * FROM payment_disputes WHERE id=? LIMIT 1').bind(disputeId).first();
-  if(!d||d.status==='resolved') return json({ok:false,error:'DISPUTE_NOT_FOUND_OR_ALREADY_RESOLVED',version:VERSION},409);
-  await env.DB.prepare(`UPDATE payment_disputes SET status='resolved',resolution=?,resolved_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(resolution,disputeId).run();
+  if(!d) return json({ok:false,error:'DISPUTE_NOT_FOUND',version:VERSION},404);
+  if(['resolved','cancelled','canceled'].includes(String(d.status).toLowerCase()))
+    return json({ok:false,error:'DISPUTE_ALREADY_RESOLVED',version:VERSION,status:d.status},409);
+  const result=await env.DB.prepare(`UPDATE payment_disputes SET status='resolved',resolution=?,resolved_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=? AND status NOT IN ('resolved','cancelled','canceled')`).bind(resolution,disputeId).run();
+  if(Number(result?.meta?.changes||0)!==1)
+    return json({ok:false,error:'DISPUTE_RESOLUTION_CONFLICT',version:VERSION},409);
   // Resolving an administrative case never fabricates a PSP settlement/refund.
   // Transaction state is changed only by authenticated provider events.
   await paymentAudit(env,'PAYMENT_DISPUTE_RESOLVED',{transaction_id:d.transaction_id,mission_id:d.mission_id,user_id:auth.user.id,metadata:{dispute_id:disputeId,resolution}},'OK');
