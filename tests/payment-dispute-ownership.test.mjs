@@ -49,3 +49,8 @@ test('payout webhook cannot mutate a payout from another provider', () => {
   assert.match(source, /WEBHOOK_PROVIDER_PAYOUT_MISMATCH/);
   assert.match(source, /String\(payout\.provider\|\|''\)\.toLowerCase\(\)!==String\(provider\|\|''\)\.toLowerCase\(\)/);
 });
+
+
+test('mission payment creation rejects zero gross amount while allowing zero commission', () => {
+  assert.match(source, /gross===null\|\|gross<=0\|\|commission===null\|\|commission>gross/);
+});
