@@ -175,7 +175,7 @@ test('Stripe checkout uses a stable transaction-scoped idempotency key', () => {
 
 test('Stripe webhook amount validation is delegated to the strict shared validator', () => {
   assert.ok(source.includes('stripeWebhookAmountMatches({eventType:event.type,amount,currency,grossCents:tx.gross_cents,transactionCurrency:tx.currency||\'EUR\'}'));
-  const adapter = readFileSync(new URL('../src/stripe-adapter.js', import.meta.url), 'utf8');
+  const adapter = await readFile(new URL('../src/stripe-adapter.js', import.meta.url), 'utf8');
   assert.ok(adapter.includes('export function stripeWebhookAmountMatches'));
   assert.ok(adapter.includes("eventType === 'charge.dispute.created'"));
   assert.ok(!source.includes('const amountMatches=amount<0 ||'));
