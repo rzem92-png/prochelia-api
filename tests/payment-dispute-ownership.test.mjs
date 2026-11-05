@@ -18,3 +18,8 @@ test('disputes require paid or held status and bounded positive amount', () => {
   assert.match(source, /if\s*\(!\['paid','held'\]\.includes\(tx\.status\)\)\s*return\s+json\(\{ok:false,error:'PAYMENT_NOT_DISPUTABLE'/);
   assert.match(source, /if\s*\(amount<=0\s*\|\|\s*amount>Number\(tx\.gross_cents\)\)\s*return\s+json\(\{ok:false,error:'DISPUTE_AMOUNT_OUT_OF_RANGE'/);
 });
+
+test('mission payment idempotency key cannot be replayed with different parameters', () => {
+  assert.match(source, /const sameIntent=String\(old\.mission_id\)===missionId[\s\S]*?Number\(old\.commission_cents\)===commission[\s\S]*?old\.type==='MISSION_CHARGE'/);
+  assert.match(source, /if\(!sameIntent\) return json\(\{ok:false,error:'IDEMPOTENCY_KEY_CONFLICT'/);
+});
