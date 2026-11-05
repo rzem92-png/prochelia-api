@@ -949,6 +949,11 @@ async function payoutRequest(request, env) {
       return json({ok:false,error:'IDEMPOTENCY_KEY_CONFLICT',version:VERSION},409);
     return json({ok:true,version:VERSION,idempotent_replay:true,payout:old},200);
   }
+  // A provider dispute places the related transaction on hold. Until a
+  // dedicated per-transaction held-balance ledger exists, fail closed and
+  // suspend new payouts for the intervenant while any dispute is active.
+  const activeDispute=await env.DB.prepare(`SELECT id,transaction_id,status FROM payment_disputes WHERE intervenant_id=? AND status IN ('open','pending') LIMIT 1`).bind(auth.user.id).first();
+  if(activeDispute) return json({ok:false,error:'PAYOUT_BLOCKED_BY_ACTIVE_DISPUTE',version:VERSION,dispute_id:activeDispute.id,status:activeDispute.status},409);
   const account=await env.DB.prepare(`SELECT * FROM payment_accounts WHERE user_id=? LIMIT 1`).bind(auth.user.id).first();
   if(!account||Number(account.payouts_enabled)!==1) return json({ok:false,error:'PAYOUT_ACCOUNT_NOT_READY',version:VERSION,message:'Le compte de paiement de l’intervenant doit être vérifié et activé par le PSP.'},409);
   const wallet=await env.DB.prepare('SELECT * FROM wallets WHERE user_id=? LIMIT 1').bind(auth.user.id).first();
