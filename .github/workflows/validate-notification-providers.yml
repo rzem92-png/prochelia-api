@@ -41,11 +41,14 @@ jobs:
           node --check src/index.js
           node --check src/notifications/providers.js
           node --check src/security/webhook-hmac.js
+          node --check src/security/meta-whatsapp-signature.js
           node --check src/security/mission-code.js
       - name: Run mocked provider tests
         run: node --test tests/notification-providers.test.mjs
       - name: Run webhook HMAC tests
         run: node --test tests/webhook-hmac.test.mjs
+      - name: Run Meta WhatsApp signature tests
+        run: node --test tests/meta-whatsapp-signature.test.mjs
       - name: Run mission code tests
         run: node --test tests/mission-code.test.mjs
       - name: Run payment idempotency tests
