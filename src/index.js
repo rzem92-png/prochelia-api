@@ -3307,7 +3307,7 @@ async function stripeWebhook(request, env) {
   const paidEvent=new Set(['checkout.session.completed','checkout.session.async_payment_succeeded','payment_intent.succeeded']);
   const failedEvent=new Set(['checkout.session.async_payment_failed','payment_intent.payment_failed']);
   const refundEvent=new Set(['charge.refunded']);
-  const disputeEvent=new Set(['charge.dispute.created']);
+  const disputeEvent=new Set(['charge.dispute.created','charge.dispute.closed']);
   // Charge/Dispute objects may not carry Checkout metadata. Resolve via Stripe API;
   // if lookup fails, reset event claim and return 503 so provider retries.
   const paymentIntentId = typeof obj?.payment_intent === 'string'
@@ -3371,20 +3371,30 @@ async function stripeWebhook(request, env) {
         await env.DB.prepare(`UPDATE payment_transactions SET status=CASE WHEN MAX(refund_cents,?)>=gross_cents THEN 'refunded' ELSE 'partially_refunded' END,refund_cents=MAX(refund_cents,?),updated_at=CURRENT_TIMESTAMP WHERE id=? AND status NOT IN ('failed','cancelled')`).bind(refundedCents,refundedCents,tx.id).run();
         result=refundStatus==='refunded'?'REFUND_RECORDED':'PARTIAL_REFUND_RECORDED';
       } else if(disputeEvent.has(event.type)) {
-        // A Stripe dispute must be represented in our own dispute table as well
-        // as holding the transaction. Payout guardrails query this table, so
-        // merely setting tx.status='held' is insufficient.
+        // Stripe dispute lifecycle. Closed disputes are not financial settlement:
+        // never release wallet funds or mark a charge refunded/paid here.
         const stripeDisputeId=clean(obj?.id);
         if(!stripeDisputeId || !tx.intervenant_id) {
           await env.DB.prepare(`UPDATE payment_webhook_events SET processed=0,processed_at=NULL WHERE provider='stripe' AND event_id=?`).bind(String(event.id)).run();
           return json({ok:false,error:'STRIPE_DISPUTE_LINKAGE_INCOMPLETE',version:VERSION,event_id:event.id},503);
         }
-        await env.DB.batch([
-          env.DB.prepare(`UPDATE payment_transactions SET status='held',updated_at=CURRENT_TIMESTAMP WHERE id=? AND status IN ('paid','held')`).bind(tx.id),
-          env.DB.prepare(`INSERT OR IGNORE INTO payment_disputes(id,mission_id,transaction_id,client_id,intervenant_id,status,reason,amount_cents)
-            VALUES(?,?,?,?,?,'open',?,?)`).bind(stripeDisputeId,tx.mission_id,tx.id,tx.client_id,tx.intervenant_id,clean(obj?.reason)||'stripe_dispute',Math.max(0,Number(obj?.amount)||0))
-        ]);
-        result='DISPUTE_HELD';
+        if(event.type==='charge.dispute.created') {
+          await env.DB.batch([
+            env.DB.prepare(`UPDATE payment_transactions SET status='held',updated_at=CURRENT_TIMESTAMP WHERE id=? AND status IN ('paid','held')`).bind(tx.id),
+            env.DB.prepare(`INSERT OR IGNORE INTO payment_disputes(id,mission_id,transaction_id,client_id,intervenant_id,status,reason,amount_cents)
+              VALUES(?,?,?,?,?,'open',?,?)`).bind(stripeDisputeId,tx.mission_id,tx.id,tx.client_id,tx.intervenant_id,clean(obj?.reason)||'stripe_dispute',Math.max(0,Number(obj?.amount)||0))
+          ]);
+          result='DISPUTE_HELD';
+        } else {
+          const providerStatus=clean(obj?.status).toLowerCase();
+          const won=providerStatus==='won';
+          const internalStatus=won?'resolved':'pending';
+          const resolution=won?'provider_won':'provider_lost_pending_manual_reconciliation';
+          await env.DB.prepare(`UPDATE payment_disputes SET status=?,resolution=?,resolved_at=CASE WHEN ?='resolved' THEN CURRENT_TIMESTAMP ELSE NULL END,updated_at=CURRENT_TIMESTAMP WHERE id=? AND transaction_id=?`)
+            .bind(internalStatus,resolution,internalStatus,stripeDisputeId,tx.id).run();
+          if(!won) await env.DB.prepare(`UPDATE payment_transactions SET status='held',updated_at=CURRENT_TIMESTAMP WHERE id=? AND status IN ('paid','held')`).bind(tx.id).run();
+          result=won?'DISPUTE_WON_RESOLVED':'DISPUTE_CLOSED_PAYOUT_STILL_BLOCKED';
+        }
       }
       await paymentAudit(env,'STRIPE_WEBHOOK_PROCESSED',{transaction_id:tx.id,mission_id:tx.mission_id,metadata:{event_id:event.id,event_type:event.type,result}},'OK');
     }
