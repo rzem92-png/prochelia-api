@@ -1,5 +1,5 @@
 import { handleV7Route } from "./v7-routes.js";
-import { verifyStripeSignature, stripeCheckoutPayload } from "./stripe-adapter.js";
+import { verifyStripeSignature, stripeCheckoutPayload, resolveStripeTransactionId } from "./stripe-adapter.js";
 // PROCHÉLIA — INDEX BACKEND CONSOLIDÉ UNIQUE
 // Référence de consolidation : V14.1 Finance + sécurité/RBAC existants.
 // Généré le 19/10/2026. À déployer uniquement après recette avec la vraie base D1.
@@ -3245,11 +3245,20 @@ async function stripeWebhook(request, env) {
     .bind(String(event.id)).run();
   if(!claim.meta?.changes) return json({ok:true,version:VERSION,processing:true,event_id:event.id,retry_after_seconds:300},202);
   const obj=event.data.object;
-  const txId=clean(obj?.metadata?.prochelia_transaction_id)||clean(obj?.client_reference_id);
+  let txId=clean(obj?.metadata?.prochelia_transaction_id)||clean(obj?.client_reference_id);
   const paidEvent=new Set(['checkout.session.completed','checkout.session.async_payment_succeeded','payment_intent.succeeded']);
   const failedEvent=new Set(['checkout.session.async_payment_failed','payment_intent.payment_failed']);
   const refundEvent=new Set(['charge.refunded']);
   const disputeEvent=new Set(['charge.dispute.created']);
+  // Charge/Dispute objects may not carry Checkout metadata. Resolve via Stripe API;
+  // if lookup fails, reset event claim and return 503 so provider retries.
+  if(!txId && (refundEvent.has(event.type)||disputeEvent.has(event.type)) && obj?.payment_intent && env.STRIPE_SECRET_KEY) {
+    txId=await resolveStripeTransactionId(String(obj.payment_intent),env.STRIPE_SECRET_KEY);
+    if(!txId) {
+      await env.DB.prepare(`UPDATE payment_webhook_events SET processed=0,processed_at=NULL WHERE provider='stripe' AND event_id=?`).bind(String(event.id)).run();
+      return json({ok:false,error:'STRIPE_PAYMENT_INTENT_LOOKUP_FAILED',version:VERSION,event_id:event.id},503);
+    }
+  }
   let result='IGNORED';
   if(txId && (paidEvent.has(event.type)||failedEvent.has(event.type)||refundEvent.has(event.type)||disputeEvent.has(event.type))) {
     const tx=await env.DB.prepare('SELECT * FROM payment_transactions WHERE id=? LIMIT 1').bind(txId).first();
