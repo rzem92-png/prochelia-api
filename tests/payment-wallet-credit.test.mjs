@@ -160,3 +160,9 @@ test('missing beneficiary wallet leaves webhook retryable instead of marking pay
   assert.match(source, /if\(!wallet\) return json\(\{ok:false,error:'WALLET_NOT_READY'[\s\S]*?\},409\)/);
   assert.match(source, /Do not acknowledge\/mark the event processed if the beneficiary wallet/);
 });
+
+test('payout terminal webhook remains retryable when reservation is inconsistent', () => {
+  assert.match(source, /PAYOUT_RESERVATION_NOT_READY/);
+  assert.match(source, /Number\(reserved\.reserved_cents\)<Number\(payout\.amount_cents\)/);
+  assert.match(source, /if\(walletUpdate\) await env\.DB\.batch\(\[terminalUpdate,walletUpdate\]\)/);
+});
