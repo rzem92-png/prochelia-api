@@ -493,7 +493,7 @@ test("Copilot next-actions GET does not create schemas and fails closed when req
 
 test("production rate limiter uses atomic UPSERT and performs no runtime DDL", () => {
   const start=source.indexOf("async function productionRateLimit(request,env)");
-  const end=source.indexOf("\\nasync function strictProductionAudit",start);
+  const end=source.indexOf("\nasync function strictProductionAudit",start);
   const fn=source.slice(start,end);
   assert.ok(start>=0 && end>start);
   assert.ok(fn.includes('ON CONFLICT(bucket,subject_hash,window_start)'));
@@ -505,7 +505,7 @@ test("production rate limiter uses atomic UPSERT and performs no runtime DDL", (
 
 test("webhook HMAC signature comparison avoids early mismatch exits", () => {
   const start=source.indexOf("function constantTimeStringEqual(a,b)");
-  const end=source.indexOf("\\nasync function verifyWebhookSignature",start);
+  const end=source.indexOf("\nasync function verifyWebhookSignature",start);
   const helper=source.slice(start,end);
   assert.ok(start>=0 && end>start);
   assert.ok(helper.includes("diff|=a.charCodeAt(i)^b.charCodeAt(i)"));
