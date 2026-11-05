@@ -877,9 +877,18 @@ async function createMissionPayment(request, env) {
   if(!requireRole(auth,['gerante'])) return json({ok:false,error:auth?.user?'FORBIDDEN':'UNAUTHENTICATED',version:VERSION},auth?.user?403:401);
   await ensurePaymentSchema(env);
   const body=await readJson(request);
-  const missionId=clean(body?.mission_id), clientId=clean(body?.client_id), intervenantId=clean(body?.intervenant_id);
-  const gross=moneyCents(body?.gross_eur), commission=moneyCents(body?.commission_eur);
-  if(!missionId||!clientId||!intervenantId||gross===null||gross<=0||commission===null||commission>gross) return json({ok:false,error:'INVALID_PAYMENT_AMOUNT_OR_PARTIES',version:VERSION},400);
+  const missionId=clean(body?.mission_id);
+  if(!missionId) return json({ok:false,error:'MISSION_ID_REQUIRED',version:VERSION},400);
+  // Payment values and parties are derived from the persisted mission, never from
+  // caller-controlled request fields. This prevents a manager/client payload from
+  // creating a payment with a forged amount or redirected beneficiary.
+  const mission=await env.DB.prepare(
+    'SELECT id, client_id, intervenant_id, price_client, commission FROM missions WHERE id=? LIMIT 1'
+  ).bind(missionId).first();
+  if(!mission) return json({ok:false,error:'MISSION_NOT_FOUND',version:VERSION},404);
+  const clientId=clean(mission.client_id), intervenantId=clean(mission.intervenant_id);
+  const gross=moneyCents(mission.price_client), commission=moneyCents(mission.commission);
+  if(!clientId||!intervenantId||gross===null||gross<=0||commission===null||commission<0||commission>gross) return json({ok:false,error:'INVALID_MISSION_PAYMENT_AMOUNT_OR_PARTIES',version:VERSION},409);
   const idem=clean(request.headers.get('idempotency-key'))||clean(body?.idempotency_key);
   if(!idem) return json({ok:false,error:'IDEMPOTENCY_KEY_REQUIRED',version:VERSION},400);
   const old=await env.DB.prepare('SELECT * FROM payment_transactions WHERE idempotency_key=? LIMIT 1').bind(idem).first();
