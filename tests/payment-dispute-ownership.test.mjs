@@ -167,3 +167,21 @@ test('Stripe refunds create idempotent cumulative reconciliation records without
   assert.match(handler,/status\)\s*VALUES\(\?,\?,\?,\?,\?,\?, 'pending'\)/);
   assert.doesNotMatch(handler,/UPDATE wallets SET|UPDATE payment_wallet_credit_ledger SET/);
 });
+
+test('manual reconciliation review is gerante-only, audited, and cannot alter financial balances', () => {
+  const start=source.indexOf('async function paymentReconciliationReview');
+  assert.notEqual(start,-1);
+  const end=source.indexOf('async function handleBase',start);
+  const handler=source.slice(start,end);
+  assert.match(handler,/requireRole\(auth,\['gerante'\]\)/);
+  assert.match(handler,/action!=='confirm_reviewed'/);
+  assert.match(handler,/note\.length<10/);
+  assert.match(handler,/UPDATE payment_reconciliation SET status='reviewed'/);
+  assert.match(handler,/PAYMENT_RECONCILIATION_REVIEWED/);
+  assert.match(handler,/financial_action:false/);
+  assert.doesNotMatch(handler,/UPDATE payment_transactions|UPDATE wallets|INSERT INTO payment_wallet_credit_ledger|payoutRequest\(/);
+});
+test('manual reconciliation review endpoint is POST-only and dispatched', () => {
+  assert.match(source,/url\.pathname === '\/api\/payments\/reconciliation\/review'/);
+  assert.match(source,/paymentReconciliationReview\(request,env\)/);
+});
