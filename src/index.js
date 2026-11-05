@@ -966,7 +966,8 @@ async function payoutRequest(request, env) {
     const fresh=await env.DB.prepare('SELECT available_cents FROM wallets WHERE id=? AND user_id=? LIMIT 1').bind(wallet.id,auth.user.id).first();
     return json({ok:false,error:'INSUFFICIENT_AVAILABLE_BALANCE',version:VERSION,available_cents:Number(fresh?.available_cents||0)},409);
   }
-  if(String(created.user_id)!==String(auth.user.id)) return json({ok:false,error:'IDEMPOTENCY_KEY_CONFLICT',version:VERSION},409);
+  if(String(created.user_id)!==String(auth.user.id) || Number(created.amount_cents)!==amount || String(created.mode)!==mode)
+    return json({ok:false,error:'IDEMPOTENCY_KEY_CONFLICT',version:VERSION},409);
   if(String(created.id)!==payoutId) return json({ok:true,version:VERSION,idempotent_replay:true,payout:created},200);
   await paymentAudit(env,'PAYOUT_REQUESTED',{payout_id:payoutId,user_id:auth.user.id,metadata:{amount_cents:amount,mode}},'OK');
   return json({ok:true,version:VERSION,payout_id:payoutId,status:'requested',amount_cents:amount,mode,provider:paymentProvider(env),next:paymentsConfigured(env)?'PSP_PAYOUT_REQUIRED':'PAYMENT_PROVIDER_NOT_CONFIGURED'},201);
