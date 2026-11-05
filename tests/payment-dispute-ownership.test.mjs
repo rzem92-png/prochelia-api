@@ -13,3 +13,8 @@ test('payment dispute route dispatches to the implemented handler', () => {
 test('client cannot open a payment dispute for another client account', () => {
   assert.match(source, /if\s*\(auth\.user\.role\s*===\s*['"]client['"]\s*&&\s*String\(tx\.client_id\)\s*!==\s*String\(auth\.user\.id\)\)\s*return\s+json\(\{ok:false,error:['"]FORBIDDEN['"]/);
 });
+
+test('disputes require paid or held status and bounded positive amount', () => {
+  assert.match(source, /if\s*\(!\['paid','held'\]\.includes\(tx\.status\)\)\s*return\s+json\(\{ok:false,error:'PAYMENT_NOT_DISPUTABLE'/);
+  assert.match(source, /if\s*\(amount<=0\s*\|\|\s*amount>Number\(tx\.gross_cents\)\)\s*return\s+json\(\{ok:false,error:'DISPUTE_AMOUNT_OUT_OF_RANGE'/);
+});
