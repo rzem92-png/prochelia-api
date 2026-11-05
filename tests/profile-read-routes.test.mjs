@@ -146,3 +146,33 @@ test("both profile directory routes require authentication", async()=>{
     assert.equal((await response.json()).error,"UNAUTHENTICATED",route);
   }
 });
+
+
+test("client self-profile route never returns other clients, even if D1 mock contains multiple rows", async () => {
+  const env=makeEnv("client","user-client-2");
+  const response=await get("/api/clients",env);
+  const body=await response.json();
+  assert.equal(response.status,200);
+  assert.deepEqual(body.clients.map(x=>x.id),["client-2"]);
+  assert.equal(body.total,1);
+});
+
+test("provider self-profile route never returns another provider's profile", async () => {
+  const env=makeEnv("intervenant","user-provider-2");
+  const response=await get("/api/intervenants",env);
+  const body=await response.json();
+  assert.equal(response.status,200);
+  assert.deepEqual(body.intervenants.map(x=>x.id),["provider-2"]);
+  assert.equal(body.total,1);
+});
+
+test("client provider directory does not expose provider surname, email, phone, or internal user id", async () => {
+  const response=await get("/api/intervenants",makeEnv("client","user-client-1"));
+  const body=await response.json();
+  assert.equal(response.status,200);
+  const provider=body.intervenants[0];
+  assert.equal(provider.nom,null);
+  assert.equal(provider.email,null);
+  assert.equal(provider.telephone,null);
+  assert.equal(provider.user_id,undefined);
+});
