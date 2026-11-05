@@ -3371,7 +3371,19 @@ async function stripeWebhook(request, env) {
         await env.DB.prepare(`UPDATE payment_transactions SET status=CASE WHEN MAX(refund_cents,?)>=gross_cents THEN 'refunded' ELSE 'partially_refunded' END,refund_cents=MAX(refund_cents,?),updated_at=CURRENT_TIMESTAMP WHERE id=? AND status NOT IN ('failed','cancelled')`).bind(refundedCents,refundedCents,tx.id).run();
         result=refundStatus==='refunded'?'REFUND_RECORDED':'PARTIAL_REFUND_RECORDED';
       } else if(disputeEvent.has(event.type)) {
-        if(tx.status==='paid') await env.DB.prepare(`UPDATE payment_transactions SET status='held',updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(tx.id).run();
+        // A Stripe dispute must be represented in our own dispute table as well
+        // as holding the transaction. Payout guardrails query this table, so
+        // merely setting tx.status='held' is insufficient.
+        const stripeDisputeId=clean(obj?.id);
+        if(!stripeDisputeId || !tx.intervenant_id) {
+          await env.DB.prepare(`UPDATE payment_webhook_events SET processed=0,processed_at=NULL WHERE provider='stripe' AND event_id=?`).bind(String(event.id)).run();
+          return json({ok:false,error:'STRIPE_DISPUTE_LINKAGE_INCOMPLETE',version:VERSION,event_id:event.id},503);
+        }
+        await env.DB.batch([
+          env.DB.prepare(`UPDATE payment_transactions SET status='held',updated_at=CURRENT_TIMESTAMP WHERE id=? AND status IN ('paid','held')`).bind(tx.id),
+          env.DB.prepare(`INSERT OR IGNORE INTO payment_disputes(id,mission_id,transaction_id,client_id,intervenant_id,status,reason,amount_cents)
+            VALUES(?,?,?,?,?,'open',?,?)`).bind(stripeDisputeId,tx.mission_id,tx.id,tx.client_id,tx.intervenant_id,clean(obj?.reason)||'stripe_dispute',Math.max(0,Number(obj?.amount)||0))
+        ]);
         result='DISPUTE_HELD';
       }
       await paymentAudit(env,'STRIPE_WEBHOOK_PROCESSED',{transaction_id:tx.id,mission_id:tx.mission_id,metadata:{event_id:event.id,event_type:event.type,result}},'OK');
