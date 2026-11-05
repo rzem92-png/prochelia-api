@@ -106,3 +106,22 @@ test("allowed browser request receives credentialed CORS headers even on a safe 
   assert.equal(response.headers.get("access-control-allow-origin"), allowedOrigin);
   assert.equal(response.headers.get("access-control-allow-credentials"), "true");
 });
+
+test("unapproved Origin blocks a mutating request before database access", async () => {
+  const env = new Proxy({}, {
+    get(_target, property) {
+      if (property === "DB") throw new Error("Unapproved Origin must be blocked before D1");
+      return undefined;
+    }
+  });
+  const response = await worker.fetch(new Request(endpoint, {
+    method: "POST",
+    headers: {
+      Origin: "https://attacker.example",
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({ email: "test@example.test", password: "synthetic" })
+  }), env);
+  assert.equal(response.status, 403);
+  assert.equal((await response.json()).error, "ORIGIN_NOT_ALLOWED");
+});
