@@ -125,3 +125,16 @@ Static inspection of PR #87 branch `integration/auth-cors-profile-routes-v1` con
 - avoid weakening the cookie or bypassing CSRF validation for convenience.
 
 Do not treat this static finding as proof of exploitability in every route; it is a merge blocker until a consistent server-side defense and test coverage are demonstrated. No code was changed on PR #87 by this review.
+
+
+## Migration manifest reconciliation — 2026-11-05
+
+Static comparison of the prelaunch branch migration directory confirms migrations `0001_core_business_schema.sql` through `0005_security_rate_limits.sql` are present. Migration `0005` creates `security_rate_limits`, so the isolated restore workflow v2 had stale expectations (4 migrations / 24 tables).
+
+Correction committed to the QA branch in `restore-preview-d1-test-v2.yml`:
+- expected migration count: **5** (0001–0005);
+- expected application tables: **25** (previous 24 + `security_rate_limits`);
+- archive precheck now explicitly requires `security_rate_limits`;
+- expected holiday rows remains **55**.
+
+This is a static reconciliation only. It does **not** establish that migration 0005 was applied to the live preview D1 or that a backup/restore succeeded. Before executing restore, obtain a fresh encrypted backup after the migration, confirm the isolated target DB name+UUID, and run the manual restore workflow only with explicit confirmation. Production D1 remains prohibited.
