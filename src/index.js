@@ -3259,7 +3259,7 @@ async function stripeWebhook(request, env) {
       const currency=String(obj?.currency||'').toLowerCase();
       const isCheckout=String(event.type).startsWith('checkout.session.');
       const sessionMatches=!isCheckout || !tx.provider_payment_id || String(tx.provider_payment_id)===sessionId;
-      const amountMatches=amount<0 || (amount===Number(tx.gross_cents) && currency===String(tx.currency||'EUR').toLowerCase());
+      const amountMatches=Number.isSafeInteger(amount) && amount>=0 && !!currency && amount===Number(tx.gross_cents) && currency===String(tx.currency||'EUR').toLowerCase();
       if(!sessionMatches || !amountMatches) {
         await paymentAudit(env,'STRIPE_WEBHOOK_MISMATCH',{transaction_id:tx.id,mission_id:tx.mission_id,metadata:{event_id:event.id,event_type:event.type}},'BLOCKED');
         result='MISMATCH_BLOCKED';
