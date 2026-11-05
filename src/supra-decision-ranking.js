@@ -58,7 +58,8 @@ export function rankSupraProposals(proposals, options = {}) {
     const autonomy = classifySupraAutonomy({
       // Risk labels are authoritative for the ranking decision: high requires
       // manager approval (A3), critical requires mandatory human review (A4).
-      riskTypes: proposalRisk === "critical" ? ["security"] : proposalRisk === "high" ? ["human_impact"] : [],
+      riskTypes: proposalRisk === "critical" ? ["security"] : [],
+      externalSideEffect: proposalRisk === "high" || p.externalSideEffect === true,
       irreversible: p.irreversible === true,
       externalCommitment: p.externalCommitment === true,
       externalSideEffect: p.externalSideEffect === true,
