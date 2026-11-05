@@ -96,3 +96,14 @@ test('Stripe webhook does not fall back to generic PROCHÉLIA HMAC handler', asy
   assert.doesNotMatch(handler,/verifyWebhookSignature\(request,env,raw\)/);
   assert.match(handler,/STRIPE_WEBHOOK_NOT_CONFIGURED/);
 });
+
+test('Stripe webhook signature is checked before schema initialization', async()=>{
+  const { readFile } = await import('node:fs/promises');
+  const source=await readFile(new URL('../src/index.js',import.meta.url),'utf8');
+  const start=source.indexOf('async function stripeWebhook');
+  const end=source.indexOf('async function coreAccountsSchema',start);
+  const handler=source.slice(start,end);
+  const verify=handler.indexOf('verifyStripeSignature(raw,request.headers.get');
+  const schema=handler.indexOf('ensurePaymentSchema(env)');
+  assert.ok(verify>=0 && schema>verify,'Stripe signature check must precede D1 schema writes');
+});
