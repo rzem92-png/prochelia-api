@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHmac } from 'node:crypto';
-import { verifyStripeSignature, stripeCheckoutPayload, resolveStripeTransactionId } from '../stripe-adapter.js';
+import { verifyStripeSignature, stripeCheckoutPayload, resolveStripeTransactionId, stripeWebhookAmountMatches } from '../stripe-adapter.js';
 
 const secret='whsec_test_prochelia';
 function signature(body,timestamp) {
@@ -53,4 +53,15 @@ test('Stripe PaymentIntent lookup rejects mismatched id and invalid identifiers'
   const fetchMock=async()=>({ok:true,json:async()=>({id:'pi_other',metadata:{prochelia_transaction_id:'tx-123'}})});
   assert.equal(await resolveStripeTransactionId('pi_test123','sk_test',fetchMock),null);
   assert.equal(await resolveStripeTransactionId('bad-id','sk_test',fetchMock),null);
+});
+
+
+test('Stripe webhook amount validation allows bounded partial disputes but rejects mismatches',()=>{
+  const base={currency:'eur',grossCents:10000,transactionCurrency:'EUR'};
+  assert.equal(stripeWebhookAmountMatches({...base,eventType:'charge.dispute.created',amount:2500}),true);
+  assert.equal(stripeWebhookAmountMatches({...base,eventType:'charge.dispute.created',amount:10001}),false);
+  assert.equal(stripeWebhookAmountMatches({...base,eventType:'charge.dispute.created',amount:0}),false);
+  assert.equal(stripeWebhookAmountMatches({...base,eventType:'charge.refunded',amount:2500}),false);
+  assert.equal(stripeWebhookAmountMatches({...base,eventType:'charge.refunded',amount:10000}),true);
+  assert.equal(stripeWebhookAmountMatches({...base,eventType:'charge.refunded',amount:10000,currency:'usd'}),false);
 });
