@@ -58,3 +58,52 @@ test('wallet schema enforces one wallet per user', async () => {
   const schema = source.slice(start, end);
   assert.match(schema, /user_id TEXT NOT NULL UNIQUE/);
 });
+
+
+test('payout route authenticates and enforces intervenant role before schema access', async () => {
+  const source = await readFile(new URL('../src/index.js', import.meta.url), 'utf8');
+  const start = source.indexOf('async function payoutRequest');
+  const end = source.indexOf('\nasync function verifyWebhookSignature', start);
+  const fn = source.slice(start, end);
+  const auth = fn.indexOf('const auth=await getSessionUser(request,env)');
+  const role = fn.indexOf("requireRole(auth,['intervenant'])");
+  const schema = fn.indexOf('await ensurePaymentSchema(env)');
+  assert.ok(auth >= 0 && role > auth && schema > role,
+    'authentication and role checks must precede payment schema/database setup');
+});
+
+test('payout feature gate is fail-closed before any payout database setup', async () => {
+  const source = await readFile(new URL('../src/index.js', import.meta.url), 'utf8');
+  const start = source.indexOf('async function payoutRequest');
+  const end = source.indexOf('\nasync function verifyWebhookSignature', start);
+  const fn = source.slice(start, end);
+  const gate = fn.indexOf("PAYOUTS_ENABLED).toLowerCase()!=='true'");
+  const schema = fn.indexOf('await ensurePaymentSchema(env)');
+  assert.ok(gate >= 0 && schema > gate);
+  assert.match(fn, /PAYOUTS_DISABLED_UNTIL_CONNECT_ACCEPTANCE/);
+  assert.match(fn, /\},423\)/);
+});
+
+test('payout validates positive amount, supported mode, and idempotency key before wallet queries', async () => {
+  const source = await readFile(new URL('../src/index.js', import.meta.url), 'utf8');
+  const start = source.indexOf('async function payoutRequest');
+  const end = source.indexOf('\nasync function verifyWebhookSignature', start);
+  const fn = source.slice(start, end);
+  const validation = fn.indexOf('amount===null||amount<=0');
+  const replayLookup = fn.indexOf('SELECT * FROM payout_requests WHERE idempotency_key=? AND user_id=?');
+  const walletLookup = fn.indexOf("SELECT * FROM wallets WHERE user_id=?");
+  assert.ok(validation >= 0 && replayLookup > validation && walletLookup > replayLookup);
+  assert.match(fn, /!\['standard','express'\]\.includes\(mode\)/);
+  assert.match(fn, /!idem/);
+});
+
+test('payout response uses stable non-sensitive error codes on balance and account readiness failures', async () => {
+  const source = await readFile(new URL('../src/index.js', import.meta.url), 'utf8');
+  const start = source.indexOf('async function payoutRequest');
+  const end = source.indexOf('\nasync function verifyWebhookSignature', start);
+  const fn = source.slice(start, end);
+  assert.match(fn, /PAYOUT_ACCOUNT_NOT_READY/);
+  assert.match(fn, /INSUFFICIENT_AVAILABLE_BALANCE/);
+  assert.match(fn, /PAYOUT_RESERVATION_RACE_OR_INSUFFICIENT_BALANCE/);
+  assert.doesNotMatch(fn, /stack|SQLITE_ERROR|exception\.message/i);
+});
