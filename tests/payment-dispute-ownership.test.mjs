@@ -122,3 +122,8 @@ test('admin dispute resolution uses conditional state transition and reports con
   assert.match(source, /DISPUTE_RESOLUTION_CONFLICT/);
   assert.match(source, /Number\(result\?\.meta\?\.changes\|\|0\)!==1/);
 });
+
+test('payout creation is blocked while intervenant has an active payment dispute', () => {
+  assert.match(source, /PAYOUT_BLOCKED_BY_ACTIVE_DISPUTE/);
+  assert.match(source, /SELECT id,transaction_id,status FROM payment_disputes WHERE intervenant_id=\? AND status IN \('open','pending'\) LIMIT 1/);
+});
