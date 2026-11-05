@@ -3197,10 +3197,26 @@ async function stripeWebhook(request, env) {
         result='MISMATCH_BLOCKED';
       } else if(paidEvent.has(event.type) && (!isCheckout || obj.payment_status==='paid')) {
         if(tx.status!=='paid' && tx.status!=='refunded') {
-          await env.DB.prepare(`UPDATE payment_transactions SET status='paid',provider='stripe',provider_payment_id=COALESCE(?,provider_payment_id),updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(sessionId||null,tx.id).run();
+          // D1 batch is transactional. The credit ledger is gated by changes() from
+          // the preceding payment-status transition to prevent duplicate concurrent credits.
+          const paymentStatements=[
+            env.DB.prepare(`UPDATE payment_transactions SET status='paid',provider='stripe',provider_payment_id=COALESCE(?,provider_payment_id),updated_at=CURRENT_TIMESTAMP WHERE id=? AND status NOT IN ('paid','refunded')`).bind(sessionId||null,tx.id)
+          ];
           if(tx.intervenant_id) {
-            await env.DB.prepare(`INSERT OR IGNORE INTO wallets(id,user_id,currency,available_cents,pending_cents,paid_cents,reserved_cents) VALUES(?,?,?,0,0,0,0)`).bind(crypto.randomUUID(),tx.intervenant_id,tx.currency||'EUR').run();
-            await env.DB.prepare(`UPDATE wallets SET available_cents=available_cents+?,updated_at=CURRENT_TIMESTAMP WHERE user_id=?`).bind(Number(tx.net_intervenant_cents||0),tx.intervenant_id).run();
+            paymentStatements.push(
+              env.DB.prepare(`INSERT OR IGNORE INTO payment_wallet_credit_ledger(transaction_id,user_id,amount_cents,currency,applied) SELECT id,intervenant_id,net_intervenant_cents,currency,0 FROM payment_transactions WHERE id=? AND status='paid' AND changes()=1`).bind(tx.id),
+              env.DB.prepare(`INSERT OR IGNORE INTO wallets(id,user_id,currency,available_cents,pending_cents,paid_cents,reserved_cents) VALUES(?,?,?,0,0,0,0)`).bind(crypto.randomUUID(),tx.intervenant_id,tx.currency||'EUR'),
+              env.DB.prepare(`UPDATE wallets SET available_cents=available_cents+(SELECT amount_cents FROM payment_wallet_credit_ledger WHERE transaction_id=? AND user_id=? AND applied=0),updated_at=CURRENT_TIMESTAMP WHERE user_id=? AND currency=? AND EXISTS(SELECT 1 FROM payment_wallet_credit_ledger WHERE transaction_id=? AND user_id=? AND currency=? AND applied=0)`).bind(tx.id,tx.intervenant_id,tx.intervenant_id,tx.currency||'EUR',tx.id,tx.intervenant_id,tx.currency||'EUR'),
+              env.DB.prepare(`UPDATE payment_wallet_credit_ledger SET applied=1,applied_at=CURRENT_TIMESTAMP WHERE transaction_id=? AND applied=0 AND EXISTS(SELECT 1 FROM wallets WHERE user_id=? AND currency=payment_wallet_credit_ledger.currency)`).bind(tx.id,tx.intervenant_id)
+            );
+          }
+          await env.DB.batch(paymentStatements);
+          if(tx.intervenant_id) {
+            const credit=await env.DB.prepare(`SELECT applied FROM payment_wallet_credit_ledger WHERE transaction_id=?`).bind(tx.id).first();
+            if(credit && Number(credit.applied)!==1) {
+              result='PAYMENT_CONFIRMED_WALLET_CREDIT_PENDING';
+              await paymentAudit(env,'STRIPE_WALLET_CREDIT_PENDING',{transaction_id:tx.id,mission_id:tx.mission_id,metadata:{event_id:event.id,event_type:event.type,currency:tx.currency||'EUR'}},'BLOCKED');
+            }
           }
         }
         result='PAYMENT_CONFIRMED';
