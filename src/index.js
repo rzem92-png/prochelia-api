@@ -1257,7 +1257,13 @@ async function paymentWebhook(request, env) {
     const payoutsEnabled=transferStatus==='active'?1:0;
     const status=payoutsEnabled?'active':'pending';
     const onboardingStatus=payoutsEnabled?'submitted':'required';
-    await env.DB.prepare(`UPDATE payment_accounts SET charges_enabled=0,payouts_enabled=?,status=?,onboarding_status=?,updated_at=CURRENT_TIMESTAMP WHERE provider='stripe' AND provider_account_id=?`).bind(payoutsEnabled,status,onboardingStatus,stripeObject.id).run();
+    const linkedAccount=await env.DB.prepare(`UPDATE payment_accounts SET charges_enabled=0,payouts_enabled=?,status=?,onboarding_status=?,updated_at=CURRENT_TIMESTAMP WHERE provider='stripe' AND provider_account_id=?`).bind(payoutsEnabled,status,onboardingStatus,stripeObject.id).run();
+    // Stripe can emit the event before the account-creation response is
+    // persisted locally. Do not acknowledge it as processed until linked;
+    // returning 503 lets Stripe retry after the local reservation is updated.
+    if(Number(linkedAccount?.meta?.changes||0)!==1) {
+      return json({ok:false,error:'STRIPE_CONNECT_ACCOUNT_NOT_LINKED',version:VERSION},503);
+    }
   }
   if(txId){
     const tx=await env.DB.prepare('SELECT * FROM payment_transactions WHERE id=? LIMIT 1').bind(txId).first();
