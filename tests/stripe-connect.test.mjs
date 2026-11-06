@@ -213,6 +213,26 @@ test("Stripe Connect ambiguous account creation is locked for reconciliation ins
   }
 });
 
+test("legacy creation_failed Connect row cannot trigger a second Stripe account", async()=>{
+  const originalFetch=globalThis.fetch;
+  let stripeCalls=0;
+  globalThis.fetch=async()=>{stripeCalls++;throw new Error("must not call Stripe");};
+  try {
+    const fake=fakeDb("intervenant",{paymentAccount:{id:"legacy-reservation",user_id:"user-test-1",provider:"stripe",provider_account_id:null,status:"creation_failed",onboarding_status:"required",payouts_enabled:0}});
+    const env={DB:fake.DB,STRIPE_CONNECT_ONBOARDING_ENABLED:"true",PAYMENT_PROVIDER:"stripe",STRIPE_SECRET_KEY:"sk_test_unit",STRIPE_PUBLISHABLE_KEY:"pk_test_unit",STRIPE_WEBHOOK_SECRET:"whsec_unit",STRIPE_DASHBOARD:"express",STRIPE_FEES_COLLECTOR:"application",STRIPE_LOSSES_COLLECTOR:"application",APP_BASE_URL:"https://prochelia.pages.dev"};
+    const response=await worker.fetch(new Request("https://api.test/api/payments/onboard",{
+      method:"POST",headers:{Origin:"https://prochelia.pages.dev",Cookie:"prochelia_session=synthetic-token","Content-Type":"application/json"},
+      body:JSON.stringify({account_token:"acctok_test123",stripe_terms_accepted:true})
+    }),env);
+    const body=await response.json();
+    assert.equal(response.status,409);
+    assert.equal(body.error,"STRIPE_CONNECT_ACCOUNT_STATE_CONFLICT");
+    assert.equal(stripeCalls,0);
+  } finally {
+    globalThis.fetch=originalFetch;
+  }
+});
+
 test("real charges and payouts fail closed until the transaction adapters are implemented", async()=>{
   const fake=fakeDb("gerante");
   const env={DB:fake.DB,PAYMENT_PROVIDER:"stripe",STRIPE_SECRET_KEY:"sk_test_unit",STRIPE_WEBHOOK_SECRET:"whsec_unit",APP_BASE_URL:"https://prochelia.pages.dev"};
