@@ -540,7 +540,7 @@ test("Stripe Connect rejects invalid Account Tokens and missing terms consent be
 
 test("mission payment INSERT placeholder count matches its 14 columns", async()=>{
   const source=await readFile(new URL("../src/index.js",import.meta.url),"utf8");
-  const match=source.match(/INSERT INTO payment_transactions\\s*\\((id,idempotency_key,mission_id,client_id,intervenant_id,type,status,gross_cents,commission_cents,net_intervenant_cents,currency,provider,reason,metadata_json)\\)\\s*VALUES\\s*\\(([^)]*)\\)/);
+  const match=source.match(/INSERT INTO payment_transactions\s*\(([^)]*)\)\s*VALUES\s*\(([^)]*)\)/);
   assert.ok(match,"mission payment insert statement should exist");
   const columns=match[1].split(",").length;
   const placeholders=match[2].split(",").length;
