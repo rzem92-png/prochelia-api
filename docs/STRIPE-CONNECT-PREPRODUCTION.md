@@ -44,6 +44,10 @@ Pour les comptes connectés créés en France, le parcours Accounts v2 exige un 
 
 La clé secrète ne quitte jamais le Worker. Le token ne doit jamais être journalisé ni conservé dans le navigateur après utilisation.
 
+## Réconciliation après création ambiguë
+
+Si la réservation locale reste en état `reconciliation_required`, l'appel Stripe a pu réussir sans que le Worker ait reçu ou enregistré la réponse. Le parcours bloque alors toute nouvelle création automatique pour cet intervenant. Une personne habilitée doit rechercher le compte Stripe via les journaux/metadata de plateforme et réconcilier manuellement l'identifiant avant de débloquer le dossier. Ne pas supprimer la réservation ni relancer avec un nouveau Account Token avant vérification, afin d'éviter les comptes connectés doublons.
+
 ## Webhook Stripe
 
 Endpoint à enregistrer dans le compte Stripe de plateforme :
