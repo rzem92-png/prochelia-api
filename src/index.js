@@ -389,13 +389,23 @@ async function loginAttemptKey(request,email) {
 }
 
 async function recordLoginFailure(env,keys) {
-  await env.DB.prepare('INSERT INTO login_attempts (id,key_hash) VALUES (?,?)').bind(crypto.randomUUID(),keys.emailIpHash).run();
-  await env.DB.prepare('INSERT INTO login_attempts (id,key_hash) VALUES (?,?)').bind(crypto.randomUUID(),keys.ipHash).run();
+  // Conditional inserts are evaluated inside one D1 batch/transaction. This
+  // closes the race where many concurrent failures all pass a stale COUNT.
+  const results=await env.DB.batch([
+    env.DB.prepare(`INSERT INTO login_attempts (id,key_hash)
+      SELECT ?,? WHERE (SELECT COUNT(*) FROM login_attempts WHERE key_hash=? AND created_at>=datetime('now','-15 minutes')) < ?`)
+      .bind(crypto.randomUUID(),keys.emailIpHash,keys.emailIpHash,SECURITY_MAX_ATTEMPTS),
+    env.DB.prepare(`INSERT INTO login_attempts (id,key_hash)
+      SELECT ?,? WHERE (SELECT COUNT(*) FROM login_attempts WHERE key_hash=? AND created_at>=datetime('now','-15 minutes')) < ?`)
+      .bind(crypto.randomUUID(),keys.ipHash,keys.ipHash,SECURITY_IP_MAX_ATTEMPTS)
+  ]);
+  if(Number(results?.[0]?.meta?.changes||0)!==1 || Number(results?.[1]?.meta?.changes||0)!==1) return {rateLimited:true,emailAttempts:0,ipAttempts:0};
   const [emailRow,ipRow]=await Promise.all([
     env.DB.prepare(`SELECT COUNT(*) AS total FROM login_attempts WHERE key_hash=? AND created_at>=datetime('now','-15 minutes')`).bind(keys.emailIpHash).first(),
     env.DB.prepare(`SELECT COUNT(*) AS total FROM login_attempts WHERE key_hash=? AND created_at>=datetime('now','-15 minutes')`).bind(keys.ipHash).first()
   ]);
-  return {emailAttempts:Number(emailRow?.total||0),ipAttempts:Number(ipRow?.total||0)};
+  const emailAttempts=Number(emailRow?.total||0),ipAttempts=Number(ipRow?.total||0);
+  return {rateLimited:emailAttempts>=SECURITY_MAX_ATTEMPTS||ipAttempts>=SECURITY_IP_MAX_ATTEMPTS,emailAttempts,ipAttempts};
 }
 
 async function login(request, env) {
@@ -416,7 +426,7 @@ async function login(request, env) {
   }
   if (!validEmail(email) || !validPassword(password)) {
     const attempts=await recordLoginFailure(env,rateKeys);
-    if(attempts.emailAttempts>=SECURITY_MAX_ATTEMPTS || attempts.ipAttempts>=SECURITY_IP_MAX_ATTEMPTS) return json({ok:false,error:'LOGIN_RATE_LIMITED',version:VERSION,retry_after_seconds:SECURITY_LOCK_SECONDS},429,{'retry-after':String(SECURITY_LOCK_SECONDS)});
+    if(attempts.rateLimited) return json({ok:false,error:'LOGIN_RATE_LIMITED',version:VERSION,retry_after_seconds:SECURITY_LOCK_SECONDS},429,{'retry-after':String(SECURITY_LOCK_SECONDS)});
     return json({ ok: false, error: 'INVALID_CREDENTIALS', version: VERSION }, 401);
   }
 
