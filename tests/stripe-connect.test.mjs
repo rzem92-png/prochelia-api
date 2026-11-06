@@ -369,6 +369,23 @@ test("payout paid webhook uses atomic reserved-to-paid wallet settlement", async
   assert.ok(fake.calls.some(x=>x.sql.includes("reserved_cents=reserved_cents-?,paid_cents=paid_cents+?")));
 });
 
+test("payout failed webhook atomically releases reserved funds back to available", async()=>{
+  const fake=fakeDb("gerante",{payout:{id:"payout-local-failed",status:"processing",amount_cents:1250,wallet_id:"wallet-provider-failed"}});
+  const raw=JSON.stringify({id:"evt_payout_failed_atomic",type:"payout.failed",data:{object:{id:"po_failed_1",failure_code:"account_closed",failure_message:"Destination account unavailable",metadata:{prochelia_payout_id:"payout-local-failed"}}}});
+  const timestamp=Math.floor(Date.now()/1000),signature=await stripeSignature("whsec_payout_failed",timestamp,raw);
+  const response=await worker.fetch(new Request("https://api.test/api/payments/webhook",{method:"POST",headers:{"Stripe-Signature":"t="+timestamp+",v1="+signature,"Content-Type":"application/json"},body:raw}),{DB:fake.DB,PAYMENT_PROVIDER:"stripe",STRIPE_WEBHOOK_SECRET:"whsec_payout_failed"});
+  const body=await response.json();
+  assert.equal(response.status,200,JSON.stringify(body));
+  const payoutUpdate=fake.calls.find(x=>x.sql.includes("UPDATE payout_requests SET status=?"));
+  assert.ok(payoutUpdate);
+  assert.equal(payoutUpdate.args[0],"failed");
+  assert.equal(payoutUpdate.args[2],"account_closed");
+  assert.equal(payoutUpdate.args[3],"Destination account unavailable");
+  const walletRelease=fake.calls.find(x=>x.sql.includes("reserved_cents=reserved_cents-?,available_cents=available_cents+?"));
+  assert.ok(walletRelease,"failed payout must release reserve back to available wallet");
+  assert.deepEqual(walletRelease.args.slice(0,4),[1250,1250,"wallet-provider-failed",1250]);
+});
+
 test("Stripe v2 account requirements webhook updates Connect readiness only after valid signature", async()=>{
   const fake=fakeDb("intervenant");
   const env={DB:fake.DB,PAYMENT_PROVIDER:"stripe",STRIPE_SECRET_KEY:"sk_test_unit",STRIPE_WEBHOOK_SECRET:"whsec_unit",APP_BASE_URL:"https://prochelia.pages.dev"};
