@@ -206,6 +206,28 @@ test("real charges and payouts fail closed until the transaction adapters are im
   assert.equal(fake.calls.some(x=>x.sql.includes("INSERT INTO payment_transactions")),false);
 });
 
+test("paid payment webhook applies transaction and wallet credit through D1 batch", async()=>{
+  const fake=fakeDb("gerante",{transaction:{id:"tx-local-1",status:"pending",intervenant_id:"provider-user-1",net_intervenant_cents:750}});
+  const raw=JSON.stringify({id:"evt_paid_atomic",type:"payment_intent.succeeded",data:{object:{id:"pi_test_1",metadata:{prochelia_transaction_id:"tx-local-1"}}}});
+  const timestamp=Math.floor(Date.now()/1000),signature=await stripeSignature("whsec_atomic",timestamp,raw);
+  const response=await worker.fetch(new Request("https://api.test/api/payments/webhook",{method:"POST",headers:{"Stripe-Signature":"t="+timestamp+",v1="+signature,"Content-Type":"application/json"},body:raw}),{DB:fake.DB,PAYMENT_PROVIDER:"stripe",STRIPE_WEBHOOK_SECRET:"whsec_atomic"});
+  const body=await response.json();
+  assert.equal(response.status,200,JSON.stringify(body));
+  assert.ok(fake.calls.some(x=>x.sql.includes("UPDATE payment_transactions SET status='paid'")));
+  assert.ok(fake.calls.some(x=>x.sql.includes("UPDATE wallets SET available_cents=available_cents+?")));
+});
+
+test("payout paid webhook uses atomic reserved-to-paid wallet settlement", async()=>{
+  const fake=fakeDb("gerante",{payout:{id:"payout-local-1",status:"processing",amount_cents:900,wallet_id:"wallet-provider-1"}});
+  const raw=JSON.stringify({id:"evt_payout_atomic",type:"payout.paid",data:{object:{id:"po_test_1",metadata:{prochelia_payout_id:"payout-local-1"}}}});
+  const timestamp=Math.floor(Date.now()/1000),signature=await stripeSignature("whsec_atomic",timestamp,raw);
+  const response=await worker.fetch(new Request("https://api.test/api/payments/webhook",{method:"POST",headers:{"Stripe-Signature":"t="+timestamp+",v1="+signature,"Content-Type":"application/json"},body:raw}),{DB:fake.DB,PAYMENT_PROVIDER:"stripe",STRIPE_WEBHOOK_SECRET:"whsec_atomic"});
+  const body=await response.json();
+  assert.equal(response.status,200,JSON.stringify(body));
+  assert.ok(fake.calls.some(x=>x.sql.includes("UPDATE payout_requests SET status=?")));
+  assert.ok(fake.calls.some(x=>x.sql.includes("reserved_cents=reserved_cents-?,paid_cents=paid_cents+?")));
+});
+
 test("Stripe v2 account requirements webhook updates Connect readiness only after valid signature", async()=>{
   const fake=fakeDb("intervenant");
   const env={DB:fake.DB,PAYMENT_PROVIDER:"stripe",STRIPE_SECRET_KEY:"sk_test_unit",STRIPE_WEBHOOK_SECRET:"whsec_unit",APP_BASE_URL:"https://prochelia.pages.dev"};
