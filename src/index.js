@@ -1248,34 +1248,22 @@ async function paymentWebhook(request, env) {
         if(newStatus==='processing') {
           await env.DB.prepare(`UPDATE payout_requests SET status='processing',provider_payout_id=COALESCE(?,provider_payout_id),updated_at=CURRENT_TIMESTAMP WHERE id=? AND status NOT IN ('completed','failed','canceled')`).bind(providerPayoutId,payoutId).run();
         } else {
-          const walletUpdate=newStatus==='completed'
-            ? env.DB.prepare(`UPDATE wallets SET reserved_cents=reserved_cents-?,paid_cents=paid_cents+?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND reserved_cents>=?`).bind(payout.amount_cents,payout.amount_cents,payout.wallet_id,payout.amount_cents)
-            : env.DB.prepare(`UPDATE wallets SET reserved_cents=reserved_cents-?,available_cents=available_cents+?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND reserved_cents>=?`).bind(payout.amount_cents,payout.amount_cents,payout.wallet_id,payout.amount_cents);
+          const walletStatement=newStatus==='completed'
+            ? env.DB.prepare(`UPDATE wallets SET reserved_cents=reserved_cents-?,paid_cents=paid_cents+?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND reserved_cents>=? AND changes()=1`).bind(payout.amount_cents,payout.amount_cents,payout.wallet_id,payout.amount_cents)
+            : env.DB.prepare(`UPDATE wallets SET reserved_cents=reserved_cents-?,available_cents=available_cents+?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND reserved_cents>=? AND changes()=1`).bind(payout.amount_cents,payout.amount_cents,payout.wallet_id,payout.amount_cents);
           const results=await env.DB.batch([
             env.DB.prepare(`UPDATE payout_requests SET status=?,provider_payout_id=COALESCE(?,provider_payout_id),failure_code=?,failure_message=?,completed_at=CASE WHEN ?='completed' THEN CURRENT_TIMESTAMP ELSE completed_at END,updated_at=CURRENT_TIMESTAMP
               WHERE id=? AND status NOT IN ('completed','failed','canceled')
                 AND EXISTS (SELECT 1 FROM wallets WHERE id=? AND reserved_cents>=?)`)
               .bind(newStatus,providerPayoutId,failureCode,failureMessage,newStatus,payoutId,payout.wallet_id,payout.amount_cents),
-            env.DB.prepare(`UPDATE wallets SET reserved_cents=reserved_cents-?,paid_cents=paid_cents+?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND reserved_cents>=? AND changes()=1`)
-              .bind(payout.amount_cents,payout.amount_cents,payout.wallet_id,payout.amount_cents)
+            walletStatement
           ]);
           if(Number(results?.[0]?.meta?.changes||0)!==1 || Number(results?.[1]?.meta?.changes||0)!==1) {
-            // For failed/canceled payout, use the same atomic release operation.
-            if(['failed','canceled'].includes(newStatus)) {
-              const release=await env.DB.batch([
-                env.DB.prepare(`UPDATE payout_requests SET status=?,provider_payout_id=COALESCE(?,provider_payout_id),failure_code=?,failure_message=?,completed_at=CASE WHEN ?='completed' THEN CURRENT_TIMESTAMP ELSE completed_at END,updated_at=CURRENT_TIMESTAMP
-                  WHERE id=? AND status NOT IN ('completed','failed','canceled') AND EXISTS (SELECT 1 FROM wallets WHERE id=? AND reserved_cents>=?)`)
-                  .bind(newStatus,providerPayoutId,failureCode,failureMessage,newStatus,payoutId,payout.wallet_id,payout.amount_cents),
-                env.DB.prepare(`UPDATE wallets SET reserved_cents=reserved_cents-?,available_cents=available_cents+?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND reserved_cents>=? AND changes()=1`)
-                  .bind(payout.amount_cents,payout.amount_cents,payout.wallet_id,payout.amount_cents)
-              ]);
-              if(Number(release?.[0]?.meta?.changes||0)!==1 || Number(release?.[1]?.meta?.changes||0)!==1) return json({ok:false,error:'PAYOUT_WALLET_ATOMIC_UPDATE_FAILED',version:VERSION},503);
-            } else {
-              return json({ok:false,error:'PAYOUT_WALLET_ATOMIC_UPDATE_FAILED',version:VERSION},503);
-            }
+            return json({ok:false,error:'PAYOUT_WALLET_ATOMIC_UPDATE_FAILED',version:VERSION},503);
           }
         }
       }
+    }
     }
   }
   // Audit and completion marker are committed together. A failed batch leaves
