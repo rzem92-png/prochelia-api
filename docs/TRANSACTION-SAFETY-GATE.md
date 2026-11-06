@@ -120,3 +120,17 @@ Les mocks seuls ne prouvent pas les transactions D1. Il faut des tests Worker-D1
 - Montant du litige strictement positif et plafonné au montant payé restant après remboursements.
 - Un litige ouvert/pending par transaction; statut `paid → held`, création du litige et audit en batch D1.
 - La route reste soumise aux tests D1 de concurrence et à la validation du modèle de remboursement avant toute activation de charges.
+
+## Blocages de readiness produit/API
+
+Le Worker n'expose pas encore de routes publiques de création de compte client/intervenant ni de flux complet mission (validation, acceptation, réservation de créneau, progression, clôture). Ces capacités ne sont donc pas considérées comme prêtes.
+
+Les readiness flags suivants restent fermés et sont maintenant inclus dans `paymentsConfigured()` et le contrôle de production :
+- `CLIENT_PROVIDER_REGISTRATION_READY=false`
+- `MISSION_WORKFLOW_READY=false`
+- `SERVER_PRICING_POLICY_READY=false`
+- `REFUND_LEDGER_READY=false`
+- `PSP_RECONCILIATION_READY=false`
+- `STRIPE_CHARGES_AND_PAYOUTS_READY=false`
+
+L'onboarding Stripe Connect ne constitue pas une capacité d'encaissement, de remboursement ou de payout. Aucun de ces flags ne doit être ouvert tant que les parcours correspondants ne sont pas implémentés et testés de bout en bout.
