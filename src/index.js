@@ -1002,7 +1002,7 @@ async function paymentOnboard(request, env) {
     return json({ok:false,error:'APP_BASE_URL_NOT_ALLOWED',version:VERSION},503);
   }
   const body=await readJson(request)||{};
-  const accountToken=clean(body.account_token);
+  const accountToken=typeof body.account_token==='string'?body.account_token.trim():'';
   if(!/^[A-Za-z0-9_]{8,255}$/.test(accountToken) || body.stripe_terms_accepted!==true) {
     return json({ok:false,error:'STRIPE_ACCOUNT_TOKEN_AND_TERMS_REQUIRED',version:VERSION},400);
   }
