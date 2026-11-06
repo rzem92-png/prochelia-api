@@ -25,6 +25,12 @@ Ce document décrit les risques observés dans le code de la branche `feat/strip
 - La réservation du wallet et l'insertion du payout ne sont pas une opération atomique démontrée. Une panne entre les deux peut laisser une réservation sans payout correspondant.
 - Les effets webhook du payout et les mouvements de wallet sont séparés; une livraison concurrente peut tenter plusieurs transitions.
 
+### Routes V7 de validation — ne pas confondre validation et autorisation
+- Les routes `/api/v7/check/*` et notamment `/api/v7/check/permissions` reçoivent des éléments de validation dans le corps de la requête. La route de permissions vérifie un rôle et un objet `permissions` fournis par l'appelant; elle ne constitue donc **pas** une source d'autorité RBAC.
+- Les résultats V7 sont des validations déclaratives. Ils ne doivent jamais autoriser directement une lecture/écriture D1, une mission, un paiement, un remboursement, un payout ou une action d'administration.
+- Toute autorisation effective doit être calculée côté serveur depuis la session authentifiée, le rôle et les permissions persistés, l'état du compte et le propriétaire de la ressource. Les identifiants/roles/permissions fournis par le navigateur sont non fiables.
+- Ajouter des tests négatifs prouvant qu'un client/intervenant ne peut pas obtenir des privilèges en forgeant `role`, `permissions`, `user_id`, `client_id`, `intervenant_id` ou les statuts. Vérifier aussi que les routes purement consultatives ne sont pas réutilisées comme garde d'accès par les routes transactionnelles.
+
 **Conséquence :** risques potentiels de traitement perdu, double mouvement, réservation orpheline, incohérence de solde ou retour d'une transaction incorrecte en réutilisant une clé. Les adaptateurs financiers doivent rester désactivés.
 
 ## Corrections obligatoires avant toute activation transactionnelle
@@ -59,6 +65,8 @@ Ce document décrit les risques observés dans le code de la branche `feat/strip
 | Signature invalide, webhook ancien, compte non lié | Refus sans mutation métier |
 | Mission/slot concurrent | Une réservation, pas de double attribution |
 | Reconciliation après crash | Écart détecté et réparé avec audit |
+| Route V7 permissions avec role/permissions falsifiés | Ne donne jamais d'accès réel à une route protégée |
+| ID de ressource appartenant à un autre compte | Refus serveur (403/404) et aucune mutation |
 
 Les mocks seuls ne prouvent pas les transactions D1. Il faut des tests Worker-D1 isolés, des tests de concurrence et des injections de panne contrôlées.
 
