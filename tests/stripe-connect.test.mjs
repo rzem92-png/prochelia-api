@@ -193,6 +193,26 @@ test("Stripe Connect onboarding creates the account and a fresh onboarding link 
   }
 });
 
+test("Stripe Connect ambiguous account creation is locked for reconciliation instead of retrying", async()=>{
+  const originalFetch=globalThis.fetch;
+  globalThis.fetch=async()=>{throw new Error("simulated network timeout after Stripe request");};
+  try {
+    const fake=fakeDb("intervenant");
+    const env={DB:fake.DB,STRIPE_CONNECT_ONBOARDING_ENABLED:"true",PAYMENT_PROVIDER:"stripe",STRIPE_SECRET_KEY:"sk_test_unit",STRIPE_PUBLISHABLE_KEY:"pk_test_unit",STRIPE_WEBHOOK_SECRET:"whsec_unit",STRIPE_DASHBOARD:"express",STRIPE_FEES_COLLECTOR:"application",STRIPE_LOSSES_COLLECTOR:"application",APP_BASE_URL:"https://prochelia.pages.dev"};
+    const response=await worker.fetch(new Request("https://api.test/api/payments/onboard",{
+      method:"POST",headers:{Origin:"https://prochelia.pages.dev",Cookie:"prochelia_session=synthetic-token","Content-Type":"application/json"},
+      body:JSON.stringify({account_token:"acctok_test123",stripe_terms_accepted:true})
+    }),env);
+    const body=await response.json();
+    assert.equal(response.status,502);
+    assert.equal(body.error,"STRIPE_ONBOARDING_FAILED");
+    assert.ok(fake.calls.some(x=>x.sql.includes("status='reconciliation_required'") && x.args.length===1));
+    assert.equal(fake.calls.some(x=>x.sql.includes("status='creation_failed'")),false);
+  } finally {
+    globalThis.fetch=originalFetch;
+  }
+});
+
 test("real charges and payouts fail closed until the transaction adapters are implemented", async()=>{
   const fake=fakeDb("gerante");
   const env={DB:fake.DB,PAYMENT_PROVIDER:"stripe",STRIPE_SECRET_KEY:"sk_test_unit",STRIPE_WEBHOOK_SECRET:"whsec_unit",APP_BASE_URL:"https://prochelia.pages.dev"};
