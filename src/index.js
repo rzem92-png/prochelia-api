@@ -1015,15 +1015,12 @@ async function paymentOnboard(request, env) {
       // Reserve the unique user_id row BEFORE contacting Stripe to prevent
       // concurrent requests from creating multiple connected accounts.
       if(existing && existing.status==='creating') return json({ok:false,error:'STRIPE_CONNECT_CREATION_IN_PROGRESS',version:VERSION},409);
-      if(existing && existing.status!=='creation_failed') return json({ok:false,error:'STRIPE_CONNECT_ACCOUNT_STATE_CONFLICT',version:VERSION},409);
-      if(existing) {
-        const claim=await env.DB.prepare(`UPDATE payment_accounts SET status='creating',updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='creation_failed' AND provider_account_id IS NULL`).bind(existing.id).run();
-        if(Number(claim?.meta?.changes||0)!==1) return json({ok:false,error:'STRIPE_CONNECT_CREATION_IN_PROGRESS',version:VERSION},409);
-        reservationId=existing.id;
-      } else {
-        reservationId=crypto.randomUUID();
-        await env.DB.prepare(`INSERT INTO payment_accounts (id,user_id,provider,provider_account_id,status,onboarding_status) VALUES (?,?, 'stripe',NULL,'creating','required')`).bind(reservationId,auth.user.id).run();
-      }
+      // Any pre-existing row without an account ID needs reconciliation.
+      // In particular, legacy creation_failed rows may represent a timed-out
+      // Stripe call whose external outcome is unknown; never retry automatically.
+      if(existing) return json({ok:false,error:'STRIPE_CONNECT_ACCOUNT_STATE_CONFLICT',version:VERSION},409);
+      reservationId=crypto.randomUUID();
+      await env.DB.prepare(`INSERT INTO payment_accounts (id,user_id,provider,provider_account_id,status,onboarding_status) VALUES (?,?, 'stripe',NULL,'creating','required')`).bind(reservationId,auth.user.id).run();
       const accountTokenHash=await sha256Base64url(accountToken);
       const account=await stripePost(env,'v2/core/accounts',{
         account_token:accountToken,
