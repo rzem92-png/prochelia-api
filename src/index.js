@@ -369,12 +369,42 @@ async function postMissions(request, env) {
   }, 503);
 }
 
+async function ensureLoginSecuritySchema(env) {
+  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS login_attempts (
+    id TEXT PRIMARY KEY, key_hash TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  )`).run();
+  await env.DB.prepare(`CREATE INDEX IF NOT EXISTS idx_login_attempts_key_created ON login_attempts(key_hash,created_at)`).run();
+}
+
+async function loginAttemptKey(request,email) {
+  // Cloudflare overwrites CF-Connecting-IP at the edge. Do not trust arbitrary
+  // X-Forwarded-For values for security decisions.
+  const ip=clean(request.headers.get('cf-connecting-ip'))||'unknown';
+  return sha256Base64url(`${normalizeEmail(email)}|${ip}`);
+}
+
+async function recordLoginFailure(env,keyHash) {
+  await env.DB.prepare('INSERT INTO login_attempts (id,key_hash) VALUES (?,?)').bind(crypto.randomUUID(),keyHash).run();
+  const row=await env.DB.prepare(`SELECT COUNT(*) AS total FROM login_attempts WHERE key_hash=? AND created_at>=datetime('now','-15 minutes')`).bind(keyHash).first();
+  return Number(row?.total||0);
+}
+
 async function login(request, env) {
   if (!env.DB) return json({ ok: false, database: false, version: VERSION }, 503);
   const body = await readJson(request);
   const email = normalizeEmail(body?.email);
   const password = body?.password;
+  await ensureLoginSecuritySchema(env);
+  const keyHash=await loginAttemptKey(request,email);
+  // Bound storage growth; the active throttle window is 15 minutes.
+  await env.DB.prepare(`DELETE FROM login_attempts WHERE created_at<datetime('now','-1 day')`).run();
+  const current=await env.DB.prepare(`SELECT COUNT(*) AS total FROM login_attempts WHERE key_hash=? AND created_at>=datetime('now','-15 minutes')`).bind(keyHash).first();
+  if(Number(current?.total||0)>=SECURITY_MAX_ATTEMPTS) {
+    return json({ok:false,error:'LOGIN_RATE_LIMITED',version:VERSION,retry_after_seconds:SECURITY_LOCK_SECONDS},429,{'retry-after':String(SECURITY_LOCK_SECONDS)});
+  }
   if (!validEmail(email) || !validPassword(password)) {
+    const attempts=await recordLoginFailure(env,keyHash);
+    if(attempts>=SECURITY_MAX_ATTEMPTS) return json({ok:false,error:'LOGIN_RATE_LIMITED',version:VERSION,retry_after_seconds:SECURITY_LOCK_SECONDS},429,{'retry-after':String(SECURITY_LOCK_SECONDS)});
     return json({ ok: false, error: 'INVALID_CREDENTIALS', version: VERSION }, 401);
   }
 
@@ -384,9 +414,13 @@ async function login(request, env) {
   ).bind(email).first();
 
   if (!user || user.status !== 'active' || !user.password_hash || !(await verifyPassword(password, user.password_hash))) {
+    const attempts=await recordLoginFailure(env,keyHash);
+    if(attempts>=SECURITY_MAX_ATTEMPTS) return json({ok:false,error:'LOGIN_RATE_LIMITED',version:VERSION,retry_after_seconds:SECURITY_LOCK_SECONDS},429,{'retry-after':String(SECURITY_LOCK_SECONDS)});
     return json({ ok: false, error: 'INVALID_CREDENTIALS', version: VERSION }, 401);
   }
 
+  // Clear failed attempts for this IP/email pair after successful authentication.
+  await env.DB.prepare('DELETE FROM login_attempts WHERE key_hash=?').bind(keyHash).run();
   // Remove expired sessions for this user before creating a fresh one.
   await env.DB.prepare(`DELETE FROM sessions WHERE user_id = ? AND expires_at <= CURRENT_TIMESTAMP`).bind(user.id).run();
 
