@@ -128,6 +128,8 @@ Le Worker n'expose pas encore de routes publiques de création de compte client/
 Les readiness flags suivants restent fermés et sont maintenant inclus dans `paymentsConfigured()` et le contrôle de production :
 - `CLIENT_PROVIDER_REGISTRATION_READY=false`
 - `MISSION_WORKFLOW_READY=false`
+- `MISSION_SECURITY_READY=false` (presence, QR/check-in, identity and status transitions)
+- `CLIENT_CODE_DELIVERY_READY=false` (no client secret/code delivered to the client yet)
 - `SERVER_PRICING_POLICY_READY=false`
 - `REFUND_LEDGER_READY=false`
 - `PSP_RECONCILIATION_READY=false`
