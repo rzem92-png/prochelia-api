@@ -197,7 +197,9 @@ async function health(env) {
   return json({ ok: true, database: result?.ok === 1, service: 'PROCHÉLIA API', version: VERSION });
 }
 
-async function coreAccountsSchema(env) {
+async function coreAccountsSchema(request, env) {
+  const gate = await requireAuthRole(request, env, ['gerante', 'admin']);
+  if (gate.error) return gate.error;
   if (!env.DB) return json({ ok: false, database: false, version: VERSION }, 503);
   const tables = ['users', 'clients', 'intervenants', 'sessions', 'disponibilites'];
   const results = {};
@@ -221,7 +223,9 @@ async function coreAccountsSchema(env) {
   });
 }
 
-async function missionsSchema(env) {
+async function missionsSchema(request, env) {
+  const gate = await requireAuthRole(request, env, ['gerante', 'admin']);
+  if (gate.error) return gate.error;
   if (!env.DB) return json({ ok: false, database: false, version: VERSION }, 503);
   const row = await env.DB.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='missions';").first();
   const count = await env.DB.prepare('SELECT COUNT(*) AS total FROM missions;').first();
@@ -1253,12 +1257,12 @@ async function handleBase(request, env) {
 
   if (url.pathname === '/api/core/schema') {
     if (request.method !== 'GET') return json({ ok: false, error: 'METHOD_NOT_ALLOWED', version: VERSION }, 405);
-    return coreAccountsSchema(env);
+    return coreAccountsSchema(request,env);
   }
 
   if (url.pathname === '/api/missions/schema') {
     if (request.method !== 'GET') return json({ ok: false, error: 'METHOD_NOT_ALLOWED', version: VERSION }, 405);
-    return missionsSchema(env);
+    return missionsSchema(request,env);
   }
 
   if (url.pathname === '/api/missions/validate') {
