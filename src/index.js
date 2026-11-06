@@ -437,7 +437,7 @@ async function login(request, env) {
 
   if (!user || user.status !== 'active' || !user.password_hash || !(await verifyPassword(password, user.password_hash))) {
     const attempts=await recordLoginFailure(env,rateKeys);
-    if(attempts.emailAttempts>=SECURITY_MAX_ATTEMPTS || attempts.ipAttempts>=SECURITY_IP_MAX_ATTEMPTS) return json({ok:false,error:'LOGIN_RATE_LIMITED',version:VERSION,retry_after_seconds:SECURITY_LOCK_SECONDS},429,{'retry-after':String(SECURITY_LOCK_SECONDS)});
+    if(attempts.rateLimited) return json({ok:false,error:'LOGIN_RATE_LIMITED',version:VERSION,retry_after_seconds:SECURITY_LOCK_SECONDS},429,{'retry-after':String(SECURITY_LOCK_SECONDS)});
     return json({ ok: false, error: 'INVALID_CREDENTIALS', version: VERSION }, 401);
   }
 
