@@ -2911,8 +2911,19 @@ async function productionConfigCheck(env) {
 async function finalProductionAudit(request,env) {
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
   const result=await productionConfigCheck(env);
-  await journal(env,'gerante',gate.auth.user.id,'FINAL_PRODUCTION_AUDIT','system',null,result.overall?'OK':'ATTENTION',{blocking:result.blocking,externalNotConfigured:result.externalNotConfigured});
-  return json({ok:true,version:VERSION,production_gate:result.overall?'OPEN':'CLOSED',ready_for_real_traffic:result.overall,checks:result.checks,note:result.overall?'Architecture gate passed; external business integrations must still be exercised with sandbox/acceptance tests.':'No real production traffic should be enabled until blocking configuration/schema checks are resolved.'});
+  const extra=[
+    {code:'SECURITY_CODE_DELIVERY',status:finalSecretConfigured(env,'SECURITY_CODE_WEBHOOK')&&finalSecretConfigured(env,'SECURITY_CODE_WEBHOOK_SECRET')?'OK':'NOT_CONFIGURED'},
+    {code:'CORS_ORIGIN',status:finalSecretConfigured(env,'CORS_ORIGIN')?'OK':'NOT_CONFIGURED'},
+    {code:'BACKUP_R2',status:env.BACKUP_BUCKET&&finalSecretConfigured(env,'BACKUP_ENCRYPTION_KEY')?'OK':'NOT_CONFIGURED'},
+    {code:'NOTIFICATION_PROVIDER',status:finalSecretConfigured(env,'NOTIFICATION_PROVIDER')?'OK':'NOT_CONFIGURED'},
+    {code:'MAPS_PROVIDER',status:finalSecretConfigured(env,'MAPS_PROVIDER')&&finalSecretConfigured(env,'MAPS_API_KEY')?'OK':'NOT_CONFIGURED'}
+  ];
+  const checks=[...(result.checks||[]),...extra];
+  const blockingCodes=new Set(['SECRET:PAYMENT_PROVIDER','SECRET:PAYMENT_WEBHOOK_SECRET','SECRET:PAYMENT_API_SECRET','SECRET:STRIPE_SECRET_KEY','CONFIG:STRIPE_PUBLISHABLE_KEY','SECRET:STRIPE_WEBHOOK_SECRET','SECRET:STRIPE_DASHBOARD','SECRET:STRIPE_FEES_COLLECTOR','SECRET:STRIPE_LOSSES_COLLECTOR','SECRET:APP_BASE_URL','SECRET:BOOTSTRAP_TOKEN','SERVER_PRICING_POLICY','STRIPE_CHARGES_ADAPTER','STRIPE_PAYOUT_ADAPTER','SECURITY_CODE_DELIVERY','NOTIFICATION_PROVIDER','MAPS_PROVIDER','CORS_ORIGIN','BACKUP_R2']);
+  const blocking=checks.filter(x=>blockingCodes.has(x.code)&&x.status!=='OK');
+  const overall=blocking.length===0 && result.blocking===0 && Number(result.externalNotConfigured||0)===0;
+  await journal(env,'gerante',gate.auth.user.id,'FINAL_PRODUCTION_AUDIT','system',null,overall?'OK':'ATTENTION',{blocking:blocking.map(x=>x.code),externalNotConfigured:Number(result.externalNotConfigured||0)});
+  return json({ok:true,version:VERSION,production_gate:overall?'OPEN':'CLOSED',ready_for_real_traffic:overall,checks,blocking:blocking.map(x=>x.code),external_not_configured:Number(result.externalNotConfigured||0),note:overall?'Architecture gate passed; external business integrations must still be exercised with sandbox/acceptance tests.':'No real production traffic should be enabled until blocking configuration/schema checks are resolved.'});
 }
 
 async function copilotNextActions(request,env) {
