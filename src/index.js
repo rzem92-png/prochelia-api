@@ -1208,6 +1208,11 @@ async function paymentWebhook(request, env) {
       const statusMap={payment_succeeded:'paid',charge_succeeded:'paid',payment_failed:'failed',charge_failed:'failed',payment_refunded:'refunded'};
       const newStatus=statusMap[type];
       if(newStatus){
+        if(newStatus==='refunded') {
+          // Refund ledger/available-balance reversal is not yet implemented.
+          // Do not falsely mark the transaction refunded or acknowledge it.
+          return json({ok:false,error:'REFUND_LEDGER_NOT_IMPLEMENTED',version:VERSION},503);
+        }
         const alreadyFinal = ['paid','failed','refunded'].includes(tx.status);
         if(!alreadyFinal){
           if(newStatus==='paid'){
@@ -1237,9 +1242,39 @@ async function paymentWebhook(request, env) {
     if(payout&&newStatus){
       const alreadyFinal=['completed','failed','canceled'].includes(payout.status);
       if(!alreadyFinal){
-        if(newStatus==='completed') await env.DB.prepare(`UPDATE wallets SET reserved_cents=MAX(0,reserved_cents-?),paid_cents=paid_cents+?,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(payout.amount_cents,payout.amount_cents,payout.wallet_id).run();
-        if(['failed','canceled'].includes(newStatus)) await env.DB.prepare(`UPDATE wallets SET reserved_cents=MAX(0,reserved_cents-?),available_cents=available_cents+?,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(payout.amount_cents,payout.amount_cents,payout.wallet_id).run();
-        await env.DB.prepare(`UPDATE payout_requests SET status=?,provider_payout_id=COALESCE(?,provider_payout_id),failure_code=?,failure_message=?,completed_at=CASE WHEN ?='completed' THEN CURRENT_TIMESTAMP ELSE completed_at END,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(newStatus,clean(stripeObject?.id)||clean(event?.data?.provider_payout_id)||null,clean(stripeObject?.failure_code)||clean(event?.data?.failure_code)||null,clean(stripeObject?.failure_message)||clean(event?.data?.failure_message)||null,newStatus,payoutId).run();
+        const providerPayoutId=clean(stripeObject?.id)||clean(event?.data?.provider_payout_id)||null;
+        const failureCode=clean(stripeObject?.failure_code)||clean(event?.data?.failure_code)||null;
+        const failureMessage=clean(stripeObject?.failure_message)||clean(event?.data?.failure_message)||null;
+        if(newStatus==='processing') {
+          await env.DB.prepare(`UPDATE payout_requests SET status='processing',provider_payout_id=COALESCE(?,provider_payout_id),updated_at=CURRENT_TIMESTAMP WHERE id=? AND status NOT IN ('completed','failed','canceled')`).bind(providerPayoutId,payoutId).run();
+        } else {
+          const walletUpdate=newStatus==='completed'
+            ? env.DB.prepare(`UPDATE wallets SET reserved_cents=reserved_cents-?,paid_cents=paid_cents+?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND reserved_cents>=?`).bind(payout.amount_cents,payout.amount_cents,payout.wallet_id,payout.amount_cents)
+            : env.DB.prepare(`UPDATE wallets SET reserved_cents=reserved_cents-?,available_cents=available_cents+?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND reserved_cents>=?`).bind(payout.amount_cents,payout.amount_cents,payout.wallet_id,payout.amount_cents);
+          const results=await env.DB.batch([
+            env.DB.prepare(`UPDATE payout_requests SET status=?,provider_payout_id=COALESCE(?,provider_payout_id),failure_code=?,failure_message=?,completed_at=CASE WHEN ?='completed' THEN CURRENT_TIMESTAMP ELSE completed_at END,updated_at=CURRENT_TIMESTAMP
+              WHERE id=? AND status NOT IN ('completed','failed','canceled')
+                AND EXISTS (SELECT 1 FROM wallets WHERE id=? AND reserved_cents>=?)`)
+              .bind(newStatus,providerPayoutId,failureCode,failureMessage,newStatus,payoutId,payout.wallet_id,payout.amount_cents),
+            env.DB.prepare(`UPDATE wallets SET reserved_cents=reserved_cents-?,paid_cents=paid_cents+?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND reserved_cents>=? AND changes()=1`)
+              .bind(payout.amount_cents,payout.amount_cents,payout.wallet_id,payout.amount_cents)
+          ]);
+          if(Number(results?.[0]?.meta?.changes||0)!==1 || Number(results?.[1]?.meta?.changes||0)!==1) {
+            // For failed/canceled payout, use the same atomic release operation.
+            if(['failed','canceled'].includes(newStatus)) {
+              const release=await env.DB.batch([
+                env.DB.prepare(`UPDATE payout_requests SET status=?,provider_payout_id=COALESCE(?,provider_payout_id),failure_code=?,failure_message=?,completed_at=CASE WHEN ?='completed' THEN CURRENT_TIMESTAMP ELSE completed_at END,updated_at=CURRENT_TIMESTAMP
+                  WHERE id=? AND status NOT IN ('completed','failed','canceled') AND EXISTS (SELECT 1 FROM wallets WHERE id=? AND reserved_cents>=?)`)
+                  .bind(newStatus,providerPayoutId,failureCode,failureMessage,newStatus,payoutId,payout.wallet_id,payout.amount_cents),
+                env.DB.prepare(`UPDATE wallets SET reserved_cents=reserved_cents-?,available_cents=available_cents+?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND reserved_cents>=? AND changes()=1`)
+                  .bind(payout.amount_cents,payout.amount_cents,payout.wallet_id,payout.amount_cents)
+              ]);
+              if(Number(release?.[0]?.meta?.changes||0)!==1 || Number(release?.[1]?.meta?.changes||0)!==1) return json({ok:false,error:'PAYOUT_WALLET_ATOMIC_UPDATE_FAILED',version:VERSION},503);
+            } else {
+              return json({ok:false,error:'PAYOUT_WALLET_ATOMIC_UPDATE_FAILED',version:VERSION},503);
+            }
+          }
+        }
       }
     }
   }
