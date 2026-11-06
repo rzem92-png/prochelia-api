@@ -998,9 +998,15 @@ async function createMissionPayment(request, env) {
   const gross=moneyCents(body?.gross_eur), commission=moneyCents(body?.commission_eur);
   if(!missionId||!clientId||!intervenantId||gross===null||commission===null||commission>gross) return json({ok:false,error:'INVALID_PAYMENT_AMOUNT_OR_PARTIES',version:VERSION},400);
   const idem=clean(request.headers.get('idempotency-key'))||clean(body?.idempotency_key);
-  if(!idem) return json({ok:false,error:'IDEMPOTENCY_KEY_REQUIRED',version:VERSION},400);
+  if(!idem || idem.length<8 || idem.length>255) return json({ok:false,error:'IDEMPOTENCY_KEY_REQUIRED_OR_INVALID',version:VERSION},400);
   const old=await env.DB.prepare('SELECT * FROM payment_transactions WHERE idempotency_key=? LIMIT 1').bind(idem).first();
-  if(old) return json({ok:true,version:VERSION,idempotent_replay:true,transaction:old},200);
+  if(old) {
+    const samePayload=old.type==='MISSION_CHARGE' && old.mission_id===missionId && old.client_id===clientId &&
+      old.intervenant_id===intervenantId && Number(old.gross_cents)===gross && Number(old.commission_cents)===commission &&
+      String(old.currency||'EUR').toUpperCase()==='EUR';
+    if(!samePayload) return json({ok:false,error:'IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_REQUEST',version:VERSION},409);
+    return json({ok:true,version:VERSION,idempotent_replay:true,transaction:old},200);
+  }
   const net=gross-commission;
   const txId=crypto.randomUUID();
   await env.DB.prepare(`INSERT INTO payment_transactions
@@ -1041,17 +1047,46 @@ async function payoutRequest(request, env) {
   await ensurePaymentSchema(env);
   const body=await readJson(request), amount=moneyCents(body?.amount_eur), mode=clean(body?.mode)||'standard';
   const idem=clean(request.headers.get('idempotency-key'))||clean(body?.idempotency_key);
-  if(amount===null||amount<=0||!['standard','express'].includes(mode)||!idem) return json({ok:false,error:'INVALID_PAYOUT_REQUEST',version:VERSION},400);
+  if(amount===null||amount<=0||!['standard','express'].includes(mode)||!idem||idem.length<8||idem.length>255) return json({ok:false,error:'INVALID_PAYOUT_REQUEST',version:VERSION},400);
   const old=await env.DB.prepare('SELECT * FROM payout_requests WHERE idempotency_key=? LIMIT 1').bind(idem).first();
-  if(old) return json({ok:true,version:VERSION,idempotent_replay:true,payout:old},200);
+  if(old) {
+    if(old.user_id!==auth.user.id) return json({ok:false,error:'IDEMPOTENCY_KEY_CONFLICT',version:VERSION},409);
+    if(Number(old.amount_cents)!==amount || old.mode!==mode) return json({ok:false,error:'IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_REQUEST',version:VERSION},409);
+    return json({ok:true,version:VERSION,idempotent_replay:true,payout:old},200);
+  }
   const account=await env.DB.prepare(`SELECT * FROM payment_accounts WHERE user_id=? LIMIT 1`).bind(auth.user.id).first();
   if(!account||Number(account.payouts_enabled)!==1) return json({ok:false,error:'PAYOUT_ACCOUNT_NOT_READY',version:VERSION,message:'Le compte de paiement de l’intervenant doit être vérifié et activé par le PSP.'},409);
   const wallet=await env.DB.prepare('SELECT * FROM wallets WHERE user_id=? LIMIT 1').bind(auth.user.id).first();
   if(!wallet||Number(wallet.available_cents)<amount) return json({ok:false,error:'INSUFFICIENT_AVAILABLE_BALANCE',version:VERSION,available_cents:Number(wallet?.available_cents||0)},409);
   const payoutId=crypto.randomUUID();
-  await env.DB.prepare(`UPDATE wallets SET available_cents=available_cents-?,reserved_cents=reserved_cents+?,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(amount,amount,wallet.id).run();
-  await env.DB.prepare(`INSERT INTO payout_requests (id,idempotency_key,wallet_id,user_id,amount_cents,mode,provider,status) VALUES (?,?,?,?,?,?,?,'requested')`).bind(payoutId,idem,wallet.id,auth.user.id,amount,mode,paymentProvider(env)).run();
-  await paymentAudit(env,'PAYOUT_REQUESTED',{payout_id:payoutId,user_id:auth.user.id,metadata:{amount_cents:amount,mode}},'OK');
+  // Atomic wallet reservation + payout row + audit. The conditional UPDATE
+  // prevents concurrent requests from spending the same available balance.
+  // D1 batch is transactional: a uniqueness/insert failure rolls back reserve.
+  try {
+    const results=await env.DB.batch([
+      env.DB.prepare(`UPDATE wallets SET available_cents=available_cents-?,reserved_cents=reserved_cents+?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND user_id=? AND available_cents>=?`).bind(amount,amount,wallet.id,auth.user.id,amount),
+      env.DB.prepare(`INSERT INTO payout_requests (id,idempotency_key,wallet_id,user_id,amount_cents,mode,provider,status) SELECT ?,?,?,?,?,?,?,'requested' WHERE changes()=1`).bind(payoutId,idem,wallet.id,auth.user.id,amount,mode,paymentProvider(env)),
+      env.DB.prepare(`INSERT INTO payment_audit (id,event_type,transaction_id,payout_id,mission_id,user_id,result,metadata_json) SELECT ?,?,?,?,?,?,?,? WHERE changes()=1`).bind(crypto.randomUUID(),'PAYOUT_REQUESTED',null,payoutId,null,auth.user.id,'OK',JSON.stringify({amount_cents:amount,mode}))
+    ]);
+    if(Number(results?.[0]?.meta?.changes||0)!==1 || Number(results?.[1]?.meta?.changes||0)!==1) {
+      const replay=await env.DB.prepare('SELECT * FROM payout_requests WHERE idempotency_key=? LIMIT 1').bind(idem).first();
+      if(replay) {
+        if(replay.user_id!==auth.user.id) return json({ok:false,error:'IDEMPOTENCY_KEY_CONFLICT',version:VERSION},409);
+        if(Number(replay.amount_cents)!==amount || replay.mode!==mode) return json({ok:false,error:'IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_REQUEST',version:VERSION},409);
+        return json({ok:true,version:VERSION,idempotent_replay:true,payout:replay},200);
+      }
+      return json({ok:false,error:'INSUFFICIENT_AVAILABLE_BALANCE',version:VERSION},409);
+    }
+  } catch(error) {
+    const replay=await env.DB.prepare('SELECT * FROM payout_requests WHERE idempotency_key=? LIMIT 1').bind(idem).first();
+    if(replay) {
+      if(replay.user_id!==auth.user.id) return json({ok:false,error:'IDEMPOTENCY_KEY_CONFLICT',version:VERSION},409);
+      if(Number(replay.amount_cents)!==amount || replay.mode!==mode) return json({ok:false,error:'IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_REQUEST',version:VERSION},409);
+      return json({ok:true,version:VERSION,idempotent_replay:true,payout:replay},200);
+    }
+    console.error('PAYOUT_RESERVATION_FAILED',error instanceof Error?error.message:'unknown');
+    return json({ok:false,error:'PAYOUT_RESERVATION_FAILED',version:VERSION},503);
+  }
   return json({ok:true,version:VERSION,payout_id:payoutId,status:'requested',amount_cents:amount,mode,provider:paymentProvider(env),next:paymentsConfigured(env)?'PSP_PAYOUT_REQUIRED':'PAYMENT_PROVIDER_NOT_CONFIGURED'},201);
 }
 
