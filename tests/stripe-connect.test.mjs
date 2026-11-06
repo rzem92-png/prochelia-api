@@ -108,6 +108,10 @@ function fakeDb(role="intervenant"){
           }
         };
         return statement;
+      },
+      async batch(statements){
+        // D1 batch mock: execute each statement and return its result in order.
+        return Promise.all(statements.map(statement=>statement.run()));
       }
     }
   };
