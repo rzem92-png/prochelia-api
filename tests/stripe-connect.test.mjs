@@ -212,7 +212,7 @@ test("payout requests remain blocked until a real payout adapter exists", async(
 
 test("Stripe onboarding refuses to choose dashboard and financial responsibility silently", async()=>{
   const fake=fakeDb("intervenant");
-  const env={DB:fake.DB,PAYMENT_PROVIDER:"stripe",STRIPE_SECRET_KEY:"sk_test_unit",STRIPE_WEBHOOK_SECRET:"whsec_unit",APP_BASE_URL:"https://prochelia.pages.dev"};
+  const env={DB:fake.DB,STRIPE_CONNECT_ONBOARDING_ENABLED:"true",PAYMENT_PROVIDER:"stripe",STRIPE_SECRET_KEY:"sk_test_unit",STRIPE_WEBHOOK_SECRET:"whsec_unit",APP_BASE_URL:"https://prochelia.pages.dev"};
   const response=await worker.fetch(new Request("https://api.test/api/payments/onboard",{
     method:"POST",
     headers:{Origin:"https://prochelia.pages.dev",Cookie:"prochelia_session=synthetic-token","Content-Type":"application/json"},
@@ -238,7 +238,7 @@ test("public payment configuration exposes only the Stripe publishable key", asy
 
 test("Stripe onboarding requires an account token and explicit terms acceptance", async()=>{
   const fake=fakeDb("intervenant");
-  const env={DB:fake.DB,PAYMENT_PROVIDER:"stripe",STRIPE_SECRET_KEY:"sk_test_unit",STRIPE_PUBLISHABLE_KEY:"pk_test_unit",STRIPE_WEBHOOK_SECRET:"whsec_unit",STRIPE_DASHBOARD:"express",STRIPE_FEES_COLLECTOR:"application",STRIPE_LOSSES_COLLECTOR:"application",APP_BASE_URL:"https://prochelia.pages.dev"};
+  const env={DB:fake.DB,STRIPE_CONNECT_ONBOARDING_ENABLED:"true",PAYMENT_PROVIDER:"stripe",STRIPE_SECRET_KEY:"sk_test_unit",STRIPE_PUBLISHABLE_KEY:"pk_test_unit",STRIPE_WEBHOOK_SECRET:"whsec_unit",STRIPE_DASHBOARD:"express",STRIPE_FEES_COLLECTOR:"application",STRIPE_LOSSES_COLLECTOR:"application",APP_BASE_URL:"https://prochelia.pages.dev"};
   const response=await worker.fetch(new Request("https://api.test/api/payments/onboard",{
     method:"POST",
     headers:{Origin:"https://prochelia.pages.dev",Cookie:"prochelia_session=synthetic-token","Content-Type":"application/json"},
