@@ -103,3 +103,12 @@ Les mocks seuls ne prouvent pas les transactions D1. Il faut des tests Worker-D1
 - Login : compteur de tentatives sur 15 minutes par e-mail normalisé + IP Cloudflare, IP hachée, seuil 5, réponse 429 et `Retry-After` 900 secondes. Les tentatives expirées sont purgées au-delà de 24 h.
 - Bootstrap initial : création du premier compte gérant protégée par un verrou singleton et un batch D1 atomique afin qu'une course de deux requêtes ne crée qu'un seul compte.
 - Ces protections nécessitent encore une validation avec D1 réelle, comportement Cloudflare IP, tests de charge, observation anti-faux-positifs et revue de sécurité avant mise en production.
+
+## Webhook state machine / finance side effects
+
+- Event state: `0=pending`, `2=processing` (5-minute lease), `1=processed`. Replayed event IDs with a different payload hash are conflicts; a live lease returns retryable `409 WEBHOOK_EVENT_PROCESSING`; expired leases can be reclaimed.
+- Final audit and `processed=1` are committed in one D1 batch. A failure must not be falsely acknowledged as complete.
+- Paid charge transition and wallet credit now use one D1 batch with a conditional transaction state update.
+- Payout completion/failure/cancellation now uses status-specific atomic wallet settlement/release; no silent `MAX(0, reserved)` clamp.
+- Refund webhook effects intentionally return `503 REFUND_LEDGER_NOT_IMPLEMENTED` until refund ledger/reversal and negative-balance handling exist. Do not activate charge/refund flows before this gate passes.
+- D1 concurrency, batch rollback, crash injection and Stripe test-mode webhook replay remain mandatory. CI mocks do not prove Cloudflare D1 transaction semantics.
