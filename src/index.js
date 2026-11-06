@@ -3891,6 +3891,14 @@ handle = async function(request,env){
     return json({ok:false,error:'ORIGIN_NOT_ALLOWED',version:VERSION},403);
   }
 
+  // Defense in depth for browser CSRF: Fetch Metadata identifies cross-site
+  // mutations even when an Origin header is absent. Non-browser clients without
+  // this header remain supported; same-site/same-origin requests are unchanged.
+  const fetchSite=(request.headers.get('sec-fetch-site')||'').toLowerCase();
+  if(isMutatingMethod(request.method) && fetchSite==='cross-site'){
+    return json({ok:false,error:'CROSS_SITE_REQUEST_NOT_ALLOWED',version:VERSION},403);
+  }
+
   // Cross-origin browser preflight must complete without touching D1,
   // rate-limit tables, session state or any business handler.
   if(request.method.toUpperCase()==='OPTIONS'){
