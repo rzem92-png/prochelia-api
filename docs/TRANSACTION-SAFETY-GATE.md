@@ -6,32 +6,36 @@
 
 Ce document décrit les risques observés dans le code de la branche `feat/stripe-connect-onboarding` et les conditions de sortie du blocage. Il ne constitue pas une autorisation de production.
 
-## Constats d'audit du code existant
+## État de l'audit — synthèse actuelle
 
-### Webhook `paymentWebhook()`
-1. L'événement webhook est inséré dans `payment_webhook_events` avec `INSERT OR IGNORE` avant l'exécution complète des effets métier.
-2. En cas de doublon d'identifiant, le handler répond `duplicate: true` sans distinguer un événement déjà traité d'un événement enregistré mais dont le traitement a échoué.
-3. Les transitions `payment_transactions`, les mouvements de `wallets`, les transitions `payout_requests` et l'audit sont exécutés en requêtes D1 séparées.
-4. Les contrôles de statut sont des lectures suivies d'écritures distinctes. Ils ne démontrent pas une exclusion mutuelle en cas de livraisons concurrentes.
-5. Une panne intermédiaire peut laisser un état partiel; la reprise n'est pas démontrée comme sûre.
+> **Important :** les constats de la première revue ont été partiellement corrigés dans la branche. Ne pas les lire comme une description de la dernière version du code. La CI simulée ne suffit pas à prouver les garanties Cloudflare D1 en production.
 
-### Idempotence des opérations
-- `createMissionPayment()` retrouve une transaction par `idempotency_key` et renvoie l'ancienne, mais le code ne compare pas le payload de la nouvelle demande au payload initial. Réutiliser la même clé avec une autre mission, un autre client/intervenant ou un autre montant peut retourner une transaction étrangère à la demande.
-- `payoutRequest()` présente le même manque de comparaison de payload pour une clé déjà utilisée.
-- L'unicité SQL protège contre certaines insertions dupliquées, mais ne remplace ni la validation du propriétaire de la clé ni la comparaison d'empreinte.
+### Correctifs déjà intégrés dans la branche
+- Idempotence charge et payout : comparaison acteur + payload, conflit si réutilisation incompatible.
+- Payout : réservation conditionnelle, insert payout et audit groupés en D1 batch.
+- Webhooks : hash payload, états pending/processing/processed, lease de reprise, conflit en cas de payload différent, non-ack prématuré des événements incomplets.
+- Charge payée et crédit wallet : transition et effet financier groupés dans un batch D1.
+- Payouts : settlement/release par statut dans un batch, sans clamp silencieux de solde réservé.
+- Remboursement : fail-closed avec `503 REFUND_LEDGER_NOT_IMPLEMENTED` tant que le ledger de remboursement n’existe pas.
+- V7 permission checks : déclaratifs/non autoritaires; les routes sensibles doivent reposer sur session serveur, rôle persisté et ownership.
+- Auth : rate limiting login et bootstrap initial atomique.
+- Mission writes : désactivées tant que les gates de workflow, pricing, sécurité et validation client ne sont pas démontrées.
 
-### Payout et portefeuille
-- Le solde est lu puis comparé, puis décrémenté et réservé dans des statements distincts. Deux demandes simultanées peuvent toutes deux réussir la vérification préalable avant les décréments.
-- La réservation du wallet et l'insertion du payout ne sont pas une opération atomique démontrée. Une panne entre les deux peut laisser une réservation sans payout correspondant.
-- Les effets webhook du payout et les mouvements de wallet sont séparés; une livraison concurrente peut tenter plusieurs transitions.
+### Risques encore à démontrer par tests d’intégration Cloudflare D1
+- Isolation de transactions/batch sous concurrence multi-worker.
+- Atomicité effective et rollback lors de panne/crash injecté.
+- Reprise après lease webhook expirée, sans double effet.
+- Ledger append-only, réconciliation et réparation auditée.
+- Parcours mission complet avec contrôle ownership, disponibilité/slots et transitions.
+- Parcours Stripe sandbox complet, notamment remboursement, litige, payout, retry et rapprochement.
 
-### Routes V7 de validation — ne pas confondre validation et autorisation
-- Les routes `/api/v7/check/*` et notamment `/api/v7/check/permissions` reçoivent des éléments de validation dans le corps de la requête. La route de permissions vérifie un rôle et un objet `permissions` fournis par l'appelant; elle ne constitue donc **pas** une source d'autorité RBAC.
-- Les résultats V7 sont des validations déclaratives. Ils ne doivent jamais autoriser directement une lecture/écriture D1, une mission, un paiement, un remboursement, un payout ou une action d'administration.
-- Toute autorisation effective doit être calculée côté serveur depuis la session authentifiée, le rôle et les permissions persistés, l'état du compte et le propriétaire de la ressource. Les identifiants/roles/permissions fournis par le navigateur sont non fiables.
-- Ajouter des tests négatifs prouvant qu'un client/intervenant ne peut pas obtenir des privilèges en forgeant `role`, `permissions`, `user_id`, `client_id`, `intervenant_id` ou les statuts. Vérifier aussi que les routes purement consultatives ne sont pas réutilisées comme garde d'accès par les routes transactionnelles.
+### Routes V7 — séparation validation et autorisation
+- Les routes `/api/v7/check/*` sont des validations déclaratives, non une source d’autorité RBAC.
+- Les rôles, permissions, statuts et IDs transmis par le navigateur sont non fiables.
+- Toute autorisation effective doit être calculée côté serveur depuis la session, le rôle/statut persisté et l’appartenance à la ressource.
+- Les tests négatifs doivent vérifier la falsification de `role`, `permissions`, `user_id`, `client_id`, `intervenant_id` et statuts.
 
-**Conséquence :** risques potentiels de traitement perdu, double mouvement, réservation orpheline, incohérence de solde ou retour d'une transaction incorrecte en réutilisant une clé. Les adaptateurs financiers doivent rester désactivés.
+**Conséquence :** même si les correctifs de code sont intégrés, les adaptateurs financiers et mission restent fail-closed jusqu’à la preuve des garanties D1 et la recette de bout en bout.
 
 ## Corrections obligatoires avant toute activation transactionnelle
 
