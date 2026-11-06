@@ -1001,8 +1001,10 @@ async function createMissionPayment(request, env) {
   if(!idem || idem.length<8 || idem.length>255) return json({ok:false,error:'IDEMPOTENCY_KEY_REQUIRED_OR_INVALID',version:VERSION},400);
   const old=await env.DB.prepare('SELECT * FROM payment_transactions WHERE idempotency_key=? LIMIT 1').bind(idem).first();
   if(old) {
-    const samePayload=old.type==='MISSION_CHARGE' && old.mission_id===missionId && old.client_id===clientId &&
-      old.intervenant_id===intervenantId && Number(old.gross_cents)===gross && Number(old.commission_cents)===commission &&
+    let oldMeta={}; try { oldMeta=JSON.parse(old.metadata_json||'{}'); } catch {}
+    const samePayload=oldMeta.created_by_user_id===auth.user.id && old.type==='MISSION_CHARGE' &&
+      old.mission_id===missionId && old.client_id===clientId && old.intervenant_id===intervenantId &&
+      Number(old.gross_cents)===gross && Number(old.commission_cents)===commission &&
       String(old.currency||'EUR').toUpperCase()==='EUR';
     if(!samePayload) return json({ok:false,error:'IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_REQUEST',version:VERSION},409);
     return json({ok:true,version:VERSION,idempotent_replay:true,transaction:old},200);
@@ -1010,8 +1012,8 @@ async function createMissionPayment(request, env) {
   const net=gross-commission;
   const txId=crypto.randomUUID();
   await env.DB.prepare(`INSERT INTO payment_transactions
-    (id,idempotency_key,mission_id,client_id,intervenant_id,type,status,gross_cents,commission_cents,net_intervenant_cents,currency,provider,reason)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(txId,idem,missionId,clientId,intervenantId,'MISSION_CHARGE','pending',gross,commission,net,'EUR',paymentProvider(env),'MISSION_PAYMENT_CREATED').run();
+    (id,idempotency_key,mission_id,client_id,intervenant_id,type,status,gross_cents,commission_cents,net_intervenant_cents,currency,provider,reason,metadata_json)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(txId,idem,missionId,clientId,intervenantId,'MISSION_CHARGE','pending',gross,commission,net,'EUR',paymentProvider(env),'MISSION_PAYMENT_CREATED',JSON.stringify({created_by_user_id:auth.user.id})).run();
   await paymentAudit(env,'MISSION_PAYMENT_CREATED',{transaction_id:txId,mission_id:missionId,user_id:auth.user.id,metadata:{gross_cents:gross,commission_cents:commission,net_cents:net}},'OK');
   return json({ok:true,version:VERSION,transaction_id:txId,status:'pending',gross_cents:gross,commission_cents:commission,net_intervenant_cents:net,provider:paymentProvider(env),next:paymentsConfigured(env)?'PSP_CHARGE_REQUIRED':'PAYMENT_PROVIDER_NOT_CONFIGURED'},201);
 }
