@@ -1497,13 +1497,39 @@ async function handleBase(request, env) {
     const h = await env.DB.prepare('SELECT 1 AS ok').first();
     const s = await env.DB.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='missions';").first();
     const u = await env.DB.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='users';").first();
+    const infrastructureReady = h?.ok === 1 && !!s?.sql && !!u?.sql;
+    // "Ready" must never mean only "the database exists". The public
+    // readiness endpoint is consumed by dashboards and must not falsely
+    // advertise the marketplace as production-ready while business gates
+    // (registration, mission workflow, payment ledger, reconciliation) are
+    // intentionally closed.
+    const featureGates = {
+      client_provider_registration: CLIENT_PROVIDER_REGISTRATION_READY,
+      mission_workflow: MISSION_WORKFLOW_READY,
+      mission_security: MISSION_SECURITY_READY,
+      client_code_delivery: CLIENT_CODE_DELIVERY_READY,
+      server_pricing: SERVER_PRICING_POLICY_READY,
+      refund_ledger: REFUND_LEDGER_READY,
+      psp_reconciliation: PSP_RECONCILIATION_READY,
+      charges_and_payouts: STRIPE_CHARGES_AND_PAYOUTS_READY
+    };
+    const blockers = Object.entries(featureGates)
+      .filter(([, enabled]) => enabled !== true)
+      .map(([name]) => name);
+    const platformReady = infrastructureReady && blockers.length === 0;
     return json({
-      ok: true,
-      ready: h?.ok === 1 && !!s?.sql && !!u?.sql,
+      ok: infrastructureReady,
+      ready: platformReady,
+      infrastructure_ready: infrastructureReady,
+      platform_ready: platformReady,
       database: h?.ok === 1,
       missions_schema: !!s?.sql,
       users_schema: !!u?.sql,
       writes: false,
+      payments_enabled: STRIPE_CHARGES_AND_PAYOUTS_READY && platformReady,
+      feature_gates: featureGates,
+      blockers,
+      status: platformReady ? 'production_ready' : (infrastructureReady ? 'preproduction_blocked' : 'infrastructure_unavailable'),
       version: VERSION
     });
   }
