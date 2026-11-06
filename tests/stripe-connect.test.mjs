@@ -97,7 +97,7 @@ test("Stripe webhook signature rejects invalid and stale signatures", async()=>{
   assert.equal(await verifyStripeSignature("t="+(timestamp-601)+",v1="+signature,secret,body,timestamp),false);
 });
 
-function fakeDb(role="intervenant"){
+function fakeDb(role="intervenant", options={}){
   const calls=[];
   const user={id:"user-test-1",role,email:"provider@example.test",first_name:"Alex",last_name:"Provider",phone:"0600000000",status:"active",created_at:"2026-10-31",updated_at:"2026-10-31",session_id:"session-test"};
   return {
@@ -109,6 +109,10 @@ function fakeDb(role="intervenant"){
           bind(...args){this.args=args;return this;},
           async first(){
             if(sql.includes("FROM sessions s")) return user;
+            if(sql.includes("FROM payment_transactions")) return options.transaction || null;
+            if(sql.includes("FROM payout_requests")) return options.payout || null;
+            if(sql.includes("FROM payment_accounts")) return options.paymentAccount || null;
+            if(sql.includes("FROM wallets")) return options.wallet || null;
             return null;
           },
           async all(){return {results:[]};},
