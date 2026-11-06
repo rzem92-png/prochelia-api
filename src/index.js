@@ -1264,7 +1264,6 @@ async function paymentWebhook(request, env) {
         }
       }
     }
-    }
   }
   // Audit and completion marker are committed together. A failed batch leaves
   // the lease reclaimable rather than falsely acknowledging a partial event.
