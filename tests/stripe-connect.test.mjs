@@ -206,6 +206,17 @@ test("real charges and payouts fail closed until the transaction adapters are im
   assert.equal(fake.calls.some(x=>x.sql.includes("INSERT INTO payment_transactions")),false);
 });
 
+test("refund webhook remains blocked until reversal ledger is implemented", async()=>{
+  const fake=fakeDb("gerante",{transaction:{id:"tx-refund-1",status:"paid",intervenant_id:"provider-user-1",net_intervenant_cents:700,gross_cents:1000,refund_cents:0}});
+  const raw=JSON.stringify({id:"evt_refund_blocked",type:"charge.refunded",data:{object:{id:"ch_test_1",metadata:{prochelia_transaction_id:"tx-refund-1"}}}});
+  const timestamp=Math.floor(Date.now()/1000),signature=await stripeSignature("whsec_refund",timestamp,raw);
+  const response=await worker.fetch(new Request("https://api.test/api/payments/webhook",{method:"POST",headers:{"Stripe-Signature":"t="+timestamp+",v1="+signature,"Content-Type":"application/json"},body:raw}),{DB:fake.DB,PAYMENT_PROVIDER:"stripe",STRIPE_WEBHOOK_SECRET:"whsec_refund"});
+  const body=await response.json();
+  assert.equal(response.status,503);
+  assert.equal(body.error,"REFUND_LEDGER_NOT_IMPLEMENTED");
+  assert.equal(fake.calls.some(x=>x.sql.includes("SET status='refunded'")),false);
+});
+
 test("paid payment webhook applies transaction and wallet credit through D1 batch", async()=>{
   const fake=fakeDb("gerante",{transaction:{id:"tx-local-1",status:"pending",intervenant_id:"provider-user-1",net_intervenant_cents:750}});
   const raw=JSON.stringify({id:"evt_paid_atomic",type:"payment_intent.succeeded",data:{object:{id:"pi_test_1",metadata:{prochelia_transaction_id:"tx-local-1"}}}});
