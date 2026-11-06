@@ -91,6 +91,17 @@ function fakeDb(role="intervenant"){
   };
 }
 
+test("Stripe Connect onboarding fails closed unless explicit feature flag is enabled", async()=>{
+  const fake=fakeDb("intervenant");
+  const env={DB:fake.DB,PAYMENT_PROVIDER:"stripe",STRIPE_SECRET_KEY:"sk_test_unit",STRIPE_PUBLISHABLE_KEY:"pk_test_unit",STRIPE_WEBHOOK_SECRET:"whsec_unit",STRIPE_DASHBOARD:"express",STRIPE_FEES_COLLECTOR:"application",STRIPE_LOSSES_COLLECTOR:"application",APP_BASE_URL:"https://prochelia.pages.dev"};
+  const response=await worker.fetch(new Request("https://api.test/api/payments/onboard",{
+    method:"POST",headers:{Origin:"https://prochelia.pages.dev",Cookie:"prochelia_session=synthetic-token","Content-Type":"application/json"},body:JSON.stringify({account_token:"acctok_test123",stripe_terms_accepted:true})
+  }),env);
+  const body=await response.json();
+  assert.equal(response.status,503);
+  assert.equal(body.error,"STRIPE_CONNECT_ONBOARDING_DISABLED");
+});
+
 test("Stripe Connect onboarding creates the account and a fresh onboarding link server-side", async()=>{
   const originalFetch=globalThis.fetch;
   const calls=[];
