@@ -6,63 +6,74 @@
 
 Ce document décrit les risques observés dans le code de la branche `feat/stripe-connect-onboarding` et les conditions de sortie du blocage. Il ne constitue pas une autorisation de production.
 
-## Constat d'audit sur le webhook
+## Constats d'audit du code existant
 
-Dans `paymentWebhook()` :
-
+### Webhook `paymentWebhook()`
 1. L'événement webhook est inséré dans `payment_webhook_events` avec `INSERT OR IGNORE` avant l'exécution complète des effets métier.
-2. En cas de doublon d'identifiant, le handler répond `duplicate: true` sans distinguer un événement déjà traité d'un événement précédemment enregistré mais dont le traitement a échoué.
+2. En cas de doublon d'identifiant, le handler répond `duplicate: true` sans distinguer un événement déjà traité d'un événement enregistré mais dont le traitement a échoué.
 3. Les transitions `payment_transactions`, les mouvements de `wallets`, les transitions `payout_requests` et l'audit sont exécutés en requêtes D1 séparées.
-4. Les contrôles de statut sont effectués par lecture suivie d'écritures distinctes. Ils ne constituent pas une garantie d'exclusion mutuelle en cas de livraisons concurrentes.
-5. Le statut de l'événement peut être mis à jour après des effets métier partiels. Une reprise après panne n'est donc pas démontrée comme sûre.
+4. Les contrôles de statut sont des lectures suivies d'écritures distinctes. Ils ne démontrent pas une exclusion mutuelle en cas de livraisons concurrentes.
+5. Une panne intermédiaire peut laisser un état partiel; la reprise n'est pas démontrée comme sûre.
 
-**Conséquence :** la livraison répétée, la panne au milieu du traitement ou deux événements concurrents peuvent laisser un état incomplet ou produire des mouvements de portefeuille incohérents. Les adaptateurs de paiement doivent rester désactivés.
+### Idempotence des opérations
+- `createMissionPayment()` retrouve une transaction par `idempotency_key` et renvoie l'ancienne, mais le code ne compare pas le payload de la nouvelle demande au payload initial. Réutiliser la même clé avec une autre mission, un autre client/intervenant ou un autre montant peut retourner une transaction étrangère à la demande.
+- `payoutRequest()` présente le même manque de comparaison de payload pour une clé déjà utilisée.
+- L'unicité SQL protège contre certaines insertions dupliquées, mais ne remplace ni la validation du propriétaire de la clé ni la comparaison d'empreinte.
+
+### Payout et portefeuille
+- Le solde est lu puis comparé, puis décrémenté et réservé dans des statements distincts. Deux demandes simultanées peuvent toutes deux réussir la vérification préalable avant les décréments.
+- La réservation du wallet et l'insertion du payout ne sont pas une opération atomique démontrée. Une panne entre les deux peut laisser une réservation sans payout correspondant.
+- Les effets webhook du payout et les mouvements de wallet sont séparés; une livraison concurrente peut tenter plusieurs transitions.
+
+**Conséquence :** risques potentiels de traitement perdu, double mouvement, réservation orpheline, incohérence de solde ou retour d'une transaction incorrecte en réutilisant une clé. Les adaptateurs financiers doivent rester désactivés.
 
 ## Corrections obligatoires avant toute activation transactionnelle
 
-- Concevoir une machine à états métier explicite et monotone : transitions autorisées, transitions terminales, refus des retours arrière et des transitions non autorisées.
-- Introduire un mécanisme d'idempotence métier distinct de l'idempotence PSP : clés uniques par opération, empreinte du payload, réponse stable et gestion des collisions de clés.
-- Enregistrer un événement webhook comme **reçu** puis **traité** uniquement après réussite complète. Un événement non traité doit être récupérable après interruption; ne jamais l'acquitter comme doublon traité.
-- Prévoir une stratégie de claim/lease ou de traitement concurrent qui empêche deux workers d'appliquer simultanément les mêmes effets. Le seul `INSERT OR IGNORE` n'est pas suffisant.
-- Implémenter un ledger append-only avec une contrainte d'unicité par mouvement source; ne pas calculer les soldes uniquement par incréments répétés.
-- Utiliser des opérations D1 atomiques/transactions adaptées pour les transitions qui doivent être indivisibles. Vérifier les résultats de chaque statement et la gestion des erreurs.
-- Pour un payout, réserver les fonds de manière atomique avant appel PSP, avec clé d'idempotence stable; libérer la réservation une seule fois en cas d'échec/annulation; confirmer le débit final une seule fois.
-- Pour un remboursement, limiter le montant remboursé au montant encaissé net des remboursements déjà confirmés; traiter les remboursements partiels et répétés.
-- Ajouter rapprochement PSP ↔ ledger ↔ missions, une file de reprise des événements en échec et une procédure de réparation auditée.
-- Les écritures de missions doivent être sécurisées séparément : auth/RBAC, validation serveur du prix, créneau atomique, idempotence, transitions de statut et audit.
+- Définir une machine à états explicite et monotone : transitions autorisées, transitions terminales et refus des retours arrière.
+- Idempotence métier distincte de l'idempotence PSP : clé scoped (acteur/opération), empreinte du payload, réponse stable et conflit explicite si même clé + payload différent.
+- Webhook : distinguer reçu/en cours/traité/échec récupérable; ne jamais traiter un événement non finalisé comme doublon réussi. Prévoir retry/lease et reprise.
+- Empêcher le traitement simultané des mêmes opérations et vérifier les contraintes SQL/retours de statements.
+- Ledger append-only avec unicité par mouvement source; soldes dérivés ou maintenus par opérations atomiques garanties et rapprochables.
+- Opérations D1 atomiques adaptées pour les transitions indivisibles. Payout : réservation conditionnelle atomique (available >= amount), enregistrement payout et ledger en bloc cohérent; release exactement une fois.
+- Ne jamais appeler un PSP avant une réservation/idempotence durable. Utiliser la même clé d'idempotence côté PSP et PROCHÉLIA.
+- Remboursements : plafond au montant encaissé moins remboursements déjà confirmés; partial/full, concurrence et replay.
+- Rapprochement PSP ↔ ledger ↔ missions, file de reprise, alertes et réparation auditée.
+- Missions : auth/RBAC, prix calculé côté serveur, slot/availability atomique, idempotence, transitions contrôlées et audit.
 
 ## Matrice de tests obligatoire (préproduction isolée, données synthétiques)
 
 | Scénario | Résultat exigé |
 |---|---|
-| Même webhook envoyé 2, 10 puis 100 fois | Un seul effet financier/ledger |
-| Même webhook concurrent sur plusieurs workers | Un seul effet financier |
-| Deux webhook IDs différents représentant la même opération | Une seule opération métier grâce à l'idempotence métier |
-| Crash après réception, avant traitement | Événement récupérable et rejoué |
-| Crash après transition, avant ledger | Pas d'état partiel; transaction atomique ou réparation démontrée |
-| Crash après ledger, avant réponse HTTP | Retry sans mouvement en double |
-| Deux payouts simultanés dépassant le solde | Un seul accepté; solde jamais négatif |
-| Payout PSP échoué ou annulé | Réservation libérée exactement une fois |
-| Remboursement total/partiel répété ou concurrent | Cumul plafonné au montant remboursable |
-| Webhook ancien, signature invalide ou compte non associé | Refus sans écriture métier |
-| Mission/slot concurrent | Une seule réservation; aucune double attribution |
-| Idempotency-Key réutilisée avec payload différent | Refus explicite, aucune mutation |
-| Rapprochement après panne | Écarts détectés et réconciliables, audit conservé |
+| Webhook identique répété 2/10/100 fois | Un seul effet financier/ledger |
+| Webhook identique concurrent sur plusieurs workers | Un seul effet métier |
+| IDs webhook différents, même opération métier | Une seule opération grâce à l'idempotence métier |
+| Crash après réception avant traitement | Événement récupérable/rejouable |
+| Crash après transition avant ledger | Pas d'état partiel; atomicité ou réparation prouvée |
+| Crash après ledger avant réponse HTTP | Retry sans double mouvement |
+| Même idempotency key, payload identique | Réponse stable, pas de nouvelle mutation |
+| Même idempotency key, payload différent | Conflit explicite, aucune mutation |
+| Deux payouts concurrents au-delà du solde | Un seul accepté; jamais de solde négatif |
+| Crash entre réservation et création payout | Aucun fonds bloqué orphelin |
+| Payout PSP échoué/annulé/rejoué | Réservation libérée exactement une fois |
+| Remboursement total/partiel répété/concurrent | Cumul ≤ montant remboursable |
+| Signature invalide, webhook ancien, compte non lié | Refus sans mutation métier |
+| Mission/slot concurrent | Une réservation, pas de double attribution |
+| Reconciliation après crash | Écart détecté et réparé avec audit |
 
-Les tests doivent utiliser D1 isolée/restaurée, vrais tests d'intégration Worker-D1 et des injections de panne. Les mocks unitaires seuls ne prouvent pas les transactions, les contraintes SQL ni les courses concurrentes.
+Les mocks seuls ne prouvent pas les transactions D1. Il faut des tests Worker-D1 isolés, des tests de concurrence et des injections de panne contrôlées.
 
 ## Critères de sortie du gate
 
-- [ ] Revue technique indépendante du ledger et des transitions.
-- [ ] Tests unitaires, intégration D1, concurrence et reprise après panne tous verts.
-- [ ] Aucune incohérence détectée dans les tests de rapprochement.
-- [ ] Journalisation sans secrets ni données personnelles excessives.
-- [ ] Rétention, export, suppression/anonymisation et audit RGPD validés.
-- [ ] Stripe test mode : encaissement, remboursement, transfert, payout, échec, litige et réconciliation validés.
-- [ ] Procédures de sauvegarde/restauration testées.
+- [ ] Revue indépendante ledger et transitions.
+- [ ] Tests unitaires, D1 intégration, concurrence et reprise après panne tous verts.
+- [ ] Rapprochement sans écart inexpliqué.
+- [ ] Logs sans secrets ni données personnelles excessives.
+- [ ] Rétention, export, suppression/anonymisation et RGPD validés.
+- [ ] Stripe test mode : charge, remboursement, payout, échec, litige, retry et réconciliation validés.
+- [ ] Sauvegarde/restauration testées.
 - [ ] Revue sécurité, conformité juridique/financière et validation humaine formelle.
-- [ ] Feature flags et rollback documentés, testés et indépendants de l'interface utilisateur.
-- [ ] Autorisation explicite de production donnée par la gérante.
+- [ ] Feature flags et rollback documentés/testés, indépendants de l'interface.
+- [ ] Autorisation explicite de production de la gérante.
 
 ## Garde-fous maintenus
 
