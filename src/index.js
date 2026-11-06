@@ -1125,7 +1125,7 @@ async function createMissionPayment(request, env) {
   const txId=crypto.randomUUID();
   await env.DB.prepare(`INSERT INTO payment_transactions
     (id,idempotency_key,mission_id,client_id,intervenant_id,type,status,gross_cents,commission_cents,net_intervenant_cents,currency,provider,reason,metadata_json)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(txId,idem,missionId,clientId,intervenantId,'MISSION_CHARGE','pending',gross,commission,net,'EUR',paymentProvider(env),'MISSION_PAYMENT_CREATED',JSON.stringify({created_by_user_id:auth.user.id})).run();
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(txId,idem,missionId,clientId,intervenantId,'MISSION_CHARGE','pending',gross,commission,net,'EUR',paymentProvider(env),'MISSION_PAYMENT_CREATED',JSON.stringify({created_by_user_id:auth.user.id})).run();
   await paymentAudit(env,'MISSION_PAYMENT_CREATED',{transaction_id:txId,mission_id:missionId,user_id:auth.user.id,metadata:{gross_cents:gross,commission_cents:commission,net_cents:net}},'OK');
   return json({ok:true,version:VERSION,transaction_id:txId,status:'pending',gross_cents:gross,commission_cents:commission,net_intervenant_cents:net,provider:paymentProvider(env),next:paymentsConfigured(env)?'PSP_CHARGE_REQUIRED':'PAYMENT_PROVIDER_NOT_CONFIGURED'},201);
 }
