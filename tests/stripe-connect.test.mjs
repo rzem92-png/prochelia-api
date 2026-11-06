@@ -118,6 +118,7 @@ function fakeDb(role="intervenant", options={}){
           async all(){return {results:[]};},
           async run(){
             calls.push({sql,args:this.args});
+            if(options.forceZeroChanges && sql.includes("UPDATE payment_accounts SET charges_enabled")) return {meta:{changes:0}};
             return {meta:{changes:1}};
           }
         };
@@ -302,6 +303,24 @@ test("Stripe v2 account requirements webhook updates Connect readiness only afte
   assert.equal(update.args[1],"active");
   assert.equal(update.args[2],"submitted");
   assert.equal(update.args[3],"acct_test123");
+  } finally {
+    globalThis.fetch=originalFetch;
+  }
+});
+
+test("Stripe Connect webhook is retryable until the account is locally linked", async()=>{
+  const fake=fakeDb("intervenant",{forceZeroChanges:true});
+  const timestamp=Math.floor(Date.now()/1000);
+  const body=JSON.stringify({id:"evt_account_not_linked",type:"v2.core.account[requirements].updated",data:{object:{id:"acct_not_yet_linked"}}});
+  const signature=await stripeSignature("whsec_unit",timestamp,body);
+  const originalFetch=globalThis.fetch;
+  globalThis.fetch=async()=>new Response(JSON.stringify({id:"acct_not_yet_linked",configuration:{recipient:{capabilities:{stripe_balance:{stripe_transfers:{status:"active"}}}}}}),{status:200,headers:{"content-type":"application/json"}});
+  try {
+    const response=await worker.fetch(new Request("https://api.test/api/payments/webhook",{method:"POST",headers:{"Content-Type":"application/json","Stripe-Signature":"t="+timestamp+",v1="+signature},body}),{DB:fake.DB,PAYMENT_PROVIDER:"stripe",STRIPE_SECRET_KEY:"sk_test_unit",STRIPE_WEBHOOK_SECRET:"whsec_unit"});
+    const result=await response.json();
+    assert.equal(response.status,503,JSON.stringify(result));
+    assert.equal(result.error,"STRIPE_CONNECT_ACCOUNT_NOT_LINKED");
+    assert.equal(fake.calls.some(x=>x.sql.includes("SET processed=1")),false);
   } finally {
     globalThis.fetch=originalFetch;
   }
