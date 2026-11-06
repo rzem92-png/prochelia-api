@@ -55,6 +55,15 @@ async function get(path, env) {
   return worker.fetch(new Request(base+path,{headers:{Cookie:cookie}}),env);
 }
 
+test("schema audit routes require an authenticated manager/admin", async()=>{
+  for(const route of ["/api/core/schema","/api/missions/schema"]){
+    const response=await worker.fetch(new Request(base+route),{});
+    const body=await response.json();
+    assert.equal(response.status,401,route+":"+JSON.stringify(body));
+    assert.equal(body.error,"UNAUTHENTICATED");
+  }
+});
+
 test("client profile route requires authentication", async()=>{
   const response=await worker.fetch(new Request(base+"/api/clients"),{DB:{}});
   assert.equal(response.status,401);
