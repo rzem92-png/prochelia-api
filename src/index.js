@@ -2899,7 +2899,7 @@ async function productionConfigCheck(env) {
   checks.push({code:'MISSION_CORE_COLUMNS',status:usefulMissionCols.every(x=>missionCols.includes(x))?'OK':'INCOMPLETE',missing:usefulMissionCols.filter(x=>!missionCols.includes(x))});
   await registerIntegration(env,'PSP','PAYMENT',pspRequired,['connect_onboarding','charge','refund','payout','webhook','reconciliation'],paymentsConfigured(env)?'CONFIGURED':'NOT_CONFIGURED');
   await registerIntegration(env,'NOTIFICATIONS','MESSAGING',['NOTIFICATION_PROVIDER'],['email','sms','push'],finalSecretConfigured(env,'NOTIFICATION_PROVIDER')?'CONFIGURED':'NOT_CONFIGURED');
-  await registerIntegration(env,'MAPS','LOCATION',['MAPS_PROVIDER','MAPS_API_KEY'],['distance','geocoding','routing'],finalSecretConfigured(env,'MAPS_API_KEY')?'CONFIGURED':'NOT_CONFIGURED');
+  await registerIntegration(env,'MAPS','LOCATION',['MAPS_PROVIDER','MAPS_API_KEY'],['distance','geocoding','routing'],(finalSecretConfigured(env,'MAPS_PROVIDER')&&finalSecretConfigured(env,'MAPS_API_KEY'))?'CONFIGURED':'NOT_CONFIGURED');
   await registerIntegration(env,'MARKET_DATA','COMMERCIAL',['MARKET_DATA_PROVIDER'],['market_prices','competitor_signals'],finalSecretConfigured(env,'MARKET_DATA_PROVIDER')?'CONFIGURED':'NOT_CONFIGURED');
   const blocking=checks.filter(x=>['MISSING','INCOMPLETE','NOT_IMPLEMENTED'].includes(x.status));
   const externalNotConfigured=checks.filter(x=>x.status==='NOT_CONFIGURED' && (pspRequired.map(k=>'SECRET:'+k).includes(x.code)||x.code==='CONFIG:STRIPE_PUBLISHABLE_KEY'));
