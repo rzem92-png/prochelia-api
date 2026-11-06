@@ -1400,15 +1400,21 @@ async function paymentAdminResolve(request, env) {
   await ensurePaymentSchema(env);
   const body=await readJson(request), disputeId=clean(body?.dispute_id), resolution=clean(body?.resolution);
   if(!disputeId||!['release','partial_refund','full_refund','cancel'].includes(resolution)) return json({ok:false,error:'INVALID_DISPUTE_RESOLUTION',version:VERSION},400);
+  // Do not report refunds/cancellations as completed until a PSP refund and
+  // corresponding wallet/commission ledger reversal are implemented. The
+  // held funds must remain held rather than silently changing financial state.
+  if(resolution!=='release') return json({ok:false,error:'DISPUTE_RESOLUTION_NOT_IMPLEMENTED',version:VERSION,required:'PSP_REFUND_AND_LEDGER_RECONCILIATION'},503);
   const d=await env.DB.prepare('SELECT * FROM payment_disputes WHERE id=? LIMIT 1').bind(disputeId).first();
-  if(!d||d.status==='resolved') return json({ok:false,error:'DISPUTE_NOT_FOUND_OR_ALREADY_RESOLVED',version:VERSION},409);
-  await env.DB.prepare(`UPDATE payment_disputes SET status='resolved',resolution=?,resolved_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(resolution,disputeId).run();
-  if(d.transaction_id){
-    const newStatus=resolution==='release'?'paid':resolution==='full_refund'?'refunded':resolution==='cancel'?'canceled':'held';
-    await env.DB.prepare('UPDATE payment_transactions SET status=?,updated_at=CURRENT_TIMESTAMP WHERE id=?').bind(newStatus,d.transaction_id).run();
-  }
+  if(!d||!['open','pending'].includes(d.status)||!d.transaction_id) return json({ok:false,error:'DISPUTE_NOT_FOUND_OR_NOT_OPEN',version:VERSION},409);
+  // Resolve dispute and release held payment atomically, with compare-and-set
+  // guards against duplicate/concurrent admin requests.
+  const results=await env.DB.batch([
+    env.DB.prepare(`UPDATE payment_transactions SET status='paid',updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='held'`).bind(d.transaction_id),
+    env.DB.prepare(`UPDATE payment_disputes SET status='resolved',resolution='release',resolved_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=? AND status IN ('open','pending') AND transaction_id=? AND changes()=1`).bind(disputeId,d.transaction_id)
+  ]);
+  if(Number(results?.[0]?.meta?.changes||0)!==1||Number(results?.[1]?.meta?.changes||0)!==1) return json({ok:false,error:'DISPUTE_STATE_CHANGED_RETRY',version:VERSION},409);
   await paymentAudit(env,'PAYMENT_DISPUTE_RESOLVED',{transaction_id:d.transaction_id,mission_id:d.mission_id,user_id:auth.user.id,metadata:{dispute_id:disputeId,resolution}},'OK');
-  return json({ok:true,version:VERSION,dispute_id:disputeId,status:'resolved',resolution},200);
+  return json({ok:true,version:VERSION,dispute_id:disputeId,status:'resolved',resolution,payment_status:'paid'},200);
 }
 
 async function handleBase(request, env) {
