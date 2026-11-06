@@ -54,7 +54,7 @@ test("duplicate webhook in processing state is not falsely acknowledged as compl
   const signature=await stripeSignature("whsec_processing_test",timestamp,raw);
   const digest=new Uint8Array(await crypto.subtle.digest("SHA-256",new TextEncoder().encode(raw)));
   let binary=""; for(const byte of digest) binary+=String.fromCharCode(byte);
-  const payloadHash=btoa(binary).replace(/\\+/g,"-").replace(/\\//g,"_").replace(/=+$/g,"");
+  const payloadHash=btoa(binary).replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/g,"");
   const DB={prepare(sql){const stmt={args:[],bind(...args){this.args=args;return this;},async first(){
     if(sql.includes("SELECT processed,payload_hash,received_at")) return {processed:2,payload_hash:payloadHash,received_at:new Date().toISOString().replace("T"," ").slice(0,19)};
     return null;
