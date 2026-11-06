@@ -40,6 +40,8 @@ jobs:
           grep -Fq 'const SERVER_PRICING_POLICY_READY = false;' src/index.js
           grep -Fq 'const CLIENT_PROVIDER_REGISTRATION_READY = false;' src/index.js
           grep -Fq 'const MISSION_WORKFLOW_READY = false;' src/index.js
+          grep -Fq 'const MISSION_SECURITY_READY = false;' src/index.js
+          grep -Fq 'const CLIENT_CODE_DELIVERY_READY = false;' src/index.js
           grep -Fq 'const REFUND_LEDGER_READY = false;' src/index.js
           grep -Fq 'const PSP_RECONCILIATION_READY = false;' src/index.js
           grep -Fq "REAL_PAYMENT_ADAPTER_NOT_READY" src/index.js
