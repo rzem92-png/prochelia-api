@@ -78,6 +78,7 @@ Aucun déploiement production ni aucune clé live n'est autorisé par ce documen
 
 Le parcours d'onboarding Stripe Connect est **désactivé par défaut**. Avant de l'exposer en environnement de test, il faut explicitement définir la variable Worker :
 
-- `STRIPE_CONNECT_ONBOARDING_ENABLED=true`
+- `STRIPE_CONNECT_ONBOARDING_ENABLED=true` (uniquement préproduction/test)
+- `STRIPE_CONNECT_LIVE_ENABLED=true` (verrou distinct, interdit par défaut; ne jamais le définir sans autorisation explicite et recette live dédiée)
 
 Sans cette valeur exacte, `POST /api/payments/onboard` répond `503 STRIPE_CONNECT_ONBOARDING_DISABLED` avant toute création externe. Ne pas activer ce drapeau en production sans validation humaine, clés live dédiées, contrôle du webhook, revue juridique/financière et recette complète. Les charges et payouts restent indépendamment verrouillés par `STRIPE_CHARGES_AND_PAYOUTS_READY=false`.
