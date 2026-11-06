@@ -1,4 +1,5 @@
 import test from "node:test";
+import { readFile } from "node:fs/promises";
 import assert from "node:assert/strict";
 import { webcrypto } from "node:crypto";
 import worker from "../src/index.js";
@@ -534,4 +535,15 @@ test("Stripe Connect rejects invalid Account Tokens and missing terms consent be
     assert.equal(stripeCalls,0);
     assert.equal(fake.calls.some(x=>x.sql.includes("INSERT INTO payment_accounts")),false);
   } finally { globalThis.fetch=originalFetch; }
+});
+
+
+test("mission payment INSERT placeholder count matches its 14 columns", async()=>{
+  const source=await readFile(new URL("../src/index.js",import.meta.url),"utf8");
+  const match=source.match(/INSERT INTO payment_transactions\\s*\\((id,idempotency_key,mission_id,client_id,intervenant_id,type,status,gross_cents,commission_cents,net_intervenant_cents,currency,provider,reason,metadata_json)\\)\\s*VALUES\\s*\\(([^)]*)\\)/);
+  assert.ok(match,"mission payment insert statement should exist");
+  const columns=match[1].split(",").length;
+  const placeholders=match[2].split(",").length;
+  assert.equal(placeholders,columns,"SQLite binding count must equal INSERT column count");
+  assert.equal(columns,14);
 });
