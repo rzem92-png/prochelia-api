@@ -80,6 +80,37 @@ test("duplicate webhook in processing state is not falsely acknowledged as compl
   assert.equal(body.duplicate,undefined);
 });
 
+test("unlinked Connect webhook releases its processing lease for prompt Stripe retry", async()=>{
+  const raw=JSON.stringify({id:"evt_connect_unlinked_retry",type:"v2.core.account[requirements].updated",data:{object:{id:"acct_unlinked123"}}});
+  const timestamp=Math.floor(Date.now()/1000);
+  const signature=await stripeSignature("whsec_unlinked_retry",timestamp,raw);
+  const calls=[];
+  const DB={prepare(sql){const stmt={args:[],bind(...args){this.args=args;return this;},async first(){
+    if(sql.includes("SELECT processed,payload_hash,received_at")) return null;
+    return null;
+  },async run(){
+    calls.push({sql,args:this.args});
+    if(sql.includes("INSERT OR IGNORE INTO payment_webhook_events")) return {meta:{changes:1}};
+    if(sql.includes("SET processed=2")) return {meta:{changes:1}};
+    if(sql.includes("UPDATE payment_accounts SET charges_enabled")) return {meta:{changes:0}};
+    if(sql.includes("UPDATE payment_webhook_events SET processed=0")) return {meta:{changes:1}};
+    return {meta:{changes:1}};
+  }};return stmt;}};
+  const originalFetch=globalThis.fetch;
+  globalThis.fetch=async()=>new Response(JSON.stringify({configuration:{recipient:{capabilities:{stripe_balance:{stripe_transfers:{status:"active"}}}}}}),{status:200,headers:{"content-type":"application/json"}});
+  try {
+    const response=await worker.fetch(new Request("https://api.test/api/payments/webhook",{method:"POST",headers:{"stripe-signature":"t="+timestamp+",v1="+signature,"Content-Type":"application/json"},body:raw}),{DB,PAYMENT_PROVIDER:"stripe",STRIPE_SECRET_KEY:"sk_test_unlinked",STRIPE_WEBHOOK_SECRET:"whsec_unlinked_retry"});
+    const body=await response.json();
+    assert.equal(response.status,503);
+    assert.equal(body.error,"STRIPE_CONNECT_ACCOUNT_NOT_LINKED");
+    const release=calls.find(x=>x.sql.includes("UPDATE payment_webhook_events SET processed=0"));
+    assert.ok(release,"lease must be released after retryable not-linked condition");
+    assert.deepEqual(release.args,["stripe","evt_connect_unlinked_retry"]);
+  } finally {
+    globalThis.fetch=originalFetch;
+  }
+});
+
 test("Stripe webhook signature accepts a valid recent v1 signature", async()=>{
   const secret="whsec_unit_test";
   const timestamp=Math.floor(Date.now()/1000);
