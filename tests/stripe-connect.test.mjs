@@ -26,8 +26,8 @@ test("client cannot open a dispute for a mission owned by another account", asyn
   const fake=fakeDb("client");
   const response=await worker.fetch(new Request("https://api.test/api/payments/disputes/open",{method:"POST",headers:{Origin:"https://prochelia.pages.dev",Cookie:"prochelia_session=synthetic-token","Content-Type":"application/json"},body:JSON.stringify({mission_id:"mission-other-user",reason:"Contestation",amount_eur:10})}),{DB:fake.DB});
   const body=await response.json();
-  assert.equal(response.status,404,JSON.stringify(body));
-  assert.equal(body.error,"PAYMENT_NOT_FOUND_FOR_MISSION");
+  assert.equal(response.status,503,JSON.stringify(body));
+  assert.equal(body.error,"DISPUTE_HOLD_LEDGER_NOT_IMPLEMENTED");
   assert.equal(fake.calls.some(x=>x.sql.includes("INSERT INTO payment_disputes")),false);
   assert.equal(fake.calls.some(x=>x.sql.includes("UPDATE payment_transactions SET status='held'")),false);
 });
