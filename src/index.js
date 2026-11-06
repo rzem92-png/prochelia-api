@@ -883,6 +883,11 @@ function paymentsConfigured(env) {
 }
 
 async function paymentOnboard(request, env) {
+  // Explicit opt-in required: Connect onboarding creates external Stripe state.
+  // Keep disabled by default in preview/preproduction and fail closed.
+  if (env.STRIPE_CONNECT_ONBOARDING_ENABLED !== 'true') {
+    return json({ok:false,error:'STRIPE_CONNECT_ONBOARDING_DISABLED',version:VERSION},503);
+  }
   const auth = await getSessionUser(request, env);
   if (!requireRole(auth, ['intervenant'])) return json({ok:false,error:auth?.user?'FORBIDDEN':'UNAUTHENTICATED',version:VERSION},auth?.user?403:401);
   const dashboard=clean(env.STRIPE_DASHBOARD);
