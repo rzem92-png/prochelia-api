@@ -73,3 +73,11 @@ Aucun déploiement production ni aucune clé live n'est autorisé par ce documen
 - [Account Links v2 — créer un lien d'onboarding](https://docs.stripe.com/api/v2/core/account-links/create)
 - [Accounts v2 — guide Connect](https://docs.stripe.com/connect/accounts-v2)
 - [Webhooks Stripe — vérifier les signatures](https://docs.stripe.com/webhooks/signature)
+
+## Verrou runtime d'onboarding (fail-closed)
+
+Le parcours d'onboarding Stripe Connect est **désactivé par défaut**. Avant de l'exposer en environnement de test, il faut explicitement définir la variable Worker :
+
+- `STRIPE_CONNECT_ONBOARDING_ENABLED=true`
+
+Sans cette valeur exacte, `POST /api/payments/onboard` répond `503 STRIPE_CONNECT_ONBOARDING_DISABLED` avant toute création externe. Ne pas activer ce drapeau en production sans validation humaine, clés live dédiées, contrôle du webhook, revue juridique/financière et recette complète. Les charges et payouts restent indépendamment verrouillés par `STRIPE_CHARGES_AND_PAYOUTS_READY=false`.
