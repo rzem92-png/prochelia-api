@@ -1003,14 +1003,27 @@ async function paymentOnboard(request, env) {
     return json({ok:false,error:'STRIPE_ACCOUNT_TOKEN_AND_TERMS_REQUIRED',version:VERSION},400);
   }
   await ensurePaymentSchema(env);
-  const existing = await env.DB.prepare('SELECT * FROM payment_accounts WHERE user_id=? LIMIT 1').bind(auth.user.id).first();
+  let existing = await env.DB.prepare('SELECT * FROM payment_accounts WHERE user_id=? LIMIT 1').bind(auth.user.id).first();
   if(existing && existing.provider!=='stripe') return json({ok:false,error:'PAYMENT_PROVIDER_CONFLICT',version:VERSION},409);
   if(existing && Number(existing.payouts_enabled)===1 && existing.onboarding_status==='submitted') {
     return json({ok:true,version:VERSION,provider:'stripe',account_id:existing.provider_account_id,onboarding_status:'complete',already_connected:true},200);
   }
   let accountId=clean(existing?.provider_account_id);
+  let reservationId=existing?.id || null;
   try {
     if(!accountId) {
+      // Reserve the unique user_id row BEFORE contacting Stripe to prevent
+      // concurrent requests from creating multiple connected accounts.
+      if(existing && existing.status==='creating') return json({ok:false,error:'STRIPE_CONNECT_CREATION_IN_PROGRESS',version:VERSION},409);
+      if(existing && existing.status!=='creation_failed') return json({ok:false,error:'STRIPE_CONNECT_ACCOUNT_STATE_CONFLICT',version:VERSION},409);
+      if(existing) {
+        const claim=await env.DB.prepare(`UPDATE payment_accounts SET status='creating',updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='creation_failed' AND provider_account_id IS NULL`).bind(existing.id).run();
+        if(Number(claim?.meta?.changes||0)!==1) return json({ok:false,error:'STRIPE_CONNECT_CREATION_IN_PROGRESS',version:VERSION},409);
+        reservationId=existing.id;
+      } else {
+        reservationId=crypto.randomUUID();
+        await env.DB.prepare(`INSERT INTO payment_accounts (id,user_id,provider,provider_account_id,status,onboarding_status) VALUES (?,?, 'stripe',NULL,'creating','required')`).bind(reservationId,auth.user.id).run();
+      }
       const accountTokenHash=await sha256Base64url(accountToken);
       const account=await stripePost(env,'v2/core/accounts',{
         account_token:accountToken,
@@ -1021,11 +1034,7 @@ async function paymentOnboard(request, env) {
       },'prochelia-connect-account-'+auth.user.id+'-'+accountTokenHash);
       accountId=clean(account?.id);
       if(!accountId) throw new Error('STRIPE_ACCOUNT_ID_MISSING');
-      if(existing) {
-        await env.DB.prepare(`UPDATE payment_accounts SET provider='stripe',provider_account_id=?,status='pending',onboarding_status='required',updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(accountId,existing.id).run();
-      } else {
-        await env.DB.prepare(`INSERT INTO payment_accounts (id,user_id,provider,provider_account_id,status,onboarding_status) VALUES (?,?,?,?, 'pending','required')`).bind(crypto.randomUUID(),auth.user.id,'stripe',accountId).run();
-      }
+      await env.DB.prepare(`UPDATE payment_accounts SET provider='stripe',provider_account_id=?,status='pending',onboarding_status='required',updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(accountId,reservationId).run();
       const wallet=await env.DB.prepare('SELECT id FROM wallets WHERE user_id=? LIMIT 1').bind(auth.user.id).first();
       if(!wallet) await env.DB.prepare('INSERT INTO wallets (id,user_id) VALUES (?,?)').bind(crypto.randomUUID(),auth.user.id).run();
       await paymentAudit(env,'STRIPE_ACCOUNT_TERMS_ACCEPTED',{user_id:auth.user.id,metadata:{terms:'stripe_connected_account_v2'}},'OK');
@@ -1048,6 +1057,11 @@ async function paymentOnboard(request, env) {
     if(!link?.url) throw new Error('STRIPE_ACCOUNT_LINK_MISSING');
     return json({ok:true,version:VERSION,provider:'stripe',account_id:accountId,onboarding_status:'required',onboarding_url:link.url,expires_at:link.expires_at,next:'COMPLETE_STRIPE_CONNECT_ONBOARDING'},201);
   } catch(error) {
+    if(reservationId && !accountId) {
+      try {
+        await env.DB.prepare(`UPDATE payment_accounts SET status='creation_failed',updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='creating' AND provider_account_id IS NULL`).bind(reservationId).run();
+      } catch { /* Keep original failure; reconciliation can inspect the reservation. */ }
+    }
     console.error('STRIPE_CONNECT_ONBOARDING_FAILED',error instanceof Error?error.message:String(error));
     return json({ok:false,error:'STRIPE_ONBOARDING_FAILED',version:VERSION},502);
   }
