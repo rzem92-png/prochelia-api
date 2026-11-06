@@ -927,7 +927,7 @@ function paymentProvider(env) {
 
 function paymentsConfigured(env) {
   const provider=paymentProvider(env);
-  if(provider==='stripe') return !!env.STRIPE_SECRET_KEY && !!env.STRIPE_PUBLISHABLE_KEY && !!env.STRIPE_WEBHOOK_SECRET && !!env.APP_BASE_URL && !!env.STRIPE_DASHBOARD && !!env.STRIPE_FEES_COLLECTOR && !!env.STRIPE_LOSSES_COLLECTOR && STRIPE_CHARGES_AND_PAYOUTS_READY;
+  if(provider==='stripe') return !!env.STRIPE_SECRET_KEY && !!env.STRIPE_PUBLISHABLE_KEY && !!env.STRIPE_WEBHOOK_SECRET && !!env.APP_BASE_URL && !!env.STRIPE_DASHBOARD && !!env.STRIPE_FEES_COLLECTOR && !!env.STRIPE_LOSSES_COLLECTOR && SERVER_PRICING_POLICY_READY && STRIPE_CHARGES_AND_PAYOUTS_READY;
   return false;
 }
 
