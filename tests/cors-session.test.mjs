@@ -104,3 +104,17 @@ test("bootstrap permits only one concurrent initial manager creation", async()=>
   assert.equal(state.users.length,1);
 });
 
+test("login IP bucket blocks password spraying across many account names", async()=>{
+  const attempts=[];
+  const DB={prepare(sql){const stmt={args:[],bind(...args){this.args=args;return this;},async first(){
+    if(sql.includes("COUNT(*) AS total FROM login_attempts")) return {total:attempts.filter(x=>x.keyHash===this.args[0]).length};
+    if(sql.includes("FROM users WHERE email")) return null;
+    return null;
+  },async run(){if(sql.includes("INSERT INTO login_attempts"))attempts.push({keyHash:this.args[1]});return {meta:{changes:1}};}};return stmt;}};
+  const env={DB};
+  for(let n=1;n<=25;n++){
+    const response=await worker.fetch(new Request(endpoint,{method:"POST",headers:{Origin:allowedOrigin,"CF-Connecting-IP":"203.0.113.9","Content-Type":"application/json"},body:JSON.stringify({email:"spray"+n+"@example.test",password:"not-a-real-password"})}),env);
+    assert.equal(response.status,n===25?429:401);
+  }
+});
+
