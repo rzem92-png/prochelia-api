@@ -1064,7 +1064,10 @@ async function paymentOnboard(request, env) {
           // Persist its ID for recovery instead of allowing a duplicate account.
           await env.DB.prepare(`UPDATE payment_accounts SET provider='stripe',provider_account_id=?,status='pending',onboarding_status='required',updated_at=CURRENT_TIMESTAMP WHERE id=? AND provider_account_id IS NULL`).bind(accountId,reservationId).run();
         } else {
-          await env.DB.prepare(`UPDATE payment_accounts SET status='creation_failed',updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='creating' AND provider_account_id IS NULL`).bind(reservationId).run();
+          // A network/API failure can be ambiguous: Stripe may have created
+          // the account even if the response never reached this Worker.
+          // Never automatically retry with a new Account Token in that case.
+          await env.DB.prepare(`UPDATE payment_accounts SET status='reconciliation_required',updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='creating' AND provider_account_id IS NULL`).bind(reservationId).run();
         }
       } catch { /* Keep original failure; reconciliation can inspect the reservation. */ }
     }
