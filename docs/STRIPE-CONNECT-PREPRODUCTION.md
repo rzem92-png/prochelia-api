@@ -24,7 +24,7 @@ Variables :
 
 Secrets :
 - `STRIPE_SECRET_KEY` = clé API Stripe secrète de test en préproduction
-- `STRIPE_PUBLISHABLE_KEY` = clé publique Stripe de test (utilisée dans le navigateur pour créer un Account Token)
+- `STRIPE_PUBLISHABLE_KEY` = clé publique Stripe de test (utilisée dans le navigateur pour créer un Account Token). Elle doit être du même mode que la clé secrète : `pk_test_` avec `sk_test_`/`rk_test_`, ou `pk_live_` avec une clé live et l’opt-in live distinct.
 - `STRIPE_WEBHOOK_SECRET` = secret de signature du webhook Stripe
 
 Ne jamais placer ces secrets dans GitHub, dans `index.html`, dans une capture d'écran ou dans une conversation.
