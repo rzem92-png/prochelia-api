@@ -509,3 +509,27 @@ test("server quote endpoint refuses client-controlled prices until a tariff poli
   assert.equal(body.error,"SERVER_PRICING_POLICY_NOT_CONFIGURED");
   assert.equal(fake.calls.some(x=>x.sql.includes("INSERT INTO pricing_quotes")),false);
 });
+
+
+test("Stripe Connect rejects invalid Account Tokens and missing terms consent before any D1 or Stripe write", async()=>{
+  const originalFetch=globalThis.fetch;
+  let stripeCalls=0;
+  globalThis.fetch=async()=>{stripeCalls++;throw new Error("Stripe must not be called for invalid onboarding input");};
+  try{
+    const fake=fakeDb("intervenant");
+    const env={DB:fake.DB,STRIPE_CONNECT_ONBOARDING_ENABLED:"true",PAYMENT_PROVIDER:"stripe",STRIPE_SECRET_KEY:"sk_test_unit",STRIPE_PUBLISHABLE_KEY:"pk_test_unit",STRIPE_WEBHOOK_SECRET:"whsec_unit",STRIPE_DASHBOARD:"express",STRIPE_FEES_COLLECTOR:"application",STRIPE_LOSSES_COLLECTOR:"application",APP_BASE_URL:"https://prochelia.pages.dev"};
+    const cases=[
+      {account_token:"bad-token",stripe_terms_accepted:true},
+      {account_token:"acctok_valid123",stripe_terms_accepted:false},
+      {account_token:"acctok_valid123"}
+    ];
+    for(const payload of cases){
+      const response=await worker.fetch(new Request("https://api.test/api/payments/onboard",{method:"POST",headers:{Origin:"https://prochelia.pages.dev",Cookie:"prochelia_session=synthetic-token","Content-Type":"application/json"},body:JSON.stringify(payload)}),env);
+      const body=await response.json();
+      assert.equal(response.status,400,JSON.stringify(body));
+      assert.equal(body.error,"STRIPE_ACCOUNT_TOKEN_AND_TERMS_REQUIRED");
+    }
+    assert.equal(stripeCalls,0);
+    assert.equal(fake.calls.some(x=>x.sql.includes("INSERT INTO payment_accounts")),false);
+  } finally { globalThis.fetch=originalFetch; }
+});
