@@ -3936,7 +3936,7 @@ function productionAuditGate(result,env){
 async function strictProductionAudit(request,env){
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
   const result=await productionConfigCheck(env);
-  const {checks,blocking,overall,externalNotConfigured}=productionAuditGate(result,env);
+  const {checks,blocking,overall,externalNotConfigured,extra}=productionAuditGate(result,env);
   for(const c of extra){
     await env.DB.prepare(`INSERT INTO system_config_checks(id,check_code,status,details_json) VALUES(?,?,?,?)`).bind(crypto.randomUUID(),c.code,c.status,JSON.stringify(c)).run();
   }
