@@ -1266,6 +1266,11 @@ async function paymentWebhook(request, env) {
     // persisted locally. Do not acknowledge it as processed until linked;
     // returning 503 lets Stripe retry after the local reservation is updated.
     if(Number(linkedAccount?.meta?.changes||0)!==1) {
+      // Release the processing lease: this is a known, retryable ordering race,
+      // not an ambiguous business operation. Stripe can redeliver immediately
+      // after the account linkage is committed instead of waiting 5 minutes.
+      await env.DB.prepare(`UPDATE payment_webhook_events SET processed=0,received_at=CURRENT_TIMESTAMP
+        WHERE provider=? AND event_id=? AND processed=2`).bind(provider,eventId).run();
       return json({ok:false,error:'STRIPE_CONNECT_ACCOUNT_NOT_LINKED',version:VERSION},503);
     }
   }
