@@ -1079,7 +1079,11 @@ async function paymentOnboard(request, env) {
 function paymentPublicConfig(request,env) {
   const provider=paymentProvider(env);
   const publishable=provider==='stripe' && env.STRIPE_PUBLISHABLE_KEY ? String(env.STRIPE_PUBLISHABLE_KEY) : null;
-  const onboardingReady=!!publishable && !!env.STRIPE_SECRET_KEY && !!env.STRIPE_WEBHOOK_SECRET && !!env.APP_BASE_URL &&
+  const secret=String(env.STRIPE_SECRET_KEY||'').trim();
+  const allowedStripeKey=/^(sk|rk)_test_/.test(secret) ||
+    (/^(sk|rk)_live_/.test(secret) && env.STRIPE_CONNECT_LIVE_ENABLED==='true');
+  const onboardingReady=env.STRIPE_CONNECT_ONBOARDING_ENABLED==='true' && !!publishable &&
+    allowedStripeKey && !!env.STRIPE_WEBHOOK_SECRET && !!env.APP_BASE_URL &&
     !!env.STRIPE_DASHBOARD && !!env.STRIPE_FEES_COLLECTOR && !!env.STRIPE_LOSSES_COLLECTOR;
   return json({ok:true,version:VERSION,provider,stripe_publishable_key:publishable,stripe_api_version:'2026-10-28.endive',connect_onboarding_ready:onboardingReady});
 }
