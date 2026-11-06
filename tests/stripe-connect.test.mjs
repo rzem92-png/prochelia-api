@@ -547,3 +547,16 @@ test("mission payment INSERT placeholder count matches its 14 columns", async()=
   assert.equal(placeholders,columns,"SQLite binding count must equal INSERT column count");
   assert.equal(columns,14);
 });
+
+
+test("payment webhook releases its lease and requests retry when local transaction is not linked", async()=>{
+  const fake=fakeDb("gerante");
+  const raw=JSON.stringify({id:"evt_payment_missing_local",type:"payment_intent.succeeded",data:{object:{id:"pi_missing_local",metadata:{prochelia_transaction_id:"tx_not_yet_created"}}}});
+  const timestamp=Math.floor(Date.now()/1000),signature=await stripeSignature("whsec_missing_local",timestamp,raw);
+  const response=await worker.fetch(new Request("https://api.test/api/payments/webhook",{method:"POST",headers:{"Stripe-Signature":"t="+timestamp+",v1="+signature,"Content-Type":"application/json"},body:raw}),{DB:fake.DB,PAYMENT_PROVIDER:"stripe",STRIPE_WEBHOOK_SECRET:"whsec_missing_local"});
+  const body=await response.json();
+  assert.equal(response.status,503,JSON.stringify(body));
+  assert.equal(body.error,"PAYMENT_TRANSACTION_NOT_LINKED");
+  assert.ok(fake.calls.some(x=>x.sql.includes("UPDATE payment_webhook_events SET processed=0")));
+  assert.equal(fake.calls.some(x=>x.sql.includes("SET processed=1")),false);
+});
