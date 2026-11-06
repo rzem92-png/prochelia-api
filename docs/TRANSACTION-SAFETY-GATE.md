@@ -112,3 +112,11 @@ Les mocks seuls ne prouvent pas les transactions D1. Il faut des tests Worker-D1
 - Payout completion/failure/cancellation now uses status-specific atomic wallet settlement/release; no silent `MAX(0, reserved)` clamp.
 - Refund webhook effects intentionally return `503 REFUND_LEDGER_NOT_IMPLEMENTED` until refund ledger/reversal and negative-balance handling exist. Do not activate charge/refund flows before this gate passes.
 - D1 concurrency, batch rollback, crash injection and Stripe test-mode webhook replay remain mandatory. CI mocks do not prove Cloudflare D1 transaction semantics.
+
+## Litiges / disputes
+
+- Route protégée `POST /api/payments/disputes/open` ajoutée au routeur.
+- Client : sélection transaction via jointure mission → client → `user_id` de session (pas d'ID client fourni par le navigateur).
+- Montant du litige strictement positif et plafonné au montant payé restant après remboursements.
+- Un litige ouvert/pending par transaction; statut `paid → held`, création du litige et audit en batch D1.
+- La route reste soumise aux tests D1 de concurrence et à la validation du modèle de remboursement avant toute activation de charges.
