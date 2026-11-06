@@ -1365,6 +1365,11 @@ async function openPaymentDispute(request, env) {
   const auth=await getSessionUser(request,env);
   if(!requireRole(auth,['client','gerante'])) return json({ok:false,error:auth?.user?'FORBIDDEN':'UNAUTHENTICATED',version:VERSION},auth?.user?403:401);
   await ensurePaymentSchema(env);
+  // Opening a dispute must atomically freeze the provider's available funds.
+  // That wallet/ledger hold is not yet implemented, so fail closed before
+  // reading or mutating transaction/dispute state. Changing payment status
+  // alone would leave funds withdrawable during an active dispute.
+  return json({ok:false,error:'DISPUTE_HOLD_LEDGER_NOT_IMPLEMENTED',version:VERSION,required:'ATOMIC_WALLET_HOLD_AND_LEDGER'},503);
   const body=await readJson(request), missionId=clean(body?.mission_id), reason=clean(body?.reason), amount=moneyCents(body?.amount_eur);
   if(!missionId||missionId.length>128||!reason||reason.length>2000||amount===null||amount<=0) return json({ok:false,error:'INVALID_DISPUTE',version:VERSION},400);
   const tx=auth.user.role==='client'
