@@ -574,3 +574,19 @@ test("dispute refunds fail closed and dispute release is compare-and-set atomic"
   assert.match(fn,/env\.DB\.batch\(\[/);
   assert.doesNotMatch(fn,/status='refunded'/,"dispute endpoint must not claim a refund without PSP and ledger operations");
 });
+
+
+test("dispute opening fails closed until wallet hold ledger exists", async()=>{
+  const source=await readFile(new URL("../src/index.js",import.meta.url),"utf8");
+  const start=source.indexOf("async function openPaymentDispute");
+  const end=source.indexOf("async function paymentAdminResolve",start);
+  assert.ok(start>=0&&end>start,"dispute opening handler should exist");
+  const fn=source.slice(start,end);
+  assert.match(fn,/DISPUTE_HOLD_LEDGER_NOT_IMPLEMENTED/);
+  assert.match(fn,/return json\(\{ok:false,error:'DISPUTE_HOLD_LEDGER_NOT_IMPLEMENTED'.*503\)/);
+  const gate=fn.indexOf("DISPUTE_HOLD_LEDGER_NOT_IMPLEMENTED");
+  const transactionLookup=fn.indexOf("SELECT t\\.\\* FROM payment_transactions");
+  const disputeInsert=fn.indexOf("INSERT INTO payment_disputes");
+  assert.ok(transactionLookup===-1||gate<transactionLookup,"fail-closed gate must precede transaction lookup");
+  assert.ok(disputeInsert===-1||gate<disputeInsert,"fail-closed gate must precede dispute insert");
+});
