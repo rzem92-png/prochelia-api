@@ -186,7 +186,8 @@ test("Stripe Connect onboarding creates the account and a fresh onboarding link 
     assert.equal(calls[1].body.account,"acct_test123");
     assert.equal(calls[1].body.use_case.type,"account_onboarding");
     assert.deepEqual(calls[1].body.use_case.account_onboarding.configurations,["recipient"]);
-    assert.ok(fake.calls.some(x=>x.sql.includes("INSERT INTO payment_accounts") && x.args.includes("acct_test123")));
+    assert.ok(fake.calls.some(x=>x.sql.includes("INSERT INTO payment_accounts") && x.sql.includes("'creating'") && x.args.includes("user-test-1")));
+    assert.ok(fake.calls.some(x=>x.sql.includes("UPDATE payment_accounts SET provider='stripe',provider_account_id=?") && x.args.includes("acct_test123")));
   } finally {
     globalThis.fetch=originalFetch;
   }
