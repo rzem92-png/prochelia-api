@@ -937,6 +937,12 @@ async function paymentOnboard(request, env) {
   if (env.STRIPE_CONNECT_ONBOARDING_ENABLED !== 'true') {
     return json({ok:false,error:'STRIPE_CONNECT_ONBOARDING_DISABLED',version:VERSION},503);
   }
+  const stripeSecretKey=String(env.STRIPE_SECRET_KEY||'').trim();
+  const isTestStripeKey=/^(sk|rk)_test_/.test(stripeSecretKey);
+  const isLiveStripeKey=/^(sk|rk)_live_/.test(stripeSecretKey);
+  if(!isTestStripeKey && !(isLiveStripeKey && env.STRIPE_CONNECT_LIVE_ENABLED==='true')) {
+    return json({ok:false,error:'STRIPE_CONNECT_LIVE_DISABLED',version:VERSION},503);
+  }
   const auth = await getSessionUser(request, env);
   if (!requireRole(auth, ['intervenant'])) return json({ok:false,error:auth?.user?'FORBIDDEN':'UNAUTHENTICATED',version:VERSION},auth?.user?403:401);
   const dashboard=clean(env.STRIPE_DASHBOARD);
