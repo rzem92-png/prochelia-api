@@ -9,6 +9,10 @@ import { stripePost, stripeGet, verifyStripeSignature } from "./stripe.js";
 const VERSION = 'V14.3.0-PREPRODUCTION-2026-10-19';
 const STRIPE_CHARGES_AND_PAYOUTS_READY = false;
 const SERVER_PRICING_POLICY_READY = false;
+const CLIENT_PROVIDER_REGISTRATION_READY = false;
+const MISSION_WORKFLOW_READY = false;
+const REFUND_LEDGER_READY = false;
+const PSP_RECONCILIATION_READY = false;
 const SECURITY_CODE_TTL_SECONDS = 15 * 60;
 const SECURITY_MAX_ATTEMPTS = 5;
 const SECURITY_IP_MAX_ATTEMPTS = 25;
@@ -949,7 +953,7 @@ function paymentProvider(env) {
 
 function paymentsConfigured(env) {
   const provider=paymentProvider(env);
-  if(provider==='stripe') return !!env.STRIPE_SECRET_KEY && !!env.STRIPE_PUBLISHABLE_KEY && !!env.STRIPE_WEBHOOK_SECRET && !!env.APP_BASE_URL && !!env.STRIPE_DASHBOARD && !!env.STRIPE_FEES_COLLECTOR && !!env.STRIPE_LOSSES_COLLECTOR && SERVER_PRICING_POLICY_READY && STRIPE_CHARGES_AND_PAYOUTS_READY;
+  if(provider==='stripe') return !!env.STRIPE_SECRET_KEY && !!env.STRIPE_PUBLISHABLE_KEY && !!env.STRIPE_WEBHOOK_SECRET && !!env.APP_BASE_URL && !!env.STRIPE_DASHBOARD && !!env.STRIPE_FEES_COLLECTOR && !!env.STRIPE_LOSSES_COLLECTOR && CLIENT_PROVIDER_REGISTRATION_READY && MISSION_WORKFLOW_READY && SERVER_PRICING_POLICY_READY && REFUND_LEDGER_READY && PSP_RECONCILIATION_READY && STRIPE_CHARGES_AND_PAYOUTS_READY;
   return false;
 }
 
@@ -2780,7 +2784,11 @@ async function productionConfigCheck(env) {
     : ['PAYMENT_PROVIDER','PAYMENT_WEBHOOK_SECRET','PAYMENT_API_SECRET'];
   for(const k of pspRequired) checks.push({code:`SECRET:${k}`,status:finalSecretConfigured(env,k)?'OK':'NOT_CONFIGURED'});
   if(paymentProvider(env)==='stripe') checks.push({code:'CONFIG:STRIPE_PUBLISHABLE_KEY',status:finalSecretConfigured(env,'STRIPE_PUBLISHABLE_KEY')?'OK':'NOT_CONFIGURED'});
+  checks.push({code:'CLIENT_PROVIDER_REGISTRATION',status:CLIENT_PROVIDER_REGISTRATION_READY?'OK':'NOT_IMPLEMENTED'});
+  checks.push({code:'MISSION_WORKFLOW',status:MISSION_WORKFLOW_READY?'OK':'NOT_IMPLEMENTED'});
   checks.push({code:'SERVER_PRICING_POLICY',status:SERVER_PRICING_POLICY_READY?'OK':'NOT_IMPLEMENTED'});
+  checks.push({code:'REFUND_LEDGER',status:REFUND_LEDGER_READY?'OK':'NOT_IMPLEMENTED'});
+  checks.push({code:'PSP_RECONCILIATION',status:PSP_RECONCILIATION_READY?'OK':'NOT_IMPLEMENTED'});
   checks.push({code:'STRIPE_CHARGES_ADAPTER',status:STRIPE_CHARGES_AND_PAYOUTS_READY?'OK':'NOT_IMPLEMENTED'});
   checks.push({code:'STRIPE_PAYOUT_ADAPTER',status:STRIPE_CHARGES_AND_PAYOUTS_READY?'OK':'NOT_IMPLEMENTED'});
   checks.push({code:'BOOTSTRAP_TOKEN',status:finalSecretConfigured(env,'BOOTSTRAP_TOKEN')?'OK':'NOT_CONFIGURED'});
