@@ -1531,7 +1531,7 @@ async function handleBase(request, env) {
       blockers,
       status: platformReady ? 'production_ready' : (infrastructureReady ? 'preproduction_blocked' : 'infrastructure_unavailable'),
       version: VERSION
-    });
+    }, infrastructureReady ? 200 : 503);
   }
 
   if (url.pathname === '/api/info') {
