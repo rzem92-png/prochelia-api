@@ -128,6 +128,16 @@ test("Stripe Connect onboarding fails closed unless explicit feature flag is ena
   assert.equal(body.error,"STRIPE_CONNECT_ONBOARDING_DISABLED");
 });
 
+test("live Stripe key cannot enable Connect onboarding without separate live opt-in", async()=>{
+  const fake=fakeDb("intervenant");
+  const env={DB:fake.DB,STRIPE_CONNECT_ONBOARDING_ENABLED:"true",PAYMENT_PROVIDER:"stripe",STRIPE_SECRET_KEY:"sk_live_testguard",STRIPE_PUBLISHABLE_KEY:"pk_live_testguard",STRIPE_WEBHOOK_SECRET:"whsec_unit",STRIPE_DASHBOARD:"express",STRIPE_FEES_COLLECTOR:"application",STRIPE_LOSSES_COLLECTOR:"application",APP_BASE_URL:"https://prochelia.pages.dev"};
+  const response=await worker.fetch(new Request("https://api.test/api/payments/onboard",{method:"POST",headers:{Origin:"https://prochelia.pages.dev","Content-Type":"application/json"},body:"{}"}),env);
+  const body=await response.json();
+  assert.equal(response.status,503);
+  assert.equal(body.error,"STRIPE_CONNECT_LIVE_DISABLED");
+  assert.equal(fake.calls.some(x=>x.sql.includes("INSERT INTO payment_accounts")),false);
+});
+
 test("Stripe Connect onboarding creates the account and a fresh onboarding link server-side", async()=>{
   const originalFetch=globalThis.fetch;
   const calls=[];
