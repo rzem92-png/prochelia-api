@@ -340,6 +340,22 @@ test("public payment configuration exposes only the Stripe publishable key", asy
   assert.equal(JSON.stringify(body).includes("sk_live_must_never_be_returned"),false);
 });
 
+test("public Connect readiness remains false while onboarding feature flag is disabled", async()=>{
+  const response=await worker.fetch(new Request("https://api.test/api/payments/config"),{
+    PAYMENT_PROVIDER:"stripe",
+    STRIPE_PUBLISHABLE_KEY:"pk_test_public",
+    STRIPE_SECRET_KEY:"sk_test_private",
+    STRIPE_WEBHOOK_SECRET:"whsec_test",
+    APP_BASE_URL:"https://prochelia.pages.dev",
+    STRIPE_DASHBOARD:"express",
+    STRIPE_FEES_COLLECTOR:"application",
+    STRIPE_LOSSES_COLLECTOR:"application"
+  });
+  const body=await response.json();
+  assert.equal(response.status,200);
+  assert.equal(body.connect_onboarding_ready,false);
+});
+
 test("Stripe onboarding requires an account token and explicit terms acceptance", async()=>{
   const fake=fakeDb("intervenant");
   const env={DB:fake.DB,STRIPE_CONNECT_ONBOARDING_ENABLED:"true",PAYMENT_PROVIDER:"stripe",STRIPE_SECRET_KEY:"sk_test_unit",STRIPE_PUBLISHABLE_KEY:"pk_test_unit",STRIPE_WEBHOOK_SECRET:"whsec_unit",STRIPE_DASHBOARD:"express",STRIPE_FEES_COLLECTOR:"application",STRIPE_LOSSES_COLLECTOR:"application",APP_BASE_URL:"https://prochelia.pages.dev"};
