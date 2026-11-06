@@ -2912,6 +2912,9 @@ async function finalProductionAudit(request,env) {
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
   const result=await productionConfigCheck(env);
   const {checks,blocking,overall,externalNotConfigured}=productionAuditGate(result,env);
+  for(const check of checks.slice((result.checks||[]).length)){
+    await env.DB.prepare(`INSERT INTO system_config_checks(id,check_code,status,details_json) VALUES(?,?,?,?)`).bind(crypto.randomUUID(),check.code,check.status,JSON.stringify(check)).run();
+  }
   await journal(env,'gerante',gate.auth.user.id,'FINAL_PRODUCTION_AUDIT','system',null,overall?'OK':'ATTENTION',{blocking:blocking.map(x=>x.code),externalNotConfigured:externalNotConfigured});
   return json({ok:true,version:VERSION,production_gate:overall?'OPEN':'CLOSED',ready_for_real_traffic:overall,checks,blocking:blocking.map(x=>x.code),external_not_configured:externalNotConfigured,note:overall?'Architecture gate passed; external business integrations must still be exercised with sandbox/acceptance tests.':'No real production traffic should be enabled until blocking configuration/schema checks are resolved.'});
 }
