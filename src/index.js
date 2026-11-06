@@ -460,6 +460,11 @@ async function bootstrap(request, env) {
     return json({ ok: false, error: 'UNAUTHORIZED', version: VERSION }, 401);
   }
 
+  // A one-row guard plus D1 batch makes first-manager creation race-safe.
+  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS bootstrap_state (
+    id INTEGER PRIMARY KEY CHECK(id=1), used INTEGER NOT NULL DEFAULT 0, used_at TEXT
+  )`).run();
+  await env.DB.prepare('INSERT OR IGNORE INTO bootstrap_state (id,used) VALUES (1,0)').run();
   const count = await env.DB.prepare('SELECT COUNT(*) AS total FROM users').first();
   if (Number(count?.total || 0) !== 0) {
     return json({ ok: false, error: 'BOOTSTRAP_ALREADY_USED', version: VERSION }, 409);
@@ -479,10 +484,16 @@ async function bootstrap(request, env) {
   const passwordHash = await hashPassword(password);
   const userId = crypto.randomUUID();
 
-  await env.DB.prepare(
-    `INSERT INTO users (id, role, email, first_name, last_name, phone, status, password_hash)
-     VALUES (?, 'gerante', ?, ?, ?, ?, 'active', ?)`
-  ).bind(userId, email, firstName, lastName, phone, passwordHash).run();
+  const bootstrapResult=await env.DB.batch([
+    env.DB.prepare(`UPDATE bootstrap_state SET used=1,used_at=CURRENT_TIMESTAMP
+      WHERE id=1 AND used=0 AND NOT EXISTS (SELECT 1 FROM users)`),
+    env.DB.prepare(`INSERT INTO users (id, role, email, first_name, last_name, phone, status, password_hash)
+      SELECT ?, 'gerante', ?, ?, ?, ?, 'active', ? WHERE changes()=1`)
+      .bind(userId,email,firstName,lastName,phone,passwordHash)
+  ]);
+  if(Number(bootstrapResult?.[0]?.meta?.changes||0)!==1 || Number(bootstrapResult?.[1]?.meta?.changes||0)!==1) {
+    return json({ok:false,error:'BOOTSTRAP_ALREADY_USED',version:VERSION},409);
+  }
 
   return json({
     ok: true,
