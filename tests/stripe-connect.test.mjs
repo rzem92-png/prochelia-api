@@ -386,7 +386,19 @@ test("payout failed webhook atomically releases reserved funds back to available
   assert.deepEqual(walletRelease.args.slice(0,4),[1250,1250,"wallet-provider-failed",1250]);
 });
 
-test("late payout webhook cannot alter wallet after payout is already final",async()=>{\n  const fake=fakeDb("gerante",{payout:{id:"payout-final-1",status:"failed",amount_cents:700,wallet_id:"wallet-final-1"}});\n  const raw=JSON.stringify({id:"evt_late_payout_paid",type:"payout.paid",data:{object:{id:"po_late_paid",metadata:{prochelia_payout_id:"payout-final-1"}}}});\n  const timestamp=Math.floor(Date.now()/1000),signature=await stripeSignature("whsec_late_payout",timestamp,raw);\n  const response=await worker.fetch(new Request("https://api.test/api/payments/webhook",{method:"POST",headers:{"Stripe-Signature":"t="+timestamp+",v1="+signature,"Content-Type":"application/json"},body:raw}),{DB:fake.DB,PAYMENT_PROVIDER:"stripe",STRIPE_WEBHOOK_SECRET:"whsec_late_payout"});\n  const body=await response.json();\n  assert.equal(response.status,200,JSON.stringify(body));\n  assert.equal(body.processed,true);\n  assert.equal(fake.calls.some(x=>x.sql.includes("UPDATE wallets SET reserved_cents=reserved_cents-?")),false,"a terminal payout must not settle wallet funds again");\n  assert.equal(fake.calls.some(x=>x.sql.includes("UPDATE payout_requests SET status=?")),false,"late PSP event must not overwrite final payout status");\n});\n\ntest("Stripe v2 account requirements webhook updates Connect readiness only after valid signature", async()=>{
+test("late payout webhook cannot alter wallet after payout is already final",async()=>{
+  const fake=fakeDb("gerante",{payout:{id:"payout-final-1",status:"failed",amount_cents:700,wallet_id:"wallet-final-1"}});
+  const raw=JSON.stringify({id:"evt_late_payout_paid",type:"payout.paid",data:{object:{id:"po_late_paid",metadata:{prochelia_payout_id:"payout-final-1"}}}});
+  const timestamp=Math.floor(Date.now()/1000),signature=await stripeSignature("whsec_late_payout",timestamp,raw);
+  const response=await worker.fetch(new Request("https://api.test/api/payments/webhook",{method:"POST",headers:{"Stripe-Signature":"t="+timestamp+",v1="+signature,"Content-Type":"application/json"},body:raw}),{DB:fake.DB,PAYMENT_PROVIDER:"stripe",STRIPE_WEBHOOK_SECRET:"whsec_late_payout"});
+  const body=await response.json();
+  assert.equal(response.status,200,JSON.stringify(body));
+  assert.equal(body.processed,true);
+  assert.equal(fake.calls.some(x=>x.sql.includes("UPDATE wallets SET reserved_cents=reserved_cents-?")),false,"a terminal payout must not settle wallet funds again");
+  assert.equal(fake.calls.some(x=>x.sql.includes("UPDATE payout_requests SET status=?")),false,"late PSP event must not overwrite final payout status");
+});
+
+test("Stripe v2 account requirements webhook updates Connect readiness only after valid signature", async()=>{
   const fake=fakeDb("intervenant");
   const env={DB:fake.DB,PAYMENT_PROVIDER:"stripe",STRIPE_SECRET_KEY:"sk_test_unit",STRIPE_WEBHOOK_SECRET:"whsec_unit",APP_BASE_URL:"https://prochelia.pages.dev"};
   const timestamp=Math.floor(Date.now()/1000);
