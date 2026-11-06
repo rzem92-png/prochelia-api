@@ -97,3 +97,9 @@ Les mocks seuls ne prouvent pas les transactions D1. Il faut des tests Worker-D1
 - La clé payout est liée à l'intervenant, au montant et au mode. Un conflit de clé entre utilisateurs ne renvoie aucune donnée de payout.
 - La réservation payout est maintenant conçue comme un bloc D1 atomique : débit disponible conditionnel (`available_cents >= amount`), crédit réservé, ligne payout et audit. Le résultat doit encore être prouvé par tests D1 Worker concurrents et injection de panne avant activation.
 - Les frais, remboursements et mouvements ne doivent jamais être traités comme validés par une simple réponse API; le ledger et le webhook signé restent la source de vérité.
+
+## Authentification — protections ajoutées
+
+- Login : compteur de tentatives sur 15 minutes par e-mail normalisé + IP Cloudflare, IP hachée, seuil 5, réponse 429 et `Retry-After` 900 secondes. Les tentatives expirées sont purgées au-delà de 24 h.
+- Bootstrap initial : création du premier compte gérant protégée par un verrou singleton et un batch D1 atomique afin qu'une course de deux requêtes ne crée qu'un seul compte.
+- Ces protections nécessitent encore une validation avec D1 réelle, comportement Cloudflare IP, tests de charge, observation anti-faux-positifs et revue de sécurité avant mise en production.
