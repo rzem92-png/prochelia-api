@@ -1210,10 +1210,21 @@ async function paymentWebhook(request, env) {
       if(newStatus){
         const alreadyFinal = ['paid','failed','refunded'].includes(tx.status);
         if(!alreadyFinal){
-          await env.DB.prepare('UPDATE payment_transactions SET status=?,provider_payment_id=COALESCE(?,provider_payment_id),updated_at=CURRENT_TIMESTAMP WHERE id=?').bind(newStatus,providerPaymentId||null,txId).run();
           if(newStatus==='paid'){
-            const wallet=await env.DB.prepare('SELECT * FROM wallets WHERE user_id=? LIMIT 1').bind(tx.intervenant_id).first();
-            if(wallet) await env.DB.prepare('UPDATE wallets SET available_cents=available_cents+?,updated_at=CURRENT_TIMESTAMP WHERE id=?').bind(tx.net_intervenant_cents,wallet.id).run();
+            // Payment state and wallet credit must commit atomically. A crash
+            // between these statements would otherwise mark paid without credit.
+            const results=await env.DB.batch([
+              env.DB.prepare(`UPDATE payment_transactions SET status='paid',provider_payment_id=COALESCE(?,provider_payment_id),updated_at=CURRENT_TIMESTAMP
+                WHERE id=? AND status NOT IN ('paid','failed','refunded')
+                  AND EXISTS (SELECT 1 FROM wallets WHERE user_id=?)`).bind(providerPaymentId||null,txId,tx.intervenant_id),
+              env.DB.prepare(`UPDATE wallets SET available_cents=available_cents+?,updated_at=CURRENT_TIMESTAMP
+                WHERE user_id=? AND changes()=1`).bind(tx.net_intervenant_cents,tx.intervenant_id)
+            ]);
+            if(Number(results?.[0]?.meta?.changes||0)!==1 || Number(results?.[1]?.meta?.changes||0)!==1) {
+              return json({ok:false,error:'PAYMENT_WALLET_ATOMIC_UPDATE_FAILED',version:VERSION},503);
+            }
+          } else {
+            await env.DB.prepare('UPDATE payment_transactions SET status=?,provider_payment_id=COALESCE(?,provider_payment_id),updated_at=CURRENT_TIMESTAMP WHERE id=? AND status NOT IN (\'paid\',\'failed\',\'refunded\')').bind(newStatus,providerPaymentId||null,txId).run();
           }
         }
       }
