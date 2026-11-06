@@ -75,7 +75,7 @@ test("login limits repeated failures by normalized email and Cloudflare client I
   },async run(){
     if(sql.includes("INSERT INTO login_attempts")) attempts.push({keyHash:this.args[1]});
     return {meta:{changes:1}};
-  }};return stmt;}};
+  }};return stmt;},async batch(statements){return Promise.all(statements.map(s=>s.run()));}};
   const env={DB};
   for(let n=1;n<=5;n++){
     const response=await worker.fetch(new Request(endpoint,{method:"POST",headers:{Origin:allowedOrigin,"CF-Connecting-IP":"203.0.113.8","Content-Type":"application/json"},body:JSON.stringify({email:"NoSuchUser@example.test",password:"not-a-valid-password"})}),env);
@@ -110,7 +110,7 @@ test("login IP bucket blocks password spraying across many account names", async
     if(sql.includes("COUNT(*) AS total FROM login_attempts")) return {total:attempts.filter(x=>x.keyHash===this.args[0]).length};
     if(sql.includes("FROM users WHERE email")) return null;
     return null;
-  },async run(){if(sql.includes("INSERT INTO login_attempts"))attempts.push({keyHash:this.args[1]});return {meta:{changes:1}};}};return stmt;}};
+  },async run(){if(sql.includes("INSERT INTO login_attempts"))attempts.push({keyHash:this.args[1]});return {meta:{changes:1}};}};return stmt;},async batch(statements){return Promise.all(statements.map(s=>s.run()));}};
   const env={DB};
   for(let n=1;n<=25;n++){
     const response=await worker.fetch(new Request(endpoint,{method:"POST",headers:{Origin:allowedOrigin,"CF-Connecting-IP":"203.0.113.9","Content-Type":"application/json"},body:JSON.stringify({email:"spray"+n+"@example.test",password:"not-a-real-password"})}),env);
