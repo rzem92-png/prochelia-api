@@ -127,3 +127,24 @@ test("malformed percent-encoded session cookie is rejected without crashing auth
   assert.equal(response.status,401);
   assert.equal(body.error,"UNAUTHENTICATED");
 });
+
+
+test("cross-site Fetch Metadata blocks originless mutations as CSRF defense", async()=>{
+  const response=await worker.fetch(new Request(endpoint,{
+    method:"POST",
+    headers:{"Sec-Fetch-Site":"cross-site","Content-Type":"application/json"},
+    body:JSON.stringify({email:"test@example.com",password:"not-a-real-password"})
+  }),{});
+  const body=await response.json();
+  assert.equal(response.status,403);
+  assert.equal(body.error,"CROSS_SITE_REQUEST_NOT_ALLOWED");
+});
+
+test("same-site Fetch Metadata does not block mutations", async()=>{
+  const response=await worker.fetch(new Request(endpoint,{
+    method:"POST",
+    headers:{"Sec-Fetch-Site":"same-site","Content-Type":"application/json"},
+    body:JSON.stringify({email:"test@example.com",password:"not-a-real-password"})
+  }),{});
+  assert.equal(response.status,503);
+});
