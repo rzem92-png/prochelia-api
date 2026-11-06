@@ -6,6 +6,21 @@ import { stripePost, verifyStripeSignature } from "../src/stripe.js";
 
 if (!globalThis.crypto) globalThis.crypto = webcrypto;
 
+test("V7 permission check explicitly identifies caller-provided permissions as non-authoritative", async()=>{
+  const fake=fakeDb("intervenant");
+  const env={DB:fake.DB,PAYMENT_PROVIDER:"disabled",APP_BASE_URL:"https://prochelia.pages.dev"};
+  const response=await worker.fetch(new Request("https://api.test/api/v7/check/permissions",{
+    method:"POST",headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({role:"admin",permission:"manage_payments",permissions:{manage_payments:true}})
+  }),env);
+  const body=await response.json();
+  assert.equal(response.status,200);
+  assert.equal(body.ok,true,"legacy checker remains a validator only");
+  assert.equal(body.authoritative,false);
+  assert.equal(body.source,"caller_supplied_input");
+  assert.match(body.warning,/not an authorization grant/i);
+});
+
 test("Stripe API helper sends a server-side secret and idempotency key", async()=>{
   let captured;
   const result=await stripePost(
