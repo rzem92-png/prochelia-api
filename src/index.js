@@ -1057,9 +1057,15 @@ async function paymentOnboard(request, env) {
     if(!link?.url) throw new Error('STRIPE_ACCOUNT_LINK_MISSING');
     return json({ok:true,version:VERSION,provider:'stripe',account_id:accountId,onboarding_status:'required',onboarding_url:link.url,expires_at:link.expires_at,next:'COMPLETE_STRIPE_CONNECT_ONBOARDING'},201);
   } catch(error) {
-    if(reservationId && !accountId) {
+    if(reservationId) {
       try {
-        await env.DB.prepare(`UPDATE payment_accounts SET status='creation_failed',updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='creating' AND provider_account_id IS NULL`).bind(reservationId).run();
+        if(accountId) {
+          // Stripe may have created the account before a D1 write failed.
+          // Persist its ID for recovery instead of allowing a duplicate account.
+          await env.DB.prepare(`UPDATE payment_accounts SET provider='stripe',provider_account_id=?,status='pending',onboarding_status='required',updated_at=CURRENT_TIMESTAMP WHERE id=? AND provider_account_id IS NULL`).bind(accountId,reservationId).run();
+        } else {
+          await env.DB.prepare(`UPDATE payment_accounts SET status='creation_failed',updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='creating' AND provider_account_id IS NULL`).bind(reservationId).run();
+        }
       } catch { /* Keep original failure; reconciliation can inspect the reservation. */ }
     }
     console.error('STRIPE_CONNECT_ONBOARDING_FAILED',error instanceof Error?error.message:String(error));
