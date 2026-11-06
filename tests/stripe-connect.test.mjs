@@ -560,3 +560,17 @@ test("payment webhook releases its lease and requests retry when local transacti
   assert.ok(fake.calls.some(x=>x.sql.includes("UPDATE payment_webhook_events SET processed=0")));
   assert.equal(fake.calls.some(x=>x.sql.includes("SET processed=1")),false);
 });
+
+
+test("dispute refunds fail closed and dispute release is compare-and-set atomic", async()=>{
+  const source=await readFile(new URL("../src/index.js",import.meta.url),"utf8");
+  const start=source.indexOf("async function paymentAdminResolve");
+  const end=source.indexOf("async function handleBase",start);
+  assert.ok(start>=0&&end>start,"admin dispute resolution function should exist");
+  const fn=source.slice(start,end);
+  assert.match(fn,/resolution!=='release'\) return json\(\{ok:false,error:'DISPUTE_RESOLUTION_NOT_IMPLEMENTED'/);
+  assert.match(fn,/UPDATE payment_transactions SET status='paid'.*WHERE id=\? AND status='held'/s);
+  assert.match(fn,/UPDATE payment_disputes SET status='resolved'.*WHERE id=\? AND status IN \('open','pending'\).*changes\(\)=1/s);
+  assert.match(fn,/env\.DB\.batch\(\[/);
+  assert.doesNotMatch(fn,/status='refunded'/,"dispute endpoint must not claim a refund without PSP and ledger operations");
+});
