@@ -1276,6 +1276,15 @@ async function paymentWebhook(request, env) {
   }
   if(txId){
     const tx=await env.DB.prepare('SELECT * FROM payment_transactions WHERE id=? LIMIT 1').bind(txId).first();
+    const paymentEventTypes=['payment_succeeded','charge_succeeded','payment_failed','charge_failed','payment_refunded'];
+    // Stripe may deliver an event before the local transaction reservation is
+    // committed. Do not permanently acknowledge it: release the lease so the
+    // provider can retry after the local record becomes visible.
+    if(!tx && paymentEventTypes.includes(type)){
+      await env.DB.prepare(`UPDATE payment_webhook_events SET processed=0,received_at=CURRENT_TIMESTAMP
+        WHERE provider=? AND event_id=? AND processed=2`).bind(provider,eventId).run();
+      return json({ok:false,error:'PAYMENT_TRANSACTION_NOT_LINKED',version:VERSION},503);
+    }
     if(tx){
       const statusMap={payment_succeeded:'paid',charge_succeeded:'paid',payment_failed:'failed',charge_failed:'failed',payment_refunded:'refunded'};
       const newStatus=statusMap[type];
@@ -1311,6 +1320,11 @@ async function paymentWebhook(request, env) {
     const payout=await env.DB.prepare('SELECT * FROM payout_requests WHERE id=? LIMIT 1').bind(payoutId).first();
     const statusMap={payout_processing:'processing',payout_paid:'completed',payout_failed:'failed',payout_canceled:'canceled'};
     const newStatus=statusMap[type];
+    if(!payout && newStatus){
+      await env.DB.prepare(`UPDATE payment_webhook_events SET processed=0,received_at=CURRENT_TIMESTAMP
+        WHERE provider=? AND event_id=? AND processed=2`).bind(provider,eventId).run();
+      return json({ok:false,error:'PAYOUT_REQUEST_NOT_LINKED',version:VERSION},503);
+    }
     if(payout&&newStatus){
       const alreadyFinal=['completed','failed','canceled'].includes(payout.status);
       if(!alreadyFinal){
