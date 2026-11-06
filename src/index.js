@@ -1117,7 +1117,19 @@ async function paymentWebhook(request, env) {
   await ensurePaymentSchema(env);
   const payloadHash=await sha256Base64url(raw);
   const inserted=await env.DB.prepare(`INSERT OR IGNORE INTO payment_webhook_events (id,provider,event_id,event_type,signature_valid,payload_hash) VALUES (?,?,?,?,1,?)`).bind(crypto.randomUUID(),provider,eventId,originalType,payloadHash).run();
-  if(!inserted.meta?.changes) return json({ok:true,version:VERSION,duplicate:true,event_id:eventId},200);
+  if(!inserted.meta?.changes) {
+    const existing=await env.DB.prepare('SELECT processed,payload_hash,received_at FROM payment_webhook_events WHERE provider=? AND event_id=? LIMIT 1').bind(provider,eventId).first();
+    if(!existing) return json({ok:false,error:'WEBHOOK_EVENT_STATE_UNAVAILABLE',version:VERSION},503);
+    if(existing.payload_hash && existing.payload_hash!==payloadHash) return json({ok:false,error:'WEBHOOK_EVENT_ID_PAYLOAD_CONFLICT',version:VERSION},409);
+    if(Number(existing.processed)===1) return json({ok:true,version:VERSION,duplicate:true,processed:true,event_id:eventId},200);
+  }
+  // Claim the event with a 5-minute lease. `processed=2` means in progress;
+  // crashed handlers can be reclaimed after lease expiry. Never acknowledge
+  // an unprocessed duplicate as successfully completed.
+  const claim=await env.DB.prepare(`UPDATE payment_webhook_events SET processed=2,received_at=CURRENT_TIMESTAMP
+    WHERE provider=? AND event_id=? AND (processed=0 OR (processed=2 AND received_at<=datetime('now','-5 minutes')))`)
+    .bind(provider,eventId).run();
+  if(Number(claim.meta?.changes||0)!==1) return json({ok:false,error:'WEBHOOK_EVENT_PROCESSING',version:VERSION,event_id:eventId,retry_after_seconds:30},409);
   const stripeObject=event?.data?.object||{};
   const stripeTypeMap={
     'payment_intent.succeeded':'payment_succeeded',
@@ -1169,8 +1181,13 @@ async function paymentWebhook(request, env) {
       }
     }
   }
-  await env.DB.prepare('UPDATE payment_webhook_events SET processed=1,processed_at=CURRENT_TIMESTAMP WHERE provider=? AND event_id=?').bind(provider,eventId).run();
-  await paymentAudit(env,'PSP_WEBHOOK_PROCESSED',{transaction_id:txId,payout_id:payoutId,metadata:{provider,event_id:eventId,event_type:originalType}},'OK');
+  // Audit and completion marker are committed together. A failed batch leaves
+  // the lease reclaimable rather than falsely acknowledging a partial event.
+  await env.DB.batch([
+    env.DB.prepare(`INSERT INTO payment_audit (id,event_type,transaction_id,payout_id,mission_id,user_id,result,metadata_json) VALUES (?,?,?,?,?,?,?,?)`)
+      .bind(crypto.randomUUID(),'PSP_WEBHOOK_PROCESSED',txId||null,payoutId||null,null,null,'OK',JSON.stringify({provider,event_id:eventId,event_type:originalType})),
+    env.DB.prepare('UPDATE payment_webhook_events SET processed=1,processed_at=CURRENT_TIMESTAMP WHERE provider=? AND event_id=? AND processed=2').bind(provider,eventId)
+  ]);
   return json({ok:true,version:VERSION,processed:true,event_id:eventId},200);
 }
 
