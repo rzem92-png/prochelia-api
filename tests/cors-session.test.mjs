@@ -84,3 +84,23 @@ test("login limits repeated failures by normalized email and Cloudflare client I
   }
 });
 
+test("bootstrap permits only one concurrent initial manager creation", async()=>{
+  const state={used:false,users:[]};
+  const DB={prepare(sql){const stmt={args:[],bind(...args){this.args=args;return this;},async first(){
+    if(sql.includes("SELECT COUNT(*) AS total FROM users")) return {total:state.users.length};
+    return null;
+  },async run(){return {meta:{changes:1}};}};return stmt;},
+  async batch(statements){
+    if(state.used||state.users.length){return [{meta:{changes:0}},{meta:{changes:0}}];}
+    state.used=true;
+    const args=statements[1].args;
+    state.users.push({id:args[0],email:args[1],role:"gerante"});
+    return [{meta:{changes:1}},{meta:{changes:1}}];
+  }};
+  const env={DB,BOOTSTRAP_TOKEN:"bootstrap-test-token"};
+  const makeRequest=email=>new Request("https://prochelia-api.rzem92.workers.dev/api/auth/bootstrap",{method:"POST",headers:{Origin:allowedOrigin,Authorization:"Bearer bootstrap-test-token","Content-Type":"application/json"},body:JSON.stringify({email,first_name:"Test",last_name:"Manager",password:"StrongTestPass123"})});
+  const responses=await Promise.all([worker.fetch(makeRequest("manager1@example.test"),env),worker.fetch(makeRequest("manager2@example.test"),env)]);
+  assert.deepEqual(responses.map(r=>r.status).sort(),[201,409]);
+  assert.equal(state.users.length,1);
+});
+
