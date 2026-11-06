@@ -100,7 +100,7 @@ Les mocks seuls ne prouvent pas les transactions D1. Il faut des tests Worker-D1
 
 ## Authentification — protections ajoutées
 
-- Login : compteur de tentatives sur 15 minutes par e-mail normalisé + IP Cloudflare, IP hachée, seuil 5, réponse 429 et `Retry-After` 900 secondes. Les tentatives expirées sont purgées au-delà de 24 h.
+- Login : double compteur sur 15 minutes par e-mail normalisé + IP Cloudflare (seuil 5) et par IP seule (seuil 25), IP hachée, réponse 429 et `Retry-After` 900 secondes. Les tentatives expirées sont purgées au-delà de 24 h.
 - Bootstrap initial : création du premier compte gérant protégée par un verrou singleton et un batch D1 atomique afin qu'une course de deux requêtes ne crée qu'un seul compte.
 - Ces protections nécessitent encore une validation avec D1 réelle, comportement Cloudflare IP, tests de charge, observation anti-faux-positifs et revue de sécurité avant mise en production.
 
