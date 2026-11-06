@@ -1,0 +1,104 @@
+name: "PROCHÉLIA — déployer sur Worker D1 restauré (isolé)"
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_isolated_deploy:
+        description: "Confirmer le déploiement sur prochelia-api-restore-test / prochelia-restore-test-v2 uniquement"
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy-restore-test:
+    if: ${{ inputs.confirm_isolated_deploy == true }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Vérifier strictement la cible isolée
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const c=JSON.parse(fs.readFileSync('wrangler.restore-test.jsonc','utf8'));
+          if(c.name!=='prochelia-api-restore-test') throw new Error('Worker cible non autorisé');
+          if(c.main!=='src/index.js') throw new Error('Entrée Worker inattendue');
+          if(c.d1_databases?.length!==1) throw new Error('Un seul binding D1 est autorisé');
+          if(c.d1_databases[0].binding!=='DB') throw new Error('Binding D1 inattendu');
+          if(c.d1_databases[0].database_id!=='a3526c2a-39cb-49ab-97c4-979138145f33') throw new Error('UUID D1 cible incorrect');
+          if(c.d1_databases[0].database_name!=='prochelia-restore-test-v2') throw new Error('Nom D1 cible incorrect');
+          if(['04f52830-ef5a-4f17-a640-42bbc2381bba','6adb95e5-e542-4bec-9008-fbea01042305'].includes(c.d1_databases[0].database_id)) throw new Error('Base principale ou preview source interdite');
+          if(c.name==='prochelia-api') throw new Error('Nom du Worker principal interdit');
+          if(c.vars?.PAYMENT_PROVIDER!=='disabled') throw new Error('PSP doit rester désactivé sur le Worker isolé');
+          if(!process.env.CLOUDFLARE_API_TOKEN||!process.env.CLOUDFLARE_ACCOUNT_ID) throw new Error('Secrets Cloudflare manquants');
+          console.log('Cible confirmée : Worker isolé + D1 restore-test-v2.');
+          NODE
+
+      - name: Vérifier la syntaxe et compiler sans déployer
+        run: |
+          set -euo pipefail
+          node --check src/index.js
+          node --check src/stripe.js
+          npx --yes wrangler@4 deploy --config wrangler.restore-test.jsonc --dry-run
+
+      - name: Déployer uniquement le Worker isolé
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx --yes wrangler@4 deploy --config wrangler.restore-test.jsonc 2>&1 | tee "$RUNNER_TEMP/deploy.log"
+          WORKER_URL="$(grep -Eo 'https://[A-Za-z0-9.-]+\.workers\.dev' "$RUNNER_TEMP/deploy.log" | head -n 1 || true)"
+          if [ -z "$WORKER_URL" ]; then
+            echo "URL workers.dev non détectée dans la sortie de déploiement." >&2
+            exit 1
+          fi
+          echo "WORKER_URL=$WORKER_URL" >> "$GITHUB_ENV"
+          echo "Worker isolé déployé : $WORKER_URL"
+
+      - name: Vérifier les routes publiques et l'authentification sans écriture métier D1
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --max-time 20 "$WORKER_URL/api/health" -o "$RUNNER_TEMP/health.json"
+          curl --fail --silent --show-error --max-time 20 "$WORKER_URL/api/info" -o "$RUNNER_TEMP/info.json"
+          curl --fail --silent --show-error --max-time 20 "$WORKER_URL/api/payments/config" -o "$RUNNER_TEMP/payment-config.json"
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const dir=process.env.RUNNER_TEMP;
+          const h=JSON.parse(fs.readFileSync(dir+'/health.json','utf8'));
+          const i=JSON.parse(fs.readFileSync(dir+'/info.json','utf8'));
+          const p=JSON.parse(fs.readFileSync(dir+'/payment-config.json','utf8'));
+          if(h.ok!==true) throw new Error('Health check failed');
+          for(const route of ['/api/clients','/api/intervenants','/api/payments/config','/api/payments/onboard']) {
+            if(!i.routes.includes(route)) throw new Error('Route absente du contrat API : '+route);
+          }
+          if(p.stripe_publishable_key!==null) throw new Error('Aucune clé Stripe ne doit être configurée sur le Worker isolé');
+          console.log(JSON.stringify({health:h.ok,version:h.version,profileRoutes:true,paymentProvider:p.provider,stripeKeyExposed:false}));
+          NODE
+          for route in clients intervenants; do
+            code="$(curl --silent --show-error --max-time 20 -o /dev/null -w '%{http_code}' "$WORKER_URL/api/$route")"
+            if [ "$code" != "401" ]; then
+              echo "GET /api/$route doit refuser l'accès anonyme (401), reçu $code" >&2
+              exit 1
+            fi
+          done
+
+      - name: Confirmer l'isolation
+        run: |
+          echo "Déploiement limité à prochelia-api-restore-test."
+          echo "D1 cible : prochelia-restore-test-v2."
+          echo "Aucune migration, aucune écriture métier D1, aucun changement du Worker principal ou production."

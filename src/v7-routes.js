@@ -146,9 +146,18 @@ export async function handleV7Route(
           body
         );
 
+      // This endpoint validates caller-supplied data only. It is NOT an
+      // authorization decision and must never gate privileged operations.
+      // Real authorization must use the authenticated server session, persisted
+      // role/permissions, account status, and resource ownership in each route.
       return Response.json(
 
-        result,
+        {
+          ...result,
+          authoritative: false,
+          source: "caller_supplied_input",
+          warning: "Validation only; not an authorization grant."
+        },
 
         {
           status:
