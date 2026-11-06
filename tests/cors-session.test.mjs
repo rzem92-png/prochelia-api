@@ -118,3 +118,12 @@ test("login IP bucket blocks password spraying across many account names", async
   }
 });
 
+
+test("malformed percent-encoded session cookie is rejected without crashing auth", async()=>{
+  const response=await worker.fetch(new Request("https://prochelia-api.rzem92.workers.dev/api/auth/me",{
+    method:"GET",headers:{Origin:allowedOrigin,Cookie:"prochelia_session=%E0%A4%A"}
+  }),{});
+  const body=await response.json();
+  assert.equal(response.status,401);
+  assert.equal(body.error,"UNAUTHENTICATED");
+});
