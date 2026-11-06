@@ -1401,6 +1401,10 @@ async function handleBase(request, env) {
     if (request.method !== 'POST') return json({ok:false,error:'METHOD_NOT_ALLOWED',version:VERSION},405);
     return payoutRequest(request,env);
   }
+  if (url.pathname === '/api/payments/disputes/open') {
+    if (request.method !== 'POST') return json({ok:false,error:'METHOD_NOT_ALLOWED',version:VERSION},405);
+    return openPaymentDispute(request,env);
+  }
   if (url.pathname === '/api/payments/webhook') {
     if (request.method !== 'POST') return json({ok:false,error:'METHOD_NOT_ALLOWED',version:VERSION},405);
     return paymentWebhook(request,env);
