@@ -90,3 +90,10 @@ Les mocks seuls ne prouvent pas les transactions D1. Il faut des tests Worker-D1
 - `POST /api/missions` reste désactivé.
 - Aucun vrai paiement, payout, migration D1 ou déploiement production dans cette PR.
 - PR #11 reste en brouillon et non fusionnée.
+
+## Corrections intégrées — idempotence et payout
+
+- La clé d'idempotence d'une charge mission est liée au payload (mission/client/intervenant/montants/devise) et au compte gérant initiateur. Une clé réutilisée avec un payload différent ou un autre acteur retourne un conflit; pas de replay de transaction.
+- La clé payout est liée à l'intervenant, au montant et au mode. Un conflit de clé entre utilisateurs ne renvoie aucune donnée de payout.
+- La réservation payout est maintenant conçue comme un bloc D1 atomique : débit disponible conditionnel (`available_cents >= amount`), crédit réservé, ligne payout et audit. Le résultat doit encore être prouvé par tests D1 Worker concurrents et injection de panne avant activation.
+- Les frais, remboursements et mouvements ne doivent jamais être traités comme validés par une simple réponse API; le ledger et le webhook signé restent la source de vérité.
