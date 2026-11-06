@@ -48,6 +48,28 @@ async function stripeSignature(secret,timestamp,body){
   return Array.from(mac,x=>x.toString(16).padStart(2,"0")).join("");
 }
 
+test("duplicate webhook in processing state is not falsely acknowledged as completed", async()=>{
+  const raw=JSON.stringify({id:"evt_processing_test",type:"test.event",data:{object:{id:"obj_test"}}});
+  const timestamp=Math.floor(Date.now()/1000);
+  const signature=await stripeSignature("whsec_processing_test",timestamp,raw);
+  const digest=new Uint8Array(await crypto.subtle.digest("SHA-256",new TextEncoder().encode(raw)));
+  let binary=""; for(const byte of digest) binary+=String.fromCharCode(byte);
+  const payloadHash=btoa(binary).replace(/\\+/g,"-").replace(/\\//g,"_").replace(/=+$/g,"");
+  const DB={prepare(sql){const stmt={args:[],bind(...args){this.args=args;return this;},async first(){
+    if(sql.includes("SELECT processed,payload_hash,received_at")) return {processed:2,payload_hash:payloadHash,received_at:new Date().toISOString().replace("T"," ").slice(0,19)};
+    return null;
+  },async run(){
+    if(sql.includes("INSERT OR IGNORE INTO payment_webhook_events")) return {meta:{changes:0}};
+    if(sql.includes("SET processed=2")) return {meta:{changes:0}};
+    return {meta:{changes:1}};
+  }};return stmt;}};
+  const response=await worker.fetch(new Request("https://api.test/api/payments/webhook",{method:"POST",headers:{"stripe-signature":"t="+timestamp+",v1="+signature,"Content-Type":"application/json"},body:raw}),{DB,PAYMENT_PROVIDER:"stripe",STRIPE_WEBHOOK_SECRET:"whsec_processing_test"});
+  const body=await response.json();
+  assert.equal(response.status,409);
+  assert.equal(body.error,"WEBHOOK_EVENT_PROCESSING");
+  assert.equal(body.duplicate,undefined);
+});
+
 test("Stripe webhook signature accepts a valid recent v1 signature", async()=>{
   const secret="whsec_unit_test";
   const timestamp=Math.floor(Date.now()/1000);
