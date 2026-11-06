@@ -971,9 +971,13 @@ async function paymentOnboard(request, env) {
     return json({ok:false,error:'STRIPE_CONNECT_ONBOARDING_DISABLED',version:VERSION},503);
   }
   const stripeSecretKey=String(env.STRIPE_SECRET_KEY||'').trim();
+  const stripePublishableKey=String(env.STRIPE_PUBLISHABLE_KEY||'').trim();
   const isTestStripeKey=/^(sk|rk)_test_/.test(stripeSecretKey);
   const isLiveStripeKey=/^(sk|rk)_live_/.test(stripeSecretKey);
-  if(!isTestStripeKey && !(isLiveStripeKey && env.STRIPE_CONNECT_LIVE_ENABLED==='true')) {
+  const isTestPublishableKey=/^pk_test_/.test(stripePublishableKey);
+  const isLivePublishableKey=/^pk_live_/.test(stripePublishableKey);
+  if(!(isTestStripeKey && isTestPublishableKey) &&
+     !(isLiveStripeKey && isLivePublishableKey && env.STRIPE_CONNECT_LIVE_ENABLED==='true')) {
     return json({ok:false,error:'STRIPE_CONNECT_LIVE_DISABLED',version:VERSION},503);
   }
   const auth = await getSessionUser(request, env);
@@ -1077,8 +1081,8 @@ function paymentPublicConfig(request,env) {
   const provider=paymentProvider(env);
   const publishable=provider==='stripe' && env.STRIPE_PUBLISHABLE_KEY ? String(env.STRIPE_PUBLISHABLE_KEY) : null;
   const secret=String(env.STRIPE_SECRET_KEY||'').trim();
-  const allowedStripeKey=/^(sk|rk)_test_/.test(secret) ||
-    (/^(sk|rk)_live_/.test(secret) && env.STRIPE_CONNECT_LIVE_ENABLED==='true');
+  const allowedStripeKey=(/^(sk|rk)_test_/.test(secret) && /^pk_test_/.test(String(env.STRIPE_PUBLISHABLE_KEY||''))) ||
+    (/^(sk|rk)_live_/.test(secret) && /^pk_live_/.test(String(env.STRIPE_PUBLISHABLE_KEY||'')) && env.STRIPE_CONNECT_LIVE_ENABLED==='true');
   const onboardingReady=env.STRIPE_CONNECT_ONBOARDING_ENABLED==='true' && !!publishable &&
     allowedStripeKey && !!env.STRIPE_WEBHOOK_SECRET && !!env.APP_BASE_URL &&
     !!env.STRIPE_DASHBOARD && !!env.STRIPE_FEES_COLLECTOR && !!env.STRIPE_LOSSES_COLLECTOR;
