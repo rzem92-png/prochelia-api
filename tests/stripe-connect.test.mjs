@@ -520,6 +520,8 @@ test("Stripe Connect rejects invalid Account Tokens and missing terms consent be
     const env={DB:fake.DB,STRIPE_CONNECT_ONBOARDING_ENABLED:"true",PAYMENT_PROVIDER:"stripe",STRIPE_SECRET_KEY:"sk_test_unit",STRIPE_PUBLISHABLE_KEY:"pk_test_unit",STRIPE_WEBHOOK_SECRET:"whsec_unit",STRIPE_DASHBOARD:"express",STRIPE_FEES_COLLECTOR:"application",STRIPE_LOSSES_COLLECTOR:"application",APP_BASE_URL:"https://prochelia.pages.dev"};
     const cases=[
       {account_token:"bad-token",stripe_terms_accepted:true},
+      {account_token:123456789,stripe_terms_accepted:true},
+      {account_token:{token:"acctok_valid123"},stripe_terms_accepted:true},
       {account_token:"acctok_valid123",stripe_terms_accepted:false},
       {account_token:"acctok_valid123"}
     ];
