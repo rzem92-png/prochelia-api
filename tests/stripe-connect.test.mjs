@@ -235,6 +235,32 @@ test("Stripe Connect onboarding creates the account and a fresh onboarding link 
   }
 });
 
+test("existing linked Connect account can recover from an expired or failed onboarding link without creating another account", async()=>{
+  const originalFetch=globalThis.fetch;
+  const calls=[];
+  globalThis.fetch=async(url,init)=>{
+    calls.push({url,init});
+    if(String(url).endsWith("/v2/core/account_links")) return new Response(JSON.stringify({error:{type:"invalid_request_error",code:"account_link_failed"}}),{status:400,headers:{"content-type":"application/json"}});
+    throw new Error("account creation must not be called for an already-linked account");
+  };
+  try {
+    const fake=fakeDb("intervenant",{paymentAccount:{id:"linked-reservation",user_id:"user-test-1",provider:"stripe",provider_account_id:"acct_linked123",status:"pending",onboarding_status:"required",payouts_enabled:0}});
+    const env={DB:fake.DB,STRIPE_CONNECT_ONBOARDING_ENABLED:"true",PAYMENT_PROVIDER:"stripe",STRIPE_SECRET_KEY:"sk_test_unit",STRIPE_PUBLISHABLE_KEY:"pk_test_unit",STRIPE_WEBHOOK_SECRET:"whsec_unit",STRIPE_DASHBOARD:"express",STRIPE_FEES_COLLECTOR:"application",STRIPE_LOSSES_COLLECTOR:"application",APP_BASE_URL:"https://prochelia.pages.dev"};
+    const response=await worker.fetch(new Request("https://api.test/api/payments/onboard",{
+      method:"POST",headers:{Origin:"https://prochelia.pages.dev",Cookie:"prochelia_session=synthetic-token","Content-Type":"application/json"},
+      body:JSON.stringify({account_token:"acctok_retry123",stripe_terms_accepted:true})
+    }),env);
+    const body=await response.json();
+    assert.equal(response.status,502);
+    assert.equal(body.error,"STRIPE_ONBOARDING_FAILED");
+    assert.equal(calls.length,1);
+    assert.ok(String(calls[0].url).endsWith("/v2/core/account_links"));
+    assert.equal(calls[0].init.headers["Idempotency-Key"].startsWith("prochelia-connect-link-user-test-1-"),true);
+  } finally {
+    globalThis.fetch=originalFetch;
+  }
+});
+
 test("Stripe Connect ambiguous account creation is locked for reconciliation instead of retrying", async()=>{
   const originalFetch=globalThis.fetch;
   globalThis.fetch=async()=>{throw new Error("simulated network timeout after Stripe request");};
