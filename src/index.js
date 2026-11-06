@@ -2911,7 +2911,7 @@ async function productionConfigCheck(env) {
 async function finalProductionAudit(request,env) {
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
   const result=await productionConfigCheck(env);
-  const {checks,blocking,overall,externalNotConfigured}=productionAuditGate(result,env);
+  const {checks,blocking,overall,externalNotConfigured,extra}=productionAuditGate(result,env);
   for(const check of checks.slice((result.checks||[]).length)){
     await env.DB.prepare(`INSERT INTO system_config_checks(id,check_code,status,details_json) VALUES(?,?,?,?)`).bind(crypto.randomUUID(),check.code,check.status,JSON.stringify(check)).run();
   }
@@ -3929,9 +3929,9 @@ function productionAuditGate(result,env){
  const checks=[...(result.checks||[]),...extra];
  const codes=new Set(['SECRET:PAYMENT_PROVIDER','SECRET:PAYMENT_WEBHOOK_SECRET','SECRET:PAYMENT_API_SECRET','SECRET:STRIPE_SECRET_KEY','CONFIG:STRIPE_PUBLISHABLE_KEY','SECRET:STRIPE_WEBHOOK_SECRET','SECRET:STRIPE_DASHBOARD','SECRET:STRIPE_FEES_COLLECTOR','SECRET:STRIPE_LOSSES_COLLECTOR','SECRET:APP_BASE_URL','SECRET:BOOTSTRAP_TOKEN','SERVER_PRICING_POLICY','STRIPE_CHARGES_ADAPTER','STRIPE_PAYOUT_ADAPTER','SECURITY_CODE_DELIVERY','NOTIFICATION_PROVIDER','MAPS_PROVIDER','CORS_ORIGIN','BACKUP_R2']);
  const blocking=checks.filter(x=>codes.has(x.code)&&x.status!=='OK');
- const externalNotConfigured=externalNotConfigured;
+ const externalNotConfigured=Number(result.externalNotConfigured||0);
  const overall=blocking.length===0&&result.blocking===0&&externalNotConfigured===0;
- return {checks,blocking,overall,externalNotConfigured};
+ return {checks,blocking,overall,externalNotConfigured,extra};
 }
 async function strictProductionAudit(request,env){
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
