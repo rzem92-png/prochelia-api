@@ -74,7 +74,13 @@ export default {
 
     try {
       if (request.method === "POST") {
-        const payload = await readLimited(request, MAX_BODY_BYTES);
+        let payload;
+        try {
+          payload = await readLimited(request, MAX_BODY_BYTES);
+        } catch {
+          // Invalid UTF-8 is a client input error, not an R2 provider failure.
+          return response({ok:false,error:"INVALID_UTF8"},400);
+        }
         if (payload === null) return response({ok:false,error:"PAYLOAD_TOO_LARGE"},413);
         if (payload !== TEST_PAYLOAD) return response({ok:false,error:"INVALID_TEST_PAYLOAD"},400);
         await env.R2_STAGING.put(TEST_KEY, payload, { httpMetadata:{contentType:"text/plain; charset=utf-8"} });
