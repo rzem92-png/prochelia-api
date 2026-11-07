@@ -6,6 +6,10 @@ const source = readFileSync(new URL('../src/index.js', import.meta.url), 'utf8')
 const adapter = readFileSync(new URL('../src/stripe-adapter.js', import.meta.url), 'utf8');
 const scanner = readFileSync(new URL('../security/clamav-gateway/server.mjs', import.meta.url), 'utf8');
 const walletMigration = readFileSync(new URL('../migrations/0004_atomic_wallet_ledger.sql', import.meta.url), 'utf8');
+const trustPassportMigration = readFileSync(new URL('../migrations/0007_trust_passport_schema.sql', import.meta.url), 'utf8');
+const copilotMigration = readFileSync(new URL('../migrations/0006_copilot_schema.sql', import.meta.url), 'utf8');
+const documentSecurityMigration = readFileSync(new URL('../migrations/0017_document_security_scans.sql', import.meta.url), 'utf8');
+const consolidatedMigration = readFileSync(new URL('../migrations/0018_consolidated_business_schema.sql', import.meta.url), 'utf8');
 
 test('mission security checks assigned mission and canonical intervenant profile mapping', () => {
   assert.match(source, /MISSION_ASSIGNMENT_MISMATCH/);
@@ -203,7 +207,7 @@ test('Copilot readiness diagnostics are authenticated and never expose secret va
 
 
 test('Copilot plans are persisted with review status and owner-scoped retrieval', () => {
-  assert.match(source, /CREATE TABLE IF NOT EXISTS copilot_action_plans/);
+  assert.match(copilotMigration, /CREATE TABLE IF NOT EXISTS copilot_action_plans/);
   assert.match(source, /AWAITING_HUMAN_REVIEW/);
   assert.match(source, /async function copilotListPlans\(request,env\)/);
   assert.match(source, /async function copilotGetPlan\(request,env,id\)/);
@@ -214,7 +218,7 @@ test('Copilot plans are persisted with review status and owner-scoped retrieval'
 
 
 test('Uploaded documents remain quarantined unless a configured antivirus confirms the exact hash is clean', () => {
-  assert.match(source, /CREATE TABLE IF NOT EXISTS document_security_scans/);
+  assert.match(documentSecurityMigration, /CREATE TABLE IF NOT EXISTS document_security_scans/);
   assert.match(source, /DOCUMENT_SCAN_URL/);
   assert.match(source, /DOCUMENT_SCAN_TOKEN/);
   assert.match(source, /SCANNER_DID_NOT_CONFIRM_FILE_HASH/);
@@ -381,8 +385,8 @@ test('Travel fee and operating cost use server policy and a persisted route esti
 
 
 test('Travel policy history is retained while only one active policy is permitted', () => {
-  assert.match(source, /DROP INDEX IF EXISTS idx_pricing_travel_policy_active/);
-  assert.match(source, /ON pricing_travel_policies\(phase, client_type\) WHERE active=1/);
+  assert.match(consolidatedMigration, /DROP INDEX IF EXISTS idx_pricing_travel_policy_active/);
+  assert.match(consolidatedMigration, /ON pricing_travel_policies\(phase, client_type\) WHERE active=1/);
   assert.match(source, /idx_pricing_route_owner_expiry/);
 });
 
@@ -431,7 +435,7 @@ test('Pricing quotes reject every client-supplied price, discount, distance and 
 
 test('Every quote requires an active D1 prestation and its active server tariff', () => {
   const quote = source.slice(source.indexOf('async function pricingQuote'), source.indexOf('async function financeSummary'));
-  assert.match(source, /CREATE TABLE IF NOT EXISTS pricing_travel_policies/);
+  assert.match(consolidatedMigration, /CREATE TABLE IF NOT EXISTS pricing_travel_policies/);
   assert.match(quote, /FROM tarifs t JOIN prestations p ON p\.id=t\.prestation_id/);
   assert.match(quote, /p\.active=1 AND t\.prestation_id=\? AND t\.type='habituel' AND t\.active=1/);
   assert.match(quote, /ACTIVE_PRESTATION_TARIFF_AMBIGUOUS/);
@@ -446,8 +450,8 @@ test('Date modifiers and public holidays are calculated from mission timestamps 
   const quote = source.slice(source.indexOf('async function pricingQuote'), source.indexOf('async function financeSummary'));
   assert.match(quote, /timeZone:'Europe\/Paris'/);
   assert.match(quote, /pricing_holidays/);
-  assert.match(source, /2026-04-06/);
-  assert.match(source, /2030-12-25/);
+  assert.match(consolidatedMigration, /2026-04-06/);
+  assert.match(consolidatedMigration, /2030-12-25/);
   assert.match(quote, /holiday_date BETWEEN/);
   assert.match(quote, /for\(let t=startMs;t<endMs;t\+=30\*60\*1000\)/);
   assert.match(quote, /localSamples\.some\(p=>p\.weekday==='Sat'\)/);
