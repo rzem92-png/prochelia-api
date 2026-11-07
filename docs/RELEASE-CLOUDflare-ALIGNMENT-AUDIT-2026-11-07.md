@@ -42,3 +42,12 @@ Base preview `6adb95e5-e542-4bec-9008-fbea01042305`, interrogée sans écriture 
 ## R2 — blocage constaté
 La liste des buckets R2 Cloudflare a répondu HTTP 403 / code 10042 : R2 doit d'abord être activé dans le Dashboard Cloudflare. Aucun bucket n'a été créé et aucun objet n'a été écrit.
 La sauvegarde chiffrée fraîche, nécessaire comme précondition à la migration D1 preview, ne peut donc pas être attestée à cette date.
+
+
+## Mise à jour candidate — Copilote schema (2026-11-07)
+- Commit : `3cf8aafc6f30a7d9d2cbbb2a1f3cb1ddca67b2cd`.
+- `ensureCopilotSchema` a été remplacée par une vérification read-only de `sqlite_master` : elle ne crée plus tables/index au runtime et fail-closed avec `COPILOT_SCHEMA_NOT_READY` si le schéma est absent.
+- Migration candidate `0006_copilot_schema.sql` ajoutée pour `copilot_interactions`, `copilot_action_plans` et leurs index.
+- Test `tests/copilot-runtime-schema-migration.test.mjs` ajouté à la suite `test:prelaunch`.
+- La migration 0006 est candidate uniquement : elle n’a pas été exécutée sur D1 distant. Son ordre et son application restent conditionnés à la sauvegarde/restauration validée et à la recette locale.
+- Cette correction est partielle : les autres fonctions `ensure*Schema` listées dans `docs/v14-5-7-runtime-ddl-global-audit-2026-11-07.md` conservent encore du DDL runtime. Le statut global reste NO-GO.
