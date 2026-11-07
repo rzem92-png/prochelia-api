@@ -107,3 +107,22 @@ test('productionSafetySchema is read-only and fail-closed', async () => {
   assert.match(migration, /production_security_events/);
   assert.match(migration, /idx_prod_sec_events_date/);
 });
+
+test('ensureSecuritySchema is read-only and fail-closed', async () => {
+  const body = helperBody('ensureSecuritySchema');
+  assert.match(body, /sqlite_master/);
+  assert.match(body, /SECURITY_SCHEMA_NOT_READY/);
+  assert.doesNotMatch(body, /CREATE TABLE|CREATE INDEX|ALTER TABLE|DROP TABLE|INSERT INTO/i);
+  const migration = await readFile(new URL('../migrations/0016_security_identity_schema.sql', import.meta.url), 'utf8');
+  for (const name of ['identity_verifications','trusted_devices','mission_security','mission_security_attempts','security_audit']) assert.ok(migration.includes(name));
+});
+
+test('ensureDocumentSecuritySchema is read-only and fail-closed', async () => {
+  const body = helperBody('ensureDocumentSecuritySchema');
+  assert.match(body, /sqlite_master/);
+  assert.match(body, /DOCUMENT_SECURITY_SCHEMA_NOT_READY/);
+  assert.doesNotMatch(body, /CREATE TABLE|CREATE INDEX|ALTER TABLE|DROP TABLE|INSERT INTO/i);
+  const migration = await readFile(new URL('../migrations/0017_document_security_scans.sql', import.meta.url), 'utf8');
+  assert.match(migration, /document_security_scans/);
+  assert.match(migration, /idx_document_scans_latest/);
+});
