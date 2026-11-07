@@ -37,3 +37,11 @@ Base ciblée : `prochelia-preview-db` — UUID `6adb95e5-e542-4bec-9008-fbea0104
 - Observability globale `enabled=false` (les logs d'invocation sont indiqués enabled/persist=true).
 - Liste de bindings secrets Worker retournée vide. Les clés Stripe et autres secrets ne sont donc pas confirmés présents sous forme de secret Worker. Ne pas injecter de clé live; configurer sandbox via secret store et vérifier le secret sans jamais afficher sa valeur.
 - Test HTTP externe du Worker depuis l'environnement d'outils bloqué par politique réseau (`403 requests ... are not allowed`); aucune réponse health endpoint n'est certifiée depuis ce contrôle.
+
+## Version/source drift — release blocker
+- Staging branch `staging-prochelia-v14` source reports `V14.5.1-EXPERT-PREPRODUCTION` in `src/index.js`.
+- Cloudflare Worker `prochelia-api-preview` configuration annotation reports a deployed preview described as `V14.0.0` (staging payment-route wiring), last modified 2026-11-06 07:21 UTC. This indicates deployed preview and Git branch need reconciliation; deployment SHA was not proven.
+- A separate branch `prelaunch/v14.5.7-consolidation-audit` contains source `V14.5.7-EXPERT-PREPRODUCTION` and the four SQL migration files named by the staging D1 migration ledger. Do not cherry-pick or deploy it blindly: its source/schema contract must be reviewed against the present staging branch and D1.
+- The preview Worker API returned no configured secret bindings. Secrets may be managed elsewhere, but they are not confirmed in this Worker. Verify sandbox secret setup in Cloudflare without exposing values.
+- Stripe adapter regression test now imports `src/stripe-adapter.js` (the actual source module referenced by `src/index.js`) rather than the root legacy copy.
+- CI static validation was expanded to syntax-check `src/stripe-adapter.js`, `src/v7.js`, `src/v7-routes.js`, and verify Wrangler `main` plus local imports. Workflow run result for the new commit must be checked in Actions before release.
