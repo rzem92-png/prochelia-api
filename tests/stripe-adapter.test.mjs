@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHmac } from 'node:crypto';
-import { verifyStripeSignature, stripeCheckoutPayload, resolveStripeTransactionId, stripeWebhookAmountMatches } from '../stripe-adapter.js';
+import { verifyStripeSignature, stripeCheckoutPayload, resolveStripeTransactionId, stripeWebhookAmountMatches } from '../src/stripe-adapter.js';
 
 const secret='whsec_test_prochelia';
 function signature(body,timestamp) {
