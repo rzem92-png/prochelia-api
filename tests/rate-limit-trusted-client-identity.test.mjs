@@ -6,7 +6,7 @@ const source = await readFile(new URL('../src/index.js', import.meta.url), 'utf8
 
 test('rate limiter derives identity only from trusted Cloudflare header', () => {
   const start = source.indexOf('async function productionSubjectHash');
-  const end = source.indexOf('async function hashPassword', start);
+  const end = source.indexOf('async function productionRateLimitSchemaReady', start);
   assert.notEqual(start, -1);
   assert.notEqual(end, -1);
   const helper = source.slice(start, end);
