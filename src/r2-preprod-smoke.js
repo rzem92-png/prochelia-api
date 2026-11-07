@@ -66,8 +66,9 @@ export default {
         r2_binding:!!env.R2_STAGING, token_configured:typeof env.R2_TEST_TOKEN==="string" && env.R2_TEST_TOKEN.length>=32,
         public_access:"not enabled by this Worker"});
     }
-    if (!env.R2_STAGING) return response({ok:false,error:"R2_BINDING_MISSING"},503);
+    // Authenticate before revealing operational configuration details.
     if (!await authorized(request, env)) return response({ok:false,error:"UNAUTHORIZED"},401);
+    if (!env.R2_STAGING) return response({ok:false,error:"R2_BINDING_MISSING"},503);
     if (url.pathname !== "/api/r2/smoke" || !["POST","GET","DELETE"].includes(request.method)) {
       return response({ok:false,error:"NOT_FOUND"},404);
     }
