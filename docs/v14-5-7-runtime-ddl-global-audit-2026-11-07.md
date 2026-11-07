@@ -114,3 +114,11 @@ Ce document ne prétend pas que la correction est intégrée : il enregistre le 
 - Migration candidate `0015_production_security_events.sql` ajoutée.
 - Test de contrat ajouté au test runtime-schema.
 - Commits source `fd5326ff1f5b77b24ab6cfb000de62efa2efed85`, migration `63e218bc8530e8f44936cb7cadfcf442d8e0061a`, test `03ad57c04f2d1112cdb1695d2d2eb8223cd6d700`.
+
+## Consolidation candidate — identity/mission/document security
+
+- Helpers `ensureSecuritySchema` et `ensureDocumentSecuritySchema` remplacés par readiness checks read-only, fail-closed.
+- Migrations candidates `0016_security_identity_schema.sql` et `0017_document_security_scans.sql` créées.
+- Tests de contrat ajoutés à la suite prelaunch.
+- Commits : identity source `e14e2b7e7cf32888a7b2b7bf2f84488d003efaa8`, migration `582b670429bee0a9ccd3c6c17e10ed18cc681b3f`; document source `9a145b011cf981ccadfc0a271e88ff90b9e94e27`, migration `837d9d53eb53d825622308b0f0918f0446d771f7`; tests `ddf2260743e678286776ae50592e646324a1652e`.
+- Migrations non exécutées sur D1 distant. CI n’a pas retourné de status.
