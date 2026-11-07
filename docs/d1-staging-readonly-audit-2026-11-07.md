@@ -27,3 +27,13 @@ Base ciblée : `prochelia-preview-db` — UUID `6adb95e5-e542-4bec-9008-fbea0104
 5. Refaire ces étapes sur l'environnement production séparé avant tout déploiement.
 
 **Statut : audit de lecture staging effectué; D1 production et intégrité globale restent non certifiées.**
+
+## Worker preview — inspection configuration en lecture seule
+- Worker identifié : `prochelia-api-preview` (annotation : preview-only).
+- Binding `APP_ENV=preview`.
+- Binding D1 `DB` pointe vers l'UUID staging attendu `6adb95e5-e542-4bec-9008-fbea01042305`.
+- `CORS_ORIGIN` inclut les deux domaines Pages staging déclarés.
+- Subdomain workers.dev activé et previews activées.
+- Observability globale `enabled=false` (les logs d'invocation sont indiqués enabled/persist=true).
+- Liste de bindings secrets Worker retournée vide. Les clés Stripe et autres secrets ne sont donc pas confirmés présents sous forme de secret Worker. Ne pas injecter de clé live; configurer sandbox via secret store et vérifier le secret sans jamais afficher sa valeur.
+- Test HTTP externe du Worker depuis l'environnement d'outils bloqué par politique réseau (`403 requests ... are not allowed`); aucune réponse health endpoint n'est certifiée depuis ce contrôle.
