@@ -1,31 +1,48 @@
-# R2 EU preproduction binding
+# PROCHÉLIA — R2 EU preproduction smoke test
 
-This configuration is isolated from the production Worker and production D1 database.
+This is an isolated Worker entrypoint. It does not import the main API, does not bind D1, does not process payments, and does not expose object listing.
 
-## Configuration guardrails
-- Worker: `prochelia-api-r2-preprod` (separate from `prochelia-api`)
-- D1: `prochelia-restore-test-v2` only
-- R2 binding: `R2_STAGING` → `prochelia-staging-storage`, jurisdiction `eu`
-- Payments: disabled (`PAYMENT_PROVIDER=disabled`)
-- No production deployment, D1 migration, or production data copy is permitted from this config.
+## Worker and storage
+- Worker: `prochelia-api-r2-preprod`
+- Entrypoint: `src/r2-preprod-smoke.js`
+- R2 binding: `R2_STAGING` → `prochelia-staging-storage`
+- Jurisdiction: `eu`
+- Public bucket development URL: keep disabled
+- Payment provider: disabled
+- D1: no binding in this smoke Worker
 
 ## Before deploying
-1. Confirm the R2 bucket exists in the same Cloudflare account as the Worker.
-2. Confirm the Dashboard shows jurisdiction EU and public development URL disabled.
-3. Confirm the restore-test D1 database is disposable/non-production and its ID is still correct.
-4. Validate the configuration with Wrangler:
+1. Confirm the Dashboard shows bucket `prochelia-staging-storage`, jurisdiction EU, and public URL disabled.
+2. Create a random secret at least 32 characters long; do not commit or send it in chat.
+3. Set it only as a Worker secret:
+   `npx wrangler secret put R2_TEST_TOKEN --config wrangler.r2-preprod.jsonc`
+4. Validate the config:
    `npx wrangler deploy --dry-run --config wrangler.r2-preprod.jsonc`
-5. Deploy only after code review and explicit preproduction approval:
+5. Deploy only this isolated smoke Worker:
    `npx wrangler deploy --config wrangler.r2-preprod.jsonc`
 
-## Post-deploy smoke tests
-- `GET /api/health` returns healthy.
-- Verify the R2 binding is present from Worker runtime (no secret/credential exposure).
-- Test upload, read-back, metadata, delete and verify delete; use a synthetic non-PII object only.
-- Verify unauthorized requests cannot list, read, overwrite or delete objects.
-- Verify the object is absent after cleanup.
-- Confirm no public bucket URL was enabled.
-- Do not test or deploy against production D1/Worker.
+## Smoke test after deployment
+- GET `/api/health`: check `r2_binding=true` and `token_configured=true`.
+- POST `/api/r2/smoke` with Bearer token and exact body `PROCHELIA-R2-PREPROD-TEST`.
+- GET same route with Bearer token: must return `verified=true`.
+- DELETE same route with Bearer token: must return `deleted=true`.
+- Repeat GET: must return 404 / `OBJECT_NOT_FOUND`.
+- Missing/incorrect token must return 401.
+- Only one fixed synthetic non-PII object is used; no list operation exists.
 
-Wrangler R2 binding jurisdiction support is documented at:
-https://developers.cloudflare.com/r2/reference/data-location/
+Example requests (replace URL and token locally; do not paste token into GitHub):
+```sh
+curl -sS "$WORKER_URL/api/health"
+curl -sS -X POST "$WORKER_URL/api/r2/smoke" -H "Authorization: Bearer $R2_TEST_TOKEN" --data 'PROCHELIA-R2-PREPROD-TEST'
+curl -sS "$WORKER_URL/api/r2/smoke" -H "Authorization: Bearer $R2_TEST_TOKEN"
+curl -sS -X DELETE "$WORKER_URL/api/r2/smoke" -H "Authorization: Bearer $R2_TEST_TOKEN"
+```
+
+## Safety
+- Do not enable public bucket access.
+- Do not use real customer data.
+- Do not bind production D1 or production Worker.
+- Do not run migrations or production deployment from this config.
+- Remove the test secret and Worker when the preproduction verification is finished, unless continued staging use is explicitly approved.
+
+Cloudflare jurisdiction reference: https://developers.cloudflare.com/r2/reference/data-location/
