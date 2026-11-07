@@ -6,7 +6,7 @@ on:
       - preprod/r2-eu-binding-isolated-2026-11-07
     paths:
       - "src/r2-preprod-smoke.js"
-      - "tests/r2-preprod-smoke.test.mjs"
+      - "tests/r2-preprod*.test.mjs"
       - ".github/workflows/test-r2-preprod-smoke.yml"
   workflow_dispatch:
 
@@ -25,4 +25,4 @@ jobs:
         with:
           node-version: "22"
       - name: Run isolated R2 smoke tests (no Cloudflare credentials)
-        run: node --test tests/r2-preprod-smoke.test.mjs
+        run: node --test tests/r2-preprod*.test.mjs
