@@ -203,7 +203,7 @@ test("Stripe onboarding refuses to choose dashboard and financial responsibility
   const env={DB:fake.DB,PAYMENT_PROVIDER:"stripe",STRIPE_SECRET_KEY:"sk_test_unit",STRIPE_WEBHOOK_SECRET:"whsec_unit",APP_BASE_URL:"https://prochelia.pages.dev"};
   const response=await worker.fetch(new Request("https://api.test/api/payments/onboard",{
     method:"POST",
-    headers:{Origin:"https://prochelia.pages.dev",Cookie:"prochelia_session=synthetic-token","Content-Type":"application/json"},
+    headers:await authenticatedMutationHeaders(),
     body:"{}"
   }),env);
   const body=await response.json();
@@ -243,7 +243,7 @@ test("server quote endpoint refuses client-controlled prices until a tariff poli
   const env={DB:fake.DB};
   const response=await worker.fetch(new Request("https://api.test/api/pricing/quote",{
     method:"POST",
-    headers:{Cookie:"prochelia_session=synthetic-token","Content-Type":"application/json"},
+    headers:await authenticatedMutationHeaders(),
     body:JSON.stringify({base_price_cents:1,platform_fee_percent:0,discount_cents:999999,holiday:true})
   }),env);
   const body=await response.json();
