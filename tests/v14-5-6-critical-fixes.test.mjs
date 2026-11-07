@@ -619,3 +619,15 @@ test('Cumulative refunds stay monotonic, idempotent, and bounded by credited amo
   assert.match(webhook, /MAX\(0,ROUND\(t\.net_intervenant_cents\*1\.0\*t\.refund_cents\/NULLIF\(t\.gross_cents,0\)\)-/);
   assert.match(webhook, /COALESCE\(refund_cents,0\)<\?/);
 });
+
+test('Payment runtime schema guard is read-only and fails closed on missing migrated objects', () => {
+  const start = source.indexOf('async function ensurePaymentSchema(env)');
+  const end = source.indexOf('\\nfunction moneyCents', start);
+  assert.ok(start >= 0 && end > start);
+  const guard = source.slice(start, end);
+  assert.doesNotMatch(guard, /CREATE TABLE|CREATE INDEX|CREATE TRIGGER|ALTER TABLE|DROP TABLE/i);
+  assert.match(guard, /SELECT name FROM sqlite_master/);
+  assert.match(guard, /PAYMENT_SCHEMA_NOT_READY/);
+  assert.match(guard, /requiredTables/);
+  assert.match(guard, /requiredTriggers/);
+});
