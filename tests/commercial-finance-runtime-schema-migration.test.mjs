@@ -97,3 +97,13 @@ test('ensureOperationalSchema has no runtime DDL/ALTER and checks columns', asyn
     assert.ok(migration.includes(name), 'migration includes ' + name);
   }
 });
+
+test('productionSafetySchema is read-only and fail-closed', async () => {
+  const body = helperBody('productionSafetySchema');
+  assert.match(body, /sqlite_master/);
+  assert.match(body, /PRODUCTION_SAFETY_SCHEMA_NOT_READY/);
+  assert.doesNotMatch(body, /CREATE TABLE|CREATE INDEX|ALTER TABLE|DROP TABLE|INSERT INTO/i);
+  const migration = await readFile(new URL('../migrations/0015_production_security_events.sql', import.meta.url), 'utf8');
+  assert.match(migration, /production_security_events/);
+  assert.match(migration, /idx_prod_sec_events_date/);
+});
