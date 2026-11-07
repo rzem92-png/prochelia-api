@@ -15,3 +15,6 @@ CREATE TABLE IF NOT EXISTS security_rate_limits (
 
 CREATE INDEX IF NOT EXISTS idx_security_rate_limits_window
   ON security_rate_limits(bucket, window_start);
+
+CREATE INDEX IF NOT EXISTS idx_security_rate_limits_window_start
+  ON security_rate_limits(window_start);
