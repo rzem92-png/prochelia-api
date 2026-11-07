@@ -733,13 +733,23 @@ async function deliverSecurityCodes(env, payload) {
 }
 
 async function ensureTrustPassportSchema(env) {
-  if (!env.DB) throw new Error('DATABASE_REQUIRED');
-  const sql = [
-    `CREATE TABLE IF NOT EXISTS trust_service_catalog (service_code TEXT PRIMARY KEY, prestation_id TEXT NOT NULL UNIQUE, label TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'DRAFT', require_identity INTEGER NOT NULL DEFAULT 1, requirements_json TEXT NOT NULL DEFAULT '[]', allow_global_scope INTEGER NOT NULL DEFAULT 0, version INTEGER NOT NULL DEFAULT 1, updated_by_user_id TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`,
-    `CREATE TABLE IF NOT EXISTS trust_verifications (id TEXT PRIMARY KEY, intervenant_id TEXT NOT NULL, category TEXT NOT NULL, status TEXT NOT NULL, service_code TEXT NOT NULL, valid_from TEXT, expires_at TEXT, requires_expiry INTEGER NOT NULL DEFAULT 0, proof_document_id TEXT NOT NULL, verified_by_user_id TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, UNIQUE(intervenant_id,category,service_code,proof_document_id))`,
-    `CREATE INDEX IF NOT EXISTS idx_trust_verifications_lookup ON trust_verifications(intervenant_id,service_code,category,status,expires_at)`
+  if (!env?.DB) throw new Error('DATABASE_REQUIRED');
+  // Runtime schema access is read-only. Provision exclusively through D1 migrations.
+  const required = [
+    'trust_service_catalog',
+    'trust_verifications',
+    'idx_trust_verifications_lookup'
   ];
-  for (const q of sql) await env.DB.prepare(q).run();
+  const placeholders = required.map(() => '?').join(',');
+  const rows = await env.DB.prepare(
+    `SELECT name FROM sqlite_master WHERE type IN ('table','index') AND name IN (${placeholders})`
+  ).bind(...required).all();
+  const found = new Set((rows.results || []).map(row => row.name));
+  const missing = required.filter(name => !found.has(name));
+  if (missing.length) {
+    console.error(JSON.stringify({ event: 'TRUST_PASSPORT_SCHEMA_NOT_READY', version: VERSION, missing }));
+    throw new Error('TRUST_PASSPORT_SCHEMA_NOT_READY');
+  }
 }
 
 async function trustPassportSaveCatalog(request, env) {
