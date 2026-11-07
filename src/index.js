@@ -4168,11 +4168,28 @@ async function handle(request,env){
   }
 }
 
+async function pruneExpiredRateLimitBuckets(env){
+  if(!env?.DB) return {ok:false,reason:'DATABASE_UNAVAILABLE'};
+  // A deployment may precede migration 0005. Never create schema in a cron
+  // handler; skip safely until the migration is installed.
+  const schema=await env.DB.prepare(
+    "SELECT 1 AS ready FROM sqlite_master WHERE type='table' AND name='security_rate_limits' LIMIT 1"
+  ).first();
+  if(schema?.ready!==1) return {ok:true,skipped:true,reason:'RATE_LIMIT_SCHEMA_NOT_READY'};
+  const result=await env.DB.prepare(
+    "DELETE FROM security_rate_limits WHERE window_start < datetime('now','-1 day')"
+  ).run();
+  return {ok:true,deleted:Number(result?.meta?.changes||0)};
+}
+
 export default {
   fetch(request,env){ return handle(request,env); },
   async scheduled(event,env,ctx){
     if(event?.cron && (event.cron==='0 3 * * *' || event.cron==='0 3 * * 0')){
-      ctx.waitUntil(runNationalBackup(env,'AUTOMATIC'));
+      ctx.waitUntil(Promise.allSettled([
+        runNationalBackup(env,'AUTOMATIC'),
+        pruneExpiredRateLimitBuckets(env)
+      ]));
     }
   }
 };
