@@ -5,6 +5,7 @@ import { readFileSync } from 'node:fs';
 const source = readFileSync(new URL('../src/index.js', import.meta.url), 'utf8');
 const adapter = readFileSync(new URL('../src/stripe-adapter.js', import.meta.url), 'utf8');
 const scanner = readFileSync(new URL('../security/clamav-gateway/server.mjs', import.meta.url), 'utf8');
+const walletMigration = readFileSync(new URL('../migrations/0004_atomic_wallet_ledger.sql', import.meta.url), 'utf8');
 
 test('mission security checks assigned mission and canonical intervenant profile mapping', () => {
   assert.match(source, /MISSION_ASSIGNMENT_MISMATCH/);
@@ -22,7 +23,7 @@ test('Mission security codes are consumed atomically to prevent concurrent doubl
 });
 
 test('Stripe charge webhooks resolve through persisted provider references', () => {
-  assert.match(source, /CREATE TABLE IF NOT EXISTS payment_provider_references/);
+  assert.match(source, /'payment_provider_references'/);
   assert.match(source, /SELECT transaction_id FROM payment_provider_references WHERE provider='stripe' AND external_id=\?/);
   assert.match(source, /STRIPE_TRANSACTION_REFERENCE_NOT_READY/);
   assert.match(adapter, /payment_intent_data\[metadata\]\[prochelia_transaction_id\]/);
@@ -39,15 +40,17 @@ test('Stripe checkout linking and wallet transitions are safe under webhook race
 });
 
 test('Wallet balance mutations are driven by an append-only idempotent ledger trigger', () => {
-  assert.match(source, /CREATE TABLE IF NOT EXISTS payment_wallet_ledger/);
-  assert.match(source, /idempotency_key TEXT NOT NULL UNIQUE/);
-  assert.match(source, /CREATE TRIGGER IF NOT EXISTS trg_payment_wallet_ledger_apply/);
-  assert.match(source, /trg_payment_wallet_ledger_no_update/);
-  assert.match(source, /trg_payment_wallet_ledger_no_delete/);
-  assert.match(source, /available_cents=available_cents\+NEW\.available_delta_cents/);
-  assert.match(source, /pending_cents=pending_cents\+NEW\.pending_delta_cents/);
-  assert.match(source, /reserved_cents=reserved_cents\+NEW\.reserved_delta_cents/);
-  assert.match(source, /paid_cents=paid_cents\+NEW\.paid_delta_cents/);
+  assert.match(source, /'payment_wallet_ledger'/);
+  assert.match(source, /PAYMENT_SCHEMA_NOT_READY/);
+  assert.match(walletMigration, /CREATE TABLE IF NOT EXISTS payment_wallet_ledger/);
+  assert.match(walletMigration, /idempotency_key TEXT NOT NULL UNIQUE/);
+  assert.match(walletMigration, /CREATE TRIGGER IF NOT EXISTS trg_payment_wallet_ledger_apply/);
+  assert.match(walletMigration, /trg_payment_wallet_ledger_no_update/);
+  assert.match(walletMigration, /trg_payment_wallet_ledger_no_delete/);
+  assert.match(walletMigration, /available_cents=available_cents\+NEW\.available_delta_cents/);
+  assert.match(walletMigration, /pending_cents=pending_cents\+NEW\.pending_delta_cents/);
+  assert.match(walletMigration, /reserved_cents=reserved_cents\+NEW\.reserved_delta_cents/);
+  assert.match(walletMigration, /paid_cents=paid_cents\+NEW\.paid_delta_cents/);
 });
 
 test('Stripe payment and refund webhooks use atomic batches and deterministic ledger keys', () => {
