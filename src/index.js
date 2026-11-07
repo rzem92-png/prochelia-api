@@ -1052,11 +1052,27 @@ async function ensurePaymentSchema(env) {
   ).bind(...expected).all();
   const found = new Set((rows.results || []).map(row => row.name));
   const missing = expected.filter(name => !found.has(name));
-  if (missing.length) {
+  const requiredColumns = {
+    wallets: ['id', 'user_id', 'currency', 'available_cents', 'pending_cents', 'reserved_cents', 'paid_cents'],
+    payment_wallet_ledger: ['id', 'idempotency_key', 'transaction_id', 'payout_id', 'user_id', 'entry_type', 'available_delta_cents', 'pending_delta_cents', 'reserved_delta_cents', 'paid_delta_cents', 'currency'],
+    payment_transactions: ['id', 'idempotency_key', 'gross_cents', 'refund_cents', 'currency'],
+    payment_webhook_events: ['id', 'provider', 'event_id', 'event_type', 'processed', 'payload_hash']
+  };
+  const missingColumns = [];
+  for (const [table, columns] of Object.entries(requiredColumns)) {
+    if (missing.includes(table)) continue;
+    const info = await env.DB.prepare(`PRAGMA table_info(${table})`).all();
+    const actual = new Set((info.results || []).map(column => column.name));
+    for (const column of columns) {
+      if (!actual.has(column)) missingColumns.push(`${table}.${column}`);
+    }
+  }
+  if (missing.length || missingColumns.length) {
     console.error(JSON.stringify({
       event: 'PAYMENT_SCHEMA_NOT_READY',
       version: VERSION,
-      missing_objects: missing
+      missing_objects: missing,
+      missing_columns: missingColumns
     }));
     throw new Error('PAYMENT_SCHEMA_NOT_READY');
   }
