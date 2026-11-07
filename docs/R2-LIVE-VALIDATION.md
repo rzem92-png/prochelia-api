@@ -2,10 +2,10 @@
 
 **Scope:** isolated Worker `prochelia-api-r2-preprod` and EU bucket `prochelia-staging-storage` only. No production Worker, D1, migrations, customer data, or payment operations.
 
-## Status at 2026-11-07
+## Status at 2026-11-07 (updated after health-response hardening)
 - Cloudflare Worker exists and is isolated.
 - Cloudflare settings confirm `R2_STAGING` → `prochelia-staging-storage`, plus secret binding `R2_TEST_TOKEN`.
-- GitHub CI unit tests passed (mock R2 only).
+- GitHub CI unit tests passed on the latest branch commit `a67928b06b46989a06719ba6504fb9e70b51d05e` (mock R2 only). The earlier source-only commit `de312040...` failed because the code change preceded its matching test update; the subsequent test commit and workflow passed.
 - Live HTTP invocation and real R2 PUT/GET/DELETE have **not yet been confirmed**. Connector-side requests to `workers.dev` were blocked by its network policy (403), which is not proof of Worker failure.
 - Do not label this “R2 live-tested” until the operator checklist below succeeds.
 
@@ -21,7 +21,7 @@ The test bearer token was exposed during setup. Rotate it before further testing
 Set `WORKER_URL` and `R2_TEST_TOKEN` in your local shell. Avoid shell history if possible and never echo the token.
 
 ```sh
-# Health: expect HTTP 200, r2_binding=true, token_configured=true
+# Health: expect HTTP 200, ok=true, status="available". It intentionally hides binding/secret diagnostics.
 curl -i "$WORKER_URL/api/health"
 
 # Unauthorized request: expect HTTP 401
