@@ -41,3 +41,18 @@ test('ensureStrategicSchema is read-only and fail-closed', async () => {
     assert.ok(migration.includes(name), 'migration includes ' + name);
   }
 });
+
+test('ensureFinalHardeningSchema is read-only and fail-closed', async () => {
+  const start = source.indexOf('async function ensureFinalHardeningSchema');
+  const end = source.indexOf('\nfunction finalSecretConfigured', start);
+  assert.notEqual(start, -1, 'helper found');
+  assert.notEqual(end, -1, 'helper boundary found');
+  const body = source.slice(start, end);
+  assert.match(body, /sqlite_master/);
+  assert.match(body, /FINAL_HARDENING_SCHEMA_NOT_READY/);
+  assert.doesNotMatch(body, /CREATE TABLE|CREATE INDEX|ALTER TABLE|DROP TABLE|INSERT INTO/i);
+  const migration = await readFile(new URL('../migrations/0011_final_hardening_schema.sql', import.meta.url), 'utf8');
+  for (const name of ['system_config_checks','idempotency_records','background_jobs','security_rate_limits','integration_registry']) {
+    assert.ok(migration.includes(name), 'migration includes ' + name);
+  }
+});
