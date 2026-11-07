@@ -136,3 +136,11 @@ Ce document ne prétend pas que la correction est intégrée : il enregistre le 
 - DDL runtime découvert dans `verifyNationalBackup` retiré ; vérification de readiness fail-closed.
 - `backup_verifications` ajoutée à la migration candidate `0019_backup_verifications.sql` et à la readiness continuité nationale.
 - Test de non-DDL ajouté. Source `519ae89f58a14582aa6bc86213862e7d37dcd345`, migration `95cc918c1d1bc95334fc3843cca7722303ca45f9`, test `80723b1cf704d88b093e8f85496c80a75dd0f54b`.
+
+## Global static scan result — candidate
+
+- Relecture de `src/index.js` après les changements : **0 occurrence** de `CREATE TABLE IF NOT EXISTS`, `CREATE INDEX IF NOT EXISTS`, `ALTER TABLE`, `DROP TABLE` ou `DROP INDEX` en SQL exécutable dans le Worker.
+- Dernier DDL découvert dans le handler `verifyNationalBackup` a été déplacé vers migration `0019_backup_verifications.sql`.
+- Un test global a été ajouté pour bloquer la réintroduction de ces patterns dans le Worker.
+- Test commit `2500a9e32b40126751c08a84476482934711636e`.
+- Cette vérification est une analyse statique du source ; elle ne remplace pas le lancement de `npm run test:prelaunch`, l’analyse des migrations sur D1 local/preview, ni les tests de flux complets.
