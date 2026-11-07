@@ -1,4 +1,5 @@
--- PROCHÉLIA V14.5.8 — persistent rate-limit buckets
+-- PROCHÉLIA V14.5.7-EXPERT-PREPRODUCTION — persistent rate-limit buckets
+-- Version alignment only: this migration does not change its SQL schema.
 -- Additive and replay-safe. No user or financial rows are created or changed.
 -- Required by the request middleware; requests now fail closed if this migration
 -- has not been applied, rather than creating schema at runtime.
