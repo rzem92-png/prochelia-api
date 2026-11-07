@@ -1,0 +1,28 @@
+name: R2 preproduction smoke worker tests
+
+on:
+  push:
+    branches:
+      - preprod/r2-eu-binding-isolated-2026-11-07
+    paths:
+      - "src/r2-preprod-smoke.js"
+      - "tests/r2-preprod-smoke.test.mjs"
+      - ".github/workflows/test-r2-preprod-smoke.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  unit-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout isolated branch
+        uses: actions/checkout@v4
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Run isolated R2 smoke tests (no Cloudflare credentials)
+        run: node --test tests/r2-preprod-smoke.test.mjs
