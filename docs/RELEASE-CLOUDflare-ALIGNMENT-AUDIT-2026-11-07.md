@@ -29,3 +29,16 @@ Aucune écriture Cloudflare, aucun déploiement Worker et aucune migration D1 di
 3. Exécuter la migration 0005 uniquement après sauvegarde chiffrée fraîche, vérification restauration et validation explicite de l'environnement preview.
 4. Recette réelle Stripe Sandbox (checkout, signature webhook, idempotence, refund, dispute) et journeys clients/intervenants.
 5. Seulement ensuite, revue de lancement et décision humaine production séparée.
+
+## D1 preview — vérification distante en lecture seule
+Base preview `6adb95e5-e542-4bec-9008-fbea01042305`, interrogée sans écriture :
+- Migrations enregistrées : `0001`, `0002`, `0003`, `0004`.
+- Migration `0005_security_rate_limits.sql` : **non appliquée**.
+- Table `security_rate_limits` : **absente**.
+- La requête d'inventaire a retourné `changed_db=false` et `rows_written=0`.
+
+**Conséquence :** le candidat qui active le rate limiter persistant doit rester non déployé sur ce Worker tant que la migration 0005 n'est pas installée sur le D1 preview. Avec le garde-fou actuel, les requêtes mutantes seraient refusées avec 503 plutôt que d'écrire dans un schéma absent. C'est le comportement de sécurité attendu, mais cela bloque la recette fonctionnelle.
+
+## R2 — blocage constaté
+La liste des buckets R2 Cloudflare a répondu HTTP 403 / code 10042 : R2 doit d'abord être activé dans le Dashboard Cloudflare. Aucun bucket n'a été créé et aucun objet n'a été écrit.
+La sauvegarde chiffrée fraîche, nécessaire comme précondition à la migration D1 preview, ne peut donc pas être attestée à cette date.
