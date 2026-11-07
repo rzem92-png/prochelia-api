@@ -1,0 +1,32 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "prochelia-api-r2-preprod",
+  "main": "src/index.js",
+  "compatibility_date": "2026-09-25",
+  "workers_dev": true,
+  "vars": {
+    "APP_ENV": "preprod",
+    "PAYMENT_PROVIDER": "disabled",
+    "APP_BASE_URL": "https://prochelia.pages.dev"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "prochelia-restore-test-v2",
+      "database_id": "a3526c2a-39cb-49ab-97c4-979138145f33"
+    }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "R2_STAGING",
+      "bucket_name": "prochelia-staging-storage",
+      "jurisdiction": "eu"
+    }
+  ],
+  "observability": {
+    "logs": {
+      "enabled": true,
+      "invocation_logs": true
+    }
+  }
+}
