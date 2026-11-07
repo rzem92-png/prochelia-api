@@ -56,3 +56,14 @@ Ce document ne prétend pas que la correction est intégrée : il enregistre le 
 - Commits test/package : `d2edeba1b00ed532e05919453c8e02d537fe7358`, `72f44b631811408c5eed1898fb8162ec48b2fdce`.
 - CI pour le commit de suite `72f44b6` : aucun status ni run retourné par l’intégration GitHub à la vérification ; **pas de PASS attribué**.
 - Migration 0007 non appliquée à D1 distant. Le NO-GO reste en vigueur : autres fonctions runtime DDL, R2/backup/restore, migrations preview, Stripe sandbox E2E et recette utilisateur restent non validés.
+
+
+## Consolidation candidate — commercial/recruitment + finance workspace
+
+- Commit source : `b98b2bfdcc25fae0bfbe88807819c2226d82e7ff`.
+- Les helpers `ensureCommercialRecruitmentSchema` et `ensureFinanceWorkspaceSchema` sont désormais des contrôles read-only `sqlite_master`, fail-closed si les objets attendus manquent.
+- Migrations candidates `0008_commercial_recruitment_schema.sql` (7 objets) et `0009_finance_workspace_schema.sql` (7 objets) reprennent les tables/index de l’ancien helper.
+- Test ajouté : `tests/commercial-finance-runtime-schema-migration.test.mjs`, dans `test:prelaunch`.
+- Commits migration : `f92b9928e4c0415df3e2b77251841104445cb430`, `e07a3710cfe93e6a39659ec72df9957c6031d992`; test/suite : `eb82ac9e73893e788168e9146def77f9f1017a24`, `4f3e0735f881636257c499c98137512d072903d6`; ajustement test : `59291d30a025a6dff5b7ce80bc4bead186fca77f`.
+- CI : pas de status ni run GitHub visible pour le commit suite à la dernière vérification ; aucun PASS attribué.
+- Ces migrations restent candidates et non exécutées sur D1 distant. Le NO-GO demeure tant que l’audit DDL global, la CI, backup/restore, preview et E2E Stripe ne sont pas validés.
