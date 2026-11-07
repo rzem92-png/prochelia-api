@@ -99,3 +99,11 @@ Ce document ne prétend pas que la correction est intégrée : il enregistre le 
 - Les insertions idempotentes des paramètres de marque, profils et règles restent explicitement séparées du DDL dans le helper (préservation du comportement métier).
 - Commits source `7630a34f2d4f3fac2e4106f040f74879f0204370`, migration `ed8640fbdcfa941b0f45d4859d9e443cea94320f`, test `9e06d6943d5c34359d1b8d494ae182ed4e7da5dc`.
 - Migration non appliquée sur D1 distant. Les insertions seed au runtime nécessitent encore une revue de droits/transaction et ne constituent pas une migration exécutée.
+
+## Consolidation candidate — operational schema
+
+- `ensureOperationalSchema` : suppression du DDL runtime et des `ALTER TABLE` opportunistes ; contrôle read-only des tables et colonnes `action_outbox.case_id/processed_at`, fail-closed (`OPERATIONAL_SCHEMA_NOT_READY`).
+- Migration candidate `0014_operational_schema.sql` reprend les tables/index opérationnels et inclut les deux colonnes attendues dès la création.
+- Test de contrat ajouté à la suite prélaunch.
+- Commits source `fd277c9039a2a12dcba64732412c8e0d0daef854`, migration `367709c77175a6b98eb577082e0741f4d91da210`, test `38beb3dcfcaedd1d660d51ea786631db64ccad3b`.
+- Migration non appliquée à D1 distant ; aucun PASS CI attribué.
