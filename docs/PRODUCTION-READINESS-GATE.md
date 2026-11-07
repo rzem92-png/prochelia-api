@@ -96,3 +96,9 @@ Required signed record:
 - CI for recent security header/auth tests has passed (check current workflow status before relying on it).
 - Real R2 authenticated HTTP lifecycle, old-token rejection, and backup restore are not yet evidenced here.
 - This checklist is a readiness plan, not proof that controls are implemented or production is safe.
+
+## Frontend session cookie / CSRF acceptance note (2026-11-07)
+- Worker cookie is currently configured `Secure; HttpOnly; SameSite=None` (cross-origin Pages-to-Worker session use). The API checks browser Origin against the configured allowlist and CORS uses credentials with a reflected allowlisted origin; preflight only accepts an explicit header/method allowlist.
+- Before release, run browser tests from the exact Pages production origin and staging preview origin: allowlisted Origin success; unlisted Origin rejected; preflight allowed headers; cookie stored/sent in Safari/iOS and Chromium; logout invalidation; session expiry; state-changing requests from hostile Origin rejected.
+- Verify every cookie-authenticated state-changing route checks Origin/CSRF at the handler boundary (not only CORS). CORS alone is not a CSRF defense. Add CSRF token validation where origin-only enforcement is insufficient, and ensure requests without Origin are only accepted for trusted non-browser clients with an appropriate separate authentication mechanism.
+- Current frontend diagnostic/static checks do not prove browser cookie acceptance or CSRF behavior. Mark these gates BLOCKED until live evidence is captured.
