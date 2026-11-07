@@ -63,8 +63,7 @@ export default {
     const url = new URL(request.url);
     if (request.method === "GET" && url.pathname === "/api/health") {
       return response({ok:true, service:"PROCHÉLIA R2 preproduction smoke", version:VERSION,
-        r2_binding:!!env.R2_STAGING, token_configured:typeof env.R2_TEST_TOKEN==="string" && env.R2_TEST_TOKEN.length>=32,
-        public_access:"not enabled by this Worker"});
+        status:"available", public_access:"not enabled by this Worker"});
     }
     // Authenticate before revealing operational configuration details.
     if (!await authorized(request, env)) return response({ok:false,error:"UNAUTHORIZED"},401);
