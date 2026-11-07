@@ -4688,23 +4688,24 @@ const COPILOT_SCENARIOS = [
 ];
 
 async function ensureCopilotSchema(env) {
-  if (!env.DB) throw new Error('DATABASE_REQUIRED');
-  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS copilot_interactions (
-    id TEXT PRIMARY KEY, user_id TEXT NOT NULL, role TEXT NOT NULL,
-    prompt_hash TEXT NOT NULL, scenario_key TEXT NOT NULL,
-    model TEXT, status TEXT NOT NULL, latency_ms INTEGER,
-    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-  )`).run();
-  await env.DB.prepare(`CREATE INDEX IF NOT EXISTS idx_copilot_interactions_user_date
-    ON copilot_interactions(user_id,created_at DESC)`).run();
-  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS copilot_action_plans (
-    id TEXT PRIMARY KEY, interaction_id TEXT NOT NULL UNIQUE, user_id TEXT NOT NULL,
-    role TEXT NOT NULL, scenario_key TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'PROPOSED',
-    approval_required INTEGER NOT NULL DEFAULT 0, plan_json TEXT NOT NULL,
-    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-  )`).run();
-  await env.DB.prepare(`CREATE INDEX IF NOT EXISTS idx_copilot_plans_user_date
-    ON copilot_action_plans(user_id,created_at DESC)`).run();
+  if (!env?.DB) throw new Error('DATABASE_REQUIRED');
+  // Runtime is read-only: copilot schema is provisioned exclusively by D1 migrations.
+  const required = [
+    'copilot_interactions',
+    'idx_copilot_interactions_user_date',
+    'copilot_action_plans',
+    'idx_copilot_plans_user_date'
+  ];
+  const placeholders = required.map(() => '?').join(',');
+  const rows = await env.DB.prepare(
+    `SELECT name FROM sqlite_master WHERE type IN ('table','index') AND name IN (${placeholders})`
+  ).bind(...required).all();
+  const found = new Set((rows.results || []).map(row => row.name));
+  const missing = required.filter(name => !found.has(name));
+  if (missing.length) {
+    console.error(JSON.stringify({ event: 'COPILOT_SCHEMA_NOT_READY', version: VERSION, missing }));
+    throw new Error('COPILOT_SCHEMA_NOT_READY');
+  }
 }
 
 function copilotScenarioFor(text) {
