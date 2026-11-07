@@ -20,7 +20,6 @@ async function authorized(request, env) {
   const supplied = request.headers.get("authorization") || "";
   if (typeof expected !== "string" || expected.length < 32 || !supplied.startsWith("Bearer ")) return false;
   const candidate = supplied.slice(7);
-  // Compare fixed-size SHA-256 digests rather than secret strings directly.
   const encoder = new TextEncoder();
   const [a,b] = await Promise.all([
     crypto.subtle.digest("SHA-256", encoder.encode(expected)),
@@ -56,7 +55,7 @@ async function readLimited(request, limit) {
   const merged = new Uint8Array(total);
   let offset=0;
   for (const chunk of chunks) { merged.set(chunk,offset); offset+=chunk.byteLength; }
-  return new TextDecoder().decode(merged);
+  return new TextDecoder("utf-8", {fatal:true}).decode(merged);
 }
 
 export default {
@@ -73,22 +72,27 @@ export default {
       return response({ok:false,error:"NOT_FOUND"},404);
     }
 
-    if (request.method === "POST") {
-      const payload = await readLimited(request, MAX_BODY_BYTES);
-      if (payload === null) return response({ok:false,error:"PAYLOAD_TOO_LARGE"},413);
-      if (payload !== TEST_PAYLOAD) return response({ok:false,error:"INVALID_TEST_PAYLOAD"},400);
-      await env.R2_STAGING.put(TEST_KEY, payload, { httpMetadata:{contentType:"text/plain; charset=utf-8"} });
-      return response({ok:true,operation:"put",key:TEST_KEY});
+    try {
+      if (request.method === "POST") {
+        const payload = await readLimited(request, MAX_BODY_BYTES);
+        if (payload === null) return response({ok:false,error:"PAYLOAD_TOO_LARGE"},413);
+        if (payload !== TEST_PAYLOAD) return response({ok:false,error:"INVALID_TEST_PAYLOAD"},400);
+        await env.R2_STAGING.put(TEST_KEY, payload, { httpMetadata:{contentType:"text/plain; charset=utf-8"} });
+        return response({ok:true,operation:"put",key:TEST_KEY});
+      }
+      if (request.method === "GET") {
+        const object = await env.R2_STAGING.get(TEST_KEY);
+        if (!object) return response({ok:false,error:"OBJECT_NOT_FOUND"},404);
+        const body = await object.text();
+        return response({ok:true,operation:"get",key:TEST_KEY,body,etag:object.etag,
+          verified:body===TEST_PAYLOAD});
+      }
+      await env.R2_STAGING.delete(TEST_KEY);
+      const remaining = await env.R2_STAGING.head(TEST_KEY);
+      return response({ok:true,operation:"delete",key:TEST_KEY,deleted:!remaining});
+    } catch {
+      // Avoid returning provider internals, credentials, or raw exception details to callers.
+      return response({ok:false,error:"R2_OPERATION_FAILED"},503);
     }
-    if (request.method === "GET") {
-      const object = await env.R2_STAGING.get(TEST_KEY);
-      if (!object) return response({ok:false,error:"OBJECT_NOT_FOUND"},404);
-      const body = await object.text();
-      return response({ok:true,operation:"get",key:TEST_KEY,body,etag:object.etag,
-        verified:body===TEST_PAYLOAD});
-    }
-    await env.R2_STAGING.delete(TEST_KEY);
-    const remaining = await env.R2_STAGING.head(TEST_KEY);
-    return response({ok:true,operation:"delete",key:TEST_KEY,deleted:!remaining});
   }
 };
