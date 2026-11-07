@@ -31,3 +31,18 @@ test('rate limiter rejects missing trusted client identity before D1 increment',
   assert.ok(schemaCheck > identityGuard);
   assert.ok(counterWrite > identityGuard);
 });
+
+test('expired rate-limit buckets are pruned by scheduled maintenance without runtime DDL', () => {
+  const start = source.indexOf('async function pruneExpiredRateLimitBuckets');
+  const end = source.indexOf('export default', start);
+  assert.notEqual(start, -1);
+  assert.notEqual(end, -1);
+  const cleanup = source.slice(start, end);
+
+  assert.match(cleanup, /sqlite_master/);
+  assert.match(cleanup, /DELETE FROM security_rate_limits/);
+  assert.match(cleanup, /datetime\\('now','-1 day'\\)/);
+  assert.doesNotMatch(cleanup, /CREATE TABLE|ALTER TABLE|DROP TABLE/);
+  assert.match(source.slice(end), /Promise\\.allSettled\\(\\[\\s*runNationalBackup/);
+  assert.match(source.slice(end), /pruneExpiredRateLimitBuckets\\(env\\)/);
+});
