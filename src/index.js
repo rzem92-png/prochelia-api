@@ -4894,7 +4894,11 @@ async function productionSafetySchema(env){
 }
 
 async function productionSubjectHash(request, route){
-  const ip=clean(request.headers.get('CF-Connecting-IP')) || clean(request.headers.get('X-Forwarded-For')) || 'unknown';
+  // Cloudflare Worker: CF-Connecting-IP is the trusted edge-provided client
+  // address. Never fall back to X-Forwarded-For: clients can spoof it and
+  // rotate rate-limit identities. Missing trusted identity fails closed.
+  const ip=clean(request.headers.get('CF-Connecting-IP'));
+  if(!ip) return null;
   return sha256Hex(`${ip}|${route}`);
 }
 
@@ -4922,6 +4926,9 @@ async function productionRateLimit(request,env){
   const windowSeconds=60;
   const bucket=`${sensitive?'SENSITIVE':'GENERAL'}:${path}`;
   const subject=await productionSubjectHash(request,path);
+  if(!subject){
+    return {ok:false,response:json({ok:false,error:'RATE_LIMIT_CLIENT_ID_UNAVAILABLE',version:VERSION},503,{'retry-after':'60'})};
+  }
   const now=Math.floor(Date.now()/1000);
   const start=new Date(Math.floor(now/windowSeconds)*windowSeconds*1000).toISOString();
   if(!(await productionRateLimitSchemaReady(env))){
