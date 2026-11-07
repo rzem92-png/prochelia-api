@@ -45,3 +45,14 @@ Plusieurs de ces fonctions sont appelées par des handlers ou des chemins d’ad
 **NO-GO préproduction fonctionnelle / NO-GO production** tant que cette dette DDL runtime n’est pas résolue ou explicitement confinée aux endpoints d’administration avec permissions, validation, journalisation et approbation adaptées.
 
 Ce document ne prétend pas que la correction est intégrée : il enregistre le constat pour éviter qu’un PASS des suites ciblées soit interprété comme une certification complète du Worker.
+
+
+## Mise à jour de consolidation — Trust Passport (candidate, 2026-11-07)
+
+- Commit source : `aec93b2741fad747a3bf01c33718506db5a37672`.
+- `ensureTrustPassportSchema` devient un contrôle read-only `sqlite_master` et fail-closed (`TRUST_PASSPORT_SCHEMA_NOT_READY`) au lieu de créer tables/index depuis le runtime.
+- Migration candidate `0007_trust_passport_schema.sql` ajoutée ; elle reprend les deux tables et l’index lookup avec la contrainte unique existante.
+- Test `tests/trust-passport-runtime-schema-migration.test.mjs` ajouté à `test:prelaunch`.
+- Commits test/package : `d2edeba1b00ed532e05919453c8e02d537fe7358`, `72f44b631811408c5eed1898fb8162ec48b2fdce`.
+- CI pour le commit de suite `72f44b6` : aucun status ni run retourné par l’intégration GitHub à la vérification ; **pas de PASS attribué**.
+- Migration 0007 non appliquée à D1 distant. Le NO-GO reste en vigueur : autres fonctions runtime DDL, R2/backup/restore, migrations preview, Stripe sandbox E2E et recette utilisateur restent non validés.
