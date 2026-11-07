@@ -622,7 +622,7 @@ test('Cumulative refunds stay monotonic, idempotent, and bounded by credited amo
 
 test('Payment runtime schema guard is read-only and fails closed on missing migrated objects', () => {
   const start = source.indexOf('async function ensurePaymentSchema(env)');
-  const end = source.indexOf('\\nfunction moneyCents', start);
+  const end = source.indexOf('\nfunction moneyCents', start);
   assert.ok(start >= 0 && end > start);
   const guard = source.slice(start, end);
   assert.doesNotMatch(guard, /CREATE TABLE|CREATE INDEX|CREATE TRIGGER|ALTER TABLE|DROP TABLE/i);
