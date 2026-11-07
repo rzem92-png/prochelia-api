@@ -91,3 +91,11 @@ Ce document ne prétend pas que la correction est intégrée : il enregistre le 
 - Test ajouté au fichier de contrat runtime schema (déjà référencé dans `test:prelaunch`).
 - Commits source `f4ed42dd6e9a58d8daa32e10b6ff2a519cce8fe7`, migration `5e0001bb929ccf1cc78cc2b1bbf4f6849e3ebedb`, test `8b0e8c97d2a7f930a85e6fb00a9d7860cc854091`.
 - Migration candidate, non appliquée sur D1 distant. R2 non activé et sauvegarde/restauration non vérifiées : ce changement n’établit pas de backup opérationnel.
+
+## Consolidation candidate — master complement schema
+
+- `ensureProcheliaMasterComplementSchema` ne contient plus de DDL runtime ; contrôle read-only fail-closed (`MASTER_COMPLEMENT_SCHEMA_NOT_READY`).
+- Migration `0013_master_complement_schema.sql` créée pour les tables/index branding, profils d’interface et support/Copilote.
+- Les insertions idempotentes des paramètres de marque, profils et règles restent explicitement séparées du DDL dans le helper (préservation du comportement métier).
+- Commits source `7630a34f2d4f3fac2e4106f040f74879f0204370`, migration `ed8640fbdcfa941b0f45d4859d9e443cea94320f`, test `9e06d6943d5c34359d1b8d494ae182ed4e7da5dc`.
+- Migration non appliquée sur D1 distant. Les insertions seed au runtime nécessitent encore une revue de droits/transaction et ne constituent pas une migration exécutée.
