@@ -140,3 +140,12 @@ test('ensureConsolidatedSchema is read-only and consolidated migration carries s
   assert.match(migration, /project_phase/);
   assert.match(migration, /2030-12-25/);
 });
+
+test('backup verification handler does not create schema at runtime', async () => {
+  const body = helperBody('verifyNationalBackup');
+  assert.doesNotMatch(body, /CREATE TABLE|CREATE INDEX|ALTER TABLE|DROP TABLE/i);
+  assert.match(body, /backup_verifications/);
+  assert.match(body, /NATIONAL_CONTINUITY_SCHEMA_NOT_READY/);
+  const migration = await readFile(new URL('../migrations/0019_backup_verifications.sql', import.meta.url), 'utf8');
+  assert.match(migration, /backup_verifications/);
+});
