@@ -3369,46 +3369,20 @@ function securityOriginAllowed(request,env){
 // autorisées et aux règles RGPD/anti-spam applicables.
 // ================================================================
 
-async function ensureCommercialRecruitmentSchema(env){
-  if(!env.DB) throw new Error('DATABASE_REQUIRED');
-  const sql=[
-    `CREATE TABLE IF NOT EXISTS commercial_prospects (
-      id TEXT PRIMARY KEY, kind TEXT NOT NULL DEFAULT 'B2B', company_name TEXT, contact_name TEXT,
-      email TEXT, phone TEXT, website TEXT, sector TEXT, city TEXT, postal_code TEXT,
-      source TEXT, need TEXT, estimated_potential_cents INTEGER, score INTEGER NOT NULL DEFAULT 0,
-      stage TEXT NOT NULL DEFAULT 'QUALIFICATION', status TEXT NOT NULL DEFAULT 'OPEN',
-      next_action TEXT, notes TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )`,
-    `CREATE INDEX IF NOT EXISTS idx_commercial_prospects_priority ON commercial_prospects(status,score DESC,updated_at)`,
-    `CREATE TABLE IF NOT EXISTS commercial_playbooks (
-      id TEXT PRIMARY KEY, target_type TEXT NOT NULL, stage TEXT NOT NULL,
-      objective TEXT NOT NULL, script TEXT NOT NULL, objections_json TEXT NOT NULL DEFAULT '[]',
-      followup_json TEXT NOT NULL DEFAULT '[]', metadata_json TEXT NOT NULL DEFAULT '{}',
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )`,
-    `CREATE TABLE IF NOT EXISTS recruitment_candidates (
-      id TEXT PRIMARY KEY, full_name TEXT, email TEXT, phone TEXT, metier_code TEXT,
-      city TEXT, radius_km REAL, qualifications_json TEXT NOT NULL DEFAULT '[]',
-      documents_status TEXT NOT NULL DEFAULT 'TO_VERIFY', identity_status TEXT NOT NULL DEFAULT 'TO_VERIFY',
-      score INTEGER NOT NULL DEFAULT 0, stage TEXT NOT NULL DEFAULT 'SOURCING',
-      status TEXT NOT NULL DEFAULT 'OPEN', notes TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )`,
-    `CREATE INDEX IF NOT EXISTS idx_recruitment_candidates ON recruitment_candidates(status,score DESC,updated_at)`,
-    `CREATE TABLE IF NOT EXISTS copilot_growth_actions (
-      id TEXT PRIMARY KEY, category TEXT NOT NULL, target_type TEXT NOT NULL, title TEXT NOT NULL,
-      recommendation TEXT NOT NULL, expected_impact_json TEXT NOT NULL DEFAULT '{}',
-      priority INTEGER NOT NULL DEFAULT 10, status TEXT NOT NULL DEFAULT 'PROPOSED',
-      approved_by TEXT, executed_at TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )`,
-    `CREATE TABLE IF NOT EXISTS sales_results (
-      id TEXT PRIMARY KEY, prospect_id TEXT, stage TEXT NOT NULL, outcome TEXT NOT NULL,
-      amount_cents INTEGER, margin_cents INTEGER, source TEXT, notes TEXT,
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )`
-  ];
-  for(const q of sql) await env.DB.prepare(q).run();
+async function ensureCommercialRecruitmentSchema(env) {
+  if (!env?.DB) throw new Error('DATABASE_REQUIRED');
+  // Runtime schema access is read-only; provision through versioned D1 migrations.
+  const required = ["commercial_prospects","idx_commercial_prospects_priority","commercial_playbooks","recruitment_candidates","idx_recruitment_candidates","copilot_growth_actions","sales_results"];
+  const placeholders = required.map(() => '?').join(',');
+  const rows = await env.DB.prepare(
+    `SELECT name FROM sqlite_master WHERE type IN ('table','index') AND name IN (${placeholders})`
+  ).bind(...required).all();
+  const found = new Set((rows.results || []).map(row => row.name));
+  const missing = required.filter(name => !found.has(name));
+  if (missing.length) {
+    console.error(JSON.stringify({ event: 'COMMERCIAL_RECRUITMENT_SCHEMA_NOT_READY', version: VERSION, missing }));
+    throw new Error('COMMERCIAL_RECRUITMENT_SCHEMA_NOT_READY');
+  }
 }
 
 function commercialStageGuide(stage){
@@ -3531,56 +3505,19 @@ async function growthDashboard(request,env){
 
 /* ==================== V14.0.0 — COMPTABILITÉ MULTI-ESPACE / EXPORTS / RÉSOLUTION ==================== */
 async function ensureFinanceWorkspaceSchema(env) {
-  if (!env.DB) throw new Error('DATABASE_REQUIRED');
-  const sql = [
-    `CREATE TABLE IF NOT EXISTS finance_workspace_entries (
-      id TEXT PRIMARY KEY,
-      user_id TEXT NOT NULL,
-      role TEXT NOT NULL,
-      entry_type TEXT NOT NULL,
-      direction TEXT NOT NULL DEFAULT 'IN',
-      amount_cents INTEGER NOT NULL DEFAULT 0,
-      currency TEXT NOT NULL DEFAULT 'EUR',
-      label TEXT,
-      reference_type TEXT,
-      reference_id TEXT,
-      status TEXT NOT NULL DEFAULT 'posted',
-      metadata_json TEXT NOT NULL DEFAULT '{}',
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )`,
-    `CREATE INDEX IF NOT EXISTS idx_finance_workspace_user ON finance_workspace_entries(user_id, created_at DESC)`,
-    `CREATE INDEX IF NOT EXISTS idx_finance_workspace_ref ON finance_workspace_entries(reference_type, reference_id)`,
-    `CREATE TABLE IF NOT EXISTS finance_export_log (
-      id TEXT PRIMARY KEY,
-      user_id TEXT NOT NULL,
-      role TEXT NOT NULL,
-      format TEXT NOT NULL,
-      period_start TEXT,
-      period_end TEXT,
-      row_count INTEGER NOT NULL DEFAULT 0,
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )`,
-    `CREATE INDEX IF NOT EXISTS idx_finance_export_user ON finance_export_log(user_id, created_at DESC)`,
-    `CREATE TABLE IF NOT EXISTS finance_resolution_cases (
-      id TEXT PRIMARY KEY,
-      user_id TEXT NOT NULL,
-      role TEXT NOT NULL,
-      issue_type TEXT NOT NULL,
-      status TEXT NOT NULL DEFAULT 'OPEN',
-      severity TEXT NOT NULL DEFAULT 'LOW',
-      description TEXT,
-      proposed_solution TEXT,
-      resolution TEXT,
-      amount_cents INTEGER,
-      reference_id TEXT,
-      metadata_json TEXT NOT NULL DEFAULT '{}',
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      resolved_at TEXT
-    )`,
-    `CREATE INDEX IF NOT EXISTS idx_finance_resolution_user ON finance_resolution_cases(user_id, status, created_at DESC)`
-  ];
-  for (const q of sql) await env.DB.prepare(q).run();
+  if (!env?.DB) throw new Error('DATABASE_REQUIRED');
+  // Runtime schema access is read-only; provision through versioned D1 migrations.
+  const required = ["finance_workspace_entries","idx_finance_workspace_user","idx_finance_workspace_ref","finance_export_log","idx_finance_export_user","finance_resolution_cases","idx_finance_resolution_user"];
+  const placeholders = required.map(() => '?').join(',');
+  const rows = await env.DB.prepare(
+    `SELECT name FROM sqlite_master WHERE type IN ('table','index') AND name IN (${placeholders})`
+  ).bind(...required).all();
+  const found = new Set((rows.results || []).map(row => row.name));
+  const missing = required.filter(name => !found.has(name));
+  if (missing.length) {
+    console.error(JSON.stringify({ event: 'FINANCE_WORKSPACE_SCHEMA_NOT_READY', version: VERSION, missing }));
+    throw new Error('FINANCE_WORKSPACE_SCHEMA_NOT_READY');
+  }
 }
 
 function financeRoleAllowed(role) {
