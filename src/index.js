@@ -1290,6 +1290,15 @@ async function handleBase(request, env) {
     return logout(request, env);
   }
 
+  if (url.pathname === '/api/auth/csrf') {
+    if (request.method !== 'GET') return json({ ok: false, error: 'METHOD_NOT_ALLOWED', version: VERSION }, 405);
+    const token = getCookie(request, SESSION_COOKIE);
+    if (!token) return json({ ok: false, error: 'AUTH_REQUIRED', version: VERSION }, 401);
+    const auth = await getSessionUser(request, env);
+    if (!auth) return json({ ok: false, error: 'AUTH_REQUIRED', version: VERSION }, 401);
+    return json({ ok: true, csrf_token: await sha256Base64url('prochelia-csrf-v1:' + token), version: VERSION });
+  }
+
   if (url.pathname === '/api/auth/me') {
     if (request.method !== 'GET') return json({ ok: false, error: 'METHOD_NOT_ALLOWED', version: VERSION }, 405);
     return me(request, env);
@@ -3689,6 +3698,24 @@ handle = async function(request,env){
       headers.set('access-control-allow-credentials','true');
     }
     return new Response(null,{status:204,headers});
+  }
+
+  // Cookie-authenticated browser mutations require both a trusted Origin and
+  // a session-bound CSRF token. Login/bootstrap/webhooks are explicit exceptions.
+  const csrfPath = new URL(request.url).pathname;
+  const csrfExempt = new Set(['/api/auth/login','/api/auth/bootstrap','/api/payments/webhook']);
+  if (isMutatingMethod(request.method) && !csrfExempt.has(csrfPath)) {
+    const sessionToken = getCookie(request, SESSION_COOKIE);
+    if (sessionToken) {
+      if (!origin || !securityOriginAllowed(request,env)) {
+        return json({ok:false,error:'CSRF_ORIGIN_REQUIRED',version:VERSION},403);
+      }
+      const expected = await sha256Base64url('prochelia-csrf-v1:' + sessionToken);
+      const supplied = request.headers.get('x-csrf-token') || '';
+      if (!supplied || supplied !== expected) {
+        return applyCorsHeaders(request,env,json({ok:false,error:'CSRF_TOKEN_INVALID',version:VERSION},403));
+      }
+    }
   }
 
   let response;
