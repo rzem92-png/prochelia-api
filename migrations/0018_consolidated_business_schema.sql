@@ -25,9 +25,6 @@ DROP INDEX IF EXISTS idx_pricing_travel_policy_active;
 CREATE UNIQUE INDEX IF NOT EXISTS idx_pricing_travel_policy_active
       ON pricing_travel_policies(phase, client_type) WHERE active=1;
 
-CREATE INDEX IF NOT EXISTS idx_pricing_route_owner_expiry
-      ON pricing_route_estimates(owner_user_id,status,expires_at);
-
 CREATE TABLE IF NOT EXISTS pricing_route_estimates (
       id TEXT PRIMARY KEY,
       owner_user_id TEXT NOT NULL,
@@ -36,6 +33,9 @@ CREATE TABLE IF NOT EXISTS pricing_route_estimates (
       expires_at TEXT NOT NULL,
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
+
+CREATE INDEX IF NOT EXISTS idx_pricing_route_owner_expiry
+      ON pricing_route_estimates(owner_user_id,status,expires_at);
 
 CREATE TABLE IF NOT EXISTS pricing_route_estimate_audit (
       estimate_id TEXT PRIMARY KEY,
