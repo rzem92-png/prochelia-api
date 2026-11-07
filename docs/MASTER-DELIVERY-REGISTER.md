@@ -83,3 +83,8 @@ Record for every gate: candidate commit/tag, environment, UTC date, test owner, 
 - Do not merge PRs, apply D1 migrations, modify production Workers/DNS/billing, or process real payments without a separate explicit approval.
 - Production GO requires every mandatory gate PASS, no unresolved critical/high security issue, verified backup/restore, legal/privacy/insurance review, rollback plan, and an explicit human decision.
 - This register is a traceability aid, not evidence that any feature is implemented or certified.
+
+
+## 9. Security review addendum — 2026-11-07
+
+A dedicated CSRF/session hardening gate was added at `docs/CSRF-SESSION-HARDENING-GATE-2026-11-07.md` (commit `c45ce4500954a60a7e4b711b87da6b3d48fb6b83`). It records the observed risk that cookie sessions use `SameSite=None`, `X-CSRF-Token` is allowed by preflight, but no verified token issuance/validation proof is established by the reviewed code. **CSRF remains a production blocker until implemented and covered by the negative test matrix.** This is documentation/audit evidence, not implementation completion.
