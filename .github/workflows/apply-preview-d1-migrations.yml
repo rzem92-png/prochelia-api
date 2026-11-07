@@ -44,21 +44,17 @@ jobs:
           import json
           from pathlib import Path
           config = json.loads(Path("wrangler.jsonc").read_text())
-          assert config["name"] == "prochelia-api-staging", "Unexpected Worker name"
+          assert config["name"] == "prochelia-api-preview", "Unexpected preview Worker name"
           db = next(x for x in config["d1_databases"] if x["binding"] == "DB")
           assert db["database_name"] == "prochelia-preview-db", "Unexpected D1 name"
           assert db["database_id"] == "6adb95e5-e542-4bec-9008-fbea01042305", "Unexpected D1 UUID"
           assert len(config["d1_databases"]) == 1, "Unexpected additional D1 binding"
-          for name in (
-            "0001_core_business_schema.sql",
-            "0002_server_pricing.sql",
-            "0003_route_address_provenance.sql",
-            "0004_atomic_wallet_ledger.sql",
-            "0005_security_rate_limits.sql",
-          ):
-            p = Path("migrations") / name
-            assert p.is_file() and p.stat().st_size > 0, f"Missing migration: {name}"
-          print("PASS: staging Worker, exact preview D1 and five migration files verified")
+          migrations = sorted(Path("migrations").glob("[0-9][0-9][0-9][0-9]_*.sql"))
+          expected = [f"{i:04d}" for i in range(1, 20)]
+          actual = [p.name[:4] for p in migrations]
+          assert actual == expected, f"Expected migrations 0001–0019 in order; found {actual}"
+          assert all(p.stat().st_size > 0 for p in migrations), "Empty migration file detected"
+          print(f"PASS: exact preview Worker, pinned preview D1 and all {len(migrations)} migrations verified")
           PY
           test "$EXPECTED_DB_NAME" = "prochelia-preview-db"
           test "$EXPECTED_DB_ID" = "6adb95e5-e542-4bec-9008-fbea01042305"
