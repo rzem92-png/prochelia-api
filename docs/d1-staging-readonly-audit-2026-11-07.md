@@ -7,7 +7,7 @@ Base ciblée : `prochelia-preview-db` — UUID `6adb95e5-e542-4bec-9008-fbea0104
 ## Résultats observés via Cloudflare D1 API
 - Tables (hors sqlite internes) : **25**.
 - Index (hors sqlite internes) : **18**.
-- `d1_migrations` existe et contient **4** entrées.
+- `d1_migrations` existe et contient **4** entrées : `0001_core_business_schema.sql`, `0002_server_pricing.sql`, `0003_route_address_provenance.sql`, `0004_atomic_wallet_ledger.sql` (30/10/2026).
 - Tables principales présentes : `users`, `clients`, `intervenants`, `missions`, `paiements`, `payment_wallet_ledger`, `wallets`, `sessions`, `prestations`, `tarifs`.
 - `PRAGMA foreign_key_check` : résultat vide (aucune violation retournée).
 - Taille D1 annoncée par l'API lors de la lecture : **335 872 octets**.
