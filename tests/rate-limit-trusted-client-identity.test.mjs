@@ -41,7 +41,7 @@ test('expired rate-limit buckets are pruned by scheduled maintenance without run
 
   assert.match(cleanup, /sqlite_master/);
   assert.match(cleanup, /DELETE FROM security_rate_limits/);
-  assert.ok(cleanup.includes("datetime(" + "'now','-1 day'" + ")"));
+  assert.ok(cleanup.includes("strftime(" + "'%Y-%m-%dT%H:%M:%fZ','now','-1 day'" + ")"));
   assert.doesNotMatch(cleanup, /CREATE TABLE|ALTER TABLE|DROP TABLE/);
   assert.ok(source.slice(end).includes('Promise.allSettled(['));
   assert.ok(source.slice(end).includes('pruneExpiredRateLimitBuckets(env)'));
