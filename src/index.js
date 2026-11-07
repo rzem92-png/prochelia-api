@@ -4045,21 +4045,22 @@ const NATIONAL_SCALE_DEFAULTS = Object.freeze({
   documentsStorage:'R2', backupFrequency:'DAILY', backupRetentionDays:90
 });
 
-async function ensureNationalContinuitySchema(env){
-  if(!env.DB) throw new Error('DATABASE_REQUIRED');
-  const sqls=[
-    `CREATE TABLE IF NOT EXISTS platform_scale_config(id TEXT PRIMARY KEY,key TEXT NOT NULL UNIQUE,value_json TEXT NOT NULL,updated_at TEXT DEFAULT CURRENT_TIMESTAMP)`,
-    `CREATE TABLE IF NOT EXISTS backup_runs(id TEXT PRIMARY KEY,status TEXT NOT NULL,trigger_type TEXT NOT NULL,storage_provider TEXT,started_at TEXT DEFAULT CURRENT_TIMESTAMP,completed_at TEXT,object_count INTEGER DEFAULT 0,row_count INTEGER DEFAULT 0,error_message TEXT,metadata_json TEXT)`,
-    `CREATE TABLE IF NOT EXISTS backup_objects(id TEXT PRIMARY KEY,backup_run_id TEXT NOT NULL,object_key TEXT NOT NULL,table_name TEXT,row_count INTEGER DEFAULT 0,byte_size INTEGER DEFAULT 0,checksum TEXT,encrypted INTEGER DEFAULT 0,created_at TEXT DEFAULT CURRENT_TIMESTAMP)`,
-    `CREATE INDEX IF NOT EXISTS idx_backup_runs_date ON backup_runs(status,started_at)`,
-    `CREATE INDEX IF NOT EXISTS idx_backup_objects_run ON backup_objects(backup_run_id)`,
-    `CREATE INDEX IF NOT EXISTS idx_scale_key ON platform_scale_config(key)`
-  ];
-  for(const q of sqls) await env.DB.prepare(q).run();
-  for(const [k,v] of Object.entries(NATIONAL_SCALE_DEFAULTS))
-    await env.DB.prepare(`INSERT OR IGNORE INTO platform_scale_config(id,key,value_json) VALUES(?,?,?)`).bind(crypto.randomUUID(),k,JSON.stringify(v)).run();
+async function ensureNationalContinuitySchema(env) {
+  if (!env.DB) throw new Error('DATABASE_REQUIRED');
+  const requiredTables = ['platform_scale_config', 'backup_runs', 'backup_objects'];
+  const placeholders = requiredTables.map(() => '?').join(',');
+  const result = await env.DB.prepare(
+    `SELECT name FROM sqlite_master WHERE type='table' AND name IN (${placeholders})`
+  ).bind(...requiredTables).all();
+  const found = new Set((result.results || []).map(row => String(row.name)));
+  const missing = requiredTables.filter(name => !found.has(name));
+  if (missing.length) {
+    const error = new Error('NATIONAL_CONTINUITY_SCHEMA_NOT_READY');
+    error.code = 'NATIONAL_CONTINUITY_SCHEMA_NOT_READY';
+    error.missing = missing;
+    throw error;
+  }
 }
-
 function b64(u8){let s='';for(let i=0;i<u8.length;i+=0x8000)s+=String.fromCharCode(...u8.subarray(i,i+0x8000));return btoa(s)}
 async function backupEncrypt(text,secret){
   if(!secret) throw new Error('BACKUP_ENCRYPTION_KEY_REQUIRED');
