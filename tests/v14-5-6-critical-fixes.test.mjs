@@ -387,7 +387,7 @@ test('Travel fee and operating cost use server policy and a persisted route esti
 test('Travel policy history is retained while only one active policy is permitted', () => {
   assert.match(consolidatedMigration, /DROP INDEX IF EXISTS idx_pricing_travel_policy_active/);
   assert.match(consolidatedMigration, /ON pricing_travel_policies\(phase, client_type\) WHERE active=1/);
-  assert.match(source, /idx_pricing_route_owner_expiry/);
+  assert.match(consolidatedMigration, /idx_pricing_route_owner_expiry/);
 });
 
 test('Route estimates use profile-owned addresses and never trust browser-supplied route endpoints', () => {
