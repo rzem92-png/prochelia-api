@@ -38,6 +38,31 @@ jobs:
           node --check v7.js
           node --check v7-routes.js
           node --check stripe-adapter.js
+          # Validate the actual Wrangler entrypoint's local module graph as well.
+          node --check src/stripe-adapter.js
+          node --check src/v7.js
+          node --check src/v7-routes.js
+
+      - name: Verify actual Worker entrypoint and local imports
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          import path from 'node:path';
+          const config = JSON.parse(fs.readFileSync('wrangler.jsonc', 'utf8'));
+          const main = config.main;
+          if (!main || !fs.existsSync(main)) throw new Error(`Wrangler main does not exist: ${main}`);
+          const source = fs.readFileSync(main, 'utf8');
+          const imports = [...source.matchAll(/from\s+["'](\.\/[^"']+)["']/g)].map(m => m[1]);
+          for (const specifier of imports) {
+            const resolved = path.resolve(path.dirname(main), specifier);
+            if (!fs.existsSync(resolved)) throw new Error(`Missing Worker import: ${specifier} -> ${resolved}`);
+          }
+          if (!/V14\.5\.1-EXPERT-PREPRODUCTION/.test(source)) {
+            throw new Error('Unexpected Worker source version; review before staging release');
+          }
+          console.log(`Worker entrypoint ${main} and ${imports.length} local imports verified`);
+          NODE
 
       - name: Verify Wrangler config does not target production
         run: |
