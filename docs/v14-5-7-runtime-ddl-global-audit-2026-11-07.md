@@ -122,3 +122,11 @@ Ce document ne prétend pas que la correction est intégrée : il enregistre le 
 - Tests de contrat ajoutés à la suite prelaunch.
 - Commits : identity source `e14e2b7e7cf32888a7b2b7bf2f84488d003efaa8`, migration `582b670429bee0a9ccd3c6c17e10ed18cc681b3f`; document source `9a145b011cf981ccadfc0a271e88ff90b9e94e27`, migration `837d9d53eb53d825622308b0f0918f0446d771f7`; tests `ddf2260743e678286776ae50592e646324a1652e`.
 - Migrations non exécutées sur D1 distant. CI n’a pas retourné de status.
+
+## Consolidation candidate — consolidated business/pricing schema
+
+- `ensureConsolidatedSchema` remplacé par un contrôle read-only fail-closed (`CONSOLIDATED_SCHEMA_NOT_READY`).
+- Migration candidate `0018_consolidated_business_schema.sql` reprend 21 tables et indexes, les paramètres de plateforme et les 55 dates fériées de 2026–2030.
+- Ordre de création corrigé : l’index `idx_pricing_route_owner_expiry` est créé après la table cible.
+- Test de contrat ajouté. Commits source `7e78f2b65bf941e64b2a774e78d4b1537d1c3a8f`, migration initiale `0d87b1385473a60501b62b13eb25f5578fa36b69`, correction ordre `5228b8f94eeca825a1af1aca3cf2d7ed73d1437d`, test `4e073632f317a65dac48638de8ddb058134ca601`.
+- Migration non exécutée sur D1 distant ; validation SQL/CI à effectuer.
