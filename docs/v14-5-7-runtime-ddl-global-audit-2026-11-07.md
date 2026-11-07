@@ -107,3 +107,10 @@ Ce document ne prétend pas que la correction est intégrée : il enregistre le 
 - Test de contrat ajouté à la suite prélaunch.
 - Commits source `fd277c9039a2a12dcba64732412c8e0d0daef854`, migration `367709c77175a6b98eb577082e0741f4d91da210`, test `38beb3dcfcaedd1d660d51ea786631db64ccad3b`.
 - Migration non appliquée à D1 distant ; aucun PASS CI attribué.
+
+## Consolidation candidate — production safety events
+
+- `productionSafetySchema` désormais vérifie uniquement la présence de la table, avec fail-closed `PRODUCTION_SAFETY_SCHEMA_NOT_READY`.
+- Migration candidate `0015_production_security_events.sql` ajoutée.
+- Test de contrat ajouté au test runtime-schema.
+- Commits source `fd5326ff1f5b77b24ab6cfb000de62efa2efed85`, migration `63e218bc8530e8f44936cb7cadfcf442d8e0061a`, test `03ad57c04f2d1112cdb1695d2d2eb8223cd6d700`.
