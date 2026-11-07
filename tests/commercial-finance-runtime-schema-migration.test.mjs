@@ -4,6 +4,22 @@ import { readFile } from 'node:fs/promises';
 
 const source = await readFile(new URL('../src/index.js', import.meta.url), 'utf8');
 
+function helperBody(name) {
+  const start = source.indexOf('async function ' + name);
+  assert.notEqual(start, -1, name + ' helper found');
+  const open = source.indexOf('{', start);
+  assert.notEqual(open, -1, name + ' opening brace found');
+  let depth = 0;
+  for (let i = open; i < source.length; i++) {
+    if (source[i] === '{') depth++;
+    else if (source[i] === '}') {
+      depth--;
+      if (depth === 0) return source.slice(start, i + 1);
+    }
+  }
+  assert.fail(name + ' closing brace found');
+}
+
 const cases = [
   ['ensureCommercialRecruitmentSchema', '../migrations/0008_commercial_recruitment_schema.sql',
     ['commercial_prospects','idx_commercial_prospects_priority','commercial_playbooks','recruitment_candidates','idx_recruitment_candidates','copilot_growth_actions','sales_results']],
@@ -13,11 +29,7 @@ const cases = [
 
 for (const [helper, migrationPath, required] of cases) {
   test(helper + ' is read-only and fail-closed', async () => {
-    const start = source.indexOf('async function ' + helper);
-    const end = source.indexOf('\nasync function ' + nextFn, start);
-    assert.notEqual(start, -1, 'helper found');
-    assert.notEqual(end, -1, 'helper boundary found');
-    const body = source.slice(start, end);
+    const body = helperBody(helper);
     assert.match(body, /sqlite_master/);
     assert.match(body, /SCHEMA_NOT_READY/);
     assert.doesNotMatch(body, /CREATE TABLE|CREATE INDEX|ALTER TABLE|DROP TABLE|INSERT INTO/i);
@@ -28,11 +40,7 @@ for (const [helper, migrationPath, required] of cases) {
 
 test('ensureStrategicSchema is read-only and fail-closed', async () => {
   const helper = 'ensureStrategicSchema';
-  const start = source.indexOf('async function ' + helper);
-  assert.notEqual(start, -1, 'helper found');
-  const nextFunction = source.indexOf('\nfunction promotionCandidate', start);
-  assert.notEqual(nextFunction, -1, 'helper boundary found');
-  const body = source.slice(start, nextFunction);
+  const body = helperBody(helper);
   assert.match(body, /sqlite_master/);
   assert.match(body, /STRATEGIC_SCHEMA_NOT_READY/);
   assert.doesNotMatch(body, /CREATE TABLE|CREATE INDEX|ALTER TABLE|DROP TABLE|INSERT INTO/i);
@@ -43,11 +51,7 @@ test('ensureStrategicSchema is read-only and fail-closed', async () => {
 });
 
 test('ensureFinalHardeningSchema is read-only and fail-closed', async () => {
-  const start = source.indexOf('async function ensureFinalHardeningSchema');
-  const end = source.indexOf('\nfunction finalSecretConfigured', start);
-  assert.notEqual(start, -1, 'helper found');
-  assert.notEqual(end, -1, 'helper boundary found');
-  const body = source.slice(start, end);
+  const body = helperBody('ensureFinalHardeningSchema');
   assert.match(body, /sqlite_master/);
   assert.match(body, /FINAL_HARDENING_SCHEMA_NOT_READY/);
   assert.doesNotMatch(body, /CREATE TABLE|CREATE INDEX|ALTER TABLE|DROP TABLE|INSERT INTO/i);
@@ -58,11 +62,7 @@ test('ensureFinalHardeningSchema is read-only and fail-closed', async () => {
 });
 
 test('ensureNationalContinuitySchema is read-only and migration seeds defaults', async () => {
-  const start = source.indexOf('async function ensureNationalContinuitySchema');
-  const end = source.indexOf('\nfunction b64', start);
-  assert.notEqual(start, -1, 'helper found');
-  assert.notEqual(end, -1, 'helper boundary found');
-  const body = source.slice(start, end);
+  const body = helperBody('ensureNationalContinuitySchema');
   assert.match(body, /sqlite_master/);
   assert.match(body, /NATIONAL_CONTINUITY_SCHEMA_NOT_READY/);
   assert.doesNotMatch(body, /CREATE TABLE|CREATE INDEX|ALTER TABLE|DROP TABLE|INSERT INTO/i);
@@ -73,11 +73,7 @@ test('ensureNationalContinuitySchema is read-only and migration seeds defaults',
 });
 
 test('ensureProcheliaMasterComplementSchema is read-only for DDL and preserves explicit seed initialization', async () => {
-  const start = source.indexOf('async function ensureProcheliaMasterComplementSchema');
-  const end = source.indexOf('\nfunction supportRoleAllowed', start);
-  assert.notEqual(start, -1, 'helper found');
-  assert.notEqual(end, -1, 'helper boundary found');
-  const body = source.slice(start, end);
+  const body = helperBody('ensureProcheliaMasterComplementSchema');
   assert.match(body, /sqlite_master/);
   assert.match(body, /MASTER_COMPLEMENT_SCHEMA_NOT_READY/);
   assert.doesNotMatch(body, /CREATE TABLE|CREATE INDEX|ALTER TABLE|DROP TABLE/i);
@@ -91,11 +87,7 @@ test('ensureProcheliaMasterComplementSchema is read-only for DDL and preserves e
 });
 
 test('ensureOperationalSchema has no runtime DDL/ALTER and checks columns', async () => {
-  const start = source.indexOf('async function ensureOperationalSchema');
-  const end = source.indexOf('\nasync function ', start + 15);
-  assert.notEqual(start, -1, 'helper found');
-  assert.notEqual(end, -1, 'helper boundary found');
-  const body = source.slice(start, end);
+  const body = helperBody('ensureOperationalSchema');
   assert.match(body, /sqlite_master/);
   assert.match(body, /PRAGMA table_info\(action_outbox\)/);
   assert.match(body, /OPERATIONAL_SCHEMA_NOT_READY/);
