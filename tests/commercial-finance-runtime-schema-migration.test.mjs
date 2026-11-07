@@ -126,3 +126,17 @@ test('ensureDocumentSecuritySchema is read-only and fail-closed', async () => {
   assert.match(migration, /document_security_scans/);
   assert.match(migration, /idx_document_scans_latest/);
 });
+
+test('ensureConsolidatedSchema is read-only and consolidated migration carries seeds', async () => {
+  const body = helperBody('ensureConsolidatedSchema');
+  assert.match(body, /sqlite_master/);
+  assert.match(body, /CONSOLIDATED_SCHEMA_NOT_READY/);
+  assert.doesNotMatch(body, /CREATE TABLE|CREATE INDEX|ALTER TABLE|DROP TABLE|INSERT INTO/i);
+  const migration = await readFile(new URL('../migrations/0018_consolidated_business_schema.sql', import.meta.url), 'utf8');
+  for (const name of ['platform_settings','pricing_policies','pricing_travel_policies','pricing_route_estimates','pricing_route_estimate_audit','pricing_holidays','operational_cases','case_actions','activity_journal','accounting_ledger','compliance_events']) {
+    assert.ok(migration.includes(name), 'migration includes ' + name);
+  }
+  assert.match(migration, /idx_pricing_route_owner_expiry[\s\S]*?pricing_route_estimate_audit/);
+  assert.match(migration, /project_phase/);
+  assert.match(migration, /2030-12-25/);
+});
