@@ -3,10 +3,11 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
 const source = readFileSync(new URL('../src/index.js', import.meta.url), 'utf8');
+const migration = readFileSync(new URL('../migrations/0007_trust_passport_schema.sql', import.meta.url), 'utf8');
 
 test('Trust Passport persists a versioned service catalogue and scoped verification evidence in D1', () => {
-  assert.match(source, /CREATE TABLE IF NOT EXISTS trust_service_catalog/);
-  assert.match(source, /CREATE TABLE IF NOT EXISTS trust_verifications/);
+  assert.match(migration, /CREATE TABLE IF NOT EXISTS trust_service_catalog/);
+  assert.match(migration, /CREATE TABLE IF NOT EXISTS trust_verifications/);
   assert.match(source, /UNIQUE\(intervenant_id,category,service_code,proof_document_id\)/);
   assert.match(source, /trustPassportSaveCatalog/);
   assert.match(source, /trustPassportVerifyEvidence/);
