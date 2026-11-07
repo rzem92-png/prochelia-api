@@ -3883,7 +3883,7 @@ const NATIONAL_SCALE_DEFAULTS = Object.freeze({
 
 async function ensureNationalContinuitySchema(env) {
   if (!env.DB) throw new Error('DATABASE_REQUIRED');
-  const requiredTables = ['platform_scale_config', 'backup_runs', 'backup_objects'];
+  const requiredTables = ['platform_scale_config', 'backup_runs', 'backup_objects', 'backup_verifications'];
   const placeholders = requiredTables.map(() => '?').join(',');
   const result = await env.DB.prepare(
     `SELECT name FROM sqlite_master WHERE type='table' AND name IN (${placeholders})`
@@ -4047,7 +4047,8 @@ async function verifyNationalBackup(env,runId){
     }catch(e){failed++;errors.push({object_key:entry.object_key,error:String(e.message||e)});}
   }
   const result={ok:failed===0,status:failed===0?'VERIFIED':'FAILED',runId,verifiedObjects:verified,failedObjects:failed,manifestChecksum:manifestRecord.checksum,errors};
-  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS backup_verifications(id TEXT PRIMARY KEY,backup_run_id TEXT NOT NULL,status TEXT NOT NULL,verified_objects INTEGER NOT NULL,failed_objects INTEGER NOT NULL,report_json TEXT NOT NULL,checked_at TEXT DEFAULT CURRENT_TIMESTAMP)`).run();
+  const verificationSchema = await env.DB.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='backup_verifications'").first();
+  if (!verificationSchema) throw new Error('NATIONAL_CONTINUITY_SCHEMA_NOT_READY');
   await env.DB.prepare(`INSERT INTO backup_verifications(id,backup_run_id,status,verified_objects,failed_objects,report_json) VALUES(?,?,?,?,?,?)`).bind(crypto.randomUUID(),runId,result.status,verified,failed,JSON.stringify(result)).run();
   return result;
 }
