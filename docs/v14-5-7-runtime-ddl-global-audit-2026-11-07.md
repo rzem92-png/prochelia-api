@@ -130,3 +130,9 @@ Ce document ne prétend pas que la correction est intégrée : il enregistre le 
 - Ordre de création corrigé : l’index `idx_pricing_route_owner_expiry` est créé après la table cible.
 - Test de contrat ajouté. Commits source `7e78f2b65bf941e64b2a774e78d4b1537d1c3a8f`, migration initiale `0d87b1385473a60501b62b13eb25f5578fa36b69`, correction ordre `5228b8f94eeca825a1af1aca3cf2d7ed73d1437d`, test `4e073632f317a65dac48638de8ddb058134ca601`.
 - Migration non exécutée sur D1 distant ; validation SQL/CI à effectuer.
+
+## Consolidation candidate — backup verification history
+
+- DDL runtime découvert dans `verifyNationalBackup` retiré ; vérification de readiness fail-closed.
+- `backup_verifications` ajoutée à la migration candidate `0019_backup_verifications.sql` et à la readiness continuité nationale.
+- Test de non-DDL ajouté. Source `519ae89f58a14582aa6bc86213862e7d37dcd345`, migration `95cc918c1d1bc95334fc3843cca7722303ca45f9`, test `80723b1cf704d88b093e8f85496c80a75dd0f54b`.
