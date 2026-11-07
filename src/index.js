@@ -4177,7 +4177,7 @@ async function pruneExpiredRateLimitBuckets(env){
   ).first();
   if(schema?.ready!==1) return {ok:true,skipped:true,reason:'RATE_LIMIT_SCHEMA_NOT_READY'};
   const result=await env.DB.prepare(
-    "DELETE FROM security_rate_limits WHERE window_start < datetime('now','-1 day')"
+    "DELETE FROM security_rate_limits WHERE window_start < strftime('%Y-%m-%dT%H:%M:%fZ','now','-1 day')"
   ).run();
   return {ok:true,deleted:Number(result?.meta?.changes||0)};
 }
