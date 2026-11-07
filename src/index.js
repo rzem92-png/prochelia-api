@@ -2789,70 +2789,34 @@ async function handleStrategic(request, env) {
 // ================================================================
 
 async function ensureOperationalSchema(env) {
-  const statements = [
-    `CREATE TABLE IF NOT EXISTS action_outbox (
-      id TEXT PRIMARY KEY, case_id TEXT, action_type TEXT NOT NULL, entity_type TEXT,
-      entity_id TEXT, idempotency_key TEXT NOT NULL UNIQUE, status TEXT NOT NULL DEFAULT 'PENDING',
-      payload_json TEXT NOT NULL DEFAULT '{}', result_json TEXT, attempts INTEGER NOT NULL DEFAULT 0,
-      last_error TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, executed_at TEXT, processed_at TEXT
-    )`,
-    `CREATE INDEX IF NOT EXISTS idx_action_outbox_status ON action_outbox(status,created_at)`,
-    `CREATE TABLE IF NOT EXISTS copilot_briefings (
-      id TEXT PRIMARY KEY, phase TEXT NOT NULL, priority INTEGER NOT NULL DEFAULT 10,
-      category TEXT NOT NULL, title TEXT NOT NULL, recommendation TEXT NOT NULL,
-      action_type TEXT, entity_type TEXT, entity_id TEXT, impact_json TEXT NOT NULL DEFAULT '{}',
-      status TEXT NOT NULL DEFAULT 'OPEN', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      closed_at TEXT
-    )`,
-    `CREATE INDEX IF NOT EXISTS idx_copilot_briefings_open ON copilot_briefings(status,priority,created_at)`,
-    `CREATE TABLE IF NOT EXISTS loyalty_events (
-      id TEXT PRIMARY KEY, client_id TEXT, company_id TEXT, event_type TEXT NOT NULL,
-      points INTEGER NOT NULL DEFAULT 0, amount_cents INTEGER NOT NULL DEFAULT 0,
-      metadata_json TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )`,
-    `CREATE TABLE IF NOT EXISTS loyalty_balances (
-      id TEXT PRIMARY KEY, client_id TEXT, company_id TEXT, points INTEGER NOT NULL DEFAULT 0,
-      tier TEXT NOT NULL DEFAULT 'STANDARD', updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      UNIQUE(client_id,company_id)
-    )`,
-    `CREATE TABLE IF NOT EXISTS quality_events (
-      id TEXT PRIMARY KEY, mission_id TEXT, client_id TEXT, company_id TEXT, intervenant_id TEXT,
-      rating REAL, category TEXT, comment TEXT, severity TEXT NOT NULL DEFAULT 'LOW',
-      metadata_json TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )`,
-    `CREATE TABLE IF NOT EXISTS b2b_leads (
-      id TEXT PRIMARY KEY, company_name TEXT NOT NULL, contact_name TEXT, email TEXT,
-      phone TEXT, source TEXT, status TEXT NOT NULL DEFAULT 'NEW', estimated_value_cents INTEGER DEFAULT 0,
-      next_action TEXT, metadata_json TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )`,
-    `CREATE TABLE IF NOT EXISTS capacity_snapshots (
-      id TEXT PRIMARY KEY, zone_code TEXT, service_code TEXT, snapshot_date TEXT NOT NULL,
-      demand_count INTEGER NOT NULL DEFAULT 0, supply_count INTEGER NOT NULL DEFAULT 0,
-      fill_rate REAL NOT NULL DEFAULT 0, unused_capacity INTEGER NOT NULL DEFAULT 0,
-      recommendation TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )`,
-    `CREATE INDEX IF NOT EXISTS idx_capacity_date ON capacity_snapshots(snapshot_date,zone_code,service_code)`,
-    `CREATE TABLE IF NOT EXISTS finance_forecasts (
-      id TEXT PRIMARY KEY, period TEXT NOT NULL, scenario TEXT NOT NULL,
-      revenue_cents INTEGER NOT NULL DEFAULT 0, commission_cents INTEGER NOT NULL DEFAULT 0,
-      payout_cents INTEGER NOT NULL DEFAULT 0, provider_fee_cents INTEGER NOT NULL DEFAULT 0,
-      refund_cents INTEGER NOT NULL DEFAULT 0, estimated_margin_cents INTEGER NOT NULL DEFAULT 0,
-      confidence REAL NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )`,
-    `CREATE TABLE IF NOT EXISTS system_checks (
-      id TEXT PRIMARY KEY, check_type TEXT NOT NULL, status TEXT NOT NULL,
-      details_json TEXT NOT NULL DEFAULT '{}', checked_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )`
+  if (!env.DB) throw new Error('DATABASE_REQUIRED');
+  const requiredTables = [
+    'action_outbox', 'copilot_briefings', 'loyalty_events', 'loyalty_balances',
+    'quality_events', 'b2b_leads', 'capacity_snapshots', 'finance_forecasts', 'system_checks'
   ];
-  for (const sql of statements) await env.DB.prepare(sql).run();
+  const placeholders = requiredTables.map(() => '?').join(',');
+  const result = await env.DB.prepare(
+    `SELECT name FROM sqlite_master WHERE type='table' AND name IN (${placeholders})`
+  ).bind(...requiredTables).all();
+  const found = new Set((result.results || []).map(row => String(row.name)));
+  const missing = requiredTables.filter(name => !found.has(name));
+  if (missing.length) {
+    const error = new Error('OPERATIONAL_SCHEMA_NOT_READY');
+    error.code = 'OPERATIONAL_SCHEMA_NOT_READY';
+    error.missing = missing;
+    throw error;
+  }
   const actionInfo = await env.DB.prepare('PRAGMA table_info(action_outbox)').all();
   const actionColumns = (actionInfo.results || []).map(x => String(x.name));
-  if (!actionColumns.includes('case_id')) await env.DB.prepare('ALTER TABLE action_outbox ADD COLUMN case_id TEXT').run();
-  if (!actionColumns.includes('processed_at')) await env.DB.prepare('ALTER TABLE action_outbox ADD COLUMN processed_at TEXT').run();
+  const requiredColumns = ['case_id', 'processed_at'];
+  const missingColumns = requiredColumns.filter(name => !actionColumns.includes(name));
+  if (missingColumns.length) {
+    const error = new Error('OPERATIONAL_SCHEMA_NOT_READY');
+    error.code = 'OPERATIONAL_SCHEMA_NOT_READY';
+    error.missingColumns = missingColumns;
+    throw error;
+  }
 }
-
 async function tableExists(env, table) {
   const r = await env.DB.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name=? LIMIT 1").bind(table).first();
   return !!r;
