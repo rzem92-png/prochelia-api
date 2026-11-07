@@ -25,3 +25,19 @@ for (const [helper, migrationPath, required] of cases) {
     for (const name of required) assert.ok(migration.includes(name), 'migration includes ' + name);
   });
 }
+
+test('ensureStrategicSchema is read-only and fail-closed', async () => {
+  const helper = 'ensureStrategicSchema';
+  const start = source.indexOf('async function ' + helper);
+  assert.notEqual(start, -1, 'helper found');
+  const nextFunction = source.indexOf('\nfunction promotionCandidate', start);
+  assert.notEqual(nextFunction, -1, 'helper boundary found');
+  const body = source.slice(start, nextFunction);
+  assert.match(body, /sqlite_master/);
+  assert.match(body, /STRATEGIC_SCHEMA_NOT_READY/);
+  assert.doesNotMatch(body, /CREATE TABLE|CREATE INDEX|ALTER TABLE|DROP TABLE|INSERT INTO/i);
+  const migration = await readFile(new URL('../migrations/0010_strategic_schema.sql', import.meta.url), 'utf8');
+  for (const name of ['promotions','idx_promotions_active','promotion_recommendations','idx_promotion_reco_status','commercial_events','market_signals','client_value_scores','strategic_alerts']) {
+    assert.ok(migration.includes(name), 'migration includes ' + name);
+  }
+});
