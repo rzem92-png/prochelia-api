@@ -74,3 +74,11 @@ test("invalid UTF-8 body is rejected as a 400 without reaching R2",async()=>{
  const res=await worker.fetch(request,env); const data=await res.json();
  assert.equal(res.status,400); assert.equal(data.error,"INVALID_UTF8"); assert.equal(puts,0);
 });
+
+test("binding diagnostics are not exposed to unauthenticated callers",async()=>{
+ const env={R2_TEST_TOKEN:token};
+ let res=await worker.fetch(req("POST","/api/r2/smoke","bad","PROCHELIA-R2-PREPROD-TEST"),env);
+ assert.equal(res.status,401); assert.equal((await res.json()).error,"UNAUTHORIZED");
+ res=await worker.fetch(req("POST","/api/r2/smoke",token,"PROCHELIA-R2-PREPROD-TEST"),env);
+ assert.equal(res.status,503); assert.equal((await res.json()).error,"R2_BINDING_MISSING");
+});
