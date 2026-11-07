@@ -45,3 +45,11 @@ Base ciblée : `prochelia-preview-db` — UUID `6adb95e5-e542-4bec-9008-fbea0104
 - The preview Worker API returned no configured secret bindings. Secrets may be managed elsewhere, but they are not confirmed in this Worker. Verify sandbox secret setup in Cloudflare without exposing values.
 - Stripe adapter regression test now imports `src/stripe-adapter.js` (the actual source module referenced by `src/index.js`) rather than the root legacy copy.
 - CI static validation was expanded to syntax-check `src/stripe-adapter.js`, `src/v7.js`, `src/v7-routes.js`, and verify Wrangler `main` plus local imports. Workflow run result for the new commit must be checked in Actions before release.
+
+## CI staging — vérification post-corrections
+Commit contrôlé : `74e1e3a3cde3aae625ad43ac0cafa0ee88e78164`.
+- Workflow `PROCHÉLIA preproduction static validation` #204 : **success**.
+- Workflow `PROCHÉLIA Security Origin Regression` #121 : **success**.
+- Logs du job de tests Node 22 : **67 tests, 67 réussis, 0 échoué**.
+- Les tests Stripe adaptateur importent désormais `src/stripe-adapter.js` (la source applicative), et non la copie racine.
+- Ces tests sont des tests Node/contractuels et certains contrôles statiques; ils ne remplacent pas une recette API/Stripe/D1 de bout en bout.
