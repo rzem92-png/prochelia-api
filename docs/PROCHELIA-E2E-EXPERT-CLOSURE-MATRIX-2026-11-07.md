@@ -63,3 +63,11 @@ Production interdite tant qu'une ligne critique n'a pas une preuve datée liée 
 
 ## Limites de ce registre
 Ce document est une matrice de contrôle et non une preuve que les tests, audits, validations juridiques ou déploiements ont été exécutés. Les statuts doivent être remplacés par des liens vers des preuves réelles.
+
+
+## Mise à jour des preuves CI — 2026-11-08
+
+- Backend rate-limit identity hardening : commit `9498ab4bcec25e1ab5bd67309d2eff4065e1c188`.
+- CI backend `42423385977` et `42423386015` : `success`.
+- Frontend CSRF/webhook/idempotency: CI `42423101801`, `42423209792`, `42423223275` : `success`.
+- Cette mise à jour clôt uniquement les preuves de tests automatisés correspondant aux commits cités. Les parcours E2E réels, la recette navigateur, Stripe sandbox, R2 restore et les validations juridiques restent `BLOCKED / NOT VERIFIED` jusqu'à preuve distincte.
