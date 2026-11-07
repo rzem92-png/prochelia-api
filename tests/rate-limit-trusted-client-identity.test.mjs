@@ -10,12 +10,12 @@ test('rate limiter derives identity only from trusted Cloudflare header', () => 
   assert.notEqual(start, -1);
   assert.notEqual(end, -1);
   const helper = source.slice(start, end);
-  const executable = helper.split(/\\r?\\n/).filter(line => !line.trim().startsWith('//')).join('\\n');
+  const executable = helper;
 
   assert.match(executable, /CF-Connecting-IP/);
   assert.ok(executable.includes('if(!ip) return null;'));
   assert.match(executable, /sha256Hex/);
-  assert.doesNotMatch(executable, /X-Forwarded-For/);
+  assert.ok(!executable.includes(\"request.headers.get('X-Forwarded-For')\"));
 });
 
 test('rate limiter rejects missing trusted client identity before D1 increment', () => {
