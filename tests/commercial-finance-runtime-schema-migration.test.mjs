@@ -56,3 +56,18 @@ test('ensureFinalHardeningSchema is read-only and fail-closed', async () => {
     assert.ok(migration.includes(name), 'migration includes ' + name);
   }
 });
+
+test('ensureNationalContinuitySchema is read-only and migration seeds defaults', async () => {
+  const start = source.indexOf('async function ensureNationalContinuitySchema');
+  const end = source.indexOf('\nfunction b64', start);
+  assert.notEqual(start, -1, 'helper found');
+  assert.notEqual(end, -1, 'helper boundary found');
+  const body = source.slice(start, end);
+  assert.match(body, /sqlite_master/);
+  assert.match(body, /NATIONAL_CONTINUITY_SCHEMA_NOT_READY/);
+  assert.doesNotMatch(body, /CREATE TABLE|CREATE INDEX|ALTER TABLE|DROP TABLE|INSERT INTO/i);
+  const migration = await readFile(new URL('../migrations/0012_national_continuity_schema.sql', import.meta.url), 'utf8');
+  for (const name of ['platform_scale_config','backup_runs','backup_objects','maxPageSize','defaultPageSize','importBatchSize','backupRetentionDays']) {
+    assert.ok(migration.includes(name), 'migration includes ' + name);
+  }
+});
