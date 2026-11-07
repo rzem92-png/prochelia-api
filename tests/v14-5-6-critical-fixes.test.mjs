@@ -630,4 +630,7 @@ test('Payment runtime schema guard is read-only and fails closed on missing migr
   assert.match(guard, /PAYMENT_SCHEMA_NOT_READY/);
   assert.match(guard, /requiredTables/);
   assert.match(guard, /requiredTriggers/);
+  assert.match(guard, /requiredColumns/);
+  assert.match(guard, /PRAGMA table_info/);
+  assert.match(guard, /missing_columns/);
 });
