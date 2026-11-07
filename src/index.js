@@ -3574,15 +3574,16 @@ async function documentsMine(request, env) {
   const r=await env.DB.prepare(`SELECT id,document_type,original_filename,mime_type,size_bytes,status,expires_at,created_at,updated_at FROM document_records WHERE owner_user_id=? ORDER BY created_at DESC LIMIT 100`).bind(auth.user.id).all();
   return json({ok:true,documents:r.results||[],version:VERSION});
 }
-async function ensureDocumentSecuritySchema(env){
-  if(!env.DB) throw new Error('DATABASE_REQUIRED');
-  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS document_security_scans(
-    id TEXT PRIMARY KEY, document_id TEXT NOT NULL, scanner TEXT NOT NULL,
-    result TEXT NOT NULL, signature_version TEXT, file_sha256 TEXT NOT NULL,
-    threat_name TEXT, scanner_reference TEXT, scanned_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    metadata_json TEXT NOT NULL DEFAULT '{}'
-  )`).run();
-  await env.DB.prepare(`CREATE INDEX IF NOT EXISTS idx_document_scans_latest ON document_security_scans(document_id,scanned_at DESC)`).run();
+async function ensureDocumentSecuritySchema(env) {
+  if (!env.DB) throw new Error('DATABASE_REQUIRED');
+  const result = await env.DB.prepare(
+    "SELECT name FROM sqlite_master WHERE type='table' AND name='document_security_scans'"
+  ).first();
+  if (!result) {
+    const error = new Error('DOCUMENT_SECURITY_SCHEMA_NOT_READY');
+    error.code = 'DOCUMENT_SECURITY_SCHEMA_NOT_READY';
+    throw error;
+  }
 }
 async function scanDocumentBytes(env,doc,bytes,actorId){
   await ensureDocumentSecuritySchema(env);
