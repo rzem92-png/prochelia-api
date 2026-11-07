@@ -20,13 +20,11 @@ function envWithR2() {
 }
 const req=(method,path,auth=token,body="")=>new Request("https://preprod.invalid"+path,{method,headers:auth?{authorization:"Bearer "+auth}: {},body:method==="GET"?undefined:body});
 
-test("health reports R2 binding and configured token without revealing secret", async()=>{
+test("public health is minimal and does not expose binding/token configuration", async()=>{
  const env=envWithR2(); const res=await worker.fetch(req("GET","/api/health"),env); const data=await res.json();
- assert.equal(res.status,200); assert.equal(data.r2_binding,true); assert.equal(data.token_configured,true); assert.equal(JSON.stringify(data).includes(token),false);
-});
-test("health works without R2 but reports missing binding",async()=>{
- const res=await worker.fetch(req("GET","/api/health"),{R2_TEST_TOKEN:token});
- const data=await res.json(); assert.equal(res.status,200); assert.equal(data.r2_binding,false);
+ assert.equal(res.status,200); assert.equal(data.ok,true); assert.equal(data.status,"available");
+ assert.equal("r2_binding" in data,false); assert.equal("token_configured" in data,false);
+ assert.equal(JSON.stringify(data).includes(token),false);
 });
 test("rejects missing/incorrect token",async()=>{
  const env=envWithR2();
