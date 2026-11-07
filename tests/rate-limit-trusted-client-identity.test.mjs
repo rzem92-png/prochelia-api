@@ -13,7 +13,7 @@ test('rate limiter derives identity only from trusted Cloudflare header', () => 
   const executable = helper.split(/\\r?\\n/).filter(line => !line.trim().startsWith('//')).join('\\n');
 
   assert.match(executable, /CF-Connecting-IP/);
-  assert.match(executable, /if\\s*\\(!ip\\)\\s*return null/);
+  assert.ok(executable.includes('if(!ip) return null;'));
   assert.match(executable, /sha256Hex/);
   assert.doesNotMatch(executable, /X-Forwarded-For/);
 });
