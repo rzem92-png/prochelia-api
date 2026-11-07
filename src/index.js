@@ -3594,7 +3594,10 @@ async function productionSafetySchema(env){
 }
 
 async function productionSubjectHash(request, route){
-  const ip=clean(request.headers.get('CF-Connecting-IP')) || clean(request.headers.get('X-Forwarded-For')) || 'unknown';
+  // Trust only Cloudflare's edge-provided client IP. X-Forwarded-For is
+  // attacker-controlled unless a trusted proxy explicitly sanitizes it;
+  // accepting it here lets callers rotate spoofed values to evade rate limits.
+  const ip=clean(request.headers.get('CF-Connecting-IP')) || 'unknown';
   return sha256Base64url(`${ip}|${route}`);
 }
 
