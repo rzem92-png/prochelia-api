@@ -71,3 +71,21 @@ test('ensureNationalContinuitySchema is read-only and migration seeds defaults',
     assert.ok(migration.includes(name), 'migration includes ' + name);
   }
 });
+
+test('ensureProcheliaMasterComplementSchema is read-only for DDL and preserves explicit seed initialization', async () => {
+  const start = source.indexOf('async function ensureProcheliaMasterComplementSchema');
+  const end = source.indexOf('\nfunction supportRoleAllowed', start);
+  assert.notEqual(start, -1, 'helper found');
+  assert.notEqual(end, -1, 'helper boundary found');
+  const body = source.slice(start, end);
+  assert.match(body, /sqlite_master/);
+  assert.match(body, /MASTER_COMPLEMENT_SCHEMA_NOT_READY/);
+  assert.doesNotMatch(body, /CREATE TABLE|CREATE INDEX|ALTER TABLE|DROP TABLE/i);
+  assert.match(body, /INSERT OR IGNORE INTO brand_identity/);
+  assert.match(body, /INSERT OR IGNORE INTO interface_profiles/);
+  assert.match(body, /INSERT OR IGNORE INTO copilot_resolution_rules/);
+  const migration = await readFile(new URL('../migrations/0013_master_complement_schema.sql', import.meta.url), 'utf8');
+  for (const name of ['brand_identity','brand_assets','brand_clearance_log','interface_profiles','support_cases','support_case_events','copilot_resolution_rules']) {
+    assert.ok(migration.includes(name), 'migration includes ' + name);
+  }
+});
