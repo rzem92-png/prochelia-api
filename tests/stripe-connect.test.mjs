@@ -50,6 +50,20 @@ test("Stripe webhook signature rejects invalid and stale signatures", async()=>{
   assert.equal(await verifyStripeSignature("t="+(timestamp-601)+",v1="+signature,secret,body,timestamp),false);
 });
 
+async function csrfTokenForTest(sessionToken="synthetic-token") {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode("prochelia-csrf-v1:" + sessionToken));
+  return Buffer.from(digest).toString("base64url");
+}
+async function authenticatedMutationHeaders(extra={}) {
+  return {
+    Origin:"https://prochelia.pages.dev",
+    Cookie:"prochelia_session=synthetic-token",
+    "Content-Type":"application/json",
+    "X-CSRF-Token":await csrfTokenForTest(),
+    ...extra
+  };
+}
+
 function fakeDb(role="intervenant"){
   const calls=[];
   const user={id:"user-test-1",role,email:"provider@example.test",first_name:"Alex",last_name:"Provider",phone:"0600000000",status:"active",created_at:"2026-10-31",updated_at:"2026-10-31",session_id:"session-test"};
@@ -90,7 +104,7 @@ test("Stripe Connect onboarding creates the account and a fresh onboarding link 
     const env={DB:fake.DB,PAYMENT_PROVIDER:"stripe",STRIPE_SECRET_KEY:"sk_test_unit",STRIPE_PUBLISHABLE_KEY:"pk_test_unit",STRIPE_WEBHOOK_SECRET:"whsec_unit",STRIPE_DASHBOARD:"express",STRIPE_FEES_COLLECTOR:"application",STRIPE_LOSSES_COLLECTOR:"application",APP_BASE_URL:"https://prochelia.pages.dev"};
     const response=await worker.fetch(new Request("https://api.test/api/payments/onboard",{
       method:"POST",
-      headers:{Origin:"https://prochelia.pages.dev",Cookie:"prochelia_session=synthetic-token","Content-Type":"application/json"},
+      headers:await authenticatedMutationHeaders(),
       body:JSON.stringify({account_token:"acctok_test123",stripe_terms_accepted:true,provider_account_id:"acct_attacker_controlled"})
     }),env);
     const body=await response.json();
@@ -121,7 +135,7 @@ test("real charges and payouts fail closed until the transaction adapters are im
   const env={DB:fake.DB,PAYMENT_PROVIDER:"stripe",STRIPE_SECRET_KEY:"sk_test_unit",STRIPE_WEBHOOK_SECRET:"whsec_unit",APP_BASE_URL:"https://prochelia.pages.dev"};
   const response=await worker.fetch(new Request("https://api.test/api/payments/mission/create",{
     method:"POST",
-    headers:{Cookie:"prochelia_session=synthetic-token","Content-Type":"application/json","Idempotency-Key":"test-charge-1"},
+    headers:await authenticatedMutationHeaders({"Idempotency-Key":"test-charge-1"}),
     body:JSON.stringify({mission_id:"m1",client_id:"c1",intervenant_id:"i1",gross_eur:100,commission_eur:10})
   }),env);
   const body=await response.json();
@@ -175,7 +189,7 @@ test("payout requests remain blocked until a real payout adapter exists", async(
   const env={DB:fake.DB,PAYMENT_PROVIDER:"stripe",STRIPE_SECRET_KEY:"sk_test_unit",STRIPE_WEBHOOK_SECRET:"whsec_unit",APP_BASE_URL:"https://prochelia.pages.dev"};
   const response=await worker.fetch(new Request("https://api.test/api/payments/payout",{
     method:"POST",
-    headers:{Cookie:"prochelia_session=synthetic-token","Content-Type":"application/json"},
+    headers:await authenticatedMutationHeaders(),
     body:JSON.stringify({amount_eur:100})
   }),env);
   const body=await response.json();
