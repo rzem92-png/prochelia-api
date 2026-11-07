@@ -59,3 +59,12 @@ Mark **R2 preproduction smoke PASS** only if health, auth, put, get+verification
 
 ## Cleanup
 After validation, delete the synthetic object (if present). Remove `R2_TEST_TOKEN` and delete the isolated Worker only when staging use is no longer needed. Keep the private bucket unless a separately approved retention/cleanup plan says otherwise.
+
+
+## Cloudflare control-plane recheck — 2026-11-08
+
+Read-only Cloudflare API verification:
+- Worker `prochelia-api-r2-preprod` settings show binding `R2_STAGING` → `prochelia-staging-storage`, jurisdiction `eu`, and secret binding `R2_TEST_TOKEN` (secret value is not retrievable and was not exposed).
+- Worker versions include version 7 (`06eeaf18-97dd-4277-af26-f701570934a7`), created 2026-11-07 22:36:20 UTC after the secret update. Deployment traffic record previously verified remains version 5 / deployment `2bcbcd16-18fd-46c4-a92e-4ab2d1864fa0` at 100%; this version/traffic distinction must not be confused.
+- Cloudflare R2 bucket list API returned an empty `buckets` array, while Worker settings still report the R2 binding. This API result is **inconclusive** (possible account/API visibility issue) and requires Dashboard confirmation; do not treat it as bucket deletion or as proof bucket health.
+- No live Worker HTTP smoke or actual object PUT/GET/DELETE was executed in this recheck. R2 smoke and restore remain `BLOCKED / NOT VERIFIED`.
