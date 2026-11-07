@@ -22,7 +22,7 @@ This is an isolated Worker entrypoint. It does not import the main API, does not
    `npx wrangler deploy --config wrangler.r2-preprod.jsonc`
 
 ## Smoke test after deployment
-- GET `/api/health`: check `r2_binding=true` and `token_configured=true`.
+- GET `/api/health`: expect HTTP 200, `ok=true`, `status="available"`; the public response intentionally does **not** disclose R2 binding or secret configuration. Confirm binding/secret only in the authenticated Cloudflare Dashboard/configuration view.
 - POST `/api/r2/smoke` with Bearer token and exact body `PROCHELIA-R2-PREPROD-TEST`.
 - GET same route with Bearer token: must return `verified=true`.
 - DELETE same route with Bearer token: must return `deleted=true`.
@@ -37,6 +37,10 @@ curl -sS -X POST "$WORKER_URL/api/r2/smoke" -H "Authorization: Bearer $R2_TEST_T
 curl -sS "$WORKER_URL/api/r2/smoke" -H "Authorization: Bearer $R2_TEST_TOKEN"
 curl -sS -X DELETE "$WORKER_URL/api/r2/smoke" -H "Authorization: Bearer $R2_TEST_TOKEN"
 ```
+
+## CI status
+- Unit tests are credential-free and use a mock R2 adapter; they validate application behavior but are not proof of live bucket access.
+- Latest workflow passed for commit `a67928b06b46989a06719ba6504fb9e70b51d05e`.
 
 ## Safety
 - Do not enable public bucket access.
