@@ -6,7 +6,8 @@ import json
 ROOT = Path(__file__).resolve().parents[1]
 CONFIG = ROOT / "wrangler.jsonc"
 PRODUCTION_D1 = "04f52830-ef5a-4f17-a640-42bbc2381bba"
-PREVIEW_D1 = "6adb95e5-e542-4bec-9008-fbea01042305"\nPREVIEW_WORKER = "prochelia-api-preview"
+PREVIEW_D1 = "6adb95e5-e542-4bec-9008-fbea01042305"
+PREVIEW_WORKER = "prochelia-api-preview"
 
 def main():
     # Current wrangler.jsonc is strict JSON despite its extension.
