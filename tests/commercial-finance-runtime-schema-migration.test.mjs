@@ -149,3 +149,9 @@ test('backup verification handler does not create schema at runtime', async () =
   const migration = await readFile(new URL('../migrations/0019_backup_verifications.sql', import.meta.url), 'utf8');
   assert.match(migration, /backup_verifications/);
 });
+
+test('Worker source contains no runtime DDL statements', () => {
+  assert.doesNotMatch(source, /\bCREATE\s+(?:TABLE|INDEX)\s+IF\s+NOT\s+EXISTS\b/i);
+  assert.doesNotMatch(source, /\bALTER\s+TABLE\b/i);
+  assert.doesNotMatch(source, /\bDROP\s+(?:TABLE|INDEX)\b/i);
+});
