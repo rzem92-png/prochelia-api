@@ -53,3 +53,14 @@ Commit contrôlé : `74e1e3a3cde3aae625ad43ac0cafa0ee88e78164`.
 - Logs du job de tests Node 22 : **67 tests, 67 réussis, 0 échoué**.
 - Les tests Stripe adaptateur importent désormais `src/stripe-adapter.js` (la source applicative), et non la copie racine.
 - Ces tests sont des tests Node/contractuels et certains contrôles statiques; ils ne remplacent pas une recette API/Stripe/D1 de bout en bout.
+
+## Audit comparatif de la branche candidate v14.5.7
+Comparaison ponctuelle de fichiers entre `staging-prochelia-v14` et `prelaunch/v14.5.7-consolidation-audit` (lecture seule, sans merge) :
+- `src/index.js` : 283,304 caractères sur staging contre 368,293 sur la branche candidate. La différence est importante et doit être revue en diff, pas fusionnée aveuglément.
+- `src/stripe-adapter.js` : staging 4,292 caractères, candidate 2,508. Le candidate est plus court et n’est pas automatiquement une version supérieure.
+- Les migrations `0001` à `0004` sont présentes sur la candidate, absentes de staging. La base staging annonce déjà ces 4 migrations appliquées. Cela laisse une incohérence repository-versus-database à résoudre avant une migration future.
+- La branche candidate a une CI prelaunch audit qui date du 4 novembre; ce n’est pas une validation de son code actuel contre la base preview du 7 novembre.
+**Décision de sécurité :** aucun cherry-pick, merge, migration ni déploiement effectué. Une intégration massive de cette branche sans analyse différentielle pourrait retirer des protections ou modifier les contrats API.
+
+## État du lancement après CI #205 / #122
+Les deux workflows sur commit `a9cfcee33d23382851f0d37a6d00616820d55978` sont réussis. La CI prouve syntaxe, garde-fous de configuration et tests Node, mais pas une recette end-to-end Cloudflare/Stripe/D1, pas un test de restauration et pas la présence du secret Stripe dans le Worker preview.
