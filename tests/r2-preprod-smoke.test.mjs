@@ -52,6 +52,15 @@ test("put get delete lifecycle works for fixed synthetic object",async()=>{
  res=await worker.fetch(req("GET","/api/r2/smoke",token),env);
  assert.equal(res.status,404);
 });
+test("storage provider exceptions are sanitized into 503",async()=>{
+ const env=envWithR2();
+ env.R2_STAGING.put=async()=>{throw new Error("secret provider detail should not leak");};
+ const res=await worker.fetch(req("POST","/api/r2/smoke",token,"PROCHELIA-R2-PREPROD-TEST"),env);
+ const body=await res.text();
+ assert.equal(res.status,503);
+ assert.equal(body.includes("secret provider detail"),false);
+ assert.equal(body.includes("R2_OPERATION_FAILED"),true);
+});
 test("unknown route/method are denied",async()=>{
  const env=envWithR2();
  assert.equal((await worker.fetch(req("GET","/api/r2/objects",token),env)).status,404);
