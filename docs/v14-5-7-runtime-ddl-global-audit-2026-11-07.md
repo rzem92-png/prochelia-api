@@ -83,3 +83,11 @@ Ce document ne prétend pas que la correction est intégrée : il enregistre le 
 - Test de non-DDL ajouté au fichier de tests runtime-schema déjà présent dans `test:prelaunch`.
 - Commits source `1a3b2061a4291e6d36f3de70f76aef644a741b29`, migration `02eadd54615eb08c739232a26186fa5f855c54b3`, test `5449a5c627ea32119c09bfa5873431e67fc78f7a`.
 - Non exécuté sur D1 distant ; CI/tests restent à vérifier.
+
+## Consolidation candidate — national continuity / backups
+
+- `ensureNationalContinuitySchema` devient read-only/fail-closed (`NATIONAL_CONTINUITY_SCHEMA_NOT_READY`).
+- Migration `0012_national_continuity_schema.sql` porte les tables backup/scale config, indexes et defaults d’échelle. Les defaults sont initialisés dans la migration, plus dans le handler.
+- Test ajouté au fichier de contrat runtime schema (déjà référencé dans `test:prelaunch`).
+- Commits source `f4ed42dd6e9a58d8daa32e10b6ff2a519cce8fe7`, migration `5e0001bb929ccf1cc78cc2b1bbf4f6849e3ebedb`, test `8b0e8c97d2a7f930a85e6fb00a9d7860cc854091`.
+- Migration candidate, non appliquée sur D1 distant. R2 non activé et sauvegarde/restauration non vérifiées : ce changement n’établit pas de backup opérationnel.
