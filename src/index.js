@@ -3014,7 +3014,15 @@ async function finalProductionAudit(request,env) {
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
   const result=await productionConfigCheck(env);
   await journal(env,'gerante',gate.auth.user.id,'FINAL_PRODUCTION_AUDIT','system',null,result.overall?'OK':'ATTENTION',{blocking:result.blocking,externalNotConfigured:result.externalNotConfigured});
-  return json({ok:true,version:VERSION,production_gate:result.overall?'OPEN':'CLOSED',ready_for_real_traffic:result.overall,checks:result.checks,note:result.overall?'Architecture gate passed; external business integrations must still be exercised with sandbox/acceptance tests.':'No real production traffic should be enabled until blocking configuration/schema checks are resolved.'});
+  // This endpoint verifies configuration/schema only. It is NOT release approval.
+  // Never return ready_for_real_traffic=true before live staging acceptance,
+  // backup/restore proof, PSP sandbox evidence, security/legal review and human approval.
+  const configurationStatus=result.overall?'CONFIGURATION_PASS':'CONFIGURATION_BLOCKED';
+  return json({ok:true,version:VERSION,configuration_gate:configurationStatus,
+    production_gate:'CLOSED_RELEASE_VALIDATION_REQUIRED',ready_for_real_traffic:false,
+    checks:result.checks,blocking:result.checks.filter(x=>['MISSING','INCOMPLETE','NOT_CONFIGURED'].includes(x.status)).map(x=>x.code),
+    required_release_evidence:['STAGING_D1_MIGRATIONS','STAGING_RUNTIME_ACCEPTANCE','STRIPE_SANDBOX_E2E','BACKUP_RESTORE_VERIFIED','SECURITY_REVIEW','RGPD_LEGAL_REVIEW','HUMAN_PRODUCTION_APPROVAL'],
+    note:'Configuration/schema audit only. Real traffic remains blocked until each release evidence item is verified and production is explicitly authorized.'});
 }
 
 async function copilotNextActions(request,env) {
@@ -4667,7 +4675,14 @@ async function strictProductionAudit(request,env){
     await env.DB.prepare(`INSERT INTO system_config_checks(id,check_code,status,details_json) VALUES(?,?,?,?)`).bind(crypto.randomUUID(),c.code,c.status,JSON.stringify(c)).run();
   }
   await journal(env,'gerante',gate.auth.user.id,'STRICT_PRODUCTION_AUDIT','system',null,overall?'OK':'ATTENTION',{blocking:blocking.map(x=>x.code)});
-  return json({ok:true,version:VERSION,production_gate:overall?'OPEN':'CLOSED',ready_for_real_traffic:overall,checks,blocking:blocking.map(x=>x.code),note:overall?'Configuration gate passed. A real production launch still requires sandbox/acceptance tests for PSP, notifications, identity/security, backups/restore and critical user journeys.':'Production traffic remains blocked until the listed blocking controls are configured and tested.'});
+  // This stricter endpoint also reports configuration only. Secrets being set
+  // cannot substitute for PSP acceptance, verified restore, compliance review,
+  // or an explicit human release decision.
+  return json({ok:true,version:VERSION,configuration_gate:overall?'CONFIGURATION_PASS':'CONFIGURATION_BLOCKED',
+    production_gate:'CLOSED_RELEASE_VALIDATION_REQUIRED',ready_for_real_traffic:false,
+    checks,blocking:blocking.map(x=>x.code),
+    required_release_evidence:['STAGING_D1_MIGRATIONS','STAGING_RUNTIME_ACCEPTANCE','STRIPE_SANDBOX_E2E','BACKUP_RESTORE_VERIFIED','SECURITY_REVIEW','RGPD_LEGAL_REVIEW','HUMAN_PRODUCTION_APPROVAL'],
+    note:'Configuration audit only. Real production traffic is not authorized by this endpoint.'});
 }
 
 
