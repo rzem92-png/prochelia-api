@@ -16,7 +16,7 @@
 
 ## Points à valider impérativement (non prouvés par la revue statique)
 
-1. **Bootstrap race condition :** le `COUNT(*)` puis l'INSERT ne sont pas une transaction atomique. Confirmer l'unicité du compte gérante et traiter les requêtes concurrentes avant d'autoriser bootstrap en production.
+1. **Bootstrap race condition — correction source observée :** la fonction actuelle effectue l'INSERT conditionnel `INSERT ... SELECT ... WHERE NOT EXISTS (SELECT 1 FROM users)` et vérifie `meta.changes === 1`, renvoyant 409 en cas de course. Cette amélioration réduit le risque COUNT/INSERT, mais doit être confirmée par test concurrent sur D1 (deux requêtes simultanées, exactement un compte créé) et par contrainte unique sur email/role selon le schéma. Ne pas déclarer bootstrap production-ready avant ce test.
 2. **Diagnostics/readiness :** vérifier que les endpoints de readiness n'exposent pas de détails de configuration, secrets, erreurs D1, ou état sensible à un utilisateur non authentifié.
 3. **CORS/CSRF :** vérifier configuration des origines en environnement, cookies `Secure/HttpOnly/SameSite`, protection CSRF effective sur toutes les mutations, et comportement sur les sous-domaines.
 4. **Sessions/RBAC/tenancy :** tests systématiques d'accès croisé client/intervenant/admin, invalidation session, expiration, rotation et ownership sur chaque route.
