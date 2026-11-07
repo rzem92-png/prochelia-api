@@ -21,7 +21,10 @@ test('mission payment idempotency key remains required and unique at storage lay
   const end = source.indexOf('\nasync function finalizeMissionPayment', start);
   const handler = source.slice(start, end);
   assert.match(handler, /if\(!idem\) return json\(\{ok:false,error:'IDEMPOTENCY_KEY_REQUIRED'/);
-  const schemaStart = source.indexOf('CREATE TABLE IF NOT EXISTS payment_transactions');
-  const schema = source.slice(schemaStart, schemaStart + 700);
-  assert.match(schema, /idempotency_key TEXT NOT NULL UNIQUE/);
+  // Runtime no longer owns DDL; readiness must require the migrated table.
+  const schemaStart = source.indexOf('async function ensurePaymentSchema(env)');
+  const schemaEnd = source.indexOf('\\nfunction moneyCents', schemaStart);
+  const readiness = source.slice(schemaStart, schemaEnd);
+  assert.match(readiness, /'payment_transactions'/);
+  assert.match(readiness, /PAYMENT_SCHEMA_NOT_READY/);
 });
