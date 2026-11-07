@@ -1,0 +1,30 @@
+name: PROCHÉLIA prelaunch CI
+
+on:
+  push:
+    branches:
+      - prelaunch/v14.5.7-consolidation-audit
+  pull_request:
+    branches:
+      - prelaunch/v14.5.7-consolidation-audit
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  prelaunch-tests:
+    name: Prelaunch regression suite
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout candidate
+        uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Run prelaunch tests
+        run: npm run test:prelaunch
+      - name: Run complete Node test inventory
+        run: node --test tests/*.test.mjs
