@@ -102,3 +102,10 @@ Required signed record:
 - Before release, run browser tests from the exact Pages production origin and staging preview origin: allowlisted Origin success; unlisted Origin rejected; preflight allowed headers; cookie stored/sent in Safari/iOS and Chromium; logout invalidation; session expiry; state-changing requests from hostile Origin rejected.
 - Verify every cookie-authenticated state-changing route checks Origin/CSRF at the handler boundary (not only CORS). CORS alone is not a CSRF defense. Add CSRF token validation where origin-only enforcement is insufficient, and ensure requests without Origin are only accepted for trusted non-browser clients with an appropriate separate authentication mechanism.
 - Current frontend diagnostic/static checks do not prove browser cookie acceptance or CSRF behavior. Mark these gates BLOCKED until live evidence is captured.
+
+
+## Preproduction security CI evidence — 2026-11-08
+
+- Backend commit `9498ab4bcec25e1ab5bd67309d2eff4065e1c188` removes `X-Forwarded-For` as a rate-limit identity fallback and trusts only Cloudflare's `CF-Connecting-IP` header (or `unknown` if absent).
+- Backend regression CI runs `42423385977` and `42423386015`: **success** for this commit; job `unit-tests` passed.
+- This validates the automated Node regression suite only. It does not establish live Cloudflare/R2 behavior, browser CORS/cookie behavior, restore success, Stripe sandbox completion, legal approval, or production readiness.
