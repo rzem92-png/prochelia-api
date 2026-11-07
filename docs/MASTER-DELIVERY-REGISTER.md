@@ -88,3 +88,17 @@ Record for every gate: candidate commit/tag, environment, UTC date, test owner, 
 ## 9. Security review addendum — 2026-11-07
 
 A dedicated CSRF/session hardening gate was added at `docs/CSRF-SESSION-HARDENING-GATE-2026-11-07.md` (commit `c45ce4500954a60a7e4b711b87da6b3d48fb6b83`). It records the observed risk that cookie sessions use `SameSite=None`, `X-CSRF-Token` is allowed by preflight, but no verified token issuance/validation proof is established by the reviewed code. **CSRF remains a production blocker until implemented and covered by the negative test matrix.** This is documentation/audit evidence, not implementation completion.
+
+
+## 10. Status synchronization — 2026-11-08
+
+### Verified in this session
+- Backend branch CI for commit `6926f77263539311255c0e3571c287c2e81ade39` (R2 control-plane recheck documentation): GitHub Actions run `42423705448` **success**.
+- Cloudflare isolated preprod Worker `prochelia-api-r2-preprod`: deployment `e1e372c4-3623-4ac2-98b4-03867bfb6002`, version `06eeaf18-97dd-4277-af26-f701570934a7` assigned 100% traffic to this Worker only.
+- Worker settings report R2 binding `R2_STAGING` → `prochelia-staging-storage` (jurisdiction `eu`) and `R2_TEST_TOKEN` secret binding.
+- Cloudflare account R2 bucket list API currently returns an empty list. Treat this as unresolved control-plane inconsistency; confirm the bucket in the Dashboard. No conclusion that it is absent or healthy.
+
+### Release status
+- **Do not promote to production.** This session did not run a real Worker HTTP request, R2 object lifecycle, backup/restore, browser E2E, Stripe sandbox suite, or legal review.
+- Green CI validates the repository tests only; it does not substitute for live service acceptance.
+- Current blockers remain: R2 bucket visibility/access; real R2 smoke and old-token rejection; isolated restore drill; browser client/provider/admin workflows; Stripe Connect sandbox lifecycle/refunds/webhook replay/reconciliation; legal/privacy/insurance review; alert/rollback drill.
