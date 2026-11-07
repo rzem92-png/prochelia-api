@@ -66,3 +66,11 @@ test("unknown route/method are denied",async()=>{
  assert.equal((await worker.fetch(req("GET","/api/r2/objects",token),env)).status,404);
  assert.equal((await worker.fetch(req("PUT","/api/r2/smoke",token),env)).status,404);
 });
+
+test("invalid UTF-8 body is rejected as a 400 without reaching R2",async()=>{
+ const env=envWithR2(); let puts=0; const original=env.R2_STAGING.put;
+ env.R2_STAGING.put=async(...args)=>{puts++; return original(...args);};
+ const request=new Request("https://preprod.invalid/api/r2/smoke",{method:"POST",headers:{authorization:"Bearer "+token},body:new Uint8Array([0xc3,0x28])});
+ const res=await worker.fetch(request,env); const data=await res.json();
+ assert.equal(res.status,400); assert.equal(data.error,"INVALID_UTF8"); assert.equal(puts,0);
+});
