@@ -6,8 +6,7 @@
   "workers_dev": true,
   "vars": {
     "APP_ENV": "preprod",
-    "PAYMENT_PROVIDER": "disabled",
-    "APP_BASE_URL": "https://prochelia.pages.dev"
+    "PAYMENT_PROVIDER": "disabled"
   },
   "d1_databases": [
     {
