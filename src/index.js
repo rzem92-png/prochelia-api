@@ -441,10 +441,16 @@ async function bootstrap(request, env) {
   const passwordHash = await hashPassword(password);
   const userId = crypto.randomUUID();
 
-  await env.DB.prepare(
+  // Atomic first-user gate: avoid a COUNT-then-INSERT race between concurrent bootstrap requests.
+  const bootstrapInsert = await env.DB.prepare(
     `INSERT INTO users (id, role, email, first_name, last_name, phone, status, password_hash)
-     VALUES (?, 'gerante', ?, ?, ?, ?, 'active', ?)`
+     SELECT ?, 'gerante', ?, ?, ?, ?, 'active', ?
+     WHERE NOT EXISTS (SELECT 1 FROM users)`
   ).bind(userId, email, firstName, lastName, phone, passwordHash).run();
+
+  if (Number(bootstrapInsert?.meta?.changes || 0) !== 1) {
+    return json({ ok: false, error: 'BOOTSTRAP_ALREADY_USED', version: VERSION }, 409);
+  }
 
   return json({
     ok: true,
