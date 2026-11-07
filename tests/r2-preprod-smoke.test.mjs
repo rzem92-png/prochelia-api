@@ -80,3 +80,22 @@ test("binding diagnostics are not exposed to unauthenticated callers",async()=>{
  res=await worker.fetch(req("POST","/api/r2/smoke",token,"PROCHELIA-R2-PREPROD-TEST"),env);
  assert.equal(res.status,503); assert.equal((await res.json()).error,"R2_BINDING_MISSING");
 });
+
+test("JSON responses include baseline browser security headers",async()=>{
+ const res=await worker.fetch(req("GET","/api/health"),envWithR2());
+ assert.equal(res.headers.get("cache-control"),"no-store");
+ assert.equal(res.headers.get("x-content-type-options"),"nosniff");
+ assert.equal(res.headers.get("x-frame-options"),"DENY");
+ assert.equal(res.headers.get("referrer-policy"),"no-referrer");
+ assert.equal(res.headers.get("permissions-policy"),"camera=(), microphone=(), geolocation=()");
+});
+
+test("unauthorized requests never call R2",async()=>{
+ const env=envWithR2(); let calls=0;
+ for (const method of ["put","get","delete","head"]) {
+   const original=env.R2_STAGING[method];
+   env.R2_STAGING[method]=async(...args)=>{calls++; return original(...args);};
+ }
+ const res=await worker.fetch(req("POST","/api/r2/smoke","invalid","PROCHELIA-R2-PREPROD-TEST"),env);
+ assert.equal(res.status,401); assert.equal(calls,0);
+});
