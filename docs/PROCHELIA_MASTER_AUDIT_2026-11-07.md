@@ -84,3 +84,28 @@ Legend: **UNVERIFIED** = no current proof of complete end-to-end behavior in the
 
 ## Safety rule
 Keep mission writes, payouts and payment capture fail-closed until the corresponding runtime, transaction, reconciliation and status-consistency tests pass. Do not merge draft PRs as a batch. Do not run production migrations, activate real payment flows, or deploy production merely because CI is green.
+
+
+## Follow-up dependency review (2026-11-07, read-only)
+### PR #91 — local D1 hardening
+- Confirmed draft, open, unmerged; exact head: `e08eea7aa7bb8a179de6534a5fa59890608a030a`.
+- Its patch changes the Wrangler Worker name to `prochelia-api-preview`, pins preview D1 UUID, expands local ephemeral D1 migration loop to numbered migrations 0001–0019, and updates static configuration tests.
+- Cloudflare bot reported successful preview build/deployment for commit `e08eea7`. This establishes deployment of the preview Worker, **not** remote D1 migration, functional browser E2E, or payment/mission transaction correctness.
+- CI script's loop checks for at least 19 migration files; exact sequence validation is in a separate static test. Keep both checks and confirm CI ran against exact SHA before considering it reviewed.
+- The test fixture `tests/fixtures/d1-auth-baseline.sql` creates users/sessions/notifications before migrations. It is a local CI fixture, not a production schema or migration procedure.
+
+### Draft PR dependency/branch review
+- PR #87 (CORS/cookie sessions/profile routes), #88 (notifications), #12 (SUPRA governance), #17 (backup/restore), #35 (release gate), #36 (marketplace completeness), #90 (NEXUS/SUPRA blueprint) remain drafts/unmerged at review time.
+- Their heads are on distinct branches and the PR snapshots do not establish that they share a single current integration base. Do not merge or cherry-pick en masse. For each, first compare base/head, changed files, current core API implementation, schema changes, and overlapping routes; then test on a dedicated integration branch.
+- PR #87 CI snippets verify syntax and selected cookie strings; these are contract/static checks, not real browser/CORS/Safari proof. In particular, `SameSite=None` must be paired with Secure and validated against allowed origins, CSRF defense, credentialed CORS, and actual client origin. Avoid treating a grep for cookie text as sufficient security evidence.
+- PR #88 notification workflows and PR #17/#35 backup gates are guardrail proposals until provider sandbox delivery, signed webhook/replay checks, encrypted backup, and an actual restore drill are demonstrated.
+- PR #90 is explicitly an audit/blueprint. It must not be counted as implemented NEXUS/SUPRA functionality.
+
+### Preview runtime access attempt
+- Preview Worker deployment is present in GitHub's Cloudflare deployment comment.
+- A direct external HTTP probe from this execution environment failed at DNS resolution (temporary name-resolution failure). Therefore health/readiness endpoints and runtime behavior could not be independently verified here. This is an environment access limitation, **not** a claim that the Worker is down.
+
+### Current conclusion
+- Safe progress: branch-level audit and local CI review.
+- Remaining hard blockers: live preview endpoint access, approved preview D1 backup/migration/verification, R2 enablement and restore drill, browser E2E/auth/role isolation, Stripe sandbox E2E/reconciliation, integrated Talent/SUPRA/NEXUS tests, security/privacy and legal review.
+- Keep all production-sensitive operations disabled and the release status **NO-GO** until evidence and explicit human release approval exist.
