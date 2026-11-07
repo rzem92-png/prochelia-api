@@ -89,3 +89,19 @@ test('ensureProcheliaMasterComplementSchema is read-only for DDL and preserves e
     assert.ok(migration.includes(name), 'migration includes ' + name);
   }
 });
+
+test('ensureOperationalSchema has no runtime DDL/ALTER and checks columns', async () => {
+  const start = source.indexOf('async function ensureOperationalSchema');
+  const end = source.indexOf('\nasync function ', start + 15);
+  assert.notEqual(start, -1, 'helper found');
+  assert.notEqual(end, -1, 'helper boundary found');
+  const body = source.slice(start, end);
+  assert.match(body, /sqlite_master/);
+  assert.match(body, /PRAGMA table_info\(action_outbox\)/);
+  assert.match(body, /OPERATIONAL_SCHEMA_NOT_READY/);
+  assert.doesNotMatch(body, /CREATE TABLE|CREATE INDEX|ALTER TABLE|DROP TABLE|INSERT INTO/i);
+  const migration = await readFile(new URL('../migrations/0014_operational_schema.sql', import.meta.url), 'utf8');
+  for (const name of ['action_outbox','processed_at','case_id','copilot_briefings','loyalty_events','loyalty_balances','quality_events','b2b_leads','capacity_snapshots','finance_forecasts','system_checks']) {
+    assert.ok(migration.includes(name), 'migration includes ' + name);
+  }
+});
