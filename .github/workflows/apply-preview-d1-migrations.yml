@@ -28,10 +28,18 @@ jobs:
       EXPECTED_DB_ID: 6adb95e5-e542-4bec-9008-fbea01042305
       EXPECTED_ACCOUNT_ID: f2a79e9fa41566a8ec80fb24c02c60eb
     steps:
-      - name: Checkout preproduction branch
+      - name: Verify dispatch branch and checkout the exact reviewed workflow commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = "refs/heads/prelaunch/full-d1-migration-integration" || {
+            echo "::error::This workflow is restricted to the reviewed preview integration branch."
+            exit 1
+          }
+      - name: Checkout exact dispatch commit (Worker config and workflow stay coherent)
         uses: actions/checkout@v4
         with:
-          ref: prelaunch/v14.5.7-consolidation-audit
+          ref: ${{ github.sha }}
 
       - name: Verify credentials, exact target and migration files
         shell: bash
