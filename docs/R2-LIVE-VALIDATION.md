@@ -68,3 +68,11 @@ Read-only Cloudflare API verification:
 - Worker versions include version 7 (`06eeaf18-97dd-4277-af26-f701570934a7`), created 2026-11-07 22:36:20 UTC after the secret update. Deployment traffic record previously verified remains version 5 / deployment `2bcbcd16-18fd-46c4-a92e-4ab2d1864fa0` at 100%; this version/traffic distinction must not be confused.
 - Cloudflare R2 bucket list API returned an empty `buckets` array, while Worker settings still report the R2 binding. This API result is **inconclusive** (possible account/API visibility issue) and requires Dashboard confirmation; do not treat it as bucket deletion or as proof bucket health.
 - No live Worker HTTP smoke or actual object PUT/GET/DELETE was executed in this recheck. R2 smoke and restore remain `BLOCKED / NOT VERIFIED`.
+
+
+## Preproduction Worker deployment verified — 2026-11-08
+
+- Isolated Worker `prochelia-api-r2-preprod` deployment created and read back from Cloudflare API: deployment `e1e372c4-3623-4ac2-98b4-03867bfb6002`.
+- Version `06eeaf18-97dd-4277-af26-f701570934a7` (version 7) is now assigned **100% of this isolated Worker’s traffic**. This is preproduction only; no production Worker was modified.
+- This deployment applies the version created after the `R2_TEST_TOKEN` secret update. It does **not** prove R2 bucket existence/access or smoke-test success.
+- R2 list API previously returned empty buckets; reconcile this with Cloudflare Dashboard before declaring bucket validated.
