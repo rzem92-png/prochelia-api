@@ -8,7 +8,7 @@ const migration = readFileSync(new URL('../migrations/0007_trust_passport_schema
 test('Trust Passport persists a versioned service catalogue and scoped verification evidence in D1', () => {
   assert.match(migration, /CREATE TABLE IF NOT EXISTS trust_service_catalog/);
   assert.match(migration, /CREATE TABLE IF NOT EXISTS trust_verifications/);
-  assert.match(source, /UNIQUE\(intervenant_id,category,service_code,proof_document_id\)/);
+  assert.match(migration, /UNIQUE\(intervenant_id,category,service_code,proof_document_id\)/);
   assert.match(source, /trustPassportSaveCatalog/);
   assert.match(source, /trustPassportVerifyEvidence/);
 });
