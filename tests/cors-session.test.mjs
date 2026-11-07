@@ -66,3 +66,48 @@ test("allowed browser request receives credentialed CORS headers even on a safe 
   assert.equal(response.headers.get("access-control-allow-origin"), allowedOrigin);
   assert.equal(response.headers.get("access-control-allow-credentials"), "true");
 });
+
+
+test("cookie-authenticated mutation rejects missing CSRF token before touching D1", async () => {
+  const env = new Proxy({}, {
+    get(_target, property) {
+      if (property === "DB") throw new Error("CSRF rejection must happen before D1");
+      return undefined;
+    }
+  });
+  const response = await worker.fetch(new Request(endpoint.replace("/api/auth/login", "/api/auth/logout"), {
+    method: "POST",
+    headers: {
+      Origin: allowedOrigin,
+      Cookie: "prochelia_session=fake-session-token",
+      "Content-Type": "application/json"
+    },
+    body: "{}"
+  }), env);
+  assert.equal(response.status, 403);
+  assert.equal((await response.json()).error, "CSRF_TOKEN_INVALID");
+});
+
+test("session-bound CSRF token passes middleware (then fails closed on unavailable D1)", async () => {
+  const { createHash } = await import("node:crypto");
+  const token = "fake-session-token";
+  const csrf = createHash("sha256").update("prochelia-csrf-v1:" + token).digest("base64url");
+  const env = new Proxy({}, {
+    get(_target, property) {
+      if (property === "DB") return undefined;
+      return undefined;
+    }
+  });
+  const response = await worker.fetch(new Request(endpoint.replace("/api/auth/login", "/api/auth/logout"), {
+    method: "POST",
+    headers: {
+      Origin: allowedOrigin,
+      Cookie: "prochelia_session=" + token,
+      "X-CSRF-Token": csrf,
+      "Content-Type": "application/json"
+    },
+    body: "{}"
+  }), env);
+  assert.equal(response.status, 503);
+  assert.notEqual((await response.json()).error, "CSRF_TOKEN_INVALID");
+});
