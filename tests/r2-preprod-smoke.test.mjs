@@ -24,6 +24,10 @@ test("health reports R2 binding and configured token without revealing secret", 
  const env=envWithR2(); const res=await worker.fetch(req("GET","/api/health"),env); const data=await res.json();
  assert.equal(res.status,200); assert.equal(data.r2_binding,true); assert.equal(data.token_configured,true); assert.equal(JSON.stringify(data).includes(token),false);
 });
+test("health works without R2 but reports missing binding",async()=>{
+ const res=await worker.fetch(req("GET","/api/health"),{R2_TEST_TOKEN:token});
+ const data=await res.json(); assert.equal(res.status,200); assert.equal(data.r2_binding,false);
+});
 test("rejects missing/incorrect token",async()=>{
  const env=envWithR2();
  assert.equal((await worker.fetch(req("POST","/api/r2/smoke",""),env)).status,401);
@@ -32,6 +36,10 @@ test("rejects missing/incorrect token",async()=>{
 test("rejects unexpected payload",async()=>{
  const res=await worker.fetch(req("POST","/api/r2/smoke",token,"not-approved"),envWithR2());
  assert.equal(res.status,400);
+});
+test("rejects oversized body before storage operation",async()=>{
+ const res=await worker.fetch(req("POST","/api/r2/smoke",token,"Z".repeat(1024)),envWithR2());
+ assert.equal(res.status,413);
 });
 test("put get delete lifecycle works for fixed synthetic object",async()=>{
  const env=envWithR2();
