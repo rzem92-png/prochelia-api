@@ -4704,16 +4704,17 @@ async function copilotAsk(request,env) {
    - traçabilité des blocages de sécurité
    ============================================================================ */
 
-async function productionSafetySchema(env){
-  if(!env.DB) throw new Error('DATABASE_REQUIRED');
-  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS production_security_events (
-    id TEXT PRIMARY KEY, event_type TEXT NOT NULL, route TEXT, subject_hash TEXT,
-    decision TEXT NOT NULL, details_json TEXT NOT NULL DEFAULT '{}',
-    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-  )`).run();
-  await env.DB.prepare(`CREATE INDEX IF NOT EXISTS idx_prod_sec_events_date ON production_security_events(event_type,created_at)`).run();
+async function productionSafetySchema(env) {
+  if (!env.DB) throw new Error('DATABASE_REQUIRED');
+  const result = await env.DB.prepare(
+    "SELECT name FROM sqlite_master WHERE type='table' AND name='production_security_events'"
+  ).first();
+  if (!result) {
+    const error = new Error('PRODUCTION_SAFETY_SCHEMA_NOT_READY');
+    error.code = 'PRODUCTION_SAFETY_SCHEMA_NOT_READY';
+    throw error;
+  }
 }
-
 async function productionSubjectHash(request, route){
   // Cloudflare Worker: CF-Connecting-IP is the trusted edge-provided client
   // address. Never fall back to X-Forwarded-For: clients can spoof it and
