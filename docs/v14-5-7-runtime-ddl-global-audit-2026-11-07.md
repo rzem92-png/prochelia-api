@@ -75,3 +75,11 @@ Ce document ne prétend pas que la correction est intégrée : il enregistre le 
 - Test de contrat ajouté à `tests/commercial-finance-runtime-schema-migration.test.mjs` ; le test est déjà référencé dans `test:prelaunch`.
 - Commits : source `bce6d00976777e058baef316b95bd6d8fd33ef16`, migration `25332632cf726dbea36c7d809d76ff87138ae0c1`, test `3756b511e2d394d3886430ddec4d66e7fbd58d94`, package `7719c7fbc46ab467e758d6ab0afe34e0207c4b19`.
 - Migration non appliquée sur D1 distant. Aucune validation CI ou test d’exécution n’est revendiquée ici.
+
+## Consolidation candidate — final hardening schema
+
+- `ensureFinalHardeningSchema` devient un contrôle read-only et fail-closed (`FINAL_HARDENING_SCHEMA_NOT_READY`) pour 5 tables.
+- Migration candidate `0011_final_hardening_schema.sql` créée pour configuration-checks, idempotency, background jobs, rate limits et registry d’intégrations.
+- Test de non-DDL ajouté au fichier de tests runtime-schema déjà présent dans `test:prelaunch`.
+- Commits source `1a3b2061a4291e6d36f3de70f76aef644a741b29`, migration `02eadd54615eb08c739232a26186fa5f855c54b3`, test `5449a5c627ea32119c09bfa5873431e67fc78f7a`.
+- Non exécuté sur D1 distant ; CI/tests restent à vérifier.
