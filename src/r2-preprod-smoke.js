@@ -11,7 +11,7 @@ const MAX_BODY_BYTES = 64;
 function response(body, status=200) {
   return new Response(JSON.stringify(body), {
     status,
-    headers: { "content-type":"application/json; charset=utf-8", "cache-control":"no-store", "x-content-type-options":"nosniff" }
+    headers: { "content-type":"application/json; charset=utf-8", "cache-control":"no-store", "x-content-type-options":"nosniff", "x-frame-options":"DENY", "referrer-policy":"no-referrer", "permissions-policy":"camera=(), microphone=(), geolocation=()" }
   });
 }
 
