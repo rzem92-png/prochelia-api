@@ -79,7 +79,7 @@ jobs:
         run: |
           set -euo pipefail
           out="$RUNNER_TEMP/verify-v2"; mkdir -p "$out"
-          npx --yes wrangler@4 d1 execute "$DB_NAME" --remote --command="SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name;" --json > "$out/tables.json"
+          npx --yes wrangler@4 d1 execute "$DB_NAME" --remote --command="SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name <> '_cf_KV' ORDER BY name;" --json > "$out/tables.json"
           # Wrangler JSON response shape varies between CLI versions; extract named
           # result rows recursively and print only the sanitized table inventory.
           jq -r '[.. | objects | select(.name? != null) | .name | select(type == "string")] | unique | .[]' "$out/tables.json" > "$out/tables.txt"
@@ -88,7 +88,7 @@ jobs:
             jq -r 'keys | join(",")' "$out/tables.json" || true
             exit 1
           fi
-          # The /query endpoint accepts a single SQL statement in the "sql" field.
+          # Cloudflare internal _cf_KV is managed by D1 and is not queryable by user SQL.
           # Execute one SELECT-only COUNT statement per discovered table.
           mapfile -t table_names < "$out/tables.txt"
           printf 'table,row_count\\n' > "$out/counts.csv"
