@@ -608,25 +608,34 @@ export async function handleV7Route(
       method === "POST"
     ) {
 
-      const body =
-        await request.json();
-
-      const result =
-        procheliaV7.auditEvent(
-          body
+      if (!auth?.user) {
+        return Response.json(
+          { ok: false, version: procheliaV7.version, error: "UNAUTHENTICATED" },
+          { status: 401 }
         );
+      }
+      if (auth.user.role !== "gerante") {
+        return Response.json(
+          { ok: false, version: procheliaV7.version, error: "FORBIDDEN" },
+          { status: 403 }
+        );
+      }
 
-      return Response.json({
+      const body = await request.json();
+      if (!body || typeof body.action !== "string" || !body.action.trim()) {
+        return Response.json(
+          { ok: false, version: procheliaV7.version, error: "INVALID_AUDIT_EVENT" },
+          { status: 400 }
+        );
+      }
 
-        ok: true,
-
-        version:
-          procheliaV7.version,
-
-        audit:
-          result
-
+      const result = procheliaV7.auditEvent({
+        ...body,
+        actorId: auth.user.id,
+        actorRole: auth.user.role
       });
+
+      return Response.json({ ok: true, version: procheliaV7.version, audit: result });
     }
 
 
