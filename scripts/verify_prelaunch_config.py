@@ -7,6 +7,7 @@ ROOT = Path(__file__).resolve().parents[1]
 CONFIG = ROOT / "wrangler.jsonc"
 PRODUCTION_D1 = "04f52830-ef5a-4f17-a640-42bbc2381bba"
 PREVIEW_D1 = "6adb95e5-e542-4bec-9008-fbea01042305"
+PREVIEW_WORKER = "prochelia-api-preview"
 
 def main():
     # Current wrangler.jsonc is strict JSON despite its extension.
@@ -46,7 +47,7 @@ def main():
             print("FAIL:", error)
         raise SystemExit(1)
 
-    print("PASS: Worker name is prelaunch-only")
+    print("PASS: Worker name matches the existing preview Worker")
     print("PASS: D1 binding targets approved preview DB (not production)")
     print("PASS: R2 backup binding is preview/staging-only")
     print("PASS: observability logs and scheduled trigger are configured")
