@@ -1,5 +1,5 @@
 {
-  "name": "prochelia-api-staging",
+  "name": "prochelia-api-preview",
   "main": "src/index.js",
   "compatibility_date": "2026-09-25",
   "triggers": {

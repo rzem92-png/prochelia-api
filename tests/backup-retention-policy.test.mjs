@@ -8,12 +8,12 @@ const policy = readFileSync(new URL('../legal/10-matrice-conservation-archivage-
 const runbook = readFileSync(new URL('../docs/SAUVEGARDE-RESTAURATION-R2-PREPROD.md', import.meta.url), 'utf8');
 const privacy = readFileSync(new URL('../legal/04-notice-confidentialite-rgpd.md', import.meta.url), 'utf8');
 
-test('staging config declares daily UTC backup Cron and private R2 binding', () => {
+test('preview config declares daily UTC backup Cron and private R2 binding', () => {
   const config = JSON.parse(wrangler);
   assert.deepEqual(config.triggers.crons, ['0 3 * * *']);
   assert.equal(config.r2_buckets.find(x => x.binding === 'BACKUP_BUCKET')?.bucket_name, 'prochelia-preview-backups');
   assert.equal(config.previews?.r2_buckets, undefined, 'R2 bindings must remain in the supported top-level r2_buckets field');
-  assert.equal(config.name, 'prochelia-api-staging');
+  assert.equal(config.name, 'prochelia-api-preview');
 });
 
 test('backup export excludes its own journal tables and captures schema metadata', () => {
