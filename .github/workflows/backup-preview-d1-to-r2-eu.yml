@@ -45,6 +45,12 @@ jobs:
           for name in CLOUDFLARE_API_TOKEN BACKUP_ENCRYPTION_KEY AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY; do
             test -n "${!name:-}" || { echo "::error::Required secret missing: $name"; exit 1; }
           done
+          # R2 S3 Access Key IDs are 32 characters. Check shape early without ever printing secret values.
+          access_key_length="${#AWS_ACCESS_KEY_ID}"
+          if [[ "$access_key_length" -ne 32 ]]; then
+            echo "::error::R2_EU_ACCESS_KEY_ID is not a valid R2 S3 Access Key ID (received length: $access_key_length; expected: 32). Replace the GitHub secret with the Access Key ID from a Cloudflare R2 API token, not a Cloudflare API token or Secret Access Key."
+            exit 1
+          fi
 
       - name: Checkout pinned reviewed Preview branch commit (D1 config)
         uses: actions/checkout@v4
