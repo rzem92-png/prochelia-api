@@ -88,32 +88,25 @@ jobs:
             jq -r 'keys | join(",")' "$out/tables.json" || true
             exit 1
           fi
-          # Cloudflare D1 REST API batch schema is { "batch": [{ "sql": ... }] }.
-          # Build it with jq (never hand-escape JSON) and execute SELECT-only SQL.
+          # The /query endpoint accepts a single SQL statement in the "sql" field.
+          # Execute one SELECT-only COUNT statement per discovered table.
           mapfile -t table_names < "$out/tables.txt"
-          batch='[]'
+          printf 'table,row_count\\n' > "$out/counts.csv"
           for table in "${table_names[@]}"; do
             [[ "$table" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || { echo "::error::Unexpected table identifier (name suppressed)"; exit 1; }
             statement="SELECT COUNT(*) AS row_count FROM \"$table\";"
-            batch="$(jq -c --arg sql "$statement" '. + [{sql:$sql,params:[]}]' <<< "$batch")"
-          done
-          jq -n --argjson batch "$batch" '{batch:$batch}' > "$out/query.json"
-          status="$(curl -sS -o "$out/counts-response.json" -w '%{http_code}' \
-            -X POST \
-            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
-            -H "Content-Type: application/json" \
-            --data-binary @"$out/query.json" \
-            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/d1/database/$DB_ID/query")"
-          [[ "$status" == 200 ]] || { echo "::error::D1 read-only batch HTTP $status"; exit 1; }
-          [[ "$(jq -r '.success' "$out/counts-response.json")" == true ]] || { echo "::error::D1 read-only batch returned unsuccessful envelope"; exit 1; }
-          result_count="$(jq -r '[.result[]? | select(.success == true)] | length' "$out/counts-response.json")"
-          expected="${#table_names[@]}"
-          [[ "$result_count" == "$expected" ]] || { echo "::error::D1 batch result count mismatch: expected=$expected actual=$result_count"; exit 1; }
-          printf 'table,row_count\\n' > "$out/counts.csv"
-          for i in "${!table_names[@]}"; do
-            count="$(jq -r --argjson i "$i" '.result[$i].results[0].row_count // empty' "$out/counts-response.json")"
-            [[ "$count" =~ ^[0-9]+$ ]] || { echo "::error::Invalid D1 COUNT result (table name suppressed)"; exit 1; }
-            printf '"%s",%s\\n' "${table_names[$i]}" "$count" >> "$out/counts.csv"
+            jq -n --arg sql "$statement" '{sql:$sql}' > "$out/query.json"
+            status="$(curl -sS -o "$out/count-response.json" -w '%{http_code}' \
+              -X POST \
+              -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+              -H "Content-Type: application/json" \
+              --data-binary @"$out/query.json" \
+              "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/d1/database/$DB_ID/query")"
+            [[ "$status" == 200 ]] || { echo "::error::D1 read-only query HTTP $status"; exit 1; }
+            [[ "$(jq -r '.success' "$out/count-response.json")" == true ]] || { echo "::error::D1 query returned unsuccessful envelope"; exit 1; }
+            count="$(jq -r '.result[0].results[0].row_count // empty' "$out/count-response.json")"
+            [[ "$count" =~ ^[0-9]+$ ]] || { echo "::error::Invalid D1 COUNT result (table identifier suppressed)"; exit 1; }
+            printf '"%s",%s\\n' "$table" "$count" >> "$out/counts.csv"
           done
           table_count="$(wc -l < "$out/tables.txt" | tr -d ' ')"
           echo "Tables counted: $table_count"
