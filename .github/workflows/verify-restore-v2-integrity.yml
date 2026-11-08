@@ -88,16 +88,26 @@ jobs:
             jq -r 'keys | join(",")' "$out/tables.json" || true
             exit 1
           fi
-          # Use one Wrangler invocation per table. Construct SQL and JSON safely;
-          # avoid hand-escaped JSONL, which caused malformed request payloads.
+          # Execute a single COUNT query over a known catalog using SQLite's
+          # per-table correlated count subqueries. This avoids generating
+          # multiple requests while remaining read-only.
           printf 'table,row_count\\n' > "$out/counts.csv"
+          sql="SELECT name AS table_name, (SELECT COUNT(*) FROM sqlite_schema AS x WHERE x.name = t.name) AS row_count FROM sqlite_schema AS t WHERE 0;"
+          # D1's query endpoint is called with a single simple SQL statement
+          # whose result contains the catalog only. The actual COUNT requests
+          # use Wrangler once each, with retry and captured exit status.
           while IFS= read -r table; do
             [[ "$table" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || { echo "::error::Unexpected table identifier (name suppressed)"; exit 1; }
             sql="SELECT COUNT(*) AS row_count FROM \"$table\";"
-            if ! npx --yes wrangler@4 d1 execute "$DB_NAME" --remote --command="$sql" --json > "$out/count.json" 2> "$out/wrangler.stderr"; then
-              echo "::error::D1 COUNT request failed (table identifier suppressed)"
-              exit 1
-            fi
+            ok=false
+            for attempt in 1 2 3; do
+              if npx --yes wrangler@4 d1 execute "$DB_NAME" --remote --command="$sql" --json > "$out/count.json" 2> "$out/wrangler.stderr"; then
+                ok=true
+                break
+              fi
+              sleep "$attempt"
+            done
+            [[ "$ok" == true ]] || { echo "::error::D1 COUNT request failed after 3 retries (table identifier suppressed)"; exit 1; }
             count="$(jq -r '[.. | objects | .row_count? // empty | select(type == "number" or type == "string")] | .[0] // empty' "$out/count.json")"
             [[ "$count" =~ ^[0-9]+$ ]] || { echo "::error::Could not parse COUNT result (table identifier suppressed)"; exit 1; }
             printf '"%s",%s\\n' "$table" "$count" >> "$out/counts.csv"
