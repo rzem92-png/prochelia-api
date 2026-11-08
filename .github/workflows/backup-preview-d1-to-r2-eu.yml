@@ -93,7 +93,11 @@ jobs:
           rm -f "$RUNNER_TEMP/prochelia-r2/preview.sql"
 
       - name: Install AWS CLI for S3-compatible Cloudflare R2
-        run: python3 -m pip install --user awscli
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m pip install --user --break-system-packages awscli
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       - name: Upload encrypted backup to private R2 EU bucket
         shell: bash
@@ -110,9 +114,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          export PATH="$HOME/.local/bin:$PATH"
+          set -euo pipefail
           key="preview-d1/${EXPECTED_DB_NAME}/$(date -u +%Y/%m/%d)/${GITHUB_RUN_ID}-${GITHUB_SHA:0:12}.sql.gpg"
           aws s3 cp "s3://$R2_BUCKET/$key" "$RUNNER_TEMP/prochelia-r2/roundtrip.sql.gpg" --endpoint-url "$R2_ENDPOINT" --region auto --only-show-errors
+          aws s3 cp "s3://$R2_BUCKET/$key.sha256" "$RUNNER_TEMP/prochelia-r2/roundtrip.manifest.sha256" --endpoint-url "$R2_ENDPOINT" --region auto --only-show-errors
+          cmp "$RUNNER_TEMP/prochelia-r2/manifest.sha256" "$RUNNER_TEMP/prochelia-r2/roundtrip.manifest.sha256"
           cmp "$RUNNER_TEMP/prochelia-r2/preview.sql.gpg" "$RUNNER_TEMP/prochelia-r2/roundtrip.sql.gpg"
           printf '%s' "$BACKUP_ENCRYPTION_KEY" | gpg --batch --yes --pinentry-mode loopback --passphrase-fd 0 --decrypt "$RUNNER_TEMP/prochelia-r2/roundtrip.sql.gpg" > "$RUNNER_TEMP/prochelia-r2/roundtrip.sql"
           actual="$(sha256sum "$RUNNER_TEMP/prochelia-r2/roundtrip.sql" | awk '{print $1}')"
