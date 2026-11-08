@@ -72,6 +72,13 @@ jobs:
           printf '%s\n' "$identity"
           printf '%s' "$identity" | grep -Fq "$EXPECTED_ACCOUNT_ID"
 
+      - name: Install local restore-validation tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends sqlite3 gnupg
+
       - name: Export preview D1 (read-only)
         shell: bash
         run: |
@@ -81,6 +88,11 @@ jobs:
           npx --yes wrangler@4 d1 export "$EXPECTED_DB_NAME" --remote --config wrangler.jsonc --skip-confirmation --output="$RUNNER_TEMP/prochelia-r2/preview.sql"
           test -s "$RUNNER_TEMP/prochelia-r2/preview.sql"
           sha256sum "$RUNNER_TEMP/prochelia-r2/preview.sql" | awk '{print $1}' > "$RUNNER_TEMP/prochelia-r2/plain.sha256"
+          # Validate that the exported dump can be restored locally without touching any remote database.
+          sqlite3 "$RUNNER_TEMP/prochelia-r2/restore-validation.sqlite" < "$RUNNER_TEMP/prochelia-r2/preview.sql"
+          integrity="$(sqlite3 "$RUNNER_TEMP/prochelia-r2/restore-validation.sqlite" 'PRAGMA integrity_check;')"
+          test "$integrity" = "ok" || { echo "::error::Local SQLite restore integrity_check failed: $integrity"; exit 1; }
+          echo "PASS: exported Preview D1 dump restored locally; SQLite integrity_check=ok."
 
       - name: Encrypt backup AES-256 and prepare integrity manifest
         shell: bash
@@ -105,6 +117,7 @@ jobs:
           set -euo pipefail
           export PATH="$HOME/.local/bin:$PATH"
           key="preview-d1/${EXPECTED_DB_NAME}/$(date -u +%Y/%m/%d)/${GITHUB_RUN_ID}-${GITHUB_SHA:0:12}.sql.gpg"
+          echo "R2_OBJECT_KEY=$key" >> "$GITHUB_ENV"
           aws s3 cp "$RUNNER_TEMP/prochelia-r2/preview.sql.gpg" "s3://$R2_BUCKET/$key" --endpoint-url "$R2_ENDPOINT" --region auto --only-show-errors
           aws s3 cp "$RUNNER_TEMP/prochelia-r2/manifest.sha256" "s3://$R2_BUCKET/$key.sha256" --endpoint-url "$R2_ENDPOINT" --region auto --only-show-errors
           echo "R2_OBJECT_KEY=$key" >> "$GITHUB_OUTPUT"
@@ -114,7 +127,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          key="preview-d1/${EXPECTED_DB_NAME}/$(date -u +%Y/%m/%d)/${GITHUB_RUN_ID}-${GITHUB_SHA:0:12}.sql.gpg"
+          key="$R2_OBJECT_KEY"
           aws s3 cp "s3://$R2_BUCKET/$key" "$RUNNER_TEMP/prochelia-r2/roundtrip.sql.gpg" --endpoint-url "$R2_ENDPOINT" --region auto --only-show-errors
           aws s3 cp "s3://$R2_BUCKET/$key.sha256" "$RUNNER_TEMP/prochelia-r2/roundtrip.manifest.sha256" --endpoint-url "$R2_ENDPOINT" --region auto --only-show-errors
           cmp "$RUNNER_TEMP/prochelia-r2/manifest.sha256" "$RUNNER_TEMP/prochelia-r2/roundtrip.manifest.sha256"
