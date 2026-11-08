@@ -100,11 +100,11 @@ jobs:
             echo "::endgroup::"
             echo "::group::Comptage table par table — $target ($db)"
             counts="$out/$target-row-counts.csv"
-            printf 'table,row_count\\n' > "$counts"
+            printf 'table,row_count\n' > "$counts"
             while IFS= read -r table; do
               [[ "$table" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || { echo "::error::Nom de table inattendu ; arrêt."; exit 1; }
               one="$out/$target-count-$table.json"
-              query="SELECT COUNT(*) AS row_count FROM \\"$table\\";"
+              query="SELECT COUNT(*) AS row_count FROM \"$table\";"
               if ! timeout 45s ./node_modules/.bin/wrangler d1 execute "$db" --remote --config "$config" --command="$query" --json > "$one"; then
                 echo "::error::Échec du comptage pour la table $table ($target)."
                 exit 1
@@ -112,7 +112,7 @@ jobs:
               jq -e . "$one" >/dev/null
               count="$(jq -r '[.. | objects | select(has("results")) | .results[]? | .row_count? // .count? // empty] | first // empty' "$one")"
               [[ "$count" =~ ^[0-9]+$ ]] || { echo "::error::Comptage non numérique pour $table ($target)."; exit 1; }
-              printf '"%s",%s\\n' "$table" "$count" >> "$counts"
+              printf '"%s",%s\n' "$table" "$count" >> "$counts"
             done < "$out/$target-tables.txt"
             [[ "$(wc -l < "$counts" | tr -d ' ')" -eq "$(( $(wc -l < "$out/$target-tables.txt" | tr -d ' ') + 1 ))" ]] || { echo "::error::Comptage incomplet pour $target."; exit 1; }
             echo "Comptage terminé pour $target."
