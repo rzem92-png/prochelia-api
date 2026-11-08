@@ -1,0 +1,133 @@
+name: PROCHÉLIA — encrypted production D1 backup to R2
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_production_backup:
+        description: "Type BACKUP_PRODUCTION_D1 before creating encrypted production backup"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: prochelia-production-d1-backup
+  cancel-in-progress: false
+
+jobs:
+  backup-production:
+    if: ${{ github.event.inputs.confirm_production_backup == 'BACKUP_PRODUCTION_D1' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      BACKUP_ENCRYPTION_KEY: ${{ secrets.BACKUP_ENCRYPTION_KEY }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.R2_EU_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_EU_SECRET_ACCESS_KEY }}
+      AWS_DEFAULT_REGION: auto
+      EXPECTED_ACCOUNT_ID: f2a79e9fa41566a8ec80fb24c02c60eb
+      EXPECTED_DB_NAME: prochelia-api
+      EXPECTED_DB_ID: 04f52830-ef5a-4f17-a640-42bbc2381bba
+      R2_BUCKET: prochelia-preview-backups-eu
+      R2_ENDPOINT: https://f2a79e9fa41566a8ec80fb24c02c60eb.r2.cloudflarestorage.com
+    steps:
+      - name: Restrict to main and validate secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = "refs/heads/main" || { echo "::error::Production backup must be dispatched from main."; exit 1; }
+          test "$CLOUDFLARE_ACCOUNT_ID" = "$EXPECTED_ACCOUNT_ID"
+          for name in CLOUDFLARE_API_TOKEN BACKUP_ENCRYPTION_KEY AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY; do
+            test -n "${!name:-}" || { echo "::error::Required secret missing: $name"; exit 1; }
+          done
+          test "${#AWS_ACCESS_KEY_ID}" -eq 32 || { echo "::error::R2 S3 Access Key ID shape invalid."; exit 1; }
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Verify immutable production D1 target and Cloudflare account
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          c=json.loads(Path("wrangler.production-backup.jsonc").read_text())
+          assert len(c["d1_databases"]) == 1
+          d=c["d1_databases"][0]
+          assert d["binding"] == "DB"
+          assert d["database_name"] == "prochelia-api"
+          assert d["database_id"] == "04f52830-ef5a-4f17-a640-42bbc2381bba"
+          print("Exact production D1 target verified.")
+          PY
+          who="$(npx --yes wrangler@4 whoami 2>&1)"
+          printf '%s\n' "$who"
+          printf '%s' "$who" | grep -Fq "$EXPECTED_ACCOUNT_ID"
+
+      - name: Install export integrity tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends sqlite3 gnupg
+
+      - name: Export production D1 read-only and verify dump
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          mkdir -p "$RUNNER_TEMP/prochelia-prod-backup"
+          npx --yes wrangler@4 d1 export "$EXPECTED_DB_NAME" --remote --config wrangler.production-backup.jsonc --skip-confirmation --output="$RUNNER_TEMP/prochelia-prod-backup/production.sql"
+          test -s "$RUNNER_TEMP/prochelia-prod-backup/production.sql"
+          sha256sum "$RUNNER_TEMP/prochelia-prod-backup/production.sql" | awk '{print $1}' > "$RUNNER_TEMP/prochelia-prod-backup/plain.sha256"
+          sqlite3 "$RUNNER_TEMP/prochelia-prod-backup/validation.sqlite" < "$RUNNER_TEMP/prochelia-prod-backup/production.sql"
+          integrity="$(sqlite3 "$RUNNER_TEMP/prochelia-prod-backup/validation.sqlite" 'PRAGMA integrity_check;')"
+          test "$integrity" = "ok" || { echo "::error::Local dump integrity_check failed."; exit 1; }
+          echo "PASS: production export restored locally; SQLite integrity_check=ok."
+
+      - name: Encrypt AES-256; remove plaintext dump
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          printf '%s' "$BACKUP_ENCRYPTION_KEY" | gpg --batch --yes --pinentry-mode loopback --passphrase-fd 0 --symmetric --cipher-algo AES256 --output "$RUNNER_TEMP/prochelia-prod-backup/production.sql.gpg" "$RUNNER_TEMP/prochelia-prod-backup/production.sql"
+          test -s "$RUNNER_TEMP/prochelia-prod-backup/production.sql.gpg"
+          cp "$RUNNER_TEMP/prochelia-prod-backup/plain.sha256" "$RUNNER_TEMP/prochelia-prod-backup/manifest.sha256"
+          rm -f "$RUNNER_TEMP/prochelia-prod-backup/production.sql"
+
+      - name: Install AWS CLI for Cloudflare R2
+        run: |
+          python3 -m pip install --user --break-system-packages awscli
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Upload encrypted production dump and manifest to R2
+        id: upload
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PATH="$HOME/.local/bin:$PATH"
+          key="production-d1/${EXPECTED_DB_NAME}/$(date -u +%Y/%m/%d)/${GITHUB_RUN_ID}-${GITHUB_SHA:0:12}.sql.gpg"
+          echo "R2_OBJECT_KEY=$key" >> "$GITHUB_ENV"
+          aws s3 cp "$RUNNER_TEMP/prochelia-prod-backup/production.sql.gpg" "s3://$R2_BUCKET/$key" --endpoint-url "$R2_ENDPOINT" --region auto --only-show-errors
+          aws s3 cp "$RUNNER_TEMP/prochelia-prod-backup/manifest.sha256" "s3://$R2_BUCKET/$key.sha256" --endpoint-url "$R2_ENDPOINT" --region auto --only-show-errors
+          echo "Uploaded encrypted backup object: $key"
+
+      - name: Download, decrypt and verify R2 backup roundtrip
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PATH="$HOME/.local/bin:$PATH"
+          key="$R2_OBJECT_KEY"
+          aws s3 cp "s3://$R2_BUCKET/$key" "$RUNNER_TEMP/prochelia-prod-backup/roundtrip.sql.gpg" --endpoint-url "$R2_ENDPOINT" --region auto --only-show-errors
+          aws s3 cp "s3://$R2_BUCKET/$key.sha256" "$RUNNER_TEMP/prochelia-prod-backup/roundtrip.sha256" --endpoint-url "$R2_ENDPOINT" --region auto --only-show-errors
+          cmp "$RUNNER_TEMP/prochelia-prod-backup/manifest.sha256" "$RUNNER_TEMP/prochelia-prod-backup/roundtrip.sha256"
+          printf '%s' "$BACKUP_ENCRYPTION_KEY" | gpg --batch --yes --pinentry-mode loopback --passphrase-fd 0 --decrypt "$RUNNER_TEMP/prochelia-prod-backup/roundtrip.sql.gpg" > "$RUNNER_TEMP/prochelia-prod-backup/roundtrip.sql"
+          actual="$(sha256sum "$RUNNER_TEMP/prochelia-prod-backup/roundtrip.sql" | awk '{print $1}')"
+          expected="$(cat "$RUNNER_TEMP/prochelia-prod-backup/manifest.sha256")"
+          test "$actual" = "$expected" || { echo "::error::R2 backup checksum mismatch."; exit 1; }
+          echo "PASS: encrypted production backup uploaded, downloaded, decrypted and checksum-verified."
