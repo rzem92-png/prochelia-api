@@ -88,17 +88,26 @@ jobs:
             jq -r 'keys | join(",")' "$out/tables.json" || true
             exit 1
           fi
-          printf 'table,row_count\n' > "$out/counts.csv"
+          # D1 remote execution has per-invocation overhead and can reject a
+          # sequence of dozens of individual requests. Use one read-only
+          # aggregate query to return every table count in one invocation.
+          printf 'table,row_count\\n' > "$out/counts.csv"
+          sql="SELECT name AS table_name, (SELECT COUNT(*) FROM sqlite_master AS _check WHERE _check.name = t.name) AS _catalog_marker FROM sqlite_master t WHERE 0;"
+          # Build a UNION ALL of COUNT(*) statements from the validated catalog.
+          sql=""
           while IFS= read -r table; do
             [[ "$table" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || { echo "::error::Unexpected table identifier (name suppressed)"; exit 1; }
-            if ! npx --yes wrangler@4 d1 execute "$DB_NAME" --remote --command="SELECT COUNT(*) AS row_count FROM \"$table\";" --json > "$out/count.json"; then
-              echo "::error::COUNT query failed for a table (identifier suppressed)"
-              exit 1
-            fi
-            count="$(jq -r '[.. | objects | .row_count? // empty | select(type == "number" or type == "string")] | .[0] // empty' "$out/count.json")"
-            [[ "$count" =~ ^[0-9]+$ ]] || { echo "::error::Could not parse COUNT result (table identifier suppressed)"; exit 1; }
-            printf '"%s",%s\n' "$table" "$count" >> "$out/counts.csv"
+            if [[ -n "$sql" ]]; then sql+=" UNION ALL "; fi
+            sql+="SELECT '$table' AS table_name, COUNT(*) AS row_count FROM \"$table\""
           done < "$out/tables.txt"
+          if ! npx --yes wrangler@4 d1 execute "$DB_NAME" --remote --command="$sql" --json > "$out/counts.json"; then
+            echo "::error::Aggregate read-only COUNT query failed"
+            exit 1
+          fi
+          jq -r '.. | objects | select(has("table_name") and has("row_count")) | [.table_name, .row_count] | @csv' "$out/counts.json" >> "$out/counts.csv"
+          expected="$(wc -l < "$out/tables.txt" | tr -d ' ')"
+          actual="$(($(wc -l < "$out/counts.csv") - 1))"
+          [[ "$actual" == "$expected" ]] || { echo "::error::Count result completeness mismatch: expected=$expected actual=$actual"; exit 1; }
           table_count="$(wc -l < "$out/tables.txt" | tr -d ' ')"
           echo "Tables counted: $table_count"
           echo "Counts gathered without exposing table contents."
