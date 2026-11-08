@@ -80,24 +80,34 @@ jobs:
           set -euo pipefail
           out="$RUNNER_TEMP/verify-v2"; mkdir -p "$out"
           npx --yes wrangler@4 d1 execute "$DB_NAME" --remote --command="SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name;" --json > "$out/tables.json"
-          jq -r '[.. | objects | select(has("results")) | .results[]? | .name? // empty] | unique | .[]' "$out/tables.json" > "$out/tables.txt"
-          [[ -s "$out/tables.txt" ]] || { echo "::error::No tables found"; exit 1; }
+          # Wrangler JSON response shape varies between CLI versions; extract named
+          # result rows recursively and print only the sanitized table inventory.
+          jq -r '[.. | objects | select(.name? != null) | .name | select(type == "string")] | unique | .[]' "$out/tables.json" > "$out/tables.txt"
+          if [[ ! -s "$out/tables.txt" ]]; then
+            echo "::error::No table names parsed. Wrangler response keys:"
+            jq -r 'keys | join(",")' "$out/tables.json" || true
+            exit 1
+          fi
           printf 'table,row_count\n' > "$out/counts.csv"
           while IFS= read -r table; do
-            [[ "$table" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || exit 1
-            npx --yes wrangler@4 d1 execute "$DB_NAME" --remote --command="SELECT COUNT(*) AS row_count FROM \"$table\";" --json > "$out/count.json"
-            count="$(jq -r '[.. | objects | select(has("results")) | .results[]? | .row_count? // empty][0] // empty' "$out/count.json")"
-            [[ "$count" =~ ^[0-9]+$ ]] || { echo "::error::Invalid count for $table"; exit 1; }
+            [[ "$table" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || { echo "::error::Unexpected table identifier (name suppressed)"; exit 1; }
+            if ! npx --yes wrangler@4 d1 execute "$DB_NAME" --remote --command="SELECT COUNT(*) AS row_count FROM \"$table\";" --json > "$out/count.json"; then
+              echo "::error::COUNT query failed for a table (identifier suppressed)"
+              exit 1
+            fi
+            count="$(jq -r '[.. | objects | .row_count? // empty | select(type == "number" or type == "string")] | .[0] // empty' "$out/count.json")"
+            [[ "$count" =~ ^[0-9]+$ ]] || { echo "::error::Could not parse COUNT result (table identifier suppressed)"; exit 1; }
             printf '"%s",%s\n' "$table" "$count" >> "$out/counts.csv"
           done < "$out/tables.txt"
-          echo "Tables: $(wc -l < "$out/tables.txt" | tr -d ' ')"
+          table_count="$(wc -l < "$out/tables.txt" | tr -d ' ')"
+          echo "Tables counted: $table_count"
           echo "Counts gathered without exposing table contents."
-          echo "MIGRATIONS_COUNT=$(grep -c '^' "$out/tables.txt" || true)" >> "$GITHUB_ENV"
+          echo "TABLES_COUNT=$table_count" >> "$GITHUB_ENV"
           cat "$out/counts.csv"
           echo "## restore-test-v2 integrity" >> "$GITHUB_STEP_SUMMARY"
           echo "- SQLite quick_check: ok" >> "$GITHUB_STEP_SUMMARY"
           echo "- Foreign key check: 0 violations" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Tables and row counts: report artifact" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Tables and row counts: $table_count (report artifact)" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload sanitized verification report
         uses: actions/upload-artifact@v6
