@@ -1,0 +1,10 @@
+{
+  // Dedicated production export target. Read-only export only.
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "prochelia-api",
+      "database_id": "04f52830-ef5a-4f17-a640-42bbc2381bba"
+    }
+  ]
+}
