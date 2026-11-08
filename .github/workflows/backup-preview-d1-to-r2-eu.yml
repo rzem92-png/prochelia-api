@@ -37,16 +37,19 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$GITHUB_REF" = "refs/heads/prelaunch/r2-eu-backup-workflow"
+          case "$GITHUB_REF" in
+            refs/heads/main|refs/heads/prelaunch/r2-eu-backup-workflow) ;;
+            *) echo "::error::Dispatch only allowed from main or the dedicated preview backup branch."; exit 1 ;;
+          esac
           test "$CLOUDFLARE_ACCOUNT_ID" = "$EXPECTED_ACCOUNT_ID"
           for name in CLOUDFLARE_API_TOKEN BACKUP_ENCRYPTION_KEY AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY; do
             test -n "${!name:-}" || { echo "::error::Required secret missing: $name"; exit 1; }
           done
 
-      - name: Checkout exact dispatch commit
+      - name: Checkout pinned reviewed Preview branch commit (D1 config)
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.sha }}
+          ref: fa99307ba2c0f6dcebd154a462653690af40fb82
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
