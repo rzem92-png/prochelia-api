@@ -10,7 +10,8 @@ import { procheliaV7 } from "./v7.js";
 export async function handleV7Route(
   request,
   env,
-  path
+  path,
+  auth = null
 ) {
 
   try {
@@ -138,25 +139,28 @@ export async function handleV7Route(
       method === "POST"
     ) {
 
-      const body =
-        await request.json();
-
-      const result =
-        procheliaV7.checkPermissions(
-          body
+      // Authorization must use the authenticated session, not caller-supplied role/permissions.
+      if (!auth?.user) {
+        return Response.json(
+          { ok: false, version: procheliaV7.version, error: "UNAUTHENTICATED" },
+          { status: 401 }
         );
+      }
+      if (auth.user.role !== "gerante") {
+        return Response.json(
+          { ok: false, version: procheliaV7.version, error: "FORBIDDEN" },
+          { status: 403 }
+        );
+      }
 
-      return Response.json(
+      const body = await request.json();
+      const result = procheliaV7.checkPermissions({
+        role: auth.user.role,
+        permission: body?.permission,
+        permissions: {}
+      });
 
-        result,
-
-        {
-          status:
-            result.ok
-              ? 200
-              : 403
-        }
-      );
+      return Response.json(result, { status: result.ok ? 200 : 403 });
     }
 
 
