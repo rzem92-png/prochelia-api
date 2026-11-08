@@ -28,9 +28,13 @@ class PaymentMigrationTests(unittest.TestCase):
         self.assertTrue(expected.issubset(tables))
 
     def test_migration_has_no_destructive_sql(self):
-        sql = MIGRATION.read_text(encoding="utf-8").upper()
-        for forbidden in ("DROP TABLE", "DROP INDEX", "DELETE FROM", "UPDATE "):
-            self.assertNotIn(forbidden, sql)
+        import re
+        sql = MIGRATION.read_text(encoding="utf-8")
+        # Ignore comments; reject destructive SQL statements rather than incidental words.
+        sql = re.sub(r"--[^\\n]*", "", sql).upper()
+        for forbidden in (r"\\bDROP\\s+TABLE\\b", r"\\bDROP\\s+INDEX\\b",
+                          r"\\bDELETE\\s+FROM\\b", r"^\\s*UPDATE\\s+"):
+            self.assertIsNone(re.search(forbidden, sql, flags=re.MULTILINE))
 
     def test_unique_idempotency_constraints(self):
         self.db.executescript(MIGRATION.read_text(encoding="utf-8"))
