@@ -1,0 +1,12 @@
+{
+  // Migration-only config. This file intentionally points ONLY to the preview D1.
+  // Production config remains in wrangler.jsonc and is never used by this migration helper.
+  "d1_databases": [
+    {
+      "binding": "PREVIEW_DB",
+      "database_name": "prochelia-preview-db",
+      "database_id": "6adb95e5-e542-4bec-9008-fbea01042305",
+      "migrations_dir": "migrations"
+    }
+  ]
+}

@@ -1,0 +1,25 @@
+name: PROCHÉLIA migration SQL tests
+
+on:
+  pull_request:
+    paths:
+      - "migrations/**"
+      - "tests/test_migrations_sqlite.py"
+      - ".github/workflows/migration-sql-tests.yml"
+  push:
+    branches: [main]
+    paths:
+      - "migrations/**"
+      - "tests/test_migrations_sqlite.py"
+      - ".github/workflows/migration-sql-tests.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  migration-sql:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate migration SQL and payment ledger invariants in isolated SQLite
+        run: python3 tests/test_migrations_sqlite.py
