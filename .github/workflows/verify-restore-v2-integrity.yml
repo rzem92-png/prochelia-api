@@ -1,0 +1,108 @@
+name: PROCHÉLIA — intégrité SQLite restore-test-v2 (lecture seule)
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_read_only:
+        description: "Confirmer lecture seule sur restore-test-v2"
+        required: true
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: prochelia-restore-v2-integrity
+  cancel-in-progress: false
+
+jobs:
+  integrity:
+    if: ${{ inputs.confirm_read_only == true }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CLOUDFLARE_ACCOUNT_ID: f2a79e9fa41566a8ec80fb24c02c60eb
+      DB_NAME: prochelia-restore-test-v2
+      DB_ID: a3526c2a-39cb-49ab-97c4-979138145f33
+    steps:
+      - name: Vérifier jeton Cloudflare et identité D1 exacte
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          [[ -n "${CLOUDFLARE_API_TOKEN:-}" ]] || { echo "::error::Secret Cloudflare manquant"; exit 1; }
+          token="${CLOUDFLARE_API_TOKEN#Bearer }"
+          token="$(printf '%s' "$token" | tr -d '\r\n')"
+          status="$(curl -sS -o "$RUNNER_TEMP/token.json" -w '%{http_code}' -H "Authorization: Bearer $token" https://api.cloudflare.com/client/v4/user/tokens/verify)"
+          [[ "$status" == 200 && "$(jq -r '.success and .result.status == "active"' "$RUNNER_TEMP/token.json")" == true ]] || { echo "::error::Token invalide/inactif"; exit 1; }
+          status="$(curl -sS -o "$RUNNER_TEMP/d1.json" -w '%{http_code}' -H "Authorization: Bearer $token" "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/d1/database?name=$DB_NAME")"
+          [[ "$status" == 200 ]] || { echo "::error::Impossible de vérifier D1"; exit 1; }
+          [[ "$(jq --arg n "$DB_NAME" --arg id "$DB_ID" '[.result[]? | select(.name==$n and .uuid==$id)] | length' "$RUNNER_TEMP/d1.json")" == 1 ]] || { echo "::error::Nom/UUID D1 inattendu"; exit 1; }
+          [[ "$DB_ID" != "04f52830-ef5a-4f17-a640-42bbc2381bba" && "$DB_ID" != "6adb95e5-e542-4bec-9008-fbea01042305" ]] || { echo "::error::Production/preview interdit"; exit 1; }
+          printf 'CLOUDFLARE_API_TOKEN=%s\n' "$token" >> "$GITHUB_ENV"
+          echo "Cible confirmée : $DB_NAME / $DB_ID"
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+          package-manager-cache: false
+
+      - name: SQLite PRAGMA quick_check
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          npx --yes wrangler@4 d1 execute "$DB_NAME" --remote --command="PRAGMA quick_check;" --json > "$RUNNER_TEMP/quick.json"
+          jq -e . "$RUNNER_TEMP/quick.json" >/dev/null
+          answer="$(jq -r '[.. | objects | select(has("results")) | .results[]? | .quick_check? // empty][0] // empty' "$RUNNER_TEMP/quick.json")"
+          [[ "$answer" == ok ]] || { echo "::error::SQLite quick_check non OK (sortie non divulguée)"; exit 1; }
+          echo "SQLite quick_check = ok"
+
+      - name: SQLite foreign_key_check
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          npx --yes wrangler@4 d1 execute "$DB_NAME" --remote --command="PRAGMA foreign_key_check;" --json > "$RUNNER_TEMP/fk.json"
+          jq -e . "$RUNNER_TEMP/fk.json" >/dev/null
+          violations="$(jq -r '[.. | objects | select(has("results")) | .results[]?] | length' "$RUNNER_TEMP/fk.json")"
+          [[ "$violations" == 0 ]] || { echo "::error::Foreign-key violations detected: $violations"; exit 1; }
+          echo "Foreign-key violations = 0"
+
+      - name: Tables, migration inventory, counts (no row data)
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          out="$RUNNER_TEMP/verify-v2"; mkdir -p "$out"
+          npx --yes wrangler@4 d1 execute "$DB_NAME" --remote --command="SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name;" --json > "$out/tables.json"
+          jq -r '[.. | objects | select(has("results")) | .results[]? | .name? // empty] | unique | .[]' "$out/tables.json" > "$out/tables.txt"
+          [[ -s "$out/tables.txt" ]] || { echo "::error::No tables found"; exit 1; }
+          printf 'table,row_count\n' > "$out/counts.csv"
+          while IFS= read -r table; do
+            [[ "$table" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || exit 1
+            npx --yes wrangler@4 d1 execute "$DB_NAME" --remote --command="SELECT COUNT(*) AS row_count FROM \"$table\";" --json > "$out/count.json"
+            count="$(jq -r '[.. | objects | select(has("results")) | .results[]? | .row_count? // empty][0] // empty' "$out/count.json")"
+            [[ "$count" =~ ^[0-9]+$ ]] || { echo "::error::Invalid count for $table"; exit 1; }
+            printf '"%s",%s\n' "$table" "$count" >> "$out/counts.csv"
+          done < "$out/tables.txt"
+          echo "Tables: $(wc -l < "$out/tables.txt" | tr -d ' ')"
+          echo "Counts gathered without exposing table contents."
+          echo "MIGRATIONS_COUNT=$(grep -c '^' "$out/tables.txt" || true)" >> "$GITHUB_ENV"
+          cat "$out/counts.csv"
+          echo "## restore-test-v2 integrity" >> "$GITHUB_STEP_SUMMARY"
+          echo "- SQLite quick_check: ok" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Foreign key check: 0 violations" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Tables and row counts: report artifact" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload sanitized verification report
+        uses: actions/upload-artifact@v6
+        with:
+          name: prochelia-restore-v2-integrity-${{ github.run_id }}
+          path: ${{ runner.temp }}/verify-v2/counts.csv
+          if-no-files-found: error
+          retention-days: 30
