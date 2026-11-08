@@ -80,7 +80,7 @@ jobs:
           mkdir -p "$RUNNER_TEMP/prochelia-r2"
           npx --yes wrangler@4 d1 export "$EXPECTED_DB_NAME" --remote --config wrangler.jsonc --skip-confirmation --output="$RUNNER_TEMP/prochelia-r2/preview.sql"
           test -s "$RUNNER_TEMP/prochelia-r2/preview.sql"
-          sha256sum "$RUNNER_TEMP/prochelia-r2/preview.sql" > "$RUNNER_TEMP/prochelia-r2/plain.sha256"
+          sha256sum "$RUNNER_TEMP/prochelia-r2/preview.sql" | awk '{print $1}' > "$RUNNER_TEMP/prochelia-r2/plain.sha256"
 
       - name: Encrypt backup AES-256 and prepare integrity manifest
         shell: bash
@@ -89,7 +89,7 @@ jobs:
           umask 077
           printf '%s' "$BACKUP_ENCRYPTION_KEY" | gpg --batch --yes --pinentry-mode loopback --passphrase-fd 0 --symmetric --cipher-algo AES256 --output "$RUNNER_TEMP/prochelia-r2/preview.sql.gpg" "$RUNNER_TEMP/prochelia-r2/preview.sql"
           test -s "$RUNNER_TEMP/prochelia-r2/preview.sql.gpg"
-          cat "$RUNNER_TEMP/prochelia-r2/plain.sha256" > "$RUNNER_TEMP/prochelia-r2/manifest.sha256"
+          cp "$RUNNER_TEMP/prochelia-r2/plain.sha256" "$RUNNER_TEMP/prochelia-r2/manifest.sha256"
           rm -f "$RUNNER_TEMP/prochelia-r2/preview.sql"
 
       - name: Install AWS CLI for S3-compatible Cloudflare R2
@@ -115,7 +115,7 @@ jobs:
           aws s3 cp "s3://$R2_BUCKET/$key" "$RUNNER_TEMP/prochelia-r2/roundtrip.sql.gpg" --endpoint-url "$R2_ENDPOINT" --region auto --only-show-errors
           cmp "$RUNNER_TEMP/prochelia-r2/preview.sql.gpg" "$RUNNER_TEMP/prochelia-r2/roundtrip.sql.gpg"
           printf '%s' "$BACKUP_ENCRYPTION_KEY" | gpg --batch --yes --pinentry-mode loopback --passphrase-fd 0 --decrypt "$RUNNER_TEMP/prochelia-r2/roundtrip.sql.gpg" > "$RUNNER_TEMP/prochelia-r2/roundtrip.sql"
-          sha256sum -c "$RUNNER_TEMP/prochelia-r2/manifest.sha256" --status || {
+          actual="$(sha256sum "$RUNNER_TEMP/prochelia-r2/roundtrip.sql" | awk '{print $1}')"\n          expected="$(cat "$RUNNER_TEMP/prochelia-r2/manifest.sha256")"\n          test "$actual" = "$expected" || {
             echo "::error::Decrypted SQL checksum does not match the pre-encryption manifest."
             exit 1
           }
