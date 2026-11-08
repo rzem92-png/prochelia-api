@@ -3080,7 +3080,7 @@ handle = async function(request,env){
       return json(await backupStatus(env));
     }
     if(request.method==='POST'&&url.pathname==='/api/system/backup/run'){
-      const a=await getAuth(request,env).catch(()=>null); if(!a||a.role!=='GERANTE') return json({ok:false,error:'FORBIDDEN'},403);
+      const auth=await getSessionUser(request,env).catch(()=>null); if(!auth?.user||String(auth.user.role||'').toUpperCase()!=='GERANTE') return json({ok:false,error:'FORBIDDEN'},403);
       return json(await runNationalBackup(env,'MANUAL'));
     }
     return __procheliaNationalHandle(request,env);
