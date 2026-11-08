@@ -3072,7 +3072,7 @@ handle = async function(request,env){
   const url=new URL(request.url);
   try{
     if(request.method==='GET'&&url.pathname==='/api/system/scale'){
-      const a=await getAuth(request,env).catch(()=>null); if(!a||a.role!=='GERANTE') return json({ok:false,error:'FORBIDDEN'},403);
+      const auth=await getSessionUser(request,env).catch(()=>null); if(!auth?.user||String(auth.user.role||'').toUpperCase()!=='GERANTE') return json({ok:false,error:'FORBIDDEN'},403);
       return json(await nationalScaleStatus(env));
     }
     if(request.method==='GET'&&url.pathname==='/api/system/backups'){
@@ -3208,7 +3208,7 @@ function supportScenarioFor(category,severity){
 }
 
 async function supportAuth(request,env){
-  const auth=await getAuth(request,env).catch(()=>null);
+  const auth=await getSessionUser(request,env).catch(()=>null);
   if(!auth?.user?.id) return {response:json({ok:false,error:'UNAUTHORIZED',version:VERSION},401)};
   const role=supportRoleNormalize(auth.user.role);
   if(!supportRoleAllowed(role)) return {response:json({ok:false,error:'FORBIDDEN',version:VERSION},403)};
