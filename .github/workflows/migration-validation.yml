@@ -1,0 +1,28 @@
+name: PROCHÉLIA migration validation
+
+on:
+  pull_request:
+    paths:
+      - "migrations/**"
+      - "tests/test_payment_migration.py"
+      - ".github/workflows/migration-validation.yml"
+  push:
+    branches: [main]
+    paths:
+      - "migrations/**"
+      - "tests/test_payment_migration.py"
+      - ".github/workflows/migration-validation.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  sqlite-migration:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Validate payment migration in SQLite
+        run: python -m unittest tests/test_payment_migration.py
