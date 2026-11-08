@@ -1,0 +1,122 @@
+name: PROCHÉLIA — sauvegarde D1 preview chiffrée vers R2 EU
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_preview_backup:
+        description: "Saisir exactement BACKUP_PREVIEW_TO_R2_EU pour lancer une sauvegarde de la D1 preview"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: prochelia-preview-r2-backup
+  cancel-in-progress: false
+
+jobs:
+  backup-preview:
+    if: ${{ github.event.inputs.confirm_preview_backup == 'BACKUP_PREVIEW_TO_R2_EU' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      BACKUP_ENCRYPTION_KEY: ${{ secrets.BACKUP_ENCRYPTION_KEY }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.R2_EU_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_EU_SECRET_ACCESS_KEY }}
+      AWS_DEFAULT_REGION: auto
+      EXPECTED_ACCOUNT_ID: f2a79e9fa41566a8ec80fb24c02c60eb
+      EXPECTED_DB_NAME: prochelia-preview-db
+      EXPECTED_DB_ID: 6adb95e5-e542-4bec-9008-fbea01042305
+      R2_BUCKET: prochelia-preview-backups-eu
+      R2_ENDPOINT: https://f2a79e9fa41566a8ec80fb24c02c60eb.eu.r2.cloudflarestorage.com
+    steps:
+      - name: Enforce preview-only branch and exact workflow commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = "refs/heads/prelaunch/r2-eu-backup-workflow"
+          test "$CLOUDFLARE_ACCOUNT_ID" = "$EXPECTED_ACCOUNT_ID"
+          for name in CLOUDFLARE_API_TOKEN BACKUP_ENCRYPTION_KEY AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY; do
+            test -n "${!name:-}" || { echo "::error::Required secret missing: $name"; exit 1; }
+          done
+
+      - name: Checkout exact dispatch commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Verify pinned preview D1 target
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          c=json.loads(Path("wrangler.jsonc").read_text())
+          assert c["name"] == "prochelia-api-preview"
+          d=next(x for x in c["d1_databases"] if x["binding"]=="DB")
+          assert d["database_name"] == "prochelia-preview-db"
+          assert d["database_id"] == "6adb95e5-e542-4bec-9008-fbea01042305"
+          assert len(c["d1_databases"]) == 1
+          print("Preview Worker/D1 target verified.")
+          PY
+          identity="$(npx --yes wrangler@4 whoami 2>&1)"
+          printf '%s\n' "$identity"
+          printf '%s' "$identity" | grep -Fq "$EXPECTED_ACCOUNT_ID"
+
+      - name: Export preview D1 (read-only)
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          mkdir -p "$RUNNER_TEMP/prochelia-r2"
+          npx --yes wrangler@4 d1 export "$EXPECTED_DB_NAME" --remote --config wrangler.jsonc --skip-confirmation --output="$RUNNER_TEMP/prochelia-r2/preview.sql"
+          test -s "$RUNNER_TEMP/prochelia-r2/preview.sql"
+          sha256sum "$RUNNER_TEMP/prochelia-r2/preview.sql" > "$RUNNER_TEMP/prochelia-r2/plain.sha256"
+
+      - name: Encrypt backup AES-256 and prepare integrity manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          printf '%s' "$BACKUP_ENCRYPTION_KEY" | gpg --batch --yes --pinentry-mode loopback --passphrase-fd 0 --symmetric --cipher-algo AES256 --output "$RUNNER_TEMP/prochelia-r2/preview.sql.gpg" "$RUNNER_TEMP/prochelia-r2/preview.sql"
+          test -s "$RUNNER_TEMP/prochelia-r2/preview.sql.gpg"
+          cat "$RUNNER_TEMP/prochelia-r2/plain.sha256" > "$RUNNER_TEMP/prochelia-r2/manifest.sha256"
+          rm -f "$RUNNER_TEMP/prochelia-r2/preview.sql"
+
+      - name: Install AWS CLI for S3-compatible Cloudflare R2
+        run: python3 -m pip install --user awscli
+
+      - name: Upload encrypted backup to private R2 EU bucket
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PATH="$HOME/.local/bin:$PATH"
+          key="preview-d1/${EXPECTED_DB_NAME}/$(date -u +%Y/%m/%d)/${GITHUB_RUN_ID}-${GITHUB_SHA:0:12}.sql.gpg"
+          aws s3 cp "$RUNNER_TEMP/prochelia-r2/preview.sql.gpg" "s3://$R2_BUCKET/$key" --endpoint-url "$R2_ENDPOINT" --region auto --only-show-errors
+          aws s3 cp "$RUNNER_TEMP/prochelia-r2/manifest.sha256" "s3://$R2_BUCKET/$key.sha256" --endpoint-url "$R2_ENDPOINT" --region auto --only-show-errors
+          echo "R2_OBJECT_KEY=$key" >> "$GITHUB_OUTPUT"
+        id: upload
+
+      - name: Download backup and verify encryption/checksum
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PATH="$HOME/.local/bin:$PATH"
+          key="preview-d1/${EXPECTED_DB_NAME}/$(date -u +%Y/%m/%d)/${GITHUB_RUN_ID}-${GITHUB_SHA:0:12}.sql.gpg"
+          aws s3 cp "s3://$R2_BUCKET/$key" "$RUNNER_TEMP/prochelia-r2/roundtrip.sql.gpg" --endpoint-url "$R2_ENDPOINT" --region auto --only-show-errors
+          cmp "$RUNNER_TEMP/prochelia-r2/preview.sql.gpg" "$RUNNER_TEMP/prochelia-r2/roundtrip.sql.gpg"
+          printf '%s' "$BACKUP_ENCRYPTION_KEY" | gpg --batch --yes --pinentry-mode loopback --passphrase-fd 0 --decrypt "$RUNNER_TEMP/prochelia-r2/roundtrip.sql.gpg" > "$RUNNER_TEMP/prochelia-r2/roundtrip.sql"
+          sha256sum -c "$RUNNER_TEMP/prochelia-r2/manifest.sha256" --status || {
+            echo "::error::Decrypted SQL checksum does not match the pre-encryption manifest."
+            exit 1
+          }
+          echo "PASS: private R2 upload/download and encrypted object round-trip verified."
