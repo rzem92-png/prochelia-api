@@ -10,7 +10,8 @@ import { procheliaV7 } from "./v7.js";
 export async function handleV7Route(
   request,
   env,
-  path
+  path,
+  auth = null
 ) {
 
   try {
@@ -138,25 +139,28 @@ export async function handleV7Route(
       method === "POST"
     ) {
 
-      const body =
-        await request.json();
-
-      const result =
-        procheliaV7.checkPermissions(
-          body
+      // Authorization must use the authenticated session, not caller-supplied role/permissions.
+      if (!auth?.user) {
+        return Response.json(
+          { ok: false, version: procheliaV7.version, error: "UNAUTHENTICATED" },
+          { status: 401 }
         );
+      }
+      if (auth.user.role !== "gerante") {
+        return Response.json(
+          { ok: false, version: procheliaV7.version, error: "FORBIDDEN" },
+          { status: 403 }
+        );
+      }
 
-      return Response.json(
+      const body = await request.json();
+      const result = procheliaV7.checkPermissions({
+        role: auth.user.role,
+        permission: body?.permission,
+        permissions: {}
+      });
 
-        result,
-
-        {
-          status:
-            result.ok
-              ? 200
-              : 403
-        }
-      );
+      return Response.json(result, { status: result.ok ? 200 : 403 });
     }
 
 
@@ -604,25 +608,34 @@ export async function handleV7Route(
       method === "POST"
     ) {
 
-      const body =
-        await request.json();
-
-      const result =
-        procheliaV7.auditEvent(
-          body
+      if (!auth?.user) {
+        return Response.json(
+          { ok: false, version: procheliaV7.version, error: "UNAUTHENTICATED" },
+          { status: 401 }
         );
+      }
+      if (auth.user.role !== "gerante") {
+        return Response.json(
+          { ok: false, version: procheliaV7.version, error: "FORBIDDEN" },
+          { status: 403 }
+        );
+      }
 
-      return Response.json({
+      const body = await request.json();
+      if (!body || typeof body.action !== "string" || !body.action.trim()) {
+        return Response.json(
+          { ok: false, version: procheliaV7.version, error: "INVALID_AUDIT_EVENT" },
+          { status: 400 }
+        );
+      }
 
-        ok: true,
-
-        version:
-          procheliaV7.version,
-
-        audit:
-          result
-
+      const result = procheliaV7.auditEvent({
+        ...body,
+        actorId: auth.user.id,
+        actorRole: auth.user.role
       });
+
+      return Response.json({ ok: true, version: procheliaV7.version, audit: result });
     }
 
 

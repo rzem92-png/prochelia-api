@@ -2938,7 +2938,8 @@ async function handle(request,env){
       return json({ ok: false, error: 'AUTHENTICATED_VALIDATION_REQUIRED', version: VERSION, write_enabled: false }, 403);
     }
     if (url.pathname.startsWith('/api/v7/')) {
-      const v7Response = await handleV7Route(request, env, url.pathname);
+      const v7Auth = await getSessionUser(request, env).catch(() => null);
+      const v7Response = await handleV7Route(request, env, url.pathname, v7Auth);
       if (v7Response) return v7Response;
     }
     const fw=await handleFinanceWorkspace(request,env); if(fw) return fw;
