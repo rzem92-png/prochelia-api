@@ -546,3 +546,54 @@ Measure verified value created per active participant, not merely transactions:
 
 ### First proof, not a grand launch
 Test one bounded service journey with real customers and providers. Compare the Opportunity-to-Income Loop against a conventional listing-and-booking journey. Pre-register success thresholds, include all three stakeholder outcomes, interview users who decline or fail to complete, and publish an internal evidence report. Expand only if the new model produces materially better outcomes without increasing safety, legal or financial harm.
+
+
+## 19. Preliminary competitive reality check — 2026-11-09
+
+This is an initial public-web desk review, not an exhaustive global competitor census, patent search, trademark clearance, legal opinion or proof of uniqueness. Product capabilities and market claims must be rechecked before investment or launch decisions.
+
+### Relevant overlaps identified
+- Upwork: human/AI work marketplace, AI-assisted project scoping and talent discovery, contracts and work workflows; announced an app in ChatGPT and an MCP server enabling AI tools to discover talent and draft offers.
+  Public references: https://www.upwork.com/press/releases/upworks-work-marketplace-comes-to-chatgpt and https://investors.upwork.com/news-releases/news-release-details/upwork-talent-now-everywhere-ai-works
+- Malt: freelance marketplace with automated matching/opportunity suggestions, AI Search, Talent/skills profiles, quotes, project administration and payments.
+  Public references: https://help.malt.com/hc/fr/articles/29534878703506-Comment-fonctionnent-les-opportunit%C3%A9s-pour-freelances and https://www.malt.com/c/companies/freelancer-marketplace
+- AlloVoisins: local services and equipment marketplace, demand alerts, professional visibility, quote/invoice tools, payment and revenue tracking.
+  Public references: https://www.allovoisins.com/ and https://www.allovoisins.com/pros
+- High5: talent passport, career history, AI project matching, professional opportunities and support for independent careers.
+  Public references: https://www.high5hire.com/faqs and https://www.high5hire.com/talent-guides/how-to-register-and-build-your-talent-passport
+- QU7: AI marketplace operating system with business profiles, vendor matching, procurement, opportunity discovery agents, economic modelling, affiliates and impact workflows.
+  Public reference: https://www.quseven.com/
+- Shopify: entrepreneur commerce infrastructure including online storefront, payments, financial management, inventory, marketing, international expansion and order processing.
+  Public reference: https://www.shopify.com/fr/produits
+
+### What this means
+No defensible claim can currently be made that the individual concepts are unprecedented. Important components already exist in the market. In particular:
+- AI talent matching and project opportunities are not unique.
+- Portable talent passports and profile-based matching are not unique.
+- Local service demand generation and small-provider admin tools are not unique.
+- AI-enabled marketplace operating systems and opportunity discovery are not unique.
+- Small-business storefront, payment and management tools are not unique.
+
+The initial review has not established that one competitor delivers the complete PROCHÉLIA thesis in the exact proposed combination and target segments. Absence from this limited search is not evidence that no such competitor exists.
+
+### Differentiation hypothesis to test
+PROCHÉLIA's possible distinction is the operationally integrated loop across:
+1. helping a person turn an undeveloped skill into a legally viable micro-business;
+2. identifying evidence-backed demand and available capacity across local services, talent and multi-provider projects;
+3. enabling the offer, cost model, customer acquisition, fulfilment, trust and after-sales workflow;
+4. building portable proof of experience and future opportunity access;
+5. measuring verified customer value, provider net earnings and platform contribution together;
+6. supporting multilingual, low-bandwidth and country-specific journeys, including carefully validated France–Algeria use cases.
+
+This is a differentiation hypothesis, not a verified competitive moat. It becomes meaningful only if users demonstrably achieve better outcomes than with the relevant alternatives.
+
+### Required next competitive diligence
+- Build a competitor longlist by geography and vertical, including direct, indirect, adjacent and emerging AI-agent competitors.
+- Compare onboarding, target users, categories, matching, pricing, commissions, payments, provider tools, business creation support, trust, portability, APIs, languages, accessibility and country coverage.
+- Interview customers, providers and early-stage entrepreneurs who use competing products; document switching reasons and unmet needs.
+- Test actual journeys and total costs, not marketing claims alone.
+- Search corporate registries, product documentation, app stores, public funding/launch announcements, relevant patents and trademarks before any uniqueness or protectability claim.
+- Define a feature-level white-space map and select one narrow beachhead where PROCHÉLIA can prove materially superior outcomes.
+
+### External claims policy
+Until the diligence is complete, use wording such as "notre ambition est de réunir..." or "une combinaison que nous voulons valider", never "personne ne le fait", "première mondiale" or "unique au monde".
