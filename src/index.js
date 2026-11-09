@@ -1152,7 +1152,10 @@ async function handleBase(request, env) {
     const h=await env.DB.prepare('SELECT 1 AS ok').first();
     const s0=await env.DB.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='missions'").first();
     const u0=await env.DB.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='users'").first();
-    const ledger=await env.DB.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='payment_wallet_ledger'").first();
+    const paymentTables=await env.DB.prepare(`SELECT COUNT(*) AS total FROM sqlite_master
+      WHERE type='table' AND name IN ('payment_accounts','wallets','payment_transactions',
+        'payout_requests','payment_webhook_events','payment_disputes','payment_reconciliation',
+        'payment_audit','payment_wallet_ledger')`).first();
     const guards=await env.DB.prepare(`SELECT COUNT(*) AS total FROM sqlite_master
       WHERE type='trigger' AND name IN (
        'trg_payment_wallet_ledger_require_wallet','trg_payment_wallet_ledger_guard_balances',
@@ -1163,7 +1166,7 @@ async function handleBase(request, env) {
        'trg_payout_status_guard','trg_payout_settle_ledger','trg_payout_release_ledger'
       )`).first();
     const databaseReady=h?.ok===1, coreSchemaReady=!!s0?.sql&&!!u0?.sql;
-    const ledgerReady=!!ledger?.sql&&Number(guards?.total||0)===14;
+    const ledgerReady=Number(paymentTables?.total||0)===9&&Number(guards?.total||0)===14;
     const infrastructureReady=databaseReady&&coreSchemaReady;
     return json({ok:true,ready:false,infrastructure_ready:infrastructureReady,database:databaseReady,
       core_schema_ready:coreSchemaReady,payment_ledger_enforcement_ready:ledgerReady,
