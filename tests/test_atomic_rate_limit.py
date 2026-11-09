@@ -78,6 +78,51 @@ class AtomicRateLimitTests(unittest.TestCase):
         finally:
             db.close()
 
+    def test_login_throttle_uses_hashed_email_ip_and_ip_buckets(self):
+        source = SOURCE.read_text(encoding="utf-8")
+        login = source[source.index("async function ensureLoginSecuritySchema"):source.index("async function logout")]
+        self.assertIn("LOGIN_EMAIL_IP:", login)
+        self.assertIn("LOGIN_IP:", login)
+        self.assertIn("CF-Connecting-IP", login)
+        self.assertNotIn("X-Forwarded-For", login)
+        self.assertIn("emailIpHash", login)
+        self.assertIn("ipHash", login)
+        self.assertIn("datetime('now','-15 minutes')", login)
+        self.assertIn("retry_after_seconds:900", login)
+        self.assertIn("DELETE FROM login_attempts WHERE key_hash=?", login)
+        self.assertIn("SELECT ?,? WHERE (SELECT COUNT(*)", login)
+
+    def test_login_throttle_limits_five_identity_attempts_and_twenty_five_ip_attempts(self):
+        db = sqlite3.connect(":memory:")
+        try:
+            db.execute("""
+                CREATE TABLE login_attempts (
+                    id TEXT PRIMARY KEY,
+                    key_hash TEXT NOT NULL,
+                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            insert = """
+                INSERT INTO login_attempts (id,key_hash)
+                SELECT ?,? WHERE (
+                    SELECT COUNT(*) FROM login_attempts
+                    WHERE key_hash=? AND created_at>=datetime('now','-15 minutes')
+                ) < ?
+            """
+            email_results = []
+            for index in range(7):
+                row = db.execute(insert, (f"e-{index}", "email-ip-hash", "email-ip-hash", 5))
+                email_results.append(row.rowcount)
+            self.assertEqual(email_results, [1, 1, 1, 1, 1, 0, 0])
+            ip_results = []
+            for index in range(27):
+                row = db.execute(insert, (f"ip-{index}", "ip-hash", "ip-hash", 25))
+                ip_results.append(row.rowcount)
+            self.assertEqual(sum(ip_results), 25)
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM login_attempts WHERE key_hash='ip-hash'").fetchone()[0], 25)
+        finally:
+            db.close()
+
 
 if __name__ == "__main__":
     unittest.main()
