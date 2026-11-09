@@ -733,13 +733,13 @@ async function ensurePaymentSchema(env) {
     SELECT COUNT(*) AS total FROM sqlite_master WHERE type='trigger' AND name IN (
       'trg_payment_wallet_ledger_require_wallet','trg_payment_wallet_ledger_guard_balances',
       'trg_payment_wallet_ledger_apply','trg_payment_wallet_ledger_no_update',
-      'trg_payment_wallet_ledger_no_delete','trg_payment_tx_status_guard',
-      'trg_payment_tx_credit_ledger','trg_payment_tx_hold_ledger',
+      'trg_payment_wallet_ledger_no_delete','trg_payment_dispute_hold_paid_tx','trg_payment_tx_status_guard',
+      'trg_payment_tx_credit_ledger','trg_payment_tx_credit_disputed_ledger','trg_payment_tx_hold_ledger',
       'trg_payment_tx_settle_held_ledger','trg_payout_request_guard',
       'trg_payout_request_reserve_ledger','trg_payout_status_guard',
       'trg_payout_settle_ledger','trg_payout_release_ledger'
     )`).first();
-  if (Number(tables?.total || 0) !== 9 || Number(guards?.total || 0) !== 14) {
+  if (Number(tables?.total || 0) !== 9 || Number(guards?.total || 0) !== 16) {
     throw new Error('PAYMENT_SCHEMA_OR_LEDGER_MIGRATION_REQUIRED');
   }
 }
@@ -1164,13 +1164,13 @@ async function handleBase(request, env) {
       WHERE type='trigger' AND name IN (
        'trg_payment_wallet_ledger_require_wallet','trg_payment_wallet_ledger_guard_balances',
        'trg_payment_wallet_ledger_apply','trg_payment_wallet_ledger_no_update',
-       'trg_payment_wallet_ledger_no_delete','trg_payment_tx_status_guard',
-       'trg_payment_tx_credit_ledger','trg_payment_tx_hold_ledger','trg_payment_tx_settle_held_ledger',
+       'trg_payment_wallet_ledger_no_delete','trg_payment_dispute_hold_paid_tx','trg_payment_tx_status_guard',
+       'trg_payment_tx_credit_ledger','trg_payment_tx_credit_disputed_ledger','trg_payment_tx_hold_ledger','trg_payment_tx_settle_held_ledger',
        'trg_payout_request_guard','trg_payout_request_reserve_ledger',
        'trg_payout_status_guard','trg_payout_settle_ledger','trg_payout_release_ledger'
       )`).first();
     const databaseReady=h?.ok===1, coreSchemaReady=!!s0?.sql&&!!u0?.sql;
-    const ledgerReady=Number(paymentTables?.total||0)===9&&Number(guards?.total||0)===14;
+    const ledgerReady=Number(paymentTables?.total||0)===9&&Number(guards?.total||0)===16;
     const infrastructureReady=databaseReady&&coreSchemaReady;
     return json({ok:true,ready:false,infrastructure_ready:infrastructureReady,database:databaseReady,
       core_schema_ready:coreSchemaReady,payment_ledger_enforcement_ready:ledgerReady,
