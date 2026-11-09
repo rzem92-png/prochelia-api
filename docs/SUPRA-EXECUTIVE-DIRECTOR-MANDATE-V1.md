@@ -718,3 +718,30 @@ Do not design a "start any business" promise. Activity eligibility depends on th
 - Official product pages are primary evidence for what a company publicly claims, not proof of feature quality, adoption or actual performance.
 - Direct hands-on testing, user interviews, pricing/terms review and legal/IP searches remain outstanding.
 - Keep the competitor register dated and update it before launch and each major strategic decision.
+
+
+## 22. Runtime baseline cross-check — avoid duplicate engineering
+
+A read-only inspection of the current `main` branch found that PROCHÉLIA already contains:
+- `src/v7.js`: a V7 finance calculator and pricing validation helper.
+- `src/v7-routes.js`: `POST /api/v7/finance/calculate` and `POST /api/v7/check/pricing`.
+- `migrations/0002_server_pricing.sql`: pricing policy, travel policy, route estimate, audit and quote tables.
+- Existing test files include V7 security and SQLite migration tests.
+
+Important limitation: the existing `v7CalculateFinance` function is a basic arithmetic helper using `clientAmount`, `commissionRate`, `paymentFees` and `otherFees`. It calculates commission, provider amount and gross margin using JavaScript floating-point numbers. By itself it does not establish a full tax-aware, currency-safe, cost-based unit-economics engine or prove the displayed price is legally/commercially correct. The V7 `checkPricing` helper only checks amount against a minimum and optional maximum. The SQL migration contains richer policy/quote fields, but a schema alone does not prove end-to-end production enforcement.
+
+### Engineering consequence
+Do not add a second pricing engine blindly. First map all existing callers, DB policy reads/writes, route auth, rounding, currency, tax and test coverage. Then evolve the existing canonical path or add a separately versioned pure calculator behind tests, preserving existing API contracts until migration is justified.
+
+### Minimum test matrix before any live use
+- Reject NaN, Infinity, negative amounts, invalid percentages, unsupported currency and malformed tax rates.
+- Use integer minor units / deterministic decimal arithmetic; define rounding mode per currency.
+- Calculate provider gross, provider deductions, provider estimated net, customer subtotal/tax/total, platform fee/revenue, PSP fees, refunds/chargebacks and contribution margin separately.
+- Distinguish VAT collected from platform revenue; avoid counting pass-through taxes as margin.
+- Include transport, labor/materials, insurance, support, acquisition and risk costs where applicable.
+- Validate fee payer, fee caps/floors, provider minimum net and customer maximum budget without silently altering either party's agreed price.
+- Ensure quote snapshots are immutable/versioned and price-policy changes affect only new quotes unless explicitly accepted.
+- Property tests for arithmetic invariants and edge cases; integration tests for database policy resolution and authorization.
+- Explicitly label estimates versus final tax/accounting figures; no automatic live price or commission changes.
+
+No runtime files were modified in this competitive-mapping update.
