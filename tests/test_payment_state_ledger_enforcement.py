@@ -50,6 +50,32 @@ class PaymentStateLedgerEnforcementTests(unittest.TestCase):
         self.db.execute("UPDATE payment_transactions SET status='held' WHERE id='t1'")
         self.assertEqual(self.balances(), (10000, 4500, 0))
 
+    def add_open_dispute(self):
+        self.db.execute(
+            """INSERT INTO payment_disputes
+               (id,mission_id,transaction_id,client_id,intervenant_id,status,reason,amount_cents)
+               VALUES('d1','m1','t1','client-u1','u1','open','service dispute',5000)"""
+        )
+
+    def test_charge_settled_after_dispute_is_reserved_not_withdrawable(self):
+        self.create_transaction()
+        self.add_open_dispute()
+        self.db.execute("UPDATE payment_transactions SET status='paid' WHERE id='t1'")
+        self.assertEqual(self.balances(), (10000, 4500, 0))
+        entry = self.db.execute(
+            "SELECT entry_type FROM payment_wallet_ledger WHERE transaction_id='t1'"
+        ).fetchone()[0]
+        self.assertEqual(entry, "MISSION_PAYMENT_DISPUTED")
+
+    def test_dispute_insert_racing_after_settlement_moves_paid_credit_to_hold(self):
+        self.create_transaction()
+        self.db.execute("UPDATE payment_transactions SET status='paid' WHERE id='t1'")
+        self.assertEqual(self.balances(), (14500, 0, 0))
+        self.add_open_dispute()
+        status = self.db.execute("SELECT status FROM payment_transactions WHERE id='t1'").fetchone()[0]
+        self.assertEqual(status, "held")
+        self.assertEqual(self.balances(), (10000, 4500, 0))
+
     def test_late_psp_settlement_of_held_charge_is_reserved(self):
         self.create_transaction()
         self.db.execute("UPDATE payment_transactions SET status='held' WHERE id='t1'")
@@ -120,6 +146,8 @@ class PaymentStateLedgerEnforcementTests(unittest.TestCase):
         self.assertNotRegex(source, r"UPDATE\s+wallets\s+SET")
         self.assertIn("PAYMENT_SCHEMA_OR_LEDGER_MIGRATION_REQUIRED", source)
         self.assertIn("trg_payment_tx_settle_held_ledger", source)
+        self.assertIn("trg_payment_tx_credit_disputed_ledger", source)
+        self.assertIn("trg_payment_dispute_hold_paid_tx", source)
         ensure = source[source.index("async function ensurePaymentSchema"):source.index("function moneyCents")]
         self.assertNotIn("CREATE TABLE", ensure)
         status = source[source.index("async function paymentStatus"):source.index("async function createMissionPayment")]
