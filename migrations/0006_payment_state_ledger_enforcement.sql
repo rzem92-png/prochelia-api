@@ -51,6 +51,7 @@ END;
 CREATE TRIGGER IF NOT EXISTS trg_payment_tx_settle_held_ledger
 AFTER UPDATE OF provider_payment_id ON payment_transactions
 WHEN OLD.status = 'held'
+ AND NEW.status = 'held'
  AND OLD.provider_payment_id IS NULL
  AND NEW.provider_payment_id IS NOT NULL
  AND NEW.type = 'MISSION_CHARGE'
