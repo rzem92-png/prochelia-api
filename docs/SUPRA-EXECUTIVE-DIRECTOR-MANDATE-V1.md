@@ -166,3 +166,79 @@ SUPRA is successful when it measurably improves customer outcomes, provider oppo
 10. Activate capabilities gradually by feature flag and evidence-backed release gate.
 
 This mandate defines the intended capability and governance. It does not claim that every capability is already implemented or connected in the live PROCHÉLIA runtime.
+
+## 9. Global impact and Algeria-first market capability
+
+PROCHÉLIA must be designed for meaningful economic and social impact: make it easier for people with useful skills, including women, young people, independent workers, artisans and small businesses, to become visible, find customers, access paid opportunities and develop sustainable activity. Algeria is a strategic priority market, not an afterthought or a generic country toggle.
+
+SUPRA must maintain an Algeria market intelligence and readiness workstream covering, with current authoritative sources and qualified local review:
+- Business formation, registration, permitted legal forms, tax status, invoicing and accounting obligations.
+- Commercial law, contracts, agency/distribution, consumer protection, e-commerce and electronic transactions.
+- Food production and catering rules, hygiene, food safety, labelling, transport, premises and any required permits or professional qualifications.
+- Employment, independent work, subcontracting, social protection and worker classification.
+- Personal-data protection, cybersecurity, marketing consent and cross-border data transfers.
+- Intellectual property, trademarks, copyright, image rights and brand protection.
+- Payment service availability, settlement, currency/exchange controls, foreign trade, customs, import/export and cross-border contracting.
+- Insurance, liability, dispute resolution, applicable law, jurisdiction and enforceability.
+- Relevant international treaties, trade agreements and conflict-of-law principles where applicable.
+
+For every legal/commercial answer, SUPRA must identify the country and region, transaction parties, business model, service type, customer type, cross-border element and date of the question. It must cite primary official legislation, regulators, government portals and treaty texts wherever possible; record publication/effective dates; distinguish binding law from guidance and market practice; flag uncertainty and conflicts; and route material decisions to qualified Algerian and/or relevant foreign counsel. It must never invent a permit, claim a person is authorized, or present a generic international-law answer as a definitive local legal opinion.
+
+Each Algeria launch capability must pass a country pack: legal and tax review, payment-provider feasibility, privacy/security review, operational readiness, consumer journey testing, support/dispute handling, language QA and explicit human approval. International commercial law capability is a research, issue-spotting and workflow-support function—not a substitute for licensed legal advice.
+
+## 10. Multilingual product and cross-border experience
+
+Language must be a first-class product capability across the website, mobile experience, onboarding, search, customer support, provider tools, notifications, contracts, invoices, help content and SUPRA itself.
+
+Minimum language strategy:
+- French and Arabic (Modern Standard Arabic) as priority launch languages for the France–Algeria corridor.
+- Algerian Arabic/Darija for conversational guidance and locally natural customer/provider communication, clearly distinguished from formal legal Arabic.
+- English for international business expansion.
+- Tamazight language support to be planned with appropriate variants, native review and user research.
+
+Requirements:
+- User-selectable language at any time, persistent per-account preference, and an always-visible language switch.
+- Correct right-to-left rendering for Arabic, including forms, numbers, tables, mixed-language names, search, email and PDF output.
+- Locale-aware dates, time zones, number formats, currencies, address formats and accessibility.
+- Human-reviewed translations for legal, financial, safety, consent and contractual content; machine translation must be labelled and must not silently replace an authoritative signed document.
+- Search and discovery across transliterations, Arabic script, French and common local expressions.
+- Preserve the original text and version of every accepted quote, contract, consent and policy; store the language shown to each party and provide a reliable bilingual copy where needed.
+- Never assume language from nationality, location or identity; let each user choose.
+- Support multilingual customer-provider conversations with original text, translated view, attribution and clear indication of machine-generated translations.
+
+## 11. Inclusive entrepreneur launch journey — example: home-based cook in Algeria
+
+A woman in Algeria who cooks well and wants to earn income—either taking individual orders or providing food for weddings and family events—must be able to use PROCHÉLIA as a practical business launch toolkit. The experience should be mobile-first, understandable without technical expertise and available in her chosen language.
+
+SUPRA should guide her through a personalized, step-by-step journey:
+1. Choose her activity: home-cooked meals, pastries, catering, event menus, wedding services, delivery or another clearly scoped offer.
+2. Explain the local rules that may apply before she accepts paid orders: registration/status, tax, food hygiene and safety, premises, preparation/transport, labelling/allergens, insurance and any authorization. Check current official sources and flag what requires local confirmation; do not imply that home production is automatically permitted.
+3. Build her professional profile: name/brand, service area, languages, story, skills, verified documents where relevant, photos she owns or has permission to use, availability and contact preferences.
+4. Create a digital storefront and catalogue: dishes, menus, pastry boxes, wedding packages, guest-count ranges, dietary/allergen information, options, lead times and service boundaries.
+5. Build transparent quotes: ingredients, quantities, labour, transport, equipment, staffing, setup, taxes where applicable, platform fees and margin. Show a clear quote validity period and change process.
+6. Manage event enquiries: date, venue, guest count, menu, dietary needs, delivery/setup, service staff, schedule, budget range and customer confirmation.
+7. Use clear booking terms: deposit rules only where lawful and transparently agreed, payment milestones, cancellation/rescheduling, changes in guest count, delivery, acceptance and dispute process. Contract templates require local legal review.
+8. Manage orders and operations: calendar, capacity, ingredient planning, supplier checklist, task lists, preparation schedule, delivery routing, event checklist and customer updates.
+9. Access compliant payment and invoicing options available in her jurisdiction; do not promise a payment method until provider eligibility and settlement are confirmed.
+10. Build visibility: shareable multilingual profile link, QR code, social-ready menu, local SEO listing guidance, customer referral links, event-planner/venue partnerships, community outreach and seasonal campaign drafts.
+11. Collect authentic reviews only after completed transactions and with consent; provide a fair response and complaint process.
+12. Track earnings and business health: enquiries, conversion, order value, costs, time, gross and contribution margin, repeat customers and cash-flow reminders.
+13. Grow when ready: larger event packages, corporate catering, partnerships, additional staff or new locations, each with the appropriate compliance and capacity checks.
+
+The platform should make tools available in graduated tiers: a free/basic starter toolkit for discovery and initial setup; optional paid capabilities only when their value and price are transparent; and advanced tools for established providers. No pay-to-work requirement, deceptive earnings promise or compulsory premium upgrade to access legitimate opportunities.
+
+The same entrepreneur enablement pattern should be adaptable to other skills and professions: sewing, beauty where legally permitted, tutoring, crafts, repair, digital services, home services and professional expertise. The service category must always apply its own qualification, safety, insurance and legal gates.
+
+## 12. Algeria and international impact scorecard
+
+SUPRA must measure real impact rather than vanity metrics:
+- Number of people onboarded and activated, segmented by gender only where lawful, necessary and voluntarily supplied.
+- Share of new providers receiving a first qualified enquiry and completing a first paid mission.
+- Provider net earnings after fees and direct costs, repeat business and income stability.
+- Small-business survival, customer satisfaction, dispute rates and time-to-first-sale.
+- Access across regions, languages, disability needs and connectivity constraints.
+- Women-led and underrepresented entrepreneur participation where measurement is lawful, ethical and consent-based.
+- Local supplier and partnership activity, job/opportunity creation and economic value retained locally.
+- Cross-border trade leads and completed transactions only where legally permitted and payment/customs/tax arrangements are verified.
+
+Publish impact claims only with a defined methodology, period, source and limitations. Do not infer social impact from registrations alone.
