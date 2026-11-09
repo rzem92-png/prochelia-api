@@ -2461,6 +2461,15 @@ async function productionConfigCheck(env, { persist = false } = {}) {
   const pspRequired=['PAYMENT_PROVIDER','PAYMENT_WEBHOOK_SECRET'];
   for(const k of pspRequired) checks.push({code:`SECRET:${k}`,status:finalSecretConfigured(env,k)?'OK':'NOT_CONFIGURED'});
   checks.push({code:'BOOTSTRAP_TOKEN',status:finalSecretConfigured(env,'BOOTSTRAP_TOKEN')?'OK':'NOT_CONFIGURED'});
+  // Secrets alone never prove that payment processing is implemented or safe.
+  // These release-evidence gates remain closed until the corresponding real
+  // adapter, sandbox/restore/device tests, and human sign-offs are completed.
+  checks.push({code:'PSP_RUNTIME_ADAPTER',status:paymentsConfigured(env)?'OK':'NOT_IMPLEMENTED'});
+  checks.push({code:'PSP_SANDBOX_E2E',status:'NOT_VERIFIED'});
+  checks.push({code:'BACKUP_RESTORE_DRILL',status:'NOT_VERIFIED'});
+  checks.push({code:'IOS_SAFARI_ACCEPTANCE',status:'NOT_VERIFIED'});
+  checks.push({code:'FR_LEGAL_OPERATIONAL_SIGNOFF',status:'NOT_VERIFIED'});
+  checks.push({code:'PRODUCTION_DEPLOYMENT_APPROVAL',status:'NOT_VERIFIED'});
   const paymentCols=await tableColumns(env,'payment_transactions');
   const requiredPaymentCols=['id','idempotency_key','mission_id','client_id','intervenant_id','gross_cents','commission_cents','provider_fee_cents','refund_cents','net_intervenant_cents','status','provider_payment_id'];
   checks.push({code:'PAYMENT_COLUMNS',status:requiredPaymentCols.every(x=>paymentCols.includes(x))?'OK':'INCOMPLETE',missing:requiredPaymentCols.filter(x=>!paymentCols.includes(x))});
@@ -2473,7 +2482,7 @@ async function productionConfigCheck(env, { persist = false } = {}) {
     await registerIntegration(env,'MAPS','LOCATION',['MAPS_PROVIDER','MAPS_API_KEY'],['distance','geocoding','routing'],finalSecretConfigured(env,'MAPS_API_KEY')?'CONFIGURED':'NOT_CONFIGURED');
     await registerIntegration(env,'MARKET_DATA','COMMERCIAL',['MARKET_DATA_PROVIDER'],['market_prices','competitor_signals'],finalSecretConfigured(env,'MARKET_DATA_PROVIDER')?'CONFIGURED':'NOT_CONFIGURED');
   }
-  const blocking=checks.filter(x=>['MISSING','INCOMPLETE'].includes(x.status));
+  const blocking=checks.filter(x=>['MISSING','INCOMPLETE','NOT_IMPLEMENTED','NOT_VERIFIED'].includes(x.status));
   const externalNotConfigured=checks.filter(x=>x.status==='NOT_CONFIGURED' && ['SECRET:PAYMENT_PROVIDER','SECRET:PAYMENT_WEBHOOK_SECRET'].includes(x.code));
   const overall=blocking.length===0 && externalNotConfigured.length===0;
   if (persist) for(const c of checks) await env.DB.prepare(`INSERT INTO system_config_checks(id,check_code,status,details_json) VALUES(?,?,?,?)`).bind(crypto.randomUUID(),c.code,c.status,JSON.stringify(c)).run();
@@ -3498,7 +3507,12 @@ async function strictProductionAudit(request,env){
     {code:'MAPS_PROVIDER',status:finalSecretConfigured(env,'MAPS_API_KEY')?'OK':'NOT_CONFIGURED'}
   ];
   const checks=[...(result.checks||[]),...extra];
-  const blockingCodes=new Set(['SECRET:PAYMENT_PROVIDER','SECRET:PAYMENT_WEBHOOK_SECRET','SECURITY_CODE_DELIVERY','CORS_ORIGIN','BACKUP_R2']);
+  const blockingCodes=new Set([
+    'SECRET:PAYMENT_PROVIDER','SECRET:PAYMENT_WEBHOOK_SECRET','SECURITY_CODE_DELIVERY',
+    'CORS_ORIGIN','BACKUP_R2','PSP_RUNTIME_ADAPTER','PSP_SANDBOX_E2E',
+    'BACKUP_RESTORE_DRILL','IOS_SAFARI_ACCEPTANCE','FR_LEGAL_OPERATIONAL_SIGNOFF',
+    'PRODUCTION_DEPLOYMENT_APPROVAL'
+  ]);
   const blocking=checks.filter(x=>blockingCodes.has(x.code)&&x.status!=='OK');
   const overall=blocking.length===0 && result.blocking===0;
   // GET production-check is read-only: no config writes or journal side effects.
