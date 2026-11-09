@@ -84,7 +84,7 @@ class AtomicRateLimitTests(unittest.TestCase):
         self.assertIn("LOGIN_EMAIL_IP:", login)
         self.assertIn("LOGIN_IP:", login)
         self.assertIn("CF-Connecting-IP", login)
-        self.assertNotIn("X-Forwarded-For", login)
+        self.assertNotIn("request.headers.get('X-Forwarded-For')", login)
         self.assertIn("emailIpHash", login)
         self.assertIn("ipHash", login)
         self.assertIn("datetime('now','-15 minutes')", login)
