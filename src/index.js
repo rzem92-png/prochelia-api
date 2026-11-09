@@ -3369,7 +3369,10 @@ async function productionSafetySchema(env){
 }
 
 async function productionSubjectHash(request, route){
-  const ip=clean(request.headers.get('CF-Connecting-IP')) || clean(request.headers.get('X-Forwarded-For')) || 'unknown';
+  // CF-Connecting-IP is injected by Cloudflare at the edge. Never fall back
+  // to X-Forwarded-For: callers can supply that header themselves unless a
+  // separately trusted proxy chain has explicitly sanitized it.
+  const ip=clean(request.headers.get('CF-Connecting-IP')) || 'unknown';
   return sha256Hex(`${ip}|${route}`);
 }
 
@@ -3391,13 +3394,19 @@ async function productionRateLimit(request,env){
   const now=Math.floor(Date.now()/1000);
   const start=new Date(Math.floor(now/windowSeconds)*windowSeconds*1000).toISOString();
   await ensureFinalHardeningSchema(env);
-  const existing=await env.DB.prepare(`SELECT request_count FROM security_rate_limits WHERE bucket=? AND subject_hash=? AND window_start=? LIMIT 1`).bind(bucket,subject,start).first();
-  const count=Number(existing?.request_count||0)+1;
-  if(existing){
-    await env.DB.prepare(`UPDATE security_rate_limits SET request_count=? WHERE bucket=? AND subject_hash=? AND window_start=?`).bind(count,bucket,subject,start).run();
-  }else{
-    await env.DB.prepare(`INSERT INTO security_rate_limits(id,bucket,subject_hash,window_start,request_count) VALUES(?,?,?,?,1)`).bind(crypto.randomUUID(),bucket,subject,start).run();
+  // One atomic SQLite statement prevents concurrent requests from losing
+  // increments or bypassing the configured threshold through a read/write race.
+  const counter=await env.DB.prepare(`INSERT INTO security_rate_limits
+    (id,bucket,subject_hash,window_start,request_count)
+    VALUES(?,?,?,?,1)
+    ON CONFLICT(bucket,subject_hash,window_start)
+    DO UPDATE SET request_count=security_rate_limits.request_count+1
+    RETURNING request_count`)
+    .bind(crypto.randomUUID(),bucket,subject,start).first();
+  if(!counter || !Number.isSafeInteger(Number(counter.request_count))){
+    throw new Error('RATE_LIMIT_COUNTER_UNAVAILABLE');
   }
+  const count=Number(counter.request_count);
   if(count>limit){
     await productionSafetySchema(env);
     await env.DB.prepare(`INSERT INTO production_security_events(id,event_type,route,subject_hash,decision,details_json) VALUES(?,?,?,?,?,?)`)
