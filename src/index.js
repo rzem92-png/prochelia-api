@@ -789,11 +789,11 @@ async function ensurePaymentSchema(env) {
       'trg_payment_wallet_ledger_require_wallet','trg_payment_wallet_ledger_guard_balances',
       'trg_payment_wallet_ledger_apply','trg_payment_wallet_ledger_no_update',
       'trg_payment_wallet_ledger_no_delete','trg_payment_tx_status_guard',
-      'trg_payment_tx_credit_ledger','trg_payment_tx_hold_ledger',
+      'trg_payment_tx_credit_ledger','trg_payment_tx_hold_ledger','trg_payment_tx_settle_held_ledger',
       'trg_payout_request_guard','trg_payout_request_reserve_ledger',
       'trg_payout_status_guard','trg_payout_settle_ledger','trg_payout_release_ledger'
     )`).first();
-  if (!ledger || Number(guards?.total || 0) !== 13) {
+  if (!ledger || Number(guards?.total || 0) !== 14) {
     throw new Error('PAYMENT_LEDGER_ENFORCEMENT_MIGRATION_REQUIRED');
   }
 }
@@ -830,7 +830,7 @@ async function paymentOnboard(request, env) {
   await ensurePaymentSchema(env);
   const body = await readJson(request);
   const provider = paymentProvider(env);
-  const accountId = clean(body?.provider_account_id) || null;
+  const accountId = null; // Provider account IDs must come only from a verified PSP onboarding callback.
   const existing = await env.DB.prepare('SELECT * FROM payment_accounts WHERE user_id=? LIMIT 1').bind(auth.user.id).first();
   if (existing) return json({ok:true,version:VERSION,account:existing,action:'REUSE_EXISTING'},200);
   const id=crypto.randomUUID();
@@ -839,7 +839,7 @@ async function paymentOnboard(request, env) {
     VALUES (?,?,?,?, 'pending','required')`).bind(id,auth.user.id,provider,accountId).run();
   await env.DB.prepare(`INSERT INTO wallets (id,user_id) VALUES (?,?)`).bind(crypto.randomUUID(),auth.user.id).run();
   await paymentAudit(env,'PAYOUT_ACCOUNT_CREATED',{user_id:auth.user.id,metadata:{provider}},'OK');
-  return json({ok:true,version:VERSION,account_id:id,provider,onboarding_status:'required',next:'PSP_ONBOARDING_REQUIRED'},201);
+  return json({ok:true,version:VERSION,account_id:id,provider,onboarding_status:'required',next:'PSP_ADAPTER_NOT_IMPLEMENTED'},201);
 }
 
 async function paymentStatus(request, env) {
@@ -856,6 +856,7 @@ async function paymentStatus(request, env) {
 async function createMissionPayment(request, env) {
   const auth=await getSessionUser(request,env);
   if(!requireRole(auth,['gerante'])) return json({ok:false,error:auth?.user?'FORBIDDEN':'UNAUTHENTICATED',version:VERSION},auth?.user?403:401);
+  if(!paymentsConfigured(env)) return json({ok:false,error:'PSP_CHARGE_ADAPTER_NOT_IMPLEMENTED',version:VERSION},503);
   await ensurePaymentSchema(env);
   const body=await readJson(request);
   const missionId=clean(body?.mission_id);
@@ -923,6 +924,7 @@ async function finalizeMissionPayment(request, env) {
 async function payoutRequest(request, env) {
   const auth=await getSessionUser(request,env);
   if(!requireRole(auth,['intervenant'])) return json({ok:false,error:auth?.user?'FORBIDDEN':'UNAUTHENTICATED',version:VERSION},auth?.user?403:401);
+  if(!paymentsConfigured(env)) return json({ok:false,error:'PAYOUT_ADAPTER_NOT_IMPLEMENTED',version:VERSION},503);
   await ensurePaymentSchema(env);
   const body=await readJson(request), amount=moneyCents(body?.amount_eur), mode=clean(body?.mode)||'standard';
   const idem=clean(request.headers.get('idempotency-key'))||clean(body?.idempotency_key);
@@ -970,6 +972,7 @@ async function verifyWebhookSignature(request, env, rawBody) {
 }
 
 async function paymentWebhook(request, env) {
+  if(!paymentsConfigured(env)) return json({ok:false,error:'PSP_WEBHOOK_ADAPTER_NOT_IMPLEMENTED',version:VERSION},503);
   await ensurePaymentSchema(env);
   const raw=await request.text();
   if(!(await verifyWebhookSignature(request,env,raw))) return json({ok:false,error:'INVALID_WEBHOOK_SIGNATURE',version:VERSION},401);
@@ -1009,6 +1012,9 @@ async function paymentWebhook(request, env) {
     } else if(tx.status==='held'&&newPaymentStatus==='paid') {
       statements.push(env.DB.prepare(`UPDATE payment_transactions SET provider_payment_id=COALESCE(provider_payment_id,?),
         updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='held'`).bind(ref,txId));
+    } else if(tx.status==='held'&&newPaymentStatus==='failed'&&!tx.provider_payment_id) {
+      statements.push(env.DB.prepare(`UPDATE payment_transactions SET status='failed',provider_payment_id=?,
+        updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='held' AND provider_payment_id IS NULL`).bind(ref,txId));
     } else if(['paid','failed','canceled'].includes(tx.status)&&tx.status!==newPaymentStatus) {
       return json({ok:false,error:'PAYMENT_WEBHOOK_STATE_CONFLICT',version:VERSION,status:tx.status},409);
     }
@@ -1201,12 +1207,12 @@ async function handleBase(request, env) {
        'trg_payment_wallet_ledger_require_wallet','trg_payment_wallet_ledger_guard_balances',
        'trg_payment_wallet_ledger_apply','trg_payment_wallet_ledger_no_update',
        'trg_payment_wallet_ledger_no_delete','trg_payment_tx_status_guard',
-       'trg_payment_tx_credit_ledger','trg_payment_tx_hold_ledger',
+       'trg_payment_tx_credit_ledger','trg_payment_tx_hold_ledger','trg_payment_tx_settle_held_ledger',
        'trg_payout_request_guard','trg_payout_request_reserve_ledger',
        'trg_payout_status_guard','trg_payout_settle_ledger','trg_payout_release_ledger'
       )`).first();
     const databaseReady=h?.ok===1, coreSchemaReady=!!s0?.sql&&!!u0?.sql;
-    const ledgerReady=!!ledger?.sql&&Number(guards?.total||0)===13;
+    const ledgerReady=!!ledger?.sql&&Number(guards?.total||0)===14;
     const infrastructureReady=databaseReady&&coreSchemaReady;
     return json({ok:true,ready:false,infrastructure_ready:infrastructureReady,database:databaseReady,
       core_schema_ready:coreSchemaReady,payment_ledger_enforcement_ready:ledgerReady,
