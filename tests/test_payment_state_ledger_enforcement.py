@@ -50,6 +50,18 @@ class PaymentStateLedgerEnforcementTests(unittest.TestCase):
         self.db.execute("UPDATE payment_transactions SET status='held' WHERE id='t1'")
         self.assertEqual(self.balances(), (10000, 4500, 0))
 
+    def test_late_psp_settlement_of_held_charge_is_reserved(self):
+        self.create_transaction()
+        self.db.execute("UPDATE payment_transactions SET status='held' WHERE id='t1'")
+        self.db.execute("UPDATE payment_transactions SET provider_payment_id='ch_1' WHERE id='t1'")
+        self.assertEqual(self.balances(), (10000, 4500, 0))
+
+    def test_held_pending_charge_can_fail_without_wallet_credit(self):
+        self.create_transaction()
+        self.db.execute("UPDATE payment_transactions SET status='held' WHERE id='t1'")
+        self.db.execute("UPDATE payment_transactions SET status='failed' WHERE id='t1'")
+        self.assertEqual(self.balances(), (10000, 0, 0))
+
     def test_payout_request_reserves_atomically_and_failure_releases(self):
         self.db.execute(
             """INSERT INTO payout_requests
@@ -107,6 +119,7 @@ class PaymentStateLedgerEnforcementTests(unittest.TestCase):
         source = (ROOT / "src" / "index.js").read_text(encoding="utf-8")
         self.assertNotRegex(source, r"UPDATE\s+wallets\s+SET")
         self.assertIn("PAYMENT_LEDGER_ENFORCEMENT_MIGRATION_REQUIRED", source)
+        self.assertIn("trg_payment_tx_settle_held_ledger", source)
         self.assertIn("PSP_ADAPTER_NOT_IMPLEMENTED", source)
         self.assertIn("return false;", source[source.index("function paymentsConfigured"):source.index("async function paymentOnboard")])
 
