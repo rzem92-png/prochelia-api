@@ -350,11 +350,6 @@ async function bootstrap(request, env) {
     return json({ ok: false, error: 'UNAUTHORIZED', version: VERSION }, 401);
   }
 
-  const count = await env.DB.prepare('SELECT COUNT(*) AS total FROM users').first();
-  if (Number(count?.total || 0) !== 0) {
-    return json({ ok: false, error: 'BOOTSTRAP_ALREADY_USED', version: VERSION }, 409);
-  }
-
   const body = await readJson(request);
   const email = normalizeEmail(body?.email);
   const firstName = clean(body?.first_name);
@@ -369,10 +364,18 @@ async function bootstrap(request, env) {
   const passwordHash = await hashPassword(password);
   const userId = crypto.randomUUID();
 
-  await env.DB.prepare(
+  // Enforce first-account bootstrap in the INSERT itself. A separate
+  // COUNT followed by INSERT permits two concurrent requests to create two
+  // initial managers before either request observes the other's write.
+  const created = await env.DB.prepare(
     `INSERT INTO users (id, role, email, first_name, last_name, phone, status, password_hash)
-     VALUES (?, 'gerante', ?, ?, ?, ?, 'active', ?)`
-  ).bind(userId, email, firstName, lastName, phone, passwordHash).run();
+     SELECT ?, 'gerante', ?, ?, ?, ?, 'active', ?
+      WHERE NOT EXISTS (SELECT 1 FROM users)
+     RETURNING id`
+  ).bind(userId, email, firstName, lastName, phone, passwordHash).first();
+  if (!created?.id) {
+    return json({ ok: false, error: 'BOOTSTRAP_ALREADY_USED', version: VERSION }, 409);
+  }
 
   return json({
     ok: true,
