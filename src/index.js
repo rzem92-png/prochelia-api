@@ -827,6 +827,7 @@ function paymentsConfigured(_env) {
 async function paymentOnboard(request, env) {
   const auth = await getSessionUser(request, env);
   if (!requireRole(auth, ['intervenant'])) return json({ok:false,error:auth?.user?'FORBIDDEN':'UNAUTHENTICATED',version:VERSION},auth?.user?403:401);
+  if(!paymentsConfigured(env)) return json({ok:false,error:'PSP_ONBOARDING_ADAPTER_NOT_IMPLEMENTED',version:VERSION},503);
   await ensurePaymentSchema(env);
   const body = await readJson(request);
   const provider = paymentProvider(env);
@@ -913,11 +914,15 @@ async function finalizeMissionPayment(request, env) {
   if(!tx) return json({ok:false,error:'TRANSACTION_NOT_FOUND',version:VERSION},404);
   if(tx.status==='held') return json({ok:true,version:VERSION,transaction_id:txId,status:'held',idempotent_replay:true},200);
   if(!['pending','paid'].includes(tx.status)) return json({ok:false,error:'PAYMENT_STATE_CONFLICT',version:VERSION,status:tx.status},409);
-  const result=await env.DB.prepare(`UPDATE payment_transactions SET status='held',updated_at=CURRENT_TIMESTAMP
-    WHERE id=? AND status IN ('pending','paid')`).bind(txId).run();
-  if(!result.meta?.changes) return json({ok:false,error:'PAYMENT_STATE_CONFLICT',version:VERSION},409);
-  await paymentAudit(env,'MISSION_PAYMENT_HELD',{transaction_id:txId,mission_id:tx.mission_id,
-    user_id:auth.user.id,metadata:{reason:'ADMINISTRATIVE_HOLD'}},'OK');
+  const results=await env.DB.batch([
+    env.DB.prepare(`UPDATE payment_transactions SET status='held',updated_at=CURRENT_TIMESTAMP
+      WHERE id=? AND status IN ('pending','paid')`).bind(txId),
+    env.DB.prepare(`INSERT INTO payment_audit
+      (id,event_type,transaction_id,mission_id,user_id,result,metadata_json)
+      VALUES (?,?,?,?,?,?,?)`).bind(crypto.randomUUID(),'MISSION_PAYMENT_HELD',txId,tx.mission_id,
+        auth.user.id,'OK',JSON.stringify({reason:'ADMINISTRATIVE_HOLD'}))
+  ]);
+  if(!results[0]?.meta?.changes) return json({ok:false,error:'PAYMENT_STATE_CONFLICT',version:VERSION},409);
   return json({ok:true,version:VERSION,transaction_id:txId,status:'held'},200);
 }
 
