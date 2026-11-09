@@ -165,6 +165,25 @@ class PaymentStateLedgerEnforcementTests(unittest.TestCase):
         with self.assertRaises(sqlite3.IntegrityError):
             self.db.execute("DELETE FROM payment_wallet_ledger WHERE transaction_id='t1'")
 
+    def test_production_gate_requires_real_psp_and_release_evidence(self):
+        source = (ROOT / "src" / "index.js").read_text(encoding="utf-8")
+        gate = source[source.index("async function productionConfigCheck"):source.index("async function finalProductionAudit")]
+        self.assertIn("paymentsConfigured(env)?'OK':'NOT_IMPLEMENTED'", gate)
+        self.assertIn("PSP_RUNTIME_ADAPTER", gate)
+        self.assertIn("PSP_SANDBOX_E2E", gate)
+        self.assertIn("BACKUP_RESTORE_DRILL", gate)
+        self.assertIn("IOS_SAFARI_ACCEPTANCE", gate)
+        self.assertIn("FR_LEGAL_OPERATIONAL_SIGNOFF", gate)
+        self.assertIn("PRODUCTION_DEPLOYMENT_APPROVAL", gate)
+        self.assertIn("'NOT_IMPLEMENTED','NOT_VERIFIED'", gate)
+        strict = source[source.index("async function strictProductionAudit"):source.index("const __procheliaProductionSafetyHandle")]
+        for code in ("PSP_RUNTIME_ADAPTER", "PSP_SANDBOX_E2E", "BACKUP_RESTORE_DRILL",
+                     "IOS_SAFARI_ACCEPTANCE", "FR_LEGAL_OPERATIONAL_SIGNOFF",
+                     "PRODUCTION_DEPLOYMENT_APPROVAL"):
+            self.assertIn(code, strict)
+        configured = source[source.index("function paymentsConfigured"):source.index("async function paymentOnboard")]
+        self.assertIn("return false;", configured)
+
 
 if __name__ == "__main__":
     unittest.main()
