@@ -94,12 +94,18 @@ class PaymentStateLedgerEnforcementTests(unittest.TestCase):
         self.db.execute("UPDATE payment_transactions SET status='paid' WHERE id='t1'")
         with self.assertRaises(sqlite3.IntegrityError):
             self.db.execute("UPDATE payment_transactions SET status='refunded' WHERE id='t1'")
+        self.db.execute(
+            """INSERT INTO payout_requests
+               (id,idempotency_key,wallet_id,user_id,amount_cents,currency,mode,status)
+               VALUES('p5','payout-5','w1','u1',1000,'EUR','standard','requested')"""
+        )
+        self.db.execute("UPDATE payout_requests SET status='completed' WHERE id='p5'")
         with self.assertRaises(sqlite3.IntegrityError):
-            self.db.execute("UPDATE payout_requests SET status='failed' WHERE id='missing'")
+            self.db.execute("UPDATE payout_requests SET status='failed' WHERE id='p5'")
 
     def test_runtime_payment_handlers_do_not_mutate_wallet_balances_directly(self):
         source = (ROOT / "src" / "index.js").read_text(encoding="utf-8")
-        self.assertNotRegex(source, r"UPDATE\\s+wallets\\s+SET")
+        self.assertNotRegex(source, r"UPDATE\s+wallets\s+SET")
         self.assertIn("PAYMENT_LEDGER_ENFORCEMENT_MIGRATION_REQUIRED", source)
         self.assertIn("PSP_ADAPTER_NOT_IMPLEMENTED", source)
         self.assertIn("return false;", source[source.index("function paymentsConfigured"):source.index("async function paymentOnboard")])
