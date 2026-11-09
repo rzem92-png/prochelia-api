@@ -3,6 +3,16 @@
 -- Requires 0004_atomic_wallet_ledger.sql and 0005_payment_processor_schema.sql.
 -- Every wallet mutation is caused by an immutable ledger insert inside the same SQLite transaction.
 
+-- If a dispute races with a successful settlement, insertion of the dispute
+-- atomically moves an already-paid transaction to held and reserves its wallet credit.
+CREATE TRIGGER IF NOT EXISTS trg_payment_dispute_hold_paid_tx
+AFTER INSERT ON payment_disputes
+WHEN NEW.status='open' AND NEW.transaction_id IS NOT NULL
+BEGIN
+  UPDATE payment_transactions SET status='held',updated_at=CURRENT_TIMESTAMP
+   WHERE id=NEW.transaction_id AND status='paid';
+END;
+
 CREATE TRIGGER IF NOT EXISTS trg_payment_tx_status_guard
 BEFORE UPDATE OF status ON payment_transactions
 WHEN NEW.status <> OLD.status
@@ -19,6 +29,7 @@ CREATE TRIGGER IF NOT EXISTS trg_payment_tx_credit_ledger
 AFTER UPDATE OF status ON payment_transactions
 WHEN OLD.status = 'pending' AND NEW.status = 'paid'
  AND NEW.type = 'MISSION_CHARGE'
+ AND NOT EXISTS (SELECT 1 FROM payment_disputes WHERE transaction_id=NEW.id AND status='open')
 BEGIN
   INSERT INTO payment_wallet_ledger
     (id,idempotency_key,transaction_id,user_id,entry_type,available_delta_cents,currency,metadata_json)
@@ -28,6 +39,23 @@ BEGIN
      NEW.id,NEW.intervenant_id,'MISSION_PAYMENT_SETTLED',
      NEW.net_intervenant_cents,NEW.currency,
      '{"source":"verified_payment_webhook"}');
+END;
+
+-- A charge settled while a dispute is already open must never become withdrawable.
+CREATE TRIGGER IF NOT EXISTS trg_payment_tx_credit_disputed_ledger
+AFTER UPDATE OF status ON payment_transactions
+WHEN OLD.status = 'pending' AND NEW.status = 'paid'
+ AND NEW.type = 'MISSION_CHARGE'
+ AND EXISTS (SELECT 1 FROM payment_disputes WHERE transaction_id=NEW.id AND status='open')
+BEGIN
+  INSERT INTO payment_wallet_ledger
+    (id,idempotency_key,transaction_id,user_id,entry_type,reserved_delta_cents,currency,metadata_json)
+  VALUES
+    ('ledger:mission-disputed:' || NEW.id,
+     'mission-disputed:' || NEW.id,
+     NEW.id,NEW.intervenant_id,'MISSION_PAYMENT_DISPUTED',
+     NEW.net_intervenant_cents,NEW.currency,
+     '{"source":"open_dispute_at_settlement"}');
 END;
 
 CREATE TRIGGER IF NOT EXISTS trg_payment_tx_hold_ledger
