@@ -59,7 +59,7 @@ class PaymentStateLedgerEnforcementTests(unittest.TestCase):
     def test_held_pending_charge_can_fail_without_wallet_credit(self):
         self.create_transaction()
         self.db.execute("UPDATE payment_transactions SET status='held' WHERE id='t1'")
-        self.db.execute("UPDATE payment_transactions SET status='failed' WHERE id='t1'")
+        self.db.execute("UPDATE payment_transactions SET status='failed',provider_payment_id='ch_failed' WHERE id='t1'")
         self.assertEqual(self.balances(), (10000, 0, 0))
 
     def test_payout_request_reserves_atomically_and_failure_releases(self):
