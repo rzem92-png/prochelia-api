@@ -12,6 +12,7 @@ on:
     paths:
       - "migrations/**"
       - "tests/test_payment_migration.py"
+      - "tests/test_payment_state_ledger_enforcement.py"
       - ".github/workflows/migration-validation.yml"
 
 permissions:
