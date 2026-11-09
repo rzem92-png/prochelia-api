@@ -118,8 +118,10 @@ class PaymentStateLedgerEnforcementTests(unittest.TestCase):
     def test_runtime_payment_handlers_do_not_mutate_wallet_balances_directly(self):
         source = (ROOT / "src" / "index.js").read_text(encoding="utf-8")
         self.assertNotRegex(source, r"UPDATE\s+wallets\s+SET")
-        self.assertIn("PAYMENT_LEDGER_ENFORCEMENT_MIGRATION_REQUIRED", source)
+        self.assertIn("PAYMENT_SCHEMA_OR_LEDGER_MIGRATION_REQUIRED", source)
         self.assertIn("trg_payment_tx_settle_held_ledger", source)
+        ensure = source[source.index("async function ensurePaymentSchema"):source.index("function moneyCents")]
+        self.assertNotIn("CREATE TABLE", ensure)
         self.assertIn("PSP_ADAPTER_NOT_IMPLEMENTED", source)
         self.assertIn("return false;", source[source.index("function paymentsConfigured"):source.index("async function paymentOnboard")])
 
