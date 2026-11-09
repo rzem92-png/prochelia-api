@@ -9,6 +9,7 @@ WHEN NEW.status <> OLD.status
  AND NOT (
    (OLD.status = 'pending' AND NEW.status IN ('paid','failed','held','canceled'))
    OR (OLD.status = 'paid' AND NEW.status = 'held')
+   OR (OLD.status = 'held' AND OLD.provider_payment_id IS NULL AND NEW.status = 'failed')
  )
 BEGIN
   SELECT RAISE(ABORT,'PAYMENT_TRANSACTION_STATE_TRANSITION_FORBIDDEN');
@@ -42,6 +43,26 @@ BEGIN
      NEW.id,NEW.intervenant_id,'MISSION_PAYMENT_HELD',
      -NEW.net_intervenant_cents,NEW.net_intervenant_cents,NEW.currency,
      '{"source":"dispute_hold"}');
+END;
+
+
+-- If an administrator held a still-pending charge and the PSP later confirms
+-- success, reserve the proceeds rather than making them withdrawable.
+CREATE TRIGGER IF NOT EXISTS trg_payment_tx_settle_held_ledger
+AFTER UPDATE OF provider_payment_id ON payment_transactions
+WHEN OLD.status = 'held'
+ AND OLD.provider_payment_id IS NULL
+ AND NEW.provider_payment_id IS NOT NULL
+ AND NEW.type = 'MISSION_CHARGE'
+BEGIN
+  INSERT INTO payment_wallet_ledger
+    (id,idempotency_key,transaction_id,user_id,entry_type,reserved_delta_cents,currency,metadata_json)
+  VALUES
+    ('ledger:mission-held-settled:' || NEW.id,
+     'mission-held-settled:' || NEW.id,
+     NEW.id,NEW.intervenant_id,'MISSION_PAYMENT_SETTLED_HELD',
+     NEW.net_intervenant_cents,NEW.currency,
+     '{"source":"verified_payment_webhook_after_hold"}');
 END;
 
 CREATE TRIGGER IF NOT EXISTS trg_payout_request_guard
