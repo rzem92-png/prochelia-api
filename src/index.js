@@ -486,19 +486,6 @@ async function ensureSecuritySchema(env) {
     `CREATE INDEX IF NOT EXISTS idx_security_audit_mission ON security_audit(mission_id, created_at)`
   ];
   for (const sql of statements) await env.DB.prepare(sql).run();
-  const ledger = await env.DB.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='payment_wallet_ledger'").first();
-  const guards = await env.DB.prepare(`
-    SELECT COUNT(*) AS total FROM sqlite_master WHERE type='trigger' AND name IN (
-      'trg_payment_wallet_ledger_require_wallet','trg_payment_wallet_ledger_guard_balances',
-      'trg_payment_wallet_ledger_apply','trg_payment_wallet_ledger_no_update',
-      'trg_payment_wallet_ledger_no_delete','trg_payment_tx_status_guard',
-      'trg_payment_tx_credit_ledger','trg_payment_tx_hold_ledger',
-      'trg_payout_request_guard','trg_payout_request_reserve_ledger',
-      'trg_payout_status_guard','trg_payout_settle_ledger','trg_payout_release_ledger'
-    )`).first();
-  if (!ledger || Number(guards?.total || 0) !== 13) {
-    throw new Error('PAYMENT_LEDGER_ENFORCEMENT_MIGRATION_REQUIRED');
-  }
 }
 
 function securityCode() {
@@ -796,6 +783,19 @@ async function ensurePaymentSchema(env) {
     )`
   ];
   for (const sql of statements) await env.DB.prepare(sql).run();
+  const ledger = await env.DB.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='payment_wallet_ledger'").first();
+  const guards = await env.DB.prepare(`
+    SELECT COUNT(*) AS total FROM sqlite_master WHERE type='trigger' AND name IN (
+      'trg_payment_wallet_ledger_require_wallet','trg_payment_wallet_ledger_guard_balances',
+      'trg_payment_wallet_ledger_apply','trg_payment_wallet_ledger_no_update',
+      'trg_payment_wallet_ledger_no_delete','trg_payment_tx_status_guard',
+      'trg_payment_tx_credit_ledger','trg_payment_tx_hold_ledger',
+      'trg_payout_request_guard','trg_payout_request_reserve_ledger',
+      'trg_payout_status_guard','trg_payout_settle_ledger','trg_payout_release_ledger'
+    )`).first();
+  if (!ledger || Number(guards?.total || 0) !== 13) {
+    throw new Error('PAYMENT_LEDGER_ENFORCEMENT_MIGRATION_REQUIRED');
+  }
 }
 
 function moneyCents(value) {
