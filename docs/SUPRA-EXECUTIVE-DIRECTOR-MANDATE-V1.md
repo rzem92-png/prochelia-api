@@ -597,3 +597,87 @@ This is a differentiation hypothesis, not a verified competitive moat. It become
 
 ### External claims policy
 Until the diligence is complete, use wording such as "notre ambition est de réunir..." or "une combinaison que nous voulons valider", never "personne ne le fait", "première mondiale" or "unique au monde".
+
+
+## 20. Expanded competitor map — public desk research snapshot (2026-11-09)
+
+This expands the initial scan. It remains a public-product-surface review, not hands-on product testing, market-share research, financial diligence, patent/trademark clearance or an exhaustive global census. Some listed products are emerging or self-described; verify operating status, customer traction, geography and feature availability before treating them as established competitors.
+
+### A. Freelance, talent and professional opportunity marketplaces
+- Upwork — global talent marketplace, project workflows and AI-assisted talent/job discovery; now also appears in AI-assistant and agent workflows.
+- Malt — European freelance marketplace with opportunity suggestions, profiles, matching and project administration.
+- High5 — talent passport and AI project/career matching.
+- FreeWorkDZ — Algeria-focused services/talent marketplace across professional and home-service categories.
+- Contra, Braintrust, Toptal and Fiverr — adjacent talent marketplaces with distinct fee, vetting and client-acquisition models.
+
+Competitive implication: talent profiles, AI matching, project listings and freelancer marketplace workflows are established categories. A PROCHÉLIA passport alone is not defensible differentiation.
+
+### B. Local services and home-service discovery
+- AlloVoisins — local services and equipment exchange, with professional tools.
+- Wasla — Algeria services marketplace spanning construction/repair, transport, home/domestic services, care, events and other categories.
+- TapForWork — local services discovery and job posting in multiple countries.
+- French CESU-referenced platform directory — demonstrates an established, regulated discovery and referral ecosystem for personal services; compliance and employment models matter.
+- Yoojo, Wecasa and Helpling should be included in the next hands-on France home-services benchmark.
+
+Competitive implication: local service listing, proximity search, worker profiles and booking/referral are not novel. The home-care vertical requires a category-specific compliance, safeguarding and quality model rather than a generic marketplace wrapper.
+
+### C. Algerian marketplace and commerce infrastructure
+- Dziri Business — self-described Algerian business surface combining campaigns, marketplace, logistics, workspace and local fiscal/payment context; its public site describes a broader local business network.
+- KIO — Algerian commerce platform for storefront and POS, local payments, COD, inventory and marketing integrations.
+- GlintEcom — Algerian e-commerce operating toolkit with storefront, COD, shipping, POS, analytics, WhatsApp and AI-agent/MCP claims.
+- HEROS — all-in-one storefront, bookings, invoicing, customer records and AI assistant, with Algeria-specific payment and delivery workflows described publicly.
+- Nchriha — broad Algeria marketplace positioning across products, services, jobs, real estate, vehicles and professional storefronts; some headline metrics on the public page appear as zero and require verification.
+- KESH — Algerian classifieds/marketplace spanning products, services, employment and professional storefronts.
+- FreeWorkDZ and Wasla — relevant direct service/talent marketplaces in Algeria.
+
+Competitive implication: Algeria is not an empty market. Local payments, Arabic/French/English, commerce tools, service listings and broad marketplaces already have local competitors. A simple "France + Algeria" marketplace or Arabic interface is not enough.
+
+### D. African small-business operating systems and social commerce
+- Zirro — commerce, bookings, payments integrations, CRM, websites and automation for African businesses.
+- Tuaneka — storefront, marketplace, POS, invoices, inventory, orders and business network.
+- Kivo — commerce OS with storefront, POS, orders, delivery, payment and chat-channel workflows in multiple African markets.
+- Vouchat — AI-enabled social commerce for MSMEs, including storefronts, bookings, events and local payment rails.
+- Mercado — commerce OS positioning with POS, WhatsApp commerce, inventory, finance, customer profiles and AI signals.
+- Adwuma — entrepreneur operating system combining storefront, marketplace, books, payments and business growth.
+- AYA Africa — verified maker marketplace and export-oriented infrastructure.
+- Atlenda — Algeria-focused vertical business software, including travel and retail systems.
+
+Competitive implication: "one app for African entrepreneurs" and "storefront + CRM + payment + marketplace" are already crowded propositions. PROCHÉLIA must differentiate through verified service fulfilment, skill-to-income pathways, multi-provider work orchestration and measurable three-sided outcomes.
+
+### E. Agentic commerce and AI transaction infrastructure
+- Stripe's agentic commerce primer describes browser, conversational and headless-agent purchase modalities and the need for machine-readable catalogues, pricing, availability and programmable transaction interfaces.
+- Agent Commerce Exchange describes agent product discovery, ordering, payment and escrow-like settlement.
+- Circle Agent Stack positions machine-readable service discovery and agent wallets/payments as infrastructure.
+- Agentic Commerce Protocol describes programmatic checkout between buyers, agents and sellers.
+
+Competitive implication: "AI agents can discover and transact" is becoming infrastructure, not a unique product thesis. PROCHÉLIA should become an agent-compatible service network with stronger service-specific identity, scope, availability, quote, delivery evidence, safety and dispute protocols.
+
+### F. Preliminary white-space hypotheses for PROCHÉLIA
+The following are hypotheses to test, not proven empty market spaces:
+1. A governed "skill-to-viable-business" journey that links skills, legal eligibility, costing, offer design, first demand, fulfilment, learning and repeat business.
+2. A verified service-capacity exchange that can combine multiple independent providers into one scoped project with transparent responsibilities and quotes.
+3. A portable evidence passport built from verified delivered work, learning and credentials, with provider-controlled export and selective disclosure.
+4. A service fulfilment and trust record that joins quote versions, agreed scope, milestones, delivery proof, changes, complaint and resolution.
+5. A three-sided outcome ledger that measures customer value, provider net income and platform contribution for each product experiment.
+6. A multilingual, low-bandwidth, locally adapted service-business operating layer for underserved entrepreneurs, connected to lawful local market access rather than generic ecommerce alone.
+
+### G. Strategic conclusion
+The map does not support claiming that PROCHÉLIA's individual features are unprecedented. It does show a potential strategic opening in the integrated combination of service-business creation, demand orchestration, multi-provider fulfilment, portable verified work evidence, trusted transaction lifecycle and three-sided economic measurement.
+
+The competitive moat must be earned through:
+- superior service fulfilment and trust data;
+- local supply/demand density in chosen verticals;
+- deep category workflows and verified provider outcomes;
+- partnerships and regulatory operating capability;
+- repeat usage and portable user value;
+- interoperable but secure agent access;
+- demonstrably better economics for all three sides.
+
+### H. Required diligence before uniqueness claims or investment decisions
+1. Run hands-on onboarding and end-to-end tests for the highest-priority 10–15 competitors.
+2. Verify prices, commission, subscriptions, payout timing, refund and dispute policies from official product/terms pages.
+3. Interview at least 15 providers, 15 customers and 10 early-stage entrepreneurs in the first target geography.
+4. Benchmark one identical service journey across competitors, including time, total cost, conversion, cancellation and support.
+5. Review corporate entities, funding, customer references, app-store presence, active product status and public filings.
+6. Commission separate patent/trademark clearance and freedom-to-operate review before describing the concept as protectable or first-to-market.
+7. Maintain a dated evidence log with URL, access date, exact observed claim, whether verified hands-on, confidence and unresolved questions.
