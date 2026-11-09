@@ -122,6 +122,8 @@ class PaymentStateLedgerEnforcementTests(unittest.TestCase):
         self.assertIn("trg_payment_tx_settle_held_ledger", source)
         ensure = source[source.index("async function ensurePaymentSchema"):source.index("function moneyCents")]
         self.assertNotIn("CREATE TABLE", ensure)
+        status = source[source.index("async function paymentStatus"):source.index("async function createMissionPayment")]
+        self.assertNotIn("INSERT INTO wallets", status)
         self.assertIn("PSP_ADAPTER_NOT_IMPLEMENTED", source)
         self.assertIn("return false;", source[source.index("function paymentsConfigured"):source.index("async function paymentOnboard")])
 
