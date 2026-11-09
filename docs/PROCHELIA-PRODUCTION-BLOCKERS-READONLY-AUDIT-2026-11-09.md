@@ -103,3 +103,12 @@ Aucun test applicatif n'a été exécuté dans cette revue statique. Aucun PSP s
 ## 6. Décision
 
 **NO-GO maintenu.** Le backend ne doit pas être déclaré prêt pour la production transactionnelle sur la base de la configuration ou de la seule disponibilité de D1. La correction doit se faire par lots isolés, avec tests et preuves reproductibles, sans contourner les gates de sécurité ni fusionner en masse des branches divergentes.
+
+
+## 7. Précision après inspection des migrations ledger
+
+La migration `migrations/0004_atomic_wallet_ledger.sql` définit bien une table `payment_wallet_ledger` append-only, des triggers de garde et un trigger `AFTER INSERT` qui applique les deltas au wallet dans la transaction SQLite. Le test `tests/test_migrations_sqlite.py` vérifie notamment l'application des deltas et l'immutabilité. Cette protection de schéma est une brique utile déjà présente et doit être conservée.
+
+Toutefois, les fonctions métier examinées (`finalizeMissionPayment()`, `payoutRequest()` et les branches de `paymentWebhook()`) exécutent des `UPDATE wallets` directs au lieu d'insérer des mouvements dans `payment_wallet_ledger`. Elles contournent donc le chemin ledger/trigger et sa garantie append-only. De plus, `ensurePaymentSchema()` dans `src/index.js` crée à la volée les tables de paiement principales mais ne crée pas la table ledger ni ses triggers. L'existence de la migration ne garantit pas que tous les environnements ont cette migration appliquée, et le chemin runtime n'en exige pas explicitement la présence avant les mutations financières.
+
+**Correction obligatoire :** toutes les mutations de soldes doivent passer exclusivement par des écritures ledger idempotentes ; interdire les updates directs de soldes dans les handlers ; exiger une migration vérifiée et un contrôle de schéma au démarrage/readiness ; tester que les triggers sont présents dans chaque environnement. Le ledger doit être la source de vérité et les soldes doivent être des projections atomiquement maintenues.
