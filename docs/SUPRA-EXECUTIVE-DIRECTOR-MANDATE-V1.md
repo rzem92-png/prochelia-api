@@ -430,3 +430,67 @@ The defensible advantage should compound from trusted transaction history, porta
 
 ### Prioritization rule
 Do not attempt to launch every differentiator at once. Select one beachhead geography and a small number of service categories; validate provider liquidity, customer demand, fulfilment quality, legal feasibility and contribution margin. Expand only when the three-sided scorecard passes agreed thresholds.
+
+
+## 17. Delivery roadmap — turn differentiation into measurable product
+
+The differentiators above are a strategic target, not a claim that these capabilities are already implemented. Delivery must be incremental, observable and reversible.
+
+### Phase 0 — Establish the real baseline
+- Inventory the production-intended code, frontend, API, database, migrations, integrations, environments, CI and security controls.
+- Map every strategic capability to existing code, missing work, dependencies, owner, risk and test evidence.
+- Establish a release baseline and a documented rollback path.
+- Do not merge a broad historical branch or run production migrations merely to accelerate delivery.
+
+Exit criteria: reproducible build and test baseline; dependency and security review; environment separation; documented data and recovery strategy; prioritized backlog with no assumed capabilities.
+
+### Phase 1 — Build the trusted transaction core
+- Identity, role and tenant boundaries; provider onboarding; service catalogue; search and matching; quote versioning; booking/missions; notifications; cancellation; support and dispute intake.
+- Add auditable state transitions, idempotency, concurrency controls and clear ownership of payment state.
+- Integrate payments only through an appropriately authorized provider and only after webhook authenticity, replay protection, reconciliation, refund and failure paths are tested.
+- Keep funds custody and regulated payment functions with authorized partners.
+
+Exit criteria: end-to-end sandbox transaction tests; security and authorization tests; failure/retry/reconciliation tests; accessible customer and provider journeys; operational support process.
+
+### Phase 2 — Prove one focused market and service journey
+- Use BGOC / aide à domicile as a candidate operational vertical where the existing project context supports it, subject to confirming exact service scope, eligibility and applicable French rules.
+- Treat Algeria catering / event services as a separate discovery and legal-validation pilot, not as automatically enabled supply.
+- Select the first live geography and category only after demand, provider supply, fulfilment, safety, legal feasibility and unit economics are evidenced.
+- Run a controlled pilot with explicit capacity, geographic boundaries, service exclusions, incident response and human support.
+
+Exit criteria: repeat demand; reliable fulfilment; provider net earnings after direct costs are positive and understood; customer satisfaction and complaint rates within pre-agreed thresholds; positive or deliberately bounded contribution margin; no unresolved critical safety or legal issue.
+
+### Phase 3 — Release the first SUPRA user-facing intelligence
+- Start with read-only insights, profile improvement suggestions, quote explanations, provider business coaching and customer requirement clarification.
+- Show sources, assumptions, confidence and limitations; let users correct the underlying data.
+- Keep ranking and matching explainable; monitor language and demographic performance for unfair outcomes.
+- Require user confirmation before any external commitment.
+
+Exit criteria: measured usefulness against a non-AI baseline; low harmful-error rate; auditable recommendations; privacy and security review; clear opt-out and human escalation.
+
+### Phase 4 — Add the small-business operating toolkit
+- Introduce storefront, catalogue, quote builder, calendar, customer follow-up, simple revenue/expense view and compliant document support.
+- Make data export and portable profile/reputation available from the start.
+- Add advanced features only when actual user research shows value and support costs are understood.
+
+Exit criteria: improved time-to-first-paid-mission, repeat work or provider net income without worsening customer outcomes or creating hidden platform dependency.
+
+### Phase 5 — Expand agent interoperability and cross-border corridors
+- Publish permissioned APIs, structured service data and webhooks with scopes, rate limits, consent, revocation and audit.
+- Pilot external agent referrals before enabling any autonomous purchase or booking.
+- Validate each corridor independently for payment, tax, consumer protection, data transfer, identity, licensing and dispute jurisdiction.
+- Activate a new country only after the relevant country pack, local counsel/experts, partner readiness and operational support have signed off.
+
+Exit criteria: security certification/review appropriate to risk; partner and legal approvals; end-to-end cross-border settlement and refund evidence; local customer support; explicit rollback/stop mechanism.
+
+### Mandatory three-sided launch gates
+Every pilot and material product experiment must report:
+1. Customer: total price clarity, successful fulfilment, satisfaction, safety incidents, complaint and refund rates.
+2. Provider: qualified opportunities, conversion, time to payment, net earnings after direct costs, repeat work and access fairness.
+3. PROCHÉLIA: contribution margin, acquisition cost, support cost, fraud/loss exposure, cash and operational load.
+4. Ecosystem: accessibility, regional and language inclusion, small-business outcomes and environmental/social effects where measurable.
+
+No experiment may be declared successful based only on GMV, registrations, downloads, lead volume or platform revenue. Define thresholds before the experiment; stop or redesign when one stakeholder is systematically harmed.
+
+### Immediate next engineering deliverable
+After repository and runtime inventory, implement the smallest independent, deterministic, fully tested foundation that unlocks the roadmap without touching production data: a transparent unit-economics/pricing calculation module with explicit inputs, currency precision, fee/tax treatment, provider net estimate, customer total, platform contribution, validation errors and scenario tests. Integrate it only after confirming the current architecture and existing conventions. It must be advisory initially; it must not set live prices or commissions automatically.
