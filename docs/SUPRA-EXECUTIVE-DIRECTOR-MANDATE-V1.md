@@ -335,3 +335,98 @@ SUPRA must present a three-sided scorecard, segmented by product, service catego
 - Ecosystem: first paid mission, time-to-first-income, active businesses, local economic value, opportunity access, accessibility and verified social impact.
 
 A launch or pricing experiment is not successful unless it meets minimum guardrails for all three sides. SUPRA must flag trade-offs explicitly and recommend corrective action if one side is systematically harmed.
+
+
+## 16. PROCHÉLIA differentiation strategy — from marketplace to opportunity infrastructure
+
+The strategic ambition is not to imitate a services marketplace or add a generic AI chatbot. PROCHÉLIA should build a trusted opportunity infrastructure that helps each participant achieve a better outcome and makes the ecosystem more valuable as it grows.
+
+### Differentiator 1 — Portable professional passport and verified reputation
+- Give each provider a user-controlled professional passport containing skills, experience, portfolio, verified credentials where appropriate, completed work evidence, authentic reviews and service areas.
+- Separate self-declared information from verified evidence and explain verification level, date, issuer and expiry.
+- Let the provider export and selectively share their profile and evidence; do not trap reputation or make portability conditional on a paid subscription.
+- Prevent fake reviews, review extortion, retaliation and reputation manipulation; provide correction and appeal workflows.
+- Do not convert ratings into a single opaque score that silently excludes people.
+
+### Differentiator 2 — Three-sided personal agents with aligned incentives
+- SUPRA BUSINESS serves the platform's legitimate sustainability.
+- SUPRA PROVIDER / TALENT helps the professional improve opportunity access, pricing literacy, skills and business health.
+- SUPRA CLIENT helps customers clarify needs, compare offers, understand trade-offs and resolve service issues.
+- SUPRA ENTREPRENEUR helps individuals launch and operate a small business.
+- These assistants may coordinate through explicit permissions and shared transaction facts, but must not leak private conversations or subordinate one party's interests to another.
+- Recommendations must disclose ranking criteria, sponsorship and commercial influence. Paid placement must never masquerade as neutral suitability.
+
+### Differentiator 3 — Opportunity discovery and demand orchestration
+- Match by verified capability, scope, availability, location, price transparency, reliability, accessibility and customer requirements—not only keyword or paid ranking.
+- Detect underserved demand and provider capacity gaps; propose lawful new service bundles and local campaigns.
+- Support multi-provider projects and event packages with clear roles, quote allocation, coordination and payment rules.
+- Give providers a fair opportunity to respond; avoid opaque lead auctions and unlimited bidding races.
+- Keep matching explainable and allow human choice.
+
+### Differentiator 4 — A real micro-business operating system
+Offer a modular toolkit for solo entrepreneurs and small businesses: digital storefront, catalogue, quote builder, calendar, customer relationship management, order/missions management, invoicing support, expense tracking, profitability, stock/material planning, document reminders, marketing assets and business education.
+- Make a useful starter tier accessible, with clear limits and optional paid upgrades.
+- Integrate local requirements and language packs by jurisdiction.
+- Never imply that software registration equals legal business registration or professional authorization.
+
+### Differentiator 5 — Trust and fulfilment infrastructure
+- Create a transaction trust record linking agreed scope, quote version, parties, schedule, milestones, delivery evidence, changes, messages, invoice and payment events.
+- Offer optional milestone confirmation and payment protection only through legally permitted, appropriately licensed payment partners; never hold client funds outside authorized arrangements.
+- Provide neutral dispute intake, evidence preservation, structured resolution choices, human review and appeal.
+- Publish reliability indicators with methodology, recency and sample-size caveats.
+- Build a fair incident response and safety escalation framework by service category.
+
+### Differentiator 6 — Outcome-based service guarantees, only where supportable
+Explore limited, clearly defined service commitments such as response-time targets, verified arrival windows, replacement search assistance or service recovery credits.
+- Define exact eligibility, exclusions, caps, funding source and claim process.
+- Price the risk using real loss and fulfilment data.
+- Obtain legal and insurance approval before describing any protection as a guarantee or insurance.
+- Never promise outcomes outside the platform's control.
+
+### Differentiator 7 — Cross-border opportunity corridor
+Build a France–Algeria corridor as a carefully governed pilot, not a frictionless borderless-payment claim:
+- Multilingual discovery and communication.
+- Verified business and provider profiles.
+- Cross-border quote and contract preparation with currency/date clarity.
+- Service categories that can lawfully be delivered cross-border or locally.
+- Clear tax, customs, exchange-control, payment, data-transfer and dispute checks.
+- Local partners and country-specific support.
+- Explicit stop conditions when a payment rail, authorization or legal basis is unavailable.
+
+### Differentiator 8 — Agent-ready and interoperable commerce
+- Make service catalogues, prices, availability, credentials, terms and fulfilment signals structured, current and machine-readable.
+- Provide permissioned APIs and webhooks for trusted external agents and business partners.
+- Define safe agent transaction scopes, consent, identity, quote expiry, confirmation and revocation.
+- Preserve the customer relationship, authoritative quote, payment authorization, fulfilment record and after-sales service.
+- Design for interoperability rather than dependence on a single AI model or distribution channel.
+
+### Differentiator 9 — Low-bandwidth, inclusive and local-first design
+- Optimize mobile journeys for low-cost devices, intermittent connectivity and small data plans.
+- Support save-and-resume, lightweight pages, compressed media and clear offline-safe drafts.
+- Offer voice-assisted onboarding and guided forms where appropriate, with user confirmation before commitments.
+- Provide French, Modern Standard Arabic, Algerian Darija, English and a validated Tamazight roadmap; support RTL and accessible design.
+- Adapt service discovery to local neighbourhoods, transport realities, seasonal patterns and regional business practices.
+
+### Differentiator 10 — Transparent ecosystem economics and shared success
+- Show customer total price, provider expected net proceeds and platform contribution on each eligible quote.
+- Reward quality, reliability, repeat business, training and customer outcomes without creating hidden pay-to-rank.
+- Test loyalty, referral and cooperative promotion models with clear funding and consent.
+- Explore optional provider education, group purchasing or shared tools where lawful and commercially viable.
+- Do not coordinate independent providers' prices or exchange competitively sensitive information.
+
+### Differentiator 11 — Proprietary learning loop with data rights
+- Learn from aggregated, minimized and lawfully processed operational patterns to improve matching, forecasting, pricing recommendations and service quality.
+- Keep personal data and confidential business data segregated by tenant and purpose.
+- Give users clear controls, export and deletion rights as applicable; do not sell identifiable personal data.
+- Measure model quality, bias, false positives and outcomes across languages, regions and provider segments.
+- Do not use one party's private data to advantage another party without a valid legal basis and transparent disclosure.
+
+### Differentiator 12 — Impact ledger
+Track verified economic outcomes, not vanity metrics: time to first qualified lead, time to first paid mission, provider net earnings after direct costs, customer savings or service value, repeat activity, small-business survival, local supplier spend and access across regions and languages.
+Publish impact claims only with a transparent methodology and limitations.
+
+### Competitive moat principle
+The defensible advantage should compound from trusted transaction history, portable professional reputation, local regulatory knowledge, multilingual service design, reliable fulfilment, business-management tools, network density and interoperable agent workflows. No single feature is a moat by itself. Each must be built, measured, protected and improved through real user outcomes.
+
+### Prioritization rule
+Do not attempt to launch every differentiator at once. Select one beachhead geography and a small number of service categories; validate provider liquidity, customer demand, fulfilment quality, legal feasibility and contribution margin. Expand only when the three-sided scorecard passes agreed thresholds.
