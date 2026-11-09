@@ -494,3 +494,55 @@ No experiment may be declared successful based only on GMV, registrations, downl
 
 ### Immediate next engineering deliverable
 After repository and runtime inventory, implement the smallest independent, deterministic, fully tested foundation that unlocks the roadmap without touching production data: a transparent unit-economics/pricing calculation module with explicit inputs, currency precision, fee/tax treatment, provider net estimate, customer total, platform contribution, validation errors and scenario tests. Integrate it only after confirming the current architecture and existing conventions. It must be advisory initially; it must not set live prices or commissions automatically.
+
+
+## 18. Flagship innovation thesis — PROCHÉLIA Opportunity Economy
+
+### Category to create
+PROCHÉLIA should aim to define a category beyond marketplace, job board or SaaS: an Opportunity Economy Platform. Its purpose is to turn skills, unmet needs, available capacity and trusted collaboration into viable economic activity.
+
+This is a strategic thesis to validate, not a claim of market uniqueness or an already delivered capability.
+
+### The signature mechanism — Opportunity-to-Income Loop
+1. Discover: identify a real, lawful, sufficiently evidenced customer need or underserved demand.
+2. Mobilize: find suitable providers, emerging talent or small businesses with relevant skills and capacity.
+3. Enable: help them package a service, understand costs, prepare a quote and meet applicable requirements.
+4. Match: present a transparent offer to customers with clear scope, price, availability and provider identity.
+5. Deliver: coordinate the work with an auditable agreement, milestones and support.
+6. Reward: make provider net proceeds, customer value and platform contribution visible.
+7. Develop: turn completed work into portable evidence of experience, learning recommendations and future opportunities.
+8. Reinvest: use aggregated, privacy-protected signals to improve access, service quality and local opportunity discovery.
+
+The loop must never manufacture demand, fabricate credentials or reviews, or pressure users to accept work. It should identify evidence-backed opportunities and let people decide.
+
+### Three signature programs
+- Skill-to-Business: convert a person's skill into a viable, compliant offer with guided onboarding, costing, catalogue, first-customer preparation and business coaching.
+- Capacity-to-Opportunity: help providers use genuinely available capacity through suitable demand matching, without penalizing them for declining or being unavailable.
+- Community Projects: enable customers, associations, event organizers and businesses to assemble multi-provider projects with transparent scopes, independent quotes, responsibilities and payment terms.
+
+### Value-sharing principles
+- Provider earnings and customer total price must be visible before commitment.
+- Platform fees must be disclosed and tied to real value and sustainable costs.
+- Any loyalty, referral or collective benefit must disclose who funds it and must not conceal a price increase elsewhere.
+- Providers remain independent in setting their own prices; PROCHÉLIA must not coordinate prices among competing providers.
+- Never monetize access to essential safety information, complaint handling, data export or a provider's ability to leave the platform.
+
+### The defensible data advantage
+Build learning from consented, minimized and aggregated operational evidence: which services are requested, which offers fulfil successfully, what skills are scarce, where delays occur, what onboarding helps new entrepreneurs succeed and which service designs create repeat value.
+- Separate private user data, confidential provider data and aggregate platform insights.
+- Apply purpose limitation, retention rules, access controls and deletion/export workflows.
+- Test recommendations for regional, language, disability and other unfair access patterns.
+- Do not infer sensitive traits or use protected characteristics to determine opportunity eligibility.
+
+### Brand promise to validate
+"PROCHÉLIA transforme les compétences en opportunités, les opportunités en activités durables et les collaborations en valeur partagée."
+
+### North-star measure
+Measure verified value created per active participant, not merely transactions:
+- Customer: successful outcome relative to total cost and effort.
+- Provider: net income after direct costs, paid on time, plus durable skills and repeat opportunities.
+- Platform: positive contribution after acquisition, payment, support, fraud and operating costs.
+- Local ecosystem: new viable businesses, local spend, access to opportunity and quality of work.
+
+### First proof, not a grand launch
+Test one bounded service journey with real customers and providers. Compare the Opportunity-to-Income Loop against a conventional listing-and-booking journey. Pre-register success thresholds, include all three stakeholder outcomes, interview users who decline or fail to complete, and publish an internal evidence report. Expand only if the new model produces materially better outcomes without increasing safety, legal or financial harm.
