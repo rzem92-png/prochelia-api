@@ -49,6 +49,35 @@ class AtomicRateLimitTests(unittest.TestCase):
         finally:
             db.close()
 
+    def test_bootstrap_insert_is_single_winner(self):
+        source = SOURCE.read_text(encoding="utf-8")
+        self.assertIn("WHERE NOT EXISTS (SELECT 1 FROM users)", source)
+        self.assertIn("RETURNING id", source)
+        self.assertNotIn("SELECT COUNT(*) AS total FROM users", source[source.index("async function bootstrap"):source.index("async function authStatus")])
+
+        db = sqlite3.connect(":memory:")
+        try:
+            db.execute("""
+                CREATE TABLE users (
+                    id TEXT PRIMARY KEY, role TEXT NOT NULL, email TEXT NOT NULL UNIQUE,
+                    first_name TEXT NOT NULL, last_name TEXT NOT NULL, phone TEXT,
+                    status TEXT NOT NULL, password_hash TEXT NOT NULL
+                )
+            """)
+            statement = """
+                INSERT INTO users (id,role,email,first_name,last_name,phone,status,password_hash)
+                SELECT ?, 'gerante', ?, ?, ?, ?, 'active', ?
+                WHERE NOT EXISTS (SELECT 1 FROM users)
+                RETURNING id
+            """
+            first = db.execute(statement, ("u1", "one@example.test", "One", "Admin", None, "hash1")).fetchone()
+            second = db.execute(statement, ("u2", "two@example.test", "Two", "Admin", None, "hash2")).fetchone()
+            self.assertEqual(first[0], "u1")
+            self.assertIsNone(second)
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM users").fetchone()[0], 1)
+        finally:
+            db.close()
+
 
 if __name__ == "__main__":
     unittest.main()
