@@ -59,7 +59,10 @@ jobs:
           python3 - <<'PY'
           import json
           from pathlib import Path
-          c=json.loads(Path("wrangler.production-backup.jsonc").read_text())
+          raw=Path("wrangler.production-backup.jsonc").read_text()
+          # This pinned config contains JSONC full-line comments; remove those before parsing.
+          clean="\n".join(line for line in raw.splitlines() if not line.lstrip().startswith("//"))
+          c=json.loads(clean)
           assert len(c["d1_databases"]) == 1
           d=c["d1_databases"][0]
           assert d["binding"] == "DB"
