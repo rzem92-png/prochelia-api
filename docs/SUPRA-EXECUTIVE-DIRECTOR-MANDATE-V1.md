@@ -681,3 +681,40 @@ The competitive moat must be earned through:
 5. Review corporate entities, funding, customer references, app-store presence, active product status and public filings.
 6. Commission separate patent/trademark clearance and freedom-to-operate review before describing the concept as protectable or first-to-market.
 7. Maintain a dated evidence log with URL, access date, exact observed claim, whether verified hands-on, confidence and unresolved questions.
+
+
+## 21. Algeria competitive update — newly identified adjacent players (2026-11-09)
+
+The expanded scan surfaced additional competitors that materially narrow several earlier white-space hypotheses:
+
+- **Dealyly** — broad Algerian classifieds marketplace covering services, jobs, products and more across wilayas; public materials describe Arabic, French, Kabyle and English, verified professional shops, AI-assisted listing creation and moderation. This means multilingual local marketplace + AI-assisted listing + verified shops is already claimed by a local player. Source: https://www.dealyly.com/fr/about
+- **Moustachir** — Algeria-origin AI consulting platform connecting clients, entrepreneurs, companies and institutions to experts; AI need clarification, consultant recommendation, consultation, missions, deliverables and action-oriented follow-through. This overlaps with AI expert matching and consultation-to-mission execution. Source: https://moustachir.dz/fr/about
+- **UpGrowth** — entrepreneur support platform with startup ecosystem directory, free business tools, CNRC/ANAE activity lookup, business creation cost simulation, regulatory explainers and founder resources. Its public knowledge hub explicitly distinguishes activities eligible for the auto-entrepreneur regime from other commercial/food/production activities. This overlaps with entrepreneur enablement and local regulatory navigation. Sources: https://www.upgrowth.dz/fr and https://www.upgrowth.dz/knowledge-hub
+- **Oonadi** — home-service platform with custom alerts and request tracking, relevant to home-services discovery. Source: https://oonadi.com/
+- **Profelio** — professional portfolio and career-development platform listed in the Algerian ecosystem directory; its current product depth and traction require direct verification. Source: Official URL and product details to be verified before external citation.
+- **StartupList Africa** currently indexes 14 marketplace startups in Algeria, including Wasla; this is a useful discovery source, not a complete or authoritative registry. Source: https://www.startuplist.africa/countries/algeria/industries/marketplace
+- **Baytium ecosystem directory** lists a broad Algerian startup, incubator, coworking and investor ecosystem; use it to discover further adjacent products, then verify each with primary sources. Source: https://baytium.com/en/ecosysteme
+
+### Important strategic correction
+The following are NOT safe uniqueness claims:
+- "AI marketplace in Algeria" — Dealyly publicly positions itself this way.
+- "AI consultant/expert matching that turns questions into missions" — Moustachir publicly describes this.
+- "Help Algerian founders navigate business creation and activity eligibility" — UpGrowth publicly offers tools and resources.
+- "Multilingual local marketplace with verified shops" — Dealyly publicly describes this.
+- "Home-service requests and alerts" — Oonadi publicly describes this.
+
+### Refined PROCHÉLIA opportunity hypothesis
+A narrower and potentially stronger distinction is to operate the full service-economy lifecycle across three connected layers:
+1. **Capability formation:** diagnose a person's skills and constraints, map a lawful activity pathway, build a viable offer and prepare the first service.
+2. **Verified fulfilment network:** qualify demand, assemble independent providers for multi-party service delivery, coordinate scope, schedule, evidence, changes, quality and dispute resolution.
+3. **Economic progression:** track provider net income and customer outcomes, turn verified delivery into portable work evidence, and use consented insights to recommend the next lawful and profitable step.
+
+This combination is not yet proven unique. It is a focused hypothesis that must be compared against actual product journeys, including Dealyly, Moustachir, UpGrowth, Wasla, Oonadi, Malt, Upwork and relevant French home-service platforms.
+
+### Algeria-specific caution
+Do not design a "start any business" promise. Activity eligibility depends on the legal form, activity code, authorization, profession, location and applicable rules. For example, UpGrowth's published guidance says the ANAE auto-entrepreneur regime is limited to eligible services (with a separate micro-import regime) and does not make restaurant, commerce or manufacturing activities automatically eligible. Food/catering must be checked under the correct CNRC activity and health/safety requirements before an offer is published. The platform must point users to current official sources and qualified local advice rather than present a generic AI answer as authorization.
+
+### Research evidence quality
+- Official product pages are primary evidence for what a company publicly claims, not proof of feature quality, adoption or actual performance.
+- Direct hands-on testing, user interviews, pricing/terms review and legal/IP searches remain outstanding.
+- Keep the competitor register dated and update it before launch and each major strategic decision.
