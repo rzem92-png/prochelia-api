@@ -1243,13 +1243,30 @@ async function paymentWebhook(request, env) {
     }
   }
 
+  // Claim only after validating the referenced payment/payout. The conditional
+  // update is the concurrency gate: only one delivery can move 0 -> 2.
+  const claim=await env.DB.prepare(`UPDATE payment_webhook_events
+    SET processed=2,received_at=CURRENT_TIMESTAMP
+    WHERE provider=? AND event_id=? AND
+      (processed=0 OR (processed=2 AND received_at<=datetime('now','-5 minutes')))`)
+    .bind(provider,eventId).run();
+  if(Number(claim?.meta?.changes||0)!==1)
+    return json({ok:false,error:'WEBHOOK_EVENT_PROCESSING',version:VERSION,retry_after_seconds:30},409);
+
   statements.push(env.DB.prepare(`UPDATE payment_webhook_events SET processed=1,processed_at=CURRENT_TIMESTAMP
-    WHERE provider=? AND event_id=? AND processed=0`).bind(provider,eventId));
+    WHERE provider=? AND event_id=? AND processed=2`).bind(provider,eventId));
   statements.push(env.DB.prepare(`INSERT INTO payment_audit
     (id,event_type,transaction_id,payout_id,result,metadata_json) VALUES (?,?,?,?,?,?)`)
     .bind(crypto.randomUUID(),'PSP_WEBHOOK_PROCESSED',txId||null,payoutId||null,'OK',
       JSON.stringify({provider,event_id:eventId,event_type:type,payload_hash:payloadHash})));
-  await env.DB.batch(statements);
+  try {
+    await env.DB.batch(statements);
+  } catch(error) {
+    // A failed atomic batch must not strand the event; permit a safe retry.
+    await env.DB.prepare(`UPDATE payment_webhook_events SET processed=0,received_at=CURRENT_TIMESTAMP
+      WHERE provider=? AND event_id=? AND processed=2`).bind(provider,eventId).run().catch(()=>{});
+    throw error;
+  }
   return json({ok:true,version:VERSION,processed:true,event_id:eventId},200);
 }
 
