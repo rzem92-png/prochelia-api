@@ -37,14 +37,16 @@ export function requireStripeAccountId(value) {
   return accountId;
 }
 
-export async function stripeGet(env, apiPath, fetchImpl = fetch) {
+export async function stripeGet(env, apiPath, fetchImpl = fetch, requestContext = {}) {
   const secret = String(env?.STRIPE_SECRET_KEY || "").trim();
   if (!secret) throw new Error("STRIPE_SECRET_KEY_NOT_CONFIGURED");
   if (!/^v2\/core\/accounts\/acct_[A-Za-z0-9]+$/.test(apiPath)) throw new Error("STRIPE_PATH_NOT_ALLOWED");
-  const response = await fetchImpl(STRIPE_API_BASE + apiPath, {
-    method: "GET",
-    headers: { Authorization: "Bearer " + secret, "Stripe-Version": STRIPE_API_VERSION }
-  });
+  const headers = { Authorization: "Bearer " + secret, "Stripe-Version": STRIPE_API_VERSION };
+  const context = typeof requestContext?.context === "string" ? requestContext.context.trim() : "";
+  const eventId = typeof requestContext?.eventId === "string" ? requestContext.eventId.trim() : "";
+  if (context && context.length <= 255 && !/[\\r\\n]/.test(context)) headers["Stripe-Context"] = context;
+  if (eventId && /^evt_[A-Za-z0-9]+$/.test(eventId)) headers["Stripe-Request-Trigger"] = "event=" + eventId;
+  const response = await fetchImpl(STRIPE_API_BASE + apiPath, { method: "GET", headers });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
     const code = String(data?.error?.code || data?.error?.type || "unknown").replace(/[^a-zA-Z0-9_]/g, "").slice(0, 60);
