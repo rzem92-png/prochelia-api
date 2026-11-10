@@ -703,3 +703,20 @@ test("commercial prospect potential rejects fractional or malformed cents before
   }
   assert.equal(writes.some(x => x.sql.includes("INSERT INTO commercial_prospects")), false);
 });
+
+
+test("loyalty update rejects fractional, non-finite and unsafe points before any write", async () => {
+  const writes = [];
+  const DB = authenticatedManagerDb(writes);
+  for (const points of [1.5, "1.5", "1e3", "NaN", Number.MAX_SAFE_INTEGER + 1]) {
+    const response = await worker.fetch(new Request("https://api.test/api/loyalty/update", {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie: "prochelia_session=manager-session" },
+      body: JSON.stringify({ client_id: "client-1", points })
+    }), { DB });
+    const body = await response.json();
+    assert.equal(response.status, 400, JSON.stringify(body));
+    assert.equal(body.error, "INVALID_LOYALTY_POINTS");
+  }
+  assert.equal(writes.some(x => x.sql.includes("INSERT INTO loyalty_events")), false);
+});
