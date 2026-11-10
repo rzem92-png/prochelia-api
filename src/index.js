@@ -1,4 +1,5 @@
 import { handleV7Route } from "./v7-routes.js";
+import { stripePost, stripeGet, verifyStripeSignature } from "./stripe.js";
 // PROCHÉLIA — INDEX BACKEND CONSOLIDÉ UNIQUE
 // Référence de consolidation : V14.1 Finance + sécurité/RBAC existants.
 // Généré le 19/10/2026. À déployer uniquement après recette avec la vraie base D1.
@@ -815,22 +816,132 @@ function paymentsConfigured(_env) {
 
 
 async function paymentOnboard(request, env) {
+  // Explicit opt-in required: Connect onboarding creates external Stripe state.
+  // Keep disabled by default in preview/preproduction and fail closed.
+  if (env.STRIPE_CONNECT_ONBOARDING_ENABLED !== 'true' || env.STRIPE_CONNECT_ONBOARDING_APPROVED !== 'true') {
+    return json({ok:false,error:'STRIPE_CONNECT_ONBOARDING_DISABLED_OR_NOT_APPROVED',version:VERSION},503);
+  }
+  const stripeSecretKey=String(env.STRIPE_SECRET_KEY||'').trim();
+  const stripePublishableKey=String(env.STRIPE_PUBLISHABLE_KEY||'').trim();
+  const isTestStripeKey=/^(sk|rk)_test_/.test(stripeSecretKey);
+  const isLiveStripeKey=/^(sk|rk)_live_/.test(stripeSecretKey);
+  const isTestPublishableKey=/^pk_test_/.test(stripePublishableKey);
+  const isLivePublishableKey=/^pk_live_/.test(stripePublishableKey);
+  if(!(isTestStripeKey && isTestPublishableKey) &&
+     !(isLiveStripeKey && isLivePublishableKey && env.STRIPE_CONNECT_LIVE_ENABLED==='true')) {
+    return json({ok:false,error:'STRIPE_CONNECT_LIVE_DISABLED',version:VERSION},503);
+  }
   const auth = await getSessionUser(request, env);
   if (!requireRole(auth, ['intervenant'])) return json({ok:false,error:auth?.user?'FORBIDDEN':'UNAUTHENTICATED',version:VERSION},auth?.user?403:401);
-  if(!paymentsConfigured(env)) return json({ok:false,error:'PSP_ONBOARDING_ADAPTER_NOT_IMPLEMENTED',version:VERSION},503);
+  const dashboard=clean(env.STRIPE_DASHBOARD);
+  const feesCollector=clean(env.STRIPE_FEES_COLLECTOR);
+  const lossesCollector=clean(env.STRIPE_LOSSES_COLLECTOR);
+  if (paymentProvider(env)!=='stripe' || !env.STRIPE_SECRET_KEY || !env.STRIPE_PUBLISHABLE_KEY || !env.STRIPE_WEBHOOK_SECRET ||
+      !['express','full'].includes(dashboard) || !['application','stripe'].includes(feesCollector) ||
+      !['application','stripe'].includes(lossesCollector)) {
+    return json({ok:false,error:'STRIPE_CONNECT_NOT_CONFIGURED',version:VERSION,required:['PAYMENT_PROVIDER=stripe','STRIPE_SECRET_KEY','STRIPE_PUBLISHABLE_KEY','STRIPE_WEBHOOK_SECRET','STRIPE_DASHBOARD','STRIPE_FEES_COLLECTOR','STRIPE_LOSSES_COLLECTOR','APP_BASE_URL']},503);
+  }
+  if(dashboard==='express' && (feesCollector!=='application' || lossesCollector!=='application')) {
+    return json({ok:false,error:'STRIPE_EXPRESS_RESPONSIBILITY_CONFLICT',version:VERSION,required:'Express requires application fee/loss responsibility; choose explicitly or use full dashboard'},409);
+  }
+  let appBase;
+  try {
+    appBase=new URL(String(env.APP_BASE_URL||''));
+    const allowed=String(env.CORS_ORIGIN||'https://prochelia.pages.dev,https://56b01f85.prochelia.pages.dev').split(',').map(x=>x.trim()).filter(Boolean);
+    if(appBase.protocol!=='https:' || !allowed.includes(appBase.origin)) throw new Error('APP_ORIGIN_NOT_ALLOWED');
+  } catch {
+    return json({ok:false,error:'APP_BASE_URL_NOT_ALLOWED',version:VERSION},503);
+  }
+  const body=await readJson(request)||{};
+  const accountToken=typeof body.account_token==='string'?body.account_token.trim():'';
+  if(!/^[A-Za-z0-9_]{8,255}$/.test(accountToken) || body.stripe_terms_accepted!==true) {
+    return json({ok:false,error:'STRIPE_ACCOUNT_TOKEN_AND_TERMS_REQUIRED',version:VERSION},400);
+  }
   await ensurePaymentSchema(env);
-  const body = await readJson(request);
-  const provider = paymentProvider(env);
-  const accountId = null; // Provider account IDs must come only from a verified PSP onboarding callback.
-  const existing = await env.DB.prepare('SELECT * FROM payment_accounts WHERE user_id=? LIMIT 1').bind(auth.user.id).first();
-  if (existing) return json({ok:true,version:VERSION,account:existing,action:'REUSE_EXISTING'},200);
-  const id=crypto.randomUUID();
-  await env.DB.prepare(`INSERT INTO payment_accounts
-    (id,user_id,provider,provider_account_id,status,onboarding_status)
-    VALUES (?,?,?,?, 'pending','required')`).bind(id,auth.user.id,provider,accountId).run();
-  await env.DB.prepare(`INSERT INTO wallets (id,user_id) VALUES (?,?)`).bind(crypto.randomUUID(),auth.user.id).run();
-  await paymentAudit(env,'PAYOUT_ACCOUNT_CREATED',{user_id:auth.user.id,metadata:{provider}},'OK');
-  return json({ok:true,version:VERSION,account_id:id,provider,onboarding_status:'required',next:'PSP_ADAPTER_NOT_IMPLEMENTED'},201);
+  let existing = await env.DB.prepare('SELECT * FROM payment_accounts WHERE user_id=? LIMIT 1').bind(auth.user.id).first();
+  if(existing && existing.provider!=='stripe') return json({ok:false,error:'PAYMENT_PROVIDER_CONFLICT',version:VERSION},409);
+  if(existing && Number(existing.payouts_enabled)===1 && existing.onboarding_status==='submitted') {
+    return json({ok:true,version:VERSION,provider:'stripe',account_id:existing.provider_account_id,onboarding_status:'complete',already_connected:true},200);
+  }
+  let accountId=clean(existing?.provider_account_id);
+  let reservationId=existing?.id || null;
+  try {
+    if(!accountId) {
+      // Reserve the unique user_id row BEFORE contacting Stripe to prevent
+      // concurrent requests from creating multiple connected accounts.
+      if(existing && existing.status==='creating') return json({ok:false,error:'STRIPE_CONNECT_CREATION_IN_PROGRESS',version:VERSION},409);
+      // Any pre-existing row without an account ID needs reconciliation.
+      // In particular, legacy creation_failed rows may represent a timed-out
+      // Stripe call whose external outcome is unknown; never retry automatically.
+      if(existing) return json({ok:false,error:'STRIPE_CONNECT_ACCOUNT_STATE_CONFLICT',version:VERSION},409);
+      reservationId=crypto.randomUUID();
+      await env.DB.prepare(`INSERT INTO payment_accounts (id,user_id,provider,provider_account_id,status,onboarding_status) VALUES (?,?, 'stripe',NULL,'creating','required')`).bind(reservationId,auth.user.id).run();
+      const accountTokenHash=await sha256Base64url(accountToken);
+      const account=await stripePost(env,'v2/core/accounts',{
+        account_token:accountToken,
+        dashboard,
+        configuration:{recipient:{capabilities:{stripe_balance:{stripe_transfers:{requested:true}}}}},
+        defaults:{currency:'eur',responsibilities:{fees_collector:feesCollector,losses_collector:lossesCollector}},
+        metadata:{prochelia_user_id:auth.user.id}
+      },'prochelia-connect-account-'+auth.user.id+'-'+accountTokenHash);
+      accountId=clean(account?.id);
+      if(!accountId) throw new Error('STRIPE_ACCOUNT_ID_MISSING');
+      await env.DB.prepare(`UPDATE payment_accounts SET provider='stripe',provider_account_id=?,status='pending',onboarding_status='required',updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(accountId,reservationId).run();
+      const wallet=await env.DB.prepare('SELECT id FROM wallets WHERE user_id=? LIMIT 1').bind(auth.user.id).first();
+      if(!wallet) await env.DB.prepare('INSERT INTO wallets (id,user_id) VALUES (?,?)').bind(crypto.randomUUID(),auth.user.id).run();
+      await paymentAudit(env,'STRIPE_ACCOUNT_TERMS_ACCEPTED',{user_id:auth.user.id,metadata:{terms:'stripe_connected_account_v2'}},'OK');
+      await paymentAudit(env,'STRIPE_CONNECT_ACCOUNT_CREATED',{user_id:auth.user.id,metadata:{provider:'stripe'}},'OK');
+    }
+    const refreshUrl=new URL('/',appBase); refreshUrl.searchParams.set('stripe_onboarding','refresh');
+    const returnUrl=new URL('/',appBase); returnUrl.searchParams.set('stripe_onboarding','return');
+    const link=await stripePost(env,'v2/core/account_links',{
+      account:accountId,
+      use_case:{
+        type:'account_onboarding',
+        account_onboarding:{
+          configurations:['recipient'],
+          refresh_url:refreshUrl.toString(),
+          return_url:returnUrl.toString(),
+          collection_options:{fields:'eventually_due'}
+        }
+      }
+    },'prochelia-connect-link-'+auth.user.id+'-'+crypto.randomUUID());
+    if(!link?.url) throw new Error('STRIPE_ACCOUNT_LINK_MISSING');
+    return json({ok:true,version:VERSION,provider:'stripe',account_id:accountId,onboarding_status:'required',onboarding_url:link.url,expires_at:link.expires_at,next:'COMPLETE_STRIPE_CONNECT_ONBOARDING'},201);
+  } catch(error) {
+    if(reservationId) {
+      try {
+        if(accountId) {
+          // Stripe may have created the account before a D1 write failed.
+          // Persist its ID for recovery instead of allowing a duplicate account.
+          await env.DB.prepare(`UPDATE payment_accounts SET provider='stripe',provider_account_id=?,status='pending',onboarding_status='required',updated_at=CURRENT_TIMESTAMP WHERE id=? AND provider_account_id IS NULL`).bind(accountId,reservationId).run();
+        } else {
+          // A network/API failure can be ambiguous: Stripe may have created
+          // the account even if the response never reached this Worker.
+          // Never automatically retry with a new Account Token in that case.
+          await env.DB.prepare(`UPDATE payment_accounts SET status='reconciliation_required',updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='creating' AND provider_account_id IS NULL`).bind(reservationId).run();
+        }
+      } catch { /* Keep original failure; reconciliation can inspect the reservation. */ }
+    }
+    console.error('STRIPE_CONNECT_ONBOARDING_FAILED',error instanceof Error?error.message:String(error));
+    return json({ok:false,error:'STRIPE_ONBOARDING_FAILED',version:VERSION},502);
+  }
+}
+
+function paymentPublicConfig(request,env) {
+  const provider=paymentProvider(env);
+  const candidate=provider==='stripe' ? String(env.STRIPE_PUBLISHABLE_KEY||'') : '';
+  const secret=String(env.STRIPE_SECRET_KEY||'').trim();
+  const matchingTest=/^(sk|rk)_test_/.test(secret) && /^pk_test_/.test(candidate);
+  const matchingLive=/^(sk|rk)_live_/.test(secret) && /^pk_live_/.test(candidate) && env.STRIPE_CONNECT_LIVE_ENABLED==='true';
+  const approved=env.STRIPE_CONNECT_ONBOARDING_ENABLED==='true' && env.STRIPE_CONNECT_ONBOARDING_APPROVED==='true';
+  const publishable=approved && (matchingTest||matchingLive) ? candidate : null;
+  const allowedStripeKey=(/^(sk|rk)_test_/.test(secret) && /^pk_test_/.test(String(env.STRIPE_PUBLISHABLE_KEY||''))) ||
+    (/^(sk|rk)_live_/.test(secret) && /^pk_live_/.test(String(env.STRIPE_PUBLISHABLE_KEY||'')) && env.STRIPE_CONNECT_LIVE_ENABLED==='true');
+  const onboardingReady=approved && !!publishable &&
+    allowedStripeKey && !!env.STRIPE_WEBHOOK_SECRET && !!env.APP_BASE_URL &&
+    !!env.STRIPE_DASHBOARD && !!env.STRIPE_FEES_COLLECTOR && !!env.STRIPE_LOSSES_COLLECTOR;
+  return json({ok:true,version:VERSION,provider,stripe_publishable_key:publishable,stripe_api_version:'2026-10-28.endive',connect_onboarding_ready:onboardingReady});
 }
 
 async function paymentStatus(request, env) {
@@ -968,6 +1079,66 @@ async function verifyWebhookSignature(request, env, rawBody) {
   const mac=new Uint8Array(await crypto.subtle.sign('HMAC',key,new TextEncoder().encode(rawBody)));
   const expected=base64url(mac);
   return signature===expected || signature===`sha256=${expected}`;
+}
+
+async function stripeConnectWebhook(request, env) {
+  const raw=await request.text();
+  if(!env.STRIPE_WEBHOOK_SECRET || !(await verifyStripeSignature(request.headers.get('stripe-signature'),env.STRIPE_WEBHOOK_SECRET,raw))) {
+    return json({ok:false,error:'INVALID_WEBHOOK_SIGNATURE',version:VERSION},401);
+  }
+  let event;
+  try { event=JSON.parse(raw); } catch { return json({ok:false,error:'INVALID_WEBHOOK_JSON',version:VERSION},400); }
+  if(event?.type!=='v2.core.account[requirements].updated') {
+    return json({ok:true,version:VERSION,ignored:true,event_type:clean(event?.type)||null},200);
+  }
+  const eventId=clean(event?.id), accountId=clean(event?.data?.object?.id);
+  if(!eventId || !/^acct_[A-Za-z0-9]+$/.test(accountId)) {
+    return json({ok:false,error:'INVALID_STRIPE_CONNECT_EVENT',version:VERSION},400);
+  }
+  try { await ensurePaymentSchema(env); }
+  catch { return json({ok:false,error:'PAYMENT_LEDGER_MIGRATION_REQUIRED',version:VERSION},503); }
+  const payloadHash=await sha256Base64url(raw);
+  const inserted=await env.DB.prepare(`INSERT OR IGNORE INTO payment_webhook_events
+    (id,provider,event_id,event_type,signature_valid,payload_hash)
+    VALUES (?,?,?,?,1,?)`).bind(crypto.randomUUID(),'stripe',eventId,event.type,payloadHash).run();
+  const stored=await env.DB.prepare(`SELECT processed,payload_hash,received_at FROM payment_webhook_events
+    WHERE provider='stripe' AND event_id=? LIMIT 1`).bind(eventId).first();
+  if(!stored) return json({ok:false,error:'WEBHOOK_EVENT_STATE_UNAVAILABLE',version:VERSION},503);
+  if(stored.payload_hash && stored.payload_hash!==payloadHash) return json({ok:false,error:'WEBHOOK_EVENT_ID_PAYLOAD_CONFLICT',version:VERSION},409);
+  if(Number(stored.processed)===1) return json({ok:true,version:VERSION,duplicate:true,processed:true,event_id:eventId},200);
+  const claim=await env.DB.prepare(`UPDATE payment_webhook_events SET processed=2,received_at=CURRENT_TIMESTAMP
+    WHERE provider='stripe' AND event_id=? AND (processed=0 OR (processed=2 AND received_at<=datetime('now','-5 minutes')))`)
+    .bind(eventId).run();
+  if(Number(claim?.meta?.changes||0)!==1) return json({ok:false,error:'WEBHOOK_EVENT_PROCESSING',version:VERSION,retry_after_seconds:30},409);
+  try {
+    const account=await stripeGet(env,'v2/core/accounts/'+accountId);
+    const transferStatus=account?.configuration?.recipient?.capabilities?.stripe_balance?.stripe_transfers?.status;
+    const payoutsEnabled=transferStatus==='active'?1:0;
+    const status=payoutsEnabled?'active':'pending';
+    const onboardingStatus=payoutsEnabled?'submitted':'required';
+    const linked=await env.DB.prepare(`UPDATE payment_accounts SET charges_enabled=0,payouts_enabled=?,status=?,
+      onboarding_status=?,updated_at=CURRENT_TIMESTAMP
+      WHERE provider='stripe' AND provider_account_id=?`).bind(payoutsEnabled,status,onboardingStatus,accountId).run();
+    if(Number(linked?.meta?.changes||0)!==1) {
+      await env.DB.prepare(`UPDATE payment_webhook_events SET processed=0,received_at=CURRENT_TIMESTAMP
+        WHERE provider='stripe' AND event_id=? AND processed=2`).bind(eventId).run();
+      return json({ok:false,error:'STRIPE_CONNECT_ACCOUNT_NOT_LINKED',version:VERSION},503);
+    }
+    await env.DB.batch([
+      env.DB.prepare(`INSERT INTO payment_audit
+        (id,event_type,user_id,result,metadata_json) VALUES (?,?,?,?,?)`)
+        .bind(crypto.randomUUID(),'STRIPE_CONNECT_ACCOUNT_SYNCED',null,'OK',JSON.stringify({event_id:eventId,account_id:accountId,payouts_enabled:payoutsEnabled})),
+      env.DB.prepare(`UPDATE payment_webhook_events SET processed=1,processed_at=CURRENT_TIMESTAMP
+        WHERE provider='stripe' AND event_id=? AND processed=2`).bind(eventId)
+    ]);
+    return json({ok:true,version:VERSION,processed:true,event_id:eventId,account_id:accountId,payouts_enabled:!!payoutsEnabled},200);
+  } catch(error) {
+    // Keep the event retryable; never acknowledge an uncertain provider lookup or D1 write.
+    await env.DB.prepare(`UPDATE payment_webhook_events SET processed=0,received_at=CURRENT_TIMESTAMP
+      WHERE provider='stripe' AND event_id=? AND processed=2`).bind(eventId).run().catch(()=>{});
+    console.error('STRIPE_CONNECT_WEBHOOK_RETRYABLE',error instanceof Error?error.message:'unknown');
+    return json({ok:false,error:'STRIPE_CONNECT_WEBHOOK_RETRYABLE',version:VERSION},503);
+  }
 }
 
 async function paymentWebhook(request, env) {
@@ -1136,6 +1307,43 @@ async function handleBase(request, env) {
     return securityStatus(request, env);
   }
 
+  if (url.pathname === '/api/payments/config') {
+    if (request.method !== 'GET') return json({ok:false,error:'METHOD_NOT_ALLOWED',version:VERSION},405);
+    return paymentPublicConfig(request,env);
+  }
+  if (url.pathname === '/api/payments/onboard') {
+    if (request.method !== 'POST') return json({ok:false,error:'METHOD_NOT_ALLOWED',version:VERSION},405);
+    return paymentOnboard(request,env);
+  }
+  if (url.pathname === '/api/payments/status') {
+    if (request.method !== 'GET') return json({ok:false,error:'METHOD_NOT_ALLOWED',version:VERSION},405);
+    return paymentStatus(request,env);
+  }
+  if (url.pathname === '/api/payments/mission/create') {
+    if (request.method !== 'POST') return json({ok:false,error:'METHOD_NOT_ALLOWED',version:VERSION},405);
+    return createMissionPayment(request,env);
+  }
+  if (url.pathname === '/api/payments/mission/finalize') {
+    if (request.method !== 'POST') return json({ok:false,error:'METHOD_NOT_ALLOWED',version:VERSION},405);
+    return finalizeMissionPayment(request,env);
+  }
+  if (url.pathname === '/api/payments/payout') {
+    if (request.method !== 'POST') return json({ok:false,error:'METHOD_NOT_ALLOWED',version:VERSION},405);
+    return payoutRequest(request,env);
+  }
+  if (url.pathname === '/api/payments/webhook') {
+    if (request.method !== 'POST') return json({ok:false,error:'METHOD_NOT_ALLOWED',version:VERSION},405);
+    return paymentProvider(env)==='stripe' ? stripeConnectWebhook(request,env) : paymentWebhook(request,env);
+  }
+  if (url.pathname === '/api/payments/dispute') {
+    if (request.method !== 'POST') return json({ok:false,error:'METHOD_NOT_ALLOWED',version:VERSION},405);
+    return openPaymentDispute(request,env);
+  }
+  if (url.pathname === '/api/payments/dispute/resolve') {
+    if (request.method !== 'POST') return json({ok:false,error:'METHOD_NOT_ALLOWED',version:VERSION},405);
+    return paymentAdminResolve(request,env);
+  }
+
   if (url.pathname === '/api/health') {
     if (request.method !== 'GET') return json({ ok: false, error: 'METHOD_NOT_ALLOWED', version: VERSION }, 405);
     return health(env);
@@ -1236,7 +1444,7 @@ if (url.pathname === '/api/info') {
         '/api/health','/api/prestations','/api/core/schema',
         '/api/missions/schema','/api/missions/validate','/api/missions',
         '/api/auth/status','/api/auth/login','/api/auth/logout','/api/auth/me',
-        '/api/auth/bootstrap','/api/security/identity/start','/api/security/identity/approve','/api/security/mission/prepare','/api/security/presence','/api/security/code/verify','/api/security/resend','/api/security/client-code','/api/security/status','/api/payments/onboard','/api/payments/status','/api/payments/mission/create','/api/payments/mission/finalize','/api/payments/payout','/api/payments/webhook','/api/payments/dispute','/api/payments/dispute/resolve','/api/readiness','/api/info'
+        '/api/auth/bootstrap','/api/security/identity/start','/api/security/identity/approve','/api/security/mission/prepare','/api/security/presence','/api/security/code/verify','/api/security/resend','/api/security/client-code','/api/security/status','/api/payments/config','/api/payments/onboard','/api/payments/status','/api/payments/mission/create','/api/payments/mission/finalize','/api/payments/payout','/api/payments/webhook','/api/payments/dispute','/api/payments/dispute/resolve','/api/readiness','/api/info'
       ],
       writes: { missions: false, bootstrap: true },
       status: 'AUTH_RBAC_IDENTITY_PRESENCE_SECURITY_HARDENED_FOR_TEST'
