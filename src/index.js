@@ -845,13 +845,13 @@ async function paymentOnboard(request, env) {
   if (paymentProvider(env)!=='stripe' || !env.STRIPE_SECRET_KEY || !env.STRIPE_PUBLISHABLE_KEY || !env.STRIPE_WEBHOOK_SECRET ||
       !['express','full'].includes(dashboard) || !['application','stripe'].includes(feesCollector) ||
       !['application','stripe'].includes(lossesCollector) ||
-      !['destination','separate_charges_and_transfers'].includes(chargeModel)) {
+      chargeModel!=='destination') {
     return json({ok:false,error:'STRIPE_CONNECT_NOT_CONFIGURED',version:VERSION,required:['PAYMENT_PROVIDER=stripe','STRIPE_SECRET_KEY','STRIPE_PUBLISHABLE_KEY','STRIPE_WEBHOOK_SECRET','STRIPE_CONNECT_CHARGE_MODEL','STRIPE_DASHBOARD','STRIPE_FEES_COLLECTOR','STRIPE_LOSSES_COLLECTOR','APP_BASE_URL']},503);
   }
   // Accounts v2 responsibility defaults are immutable once set. For platform
   // This implementation is a marketplace recipient integration only.
   // Direct charges require a separate Merchant/card_payments capability flow.
-  const platformCharge=['destination','separate_charges_and_transfers'].includes(chargeModel);
+  const platformCharge=chargeModel==='destination';
   const responsibilityModelValid=platformCharge && dashboard==='express' &&
     feesCollector==='application' && lossesCollector==='application';
   if(!responsibilityModelValid) {
@@ -955,7 +955,7 @@ function paymentPublicConfig(request,env) {
   const dashboard=clean(env.STRIPE_DASHBOARD), fees=clean(env.STRIPE_FEES_COLLECTOR), losses=clean(env.STRIPE_LOSSES_COLLECTOR);
   // Only marketplace recipient accounts are implemented. Direct charges need
   // Merchant/card_payments onboarding and must remain closed until implemented.
-  const platformCharge=['destination','separate_charges_and_transfers'].includes(chargeModel);
+  const platformCharge=chargeModel==='destination';
   const responsibilityModelValid=platformCharge && dashboard==='express' &&
     fees==='application' && losses==='application';
   const publishable=approved && responsibilityModelValid && (matchingTest||matchingLive) ? candidate : null;
