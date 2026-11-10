@@ -447,6 +447,8 @@ class PaymentStateLedgerEnforcementTests(unittest.TestCase):
         self.assertIn("integerCents(x[field]??0)", summary)
         self.assertIn("integerCents(x.amount_cents??0)", summary)
         self.assertIn("Number.isSafeInteger(next)", summary)
+        self.assertIn("if(!Number.isSafeInteger(balance))", summary)
+        self.assertIn("!Number.isSafeInteger(ledgerIn-ledgerOut)", summary)
         self.assertIn("currency_totals:paymentCurrencyTotals", summary)
         self.assertIn("const safePaymentCurrencyTotals=integrityErrors===0?paymentCurrencyTotals", summary)
         self.assertIn("const safeLedgerCurrencyTotals=integrityErrors===0?ledgerCurrencyTotals", summary)
