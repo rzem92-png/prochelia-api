@@ -898,8 +898,7 @@ async function paymentOnboard(request, env) {
         defaults:{currency:'eur',responsibilities:{fees_collector:feesCollector,losses_collector:lossesCollector}},
         metadata:{prochelia_user_id:auth.user.id}
       },'prochelia-connect-account-'+auth.user.id+'-'+accountTokenHash);
-      accountId=clean(account?.id);
-      if(!accountId) throw new Error('STRIPE_ACCOUNT_ID_MISSING');
+      accountId=requireStripeAccountId(account?.id);
       await env.DB.prepare(`UPDATE payment_accounts SET provider='stripe',provider_account_id=?,status='pending',onboarding_status='required',updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(accountId,reservationId).run();
       await paymentAudit(env,'STRIPE_ACCOUNT_TERMS_ACCEPTED',{user_id:auth.user.id,metadata:{terms:'stripe_connected_account_v2'}},'OK');
       await paymentAudit(env,'STRIPE_CONNECT_ACCOUNT_CREATED',{user_id:auth.user.id,metadata:{provider:'stripe'}},'OK');
