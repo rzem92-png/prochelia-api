@@ -1,9 +1,9 @@
-# PROCHÉLIA — Contrat d'adaptateur PSP
+# PROCHÉLIA — Contrat d'adaptateur Stripe
 
 **Statut : spécification technique, non implémentée et non autorisante.**  
 **Cible : préproduction isolée uniquement tant que les gates de release ne sont pas signés.**
 
-Ce contrat définit la frontière entre le ledger métier PROCHÉLIA et un prestataire de paiement (PSP). Il ne choisit pas le montage juridique/financier, ne sélectionne pas un produit Stripe, et n'active aucun encaissement.
+Stripe est le prestataire de paiement retenu pour PROCHÉLIA. Ce contrat définit la frontière entre le ledger métier et les API Stripe. Le code d'onboarding Connect Accounts v2 existe déjà sur la PR #11, mais cette branche est séparée, non fusionnée et non intégrée à la consolidation financière. Le modèle de charge marketplace (destination charge ou separate charges and transfers), la répartition des frais/pertes et le flux de versement restent à valider ; aucun encaissement n'est activé.
 
 ## 1. Principes non négociables
 
@@ -150,14 +150,15 @@ Ces choix nécessitent une revue juridique, fiscale, comptable et opérationnell
 ### Garde de release
 Aucun trafic réel avant que les tests soient verts sur un SHA unique, que le test complet de restauration soit démontré, que les parcours iOS/Safari soient acceptés, que les validations France soient signées et que l'approbation explicite de déploiement soit enregistrée. Les clés live ne sont jamais utilisées pour les tests.
 
-## 9. État actuel constaté
+## 9. État vérifié au 10 novembre 2026
 
-Au moment de la rédaction :
-- le runtime PROCHÉLIA n'a pas d'adaptateur de charge/payout activable ;
-- `paymentsConfigured()` retourne `false` ;
-- les routes de paiement réel répondent en mode fermé ;
-- la migration de ledger 0006 est proposée dans la PR #124 mais n'est pas déclarée appliquée à D1 ;
-- les PR #124 et #125 sont divergées et doivent être consolidées avant validation combinée ;
-- la préproduction PSP E2E, le test de restauration complet, la recette Safari/iOS et les validations juridiques/opérationnelles restent à produire.
+- Le compte Stripe test est accessible via la session Stripe connectée (`livemode=false`).
+- Lecture seule du compte test : aucun endpoint webhook V1 enregistré, aucun PaymentIntent test listé, solde disponible/en attente à 0 EUR ; aucun compte connecté V1 listé. Ce dernier constat ne préjuge pas d'éventuels objets Accounts v2.
+- La PR #11 contient déjà le code d'onboarding Stripe Connect Accounts v2 et des tests unitaires. Ces tests utilisent un `fetch` simulé : ils ne prouvent pas une transaction Stripe sandbox réelle. La PR #11 est distincte, en brouillon et non fusionnée.
+- Sur le runtime de la consolidation financière, `paymentsConfigured()` retourne explicitement `false`. Les routes onboarding/charge/payout/webhook restent donc fermées et répondent 503 tant qu'un adaptateur activable n'est pas implémenté.
+- La PR #126 réintègre les protections atomiques ciblées de la PR #125 sur la base de la PR #124 ; les quatre workflows CI (migration, tests SQL, V7 et build Worker) sont verts sur le même SHA `f253e97b9ed38c5899cf8a43978551062aede9f4`.
+- Un déploiement Cloudflare Preview de cette branche a réussi ; il ne s'agit pas d'un déploiement production.
+- Les migrations 0006 et 0007 ne sont pas déclarées appliquées à D1. Aucun endpoint webhook Stripe n'a été créé et aucun PaymentIntent n'a été créé pendant l'audit.
+- La recette sandbox E2E, l'exercice complet de restauration, la recette Safari/iOS et les validations juridiques/opérationnelles France restent à produire.
 
-**Conclusion : NO-GO pour les paiements et le trafic transactionnel de production.** Ce contrat est un plan d'implémentation et de vérification, pas une preuve de conformité ni une autorisation de mise en service.
+**Conclusion : NO-GO pour les paiements et le trafic transactionnel de production.** Le compte test connecté ne suffit pas à prouver l'intégration Worker↔Stripe ; cette spécification et les tests automatisés ne constituent ni une preuve E2E, ni une autorisation de mise en service.
