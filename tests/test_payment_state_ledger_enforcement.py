@@ -419,5 +419,14 @@ class PaymentStateLedgerEnforcementTests(unittest.TestCase):
         self.assertIn("PAYMENT_NOT_DISPUTABLE", dispute)
 
 
+    def test_queued_accounting_entry_rejects_zero_value_before_ledger_insert(self):
+        source = (ROOT / "src" / "index.js").read_text(encoding="utf-8")
+        start = source.index("} else if (action.action_type === 'ACCOUNTING_ENTRY') {")
+        end = source.index("\\n    } else {", start)
+        branch = source[start:end]
+        self.assertIn("(amountCents===0&&debitCents===0&&creditCents===0)", branch)
+        self.assertLess(branch.index("INVALID_ACCOUNTING_AMOUNT_CENTS"), branch.index("INSERT INTO accounting_ledger"))
+
+
 if __name__ == "__main__":
     unittest.main()
