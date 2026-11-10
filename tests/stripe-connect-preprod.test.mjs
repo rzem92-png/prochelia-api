@@ -451,3 +451,33 @@ test("Stripe recipient capability states preserve restricted and rejected outcom
   assert.deepEqual(mapStripeRecipientCapabilityStatus("unsupported"), { status: "unsupported", onboardingStatus: "unsupported", enabled: false });
   assert.deepEqual(mapStripeRecipientCapabilityStatus("unknown_future_status"), { status: "pending", onboardingStatus: "required", enabled: false });
 });
+
+
+test("Accounts v2 recipient onboarding rejects unsupported separate charges and transfers", async () => {
+  const env = {
+    PAYMENT_PROVIDER: "stripe",
+    STRIPE_SECRET_KEY: "sk_test_placeholder",
+    STRIPE_PUBLISHABLE_KEY: "pk_test_placeholder",
+    STRIPE_WEBHOOK_SECRET: "whsec_placeholder",
+    STRIPE_CONNECT_CHARGE_MODEL: "separate_charges_and_transfers",
+    STRIPE_DASHBOARD: "express",
+    STRIPE_FEES_COLLECTOR: "application",
+    STRIPE_LOSSES_COLLECTOR: "application",
+    APP_BASE_URL: "https://prochelia.pages.dev",
+    STRIPE_CONNECT_ONBOARDING_ENABLED: "true",
+    STRIPE_CONNECT_ONBOARDING_APPROVED: "true"
+  };
+  const config = await worker.fetch(new Request("https://api.test/api/payments/config"), env);
+  const configBody = await config.json();
+  assert.equal(configBody.stripe_publishable_key, null);
+  assert.equal(configBody.connect_onboarding_ready, false);
+
+  const onboarding = await worker.fetch(new Request("https://api.test/api/payments/onboard", {
+    method: "POST",
+    headers: { "content-type": "application/json", cookie: "prochelia_session=session-test" },
+    body: JSON.stringify({ account_token: "acctok_test_12345678", stripe_terms_accepted: true })
+  }), { ...env, DB: authenticatedRateLimitDb() });
+  const onboardingBody = await onboarding.json();
+  assert.equal(onboarding.status, 503);
+  assert.equal(onboardingBody.error, "STRIPE_CONNECT_NOT_CONFIGURED");
+});
