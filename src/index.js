@@ -1068,7 +1068,7 @@ async function finalizeMissionPayment(request, env) {
       WHERE id=? AND status IN ('pending','paid')`).bind(txId),
     env.DB.prepare(`INSERT INTO payment_audit
       (id,event_type,transaction_id,mission_id,user_id,result,metadata_json)
-      SELECT ?,?,?,?,?,?,? WHERE EXISTS (
+      SELECT ?,?,?,?,?,?,? WHERE changes()=1 AND EXISTS (
         SELECT 1 FROM payment_transactions WHERE id=? AND status='held'
       )`).bind(crypto.randomUUID(),'MISSION_PAYMENT_HELD',txId,tx.mission_id,
         auth.user.id,'OK',JSON.stringify({reason:'ADMINISTRATIVE_HOLD'}),txId)
