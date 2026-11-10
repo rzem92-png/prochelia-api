@@ -9,6 +9,11 @@ DB.execute("PRAGMA foreign_keys = ON")
 for path in sorted(MIGRATIONS.glob("*.sql")):
     DB.executescript(path.read_text(encoding="utf-8"))
 
+# The baseline wallet invariant must remain present even when 0004 was
+# already recorded as applied and a later repair migration is required.
+triggers = {row[0] for row in DB.execute("SELECT name FROM sqlite_master WHERE type='trigger'")}
+assert "trg_payment_wallet_ledger_guard_balances" in triggers, "Missing wallet balance invariant trigger"
+
 # Expected payment schema objects exist.
 expected = {
     "wallets", "payment_wallet_ledger", "payment_accounts",
