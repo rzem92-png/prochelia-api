@@ -127,17 +127,17 @@ test("readiness GET performs no schema or journal writes", async () => {
   assert.ok(checkStart >= 0);
   assert.ok(checkEnd > checkStart);
   const check = source.slice(checkStart, checkEnd);
-  assert.match(check, /productionConfigCheck\\(env, \\{ persist = false \\} = \\{\\}\\)/);
-  assert.match(check, /if \\(persist\\) \\{/);
-  assert.match(check, /if \\(persist\\) for\\(const c of checks\\)/);
+  assert.ok(check.includes("productionConfigCheck(env, { persist = false } = {})"));
+  assert.ok(check.includes("if (persist) {"));
+  assert.ok(check.includes("if (persist) for(const c of checks)"));
 
   const auditStart = source.indexOf("async function strictProductionAudit");
   const auditEnd = source.indexOf("const __procheliaProductionSafetyHandle", auditStart);
   assert.ok(auditStart >= 0);
   assert.ok(auditEnd > auditStart);
   const audit = source.slice(auditStart, auditEnd);
-  assert.match(audit, /productionConfigCheck\\(env\\)/);
-  assert.doesNotMatch(audit, /\\.prepare\\([\\s\\S]*?\\.run\\(/);
-  assert.doesNotMatch(audit, /journal\\(/);
-  assert.match(audit, /PAYMENT_WEBHOOK_ATOMICITY/);
+  assert.ok(audit.includes("productionConfigCheck(env)"));
+  assert.ok(!audit.includes(".prepare("));
+  assert.ok(!audit.includes("journal("));
+  assert.ok(audit.includes("PAYMENT_WEBHOOK_ATOMICITY"));
 });
