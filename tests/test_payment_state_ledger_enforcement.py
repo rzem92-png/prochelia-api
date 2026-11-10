@@ -36,8 +36,8 @@ class PaymentStateLedgerEnforcementTests(unittest.TestCase):
 
     def test_settlement_credits_wallet_through_ledger_once(self):
         self.create_transaction()
-        self.db.execute("UPDATE payment_transactions SET status='paid' WHERE id='t1'")
-        self.db.execute("UPDATE payment_transactions SET status='paid' WHERE id='t1'")
+        self.db.execute("UPDATE payment_transactions SET status='paid',provider_payment_id='ch_t1' WHERE id='t1'")
+        self.db.execute("UPDATE payment_transactions SET status='paid',provider_payment_id='ch_t1' WHERE id='t1'")
         self.assertEqual(self.balances(), (14500, 0, 0))
         count = self.db.execute(
             "SELECT COUNT(*) FROM payment_wallet_ledger WHERE transaction_id='t1'"
@@ -46,7 +46,7 @@ class PaymentStateLedgerEnforcementTests(unittest.TestCase):
 
     def test_dispute_hold_moves_available_to_reserved(self):
         self.create_transaction()
-        self.db.execute("UPDATE payment_transactions SET status='paid' WHERE id='t1'")
+        self.db.execute("UPDATE payment_transactions SET status='paid',provider_payment_id='ch_t1' WHERE id='t1'")
         self.db.execute("UPDATE payment_transactions SET status='held' WHERE id='t1'")
         self.assertEqual(self.balances(), (10000, 4500, 0))
 
@@ -60,7 +60,7 @@ class PaymentStateLedgerEnforcementTests(unittest.TestCase):
     def test_charge_settled_after_dispute_is_reserved_not_withdrawable(self):
         self.create_transaction()
         self.add_open_dispute()
-        self.db.execute("UPDATE payment_transactions SET status='paid' WHERE id='t1'")
+        self.db.execute("UPDATE payment_transactions SET status='paid',provider_payment_id='ch_t1' WHERE id='t1'")
         self.assertEqual(self.balances(), (10000, 4500, 0))
         entry = self.db.execute(
             "SELECT entry_type FROM payment_wallet_ledger WHERE transaction_id='t1'"
@@ -69,7 +69,7 @@ class PaymentStateLedgerEnforcementTests(unittest.TestCase):
 
     def test_dispute_insert_racing_after_settlement_moves_paid_credit_to_hold(self):
         self.create_transaction()
-        self.db.execute("UPDATE payment_transactions SET status='paid' WHERE id='t1'")
+        self.db.execute("UPDATE payment_transactions SET status='paid',provider_payment_id='ch_t1' WHERE id='t1'")
         self.assertEqual(self.balances(), (14500, 0, 0))
         self.add_open_dispute()
         status = self.db.execute("SELECT status FROM payment_transactions WHERE id='t1'").fetchone()[0]
@@ -88,6 +88,32 @@ class PaymentStateLedgerEnforcementTests(unittest.TestCase):
         self.db.execute("UPDATE payment_transactions SET status='failed',provider_payment_id='ch_failed' WHERE id='t1'")
         self.assertEqual(self.balances(), (10000, 0, 0))
 
+    def test_payment_settlement_requires_provider_reference(self):
+        self.create_transaction()
+        with self.assertRaises(sqlite3.IntegrityError):
+            self.db.execute("UPDATE payment_transactions SET status='paid' WHERE id='t1'")
+        self.assertEqual(self.balances(), (10000, 0, 0))
+        self.db.execute("UPDATE payment_transactions SET status='paid',provider_payment_id='ch_evidence' WHERE id='t1'")
+        self.assertEqual(self.balances(), (14500, 0, 0))
+
+    def test_payout_status_requires_provider_reference_and_initial_requested_state(self):
+        with self.assertRaises(sqlite3.IntegrityError):
+            self.db.execute(
+                """INSERT INTO payout_requests
+                   (id,idempotency_key,wallet_id,user_id,amount_cents,currency,mode,status)
+                   VALUES('p_invalid','payout-invalid','w1','u1',1000,'EUR','standard','completed')"""
+            )
+        self.db.execute(
+            """INSERT INTO payout_requests
+               (id,idempotency_key,wallet_id,user_id,amount_cents,currency,mode,status)
+               VALUES('p_evidence','payout-evidence','w1','u1',1000,'EUR','standard','requested')"""
+        )
+        with self.assertRaises(sqlite3.IntegrityError):
+            self.db.execute("UPDATE payout_requests SET status='completed' WHERE id='p_evidence'")
+        self.assertEqual(self.balances(), (9000, 1000, 0))
+        self.db.execute("UPDATE payout_requests SET status='completed',provider_payout_id='po_evidence' WHERE id='p_evidence'")
+        self.assertEqual(self.balances(), (9000, 0, 1000))
+
     def test_payout_request_reserves_atomically_and_failure_releases(self):
         self.db.execute(
             """INSERT INTO payout_requests
@@ -95,8 +121,8 @@ class PaymentStateLedgerEnforcementTests(unittest.TestCase):
                VALUES('p1','payout-1','w1','u1',3000,'EUR','standard','requested')"""
         )
         self.assertEqual(self.balances(), (7000, 3000, 0))
-        self.db.execute("UPDATE payout_requests SET status='processing' WHERE id='p1'")
-        self.db.execute("UPDATE payout_requests SET status='failed' WHERE id='p1'")
+        self.db.execute("UPDATE payout_requests SET status='processing',provider_payout_id='po_p1' WHERE id='p1'")
+        self.db.execute("UPDATE payout_requests SET status='failed',provider_payout_id='po_p1' WHERE id='p1'")
         self.assertEqual(self.balances(), (10000, 0, 0))
 
     def test_payout_completion_settles_reserved_balance_once(self):
@@ -105,8 +131,8 @@ class PaymentStateLedgerEnforcementTests(unittest.TestCase):
                (id,idempotency_key,wallet_id,user_id,amount_cents,currency,mode,status)
                VALUES('p2','payout-2','w1','u1',3000,'EUR','standard','requested')"""
         )
-        self.db.execute("UPDATE payout_requests SET status='processing' WHERE id='p2'")
-        self.db.execute("UPDATE payout_requests SET status='completed' WHERE id='p2'")
+        self.db.execute("UPDATE payout_requests SET status='processing',provider_payout_id='po_p2' WHERE id='p2'")
+        self.db.execute("UPDATE payout_requests SET status='completed',provider_payout_id='po_p2' WHERE id='p2'")
         self.assertEqual(self.balances(), (7000, 0, 3000))
         count = self.db.execute(
             "SELECT COUNT(*) FROM payment_wallet_ledger WHERE payout_id='p2'"
@@ -129,7 +155,7 @@ class PaymentStateLedgerEnforcementTests(unittest.TestCase):
 
     def test_unsupported_refund_and_terminal_reversal_are_blocked(self):
         self.create_transaction()
-        self.db.execute("UPDATE payment_transactions SET status='paid' WHERE id='t1'")
+        self.db.execute("UPDATE payment_transactions SET status='paid',provider_payment_id='ch_t1' WHERE id='t1'")
         with self.assertRaises(sqlite3.IntegrityError):
             self.db.execute("UPDATE payment_transactions SET status='refunded' WHERE id='t1'")
         self.db.execute(
@@ -137,7 +163,7 @@ class PaymentStateLedgerEnforcementTests(unittest.TestCase):
                (id,idempotency_key,wallet_id,user_id,amount_cents,currency,mode,status)
                VALUES('p5','payout-5','w1','u1',1000,'EUR','standard','requested')"""
         )
-        self.db.execute("UPDATE payout_requests SET status='completed' WHERE id='p5'")
+        self.db.execute("UPDATE payout_requests SET status='completed',provider_payout_id='po_p5' WHERE id='p5'")
         with self.assertRaises(sqlite3.IntegrityError):
             self.db.execute("UPDATE payout_requests SET status='failed' WHERE id='p5'")
 
@@ -184,6 +210,9 @@ class PaymentStateLedgerEnforcementTests(unittest.TestCase):
         self.assertIn("trg_payment_tx_settle_held_ledger", source)
         self.assertIn("trg_payment_tx_credit_disputed_ledger", source)
         self.assertIn("trg_payment_dispute_hold_paid_tx", source)
+        self.assertIn("trg_payment_tx_paid_requires_provider_reference", source)
+        self.assertIn("trg_payout_status_requires_provider_reference", source)
+        self.assertIn("trg_payout_request_initial_state_guard", source)
         ensure = source[source.index("async function ensurePaymentSchema"):source.index("function moneyCents")]
         self.assertNotIn("CREATE TABLE", ensure)
         status = source[source.index("async function paymentStatus"):source.index("async function createMissionPayment")]
@@ -193,7 +222,7 @@ class PaymentStateLedgerEnforcementTests(unittest.TestCase):
 
     def test_ledger_is_append_only(self):
         self.create_transaction()
-        self.db.execute("UPDATE payment_transactions SET status='paid' WHERE id='t1'")
+        self.db.execute("UPDATE payment_transactions SET status='paid',provider_payment_id='ch_t1' WHERE id='t1'")
         with self.assertRaises(sqlite3.IntegrityError):
             self.db.execute(
                 "UPDATE payment_wallet_ledger SET available_delta_cents=0 WHERE transaction_id='t1'"
@@ -270,7 +299,7 @@ class PaymentStateLedgerEnforcementTests(unittest.TestCase):
 
     def test_settled_payment_dispute_cannot_be_canceled_without_refund_workflow(self):
         self.create_transaction()
-        self.db.execute("UPDATE payment_transactions SET status='paid' WHERE id='t1'")
+        self.db.execute("UPDATE payment_transactions SET status='paid',provider_payment_id='ch_t1' WHERE id='t1'")
         self.add_open_dispute()
         with self.assertRaises(sqlite3.IntegrityError):
             self.db.execute(
@@ -312,8 +341,8 @@ class PaymentStateLedgerEnforcementTests(unittest.TestCase):
         for trigger in ("trg_payment_dispute_single_open", "trg_payment_dispute_state_guard"):
             self.assertIn(trigger, ensure)
             self.assertIn(trigger, readiness)
-        self.assertIn("Number(guards?.total || 0) !== 18", ensure)
-        self.assertIn("Number(guards?.total||0)===18", readiness)
+        self.assertIn("Number(guards?.total || 0) !== 21", ensure)
+        self.assertIn("Number(guards?.total||0)===21", readiness)
         self.assertIn("PAYMENT_LEDGER_OR_DISPUTE_GUARDS_MIGRATION_REQUIRED", readiness)
 
 
