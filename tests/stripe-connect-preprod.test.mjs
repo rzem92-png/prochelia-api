@@ -48,9 +48,10 @@ test("payment config exposes only the publishable key after both explicit flags 
     STRIPE_SECRET_KEY: "sk_test_placeholder",
     STRIPE_PUBLISHABLE_KEY: "pk_test_placeholder",
     STRIPE_WEBHOOK_SECRET: "whsec_placeholder",
-    STRIPE_DASHBOARD: "full",
-    STRIPE_FEES_COLLECTOR: "stripe",
-    STRIPE_LOSSES_COLLECTOR: "stripe",
+    STRIPE_CONNECT_CHARGE_MODEL: "separate_charges_and_transfers",
+    STRIPE_DASHBOARD: "express",
+    STRIPE_FEES_COLLECTOR: "application",
+    STRIPE_LOSSES_COLLECTOR: "application",
     APP_BASE_URL: "https://prochelia.pages.dev",
     STRIPE_CONNECT_ONBOARDING_ENABLED: "true",
     STRIPE_CONNECT_ONBOARDING_APPROVED: "true"
@@ -69,16 +70,17 @@ test("payment config rejects invalid Accounts v2 dashboard and responsibility co
     STRIPE_SECRET_KEY: "sk_test_placeholder",
     STRIPE_PUBLISHABLE_KEY: "pk_test_placeholder",
     STRIPE_WEBHOOK_SECRET: "whsec_placeholder",
+    STRIPE_CONNECT_CHARGE_MODEL: "separate_charges_and_transfers",
     STRIPE_DASHBOARD: "full",
-    STRIPE_FEES_COLLECTOR: "application",
-    STRIPE_LOSSES_COLLECTOR: "application",
+    STRIPE_FEES_COLLECTOR: "stripe",
+    STRIPE_LOSSES_COLLECTOR: "stripe",
     APP_BASE_URL: "https://prochelia.pages.dev",
     STRIPE_CONNECT_ONBOARDING_ENABLED: "true",
     STRIPE_CONNECT_ONBOARDING_APPROVED: "true"
   });
   const body = await response.json();
   assert.equal(response.status, 200);
-  assert.equal(body.stripe_publishable_key, "pk_test_placeholder");
+  assert.equal(body.stripe_publishable_key, null);
   assert.equal(body.connect_onboarding_ready, false);
 });
 
@@ -88,6 +90,7 @@ test("live Connect config requires a separate live approval in addition to onboa
     STRIPE_SECRET_KEY: "sk_live_placeholder",
     STRIPE_PUBLISHABLE_KEY: "pk_live_placeholder",
     STRIPE_WEBHOOK_SECRET: "whsec_placeholder",
+    STRIPE_CONNECT_CHARGE_MODEL: "direct",
     STRIPE_DASHBOARD: "full",
     STRIPE_FEES_COLLECTOR: "stripe",
     STRIPE_LOSSES_COLLECTOR: "stripe",
@@ -100,6 +103,48 @@ test("live Connect config requires a separate live approval in addition to onboa
   assert.equal(response.status, 200);
   assert.equal(body.stripe_publishable_key, null);
   assert.equal(body.connect_onboarding_ready, false);
+});
+
+test("payment config stays closed until the charge model is explicitly selected", async () => {
+  const response = await worker.fetch(new Request("https://api.test/api/payments/config"), {
+    PAYMENT_PROVIDER: "stripe",
+    STRIPE_SECRET_KEY: "sk_test_placeholder",
+    STRIPE_PUBLISHABLE_KEY: "pk_test_placeholder",
+    STRIPE_WEBHOOK_SECRET: "whsec_placeholder",
+    STRIPE_DASHBOARD: "express",
+    STRIPE_FEES_COLLECTOR: "application",
+    STRIPE_LOSSES_COLLECTOR: "application",
+    APP_BASE_URL: "https://prochelia.pages.dev",
+    STRIPE_CONNECT_ONBOARDING_ENABLED: "true",
+    STRIPE_CONNECT_ONBOARDING_APPROVED: "true"
+  });
+  const body = await response.json();
+  assert.equal(response.status, 200);
+  assert.equal(body.connect_charge_model, null);
+  assert.equal(body.stripe_publishable_key, null);
+  assert.equal(body.connect_onboarding_ready, false);
+});
+
+test("onboarding rejects missing charge model before contacting Stripe", async () => {
+  const response = await worker.fetch(new Request("https://api.test/api/payments/onboard", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ account_token: "acctok_test_12345678", stripe_terms_accepted: true })
+  }), {
+    DB: rateLimitDb(),
+    PAYMENT_PROVIDER: "stripe",
+    STRIPE_SECRET_KEY: "sk_test_placeholder",
+    STRIPE_PUBLISHABLE_KEY: "pk_test_placeholder",
+    STRIPE_WEBHOOK_SECRET: "whsec_placeholder",
+    STRIPE_DASHBOARD: "express",
+    STRIPE_FEES_COLLECTOR: "application",
+    STRIPE_LOSSES_COLLECTOR: "application",
+    STRIPE_CONNECT_ONBOARDING_ENABLED: "true",
+    STRIPE_CONNECT_ONBOARDING_APPROVED: "true"
+  });
+  const body = await response.json();
+  assert.equal(response.status, 503);
+  assert.equal(body.error, "STRIPE_CONNECT_NOT_CONFIGURED");
 });
 
 test("Connect onboarding route is wired but disabled without explicit approval and creates no external request", async () => {
