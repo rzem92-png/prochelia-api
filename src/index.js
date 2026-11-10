@@ -1317,10 +1317,10 @@ async function paymentAdminResolve(request, env) {
   const body=await readJson(request), disputeId=clean(body?.dispute_id), resolution=clean(body?.resolution);
   if(!disputeId||resolution!=='cancel') return json({ok:false,error:'PSP_REFUND_OR_RELEASE_WORKFLOW_NOT_IMPLEMENTED',version:VERSION},409);
   const d=await env.DB.prepare('SELECT * FROM payment_disputes WHERE id=? LIMIT 1').bind(disputeId).first();
-  if(!d||d.status==='resolved') return json({ok:false,error:'DISPUTE_NOT_FOUND_OR_ALREADY_RESOLVED',version:VERSION},409);
+  if(!d||d.status!=='open') return json({ok:false,error:'DISPUTE_NOT_FOUND_OR_NOT_OPEN',version:VERSION},409);
   if(d.transaction_id) {
     const tx=await env.DB.prepare('SELECT * FROM payment_transactions WHERE id=? LIMIT 1').bind(d.transaction_id).first();
-    if(tx&&tx.status!=='pending') return json({ok:false,error:'SETTLED_OR_HELD_PAYMENT_REQUIRES_PSP_REFUND_WORKFLOW',version:VERSION,status:tx.status},409);
+    if(!tx||tx.status!=='pending') return json({ok:false,error:'SETTLED_OR_HELD_PAYMENT_REQUIRES_PSP_REFUND_WORKFLOW',version:VERSION,status:tx?.status||'missing'},409);
   }
   const statements=[
     env.DB.prepare(`UPDATE payment_disputes SET status='resolved',resolution='cancel',
@@ -1332,7 +1332,17 @@ async function paymentAdminResolve(request, env) {
       VALUES (?,?,?,?,?,?,?)`).bind(crypto.randomUUID(),'PAYMENT_DISPUTE_CANCELED',
         d.transaction_id||null,d.mission_id||null,auth.user.id,'OK',JSON.stringify({dispute_id:disputeId}))
   ];
-  await env.DB.batch(statements);
+  try {
+    await env.DB.batch(statements);
+  } catch(error) {
+    const message=String(error?.message||error);
+    if(message.includes('PAYMENT_DISPUTE_STATE_CONFLICT') ||
+       message.includes('PAYMENT_DISPUTE_ALREADY_OPEN') ||
+       message.includes('PAYMENT_TRANSACTION_STATE_TRANSITION_FORBIDDEN')) {
+      return json({ok:false,error:'DISPUTE_STATE_CONFLICT',version:VERSION},409);
+    }
+    throw error;
+  }
   return json({ok:true,version:VERSION,dispute_id:disputeId,status:'resolved',resolution:'cancel'},200);
 }
 
