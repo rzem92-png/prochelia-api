@@ -437,5 +437,34 @@ class PaymentStateLedgerEnforcementTests(unittest.TestCase):
         self.assertIn("INVALID_ACCOUNTING_AMOUNT_CENTS", validation)
 
 
+    def test_finance_summary_never_aggregates_distinct_currencies_or_coerces_corrupt_cents(self):
+        source = (ROOT / "src" / "index.js").read_text(encoding="utf-8")
+        start = source.index("function financeSummaryFromRows")
+        end = source.index("function financeProblemSolution", start)
+        summary = source[start:end]
+        self.assertIn("const paymentTotals=new Map(), ledgerTotals=new Map()", summary)
+        self.assertIn("const currency=String(x.currency||'EUR').toUpperCase()", summary)
+        self.assertIn("integerCents(x[field]??0)", summary)
+        self.assertIn("integerCents(x.amount_cents??0)", summary)
+        self.assertIn("Number.isSafeInteger(next)", summary)
+        self.assertIn("currency_totals:paymentCurrencyTotals", summary)
+        self.assertIn("manual_ledger_currency_totals:ledgerCurrencyTotals", summary)
+        self.assertIn("const legacySafe=integrityErrors===0&&paymentCurrencyTotals.every(x=>x.currency==='EUR')", summary)
+        self.assertIn("gross_cents:gross,gross_eur:gross===null?null:financeMoney(gross)", summary)
+        self.assertNotIn("Number(x.gross_cents", summary)
+        self.assertNotIn("Number(x.amount_cents", summary)
+
+    def test_manual_finance_entry_rejects_invalid_direction_and_currency_before_insert(self):
+        source = (ROOT / "src" / "index.js").read_text(encoding="utf-8")
+        start = source.index("async function financeEntryCreate")
+        end = source.index("async function financeProblemCreate", start)
+        handler = source[start:end]
+        validation = handler[:handler.index("INSERT INTO finance_workspace_entries")]
+        self.assertIn("!['IN','OUT'].includes(direction)", validation)
+        self.assertIn("!/^[A-Z]{3}$/.test(currency)", validation)
+        self.assertIn("INVALID_FINANCE_ENTRY", validation)
+        self.assertIn(".bind(id,auth.user.id,auth.user.role,entryType,direction,amount,currency", handler)
+
+
 if __name__ == "__main__":
     unittest.main()
