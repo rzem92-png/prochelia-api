@@ -273,6 +273,78 @@ test("verified Connect transfer capability never enables bank payouts", async ()
   }
 });
 
+
+
+test("verified bank-payout capability never enables recipient transfers", async () => {
+  const secret = "whsec_connect_test";
+  const timestamp = Math.floor(Date.now() / 1000);
+  const raw = JSON.stringify({
+    id: "evt_connect_payout_only",
+    type: "v2.core.account[requirements].updated",
+    data: { object: { id: "acct_payoutonly123" } }
+  });
+  const signature = await stripeSignature(secret, timestamp, raw);
+  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(raw)));
+  const payloadHash = btoa(String.fromCharCode(...digest)).split("+").join("-").split("/").join("_").replace(/=+$/g, "");
+  const calls = [];
+  const DB = {
+    prepare(sql) {
+      const statement = {
+        args: [],
+        bind(...args) { this.args = args; return this; },
+        async first() {
+          if (sql.includes("type='table'") && sql.includes("sqlite_master")) return { total: 9 };
+          if (sql.includes("type='trigger'") && sql.includes("sqlite_master")) return { total: 16 };
+          if (sql.includes("pragma_table_info('payment_accounts')")) return { total: 1 };
+          if (sql.includes("RETURNING request_count")) return { request_count: 1 };
+          if (sql.includes("SELECT processed,payload_hash,received_at")) {
+            return { processed: 0, payload_hash: payloadHash, received_at: "2026-11-10 07:00:00" };
+          }
+          return null;
+        },
+        async run() { calls.push({ sql, args: this.args }); return { meta: { changes: 1 } }; }
+      };
+      return statement;
+    },
+    async batch(statements) {
+      return Promise.all(statements.map(statement => statement.run()));
+    }
+  };
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    assert.equal(String(url), "https://api.stripe.com/v2/core/accounts/acct_payoutonly123");
+    assert.equal(init.headers.Authorization, "Bearer sk_test_connect");
+    return new Response(JSON.stringify({
+      id: "acct_payoutonly123",
+      configuration: { recipient: { capabilities: { stripe_balance: {
+        stripe_transfers: { status: "pending" },
+        payouts: { status: "active" }
+      } } } }
+    }), { status: 200, headers: { "content-type": "application/json" } });
+  };
+  try {
+    const response = await worker.fetch(new Request("https://api.test/api/payments/webhook", {
+      method: "POST",
+      headers: { "stripe-signature": "t=" + timestamp + ",v1=" + signature },
+      body: raw
+    }), {
+      DB,
+      PAYMENT_PROVIDER: "stripe",
+      STRIPE_SECRET_KEY: "sk_test_connect",
+      STRIPE_WEBHOOK_SECRET: secret
+    });
+    const body = await response.json();
+    assert.equal(response.status, 200, JSON.stringify(body));
+    assert.equal(body.transfers_enabled, false);
+    assert.equal(body.payouts_enabled, true);
+    const accountUpdate = calls.find(call => call.sql.includes("UPDATE payment_accounts") && call.sql.includes("transfers_enabled=?") && call.sql.includes("payouts_enabled=?"));
+    assert.ok(accountUpdate, "recipient transfers and bank payouts must be persisted independently");
+    assert.deepEqual(accountUpdate.args, [0, 1, "pending", "required", "acct_payoutonly123"]);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("Stripe API helper refuses non-allowlisted paths and missing idempotency", async () => {
   await assert.rejects(
     stripePost({ STRIPE_SECRET_KEY: "sk_test_placeholder" }, "v1/payment_intents", {}, "idem-test"),
