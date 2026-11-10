@@ -44,7 +44,7 @@ export async function stripeGet(env, apiPath, fetchImpl = fetch, requestContext 
   const headers = { Authorization: "Bearer " + secret, "Stripe-Version": STRIPE_API_VERSION };
   const context = typeof requestContext?.context === "string" ? requestContext.context.trim() : "";
   const eventId = typeof requestContext?.eventId === "string" ? requestContext.eventId.trim() : "";
-  if (context && context.length <= 255 && !context.includes("\\r") && !context.includes("\\n")) headers["Stripe-Context"] = context;
+  if (context && context.length <= 255 && !Array.from(context).some(character => character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127)) headers["Stripe-Context"] = context;
   if (eventId && /^evt_[A-Za-z0-9]+$/.test(eventId)) headers["Stripe-Request-Trigger"] = "event=" + eventId;
   const response = await fetchImpl(STRIPE_API_BASE + apiPath, { method: "GET", headers });
   const data = await response.json().catch(() => ({}));
