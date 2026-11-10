@@ -1848,7 +1848,7 @@ async function executeCaseBusinessAction(env, c, rec, actorId=null, automatic=fa
   // Financial actions are deliberately queued for the real PSP adapter; no fake money movement.
   if (context.refund_cents || action === 'REFUND_REQUEST') {
     const refundCents=context.refund_cents==null?0:integerCents(context.refund_cents);
-    if(refundCents===null) {
+    if(refundCents===null||refundCents<=0) {
       results.push({action:'PSP_REFUND_REVIEW',ok:false,reason:'INVALID_REFUND_AMOUNT_CENTS'});
     } else {
       const queued=await enqueueAction(env,c.id,'PSP_REFUND_REVIEW',{mission_id:c.mission_id||null,amount_cents:refundCents,reason:c.description||c.case_type},`${c.id}:psp-refund`);
