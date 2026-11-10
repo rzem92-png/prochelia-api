@@ -3379,9 +3379,11 @@ function financeSummaryFromRows(rows,user) {
     if(!derivedSafe)integrityErrors++;
     return {currency,...v,client_net_cents:derivedSafe?clientNet:null,platform_net_cents:derivedSafe?platformNet:null};
   });
-  const ledgerCurrencyTotals=[...ledgerTotals.entries()].sort(([a],[b])=>a.localeCompare(b)).map(([currency,v])=>({
-    currency,in_cents:v.in||0,out_cents:v.out||0,balance_cents:(v.in||0)-(v.out||0)
-  }));
+  const ledgerCurrencyTotals=[...ledgerTotals.entries()].sort(([a],[b])=>a.localeCompare(b)).map(([currency,v])=>{
+    const incoming=v.in||0, outgoing=v.out||0, balance=incoming-outgoing;
+    if(!Number.isSafeInteger(balance)){integrityErrors++;return {currency,in_cents:null,out_cents:null,balance_cents:null};}
+    return {currency,in_cents:incoming,out_cents:outgoing,balance_cents:balance};
+  });
   const safePaymentCurrencyTotals=integrityErrors===0?paymentCurrencyTotals:paymentCurrencyTotals.map(x=>({
     currency:x.currency,gross:null,refunds:null,commission:null,provider_fees:null,net_intervenant:null,
     client_net_cents:null,platform_net_cents:null
@@ -3410,7 +3412,7 @@ function financeSummaryFromRows(rows,user) {
     client_net_cents:clientNet,client_net_eur:clientNet===null?null:financeMoney(clientNet),
     platform_net_cents:platformNet,platform_net_eur:platformNet===null?null:financeMoney(platformNet),
     manual_ledger_in_cents:ledgerIn,manual_ledger_out_cents:ledgerOut,
-    manual_ledger_balance_cents:ledgerIn===null?null:ledgerIn-ledgerOut
+    manual_ledger_balance_cents:ledgerIn===null||!Number.isSafeInteger(ledgerIn-ledgerOut)?null:ledgerIn-ledgerOut
   };
 }
 
