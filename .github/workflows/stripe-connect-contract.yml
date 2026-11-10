@@ -1,0 +1,23 @@
+name: PROCHÉLIA Stripe Connect contract tests
+
+on:
+  pull_request:
+    paths:
+      - "src/index.js"
+      - "src/stripe.js"
+      - "tests/stripe-connect-preprod.test.mjs"
+      - ".github/workflows/stripe-connect-contract.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  stripe-connect-contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Run Stripe Connect route and safety tests
+        run: node --test tests/stripe-connect-preprod.test.mjs
