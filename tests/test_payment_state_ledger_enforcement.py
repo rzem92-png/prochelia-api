@@ -233,6 +233,36 @@ class PaymentStateLedgerEnforcementTests(unittest.TestCase):
         self.assertIn("PSP_EVENT_NOT_SUPPORTED", webhook)
         self.assertLess(webhook.index("PSP_EVENT_NOT_SUPPORTED"), webhook.index("INSERT OR IGNORE INTO payment_webhook_events"))
 
+    def test_only_one_open_dispute_can_exist_per_transaction(self):
+        self.create_transaction()
+        self.add_open_dispute()
+        with self.assertRaises(sqlite3.IntegrityError):
+            self.db.execute(
+                """INSERT INTO payment_disputes
+                   (id,mission_id,transaction_id,client_id,intervenant_id,status,reason,amount_cents)
+                   VALUES('d2','m1','t1','client-u1','u1','open','second dispute',1000)"""
+            )
+
+    def test_dispute_can_only_be_canceled_while_its_payment_is_pending(self):
+        self.create_transaction()
+        self.add_open_dispute()
+        self.db.execute(
+            "UPDATE payment_disputes SET status='resolved',resolution='cancel' WHERE id='d1'"
+        )
+        with self.assertRaises(sqlite3.IntegrityError):
+            self.db.execute(
+                "UPDATE payment_disputes SET status='open' WHERE id='d1'"
+            )
+
+    def test_settled_payment_dispute_cannot_be_canceled_without_refund_workflow(self):
+        self.create_transaction()
+        self.db.execute("UPDATE payment_transactions SET status='paid' WHERE id='t1'")
+        self.add_open_dispute()
+        with self.assertRaises(sqlite3.IntegrityError):
+            self.db.execute(
+                "UPDATE payment_disputes SET status='resolved',resolution='cancel' WHERE id='d1'"
+            )
+
 
 if __name__ == "__main__":
     unittest.main()
