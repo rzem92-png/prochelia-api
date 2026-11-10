@@ -271,5 +271,25 @@ class PaymentStateLedgerEnforcementTests(unittest.TestCase):
         self.assertIn("},409)", handler)
 
 
+    def test_webhook_acknowledgement_is_conditioned_on_persisted_state_and_provider_reference(self):
+        source = (ROOT / "src" / "index.js").read_text(encoding="utf-8")
+        webhook = source[source.index("async function paymentWebhook"):source.index("async function openPaymentDispute")]
+        self.assertIn("PAYMENT_WEBHOOK_PROVIDER_REFERENCE_CONFLICT", webhook)
+        self.assertIn("PAYOUT_WEBHOOK_PROVIDER_REFERENCE_CONFLICT", webhook)
+        self.assertIn("const stateGuard=paymentGuard", webhook)
+        self.assertIn("AND ${stateGuard}", webhook)
+        self.assertIn("INSERT INTO payment_audit", webhook)
+        self.assertIn("SELECT ?,?,?,?,?,? WHERE ${stateGuard}", webhook)
+        self.assertIn("const completion=results?.[results.length-2]", webhook)
+        self.assertIn("PAYMENT_WEBHOOK_STATE_CONFLICT", webhook)
+        self.assertIn("PAYOUT_WEBHOOK_STATE_CONFLICT", webhook)
+
+    def test_held_payment_cannot_be_reversed_by_a_late_failure_webhook(self):
+        source = (ROOT / "src" / "index.js").read_text(encoding="utf-8")
+        webhook = source[source.index("async function paymentWebhook"):source.index("async function openPaymentDispute")]
+        self.assertIn("tx.status==='held'&&newPaymentStatus==='failed'&&!tx.provider_payment_id", webhook)
+        self.assertIn("else if(tx.status==='held'&&newPaymentStatus==='failed')", webhook)
+
+
 if __name__ == "__main__":
     unittest.main()
