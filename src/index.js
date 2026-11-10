@@ -1194,6 +1194,12 @@ async function paymentWebhook(request, env) {
   if(!eventId||!type||provider!==paymentProvider(env)) return json({ok:false,error:'INVALID_WEBHOOK_EVENT_OR_PROVIDER',version:VERSION},400);
   if(['payment_refunded','charge_refunded','refund_succeeded'].includes(type))
     return json({ok:false,error:'REFUND_WORKFLOW_NOT_IMPLEMENTED',version:VERSION},503);
+  const supportedEvents=new Set([
+    'payment_succeeded','charge_succeeded','payment_failed','charge_failed',
+    'payout_processing','payout_paid','payout_failed','payout_canceled'
+  ]);
+  if(!supportedEvents.has(type))
+    return json({ok:false,error:'PSP_EVENT_NOT_SUPPORTED',version:VERSION},503);
 
   const payloadHash=await sha256Base64url(raw);
   await env.DB.prepare(`INSERT OR IGNORE INTO payment_webhook_events
