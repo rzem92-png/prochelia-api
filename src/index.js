@@ -2667,7 +2667,8 @@ async function executeQueuedAction(env, action) {
       const amountCents=payload.amount_cents==null?0:integerCents(payload.amount_cents);
       const debitCents=payload.debit_cents==null?0:integerCents(payload.debit_cents);
       const creditCents=payload.credit_cents==null?0:integerCents(payload.credit_cents);
-      if(amountCents===null||debitCents===null||creditCents===null) {
+      if(amountCents===null||debitCents===null||creditCents===null||
+        !Number.isSafeInteger(debitCents+creditCents)) {
         result={performed:false,reason:'INVALID_ACCOUNTING_AMOUNT_CENTS'};
       } else if (await tableExists(env,'accounting_ledger')) {
         const cols=await tableColumns(env,'accounting_ledger');
@@ -2741,7 +2742,10 @@ async function loyaltyUpdate(request, env) {
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
   await ensureOperationalSchema(env);
   const b=await readJson(request)||{}; if(!b.client_id&&!b.company_id)return json({ok:false,error:'CLIENT_OR_COMPANY_REQUIRED',version:VERSION},400);
-  const points=Math.max(-100000,Math.min(100000,Number(b.points||0)));
+  const rawPoints=b.points==null?0:b.points;
+  const pointsValue=typeof rawPoints==='number'?rawPoints:(typeof rawPoints==='string'&&/^-?\\d+$/.test(rawPoints.trim())?Number(rawPoints):NaN);
+  if(!Number.isSafeInteger(pointsValue)) return json({ok:false,error:'INVALID_LOYALTY_POINTS',version:VERSION},400);
+  const points=Math.max(-100000,Math.min(100000,pointsValue));
   const amountCents=b.amount_cents==null?0:integerCents(b.amount_cents);
   if(amountCents===null) return json({ok:false,error:'INVALID_LOYALTY_AMOUNT_CENTS',version:VERSION},400);
   const id=crypto.randomUUID();
