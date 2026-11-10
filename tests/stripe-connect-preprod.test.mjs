@@ -720,3 +720,30 @@ test("loyalty update rejects fractional, non-finite and unsafe points before any
   }
   assert.equal(writes.some(x => x.sql.includes("INSERT INTO loyalty_events")), false);
 });
+
+
+test("promotion financial caps reject fractional, negative and unsafe cent values before insert", async () => {
+  const writes = [];
+  const DB = authenticatedManagerDb(writes);
+  const invalidCases = [
+    { min_amount_cents: 1.5 },
+    { min_amount_cents: -1 },
+    { max_discount_cents: "2.5" },
+    { max_discount_cents: -1 },
+    { budget_cents: "1e3" },
+    { budget_cents: Number.MAX_SAFE_INTEGER + 1 },
+    { intervenant_protection_cents: 0.5 },
+    { intervenant_protection_cents: -1 }
+  ];
+  for (const financialFields of invalidCases) {
+    const response = await worker.fetch(new Request("https://api.test/api/strategic/promotions", {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie: "prochelia_session=manager-session" },
+      body: JSON.stringify({ code: "TEST", name: "Test promotion", type: "WELCOME", phase: "TEST", ...financialFields })
+    }), { DB });
+    const body = await response.json();
+    assert.equal(response.status, 400, JSON.stringify({ financialFields, body }));
+    assert.equal(body.error, "INVALID_PROMOTION_AMOUNT_CENTS");
+  }
+  assert.equal(writes.some(x => x.sql.includes("INSERT INTO promotions")), false);
+});
