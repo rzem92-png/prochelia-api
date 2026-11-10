@@ -791,11 +791,13 @@ async function ensurePaymentSchema(env) {
       'trg_payout_request_reserve_ledger','trg_payout_status_guard',
       'trg_payout_settle_ledger','trg_payout_release_ledger',
       'trg_payment_tx_paid_insert_state_guard',
+      'trg_payment_tx_paid_reference_immutable',
+      'trg_payout_provider_reference_immutable',
       'trg_payment_tx_paid_requires_provider_reference',
       'trg_payout_status_requires_provider_reference',
       'trg_payout_request_initial_state_guard'
     )`).first();
-  if (Number(tables?.total || 0) !== 9 || Number(guards?.total || 0) !== 22 ||
+  if (Number(tables?.total || 0) !== 9 || Number(guards?.total || 0) !== 24 ||
       Number(capabilityColumn?.total || 0) !== 1 || Number(accountLinkIndex?.total || 0) !== 1) {
     throw new Error('PAYMENT_SCHEMA_OR_LEDGER_MIGRATION_REQUIRED');
   }
@@ -1595,12 +1597,14 @@ async function handleBase(request, env) {
        'trg_payout_request_guard','trg_payout_request_reserve_ledger',
        'trg_payout_status_guard','trg_payout_settle_ledger','trg_payout_release_ledger',
       'trg_payment_tx_paid_insert_state_guard',
+      'trg_payment_tx_paid_reference_immutable',
+      'trg_payout_provider_reference_immutable',
       'trg_payment_tx_paid_requires_provider_reference',
       'trg_payout_status_requires_provider_reference',
       'trg_payout_request_initial_state_guard'
       )`).first();
     const databaseReady=h?.ok===1, coreSchemaReady=!!s0?.sql&&!!u0?.sql;
-    const ledgerReady=Number(paymentTables?.total||0)===9&&Number(guards?.total||0)===22&&Number(accountLinkIndex?.total||0)===1;
+    const ledgerReady=Number(paymentTables?.total||0)===9&&Number(guards?.total||0)===24&&Number(accountLinkIndex?.total||0)===1;
     const infrastructureReady=databaseReady&&coreSchemaReady;
     return json({ok:true,ready:false,infrastructure_ready:infrastructureReady,database:databaseReady,
       core_schema_ready:coreSchemaReady,payment_ledger_enforcement_ready:ledgerReady,
