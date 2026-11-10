@@ -1216,6 +1216,7 @@ async function paymentWebhook(request, env) {
   const payoutMap={payout_processing:'processing',payout_paid:'completed',payout_failed:'failed',payout_canceled:'canceled'};
   const newPaymentStatus=paymentMap[type], newPayoutStatus=payoutMap[type];
   const statements=[];
+  let paymentGuard=null, payoutGuard=null;
 
   if(newPaymentStatus) {
     if(!txId) return json({ok:false,error:'WEBHOOK_TRANSACTION_ID_REQUIRED',version:VERSION},400);
@@ -1225,17 +1226,26 @@ async function paymentWebhook(request, env) {
     const currency=String(event?.data?.currency||'').toUpperCase();
     if(!ref||!Number.isSafeInteger(cents)||cents!==Number(tx.gross_cents)||currency!==tx.currency)
       return json({ok:false,error:'WEBHOOK_PAYMENT_AMOUNT_CURRENCY_OR_REFERENCE_MISMATCH',version:VERSION},409);
+    if(tx.provider_payment_id && tx.provider_payment_id!==ref)
+      return json({ok:false,error:'PAYMENT_WEBHOOK_PROVIDER_REFERENCE_CONFLICT',version:VERSION},409);
     if(tx.status==='pending') {
+      paymentGuard={id:txId,status:newPaymentStatus,ref};
       statements.push(env.DB.prepare(`UPDATE payment_transactions SET status=?,provider_payment_id=?,
         updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='pending'`).bind(newPaymentStatus,ref,txId));
     } else if(tx.status==='held'&&newPaymentStatus==='paid') {
+      paymentGuard={id:txId,status:'held',ref};
       statements.push(env.DB.prepare(`UPDATE payment_transactions SET provider_payment_id=COALESCE(provider_payment_id,?),
         updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='held'`).bind(ref,txId));
     } else if(tx.status==='held'&&newPaymentStatus==='failed'&&!tx.provider_payment_id) {
-      statements.push(env.DB.prepare(`UPDATE payment_transactions SET status='failed',provider_payment_id=?,
+      paymentGuard={id:txId,status:'failed',ref};
+      statements.push(env.DB.prepare(`UPDATE payment_transactions SET status='failed',provider_payment_id=?, 
         updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='held' AND provider_payment_id IS NULL`).bind(ref,txId));
     } else if(['paid','failed','canceled'].includes(tx.status)&&tx.status!==newPaymentStatus) {
       return json({ok:false,error:'PAYMENT_WEBHOOK_STATE_CONFLICT',version:VERSION,status:tx.status},409);
+    } else if(tx.status==='held'&&newPaymentStatus==='failed') {
+      return json({ok:false,error:'PAYMENT_WEBHOOK_STATE_CONFLICT',version:VERSION,status:tx.status},409);
+    } else {
+      paymentGuard={id:txId,status:tx.status,ref};
     }
   }
 
@@ -1247,14 +1257,19 @@ async function paymentWebhook(request, env) {
     const currency=String(event?.data?.currency||'').toUpperCase();
     if(!ref||!Number.isSafeInteger(cents)||cents!==Number(payout.amount_cents)||currency!==payout.currency)
       return json({ok:false,error:'WEBHOOK_PAYOUT_AMOUNT_CURRENCY_OR_REFERENCE_MISMATCH',version:VERSION},409);
+    if(payout.provider_payout_id && payout.provider_payout_id!==ref)
+      return json({ok:false,error:'PAYOUT_WEBHOOK_PROVIDER_REFERENCE_CONFLICT',version:VERSION},409);
     if(['completed','failed','canceled'].includes(payout.status)&&payout.status!==newPayoutStatus)
       return json({ok:false,error:'PAYOUT_WEBHOOK_STATE_CONFLICT',version:VERSION,status:payout.status},409);
     if(['requested','processing'].includes(payout.status)) {
+      payoutGuard={id:payoutId,status:newPayoutStatus,ref};
       statements.push(env.DB.prepare(`UPDATE payout_requests SET status=?,provider_payout_id=COALESCE(provider_payout_id,?),
         failure_code=?,failure_message=?,completed_at=CASE WHEN ?='completed' THEN CURRENT_TIMESTAMP ELSE completed_at END,
         updated_at=CURRENT_TIMESTAMP WHERE id=? AND status IN ('requested','processing')`)
         .bind(newPayoutStatus,ref,clean(event?.data?.failure_code)||null,
           clean(event?.data?.failure_message)||null,newPayoutStatus,payoutId));
+    } else {
+      payoutGuard={id:payoutId,status:payout.status,ref};
     }
   }
 
@@ -1268,14 +1283,28 @@ async function paymentWebhook(request, env) {
   if(Number(claim?.meta?.changes||0)!==1)
     return json({ok:false,error:'WEBHOOK_EVENT_PROCESSING',version:VERSION,retry_after_seconds:30},409);
 
+  const stateGuard=paymentGuard
+    ? `EXISTS (SELECT 1 FROM payment_transactions WHERE id=? AND status=? AND provider_payment_id=?)`
+    : `EXISTS (SELECT 1 FROM payout_requests WHERE id=? AND status=? AND provider_payout_id=?)`;
+  const guard=paymentGuard||payoutGuard;
+  const guardArgs=paymentGuard?[paymentGuard.id,paymentGuard.status,paymentGuard.ref]:
+    [payoutGuard.id,payoutGuard.status,payoutGuard.ref];
   statements.push(env.DB.prepare(`UPDATE payment_webhook_events SET processed=1,processed_at=CURRENT_TIMESTAMP
-    WHERE provider=? AND event_id=? AND processed=2`).bind(provider,eventId));
+    WHERE provider=? AND event_id=? AND processed=2 AND ${stateGuard}`)
+    .bind(provider,eventId,...guardArgs));
   statements.push(env.DB.prepare(`INSERT INTO payment_audit
-    (id,event_type,transaction_id,payout_id,result,metadata_json) VALUES (?,?,?,?,?,?)`)
+    (id,event_type,transaction_id,payout_id,result,metadata_json)
+    SELECT ?,?,?,?,?,? WHERE ${stateGuard}`)
     .bind(crypto.randomUUID(),'PSP_WEBHOOK_PROCESSED',txId||null,payoutId||null,'OK',
-      JSON.stringify({provider,event_id:eventId,event_type:type,payload_hash:payloadHash})));
+      JSON.stringify({provider,event_id:eventId,event_type:type,payload_hash:payloadHash}),...guardArgs));
   try {
-    await env.DB.batch(statements);
+    const results=await env.DB.batch(statements);
+    const completion=results?.[results.length-2];
+    if(Number(completion?.meta?.changes||0)!==1) {
+      await env.DB.prepare(`UPDATE payment_webhook_events SET processed=0,received_at=CURRENT_TIMESTAMP
+        WHERE provider=? AND event_id=? AND processed=2`).bind(provider,eventId).run();
+      return json({ok:false,error:paymentGuard?'PAYMENT_WEBHOOK_STATE_CONFLICT':'PAYOUT_WEBHOOK_STATE_CONFLICT',version:VERSION},409);
+    }
   } catch(error) {
     // A failed atomic batch must not strand the event; permit a safe retry.
     await env.DB.prepare(`UPDATE payment_webhook_events SET processed=0,received_at=CURRENT_TIMESTAMP
