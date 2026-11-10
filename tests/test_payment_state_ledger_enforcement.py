@@ -206,6 +206,25 @@ class PaymentStateLedgerEnforcementTests(unittest.TestCase):
         configured = source[source.index("function paymentsConfigured"):source.index("async function paymentOnboard")]
         self.assertIn("return false;", configured)
 
+    def test_runtime_account_reads_are_scoped_to_the_active_provider(self):
+        source = (ROOT / "src" / "index.js").read_text(encoding="utf-8")
+        status = source[source.index("async function paymentStatus"):source.index("async function createMissionPayment")]
+        payout = source[source.index("async function payoutRequest"):source.index("async function verifyWebhookSignature")]
+        self.assertIn("WHERE user_id=? AND provider=?", status)
+        self.assertIn("bind(auth.user.id,paymentProvider(env))", status)
+        self.assertIn("WHERE user_id=? AND provider=?", payout)
+        self.assertIn("bind(auth.user.id,paymentProvider(env))", payout)
+
+    def test_mission_charge_checks_terminal_state_and_preserves_idempotent_replay(self):
+        source = (ROOT / "src" / "index.js").read_text(encoding="utf-8")
+        handler = source[source.index("async function createMissionPayment"):source.index("async function finalizeMissionPayment")]
+        terminal = handler.index("MISSION_NOT_PAYABLE")
+        recipient_gate = handler.index("RECIPIENT_TRANSFER_CAPABILITY_NOT_READY")
+        replay = handler.index("idempotent_replay:true")
+        self.assertLess(terminal, replay)
+        self.assertLess(replay, recipient_gate)
+        self.assertIn("WHERE user_id=? AND provider=?", handler)
+
 
 if __name__ == "__main__":
     unittest.main()
