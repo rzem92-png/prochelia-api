@@ -115,6 +115,38 @@ class PaymentStateLedgerEnforcementTests(unittest.TestCase):
         )
         self.assertEqual(self.balances(), (14500, 0, 0))
 
+
+    def test_provider_payment_and_payout_references_are_immutable_once_assigned(self):
+        self.create_transaction()
+        self.db.execute(
+            "UPDATE payment_transactions SET provider_payment_id='ch_original' WHERE id='t1'"
+        )
+        for replacement in ("ch_replaced", None, ""):
+            with self.assertRaises(sqlite3.IntegrityError):
+                self.db.execute(
+                    "UPDATE payment_transactions SET provider_payment_id=? WHERE id='t1'",
+                    (replacement,),
+                )
+        self.db.execute(
+            "UPDATE payment_transactions SET status='paid' WHERE id='t1'"
+        )
+        self.assertEqual(self.balances(), (14500, 0, 0))
+
+        self.db.execute(
+            """INSERT INTO payout_requests
+               (id,idempotency_key,wallet_id,user_id,amount_cents,currency,mode,status)
+               VALUES('p_immutable','payout-immutable','w1','u1',1000,'EUR','standard','requested')"""
+        )
+        self.db.execute(
+            "UPDATE payout_requests SET status='processing',provider_payout_id='po_original' WHERE id='p_immutable'"
+        )
+        for replacement in ("po_replaced", None, ""):
+            with self.assertRaises(sqlite3.IntegrityError):
+                self.db.execute(
+                    "UPDATE payout_requests SET provider_payout_id=? WHERE id='p_immutable'",
+                    (replacement,),
+                )
+
     def test_payout_status_requires_provider_reference_and_initial_requested_state(self):
         with self.assertRaises(sqlite3.IntegrityError):
             self.db.execute(
@@ -358,11 +390,12 @@ class PaymentStateLedgerEnforcementTests(unittest.TestCase):
         ensure = source[source.index("async function ensurePaymentSchema"):source.index("function moneyCents")]
         readiness = source[source.index("if (url.pathname === '/api/readiness')"):source.index("if (url.pathname === '/api/info')")]
         for trigger in ("trg_payment_dispute_single_open", "trg_payment_dispute_state_guard",
-                        "trg_payment_tx_paid_insert_state_guard"):
+                        "trg_payment_tx_paid_insert_state_guard", "trg_payment_tx_paid_reference_immutable",
+                        "trg_payout_provider_reference_immutable"):
             self.assertIn(trigger, ensure)
             self.assertIn(trigger, readiness)
-        self.assertIn("Number(guards?.total || 0) !== 22", ensure)
-        self.assertIn("Number(guards?.total||0)===22", readiness)
+        self.assertIn("Number(guards?.total || 0) !== 24", ensure)
+        self.assertIn("Number(guards?.total||0)===24", readiness)
         self.assertIn("PAYMENT_LEDGER_OR_DISPUTE_GUARDS_MIGRATION_REQUIRED", readiness)
 
 
