@@ -1,5 +1,5 @@
 import { handleV7Route } from "./v7-routes.js";
-import { assertStripeWebhookCompletion, requireStripeAccountId, stripePost, stripeGet, verifyStripeSignature } from "./stripe.js";
+import { assertStripeWebhookCompletion, mapStripeRecipientCapabilityStatus, requireStripeAccountId, stripePost, stripeGet, verifyStripeSignature } from "./stripe.js";
 // PROCHÉLIA — INDEX BACKEND CONSOLIDÉ UNIQUE
 // Référence de consolidation : V14.1 Finance + sécurité/RBAC existants.
 // Généré le 19/10/2026. À déployer uniquement après recette avec la vraie base D1.
@@ -1170,12 +1170,13 @@ async function stripeConnectWebhook(request, env) {
     const capabilities=account?.configuration?.recipient?.capabilities?.stripe_balance;
     const transferStatus=capabilities?.stripe_transfers?.status;
     const payoutStatus=capabilities?.payouts?.status;
-    const transfersEnabled=transferStatus==='active';
+    const transferState=mapStripeRecipientCapabilityStatus(transferStatus);
+    const transfersEnabled=transferState.enabled;
     // These are independent Stripe Accounts v2 capabilities. A transfer
     // permission never implies permission to pay out to an external bank account.
     const payoutsEnabled=payoutStatus==='active';
-    const status=transfersEnabled?'active':'pending';
-    const onboardingStatus=transfersEnabled?'submitted':'required';
+    const status=transferState.status;
+    const onboardingStatus=transferState.onboardingStatus;
     const linked=await env.DB.prepare(`UPDATE payment_accounts
       SET charges_enabled=0,transfers_enabled=?,payouts_enabled=?,status=?,
           onboarding_status=?,updated_at=CURRENT_TIMESTAMP
