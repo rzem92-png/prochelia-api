@@ -14,3 +14,55 @@ test("system scale and backup routes require a manager session", () => {
   assert.equal((routes.match(/getSessionUser\(request,env\)/g) || []).length >= 3, true);
   assert.match(routes, /auth\.user\|\|String\(auth\.user\.role\|\|''\)\.toUpperCase\(\)!=='GERANTE'/);
 });
+
+test("originless mutating requests are rejected before reaching business handlers", async () => {
+  const { default: worker } = await import("../src/index.js");
+  const response = await worker.fetch(new Request("https://prochelia-api.example/api/missions/validate", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ mission_id: "not-used" })
+  }), {});
+  assert.equal(response.status, 403);
+  assert.equal((await response.json()).error, "ORIGIN_NOT_ALLOWED");
+});
+
+test("malformed session cookie is treated as absent and logout still clears it", async () => {
+  const { default: worker } = await import("../src/index.js");
+  const response = await worker.fetch(new Request("https://prochelia-api.example/api/auth/logout", {
+    method: "POST",
+    headers: {
+      origin: "https://prochelia.pages.dev",
+      cookie: "prochelia_session=%E0%A4%A"
+    }
+  }), { DB: {} });
+  assert.equal(response.status, 200);
+  assert.equal((await response.json()).authenticated, false);
+  assert.match(response.headers.get("set-cookie"), /Max-Age=0/);
+});
+
+test("originless bootstrap is allowed only with the exact configured bearer token", async () => {
+  const { default: worker } = await import("../src/index.js");
+  const env = {
+    BOOTSTRAP_TOKEN: "test-bootstrap-secret",
+    DB: { prepare: () => ({ first: async () => ({ total: 1 }) }) }
+  };
+  const denied = await worker.fetch(new Request("https://prochelia-api.example/api/auth/bootstrap", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: "{}"
+  }), env);
+  assert.equal(denied.status, 403);
+  assert.equal((await denied.json()).error, "ORIGIN_NOT_ALLOWED");
+
+  const authorized = await worker.fetch(new Request("https://prochelia-api.example/api/auth/bootstrap", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      authorization: "Bearer test-bootstrap-secret"
+    },
+    body: "{}"
+  }), env);
+  assert.equal(authorized.status, 409);
+  assert.equal((await authorized.json()).error, "BOOTSTRAP_ALREADY_USED");
+});
+
