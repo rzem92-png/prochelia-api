@@ -483,3 +483,23 @@ test("Accounts v2 recipient onboarding rejects unsupported separate charges and 
   assert.equal(onboarding.status, 503);
   assert.equal(onboardingBody.error, "STRIPE_CONNECT_NOT_CONFIGURED");
 });
+
+
+test("Stripe Connect webhook rejects malformed event IDs before database access", async () => {
+  const secret = "whsec_connect_test";
+  const timestamp = Math.floor(Date.now() / 1000);
+  const raw = JSON.stringify({
+    id: "not-a-stripe-event-id",
+    type: "v2.core.account[requirements].updated",
+    related_object: { id: "acct_connecttest123", type: "v2.core.account" }
+  });
+  const signature = await stripeSignature(secret, timestamp, raw);
+  const response = await worker.fetch(new Request("https://api.test/api/payments/webhook", {
+    method: "POST",
+    headers: { "stripe-signature": "t=" + timestamp + ",v1=" + signature },
+    body: raw
+  }), { STRIPE_WEBHOOK_SECRET: secret });
+  const body = await response.json();
+  assert.equal(response.status, 400);
+  assert.equal(body.error, "INVALID_STRIPE_CONNECT_EVENT");
+});
