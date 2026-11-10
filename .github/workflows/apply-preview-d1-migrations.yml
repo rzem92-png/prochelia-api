@@ -57,6 +57,17 @@ jobs:
             "0002_server_pricing.sql",
             "0003_route_address_provenance.sql",
             "0004_atomic_wallet_ledger.sql",
+            "0005_payment_processor_schema.sql",
+            "0005_payment_runtime_schema.sql",
+            "0006_payment_state_ledger_enforcement.sql",
+            "0007_login_attempts_security.sql",
+            "0008_stripe_recipient_capabilities.sql",
+            "0009_payment_dispute_guards.sql",
+            "0010_stripe_account_link_uniqueness.sql",
+            "0011_financial_provider_evidence_guards.sql",
+            "0012_payment_insert_provider_evidence_guard.sql",
+            "0013_immutable_provider_references.sql",
+            "0014_restore_wallet_balance_guard.sql",
           ):
             p = Path("migrations") / name
             assert p.is_file() and p.stat().st_size > 0, f"Missing migration: {name}"
@@ -153,3 +164,94 @@ jobs:
           set -euo pipefail
           npx --yes wrangler@4 d1 migrations list "$EXPECTED_DB_NAME" --remote --config wrangler.preview-migrations.jsonc
           echo "Migration command completed for the hard-pinned Preview D1 target."
+
+      - name: Verify Preview D1 financial invariants
+        shell: bash
+        env:
+          VERIFY_ACCOUNT_ID: ${{ env.EXPECTED_ACCOUNT_ID }}
+          VERIFY_DATABASE_ID: ${{ env.EXPECTED_DB_ID }}
+          VERIFY_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const endpoint = `https://api.cloudflare.com/client/v4/accounts/${process.env.VERIFY_ACCOUNT_ID}/d1/database/${process.env.VERIFY_DATABASE_ID}/query`;
+          async function query(sql) {
+            const response = await fetch(endpoint, {
+              method: "POST",
+              headers: {
+                Authorization: `Bearer ${process.env.VERIFY_API_TOKEN}`,
+                "Content-Type": "application/json"
+              },
+              body: JSON.stringify({ sql })
+            });
+            const payload = await response.json();
+            if (!response.ok || payload.success !== true) {
+              throw new Error("Cloudflare D1 verification query failed");
+            }
+            return payload.result?.[0]?.results ?? [];
+          }
+          const checks = await query(`
+            SELECT 'payment_tables' AS kind, COUNT(*) AS total
+              FROM sqlite_master WHERE type='table' AND name IN (
+                'payment_accounts','wallets','payment_transactions','payout_requests',
+                'payment_webhook_events','payment_disputes','payment_reconciliation',
+                'payment_audit','payment_wallet_ledger'
+              )
+            UNION ALL
+            SELECT 'expected_triggers', COUNT(*) FROM sqlite_master
+             WHERE type='trigger' AND name IN (
+              'trg_payment_wallet_ledger_require_wallet','trg_payment_wallet_ledger_guard_balances',
+              'trg_payment_wallet_ledger_apply','trg_payment_wallet_ledger_no_update',
+              'trg_payment_wallet_ledger_no_delete','trg_payment_dispute_hold_paid_tx',
+              'trg_payment_tx_status_guard','trg_payment_tx_credit_ledger',
+              'trg_payment_tx_credit_disputed_ledger','trg_payment_tx_hold_ledger',
+              'trg_payment_tx_settle_held_ledger','trg_payment_dispute_single_open',
+              'trg_payment_dispute_state_guard','trg_payout_request_guard',
+              'trg_payout_request_reserve_ledger','trg_payout_status_guard',
+              'trg_payout_settle_ledger','trg_payout_release_ledger',
+              'trg_payment_tx_paid_insert_state_guard','trg_payment_tx_paid_reference_immutable',
+              'trg_payout_provider_reference_immutable','trg_payment_tx_paid_requires_provider_reference',
+              'trg_payout_status_requires_provider_reference','trg_payout_request_initial_state_guard'
+             )
+            UNION ALL
+            SELECT 'transfers_enabled', COUNT(*) FROM pragma_table_info('payment_accounts')
+             WHERE name='transfers_enabled'
+            UNION ALL
+            SELECT 'account_index', COUNT(*) FROM sqlite_master
+             WHERE type='index' AND name='ux_payment_accounts_provider_account'
+            UNION ALL
+            SELECT 'login_attempts', COUNT(*) FROM sqlite_master
+             WHERE type='table' AND name='login_attempts';
+          `);
+          const actual = Object.fromEntries(checks.map(row => [row.kind, Number(row.total)]));
+          const expected = {
+            payment_tables: 9,
+            expected_triggers: 24,
+            transfers_enabled: 1,
+            account_index: 1,
+            login_attempts: 1
+          };
+          for (const [key, value] of Object.entries(expected)) {
+            if (actual[key] !== value) {
+              throw new Error(`Preview D1 invariant ${key}: expected ${value}, got ${actual[key]}`);
+            }
+          }
+          const migrations = await query(`
+            SELECT name FROM d1_migrations WHERE name IN (
+              '0005_payment_processor_schema.sql',
+              '0006_payment_state_ledger_enforcement.sql',
+              '0007_login_attempts_security.sql',
+              '0008_stripe_recipient_capabilities.sql',
+              '0009_payment_dispute_guards.sql',
+              '0010_stripe_account_link_uniqueness.sql',
+              '0011_financial_provider_evidence_guards.sql',
+              '0012_payment_insert_provider_evidence_guard.sql',
+              '0013_immutable_provider_references.sql',
+              '0014_restore_wallet_balance_guard.sql'
+            )
+          `);
+          if (migrations.length !== 10) {
+            throw new Error(`Preview D1 migration ledger incomplete: ${migrations.length}/10`);
+          }
+          console.log("PASS: 9 payment tables, 24 financial triggers, capability column, unique account index, login throttling table and 10 pending migration records verified.");
+          NODE
