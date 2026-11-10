@@ -238,7 +238,7 @@ test("verified Connect transfer capability never enables bank payouts", async ()
   const raw = JSON.stringify({
     id: "evt_connect_capability_test",
     type: "v2.core.account[requirements].updated",
-    data: { object: { id: "acct_connecttest123" } }
+    related_object: { id: "acct_connecttest123", type: "v2.core.account", url: "/v2/core/accounts/acct_connecttest123" }, context: "acct_platform123"
   });
   const signature = await stripeSignature(secret, timestamp, raw);
   const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(raw)));
@@ -274,6 +274,8 @@ test("verified Connect transfer capability never enables bank payouts", async ()
   globalThis.fetch = async (url, init) => {
     assert.equal(String(url), "https://api.stripe.com/v2/core/accounts/acct_connecttest123");
     assert.equal(init.headers.Authorization, "Bearer sk_test_connect");
+    assert.equal(init.headers["Stripe-Context"], "acct_platform123");
+    assert.equal(init.headers["Stripe-Request-Trigger"], "event=evt_connect_capability_test");
     return new Response(JSON.stringify({
       id: "acct_connecttest123",
       configuration: { recipient: { capabilities: { stripe_balance: { stripe_transfers: { status: "active" } } } } }
@@ -310,7 +312,7 @@ test("verified bank-payout capability never enables recipient transfers", async 
   const raw = JSON.stringify({
     id: "evt_connect_payout_only",
     type: "v2.core.account[requirements].updated",
-    data: { object: { id: "acct_payoutonly123" } }
+    related_object: { id: "acct_payoutonly123", type: "v2.core.account", url: "/v2/core/accounts/acct_payoutonly123" }
   });
   const signature = await stripeSignature(secret, timestamp, raw);
   const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(raw)));
