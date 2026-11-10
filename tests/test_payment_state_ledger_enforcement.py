@@ -327,6 +327,15 @@ class PaymentStateLedgerEnforcementTests(unittest.TestCase):
         self.assertIn("PSP_EVENT_NOT_SUPPORTED", webhook)
         self.assertLess(webhook.index("PSP_EVENT_NOT_SUPPORTED"), webhook.index("INSERT OR IGNORE INTO payment_webhook_events"))
 
+    def test_payment_and_payout_webhooks_validate_stored_cent_values_without_number_coercion(self):
+        source = (ROOT / "src" / "index.js").read_text(encoding="utf-8")
+        webhook = source[source.index("async function paymentWebhook"):source.index("async function openPaymentDispute")]
+        self.assertIn("const expectedCents=integerCents(tx.gross_cents)", webhook)
+        self.assertIn("const expectedCents=integerCents(payout.amount_cents)", webhook)
+        self.assertIn("cents!==expectedCents", webhook)
+        self.assertNotIn("Number(tx.gross_cents)", webhook)
+        self.assertNotIn("Number(payout.amount_cents)", webhook)
+
     def test_only_one_open_dispute_can_exist_per_transaction(self):
         self.create_transaction()
         self.add_open_dispute()
