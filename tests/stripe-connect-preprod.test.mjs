@@ -126,6 +126,35 @@ test("live Connect config requires a separate live approval in addition to onboa
   assert.equal(body.connect_onboarding_ready, false);
 });
 
+test("direct-charge onboarding stays closed until Merchant card_payments is implemented", async () => {
+  const env = {
+    PAYMENT_PROVIDER: "stripe",
+    STRIPE_SECRET_KEY: "sk_test_placeholder",
+    STRIPE_PUBLISHABLE_KEY: "pk_test_placeholder",
+    STRIPE_WEBHOOK_SECRET: "whsec_placeholder",
+    STRIPE_CONNECT_CHARGE_MODEL: "direct",
+    STRIPE_DASHBOARD: "full",
+    STRIPE_FEES_COLLECTOR: "stripe",
+    STRIPE_LOSSES_COLLECTOR: "stripe",
+    APP_BASE_URL: "https://prochelia.pages.dev",
+    STRIPE_CONNECT_ONBOARDING_ENABLED: "true",
+    STRIPE_CONNECT_ONBOARDING_APPROVED: "true"
+  };
+  const config = await worker.fetch(new Request("https://api.test/api/payments/config"), env);
+  const configBody = await config.json();
+  assert.equal(configBody.stripe_publishable_key, null);
+  assert.equal(configBody.connect_onboarding_ready, false);
+
+  const onboarding = await worker.fetch(new Request("https://api.test/api/payments/onboard", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ account_token: "acctok_test_12345678", stripe_terms_accepted: true })
+  }), env);
+  const onboardingBody = await onboarding.json();
+  assert.equal(onboarding.status, 503);
+  assert.equal(onboardingBody.error, "STRIPE_CONNECT_NOT_CONFIGURED");
+});
+
 test("payment config stays closed until the charge model is explicitly selected", async () => {
   const response = await worker.fetch(new Request("https://api.test/api/payments/config"), {
     PAYMENT_PROVIDER: "stripe",
