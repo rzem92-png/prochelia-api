@@ -998,6 +998,15 @@ async function createMissionPayment(request, env) {
      WHERE m.id=? LIMIT 1
   `).bind(missionId).first();
   if(!mission) return json({ok:false,error:'MISSION_OR_ASSIGNED_PARTY_NOT_FOUND',version:VERSION},404);
+  // Do not create a charge that cannot later be transferred to its assigned
+  // recipient. This is independent from the recipient's external-bank payout
+  // capability, which is checked only by payoutRequest().
+  const recipientAccount=await env.DB.prepare(
+    "SELECT transfers_enabled FROM payment_accounts WHERE user_id=? AND provider=? LIMIT 1"
+  ).bind(mission.intervenant_user_id,paymentProvider(env)).first();
+  if(!recipientAccount||Number(recipientAccount.transfers_enabled)!==1) {
+    return json({ok:false,error:'RECIPIENT_TRANSFER_CAPABILITY_NOT_READY',version:VERSION},409);
+  }
   if(['canceled','cancelled','rejected'].includes(String(mission.status||'').toLowerCase())) {
     return json({ok:false,error:'MISSION_NOT_PAYABLE',version:VERSION},409);
   }
