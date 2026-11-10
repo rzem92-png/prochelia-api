@@ -1277,7 +1277,7 @@ async function paymentWebhook(request, env) {
     if(!txId) return json({ok:false,error:'WEBHOOK_TRANSACTION_ID_REQUIRED',version:VERSION},400);
     const tx=await env.DB.prepare('SELECT * FROM payment_transactions WHERE id=? LIMIT 1').bind(txId).first();
     if(!tx) return json({ok:false,error:'WEBHOOK_TRANSACTION_NOT_FOUND_RETRYABLE',version:VERSION},503);
-    const ref=clean(event?.data?.provider_payment_id), cents=Number(event?.data?.amount_cents);
+    const ref=clean(event?.data?.provider_payment_id), cents=integerCents(event?.data?.amount_cents);
     const currency=String(event?.data?.currency||'').toUpperCase();
     if(!ref||!Number.isSafeInteger(cents)||cents!==Number(tx.gross_cents)||currency!==tx.currency)
       return json({ok:false,error:'WEBHOOK_PAYMENT_AMOUNT_CURRENCY_OR_REFERENCE_MISMATCH',version:VERSION},409);
@@ -1310,7 +1310,7 @@ async function paymentWebhook(request, env) {
     if(!payoutId) return json({ok:false,error:'WEBHOOK_PAYOUT_ID_REQUIRED',version:VERSION},400);
     const payout=await env.DB.prepare('SELECT * FROM payout_requests WHERE id=? LIMIT 1').bind(payoutId).first();
     if(!payout) return json({ok:false,error:'WEBHOOK_PAYOUT_NOT_FOUND_RETRYABLE',version:VERSION},503);
-    const ref=clean(event?.data?.provider_payout_id), cents=Number(event?.data?.amount_cents);
+    const ref=clean(event?.data?.provider_payout_id), cents=integerCents(event?.data?.amount_cents);
     const currency=String(event?.data?.currency||'').toUpperCase();
     if(!ref||!Number.isSafeInteger(cents)||cents!==Number(payout.amount_cents)||currency!==payout.currency)
       return json({ok:false,error:'WEBHOOK_PAYOUT_AMOUNT_CURRENCY_OR_REFERENCE_MISMATCH',version:VERSION},409);
@@ -1847,8 +1847,13 @@ async function executeCaseBusinessAction(env, c, rec, actorId=null, automatic=fa
 
   // Financial actions are deliberately queued for the real PSP adapter; no fake money movement.
   if (context.refund_cents || action === 'REFUND_REQUEST') {
-    const queued=await enqueueAction(env,c.id,'PSP_REFUND_REVIEW',{mission_id:c.mission_id||null,amount_cents:Math.max(0,Number(context.refund_cents||0)),reason:c.description||c.case_type},`${c.id}:psp-refund`);
-    results.push({action:'PSP_REFUND_REVIEW',...queued});
+    const refundCents=context.refund_cents==null?0:integerCents(context.refund_cents);
+    if(refundCents===null) {
+      results.push({action:'PSP_REFUND_REVIEW',ok:false,reason:'INVALID_REFUND_AMOUNT_CENTS'});
+    } else {
+      const queued=await enqueueAction(env,c.id,'PSP_REFUND_REVIEW',{mission_id:c.mission_id||null,amount_cents:refundCents,reason:c.description||c.case_type},`${c.id}:psp-refund`);
+      results.push({action:'PSP_REFUND_REVIEW',...queued});
+    }
   }
 
   await journal(env,automatic?'copilot':'gerante',actorId,'CASE_BUSINESS_ACTIONS_EXECUTED','operational_case',c.id,'OK',{results});
