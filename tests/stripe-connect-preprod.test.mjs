@@ -596,5 +596,5 @@ test("manual finance entries reject fractional-cent and malformed euro amounts",
   assert.equal(response.status, 200, JSON.stringify(body));
   const entry = writes.find(write => write.sql.includes("INSERT INTO finance_workspace_entries"));
   assert.ok(entry);
-  assert.equal(entry.args[6], 1234);
+  assert.equal(entry.args[5], 1234);
 });
