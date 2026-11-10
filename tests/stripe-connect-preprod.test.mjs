@@ -500,6 +500,6 @@ test("Stripe Connect webhook rejects malformed event IDs before database access"
     body: raw
   }), { PAYMENT_PROVIDER: "stripe", STRIPE_WEBHOOK_SECRET: secret });
   const body = await response.json();
-  assert.equal(response.status, 400);
+  assert.equal(response.status, 400, JSON.stringify(body));
   assert.equal(body.error, "INVALID_STRIPE_CONNECT_EVENT");
 });
