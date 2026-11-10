@@ -2956,7 +2956,9 @@ async function handle(request,env){
     if(isMutatingMethod(request.method) && !noOriginBootstrap && !noOriginWebhook && !securityOriginAllowed(request,env)) return json({ok:false,error:'ORIGIN_NOT_ALLOWED',version:VERSION},403);
     if (url.pathname === '/api/payments/webhook') {
       if (request.method !== 'POST') return json({ok:false,error:'METHOD_NOT_ALLOWED',version:VERSION},405,{'allow':'POST'});
-      return paymentWebhook(request,env);
+      // Keep real PSP events disabled until atomic idempotency, refund transitions
+      // and payout reconciliation are fully tested against D1.
+      return json({ok:false,error:'PAYMENT_WEBHOOK_DISABLED_PENDING_REVIEW',version:VERSION},503);
     }
     // Fail closed before any schema helper touches D1: unauthenticated callers
     // must not use mission validation as an existence oracle for private IDs.
