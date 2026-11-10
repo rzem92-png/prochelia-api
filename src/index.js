@@ -1279,7 +1279,8 @@ async function paymentWebhook(request, env) {
     if(!tx) return json({ok:false,error:'WEBHOOK_TRANSACTION_NOT_FOUND_RETRYABLE',version:VERSION},503);
     const ref=clean(event?.data?.provider_payment_id), cents=integerCents(event?.data?.amount_cents);
     const currency=String(event?.data?.currency||'').toUpperCase();
-    if(!ref||!Number.isSafeInteger(cents)||cents!==Number(tx.gross_cents)||currency!==tx.currency)
+    const expectedCents=integerCents(tx.gross_cents);
+    if(!ref||cents===null||expectedCents===null||cents!==expectedCents||currency!==tx.currency)
       return json({ok:false,error:'WEBHOOK_PAYMENT_AMOUNT_CURRENCY_OR_REFERENCE_MISMATCH',version:VERSION},409);
     if(tx.provider_payment_id && tx.provider_payment_id!==ref)
       return json({ok:false,error:'PAYMENT_WEBHOOK_PROVIDER_REFERENCE_CONFLICT',version:VERSION},409);
@@ -1312,7 +1313,8 @@ async function paymentWebhook(request, env) {
     if(!payout) return json({ok:false,error:'WEBHOOK_PAYOUT_NOT_FOUND_RETRYABLE',version:VERSION},503);
     const ref=clean(event?.data?.provider_payout_id), cents=integerCents(event?.data?.amount_cents);
     const currency=String(event?.data?.currency||'').toUpperCase();
-    if(!ref||!Number.isSafeInteger(cents)||cents!==Number(payout.amount_cents)||currency!==payout.currency)
+    const expectedCents=integerCents(payout.amount_cents);
+    if(!ref||cents===null||expectedCents===null||cents!==expectedCents||currency!==payout.currency)
       return json({ok:false,error:'WEBHOOK_PAYOUT_AMOUNT_CURRENCY_OR_REFERENCE_MISMATCH',version:VERSION},409);
     if(payout.provider_payout_id && payout.provider_payout_id!==ref)
       return json({ok:false,error:'PAYOUT_WEBHOOK_PROVIDER_REFERENCE_CONFLICT',version:VERSION},409);
