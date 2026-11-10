@@ -7,6 +7,14 @@ SOURCE = ROOT / "src" / "index.js"
 
 
 class AtomicRateLimitTests(unittest.TestCase):
+    def test_production_rate_limit_uses_existing_sha256_helper(self):
+        source = SOURCE.read_text(encoding="utf-8")
+        start = source.index("async function productionSubjectHash")
+        end = source.index("async function productionRateLimit", start)
+        helper = source[start:end]
+        self.assertIn("return sha256Base64url(`${ip}|${route}`);", helper)
+        self.assertNotIn("sha256Hex", helper)
+
     def test_counter_uses_single_atomic_upsert(self):
         source = SOURCE.read_text(encoding="utf-8")
         self.assertIn("ON CONFLICT(bucket,subject_hash,window_start)", source)

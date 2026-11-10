@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { webcrypto } from "node:crypto";
 import worker from "../src/index.js";
-import { stripePost } from "../src/stripe.js";
+import { assertStripeWebhookCompletion, mapStripeRecipientCapabilityStatus, requireStripeAccountId, stripeGet, stripePost, verifyStripeSignature } from "../src/stripe.js";
 
 if (!globalThis.crypto) globalThis.crypto = webcrypto;
 
@@ -16,6 +16,54 @@ function rateLimitDb() {
           if (sql.includes("RETURNING request_count")) return { request_count: 1 };
           return null;
         }
+      };
+    }
+  };
+}
+
+function authenticatedRateLimitDb() {
+  return {
+    prepare(sql) {
+      const statement = rateLimitDb().prepare(sql);
+      const first = statement.first;
+      statement.first = async function () {
+        if (sql.includes("FROM sessions s")) {
+          return {
+            id: "provider-user", role: "intervenant", email: "provider@example.test",
+            first_name: "Test", last_name: "Provider", phone: null, status: "active",
+            created_at: "2026-01-01 00:00:00", updated_at: "2026-01-01 00:00:00",
+            session_id: "session-test"
+          };
+        }
+        return first.call(this);
+      };
+      return statement;
+    }
+  };
+}
+
+function schemaReadyClientDb() {
+  return {
+    prepare(sql) {
+      return {
+        bind() { return this; },
+        async first() {
+          if (sql.includes("RETURNING request_count")) return { request_count: 1 };
+          if (sql.includes("FROM sessions s")) {
+            return {
+              id: "client-user", role: "client", email: "client@example.test",
+              first_name: "Test", last_name: "Client", phone: null, status: "active",
+              created_at: "2026-01-01 00:00:00", updated_at: "2026-01-01 00:00:00",
+              session_id: "session-client-test"
+            };
+          }
+          if (sql.includes("pragma_table_info")) return { total: 1 };
+          if (sql.includes("ux_payment_accounts_provider_account")) return { total: 1 };
+          if (sql.includes("type='trigger'")) return { total: 24 };
+          if (sql.includes("type='table'") && sql.includes("payment_accounts")) return { total: 9 };
+          return null;
+        },
+        async run() { return { meta: { changes: 1 } }; }
       };
     }
   };
@@ -48,7 +96,7 @@ test("payment config exposes only the publishable key after both explicit flags 
     STRIPE_SECRET_KEY: "sk_test_placeholder",
     STRIPE_PUBLISHABLE_KEY: "pk_test_placeholder",
     STRIPE_WEBHOOK_SECRET: "whsec_placeholder",
-    STRIPE_CONNECT_CHARGE_MODEL: "separate_charges_and_transfers",
+    STRIPE_CONNECT_CHARGE_MODEL: "destination",
     STRIPE_DASHBOARD: "express",
     STRIPE_FEES_COLLECTOR: "application",
     STRIPE_LOSSES_COLLECTOR: "application",
@@ -105,6 +153,35 @@ test("live Connect config requires a separate live approval in addition to onboa
   assert.equal(body.connect_onboarding_ready, false);
 });
 
+test("direct-charge onboarding stays closed until Merchant card_payments is implemented", async () => {
+  const env = {
+    PAYMENT_PROVIDER: "stripe",
+    STRIPE_SECRET_KEY: "sk_test_placeholder",
+    STRIPE_PUBLISHABLE_KEY: "pk_test_placeholder",
+    STRIPE_WEBHOOK_SECRET: "whsec_placeholder",
+    STRIPE_CONNECT_CHARGE_MODEL: "direct",
+    STRIPE_DASHBOARD: "full",
+    STRIPE_FEES_COLLECTOR: "stripe",
+    STRIPE_LOSSES_COLLECTOR: "stripe",
+    APP_BASE_URL: "https://prochelia.pages.dev",
+    STRIPE_CONNECT_ONBOARDING_ENABLED: "true",
+    STRIPE_CONNECT_ONBOARDING_APPROVED: "true"
+  };
+  const config = await worker.fetch(new Request("https://api.test/api/payments/config"), env);
+  const configBody = await config.json();
+  assert.equal(configBody.stripe_publishable_key, null);
+  assert.equal(configBody.connect_onboarding_ready, false);
+
+  const onboarding = await worker.fetch(new Request("https://api.test/api/payments/onboard", {
+    method: "POST",
+    headers: { "content-type": "application/json", cookie: "prochelia_session=session-test" },
+    body: JSON.stringify({ account_token: "acctok_test_12345678", stripe_terms_accepted: true })
+  }), { ...env, DB: authenticatedRateLimitDb() });
+  const onboardingBody = await onboarding.json();
+  assert.equal(onboarding.status, 503);
+  assert.equal(onboardingBody.error, "STRIPE_CONNECT_NOT_CONFIGURED");
+});
+
 test("payment config stays closed until the charge model is explicitly selected", async () => {
   const response = await worker.fetch(new Request("https://api.test/api/payments/config"), {
     PAYMENT_PROVIDER: "stripe",
@@ -128,10 +205,10 @@ test("payment config stays closed until the charge model is explicitly selected"
 test("onboarding rejects missing charge model before contacting Stripe", async () => {
   const response = await worker.fetch(new Request("https://api.test/api/payments/onboard", {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: { "content-type": "application/json", cookie: "prochelia_session=session-test" },
     body: JSON.stringify({ account_token: "acctok_test_12345678", stripe_terms_accepted: true })
   }), {
-    DB: rateLimitDb(),
+    DB: authenticatedRateLimitDb(),
     PAYMENT_PROVIDER: "stripe",
     STRIPE_SECRET_KEY: "sk_test_placeholder",
     STRIPE_PUBLISHABLE_KEY: "pk_test_placeholder",
@@ -186,9 +263,9 @@ test("verified Connect transfer capability never enables bank payouts", async ()
   const secret = "whsec_connect_test";
   const timestamp = Math.floor(Date.now() / 1000);
   const raw = JSON.stringify({
-    id: "evt_connect_capability_test",
+    id: "evt_connectcapabilitytest",
     type: "v2.core.account[requirements].updated",
-    data: { object: { id: "acct_connecttest123" } }
+    related_object: { id: "acct_connecttest123", type: "v2.core.account", url: "/v2/core/accounts/acct_connecttest123" }, context: "acct_platform123"
   });
   const signature = await stripeSignature(secret, timestamp, raw);
   const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(raw)));
@@ -201,7 +278,9 @@ test("verified Connect transfer capability never enables bank payouts", async ()
         bind(...args) { this.args = args; return this; },
         async first() {
           if (sql.includes("type='table'") && sql.includes("sqlite_master")) return { total: 9 };
-          if (sql.includes("type='trigger'") && sql.includes("sqlite_master")) return { total: 16 };
+          if (sql.includes("type='trigger'") && sql.includes("sqlite_master")) return { total: 24 };
+          if (sql.includes("type='index'") && sql.includes("sqlite_master")) return { total: 1 };
+          if (sql.includes("pragma_table_info('payment_accounts')")) return { total: 1 };
           if (sql.includes("RETURNING request_count")) return { request_count: 1 };
           if (sql.includes("SELECT processed,payload_hash,received_at")) {
             return { processed: 0, payload_hash: payloadHash, received_at: "2026-11-10 07:00:00" };
@@ -221,8 +300,10 @@ test("verified Connect transfer capability never enables bank payouts", async ()
   };
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async (url, init) => {
-    assert.equal(String(url), "https://api.stripe.com/v2/core/accounts/acct_connecttest123");
+    assert.equal(String(url), "https://api.stripe.com/v2/core/accounts/acct_connecttest123?include%5B%5D=configuration.recipient");
     assert.equal(init.headers.Authorization, "Bearer sk_test_connect");
+    assert.equal(init.headers["Stripe-Context"], "acct_platform123");
+    assert.equal(init.headers["Stripe-Request-Trigger"], "event=evt_connectcapabilitytest");
     return new Response(JSON.stringify({
       id: "acct_connecttest123",
       configuration: { recipient: { capabilities: { stripe_balance: { stripe_transfers: { status: "active" } } } } }
@@ -243,11 +324,122 @@ test("verified Connect transfer capability never enables bank payouts", async ()
     assert.equal(response.status, 200, JSON.stringify(body));
     assert.equal(body.transfers_enabled, true);
     assert.equal(body.payouts_enabled, false);
-    const accountUpdate = calls.find(call => call.sql.includes("UPDATE payment_accounts SET charges_enabled=0,payouts_enabled=0"));
-    assert.ok(accountUpdate, "external payout flag must remain disabled");
+    const accountUpdate = calls.find(call => call.sql.includes("UPDATE payment_accounts") && call.sql.includes("transfers_enabled=?") && call.sql.includes("payouts_enabled=?"));
+    assert.ok(accountUpdate, "transfer and external payout capabilities must be persisted independently");
+    assert.deepEqual(accountUpdate.args, [1, 0, "active", "submitted", "acct_connecttest123"]);
   } finally {
     globalThis.fetch = originalFetch;
   }
+});
+
+
+
+test("verified bank-payout capability never enables recipient transfers", async () => {
+  const secret = "whsec_connect_test";
+  const timestamp = Math.floor(Date.now() / 1000);
+  const raw = JSON.stringify({
+    id: "evt_connectpayoutonly",
+    type: "v2.core.account[configuration.recipient].capability_status_updated",
+    related_object: { id: "acct_payoutonly123", type: "v2.core.account", url: "/v2/core/accounts/acct_payoutonly123" }
+  });
+  const signature = await stripeSignature(secret, timestamp, raw);
+  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(raw)));
+  const payloadHash = btoa(String.fromCharCode(...digest)).split("+").join("-").split("/").join("_").replace(/=+$/g, "");
+  const calls = [];
+  const DB = {
+    prepare(sql) {
+      const statement = {
+        args: [],
+        bind(...args) { this.args = args; return this; },
+        async first() {
+          if (sql.includes("type='table'") && sql.includes("sqlite_master")) return { total: 9 };
+          if (sql.includes("type='trigger'") && sql.includes("sqlite_master")) return { total: 24 };
+          if (sql.includes("type='index'") && sql.includes("sqlite_master")) return { total: 1 };
+          if (sql.includes("pragma_table_info('payment_accounts')")) return { total: 1 };
+          if (sql.includes("RETURNING request_count")) return { request_count: 1 };
+          if (sql.includes("SELECT processed,payload_hash,received_at")) {
+            return { processed: 0, payload_hash: payloadHash, received_at: "2026-11-10 07:00:00" };
+          }
+          return null;
+        },
+        async run() { calls.push({ sql, args: this.args }); return { meta: { changes: 1 } }; }
+      };
+      return statement;
+    },
+    async batch(statements) {
+      return Promise.all(statements.map(statement => statement.run()));
+    }
+  };
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    assert.equal(String(url), "https://api.stripe.com/v2/core/accounts/acct_payoutonly123?include%5B%5D=configuration.recipient");
+    assert.equal(init.headers.Authorization, "Bearer sk_test_connect");
+    assert.equal(init.headers["Stripe-Context"], undefined);
+    assert.equal(init.headers["Stripe-Request-Trigger"], "event=evt_connectpayoutonly");
+    return new Response(JSON.stringify({
+      id: "acct_payoutonly123",
+      configuration: { recipient: { capabilities: { stripe_balance: {
+        stripe_transfers: { status: "pending" },
+        payouts: { status: "active" }
+      } } } }
+    }), { status: 200, headers: { "content-type": "application/json" } });
+  };
+  try {
+    const response = await worker.fetch(new Request("https://api.test/api/payments/webhook", {
+      method: "POST",
+      headers: { "stripe-signature": "t=" + timestamp + ",v1=" + signature },
+      body: raw
+    }), {
+      DB,
+      PAYMENT_PROVIDER: "stripe",
+      STRIPE_SECRET_KEY: "sk_test_connect",
+      STRIPE_WEBHOOK_SECRET: secret
+    });
+    const body = await response.json();
+    assert.equal(response.status, 200, JSON.stringify(body));
+    assert.equal(body.transfers_enabled, false);
+    assert.equal(body.payouts_enabled, true);
+    const accountUpdate = calls.find(call => call.sql.includes("UPDATE payment_accounts") && call.sql.includes("transfers_enabled=?") && call.sql.includes("payouts_enabled=?"));
+    assert.ok(accountUpdate, "recipient transfers and bank payouts must be persisted independently");
+    assert.deepEqual(accountUpdate.args, [0, 1, "pending", "required", "acct_payoutonly123"]);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("Stripe account retrieval rejects a response for a different connected account", async () => {
+  const fetchImpl = async () => new Response(JSON.stringify({ id: "acct_other123" }), {
+    status: 200, headers: { "content-type": "application/json" }
+  });
+  await assert.rejects(
+    stripeGet({ STRIPE_SECRET_KEY: "sk_test_placeholder" }, "v2/core/accounts/acct_expected123", fetchImpl),
+    /STRIPE_ACCOUNT_ID_MISMATCH/
+  );
+});
+
+test("Stripe account retrieval accepts only the exact requested connected account", async () => {
+  const fetchImpl = async (url) => new Response(JSON.stringify({ id: "acct_expected123" }), {
+    status: 200, headers: { "content-type": "application/json" }
+  });
+  const account = await stripeGet(
+    { STRIPE_SECRET_KEY: "sk_test_placeholder" },
+    "v2/core/accounts/acct_expected123",
+    fetchImpl
+  );
+  assert.equal(account.id, "acct_expected123");
+});
+
+test("Stripe webhook signature verification rejects stale and malformed signatures", async () => {
+  const secret = "whsec_signature_unit_test";
+  const now = 1_800_000_000;
+  const body = JSON.stringify({ id: "evt_signature_test", type: "v2.core.account[requirements].updated" });
+  const valid = await stripeSignature(secret, now, body);
+  assert.equal(await verifyStripeSignature("t=" + now + ",v1=" + valid, secret, body, now), true);
+  assert.equal(await verifyStripeSignature("t=" + (now - 301) + ",v1=" + valid, secret, body, now), false);
+  assert.equal(await verifyStripeSignature("t=" + now + ",v1=not-a-hex-signature", secret, body, now), false);
+  assert.equal(await verifyStripeSignature("v1=" + valid, secret, body, now), false);
+  assert.equal(await verifyStripeSignature("t=" + now + ",v1=" + valid, "", body, now), false);
+  assert.equal(await verifyStripeSignature("t=" + now + ",v1=" + valid, secret, body + " ", now), false);
 });
 
 test("Stripe API helper refuses non-allowlisted paths and missing idempotency", async () => {
@@ -259,4 +451,299 @@ test("Stripe API helper refuses non-allowlisted paths and missing idempotency", 
     stripePost({ STRIPE_SECRET_KEY: "sk_test_placeholder" }, "v2/core/accounts", {}, ""),
     /STRIPE_IDEMPOTENCY_KEY_REQUIRED/
   );
+});
+
+
+test("Stripe onboarding accepts only a syntactically valid connected account ID", () => {
+  assert.equal(requireStripeAccountId("acct_Valid123"), "acct_Valid123");
+  assert.throws(() => requireStripeAccountId(""), /STRIPE_ACCOUNT_ID_INVALID/);
+  assert.throws(() => requireStripeAccountId("cus_not_an_account"), /STRIPE_ACCOUNT_ID_INVALID/);
+  assert.throws(() => requireStripeAccountId("acct_bad/id"), /STRIPE_ACCOUNT_ID_INVALID/);
+  assert.throws(() => requireStripeAccountId(null), /STRIPE_ACCOUNT_ID_INVALID/);
+});
+
+
+test("Stripe webhook completion requires both audit and processed-state writes", () => {
+  assert.equal(assertStripeWebhookCompletion([{ meta: { changes: 1 } }, { meta: { changes: 1 } }]), true);
+  assert.throws(() => assertStripeWebhookCompletion([{ meta: { changes: 1 } }, { meta: { changes: 0 } }]), /STRIPE_WEBHOOK_COMPLETION_NOT_PERSISTED/);
+  assert.throws(() => assertStripeWebhookCompletion([{ meta: { changes: 1 } }]), /STRIPE_WEBHOOK_COMPLETION_NOT_PERSISTED/);
+  assert.throws(() => assertStripeWebhookCompletion(null), /STRIPE_WEBHOOK_COMPLETION_NOT_PERSISTED/);
+});
+
+
+test("Stripe recipient capability states preserve restricted and rejected outcomes without enabling transfers", () => {
+  assert.deepEqual(mapStripeRecipientCapabilityStatus("active"), { status: "active", onboardingStatus: "submitted", enabled: true });
+  assert.deepEqual(mapStripeRecipientCapabilityStatus("pending"), { status: "pending", onboardingStatus: "required", enabled: false });
+  assert.deepEqual(mapStripeRecipientCapabilityStatus("inactive"), { status: "inactive", onboardingStatus: "required", enabled: false });
+  assert.deepEqual(mapStripeRecipientCapabilityStatus("restricted"), { status: "restricted", onboardingStatus: "restricted", enabled: false });
+  assert.deepEqual(mapStripeRecipientCapabilityStatus("rejected"), { status: "rejected", onboardingStatus: "rejected", enabled: false });
+  assert.deepEqual(mapStripeRecipientCapabilityStatus("unsupported"), { status: "unsupported", onboardingStatus: "unsupported", enabled: false });
+  assert.deepEqual(mapStripeRecipientCapabilityStatus("unknown_future_status"), { status: "pending", onboardingStatus: "required", enabled: false });
+});
+
+
+test("Accounts v2 recipient onboarding rejects unsupported separate charges and transfers", async () => {
+  const env = {
+    PAYMENT_PROVIDER: "stripe",
+    STRIPE_SECRET_KEY: "sk_test_placeholder",
+    STRIPE_PUBLISHABLE_KEY: "pk_test_placeholder",
+    STRIPE_WEBHOOK_SECRET: "whsec_placeholder",
+    STRIPE_CONNECT_CHARGE_MODEL: "separate_charges_and_transfers",
+    STRIPE_DASHBOARD: "express",
+    STRIPE_FEES_COLLECTOR: "application",
+    STRIPE_LOSSES_COLLECTOR: "application",
+    APP_BASE_URL: "https://prochelia.pages.dev",
+    STRIPE_CONNECT_ONBOARDING_ENABLED: "true",
+    STRIPE_CONNECT_ONBOARDING_APPROVED: "true"
+  };
+  const config = await worker.fetch(new Request("https://api.test/api/payments/config"), env);
+  const configBody = await config.json();
+  assert.equal(configBody.stripe_publishable_key, null);
+  assert.equal(configBody.connect_onboarding_ready, false);
+
+  const onboarding = await worker.fetch(new Request("https://api.test/api/payments/onboard", {
+    method: "POST",
+    headers: { "content-type": "application/json", cookie: "prochelia_session=session-test" },
+    body: JSON.stringify({ account_token: "acctok_test_12345678", stripe_terms_accepted: true })
+  }), { ...env, DB: authenticatedRateLimitDb() });
+  const onboardingBody = await onboarding.json();
+  assert.equal(onboarding.status, 503);
+  assert.equal(onboardingBody.error, "STRIPE_CONNECT_NOT_CONFIGURED");
+});
+
+
+test("Stripe Connect webhook rejects malformed event IDs before database access", async () => {
+  const secret = "whsec_connect_test";
+  const timestamp = Math.floor(Date.now() / 1000);
+  const raw = JSON.stringify({
+    id: "not-a-stripe-event-id",
+    type: "v2.core.account[requirements].updated",
+    related_object: { id: "acct_connecttest123", type: "v2.core.account" }
+  });
+  const signature = await stripeSignature(secret, timestamp, raw);
+  const response = await worker.fetch(new Request("https://api.test/api/payments/webhook", {
+    method: "POST",
+    headers: { "stripe-signature": "t=" + timestamp + ",v1=" + signature },
+    body: raw
+  }), { DB: rateLimitDb(), PAYMENT_PROVIDER: "stripe", STRIPE_WEBHOOK_SECRET: secret });
+  const body = await response.json();
+  assert.equal(response.status, 400, JSON.stringify(body));
+  assert.equal(body.error, "INVALID_STRIPE_CONNECT_EVENT");
+});
+
+
+test("financial euro parsing rejects sub-cent and malformed amounts without rounding", async () => {
+  const env = { DB: schemaReadyClientDb() };
+  const makeRequest = amount => new Request("https://api.test/api/payments/dispute", {
+    method: "POST",
+    headers: { "content-type": "application/json", cookie: "prochelia_session=session-client-test" },
+    body: JSON.stringify({ mission_id: "mission-test", reason: "test", amount_eur: amount })
+  });
+
+  for (const amount of [1.005, 1.0001, -1, "1e2", "1,23", "NaN", 0]) {
+    const response = await worker.fetch(makeRequest(amount), env);
+    const body = await response.json();
+    assert.equal(response.status, 400, `amount=${String(amount)} body=${JSON.stringify(body)}`);
+    assert.equal(body.error, "INVALID_DISPUTE");
+  }
+
+  for (const amount of [1.23, "1.23", "1.2300"]) {
+    const response = await worker.fetch(makeRequest(amount), env);
+    const body = await response.json();
+    // Reaching the lookup proves the exact-cent value passed parsing/validation.
+    assert.equal(response.status, 404, `amount=${String(amount)} body=${JSON.stringify(body)}`);
+    assert.equal(body.error, "PAYMENT_NOT_FOUND_FOR_MISSION");
+  }
+});
+
+
+test("manual finance entries reject fractional-cent and malformed euro amounts", async () => {
+  const writes = [];
+  const DB = {
+    prepare(sql) {
+      const statement = {
+        args: [],
+        bind(...args) { this.args = args; return this; },
+        async first() {
+          if (sql.includes("RETURNING request_count")) return { request_count: 1 };
+          if (sql.includes("FROM sessions s")) return {
+            id: "finance-user", role: "gerante", email: "finance@example.test",
+            first_name: "Finance", last_name: "Test", phone: null, status: "active",
+            created_at: "2026-01-01 00:00:00", updated_at: "2026-01-01 00:00:00",
+            session_id: "finance-session"
+          };
+          return null;
+        },
+        async run() { writes.push({ sql, args: this.args }); return { meta: { changes: 1 } }; }
+      };
+      return statement;
+    }
+  };
+  const makeRequest = amount => new Request("https://api.test/api/finance/entry", {
+    method: "POST",
+    headers: { "content-type": "application/json", cookie: "prochelia_session=finance-session" },
+    body: JSON.stringify({ amount_eur: amount, entry_type: "MANUAL_TEST" })
+  });
+  for (const amount of [1.005, 1.0001, -1, "1e2", "1,23", "NaN", 0, null]) {
+    const response = await worker.fetch(makeRequest(amount), { DB });
+    const body = await response.json();
+    assert.equal(response.status, 400, `amount=${String(amount)} body=${JSON.stringify(body)}`);
+    assert.equal(body.error, "INVALID_FINANCE_ENTRY");
+  }
+  assert.equal(writes.some(write => write.sql.includes("INSERT INTO finance_workspace_entries")), false);
+  const response = await worker.fetch(makeRequest("12.34"), { DB });
+  const body = await response.json();
+  assert.equal(response.status, 200, JSON.stringify(body));
+  const entry = writes.find(write => write.sql.includes("INSERT INTO finance_workspace_entries"));
+  assert.ok(entry);
+  assert.equal(entry.args[5], 1234);
+});
+
+
+test("finance problem amounts accept only non-negative safe integer cents", async () => {
+  const writes = [];
+  const DB = {
+    prepare(sql) {
+      const statement = {
+        args: [],
+        bind(...args) { this.args = args; return this; },
+        async first() {
+          if (sql.includes("RETURNING request_count")) return { request_count: 1 };
+          if (sql.includes("FROM sessions s")) return {
+            id: "finance-user", role: "gerante", email: "finance@example.test",
+            first_name: "Finance", last_name: "Test", phone: null, status: "active",
+            created_at: "2026-01-01 00:00:00", updated_at: "2026-01-01 00:00:00",
+            session_id: "finance-session"
+          };
+          return null;
+        },
+        async run() { writes.push({ sql, args: this.args }); return { meta: { changes: 1 } }; }
+      };
+      return statement;
+    }
+  };
+  const makeRequest = amount => new Request("https://api.test/api/finance/problem", {
+    method: "POST",
+    headers: { "content-type": "application/json", cookie: "prochelia_session=finance-session" },
+    body: JSON.stringify({ issue_type: "UNKNOWN", amount_cents: amount })
+  });
+  for (const amount of [1.5, -1, "1.5", "1e3", "NaN", Number.MAX_SAFE_INTEGER + 1]) {
+    const response = await worker.fetch(makeRequest(amount), { DB });
+    const body = await response.json();
+    assert.equal(response.status, 400, `amount_cents=${String(amount)} body=${JSON.stringify(body)}`);
+    assert.equal(body.error, "INVALID_FINANCE_AMOUNT_CENTS");
+  }
+  assert.equal(writes.some(write => write.sql.includes("INSERT INTO finance_resolution_cases")), false);
+  const response = await worker.fetch(makeRequest(1234), { DB });
+  assert.equal(response.status, 200);
+  const entry = writes.find(write => write.sql.includes("INSERT INTO finance_resolution_cases"));
+  assert.ok(entry);
+  assert.equal(entry.args[8], 1234);
+});
+
+
+function authenticatedManagerDb(writes = []) {
+  return {
+    prepare(sql) {
+      const statement = {
+        args: [],
+        bind(...args) { this.args = args; return this; },
+        async first() {
+          if (sql.includes("RETURNING request_count")) return { request_count: 1 };
+          if (sql.includes("FROM sessions s")) return {
+            id: "manager-user", role: "gerante", email: "manager@example.test",
+            first_name: "Manager", last_name: "Test", phone: null, status: "active",
+            created_at: "2026-01-01 00:00:00", updated_at: "2026-01-01 00:00:00",
+            session_id: "manager-session"
+          };
+          if (sql.includes("pragma_table_info")) return { total: 1 };
+          return null;
+        },
+        async all() { return { results: [] }; },
+        async run() { writes.push({ sql, args: this.args }); return { meta: { changes: 1 } }; }
+      };
+      return statement;
+    },
+    async batch(statements) {
+      for (const statement of statements) writes.push({ sql: "BATCH", args: statement.args || [] });
+      return statements.map(() => ({ meta: { changes: 1 } }));
+    }
+  };
+}
+
+
+test("loyalty update rejects fractional or malformed cents before any write", async () => {
+  const writes = [];
+  const DB = authenticatedManagerDb(writes);
+  for (const amount of [1.5, -1, "1.5", "1e3", "NaN", Number.MAX_SAFE_INTEGER + 1]) {
+    const response = await worker.fetch(new Request("https://api.test/api/loyalty/update", {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie: "prochelia_session=manager-session" },
+      body: JSON.stringify({ client_id: "client-1", amount_cents: amount })
+    }), { DB });
+    const body = await response.json();
+    assert.equal(response.status, 400, JSON.stringify(body));
+    assert.equal(body.error, "INVALID_LOYALTY_AMOUNT_CENTS");
+  }
+  assert.equal(writes.some(x => x.sql.includes("INSERT INTO loyalty_events")), false);
+});
+
+test("commercial prospect potential rejects fractional or malformed cents before insert", async () => {
+  const writes = [];
+  const DB = authenticatedManagerDb(writes);
+  for (const amount of [1.5, -1, "1.5", "1e3", "NaN", Number.MAX_SAFE_INTEGER + 1]) {
+    const response = await worker.fetch(new Request("https://api.test/api/copilot/commercial/prospect", {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie: "prochelia_session=manager-session" },
+      body: JSON.stringify({ company_name: "Test", estimated_potential_cents: amount })
+    }), { DB });
+    const body = await response.json();
+    assert.equal(response.status, 400, JSON.stringify(body));
+    assert.equal(body.error, "INVALID_PROSPECT_POTENTIAL_CENTS");
+  }
+  assert.equal(writes.some(x => x.sql.includes("INSERT INTO commercial_prospects")), false);
+});
+
+
+test("loyalty update rejects fractional, non-finite and unsafe points before any write", async () => {
+  const writes = [];
+  const DB = authenticatedManagerDb(writes);
+  for (const points of [1.5, "1.5", "1e3", "NaN", Number.MAX_SAFE_INTEGER + 1]) {
+    const response = await worker.fetch(new Request("https://api.test/api/loyalty/update", {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie: "prochelia_session=manager-session" },
+      body: JSON.stringify({ client_id: "client-1", points })
+    }), { DB });
+    const body = await response.json();
+    assert.equal(response.status, 400, JSON.stringify(body));
+    assert.equal(body.error, "INVALID_LOYALTY_POINTS");
+  }
+  assert.equal(writes.some(x => x.sql.includes("INSERT INTO loyalty_events")), false);
+});
+
+
+test("promotion financial caps reject fractional, negative and unsafe cent values before insert", async () => {
+  const writes = [];
+  const DB = authenticatedManagerDb(writes);
+  const invalidCases = [
+    { min_amount_cents: 1.5 },
+    { min_amount_cents: -1 },
+    { max_discount_cents: "2.5" },
+    { max_discount_cents: -1 },
+    { budget_cents: "1e3" },
+    { budget_cents: Number.MAX_SAFE_INTEGER + 1 },
+    { intervenant_protection_cents: 0.5 },
+    { intervenant_protection_cents: -1 }
+  ];
+  for (const financialFields of invalidCases) {
+    const response = await worker.fetch(new Request("https://api.test/api/strategic/promotions", {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie: "prochelia_session=manager-session" },
+      body: JSON.stringify({ code: "TEST", name: "Test promotion", type: "WELCOME", phase: "TEST", ...financialFields })
+    }), { DB });
+    const body = await response.json();
+    assert.equal(response.status, 400, JSON.stringify({ financialFields, body }));
+    assert.equal(body.error, "INVALID_PROMOTION_AMOUNT_CENTS");
+  }
+  assert.equal(writes.some(x => x.sql.includes("INSERT INTO promotions")), false);
 });

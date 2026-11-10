@@ -1,5 +1,5 @@
 import { handleV7Route } from "./v7-routes.js";
-import { stripePost, stripeGet, verifyStripeSignature } from "./stripe.js";
+import { assertStripeWebhookCompletion, mapStripeRecipientCapabilityStatus, requireStripeAccountId, stripePost, stripeGet, verifyStripeSignature } from "./stripe.js";
 // PROCHÉLIA — INDEX BACKEND CONSOLIDÉ UNIQUE
 // Référence de consolidation : V14.1 Finance + sécurité/RBAC existants.
 // Généré le 19/10/2026. À déployer uniquement après recette avec la vraie base D1.
@@ -774,26 +774,58 @@ async function ensurePaymentSchema(env) {
        'payment_webhook_events','payment_disputes','payment_reconciliation',
        'payment_audit','payment_wallet_ledger'
      )`).first();
+  const capabilityColumn = await env.DB.prepare(`
+    SELECT COUNT(*) AS total FROM pragma_table_info('payment_accounts')
+     WHERE name='transfers_enabled'`).first();
+  const accountLinkIndex = await env.DB.prepare(`
+    SELECT COUNT(*) AS total FROM sqlite_master
+     WHERE type='index' AND name='ux_payment_accounts_provider_account'`).first();
   const guards = await env.DB.prepare(`
     SELECT COUNT(*) AS total FROM sqlite_master WHERE type='trigger' AND name IN (
       'trg_payment_wallet_ledger_require_wallet','trg_payment_wallet_ledger_guard_balances',
       'trg_payment_wallet_ledger_apply','trg_payment_wallet_ledger_no_update',
       'trg_payment_wallet_ledger_no_delete','trg_payment_dispute_hold_paid_tx','trg_payment_tx_status_guard',
       'trg_payment_tx_credit_ledger','trg_payment_tx_credit_disputed_ledger','trg_payment_tx_hold_ledger',
-      'trg_payment_tx_settle_held_ledger','trg_payout_request_guard',
+      'trg_payment_tx_settle_held_ledger','trg_payment_dispute_single_open','trg_payment_dispute_state_guard',
+      'trg_payout_request_guard',
       'trg_payout_request_reserve_ledger','trg_payout_status_guard',
-      'trg_payout_settle_ledger','trg_payout_release_ledger'
+      'trg_payout_settle_ledger','trg_payout_release_ledger',
+      'trg_payment_tx_paid_insert_state_guard',
+      'trg_payment_tx_paid_reference_immutable',
+      'trg_payout_provider_reference_immutable',
+      'trg_payment_tx_paid_requires_provider_reference',
+      'trg_payout_status_requires_provider_reference',
+      'trg_payout_request_initial_state_guard'
     )`).first();
-  if (Number(tables?.total || 0) !== 9 || Number(guards?.total || 0) !== 16) {
+  if (Number(tables?.total || 0) !== 9 || Number(guards?.total || 0) !== 24 ||
+      Number(capabilityColumn?.total || 0) !== 1 || Number(accountLinkIndex?.total || 0) !== 1) {
     throw new Error('PAYMENT_SCHEMA_OR_LEDGER_MIGRATION_REQUIRED');
   }
 }
 
 function moneyCents(value) {
-  const n = Number(value);
-  if (!Number.isFinite(n) || n < 0) return null;
-  const cents = Math.round(n * 100);
-  return Number.isSafeInteger(cents) ? cents : null;
+  // Parse decimal euros exactly. Binary floating-point rounding can silently
+  // turn sub-cent input (for example 1.005 EUR) into a different cent amount.
+  if (typeof value !== 'number' && typeof value !== 'string') return null;
+  const raw = String(value).trim();
+  const match = /^(\d+)(?:\.(\d+))?$/.exec(raw);
+  if (!match) return null;
+  const whole = BigInt(match[1]);
+  const fraction = match[2] || '';
+  // Permit harmless trailing zeroes, but never round a fraction of a cent.
+  if (/[1-9]/.test(fraction.slice(2))) return null;
+  const cents = whole * 100n + BigInt((fraction + '00').slice(0, 2));
+  if (cents > BigInt(Number.MAX_SAFE_INTEGER)) return null;
+  return Number(cents);
+}
+
+function integerCents(value) {
+  if (typeof value !== 'number' && typeof value !== 'string') return null;
+  const raw = String(value).trim();
+  if (!/^\d+$/.test(raw)) return null;
+  const cents = BigInt(raw);
+  if (cents > BigInt(Number.MAX_SAFE_INTEGER)) return null;
+  return Number(cents);
 }
 
 async function paymentAudit(env, eventType, data = {}, result = 'OK') {
@@ -840,16 +872,15 @@ async function paymentOnboard(request, env) {
   if (paymentProvider(env)!=='stripe' || !env.STRIPE_SECRET_KEY || !env.STRIPE_PUBLISHABLE_KEY || !env.STRIPE_WEBHOOK_SECRET ||
       !['express','full'].includes(dashboard) || !['application','stripe'].includes(feesCollector) ||
       !['application','stripe'].includes(lossesCollector) ||
-      !['direct','destination','separate_charges_and_transfers'].includes(chargeModel)) {
+      chargeModel!=='destination') {
     return json({ok:false,error:'STRIPE_CONNECT_NOT_CONFIGURED',version:VERSION,required:['PAYMENT_PROVIDER=stripe','STRIPE_SECRET_KEY','STRIPE_PUBLISHABLE_KEY','STRIPE_WEBHOOK_SECRET','STRIPE_CONNECT_CHARGE_MODEL','STRIPE_DASHBOARD','STRIPE_FEES_COLLECTOR','STRIPE_LOSSES_COLLECTOR','APP_BASE_URL']},503);
   }
   // Accounts v2 responsibility defaults are immutable once set. For platform
-  // (indirect) charges, require Express + application/application. For direct
-  // charges, this integration only permits Full + stripe/stripe.
-  const platformCharge=['destination','separate_charges_and_transfers'].includes(chargeModel);
-  const responsibilityModelValid=platformCharge
-    ? dashboard==='express' && feesCollector==='application' && lossesCollector==='application'
-    : dashboard==='full' && feesCollector==='stripe' && lossesCollector==='stripe';
+  // This implementation is a marketplace recipient integration only.
+  // Direct charges require a separate Merchant/card_payments capability flow.
+  const platformCharge=chargeModel==='destination';
+  const responsibilityModelValid=platformCharge && dashboard==='express' &&
+    feesCollector==='application' && lossesCollector==='application';
   if(!responsibilityModelValid) {
     return json({ok:false,error:'STRIPE_CONNECT_RESPONSIBILITY_MODEL_CONFLICT',version:VERSION,
       required:platformCharge?'destination/separate charges require express + application/application':'direct charges require full + stripe/stripe'},409);
@@ -863,10 +894,6 @@ async function paymentOnboard(request, env) {
     return json({ok:false,error:'APP_BASE_URL_NOT_ALLOWED',version:VERSION},503);
   }
   const body=await readJson(request)||{};
-  const accountToken=typeof body.account_token==='string'?body.account_token.trim():'';
-  if(!/^[A-Za-z0-9_]{8,255}$/.test(accountToken) || body.stripe_terms_accepted!==true) {
-    return json({ok:false,error:'STRIPE_ACCOUNT_TOKEN_AND_TERMS_REQUIRED',version:VERSION},400);
-  }
   await ensurePaymentSchema(env);
   let existing = await env.DB.prepare('SELECT * FROM payment_accounts WHERE user_id=? LIMIT 1').bind(auth.user.id).first();
   if(existing && existing.provider!=='stripe') return json({ok:false,error:'PAYMENT_PROVIDER_CONFLICT',version:VERSION},409);
@@ -874,9 +901,17 @@ async function paymentOnboard(request, env) {
     return json({ok:true,version:VERSION,provider:'stripe',account_id:existing.provider_account_id,onboarding_status:'complete',already_connected:true},200);
   }
   let accountId=clean(existing?.provider_account_id);
+  if(accountId) {
+    try { accountId=requireStripeAccountId(accountId); }
+    catch { return json({ok:false,error:'STRIPE_CONNECT_ACCOUNT_STATE_CONFLICT',version:VERSION},409); }
+  }
   let reservationId=existing?.id || null;
   try {
     if(!accountId) {
+      const accountToken=typeof body.account_token==='string'?body.account_token.trim():'';
+      if(!/^[A-Za-z0-9_]{8,255}$/.test(accountToken) || body.stripe_terms_accepted!==true) {
+        return json({ok:false,error:'STRIPE_ACCOUNT_TOKEN_AND_TERMS_REQUIRED',version:VERSION},400);
+      }
       // Reserve the unique user_id row BEFORE contacting Stripe to prevent
       // concurrent requests from creating multiple connected accounts.
       if(existing && existing.status==='creating') return json({ok:false,error:'STRIPE_CONNECT_CREATION_IN_PROGRESS',version:VERSION},409);
@@ -894,8 +929,7 @@ async function paymentOnboard(request, env) {
         defaults:{currency:'eur',responsibilities:{fees_collector:feesCollector,losses_collector:lossesCollector}},
         metadata:{prochelia_user_id:auth.user.id}
       },'prochelia-connect-account-'+auth.user.id+'-'+accountTokenHash);
-      accountId=clean(account?.id);
-      if(!accountId) throw new Error('STRIPE_ACCOUNT_ID_MISSING');
+      accountId=requireStripeAccountId(account?.id);
       await env.DB.prepare(`UPDATE payment_accounts SET provider='stripe',provider_account_id=?,status='pending',onboarding_status='required',updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(accountId,reservationId).run();
       await paymentAudit(env,'STRIPE_ACCOUNT_TERMS_ACCEPTED',{user_id:auth.user.id,metadata:{terms:'stripe_connected_account_v2'}},'OK');
       await paymentAudit(env,'STRIPE_CONNECT_ACCOUNT_CREATED',{user_id:auth.user.id,metadata:{provider:'stripe'}},'OK');
@@ -950,10 +984,11 @@ function paymentPublicConfig(request,env) {
   const approved=env.STRIPE_CONNECT_ONBOARDING_ENABLED==='true' && env.STRIPE_CONNECT_ONBOARDING_APPROVED==='true';
   const chargeModel=clean(env.STRIPE_CONNECT_CHARGE_MODEL);
   const dashboard=clean(env.STRIPE_DASHBOARD), fees=clean(env.STRIPE_FEES_COLLECTOR), losses=clean(env.STRIPE_LOSSES_COLLECTOR);
-  const platformCharge=['destination','separate_charges_and_transfers'].includes(chargeModel);
-  const responsibilityModelValid=platformCharge
-    ? dashboard==='express' && fees==='application' && losses==='application'
-    : chargeModel==='direct' && dashboard==='full' && fees==='stripe' && losses==='stripe';
+  // Only marketplace recipient accounts are implemented. Direct charges need
+  // Merchant/card_payments onboarding and must remain closed until implemented.
+  const platformCharge=chargeModel==='destination';
+  const responsibilityModelValid=platformCharge && dashboard==='express' &&
+    fees==='application' && losses==='application';
   const publishable=approved && responsibilityModelValid && (matchingTest||matchingLive) ? candidate : null;
   const onboardingReady=!!publishable && !!env.STRIPE_WEBHOOK_SECRET && !!env.APP_BASE_URL;
   return json({ok:true,version:VERSION,provider,stripe_publishable_key:publishable,
@@ -966,14 +1001,15 @@ async function paymentStatus(request, env) {
   if(!auth) return json({ok:false,error:'UNAUTHENTICATED',version:VERSION},401);
   await ensurePaymentSchema(env);
   const wallet=await env.DB.prepare('SELECT * FROM wallets WHERE user_id=? LIMIT 1').bind(auth.user.id).first();
-  const account=await env.DB.prepare('SELECT * FROM payment_accounts WHERE user_id=? LIMIT 1').bind(auth.user.id).first();
+  const account=await env.DB.prepare('SELECT * FROM payment_accounts WHERE user_id=? AND provider=? LIMIT 1').bind(auth.user.id,paymentProvider(env)).first();
   const pending=await env.DB.prepare(`SELECT COUNT(*) total FROM payout_requests WHERE user_id=? AND status IN ('requested','processing')`).bind(auth.user.id).first();
   return json({ok:true,version:VERSION,provider:paymentProvider(env),payments_configured:paymentsConfigured(env),
     wallet:{currency:wallet?.currency||'EUR',available_cents:Number(wallet?.available_cents||0),
       pending_cents:Number(wallet?.pending_cents||0),paid_cents:Number(wallet?.paid_cents||0),
       reserved_cents:Number(wallet?.reserved_cents||0)},
     payout_account:account?{status:account.status,onboarding_status:account.onboarding_status,
-      payouts_enabled:!!account.payouts_enabled}:null,pending_payouts:Number(pending?.total||0)},200);
+      transfers_enabled:!!account.transfers_enabled,payouts_enabled:!!account.payouts_enabled}:null,
+    pending_payouts:Number(pending?.total||0)},200);
 }
 
 async function createMissionPayment(request, env) {
@@ -1008,19 +1044,40 @@ async function createMissionPayment(request, env) {
     if(!same) return json({ok:false,error:'IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_PAYLOAD',version:VERSION},409);
     return json({ok:true,version:VERSION,idempotent_replay:true,transaction:old,next:'PSP_ADAPTER_NOT_IMPLEMENTED'},200);
   }
+  // Do not create a charge that cannot later be transferred to its assigned
+  // recipient. Existing idempotent replays are returned above even if the
+  // capability was subsequently revoked; new charges fail closed.
+  const recipientAccount=await env.DB.prepare(
+    "SELECT transfers_enabled FROM payment_accounts WHERE user_id=? AND provider=? LIMIT 1"
+  ).bind(mission.intervenant_user_id,paymentProvider(env)).first();
+  if(!recipientAccount||Number(recipientAccount.transfers_enabled)!==1) {
+    return json({ok:false,error:'RECIPIENT_TRANSFER_CAPABILITY_NOT_READY',version:VERSION},409);
+  }
   const txId=crypto.randomUUID();
-  await env.DB.batch([
-    env.DB.prepare(`INSERT INTO payment_transactions
-      (id,idempotency_key,mission_id,client_id,intervenant_id,type,status,gross_cents,
-       commission_cents,net_intervenant_cents,currency,provider,reason)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(txId,idem,mission.id,mission.client_user_id,
-        mission.intervenant_user_id,'MISSION_CHARGE','pending',gross,commission,net,'EUR',
-        paymentProvider(env),'MISSION_PAYMENT_CREATED'),
-    env.DB.prepare(`INSERT INTO payment_audit
-      (id,event_type,transaction_id,mission_id,user_id,result,metadata_json)
-      VALUES (?,?,?,?,?,?,?)`).bind(crypto.randomUUID(),'MISSION_PAYMENT_CREATED',txId,
-        mission.id,auth.user.id,'OK',JSON.stringify({gross_cents:gross,commission_cents:commission,net_cents:net}))
-  ]);
+  try {
+    await env.DB.batch([
+      env.DB.prepare(`INSERT INTO payment_transactions
+        (id,idempotency_key,mission_id,client_id,intervenant_id,type,status,gross_cents,
+         commission_cents,net_intervenant_cents,currency,provider,reason)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(txId,idem,mission.id,mission.client_user_id,
+          mission.intervenant_user_id,'MISSION_CHARGE','pending',gross,commission,net,'EUR',
+          paymentProvider(env),'MISSION_PAYMENT_CREATED'),
+      env.DB.prepare(`INSERT INTO payment_audit
+        (id,event_type,transaction_id,mission_id,user_id,result,metadata_json)
+        SELECT ?,?,?,?,?,?,? WHERE EXISTS (SELECT 1 FROM payment_transactions WHERE id=?)`)
+        .bind(crypto.randomUUID(),'MISSION_PAYMENT_CREATED',txId,
+          mission.id,auth.user.id,'OK',JSON.stringify({gross_cents:gross,commission_cents:commission,net_cents:net}),txId)
+    ]);
+  } catch(error) {
+    // A concurrent request may win the unique idempotency key after the first read.
+    const raced=await env.DB.prepare('SELECT * FROM payment_transactions WHERE idempotency_key=? LIMIT 1').bind(idem).first();
+    if(!raced) throw error;
+    const same=raced.mission_id===mission.id&&raced.client_id===mission.client_user_id&&
+      raced.intervenant_id===mission.intervenant_user_id&&Number(raced.gross_cents)===gross&&
+      Number(raced.commission_cents)===commission&&Number(raced.net_intervenant_cents)===net&&raced.currency==='EUR';
+    if(!same) return json({ok:false,error:'IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_PAYLOAD',version:VERSION},409);
+    return json({ok:true,version:VERSION,idempotent_replay:true,transaction:raced,next:'PSP_ADAPTER_NOT_IMPLEMENTED'},200);
+  }
   return json({ok:true,version:VERSION,transaction_id:txId,status:'pending',gross_cents:gross,
     commission_cents:commission,net_intervenant_cents:net,provider:paymentProvider(env),
     next:'PSP_ADAPTER_NOT_IMPLEMENTED'},201);
@@ -1041,10 +1098,13 @@ async function finalizeMissionPayment(request, env) {
       WHERE id=? AND status IN ('pending','paid')`).bind(txId),
     env.DB.prepare(`INSERT INTO payment_audit
       (id,event_type,transaction_id,mission_id,user_id,result,metadata_json)
-      VALUES (?,?,?,?,?,?,?)`).bind(crypto.randomUUID(),'MISSION_PAYMENT_HELD',txId,tx.mission_id,
-        auth.user.id,'OK',JSON.stringify({reason:'ADMINISTRATIVE_HOLD'}))
+      SELECT ?,?,?,?,?,?,? WHERE changes()=1 AND EXISTS (
+        SELECT 1 FROM payment_transactions WHERE id=? AND status='held'
+      )`).bind(crypto.randomUUID(),'MISSION_PAYMENT_HELD',txId,tx.mission_id,
+        auth.user.id,'OK',JSON.stringify({reason:'ADMINISTRATIVE_HOLD'}),txId)
   ]);
-  if(!results[0]?.meta?.changes) return json({ok:false,error:'PAYMENT_STATE_CONFLICT',version:VERSION},409);
+  if(Number(results[0]?.meta?.changes||0)!==1)
+    return json({ok:false,error:'PAYMENT_STATE_CONFLICT',version:VERSION},409);
   return json({ok:true,version:VERSION,transaction_id:txId,status:'held'},200);
 }
 
@@ -1062,7 +1122,7 @@ async function payoutRequest(request, env) {
       return json({ok:false,error:'IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_PAYLOAD',version:VERSION},409);
     return json({ok:true,version:VERSION,idempotent_replay:true,payout:old,next:'PSP_ADAPTER_NOT_IMPLEMENTED'},200);
   }
-  const account=await env.DB.prepare('SELECT * FROM payment_accounts WHERE user_id=? LIMIT 1').bind(auth.user.id).first();
+  const account=await env.DB.prepare('SELECT * FROM payment_accounts WHERE user_id=? AND provider=? LIMIT 1').bind(auth.user.id,paymentProvider(env)).first();
   if(!account||Number(account.payouts_enabled)!==1) return json({ok:false,error:'PAYOUT_ACCOUNT_NOT_READY',version:VERSION},409);
   const wallet=await env.DB.prepare('SELECT * FROM wallets WHERE user_id=? LIMIT 1').bind(auth.user.id).first();
   if(!wallet||Number(wallet.available_cents)<amount) return json({ok:false,error:'INSUFFICIENT_AVAILABLE_BALANCE',
@@ -1081,6 +1141,13 @@ async function payoutRequest(request, env) {
   } catch(error) {
     if(String(error?.message||error).includes('PAYOUT_INSUFFICIENT_AVAILABLE_BALANCE'))
       return json({ok:false,error:'INSUFFICIENT_AVAILABLE_BALANCE',version:VERSION},409);
+    // Resolve concurrent idempotent submissions without creating a second reserve.
+    const raced=await env.DB.prepare('SELECT * FROM payout_requests WHERE idempotency_key=? LIMIT 1').bind(idem).first();
+    if(raced) {
+      if(raced.user_id!==auth.user.id||Number(raced.amount_cents)!==amount||raced.mode!==mode)
+        return json({ok:false,error:'IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_PAYLOAD',version:VERSION},409);
+      return json({ok:true,version:VERSION,idempotent_replay:true,payout:raced,next:'PSP_ADAPTER_NOT_IMPLEMENTED'},200);
+    }
     throw error;
   }
   return json({ok:true,version:VERSION,payout_id:payoutId,status:'requested',amount_cents:amount,
@@ -1105,13 +1172,13 @@ async function stripeConnectWebhook(request, env) {
   }
   let event;
   try { event=JSON.parse(raw); } catch { return json({ok:false,error:'INVALID_WEBHOOK_JSON',version:VERSION},400); }
-  if(event?.type!=='v2.core.account[requirements].updated') {
+  if(!['v2.core.account[requirements].updated','v2.core.account[configuration.recipient].capability_status_updated'].includes(event?.type)) {
     // This endpoint is scoped to the Connect account event only. Do not silently
     // acknowledge charge/refund/payout events that have no implemented handler.
     return json({ok:false,error:'STRIPE_EVENT_NOT_SUPPORTED_BY_CONNECT_WEBHOOK',version:VERSION},503);
   }
-  const eventId=clean(event?.id), accountId=clean(event?.data?.object?.id);
-  if(!eventId || !/^acct_[A-Za-z0-9]+$/.test(accountId)) {
+  const eventId=clean(event?.id), accountId=clean(event?.related_object?.id || event?.data?.object?.id);
+  if(!/^evt_[A-Za-z0-9]+$/.test(eventId) || !/^acct_[A-Za-z0-9]+$/.test(accountId)) {
     return json({ok:false,error:'INVALID_STRIPE_CONNECT_EVENT',version:VERSION},400);
   }
   try { await ensurePaymentSchema(env); }
@@ -1130,29 +1197,39 @@ async function stripeConnectWebhook(request, env) {
     .bind(eventId).run();
   if(Number(claim?.meta?.changes||0)!==1) return json({ok:false,error:'WEBHOOK_EVENT_PROCESSING',version:VERSION,retry_after_seconds:30},409);
   try {
-    const account=await stripeGet(env,'v2/core/accounts/'+accountId);
-    const transferStatus=account?.configuration?.recipient?.capabilities?.stripe_balance?.stripe_transfers?.status;
-    const transfersEnabled=transferStatus==='active';
-    const status=transfersEnabled?'active':'pending';
-    const onboardingStatus=transfersEnabled?'submitted':'required';
-    // A recipient transfer capability is not proof that external bank payouts are enabled.
-    // Keep payouts_enabled false until a separate, verified payout capability is implemented.
-    const linked=await env.DB.prepare(`UPDATE payment_accounts SET charges_enabled=0,payouts_enabled=0,status=?,
-      onboarding_status=?,updated_at=CURRENT_TIMESTAMP
-      WHERE provider='stripe' AND provider_account_id=?`).bind(status,onboardingStatus,accountId).run();
+    const account=await stripeGet(env,'v2/core/accounts/'+accountId,fetch,{context:event?.context,eventId});
+    const capabilities=account?.configuration?.recipient?.capabilities?.stripe_balance;
+    const transferStatus=capabilities?.stripe_transfers?.status;
+    const payoutStatus=capabilities?.payouts?.status;
+    const transferState=mapStripeRecipientCapabilityStatus(transferStatus);
+    const transfersEnabled=transferState.enabled;
+    // These are independent Stripe Accounts v2 capabilities. A transfer
+    // permission never implies permission to pay out to an external bank account.
+    const payoutsEnabled=payoutStatus==='active';
+    const status=transferState.status;
+    const onboardingStatus=transferState.onboardingStatus;
+    const linked=await env.DB.prepare(`UPDATE payment_accounts
+      SET charges_enabled=0,transfers_enabled=?,payouts_enabled=?,status=?,
+          onboarding_status=?,updated_at=CURRENT_TIMESTAMP
+      WHERE provider='stripe' AND provider_account_id=?`)
+      .bind(transfersEnabled?1:0,payoutsEnabled?1:0,status,onboardingStatus,accountId).run();
     if(Number(linked?.meta?.changes||0)!==1) {
       await env.DB.prepare(`UPDATE payment_webhook_events SET processed=0,received_at=CURRENT_TIMESTAMP
         WHERE provider='stripe' AND event_id=? AND processed=2`).bind(eventId).run();
       return json({ok:false,error:'STRIPE_CONNECT_ACCOUNT_NOT_LINKED',version:VERSION},503);
     }
-    await env.DB.batch([
+    const completion=await env.DB.batch([
       env.DB.prepare(`INSERT INTO payment_audit
         (id,event_type,user_id,result,metadata_json) VALUES (?,?,?,?,?)`)
-        .bind(crypto.randomUUID(),'STRIPE_CONNECT_ACCOUNT_SYNCED',null,'OK',JSON.stringify({event_id:eventId,account_id:accountId,transfers_enabled:transfersEnabled,payouts_enabled:false})),
+        .bind(crypto.randomUUID(),'STRIPE_CONNECT_ACCOUNT_SYNCED',null,'OK',JSON.stringify({
+          event_id:eventId,account_id:accountId,transfers_enabled:transfersEnabled,payouts_enabled:payoutsEnabled
+        })),
       env.DB.prepare(`UPDATE payment_webhook_events SET processed=1,processed_at=CURRENT_TIMESTAMP
         WHERE provider='stripe' AND event_id=? AND processed=2`).bind(eventId)
     ]);
-    return json({ok:true,version:VERSION,processed:true,event_id:eventId,account_id:accountId,transfers_enabled:transfersEnabled,payouts_enabled:false},200);
+    assertStripeWebhookCompletion(completion);
+    return json({ok:true,version:VERSION,processed:true,event_id:eventId,account_id:accountId,
+      transfers_enabled:transfersEnabled,payouts_enabled:payoutsEnabled},200);
   } catch(error) {
     // Keep the event retryable; never acknowledge an uncertain provider lookup or D1 write.
     await env.DB.prepare(`UPDATE payment_webhook_events SET processed=0,received_at=CURRENT_TIMESTAMP
@@ -1172,6 +1249,12 @@ async function paymentWebhook(request, env) {
   if(!eventId||!type||provider!==paymentProvider(env)) return json({ok:false,error:'INVALID_WEBHOOK_EVENT_OR_PROVIDER',version:VERSION},400);
   if(['payment_refunded','charge_refunded','refund_succeeded'].includes(type))
     return json({ok:false,error:'REFUND_WORKFLOW_NOT_IMPLEMENTED',version:VERSION},503);
+  const supportedEvents=new Set([
+    'payment_succeeded','charge_succeeded','payment_failed','charge_failed',
+    'payout_processing','payout_paid','payout_failed','payout_canceled'
+  ]);
+  if(!supportedEvents.has(type))
+    return json({ok:false,error:'PSP_EVENT_NOT_SUPPORTED',version:VERSION},503);
 
   const payloadHash=await sha256Base64url(raw);
   await env.DB.prepare(`INSERT OR IGNORE INTO payment_webhook_events
@@ -1188,26 +1271,39 @@ async function paymentWebhook(request, env) {
   const payoutMap={payout_processing:'processing',payout_paid:'completed',payout_failed:'failed',payout_canceled:'canceled'};
   const newPaymentStatus=paymentMap[type], newPayoutStatus=payoutMap[type];
   const statements=[];
+  let paymentGuard=null, payoutGuard=null;
 
   if(newPaymentStatus) {
     if(!txId) return json({ok:false,error:'WEBHOOK_TRANSACTION_ID_REQUIRED',version:VERSION},400);
     const tx=await env.DB.prepare('SELECT * FROM payment_transactions WHERE id=? LIMIT 1').bind(txId).first();
     if(!tx) return json({ok:false,error:'WEBHOOK_TRANSACTION_NOT_FOUND_RETRYABLE',version:VERSION},503);
-    const ref=clean(event?.data?.provider_payment_id), cents=Number(event?.data?.amount_cents);
+    const ref=clean(event?.data?.provider_payment_id), cents=integerCents(event?.data?.amount_cents);
     const currency=String(event?.data?.currency||'').toUpperCase();
-    if(!ref||!Number.isSafeInteger(cents)||cents!==Number(tx.gross_cents)||currency!==tx.currency)
+    const expectedCents=integerCents(tx.gross_cents);
+    if(!ref||cents===null||expectedCents===null||cents!==expectedCents||currency!==tx.currency)
       return json({ok:false,error:'WEBHOOK_PAYMENT_AMOUNT_CURRENCY_OR_REFERENCE_MISMATCH',version:VERSION},409);
+    if(tx.provider_payment_id && tx.provider_payment_id!==ref)
+      return json({ok:false,error:'PAYMENT_WEBHOOK_PROVIDER_REFERENCE_CONFLICT',version:VERSION},409);
     if(tx.status==='pending') {
+      paymentGuard={id:txId,status:newPaymentStatus,ref};
       statements.push(env.DB.prepare(`UPDATE payment_transactions SET status=?,provider_payment_id=?,
         updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='pending'`).bind(newPaymentStatus,ref,txId));
     } else if(tx.status==='held'&&newPaymentStatus==='paid') {
+      paymentGuard={id:txId,status:'held',ref};
       statements.push(env.DB.prepare(`UPDATE payment_transactions SET provider_payment_id=COALESCE(provider_payment_id,?),
         updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='held'`).bind(ref,txId));
     } else if(tx.status==='held'&&newPaymentStatus==='failed'&&!tx.provider_payment_id) {
-      statements.push(env.DB.prepare(`UPDATE payment_transactions SET status='failed',provider_payment_id=?,
+      paymentGuard={id:txId,status:'failed',ref};
+      statements.push(env.DB.prepare(`UPDATE payment_transactions SET status='failed',provider_payment_id=?, 
         updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='held' AND provider_payment_id IS NULL`).bind(ref,txId));
     } else if(['paid','failed','canceled'].includes(tx.status)&&tx.status!==newPaymentStatus) {
       return json({ok:false,error:'PAYMENT_WEBHOOK_STATE_CONFLICT',version:VERSION,status:tx.status},409);
+    } else if(tx.status==='held'&&newPaymentStatus==='failed') {
+      return json({ok:false,error:'PAYMENT_WEBHOOK_STATE_CONFLICT',version:VERSION,status:tx.status},409);
+    } else if(!['paid','failed'].includes(tx.status)) {
+      return json({ok:false,error:'PAYMENT_WEBHOOK_STATE_CONFLICT',version:VERSION,status:tx.status},409);
+    } else {
+      paymentGuard={id:txId,status:tx.status,ref};
     }
   }
 
@@ -1215,28 +1311,67 @@ async function paymentWebhook(request, env) {
     if(!payoutId) return json({ok:false,error:'WEBHOOK_PAYOUT_ID_REQUIRED',version:VERSION},400);
     const payout=await env.DB.prepare('SELECT * FROM payout_requests WHERE id=? LIMIT 1').bind(payoutId).first();
     if(!payout) return json({ok:false,error:'WEBHOOK_PAYOUT_NOT_FOUND_RETRYABLE',version:VERSION},503);
-    const ref=clean(event?.data?.provider_payout_id), cents=Number(event?.data?.amount_cents);
+    const ref=clean(event?.data?.provider_payout_id), cents=integerCents(event?.data?.amount_cents);
     const currency=String(event?.data?.currency||'').toUpperCase();
-    if(!ref||!Number.isSafeInteger(cents)||cents!==Number(payout.amount_cents)||currency!==payout.currency)
+    const expectedCents=integerCents(payout.amount_cents);
+    if(!ref||cents===null||expectedCents===null||cents!==expectedCents||currency!==payout.currency)
       return json({ok:false,error:'WEBHOOK_PAYOUT_AMOUNT_CURRENCY_OR_REFERENCE_MISMATCH',version:VERSION},409);
+    if(payout.provider_payout_id && payout.provider_payout_id!==ref)
+      return json({ok:false,error:'PAYOUT_WEBHOOK_PROVIDER_REFERENCE_CONFLICT',version:VERSION},409);
     if(['completed','failed','canceled'].includes(payout.status)&&payout.status!==newPayoutStatus)
       return json({ok:false,error:'PAYOUT_WEBHOOK_STATE_CONFLICT',version:VERSION,status:payout.status},409);
     if(['requested','processing'].includes(payout.status)) {
+      payoutGuard={id:payoutId,status:newPayoutStatus,ref};
       statements.push(env.DB.prepare(`UPDATE payout_requests SET status=?,provider_payout_id=COALESCE(provider_payout_id,?),
         failure_code=?,failure_message=?,completed_at=CASE WHEN ?='completed' THEN CURRENT_TIMESTAMP ELSE completed_at END,
         updated_at=CURRENT_TIMESTAMP WHERE id=? AND status IN ('requested','processing')`)
         .bind(newPayoutStatus,ref,clean(event?.data?.failure_code)||null,
           clean(event?.data?.failure_message)||null,newPayoutStatus,payoutId));
+    } else if(!['completed','failed','canceled'].includes(payout.status)) {
+      return json({ok:false,error:'PAYOUT_WEBHOOK_STATE_CONFLICT',version:VERSION,status:payout.status},409);
+    } else {
+      payoutGuard={id:payoutId,status:payout.status,ref};
     }
   }
 
+  // Claim only after validating the referenced payment/payout. The conditional
+  // update is the concurrency gate: only one delivery can move 0 -> 2.
+  const claim=await env.DB.prepare(`UPDATE payment_webhook_events
+    SET processed=2,received_at=CURRENT_TIMESTAMP
+    WHERE provider=? AND event_id=? AND
+      (processed=0 OR (processed=2 AND received_at<=datetime('now','-5 minutes')))`)
+    .bind(provider,eventId).run();
+  if(Number(claim?.meta?.changes||0)!==1)
+    return json({ok:false,error:'WEBHOOK_EVENT_PROCESSING',version:VERSION,retry_after_seconds:30},409);
+
+  const stateGuard=paymentGuard
+    ? `EXISTS (SELECT 1 FROM payment_transactions WHERE id=? AND status=? AND provider_payment_id=?)`
+    : `EXISTS (SELECT 1 FROM payout_requests WHERE id=? AND status=? AND provider_payout_id=?)`;
+  const guard=paymentGuard||payoutGuard;
+  const guardArgs=paymentGuard?[paymentGuard.id,paymentGuard.status,paymentGuard.ref]:
+    [payoutGuard.id,payoutGuard.status,payoutGuard.ref];
   statements.push(env.DB.prepare(`UPDATE payment_webhook_events SET processed=1,processed_at=CURRENT_TIMESTAMP
-    WHERE provider=? AND event_id=? AND processed=0`).bind(provider,eventId));
+    WHERE provider=? AND event_id=? AND processed=2 AND ${stateGuard}`)
+    .bind(provider,eventId,...guardArgs));
   statements.push(env.DB.prepare(`INSERT INTO payment_audit
-    (id,event_type,transaction_id,payout_id,result,metadata_json) VALUES (?,?,?,?,?,?)`)
+    (id,event_type,transaction_id,payout_id,result,metadata_json)
+    SELECT ?,?,?,?,?,? WHERE ${stateGuard}`)
     .bind(crypto.randomUUID(),'PSP_WEBHOOK_PROCESSED',txId||null,payoutId||null,'OK',
-      JSON.stringify({provider,event_id:eventId,event_type:type,payload_hash:payloadHash})));
-  await env.DB.batch(statements);
+      JSON.stringify({provider,event_id:eventId,event_type:type,payload_hash:payloadHash}),...guardArgs));
+  try {
+    const results=await env.DB.batch(statements);
+    const completion=results?.[results.length-2];
+    if(Number(completion?.meta?.changes||0)!==1) {
+      await env.DB.prepare(`UPDATE payment_webhook_events SET processed=0,received_at=CURRENT_TIMESTAMP
+        WHERE provider=? AND event_id=? AND processed=2`).bind(provider,eventId).run();
+      return json({ok:false,error:paymentGuard?'PAYMENT_WEBHOOK_STATE_CONFLICT':'PAYOUT_WEBHOOK_STATE_CONFLICT',version:VERSION},409);
+    }
+  } catch(error) {
+    // A failed atomic batch must not strand the event; permit a safe retry.
+    await env.DB.prepare(`UPDATE payment_webhook_events SET processed=0,received_at=CURRENT_TIMESTAMP
+      WHERE provider=? AND event_id=? AND processed=2`).bind(provider,eventId).run().catch(()=>{});
+    throw error;
+  }
   return json({ok:true,version:VERSION,processed:true,event_id:eventId},200);
 }
 
@@ -1256,12 +1391,25 @@ async function openPaymentDispute(request, env) {
     updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='paid'`).bind(tx.id));
   statements.push(env.DB.prepare(`INSERT INTO payment_disputes
     (id,mission_id,transaction_id,client_id,intervenant_id,status,reason,amount_cents)
-    VALUES (?,?,?,?,?,?,?,?)`).bind(id,missionId,tx.id,tx.client_id,tx.intervenant_id,'open',reason,amount));
+    SELECT ?,?,?,?,?,?,?,? FROM payment_transactions
+     WHERE id=? AND status IN ('pending','held') AND mission_id=?`)
+    .bind(id,missionId,tx.id,tx.client_id,tx.intervenant_id,'open',reason,amount,tx.id,missionId));
   statements.push(env.DB.prepare(`INSERT INTO payment_audit
     (id,event_type,transaction_id,mission_id,user_id,result,metadata_json)
-    VALUES (?,?,?,?,?,?,?)`).bind(crypto.randomUUID(),'PAYMENT_DISPUTE_OPENED',tx.id,missionId,
-      auth.user.id,'OK',JSON.stringify({amount_cents:amount,reason})));
-  await env.DB.batch(statements);
+    SELECT ?,?,?,?,?,?,? WHERE EXISTS (SELECT 1 FROM payment_disputes WHERE id=? AND status='open')`)
+    .bind(crypto.randomUUID(),'PAYMENT_DISPUTE_OPENED',tx.id,missionId,
+      auth.user.id,'OK',JSON.stringify({amount_cents:amount,reason}),id));
+  try {
+    const results=await env.DB.batch(statements);
+    const inserted=results?.[statements.length-2];
+    if(Number(inserted?.meta?.changes||0)!==1)
+      return json({ok:false,error:'PAYMENT_NOT_DISPUTABLE',version:VERSION},409);
+  } catch(error) {
+    if(String(error?.message||error).includes('PAYMENT_DISPUTE_ALREADY_OPEN')) {
+      return json({ok:false,error:'DISPUTE_ALREADY_OPEN',version:VERSION},409);
+    }
+    throw error;
+  }
   return json({ok:true,version:VERSION,dispute_id:id,status:'open',payment_status:tx.status==='paid'?'held':tx.status},201);
 }
 
@@ -1272,22 +1420,46 @@ async function paymentAdminResolve(request, env) {
   const body=await readJson(request), disputeId=clean(body?.dispute_id), resolution=clean(body?.resolution);
   if(!disputeId||resolution!=='cancel') return json({ok:false,error:'PSP_REFUND_OR_RELEASE_WORKFLOW_NOT_IMPLEMENTED',version:VERSION},409);
   const d=await env.DB.prepare('SELECT * FROM payment_disputes WHERE id=? LIMIT 1').bind(disputeId).first();
-  if(!d||d.status==='resolved') return json({ok:false,error:'DISPUTE_NOT_FOUND_OR_ALREADY_RESOLVED',version:VERSION},409);
+  if(!d||d.status!=='open') return json({ok:false,error:'DISPUTE_NOT_FOUND_OR_NOT_OPEN',version:VERSION},409);
   if(d.transaction_id) {
     const tx=await env.DB.prepare('SELECT * FROM payment_transactions WHERE id=? LIMIT 1').bind(d.transaction_id).first();
-    if(tx&&tx.status!=='pending') return json({ok:false,error:'SETTLED_OR_HELD_PAYMENT_REQUIRES_PSP_REFUND_WORKFLOW',version:VERSION,status:tx.status},409);
+    if(!tx||tx.status!=='pending') return json({ok:false,error:'SETTLED_OR_HELD_PAYMENT_REQUIRES_PSP_REFUND_WORKFLOW',version:VERSION,status:tx?.status||'missing'},409);
   }
   const statements=[
     env.DB.prepare(`UPDATE payment_disputes SET status='resolved',resolution='cancel',
-      resolved_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='open'`).bind(disputeId),
+      resolved_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP
+      WHERE id=? AND status='open' AND (transaction_id IS NULL OR EXISTS (
+        SELECT 1 FROM payment_transactions WHERE id=payment_disputes.transaction_id AND status='pending'
+      ))`).bind(disputeId),
     ...(d.transaction_id?[env.DB.prepare(`UPDATE payment_transactions SET status='canceled',
-      updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='pending'`).bind(d.transaction_id)]:[]),
+      updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='pending' AND EXISTS (
+        SELECT 1 FROM payment_disputes WHERE id=? AND status='resolved' AND resolution='cancel'
+      )`).bind(d.transaction_id,disputeId)]:[]),
     env.DB.prepare(`INSERT INTO payment_audit
       (id,event_type,transaction_id,mission_id,user_id,result,metadata_json)
-      VALUES (?,?,?,?,?,?,?)`).bind(crypto.randomUUID(),'PAYMENT_DISPUTE_CANCELED',
-        d.transaction_id||null,d.mission_id||null,auth.user.id,'OK',JSON.stringify({dispute_id:disputeId}))
+      SELECT ?,?,?,?,?,?,? WHERE EXISTS (
+        SELECT 1 FROM payment_disputes WHERE id=? AND status='resolved' AND resolution='cancel'
+      ) AND (? IS NULL OR EXISTS (
+        SELECT 1 FROM payment_transactions WHERE id=? AND status='canceled'
+      ))`).bind(crypto.randomUUID(),'PAYMENT_DISPUTE_CANCELED',
+        d.transaction_id||null,d.mission_id||null,auth.user.id,'OK',JSON.stringify({dispute_id:disputeId}),
+        disputeId,d.transaction_id||null,d.transaction_id||null)
   ];
-  await env.DB.batch(statements);
+  try {
+    const results=await env.DB.batch(statements);
+    if(Number(results?.[0]?.meta?.changes||0)!==1)
+      return json({ok:false,error:'DISPUTE_STATE_CONFLICT',version:VERSION},409);
+    if(d.transaction_id && Number(results?.[1]?.meta?.changes||0)!==1)
+      return json({ok:false,error:'DISPUTE_STATE_CONFLICT',version:VERSION},409);
+  } catch(error) {
+    const message=String(error?.message||error);
+    if(message.includes('PAYMENT_DISPUTE_STATE_CONFLICT') ||
+       message.includes('PAYMENT_DISPUTE_ALREADY_OPEN') ||
+       message.includes('PAYMENT_TRANSACTION_STATE_TRANSITION_FORBIDDEN')) {
+      return json({ok:false,error:'DISPUTE_STATE_CONFLICT',version:VERSION},409);
+    }
+    throw error;
+  }
   return json({ok:true,version:VERSION,dispute_id:disputeId,status:'resolved',resolution:'cancel'},200);
 }
 
@@ -1433,23 +1605,32 @@ async function handleBase(request, env) {
       WHERE type='table' AND name IN ('payment_accounts','wallets','payment_transactions',
         'payout_requests','payment_webhook_events','payment_disputes','payment_reconciliation',
         'payment_audit','payment_wallet_ledger')`).first();
+    const accountLinkIndex=await env.DB.prepare(`SELECT COUNT(*) AS total FROM sqlite_master
+      WHERE type='index' AND name='ux_payment_accounts_provider_account'`).first();
     const guards=await env.DB.prepare(`SELECT COUNT(*) AS total FROM sqlite_master
       WHERE type='trigger' AND name IN (
        'trg_payment_wallet_ledger_require_wallet','trg_payment_wallet_ledger_guard_balances',
        'trg_payment_wallet_ledger_apply','trg_payment_wallet_ledger_no_update',
        'trg_payment_wallet_ledger_no_delete','trg_payment_dispute_hold_paid_tx','trg_payment_tx_status_guard',
        'trg_payment_tx_credit_ledger','trg_payment_tx_credit_disputed_ledger','trg_payment_tx_hold_ledger','trg_payment_tx_settle_held_ledger',
+       'trg_payment_dispute_single_open','trg_payment_dispute_state_guard',
        'trg_payout_request_guard','trg_payout_request_reserve_ledger',
-       'trg_payout_status_guard','trg_payout_settle_ledger','trg_payout_release_ledger'
+       'trg_payout_status_guard','trg_payout_settle_ledger','trg_payout_release_ledger',
+      'trg_payment_tx_paid_insert_state_guard',
+      'trg_payment_tx_paid_reference_immutable',
+      'trg_payout_provider_reference_immutable',
+      'trg_payment_tx_paid_requires_provider_reference',
+      'trg_payout_status_requires_provider_reference',
+      'trg_payout_request_initial_state_guard'
       )`).first();
     const databaseReady=h?.ok===1, coreSchemaReady=!!s0?.sql&&!!u0?.sql;
-    const ledgerReady=Number(paymentTables?.total||0)===9&&Number(guards?.total||0)===16;
+    const ledgerReady=Number(paymentTables?.total||0)===9&&Number(guards?.total||0)===24&&Number(accountLinkIndex?.total||0)===1;
     const infrastructureReady=databaseReady&&coreSchemaReady;
     return json({ok:true,ready:false,infrastructure_ready:infrastructureReady,database:databaseReady,
       core_schema_ready:coreSchemaReady,payment_ledger_enforcement_ready:ledgerReady,
       payments_live_ready:false,real_traffic_authorized:false,release_status:'NO_GO',
       blockers:[...(!infrastructureReady?['DATABASE_OR_CORE_SCHEMA_NOT_READY']:[]),
-        ...(!ledgerReady?['PAYMENT_LEDGER_MIGRATION_0006_REQUIRED']:[]),
+        ...(!ledgerReady?['PAYMENT_LEDGER_OR_DISPUTE_GUARDS_MIGRATION_REQUIRED','STRIPE_ACCOUNT_LINK_UNIQUENESS_MIGRATION_REQUIRED']:[]),
         'PSP_CHARGE_AND_PAYOUT_ADAPTER_NOT_IMPLEMENTED',
         'END_TO_END_SECURITY_AND_OPERATIONAL_RELEASE_GATES_NOT_SIGNED'],
       version:VERSION});
@@ -1668,8 +1849,13 @@ async function executeCaseBusinessAction(env, c, rec, actorId=null, automatic=fa
 
   // Financial actions are deliberately queued for the real PSP adapter; no fake money movement.
   if (context.refund_cents || action === 'REFUND_REQUEST') {
-    const queued=await enqueueAction(env,c.id,'PSP_REFUND_REVIEW',{mission_id:c.mission_id||null,amount_cents:Math.max(0,Number(context.refund_cents||0)),reason:c.description||c.case_type},`${c.id}:psp-refund`);
-    results.push({action:'PSP_REFUND_REVIEW',...queued});
+    const refundCents=context.refund_cents==null?0:integerCents(context.refund_cents);
+    if(refundCents===null||refundCents<=0) {
+      results.push({action:'PSP_REFUND_REVIEW',ok:false,reason:'INVALID_REFUND_AMOUNT_CENTS'});
+    } else {
+      const queued=await enqueueAction(env,c.id,'PSP_REFUND_REVIEW',{mission_id:c.mission_id||null,amount_cents:refundCents,reason:c.description||c.case_type},`${c.id}:psp-refund`);
+      results.push({action:'PSP_REFUND_REVIEW',...queued});
+    }
   }
 
   await journal(env,automatic?'copilot':'gerante',actorId,'CASE_BUSINESS_ACTIONS_EXECUTED','operational_case',c.id,'OK',{results});
@@ -2233,6 +2419,15 @@ async function createPromotion(request, env) {
   if (!Number.isFinite(discount) || discount < 0) {
     return json({ok:false,error:'INVALID_DISCOUNT',version:VERSION},400);
   }
+  const minAmountCents=integerCents(b.min_amount_cents==null?0:b.min_amount_cents);
+  const maxDiscountCents=b.max_discount_cents==null?null:integerCents(b.max_discount_cents);
+  const budgetCents=b.budget_cents==null?null:integerCents(b.budget_cents);
+  const intervenantProtectionCents=integerCents(b.intervenant_protection_cents==null?0:b.intervenant_protection_cents);
+  if(minAmountCents===null||intervenantProtectionCents===null||
+    (b.max_discount_cents!=null&&maxDiscountCents===null)||
+    (b.budget_cents!=null&&budgetCents===null)) {
+    return json({ok:false,error:'INVALID_PROMOTION_AMOUNT_CENTS',version:VERSION},400);
+  }
 
   const id = crypto.randomUUID();
   const autoApply = b.auto_apply === true ? 1 : 0;
@@ -2248,9 +2443,8 @@ async function createPromotion(request, env) {
       id, code, name, type, phase, String(b.client_type || 'ALL').toUpperCase(),
       clean(b.service_code)||null, clean(b.zone_code)||null,
       String(b.discount_type || 'PERCENT').toUpperCase(), discount,
-      Number(b.min_amount_cents || 0), b.max_discount_cents == null ? null : Number(b.max_discount_cents),
-      b.budget_cents == null ? null : Number(b.budget_cents),
-      Number(b.target_margin_percent || 15), Number(b.intervenant_protection_cents || 0),
+      minAmountCents, maxDiscountCents, budgetCents,
+      Number(b.target_margin_percent || 15), intervenantProtectionCents,
       clean(b.starts_at) || new Date().toISOString(), clean(b.ends_at) || new Date(Date.now()+86400000).toISOString(),
       'DRAFT', autoApply, requiresManager, clean(b.rationale)||null,
       JSON.stringify(b.rules || {}), gate.auth.user.id
@@ -2485,10 +2679,19 @@ async function executeQueuedAction(env, action) {
     } else if (action.action_type === 'PAYOUT') {
       result={performed:false,requires_provider:true,reason:'PSP_EXECUTION_REQUIRED',payload};
     } else if (action.action_type === 'ACCOUNTING_ENTRY') {
-      if (await tableExists(env,'accounting_ledger')) {
+      const amountCents=payload.amount_cents==null?0:integerCents(payload.amount_cents);
+      const debitCents=payload.debit_cents==null?0:integerCents(payload.debit_cents);
+      const creditCents=payload.credit_cents==null?0:integerCents(payload.credit_cents);
+      if(amountCents===null||debitCents===null||creditCents===null||
+        !Number.isSafeInteger(debitCents+creditCents)||
+        (amountCents===0&&debitCents===0&&creditCents===0)) {
+        // A zero-value journal row has no accounting effect and can create
+        // misleading audit evidence; reject it before touching the ledger.
+        result={performed:false,reason:'INVALID_ACCOUNTING_AMOUNT_CENTS'};
+      } else if (await tableExists(env,'accounting_ledger')) {
         const cols=await tableColumns(env,'accounting_ledger');
-        const values={id:crypto.randomUUID(),entry_type:payload.entry_type||'OPERATIONAL',amount_cents:Number(payload.amount_cents||0),
-          debit_cents:Number(payload.debit_cents||0),credit_cents:Number(payload.credit_cents||0),reference_type:action.entity_type,
+        const values={id:crypto.randomUUID(),entry_type:payload.entry_type||'OPERATIONAL',amount_cents:amountCents,
+          debit_cents:debitCents,credit_cents:creditCents,reference_type:action.entity_type,
           reference_id:action.entity_id,description:payload.description||'',metadata_json:JSON.stringify(payload)};
         const usable=Object.entries(values).filter(([k])=>cols.includes(k));
         if(usable.length){
@@ -2557,10 +2760,15 @@ async function loyaltyUpdate(request, env) {
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
   await ensureOperationalSchema(env);
   const b=await readJson(request)||{}; if(!b.client_id&&!b.company_id)return json({ok:false,error:'CLIENT_OR_COMPANY_REQUIRED',version:VERSION},400);
-  const points=Math.max(-100000,Math.min(100000,Number(b.points||0)));
+  const rawPoints=b.points==null?0:b.points;
+  const pointsValue=typeof rawPoints==='number'?rawPoints:(typeof rawPoints==='string'&&/^-?\d+$/.test(rawPoints.trim())?Number(rawPoints):NaN);
+  if(!Number.isSafeInteger(pointsValue)) return json({ok:false,error:'INVALID_LOYALTY_POINTS',version:VERSION},400);
+  const points=Math.max(-100000,Math.min(100000,pointsValue));
+  const amountCents=b.amount_cents==null?0:integerCents(b.amount_cents);
+  if(amountCents===null) return json({ok:false,error:'INVALID_LOYALTY_AMOUNT_CENTS',version:VERSION},400);
   const id=crypto.randomUUID();
   await env.DB.prepare(`INSERT INTO loyalty_events(id,client_id,company_id,event_type,points,amount_cents,metadata_json) VALUES(?,?,?,?,?,?,?)`)
-    .bind(id,b.client_id||null,b.company_id||null,b.event_type||'MANUAL',points,Number(b.amount_cents||0),JSON.stringify(b)).run();
+    .bind(id,b.client_id||null,b.company_id||null,b.event_type||'MANUAL',points,amountCents,JSON.stringify(b)).run();
   const existing=await env.DB.prepare('SELECT * FROM loyalty_balances WHERE client_id IS ? AND company_id IS ? LIMIT 1').bind(b.client_id||null,b.company_id||null).first();
   const total=Number(existing?.points||0)+points;
   const tier=total>=1000?'PLATINUM':total>=500?'GOLD':total>=200?'SILVER':'STANDARD';
@@ -2949,7 +3157,9 @@ async function commercialProspectCreate(request,env){
   await ensureCommercialRecruitmentSchema(env); const b=await readJson(request);
   const id=crypto.randomUUID(); const kind=String(b?.kind||'B2B').toUpperCase();
   const score=Math.max(0,Math.min(100,Number(b?.score||0)||0));
-  await env.DB.prepare(`INSERT INTO commercial_prospects(id,kind,company_name,contact_name,email,phone,website,sector,city,postal_code,source,need,estimated_potential_cents,score,next_action,notes) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(id,kind,clean(b?.company_name)||null,clean(b?.contact_name)||null,normalizeEmail(b?.email)||null,clean(b?.phone)||null,clean(b?.website)||null,clean(b?.sector)||null,clean(b?.city)||null,clean(b?.postal_code)||null,clean(b?.source)||'COPILOTE',clean(b?.need)||null,Number.isFinite(Number(b?.estimated_potential_cents))?Math.max(0,Math.round(Number(b.estimated_potential_cents))):null,score,clean(b?.next_action)||'PREMIER_CONTACT',clean(b?.notes)||null).run();
+  const potentialCents=b?.estimated_potential_cents==null?null:integerCents(b.estimated_potential_cents);
+  if(b?.estimated_potential_cents!=null&&potentialCents===null) return json({ok:false,error:'INVALID_PROSPECT_POTENTIAL_CENTS',version:VERSION},400);
+  await env.DB.prepare(`INSERT INTO commercial_prospects(id,kind,company_name,contact_name,email,phone,website,sector,city,postal_code,source,need,estimated_potential_cents,score,next_action,notes) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(id,kind,clean(b?.company_name)||null,clean(b?.contact_name)||null,normalizeEmail(b?.email)||null,clean(b?.phone)||null,clean(b?.website)||null,clean(b?.sector)||null,clean(b?.city)||null,clean(b?.postal_code)||null,clean(b?.source)||'COPILOTE',clean(b?.need)||null,potentialCents,score,clean(b?.next_action)||'PREMIER_CONTACT',clean(b?.notes)||null).run();
   await journal(env,'gerante',gate.auth.user.id,'PROSPECT_CREATED','commercial_prospect',id,'OK',{kind,score});
   return json({ok:true,version:VERSION,prospect_id:id,score,next_action:clean(b?.next_action)||'PREMIER_CONTACT'},201);
 }
@@ -3094,76 +3304,112 @@ async function financeRowsForUser(env, user) {
     where = 'client_id=?'; params.push(uid);
   }
 
-  let payments = [];
-  try {
-    const r = await env.DB.prepare(
-      `SELECT id,mission_id,client_id,intervenant_id,type,status,gross_cents,commission_cents,
-              provider_fee_cents,refund_cents,net_intervenant_cents,currency,provider,
-              provider_payment_id,provider_payout_id,reason,created_at,updated_at
-         FROM payment_transactions WHERE ${where}
-        ORDER BY created_at DESC LIMIT 5000`
-    ).bind(...params).all();
-    payments = r.results || [];
-  } catch (_) {}
+  // Never turn a failed financial query into an apparently valid empty ledger.
+  // Propagate D1/schema failures so the endpoint returns an error, not zero totals.
+  const paymentResult = await env.DB.prepare(
+    `SELECT id,mission_id,client_id,intervenant_id,type,status,gross_cents,commission_cents,
+            provider_fee_cents,refund_cents,net_intervenant_cents,currency,provider,
+            provider_payment_id,provider_payout_id,reason,created_at,updated_at
+       FROM payment_transactions WHERE ${where}
+      ORDER BY created_at DESC LIMIT 5000`
+  ).bind(...params).all();
+  if (!paymentResult || paymentResult.success === false || !Array.isArray(paymentResult.results)) throw new Error('FINANCE_PAYMENT_QUERY_FAILED');
+  const payments = paymentResult.results || [];
 
-  let ledger = [];
-  try {
-    if (['GERANTE','ADMIN','FINANCE'].includes(role)) {
-      const r = await env.DB.prepare(
+  const ledgerResult = ['GERANTE','ADMIN','FINANCE'].includes(role)
+    ? await env.DB.prepare(
         `SELECT id,entry_type,direction,amount_cents,currency,label,reference_type,reference_id,status,created_at
            FROM finance_workspace_entries ORDER BY created_at DESC LIMIT 5000`
-      ).all();
-      ledger = r.results || [];
-    } else {
-      const r = await env.DB.prepare(
+      ).all()
+    : await env.DB.prepare(
         `SELECT id,entry_type,direction,amount_cents,currency,label,reference_type,reference_id,status,created_at
            FROM finance_workspace_entries WHERE user_id=? ORDER BY created_at DESC LIMIT 5000`
       ).bind(uid).all();
-      ledger = r.results || [];
-    }
-  } catch (_) {}
+  if (!ledgerResult || ledgerResult.success === false || !Array.isArray(ledgerResult.results)) throw new Error('FINANCE_LEDGER_QUERY_FAILED');
+  const ledger = ledgerResult.results || [];
 
-  let payouts=[];
-  try {
-    const q = ['GERANTE','ADMIN','FINANCE'].includes(role)
-      ? env.DB.prepare(`SELECT id,user_id,amount_cents,currency,mode,status,provider,provider_payout_id,failure_code,requested_at,completed_at FROM payout_requests ORDER BY requested_at DESC LIMIT 5000`)
-      : env.DB.prepare(`SELECT id,user_id,amount_cents,currency,mode,status,provider,provider_payout_id,failure_code,requested_at,completed_at FROM payout_requests WHERE user_id=? ORDER BY requested_at DESC LIMIT 5000`).bind(uid);
-    const r=await q.all(); payouts=r.results||[];
-  } catch (_) {}
+  const payoutQuery = ['GERANTE','ADMIN','FINANCE'].includes(role)
+    ? env.DB.prepare(`SELECT id,user_id,amount_cents,currency,mode,status,provider,provider_payout_id,failure_code,requested_at,completed_at FROM payout_requests ORDER BY requested_at DESC LIMIT 5000`)
+    : env.DB.prepare(`SELECT id,user_id,amount_cents,currency,mode,status,provider,provider_payout_id,failure_code,requested_at,completed_at FROM payout_requests WHERE user_id=? ORDER BY requested_at DESC LIMIT 5000`).bind(uid);
+  const payoutResult = await payoutQuery.all();
+  if (!payoutResult || payoutResult.success === false || !Array.isArray(payoutResult.results)) throw new Error('FINANCE_PAYOUT_QUERY_FAILED');
+  const payouts = payoutResult.results || [];
+
   return {payments,ledger,payouts};
 }
 
 function financeSummaryFromRows(rows,user) {
   const role=String(user.role||'').toUpperCase();
-  let gross=0, refunds=0, commission=0, psp=0, netIntervenant=0, count=0;
-  for(const x of rows.payments){
+  const paymentTotals=new Map(), ledgerTotals=new Map();
+  let count=0, integrityErrors=0;
+  const add=(map,currency,key,value)=>{
+    const current=map.get(currency)||{};
+    const next=(current[key]||0)+value;
+    if(!Number.isSafeInteger(next)){integrityErrors++;return;}
+    current[key]=next;map.set(currency,current);
+  };
+  for(const x of rows.payments||[]){
     if(String(x.status||'').toLowerCase()==='failed') continue;
-    gross += Number(x.gross_cents||0);
-    refunds += Number(x.refund_cents||0);
-    commission += Number(x.commission_cents||0);
-    psp += Number(x.provider_fee_cents||0);
-    netIntervenant += Number(x.net_intervenant_cents||0);
-    count++;
+    const currency=String(x.currency||'EUR').toUpperCase();
+    if(!/^[A-Z]{3}$/.test(currency)){integrityErrors++;continue;}
+    let valid=true;
+    for(const [field,key] of [['gross_cents','gross'],['refund_cents','refunds'],['commission_cents','commission'],['provider_fee_cents','provider_fees'],['net_intervenant_cents','net_intervenant']]){
+      const value=integerCents(x[field]??0);
+      if(value===null){integrityErrors++;valid=false;break;}
+      add(paymentTotals,currency,key,value);
+    }
+    if(valid)count++;
   }
-  let ledgerIn=0, ledgerOut=0;
-  for(const x of rows.ledger){
-    const n=Number(x.amount_cents||0);
-    if(String(x.direction).toUpperCase()==='OUT') ledgerOut+=n; else ledgerIn+=n;
+  for(const x of rows.ledger||[]){
+    const currency=String(x.currency||'EUR').toUpperCase();
+    const direction=String(x.direction||'').toUpperCase();
+    const amount=integerCents(x.amount_cents??0);
+    if(!/^[A-Z]{3}$/.test(currency)||!['IN','OUT'].includes(direction)||amount===null){integrityErrors++;continue;}
+    add(ledgerTotals,currency,direction==='OUT'?'out':'in',amount);
   }
-  const clientNet = gross-refunds;
-  const platformNet = gross-refunds-commission-psp;
+  const paymentCurrencyTotals=[...paymentTotals.entries()].sort(([a],[b])=>a.localeCompare(b)).map(([currency,v])=>{
+    const clientNet=v.gross-v.refunds;
+    const platformNet=clientNet-v.commission-v.provider_fees;
+    const derivedSafe=Number.isSafeInteger(clientNet)&&Number.isSafeInteger(platformNet);
+    if(!derivedSafe)integrityErrors++;
+    return {currency,...v,client_net_cents:derivedSafe?clientNet:null,platform_net_cents:derivedSafe?platformNet:null};
+  });
+  const ledgerCurrencyTotals=[...ledgerTotals.entries()].sort(([a],[b])=>a.localeCompare(b)).map(([currency,v])=>{
+    const incoming=v.in||0, outgoing=v.out||0, balance=incoming-outgoing;
+    if(!Number.isSafeInteger(balance)){integrityErrors++;return {currency,in_cents:null,out_cents:null,balance_cents:null};}
+    return {currency,in_cents:incoming,out_cents:outgoing,balance_cents:balance};
+  });
+  const safePaymentCurrencyTotals=integrityErrors===0?paymentCurrencyTotals:paymentCurrencyTotals.map(x=>({
+    currency:x.currency,gross:null,refunds:null,commission:null,provider_fees:null,net_intervenant:null,
+    client_net_cents:null,platform_net_cents:null
+  }));
+  const safeLedgerCurrencyTotals=integrityErrors===0?ledgerCurrencyTotals:ledgerCurrencyTotals.map(x=>({
+    currency:x.currency,in_cents:null,out_cents:null,balance_cents:null
+  }));
+  const legacySafe=integrityErrors===0&&paymentCurrencyTotals.every(x=>x.currency==='EUR')&&ledgerCurrencyTotals.every(x=>x.currency==='EUR');
+  const eurPayments=paymentCurrencyTotals.find(x=>x.currency==='EUR')||{};
+  const eurLedger=ledgerCurrencyTotals.find(x=>x.currency==='EUR')||{};
+  const amountOrNull=(value)=>legacySafe?(value??0):null;
+  const gross=amountOrNull(eurPayments.gross), refunds=amountOrNull(eurPayments.refunds);
+  const commission=amountOrNull(eurPayments.commission), psp=amountOrNull(eurPayments.provider_fees);
+  const netIntervenant=amountOrNull(eurPayments.net_intervenant);
+  const clientNetRaw=gross===null?null:gross-refunds;
+  const platformNetRaw=gross===null?null:gross-refunds-commission-psp;
+  const clientNet=Number.isSafeInteger(clientNetRaw)?clientNetRaw:null;
+  const platformNet=Number.isSafeInteger(platformNetRaw)?platformNetRaw:null;
+  const ledgerIn=amountOrNull(eurLedger.in), ledgerOut=amountOrNull(eurLedger.out);
   return {
-    role,
-    transactions:count,
-    gross_cents:gross, gross_eur:financeMoney(gross),
-    refunds_cents:refunds, refunds_eur:financeMoney(refunds),
-    commission_cents:commission, commission_eur:financeMoney(commission),
-    provider_fees_cents:psp, provider_fees_eur:financeMoney(psp),
-    net_intervenant_cents:netIntervenant, net_intervenant_eur:financeMoney(netIntervenant),
-    client_net_cents:clientNet, client_net_eur:financeMoney(clientNet),
-    platform_net_cents:platformNet, platform_net_eur:financeMoney(platformNet),
-    manual_ledger_in_cents:ledgerIn, manual_ledger_out_cents:ledgerOut,
-    manual_ledger_balance_cents:ledgerIn-ledgerOut
+    role,transactions:count,integrity_ok:integrityErrors===0,integrity_errors:integrityErrors,
+    currency_totals:safePaymentCurrencyTotals,manual_ledger_currency_totals:safeLedgerCurrencyTotals,
+    gross_cents:gross,gross_eur:gross===null?null:financeMoney(gross),
+    refunds_cents:refunds,refunds_eur:refunds===null?null:financeMoney(refunds),
+    commission_cents:commission,commission_eur:commission===null?null:financeMoney(commission),
+    provider_fees_cents:psp,provider_fees_eur:psp===null?null:financeMoney(psp),
+    net_intervenant_cents:netIntervenant,net_intervenant_eur:netIntervenant===null?null:financeMoney(netIntervenant),
+    client_net_cents:clientNet,client_net_eur:clientNet===null?null:financeMoney(clientNet),
+    platform_net_cents:platformNet,platform_net_eur:platformNet===null?null:financeMoney(platformNet),
+    manual_ledger_in_cents:ledgerIn,manual_ledger_out_cents:ledgerOut,
+    manual_ledger_balance_cents:ledgerIn===null||!Number.isSafeInteger(ledgerIn-ledgerOut)?null:ledgerIn-ledgerOut
   };
 }
 
@@ -3193,7 +3439,7 @@ async function financeDashboard(request,env) {
     payments:rows.payments,
     payouts:rows.payouts||[],
     ledger:rows.ledger,
-    exports:['CSV','JSON','HTML/PDF'],
+    exports:['CSV','JSON','HTML'],
     support_resolution:{automatic_for_low_impact:true,human_validation_for_sensitive:true}
   }});
 }
@@ -3202,14 +3448,16 @@ async function financeExport(request,env) {
   const a=await financeAuth(request,env); if(a.response)return a.response;
   const {auth}=a, url=new URL(request.url);
   const format=String(url.searchParams.get('format')||'csv').toLowerCase();
+  if(!['csv','json','html'].includes(format))return json({ok:false,error:format==='pdf'?'FINANCE_PDF_EXPORT_NOT_SUPPORTED':'INVALID_FINANCE_EXPORT_FORMAT',version:VERSION},400);
   const start=url.searchParams.get('from'), end=url.searchParams.get('to');
   const rows=await financeRowsForUser(env,auth.user);
   let payments=rows.payments.filter(x=>(!start||String(x.created_at)>=start)&&(!end||String(x.created_at)<=end));
+  const exportAmount=value=>{const cents=integerCents(value??0);return cents===null?null:financeMoney(cents);};
   const data=payments.map(x=>({
     id:x.id, mission_id:x.mission_id, type:x.type, status:x.status, date:x.created_at,
-    montant_brut_eur:financeMoney(x.gross_cents), remboursement_eur:financeMoney(x.refund_cents),
-    commission_eur:financeMoney(x.commission_cents), frais_psp_eur:financeMoney(x.provider_fee_cents),
-    remuneration_intervenant_eur:financeMoney(x.net_intervenant_cents), devise:x.currency||'EUR',
+    montant_brut:exportAmount(x.gross_cents), remboursement:exportAmount(x.refund_cents),
+    commission:exportAmount(x.commission_cents), frais_psp:exportAmount(x.provider_fee_cents),
+    remuneration_intervenant:exportAmount(x.net_intervenant_cents), devise:String(x.currency||'EUR').toUpperCase(),
     motif:x.reason||''
   }));
   const summary=financeSummaryFromRows({payments,ledger:rows.ledger},auth.user);
@@ -3219,25 +3467,37 @@ async function financeExport(request,env) {
   await journal(env,auth.user.role,auth.user.id,'FINANCE_EXPORT','finance_export',id,'OK',{format,row_count:data.length,from:start,to:end});
 
   if(format==='json') return json({ok:true,version:VERSION,summary,rows:data,export_id:id});
-  if(format==='html' || format==='pdf') {
+  if(format==='html') {
     const escHtml=v=>String(v??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
-    const body=data.map(r=>`<tr><td>${escHtml(r.date)}</td><td>${escHtml(r.type)}</td><td>${escHtml(r.status)}</td><td>${r.montant_brut_eur.toFixed(2)}</td><td>${r.remboursement_eur.toFixed(2)}</td><td>${r.commission_eur.toFixed(2)}</td><td>${r.frais_psp_eur.toFixed(2)}</td><td>${r.remuneration_intervenant_eur.toFixed(2)}</td></tr>`).join('');
-    const html=`<!doctype html><html lang="fr"><head><meta charset="utf-8"><title>PROCHÉLIA — Export financier</title><style>body{font-family:Arial,sans-serif;margin:30px;color:#172a2a}h1{font-size:22px}table{border-collapse:collapse;width:100%;font-size:11px}th,td{border:1px solid #ddd;padding:6px}th{background:#eee}.tot{margin:14px 0}</style></head><body><h1>PROCHÉLIA — Export financier</h1><div class="tot">Période : ${escHtml(start||'Toutes')} → ${escHtml(end||'Toutes')} · Transactions : ${summary.transactions} · Brut : ${summary.gross_eur.toFixed(2)} € · Remboursements : ${summary.refunds_eur.toFixed(2)} €</div><table><thead><tr><th>Date</th><th>Type</th><th>Statut</th><th>Brut €</th><th>Remb. €</th><th>Commission €</th><th>PSP €</th><th>Intervenant €</th></tr></thead><tbody>${body}</tbody></table><script>window.onload=()=>window.print()</script></body></html>`;
+    const money=v=>v===null?'Donnée invalide':Number(v).toFixed(2);
+    const body=data.map(r=>`<tr><td>${escHtml(r.date)}</td><td>${escHtml(r.type)}</td><td>${escHtml(r.status)}</td><td>${escHtml(r.devise)}</td><td>${money(r.montant_brut)}</td><td>${money(r.remboursement)}</td><td>${money(r.commission)}</td><td>${money(r.frais_psp)}</td><td>${money(r.remuneration_intervenant)}</td></tr>`).join('');
+    const grossSummary=summary.gross_eur===null?'Indisponible (devises multiples ou données invalides)':summary.gross_eur.toFixed(2)+' €';
+    const refundSummary=summary.refunds_eur===null?'Indisponible (devises multiples ou données invalides)':summary.refunds_eur.toFixed(2)+' €';
+    const html=`<!doctype html><html lang="fr"><head><meta charset="utf-8"><title>PROCHÉLIA — Export financier</title><style>body{font-family:Arial,sans-serif;margin:30px;color:#172a2a}h1{font-size:22px}table{border-collapse:collapse;width:100%;font-size:11px}th,td{border:1px solid #ddd;padding:6px}th{background:#eee}.tot{margin:14px 0}</style></head><body><h1>PROCHÉLIA — Export financier</h1><div class="tot">Période : ${escHtml(start||'Toutes')} → ${escHtml(end||'Toutes')} · Transactions : ${summary.transactions} · Brut EUR : ${grossSummary} · Remboursements EUR : ${refundSummary}</div><table><thead><tr><th>Date</th><th>Type</th><th>Statut</th><th>Devise</th><th>Brut</th><th>Remb.</th><th>Commission</th><th>PSP</th><th>Intervenant</th></tr></thead><tbody>${body}</tbody></table><script>window.onload=()=>window.print()</script></body></html>`;
     return new Response(html,{status:200,headers:{'content-type':'text/html; charset=UTF-8','content-disposition':`inline; filename="prochelia-finance-${id}.html"`,'cache-control':'no-store'}});
   }
-  const header=['date','type','status','mission_id','montant_brut_eur','remboursement_eur','commission_eur','frais_psp_eur','remuneration_intervenant_eur','devise','motif'];
-  const csv=[header,...data.map(r=>header.map(k=>String(r[k]??'').replace(/"/g,'""')))].map(row=>row.map(v=>`"${v}"`).join(';')).join('\r\n');
+  const header=['date','type','status','mission_id','devise','montant_brut','remboursement','commission','frais_psp','remuneration_intervenant','motif'];
+  const csvCell=value=>{
+    let v=String(value??'');
+    if(/^\s*[=+@-]/.test(v))v="'"+v;
+    return `"${v.replace(/"/g,'""')}"`;
+  };
+  const csv=[header,...data.map(r=>header.map(k=>r[k]))].map(row=>row.map(csvCell).join(';')).join('\r\n');
   return new Response('\ufeff'+csv,{status:200,headers:{'content-type':'text/csv; charset=UTF-8','content-disposition':`attachment; filename="prochelia-finance-${id}.csv"`,'cache-control':'no-store'}});
 }
 
 async function financeEntryCreate(request,env) {
   const a=await financeAuth(request,env); if(a.response)return a.response;
   const {auth}=a, b=await readJson(request)||{};
-  const amount=Math.round(Number(b.amount_eur)*100);
-  if(!Number.isFinite(amount)||amount<=0||!b.entry_type) return json({ok:false,error:'INVALID_FINANCE_ENTRY',version:VERSION},400);
+  const amount=moneyCents(b.amount_eur);
+  const direction=String(b.direction??'IN').trim().toUpperCase();
+  const currency=String(b.currency??'EUR').trim().toUpperCase();
+  const entryType=clean(b.entry_type);
+  if(amount===null||amount<=0||!entryType||!['IN','OUT'].includes(direction)||!/^[A-Z]{3}$/.test(currency))
+    return json({ok:false,error:'INVALID_FINANCE_ENTRY',version:VERSION},400);
   const id=crypto.randomUUID();
   await env.DB.prepare(`INSERT INTO finance_workspace_entries(id,user_id,role,entry_type,direction,amount_cents,currency,label,reference_type,reference_id,metadata_json) VALUES(?,?,?,?,?,?,?,?,?,?,?)`)
-    .bind(id,auth.user.id,auth.user.role,String(b.entry_type),String(b.direction||'IN').toUpperCase()==='OUT'?'OUT':'IN',amount,b.currency||'EUR',clean(b.label)||null,clean(b.reference_type)||null,clean(b.reference_id)||null,JSON.stringify(b.metadata||{})).run();
+    .bind(id,auth.user.id,auth.user.role,entryType,direction,amount,currency,clean(b.label)||null,clean(b.reference_type)||null,clean(b.reference_id)||null,JSON.stringify(b.metadata||{})).run();
   await journal(env,auth.user.role,auth.user.id,'FINANCE_ENTRY_CREATE','finance_workspace_entries',id,'OK',{entry_type:b.entry_type});
   return json({ok:true,version:VERSION,id});
 }
@@ -3245,12 +3505,14 @@ async function financeEntryCreate(request,env) {
 async function financeProblemCreate(request,env) {
   const a=await financeAuth(request,env); if(a.response)return a.response;
   const {auth}=a,b=await readJson(request)||{}, [issueType,solution]=financeProblemSolution(b.issue_type);
+  const amountCents=b.amount_cents==null?null:integerCents(b.amount_cents);
+  if(b.amount_cents!=null&&amountCents===null) return json({ok:false,error:'INVALID_FINANCE_AMOUNT_CENTS',version:VERSION},400);
   const severity=['CRITICAL','HIGH','MEDIUM','LOW'].includes(String(b.severity||'').toUpperCase())?String(b.severity).toUpperCase():'LOW';
   const auto=['LOW','MEDIUM'].includes(severity) && ['PAYMENT_FAILED','EXPORT_FAILED','INVOICE_MISSING','UNKNOWN'].includes(issueType);
   const status=auto?'AUTO_RESOLUTION_PROPOSED':'OPEN';
   const id=crypto.randomUUID();
   await env.DB.prepare(`INSERT INTO finance_resolution_cases(id,user_id,role,issue_type,status,severity,description,proposed_solution,amount_cents,reference_id,metadata_json) VALUES(?,?,?,?,?,?,?,?,?,?,?)`)
-    .bind(id,auth.user.id,auth.user.role,issueType,status,severity,clean(b.description)||null,solution,Number.isFinite(Number(b.amount_cents))?Number(b.amount_cents):null,clean(b.reference_id)||null,JSON.stringify(b.metadata||{})).run();
+    .bind(id,auth.user.id,auth.user.role,issueType,status,severity,clean(b.description)||null,solution,amountCents,clean(b.reference_id)||null,JSON.stringify(b.metadata||{})).run();
   await journal(env,auth.user.role,auth.user.id,'FINANCE_PROBLEM_CREATE','finance_resolution_cases',id,status,{issue_type:issueType,auto});
   return json({ok:true,version:VERSION,case:{id,issue_type:issueType,status,severity,automatic_resolution_possible:auto,proposed_solution:solution,requires_human_validation:!auto}});
 }
@@ -3265,7 +3527,7 @@ async function financeProblemResolve(request,env) {
   const owner=String(row.user_id)===String(auth.user.id);
   const manager=['GERANTE','ADMIN','FINANCE'].includes(role);
   if(!owner&&!manager)return json({ok:false,error:'FORBIDDEN',version:VERSION},403);
-  const approved=Boolean(b.approve);
+  const approved=b.approve===true;
   const resolution=clean(b.resolution)||row.proposed_solution||'Résolution contrôlée par le Copilote.';
   const status=approved?'RESOLVED':'ESCALATED';
   await env.DB.prepare(`UPDATE finance_resolution_cases SET status=?,resolution=?,resolved_at=CURRENT_TIMESTAMP WHERE id=?`).bind(status,resolution,id).run();

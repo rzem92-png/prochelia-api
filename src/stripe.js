@@ -26,19 +26,36 @@ export async function stripePost(env, apiPath, params, idempotencyKey, fetchImpl
   return data;
 }
 
-export async function stripeGet(env, apiPath, fetchImpl = fetch) {
+export function assertStripeWebhookCompletion(results) {
+  if (!Array.isArray(results) || results.length !== 2 || Number(results[0]?.meta?.changes || 0) !== 1 || Number(results[1]?.meta?.changes || 0) !== 1) throw new Error("STRIPE_WEBHOOK_COMPLETION_NOT_PERSISTED");
+  return true;
+}
+
+export function requireStripeAccountId(value) {
+  const accountId = typeof value === "string" ? value.trim() : "";
+  if (!/^acct_[A-Za-z0-9]+$/.test(accountId)) throw new Error("STRIPE_ACCOUNT_ID_INVALID");
+  return accountId;
+}
+
+export async function stripeGet(env, apiPath, fetchImpl = fetch, requestContext = {}) {
   const secret = String(env?.STRIPE_SECRET_KEY || "").trim();
   if (!secret) throw new Error("STRIPE_SECRET_KEY_NOT_CONFIGURED");
   if (!/^v2\/core\/accounts\/acct_[A-Za-z0-9]+$/.test(apiPath)) throw new Error("STRIPE_PATH_NOT_ALLOWED");
-  const response = await fetchImpl(STRIPE_API_BASE + apiPath, {
-    method: "GET",
-    headers: { Authorization: "Bearer " + secret, "Stripe-Version": STRIPE_API_VERSION }
-  });
+  const headers = { Authorization: "Bearer " + secret, "Stripe-Version": STRIPE_API_VERSION };
+  const context = typeof requestContext?.context === "string" ? requestContext.context.trim() : "";
+  const eventId = typeof requestContext?.eventId === "string" ? requestContext.eventId.trim() : "";
+  if (context && context.length <= 255 && !Array.from(context).some(character => character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127)) headers["Stripe-Context"] = context;
+  if (eventId && /^evt_[A-Za-z0-9]+$/.test(eventId)) headers["Stripe-Request-Trigger"] = "event=" + eventId;
+  const accountUrl = new URL(apiPath, STRIPE_API_BASE);
+  accountUrl.searchParams.append("include[]", "configuration.recipient");
+  const response = await fetchImpl(accountUrl.toString(), { method: "GET", headers });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
     const code = String(data?.error?.code || data?.error?.type || "unknown").replace(/[^a-zA-Z0-9_]/g, "").slice(0, 60);
     throw new Error("STRIPE_API_ERROR_" + response.status + "_" + code);
   }
+  const requestedAccountId = apiPath.slice("v2/core/accounts/".length);
+  if (!data || data.id !== requestedAccountId) throw new Error("STRIPE_ACCOUNT_ID_MISMATCH");
   return data;
 }
 
@@ -70,4 +87,15 @@ export async function verifyStripeSignature(signatureHeader, secret, rawBody, no
     for (let i = 0; i < expected.length; i++) mismatch |= candidate.charCodeAt(i) ^ expected.charCodeAt(i);
     return mismatch === 0;
   });
+}
+
+
+export function mapStripeRecipientCapabilityStatus(value) {
+  const status = typeof value === "string" ? value.trim().toLowerCase() : "";
+  if (status === "active") return { status: "active", onboardingStatus: "submitted", enabled: true };
+  if (status === "inactive") return { status: "inactive", onboardingStatus: "required", enabled: false };
+  if (status === "restricted" || status === "rejected" || status === "unsupported") {
+    return { status, onboardingStatus: status, enabled: false };
+  }
+  return { status: "pending", onboardingStatus: "required", enabled: false };
 }
