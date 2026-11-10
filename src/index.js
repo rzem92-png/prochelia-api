@@ -836,16 +836,23 @@ async function paymentOnboard(request, env) {
   const dashboard=clean(env.STRIPE_DASHBOARD);
   const feesCollector=clean(env.STRIPE_FEES_COLLECTOR);
   const lossesCollector=clean(env.STRIPE_LOSSES_COLLECTOR);
+  const chargeModel=clean(env.STRIPE_CONNECT_CHARGE_MODEL);
   if (paymentProvider(env)!=='stripe' || !env.STRIPE_SECRET_KEY || !env.STRIPE_PUBLISHABLE_KEY || !env.STRIPE_WEBHOOK_SECRET ||
       !['express','full'].includes(dashboard) || !['application','stripe'].includes(feesCollector) ||
-      !['application','stripe'].includes(lossesCollector)) {
-    return json({ok:false,error:'STRIPE_CONNECT_NOT_CONFIGURED',version:VERSION,required:['PAYMENT_PROVIDER=stripe','STRIPE_SECRET_KEY','STRIPE_PUBLISHABLE_KEY','STRIPE_WEBHOOK_SECRET','STRIPE_DASHBOARD','STRIPE_FEES_COLLECTOR','STRIPE_LOSSES_COLLECTOR','APP_BASE_URL']},503);
+      !['application','stripe'].includes(lossesCollector) ||
+      !['direct','destination','separate_charges_and_transfers'].includes(chargeModel)) {
+    return json({ok:false,error:'STRIPE_CONNECT_NOT_CONFIGURED',version:VERSION,required:['PAYMENT_PROVIDER=stripe','STRIPE_SECRET_KEY','STRIPE_PUBLISHABLE_KEY','STRIPE_WEBHOOK_SECRET','STRIPE_CONNECT_CHARGE_MODEL','STRIPE_DASHBOARD','STRIPE_FEES_COLLECTOR','STRIPE_LOSSES_COLLECTOR','APP_BASE_URL']},503);
   }
-  if(dashboard==='express' && (feesCollector!=='application' || lossesCollector!=='application')) {
-    return json({ok:false,error:'STRIPE_EXPRESS_RESPONSIBILITY_CONFLICT',version:VERSION,required:'Express requires application fee/loss responsibility'},409);
-  }
-  if(dashboard==='full' && (feesCollector!=='stripe' || lossesCollector!=='stripe')) {
-    return json({ok:false,error:'STRIPE_FULL_RESPONSIBILITY_CONFLICT',version:VERSION,required:'Full dashboard requires Stripe fee and loss responsibility'},409);
+  // Accounts v2 responsibility defaults are immutable once set. For platform
+  // (indirect) charges, require Express + application/application. For direct
+  // charges, this integration only permits Full + stripe/stripe.
+  const platformCharge=['destination','separate_charges_and_transfers'].includes(chargeModel);
+  const responsibilityModelValid=platformCharge
+    ? dashboard==='express' && feesCollector==='application' && lossesCollector==='application'
+    : dashboard==='full' && feesCollector==='stripe' && lossesCollector==='stripe';
+  if(!responsibilityModelValid) {
+    return json({ok:false,error:'STRIPE_CONNECT_RESPONSIBILITY_MODEL_CONFLICT',version:VERSION,
+      required:platformCharge?'destination/separate charges require express + application/application':'direct charges require full + stripe/stripe'},409);
   }
   let appBase;
   try {
@@ -938,17 +945,20 @@ function paymentPublicConfig(request,env) {
   const candidate=provider==='stripe' ? String(env.STRIPE_PUBLISHABLE_KEY||'') : '';
   const secret=String(env.STRIPE_SECRET_KEY||'').trim();
   const matchingTest=/^(sk|rk)_test_/.test(secret) && /^pk_test_/.test(candidate);
-  const matchingLive=/^(sk|rk)_live_/.test(secret) && /^pk_live_/.test(candidate) && env.STRIPE_CONNECT_LIVE_ENABLED==='true' && env.STRIPE_CONNECT_LIVE_APPROVED==='true';
+  const matchingLive=/^(sk|rk)_live_/.test(secret) && /^pk_live_/.test(candidate) &&
+    env.STRIPE_CONNECT_LIVE_ENABLED==='true' && env.STRIPE_CONNECT_LIVE_APPROVED==='true';
   const approved=env.STRIPE_CONNECT_ONBOARDING_ENABLED==='true' && env.STRIPE_CONNECT_ONBOARDING_APPROVED==='true';
-  const publishable=approved && (matchingTest||matchingLive) ? candidate : null;
-  const allowedStripeKey=(/^(sk|rk)_test_/.test(secret) && /^pk_test_/.test(String(env.STRIPE_PUBLISHABLE_KEY||''))) ||
-    (/^(sk|rk)_live_/.test(secret) && /^pk_live_/.test(String(env.STRIPE_PUBLISHABLE_KEY||'')) && env.STRIPE_CONNECT_LIVE_ENABLED==='true');
+  const chargeModel=clean(env.STRIPE_CONNECT_CHARGE_MODEL);
   const dashboard=clean(env.STRIPE_DASHBOARD), fees=clean(env.STRIPE_FEES_COLLECTOR), losses=clean(env.STRIPE_LOSSES_COLLECTOR);
-  const responsibilityModelValid=(dashboard==='express'&&fees==='application'&&losses==='application') ||
-    (dashboard==='full'&&fees==='stripe'&&losses==='stripe');
-  const onboardingReady=approved && !!publishable && allowedStripeKey && responsibilityModelValid &&
-    !!env.STRIPE_WEBHOOK_SECRET && !!env.APP_BASE_URL;
-  return json({ok:true,version:VERSION,provider,stripe_publishable_key:publishable,stripe_api_version:'2026-10-28.endive',connect_onboarding_ready:onboardingReady});
+  const platformCharge=['destination','separate_charges_and_transfers'].includes(chargeModel);
+  const responsibilityModelValid=platformCharge
+    ? dashboard==='express' && fees==='application' && losses==='application'
+    : chargeModel==='direct' && dashboard==='full' && fees==='stripe' && losses==='stripe';
+  const publishable=approved && responsibilityModelValid && (matchingTest||matchingLive) ? candidate : null;
+  const onboardingReady=!!publishable && !!env.STRIPE_WEBHOOK_SECRET && !!env.APP_BASE_URL;
+  return json({ok:true,version:VERSION,provider,stripe_publishable_key:publishable,
+    stripe_api_version:'2026-10-28.endive',connect_charge_model:chargeModel||null,
+    connect_onboarding_ready:onboardingReady});
 }
 
 async function paymentStatus(request, env) {
