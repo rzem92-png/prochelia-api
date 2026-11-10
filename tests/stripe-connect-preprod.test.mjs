@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { webcrypto } from "node:crypto";
 import worker from "../src/index.js";
-import { stripePost, verifyStripeSignature } from "../src/stripe.js";
+import { stripeGet, stripePost, verifyStripeSignature } from "../src/stripe.js";
 
 if (!globalThis.crypto) globalThis.crypto = webcrypto;
 
@@ -372,6 +372,28 @@ test("verified bank-payout capability never enables recipient transfers", async 
   } finally {
     globalThis.fetch = originalFetch;
   }
+});
+
+test("Stripe account retrieval rejects a response for a different connected account", async () => {
+  const fetchImpl = async () => new Response(JSON.stringify({ id: "acct_other123" }), {
+    status: 200, headers: { "content-type": "application/json" }
+  });
+  await assert.rejects(
+    stripeGet({ STRIPE_SECRET_KEY: "sk_test_placeholder" }, "v2/core/accounts/acct_expected123", fetchImpl),
+    /STRIPE_ACCOUNT_ID_MISMATCH/
+  );
+});
+
+test("Stripe account retrieval accepts only the exact requested connected account", async () => {
+  const fetchImpl = async (url) => new Response(JSON.stringify({ id: "acct_expected123" }), {
+    status: 200, headers: { "content-type": "application/json" }
+  });
+  const account = await stripeGet(
+    { STRIPE_SECRET_KEY: "sk_test_placeholder" },
+    "v2/core/accounts/acct_expected123",
+    fetchImpl
+  );
+  assert.equal(account.id, "acct_expected123");
 });
 
 test("Stripe webhook signature verification rejects stale and malformed signatures", async () => {
