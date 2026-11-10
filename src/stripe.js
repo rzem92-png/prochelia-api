@@ -93,6 +93,7 @@ export async function verifyStripeSignature(signatureHeader, secret, rawBody, no
 export function mapStripeRecipientCapabilityStatus(value) {
   const status = typeof value === "string" ? value.trim().toLowerCase() : "";
   if (status === "active") return { status: "active", onboardingStatus: "submitted", enabled: true };
+  if (status === "inactive") return { status: "inactive", onboardingStatus: "required", enabled: false };
   if (status === "restricted" || status === "rejected" || status === "unsupported") {
     return { status, onboardingStatus: status, enabled: false };
   }
