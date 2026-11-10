@@ -1245,6 +1245,8 @@ async function paymentWebhook(request, env) {
       return json({ok:false,error:'PAYMENT_WEBHOOK_STATE_CONFLICT',version:VERSION,status:tx.status},409);
     } else if(tx.status==='held'&&newPaymentStatus==='failed') {
       return json({ok:false,error:'PAYMENT_WEBHOOK_STATE_CONFLICT',version:VERSION,status:tx.status},409);
+    } else if(!['paid','failed'].includes(tx.status)) {
+      return json({ok:false,error:'PAYMENT_WEBHOOK_STATE_CONFLICT',version:VERSION,status:tx.status},409);
     } else {
       paymentGuard={id:txId,status:tx.status,ref};
     }
@@ -1269,6 +1271,8 @@ async function paymentWebhook(request, env) {
         updated_at=CURRENT_TIMESTAMP WHERE id=? AND status IN ('requested','processing')`)
         .bind(newPayoutStatus,ref,clean(event?.data?.failure_code)||null,
           clean(event?.data?.failure_message)||null,newPayoutStatus,payoutId));
+    } else if(!['completed','failed','canceled'].includes(payout.status)) {
+      return json({ok:false,error:'PAYOUT_WEBHOOK_STATE_CONFLICT',version:VERSION,status:payout.status},409);
     } else {
       payoutGuard={id:payoutId,status:payout.status,ref};
     }
