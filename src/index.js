@@ -3473,11 +3473,11 @@ async function financeExport(request,env) {
   const header=['date','type','status','mission_id','devise','montant_brut','remboursement','commission','frais_psp','remuneration_intervenant','motif'];
   const csvCell=value=>{
     let v=String(value??'');
-    if(/^[\\s]*[=+@-]/.test(v))v="'"+v;
+    if(/^\s*[=+@-]/.test(v))v="'"+v;
     return `"${v.replace(/"/g,'""')}"`;
   };
-  const csv=[header,...data.map(r=>header.map(k=>r[k]))].map(row=>row.map(csvCell).join(';')).join('\\r\\n');
-  return new Response('\\ufeff'+csv,{status:200,headers:{'content-type':'text/csv; charset=UTF-8','content-disposition':`attachment; filename="prochelia-finance-${id}.csv"`,'cache-control':'no-store'}});
+  const csv=[header,...data.map(r=>header.map(k=>r[k]))].map(row=>row.map(csvCell).join(';')).join('\r\n');
+  return new Response('\ufeff'+csv,{status:200,headers:{'content-type':'text/csv; charset=UTF-8','content-disposition':`attachment; filename="prochelia-finance-${id}.csv"`,'cache-control':'no-store'}});
 }
 
 async function financeEntryCreate(request,env) {
