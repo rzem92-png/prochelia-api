@@ -1,5 +1,5 @@
 import { handleV7Route } from "./v7-routes.js";
-import { stripePost, stripeGet, verifyStripeSignature } from "./stripe.js";
+import { assertStripeWebhookCompletion, requireStripeAccountId, stripePost, stripeGet, verifyStripeSignature } from "./stripe.js";
 // PROCHÉLIA — INDEX BACKEND CONSOLIDÉ UNIQUE
 // Référence de consolidation : V14.1 Finance + sécurité/RBAC existants.
 // Généré le 19/10/2026. À déployer uniquement après recette avec la vraie base D1.
