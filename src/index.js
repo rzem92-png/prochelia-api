@@ -828,7 +828,7 @@ async function paymentOnboard(request, env) {
   const isTestPublishableKey=/^pk_test_/.test(stripePublishableKey);
   const isLivePublishableKey=/^pk_live_/.test(stripePublishableKey);
   if(!(isTestStripeKey && isTestPublishableKey) &&
-     !(isLiveStripeKey && isLivePublishableKey && env.STRIPE_CONNECT_LIVE_ENABLED==='true')) {
+     !(isLiveStripeKey && isLivePublishableKey && env.STRIPE_CONNECT_LIVE_ENABLED==='true' && env.STRIPE_CONNECT_LIVE_APPROVED==='true')) {
     return json({ok:false,error:'STRIPE_CONNECT_LIVE_DISABLED',version:VERSION},503);
   }
   const auth = await getSessionUser(request, env);
@@ -842,7 +842,10 @@ async function paymentOnboard(request, env) {
     return json({ok:false,error:'STRIPE_CONNECT_NOT_CONFIGURED',version:VERSION,required:['PAYMENT_PROVIDER=stripe','STRIPE_SECRET_KEY','STRIPE_PUBLISHABLE_KEY','STRIPE_WEBHOOK_SECRET','STRIPE_DASHBOARD','STRIPE_FEES_COLLECTOR','STRIPE_LOSSES_COLLECTOR','APP_BASE_URL']},503);
   }
   if(dashboard==='express' && (feesCollector!=='application' || lossesCollector!=='application')) {
-    return json({ok:false,error:'STRIPE_EXPRESS_RESPONSIBILITY_CONFLICT',version:VERSION,required:'Express requires application fee/loss responsibility; choose explicitly or use full dashboard'},409);
+    return json({ok:false,error:'STRIPE_EXPRESS_RESPONSIBILITY_CONFLICT',version:VERSION,required:'Express requires application fee/loss responsibility'},409);
+  }
+  if(dashboard==='full' && (feesCollector!=='stripe' || lossesCollector!=='stripe')) {
+    return json({ok:false,error:'STRIPE_FULL_RESPONSIBILITY_CONFLICT',version:VERSION,required:'Full dashboard requires Stripe fee and loss responsibility'},409);
   }
   let appBase;
   try {
@@ -860,7 +863,7 @@ async function paymentOnboard(request, env) {
   await ensurePaymentSchema(env);
   let existing = await env.DB.prepare('SELECT * FROM payment_accounts WHERE user_id=? LIMIT 1').bind(auth.user.id).first();
   if(existing && existing.provider!=='stripe') return json({ok:false,error:'PAYMENT_PROVIDER_CONFLICT',version:VERSION},409);
-  if(existing && Number(existing.payouts_enabled)===1 && existing.onboarding_status==='submitted') {
+  if(existing && existing.provider_account_id && existing.status==='active' && existing.onboarding_status==='submitted') {
     return json({ok:true,version:VERSION,provider:'stripe',account_id:existing.provider_account_id,onboarding_status:'complete',already_connected:true},200);
   }
   let accountId=clean(existing?.provider_account_id);
@@ -933,14 +936,16 @@ function paymentPublicConfig(request,env) {
   const candidate=provider==='stripe' ? String(env.STRIPE_PUBLISHABLE_KEY||'') : '';
   const secret=String(env.STRIPE_SECRET_KEY||'').trim();
   const matchingTest=/^(sk|rk)_test_/.test(secret) && /^pk_test_/.test(candidate);
-  const matchingLive=/^(sk|rk)_live_/.test(secret) && /^pk_live_/.test(candidate) && env.STRIPE_CONNECT_LIVE_ENABLED==='true';
+  const matchingLive=/^(sk|rk)_live_/.test(secret) && /^pk_live_/.test(candidate) && env.STRIPE_CONNECT_LIVE_ENABLED==='true' && env.STRIPE_CONNECT_LIVE_APPROVED==='true';
   const approved=env.STRIPE_CONNECT_ONBOARDING_ENABLED==='true' && env.STRIPE_CONNECT_ONBOARDING_APPROVED==='true';
   const publishable=approved && (matchingTest||matchingLive) ? candidate : null;
   const allowedStripeKey=(/^(sk|rk)_test_/.test(secret) && /^pk_test_/.test(String(env.STRIPE_PUBLISHABLE_KEY||''))) ||
     (/^(sk|rk)_live_/.test(secret) && /^pk_live_/.test(String(env.STRIPE_PUBLISHABLE_KEY||'')) && env.STRIPE_CONNECT_LIVE_ENABLED==='true');
-  const onboardingReady=approved && !!publishable &&
-    allowedStripeKey && !!env.STRIPE_WEBHOOK_SECRET && !!env.APP_BASE_URL &&
-    !!env.STRIPE_DASHBOARD && !!env.STRIPE_FEES_COLLECTOR && !!env.STRIPE_LOSSES_COLLECTOR;
+  const dashboard=clean(env.STRIPE_DASHBOARD), fees=clean(env.STRIPE_FEES_COLLECTOR), losses=clean(env.STRIPE_LOSSES_COLLECTOR);
+  const responsibilityModelValid=(dashboard==='express'&&fees==='application'&&losses==='application') ||
+    (dashboard==='full'&&fees==='stripe'&&losses==='stripe');
+  const onboardingReady=approved && !!publishable && allowedStripeKey && responsibilityModelValid &&
+    !!env.STRIPE_WEBHOOK_SECRET && !!env.APP_BASE_URL;
   return json({ok:true,version:VERSION,provider,stripe_publishable_key:publishable,stripe_api_version:'2026-10-28.endive',connect_onboarding_ready:onboardingReady});
 }
 
@@ -1115,12 +1120,14 @@ async function stripeConnectWebhook(request, env) {
   try {
     const account=await stripeGet(env,'v2/core/accounts/'+accountId);
     const transferStatus=account?.configuration?.recipient?.capabilities?.stripe_balance?.stripe_transfers?.status;
-    const payoutsEnabled=transferStatus==='active'?1:0;
-    const status=payoutsEnabled?'active':'pending';
-    const onboardingStatus=payoutsEnabled?'submitted':'required';
-    const linked=await env.DB.prepare(`UPDATE payment_accounts SET charges_enabled=0,payouts_enabled=?,status=?,
+    const transfersEnabled=transferStatus==='active';
+    const status=transfersEnabled?'active':'pending';
+    const onboardingStatus=transfersEnabled?'submitted':'required';
+    // A recipient transfer capability is not proof that external bank payouts are enabled.
+    // Keep payouts_enabled false until a separate, verified payout capability is implemented.
+    const linked=await env.DB.prepare(`UPDATE payment_accounts SET charges_enabled=0,payouts_enabled=0,status=?,
       onboarding_status=?,updated_at=CURRENT_TIMESTAMP
-      WHERE provider='stripe' AND provider_account_id=?`).bind(payoutsEnabled,status,onboardingStatus,accountId).run();
+      WHERE provider='stripe' AND provider_account_id=?`).bind(status,onboardingStatus,accountId).run();
     if(Number(linked?.meta?.changes||0)!==1) {
       await env.DB.prepare(`UPDATE payment_webhook_events SET processed=0,received_at=CURRENT_TIMESTAMP
         WHERE provider='stripe' AND event_id=? AND processed=2`).bind(eventId).run();
@@ -1129,11 +1136,11 @@ async function stripeConnectWebhook(request, env) {
     await env.DB.batch([
       env.DB.prepare(`INSERT INTO payment_audit
         (id,event_type,user_id,result,metadata_json) VALUES (?,?,?,?,?)`)
-        .bind(crypto.randomUUID(),'STRIPE_CONNECT_ACCOUNT_SYNCED',null,'OK',JSON.stringify({event_id:eventId,account_id:accountId,payouts_enabled:payoutsEnabled})),
+        .bind(crypto.randomUUID(),'STRIPE_CONNECT_ACCOUNT_SYNCED',null,'OK',JSON.stringify({event_id:eventId,account_id:accountId,transfers_enabled:transfersEnabled,payouts_enabled:false})),
       env.DB.prepare(`UPDATE payment_webhook_events SET processed=1,processed_at=CURRENT_TIMESTAMP
         WHERE provider='stripe' AND event_id=? AND processed=2`).bind(eventId)
     ]);
-    return json({ok:true,version:VERSION,processed:true,event_id:eventId,account_id:accountId,payouts_enabled:!!payoutsEnabled},200);
+    return json({ok:true,version:VERSION,processed:true,event_id:eventId,account_id:accountId,transfers_enabled:transfersEnabled,payouts_enabled:false},200);
   } catch(error) {
     // Keep the event retryable; never acknowledge an uncertain provider lookup or D1 write.
     await env.DB.prepare(`UPDATE payment_webhook_events SET processed=0,received_at=CURRENT_TIMESTAMP
