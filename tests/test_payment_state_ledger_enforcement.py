@@ -357,7 +357,8 @@ class PaymentStateLedgerEnforcementTests(unittest.TestCase):
         source = (ROOT / "src" / "index.js").read_text(encoding="utf-8")
         ensure = source[source.index("async function ensurePaymentSchema"):source.index("function moneyCents")]
         readiness = source[source.index("if (url.pathname === '/api/readiness')"):source.index("if (url.pathname === '/api/info')")]
-        for trigger in ("trg_payment_dispute_single_open", "trg_payment_dispute_state_guard"):
+        for trigger in ("trg_payment_dispute_single_open", "trg_payment_dispute_state_guard",
+                        "trg_payment_tx_paid_insert_state_guard"):
             self.assertIn(trigger, ensure)
             self.assertIn(trigger, readiness)
         self.assertIn("Number(guards?.total || 0) !== 22", ensure)
