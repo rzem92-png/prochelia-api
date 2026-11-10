@@ -1150,7 +1150,7 @@ async function stripeConnectWebhook(request, env) {
     return json({ok:false,error:'STRIPE_EVENT_NOT_SUPPORTED_BY_CONNECT_WEBHOOK',version:VERSION},503);
   }
   const eventId=clean(event?.id), accountId=clean(event?.related_object?.id || event?.data?.object?.id);
-  if(!eventId || !/^acct_[A-Za-z0-9]+$/.test(accountId)) {
+  if(!/^evt_[A-Za-z0-9]+$/.test(eventId) || !/^acct_[A-Za-z0-9]+$/.test(accountId)) {
     return json({ok:false,error:'INVALID_STRIPE_CONNECT_EVENT',version:VERSION},400);
   }
   try { await ensurePaymentSchema(env); }
