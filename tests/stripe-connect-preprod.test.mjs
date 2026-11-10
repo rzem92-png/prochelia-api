@@ -396,6 +396,67 @@ test("Stripe account retrieval accepts only the exact requested connected accoun
   assert.equal(account.id, "acct_expected123");
 });
 
+test("Stripe Connect webhook refuses and releases the claim when Stripe returns another account", async () => {
+  const secret = "whsec_connect_mismatch";
+  const timestamp = Math.floor(Date.now() / 1000);
+  const raw = JSON.stringify({
+    id: "evt_connect_identity_mismatch",
+    type: "v2.core.account[requirements].updated",
+    data: { object: { id: "acct_expected123" } }
+  });
+  const signature = await stripeSignature(secret, timestamp, raw);
+  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(raw)));
+  const payloadHash = btoa(String.fromCharCode(...digest)).split("+").join("-").split("/").join("_").replace(/=+$/g, "");
+  const calls = [];
+  const DB = {
+    prepare(sql) {
+      const statement = {
+        args: [],
+        bind(...args) { this.args = args; return this; },
+        async first() {
+          if (sql.includes("type='table'") && sql.includes("sqlite_master")) return { total: 9 };
+          if (sql.includes("type='trigger'") && sql.includes("sqlite_master")) return { total: 18 };
+          if (sql.includes("pragma_table_info('payment_accounts')")) return { total: 1 };
+          if (sql.includes("SELECT processed,payload_hash,received_at")) {
+            return { processed: 0, payload_hash: payloadHash, received_at: "2026-11-10 07:00:00" };
+          }
+          return null;
+        },
+        async run() { calls.push({ sql, args: this.args }); return { meta: { changes: 1 } }; }
+      };
+      return statement;
+    },
+    async batch(statements) {
+      return Promise.all(statements.map(statement => statement.run()));
+    }
+  };
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response(JSON.stringify({ id: "acct_attacker999" }), {
+    status: 200, headers: { "content-type": "application/json" }
+  });
+  try {
+    const response = await worker.fetch(new Request("https://api.test/api/payments/webhook", {
+      method: "POST",
+      headers: { "stripe-signature": "t=" + timestamp + ",v1=" + signature },
+      body: raw
+    }), {
+      DB,
+      PAYMENT_PROVIDER: "stripe",
+      STRIPE_SECRET_KEY: "sk_test_connect",
+      STRIPE_WEBHOOK_SECRET: secret
+    });
+    const body = await response.json();
+    assert.equal(response.status, 503);
+    assert.equal(body.error, "STRIPE_CONNECT_WEBHOOK_RETRYABLE");
+    assert.equal(calls.some(call => call.sql.includes("UPDATE payment_accounts")), false,
+      "a mismatched provider account must never update a local recipient");
+    assert.equal(calls.some(call => call.sql.includes("processed=0") && call.sql.includes("payment_webhook_events")), true,
+      "failed identity verification must release the event claim for safe retry");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("Stripe webhook signature verification rejects stale and malformed signatures", async () => {
   const secret = "whsec_signature_unit_test";
   const now = 1_800_000_000;
