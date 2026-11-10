@@ -3372,10 +3372,13 @@ function financeSummaryFromRows(rows,user) {
     if(!/^[A-Z]{3}$/.test(currency)||!['IN','OUT'].includes(direction)||amount===null){integrityErrors++;continue;}
     add(ledgerTotals,currency,direction==='OUT'?'out':'in',amount);
   }
-  const paymentCurrencyTotals=[...paymentTotals.entries()].sort(([a],[b])=>a.localeCompare(b)).map(([currency,v])=>({
-    currency,...v,client_net_cents:v.gross-v.refunds,
-    platform_net_cents:v.gross-v.refunds-v.commission-v.provider_fees
-  }));
+  const paymentCurrencyTotals=[...paymentTotals.entries()].sort(([a],[b])=>a.localeCompare(b)).map(([currency,v])=>{
+    const clientNet=v.gross-v.refunds;
+    const platformNet=clientNet-v.commission-v.provider_fees;
+    const derivedSafe=Number.isSafeInteger(clientNet)&&Number.isSafeInteger(platformNet);
+    if(!derivedSafe)integrityErrors++;
+    return {currency,...v,client_net_cents:derivedSafe?clientNet:null,platform_net_cents:derivedSafe?platformNet:null};
+  });
   const ledgerCurrencyTotals=[...ledgerTotals.entries()].sort(([a],[b])=>a.localeCompare(b)).map(([currency,v])=>({
     currency,in_cents:v.in||0,out_cents:v.out||0,balance_cents:(v.in||0)-(v.out||0)
   }));
