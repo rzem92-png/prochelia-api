@@ -3445,10 +3445,13 @@ handle = async function(request,env){
     const preflightPath = preflightUrl.pathname;
     const preflightMethod = request.method.toUpperCase();
     const getOnlyDiagnostics = new Set(['/api/health','/api/readiness','/api/info']);
-    // Apply browser-origin rejection before rate limiting or any D1 access.
-    // This keeps forbidden cross-origin writes a deterministic 403 even when
-    // the database is unavailable, instead of masking them as a generic 500.
-    if (isMutatingMethod(preflightMethod) && !securityOriginAllowed(request,env)) {
+    // Bootstrap sans Origin uniquement avec le jeton initial exact.
+    // Toutes les autres mutations exigent une origine explicitement autorisée.
+    const noOriginBootstrap = preflightPath === '/api/auth/bootstrap'
+      && !request.headers.get('origin')
+      && Boolean(env?.BOOTSTRAP_TOKEN)
+      && request.headers.get('authorization') === `Bearer ${env.BOOTSTRAP_TOKEN}`;
+    if (isMutatingMethod(preflightMethod) && !noOriginBootstrap && !securityOriginAllowed(request,env)) {
       return json({ok:false,error:'ORIGIN_NOT_ALLOWED',version:VERSION},403);
     }
     // Block anonymous mission validation before rate limiting touches D1.
