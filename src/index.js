@@ -790,8 +790,8 @@ async function ensurePaymentSchema(env) {
       'trg_payout_request_guard',
       'trg_payout_request_reserve_ledger','trg_payout_status_guard',
       'trg_payout_settle_ledger','trg_payout_release_ledger',
-      'trg_payment_tx_paid_insert_requires_provider_reference',
-      'trg_payment_tx_paid_insert_requires_provider_reference',
+      'trg_payment_tx_paid_insert_state_guard',
+      'trg_payment_tx_paid_insert_state_guard',
       'trg_payment_tx_paid_requires_provider_reference',
       'trg_payout_status_requires_provider_reference',
       'trg_payout_request_initial_state_guard'
