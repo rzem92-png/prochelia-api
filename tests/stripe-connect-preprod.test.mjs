@@ -147,9 +147,9 @@ test("direct-charge onboarding stays closed until Merchant card_payments is impl
 
   const onboarding = await worker.fetch(new Request("https://api.test/api/payments/onboard", {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: { "content-type": "application/json", cookie: "prochelia_session=session-test" },
     body: JSON.stringify({ account_token: "acctok_test_12345678", stripe_terms_accepted: true })
-  }), env);
+  }), { ...env, DB: authenticatedRateLimitDb() });
   const onboardingBody = await onboarding.json();
   assert.equal(onboarding.status, 503);
   assert.equal(onboardingBody.error, "STRIPE_CONNECT_NOT_CONFIGURED");
