@@ -291,5 +291,17 @@ class PaymentStateLedgerEnforcementTests(unittest.TestCase):
         self.assertIn("else if(tx.status==='held'&&newPaymentStatus==='failed')", webhook)
 
 
+    def test_runtime_fails_closed_without_dispute_guard_migration(self):
+        source = (ROOT / "src" / "index.js").read_text(encoding="utf-8")
+        ensure = source[source.index("async function ensurePaymentSchema"):source.index("function moneyCents")]
+        readiness = source[source.index("if (url.pathname === '/api/readiness')"):source.index("if (url.pathname === '/api/info')")]
+        for trigger in ("trg_payment_dispute_single_open", "trg_payment_dispute_state_guard"):
+            self.assertIn(trigger, ensure)
+            self.assertIn(trigger, readiness)
+        self.assertIn("Number(guards?.total || 0) !== 18", ensure)
+        self.assertIn("Number(guards?.total||0)===18", readiness)
+        self.assertIn("PAYMENT_LEDGER_OR_DISPUTE_GUARDS_MIGRATION_REQUIRED", readiness)
+
+
 if __name__ == "__main__":
     unittest.main()
