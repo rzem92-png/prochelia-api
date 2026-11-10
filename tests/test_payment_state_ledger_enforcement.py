@@ -225,6 +225,14 @@ class PaymentStateLedgerEnforcementTests(unittest.TestCase):
         self.assertLess(replay, recipient_gate)
         self.assertIn("WHERE user_id=? AND provider=?", handler)
 
+    def test_payment_webhook_rejects_unhandled_event_types_before_claiming_them(self):
+        source = (ROOT / "src" / "index.js").read_text(encoding="utf-8")
+        webhook = source[source.index("async function paymentWebhook"):source.index("async function openPaymentDispute")]
+        self.assertIn("const supportedEvents=new Set([", webhook)
+        self.assertIn("if(!supportedEvents.has(type))", webhook)
+        self.assertIn("PSP_EVENT_NOT_SUPPORTED", webhook)
+        self.assertLess(webhook.index("PSP_EVENT_NOT_SUPPORTED"), webhook.index("INSERT OR IGNORE INTO payment_webhook_events"))
+
 
 if __name__ == "__main__":
     unittest.main()
