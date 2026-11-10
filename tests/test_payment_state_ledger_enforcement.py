@@ -498,5 +498,18 @@ class PaymentStateLedgerEnforcementTests(unittest.TestCase):
         self.assertNotIn("HTML/PDF", dashboard)
 
 
+    def test_finance_queries_fail_closed_instead_of_returning_empty_totals(self):
+        source = (ROOT / "src" / "index.js").read_text(encoding="utf-8")
+        start = source.index("async function financeRowsForUser")
+        end = source.index("function financeSummaryFromRows", start)
+        loader = source[start:end]
+        self.assertIn("const paymentResult = await env.DB.prepare(", loader)
+        self.assertIn("const ledgerResult =", loader)
+        self.assertIn("const payoutResult = await payoutQuery.all()", loader)
+        self.assertNotIn("catch (_) {}", loader)
+        self.assertNotIn("let payments = []", loader)
+        self.assertNotIn("let ledger = []", loader)
+
+
 if __name__ == "__main__":
     unittest.main()
