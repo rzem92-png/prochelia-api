@@ -1089,7 +1089,9 @@ async function stripeConnectWebhook(request, env) {
   let event;
   try { event=JSON.parse(raw); } catch { return json({ok:false,error:'INVALID_WEBHOOK_JSON',version:VERSION},400); }
   if(event?.type!=='v2.core.account[requirements].updated') {
-    return json({ok:true,version:VERSION,ignored:true,event_type:clean(event?.type)||null},200);
+    // This endpoint is scoped to the Connect account event only. Do not silently
+    // acknowledge charge/refund/payout events that have no implemented handler.
+    return json({ok:false,error:'STRIPE_EVENT_NOT_SUPPORTED_BY_CONNECT_WEBHOOK',version:VERSION},503);
   }
   const eventId=clean(event?.id), accountId=clean(event?.data?.object?.id);
   if(!eventId || !/^acct_[A-Za-z0-9]+$/.test(accountId)) {
