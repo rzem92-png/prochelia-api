@@ -6,6 +6,9 @@ on:
       - "migrations/**"
       - "tests/test_payment_migration.py"
       - "tests/test_payment_state_ledger_enforcement.py"
+      - "src/index.js"
+      - "src/stripe.js"
+      - "tests/stripe-connect-preprod.test.mjs"
       - "tests/test_atomic_rate_limit.py"
       - ".github/workflows/migration-validation.yml"
   push:
@@ -29,3 +32,8 @@ jobs:
           python-version: "3.12"
       - name: Validate payment migration in SQLite
         run: python -m unittest tests/test_payment_migration.py tests/test_payment_state_ledger_enforcement.py tests/test_atomic_rate_limit.py
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Run Stripe Connect route and safety tests
+        run: node --test tests/stripe-connect-preprod.test.mjs
