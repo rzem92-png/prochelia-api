@@ -970,7 +970,7 @@ async function paymentStatus(request, env) {
   if(!auth) return json({ok:false,error:'UNAUTHENTICATED',version:VERSION},401);
   await ensurePaymentSchema(env);
   const wallet=await env.DB.prepare('SELECT * FROM wallets WHERE user_id=? LIMIT 1').bind(auth.user.id).first();
-  const account=await env.DB.prepare('SELECT * FROM payment_accounts WHERE user_id=? LIMIT 1').bind(auth.user.id).first();
+  const account=await env.DB.prepare('SELECT * FROM payment_accounts WHERE user_id=? AND provider=? LIMIT 1').bind(auth.user.id,paymentProvider(env)).first();
   const pending=await env.DB.prepare(`SELECT COUNT(*) total FROM payout_requests WHERE user_id=? AND status IN ('requested','processing')`).bind(auth.user.id).first();
   return json({ok:true,version:VERSION,provider:paymentProvider(env),payments_configured:paymentsConfigured(env),
     wallet:{currency:wallet?.currency||'EUR',available_cents:Number(wallet?.available_cents||0),
@@ -998,15 +998,6 @@ async function createMissionPayment(request, env) {
      WHERE m.id=? LIMIT 1
   `).bind(missionId).first();
   if(!mission) return json({ok:false,error:'MISSION_OR_ASSIGNED_PARTY_NOT_FOUND',version:VERSION},404);
-  // Do not create a charge that cannot later be transferred to its assigned
-  // recipient. This is independent from the recipient's external-bank payout
-  // capability, which is checked only by payoutRequest().
-  const recipientAccount=await env.DB.prepare(
-    "SELECT transfers_enabled FROM payment_accounts WHERE user_id=? AND provider=? LIMIT 1"
-  ).bind(mission.intervenant_user_id,paymentProvider(env)).first();
-  if(!recipientAccount||Number(recipientAccount.transfers_enabled)!==1) {
-    return json({ok:false,error:'RECIPIENT_TRANSFER_CAPABILITY_NOT_READY',version:VERSION},409);
-  }
   if(['canceled','cancelled','rejected'].includes(String(mission.status||'').toLowerCase())) {
     return json({ok:false,error:'MISSION_NOT_PAYABLE',version:VERSION},409);
   }
@@ -1021,6 +1012,15 @@ async function createMissionPayment(request, env) {
       Number(old.commission_cents)===commission&&Number(old.net_intervenant_cents)===net&&old.currency==='EUR';
     if(!same) return json({ok:false,error:'IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_PAYLOAD',version:VERSION},409);
     return json({ok:true,version:VERSION,idempotent_replay:true,transaction:old,next:'PSP_ADAPTER_NOT_IMPLEMENTED'},200);
+  }
+  // Do not create a charge that cannot later be transferred to its assigned
+  // recipient. Existing idempotent replays are returned above even if the
+  // capability was subsequently revoked; new charges fail closed.
+  const recipientAccount=await env.DB.prepare(
+    "SELECT transfers_enabled FROM payment_accounts WHERE user_id=? AND provider=? LIMIT 1"
+  ).bind(mission.intervenant_user_id,paymentProvider(env)).first();
+  if(!recipientAccount||Number(recipientAccount.transfers_enabled)!==1) {
+    return json({ok:false,error:'RECIPIENT_TRANSFER_CAPABILITY_NOT_READY',version:VERSION},409);
   }
   const txId=crypto.randomUUID();
   await env.DB.batch([
@@ -1076,7 +1076,7 @@ async function payoutRequest(request, env) {
       return json({ok:false,error:'IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_PAYLOAD',version:VERSION},409);
     return json({ok:true,version:VERSION,idempotent_replay:true,payout:old,next:'PSP_ADAPTER_NOT_IMPLEMENTED'},200);
   }
-  const account=await env.DB.prepare('SELECT * FROM payment_accounts WHERE user_id=? LIMIT 1').bind(auth.user.id).first();
+  const account=await env.DB.prepare('SELECT * FROM payment_accounts WHERE user_id=? AND provider=? LIMIT 1').bind(auth.user.id,paymentProvider(env)).first();
   if(!account||Number(account.payouts_enabled)!==1) return json({ok:false,error:'PAYOUT_ACCOUNT_NOT_READY',version:VERSION},409);
   const wallet=await env.DB.prepare('SELECT * FROM wallets WHERE user_id=? LIMIT 1').bind(auth.user.id).first();
   if(!wallet||Number(wallet.available_cents)<amount) return json({ok:false,error:'INSUFFICIENT_AVAILABLE_BALANCE',
