@@ -555,3 +555,46 @@ test("financial euro parsing rejects sub-cent and malformed amounts without roun
     assert.equal(body.error, "PAYMENT_NOT_FOUND_FOR_MISSION");
   }
 });
+
+
+test("manual finance entries reject fractional-cent and malformed euro amounts", async () => {
+  const writes = [];
+  const DB = {
+    prepare(sql) {
+      const statement = {
+        args: [],
+        bind(...args) { this.args = args; return this; },
+        async first() {
+          if (sql.includes("RETURNING request_count")) return { request_count: 1 };
+          if (sql.includes("FROM sessions s")) return {
+            id: "finance-user", role: "gerante", email: "finance@example.test",
+            first_name: "Finance", last_name: "Test", phone: null, status: "active",
+            created_at: "2026-01-01 00:00:00", updated_at: "2026-01-01 00:00:00",
+            session_id: "finance-session"
+          };
+          return null;
+        },
+        async run() { writes.push({ sql, args: this.args }); return { meta: { changes: 1 } }; }
+      };
+      return statement;
+    }
+  };
+  const makeRequest = amount => new Request("https://api.test/api/finance/entry", {
+    method: "POST",
+    headers: { "content-type": "application/json", cookie: "prochelia_session=finance-session" },
+    body: JSON.stringify({ amount_eur: amount, entry_type: "MANUAL_TEST" })
+  });
+  for (const amount of [1.005, 1.0001, -1, "1e2", "1,23", "NaN", 0, null]) {
+    const response = await worker.fetch(makeRequest(amount), { DB });
+    const body = await response.json();
+    assert.equal(response.status, 400, `amount=${String(amount)} body=${JSON.stringify(body)}`);
+    assert.equal(body.error, "INVALID_FINANCE_ENTRY");
+  }
+  assert.equal(writes.some(write => write.sql.includes("INSERT INTO finance_workspace_entries")), false);
+  const response = await worker.fetch(makeRequest("12.34"), { DB });
+  const body = await response.json();
+  assert.equal(response.status, 200, JSON.stringify(body));
+  const entry = writes.find(write => write.sql.includes("INSERT INTO finance_workspace_entries"));
+  assert.ok(entry);
+  assert.equal(entry.args[6], 1234);
+});
