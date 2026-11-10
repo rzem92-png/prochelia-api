@@ -1306,7 +1306,14 @@ async function openPaymentDispute(request, env) {
     (id,event_type,transaction_id,mission_id,user_id,result,metadata_json)
     VALUES (?,?,?,?,?,?,?)`).bind(crypto.randomUUID(),'PAYMENT_DISPUTE_OPENED',tx.id,missionId,
       auth.user.id,'OK',JSON.stringify({amount_cents:amount,reason})));
-  await env.DB.batch(statements);
+  try {
+    await env.DB.batch(statements);
+  } catch(error) {
+    if(String(error?.message||error).includes('PAYMENT_DISPUTE_ALREADY_OPEN')) {
+      return json({ok:false,error:'DISPUTE_ALREADY_OPEN',version:VERSION},409);
+    }
+    throw error;
+  }
   return json({ok:true,version:VERSION,dispute_id:id,status:'open',payment_status:tx.status==='paid'?'held':tx.status},201);
 }
 
