@@ -3382,6 +3382,13 @@ function financeSummaryFromRows(rows,user) {
   const ledgerCurrencyTotals=[...ledgerTotals.entries()].sort(([a],[b])=>a.localeCompare(b)).map(([currency,v])=>({
     currency,in_cents:v.in||0,out_cents:v.out||0,balance_cents:(v.in||0)-(v.out||0)
   }));
+  const safePaymentCurrencyTotals=integrityErrors===0?paymentCurrencyTotals:paymentCurrencyTotals.map(x=>({
+    currency:x.currency,gross:null,refunds:null,commission:null,provider_fees:null,net_intervenant:null,
+    client_net_cents:null,platform_net_cents:null
+  }));
+  const safeLedgerCurrencyTotals=integrityErrors===0?ledgerCurrencyTotals:ledgerCurrencyTotals.map(x=>({
+    currency:x.currency,in_cents:null,out_cents:null,balance_cents:null
+  }));
   const legacySafe=integrityErrors===0&&paymentCurrencyTotals.every(x=>x.currency==='EUR')&&ledgerCurrencyTotals.every(x=>x.currency==='EUR');
   const eurPayments=paymentCurrencyTotals.find(x=>x.currency==='EUR')||{};
   const eurLedger=ledgerCurrencyTotals.find(x=>x.currency==='EUR')||{};
@@ -3394,7 +3401,7 @@ function financeSummaryFromRows(rows,user) {
   const ledgerIn=amountOrNull(eurLedger.in), ledgerOut=amountOrNull(eurLedger.out);
   return {
     role,transactions:count,integrity_ok:integrityErrors===0,integrity_errors:integrityErrors,
-    currency_totals:paymentCurrencyTotals,manual_ledger_currency_totals:ledgerCurrencyTotals,
+    currency_totals:safePaymentCurrencyTotals,manual_ledger_currency_totals:safeLedgerCurrencyTotals,
     gross_cents:gross,gross_eur:gross===null?null:financeMoney(gross),
     refunds_cents:refunds,refunds_eur:refunds===null?null:financeMoney(refunds),
     commission_cents:commission,commission_eur:commission===null?null:financeMoney(commission),
