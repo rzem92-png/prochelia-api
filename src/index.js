@@ -1146,7 +1146,7 @@ async function stripeConnectWebhook(request, env) {
     // acknowledge charge/refund/payout events that have no implemented handler.
     return json({ok:false,error:'STRIPE_EVENT_NOT_SUPPORTED_BY_CONNECT_WEBHOOK',version:VERSION},503);
   }
-  const eventId=clean(event?.id), accountId=clean(event?.data?.object?.id);
+  const eventId=clean(event?.id), accountId=clean(event?.related_object?.id || event?.data?.object?.id);
   if(!eventId || !/^acct_[A-Za-z0-9]+$/.test(accountId)) {
     return json({ok:false,error:'INVALID_STRIPE_CONNECT_EVENT',version:VERSION},400);
   }
@@ -1166,7 +1166,7 @@ async function stripeConnectWebhook(request, env) {
     .bind(eventId).run();
   if(Number(claim?.meta?.changes||0)!==1) return json({ok:false,error:'WEBHOOK_EVENT_PROCESSING',version:VERSION,retry_after_seconds:30},409);
   try {
-    const account=await stripeGet(env,'v2/core/accounts/'+accountId);
+    const account=await stripeGet(env,'v2/core/accounts/'+accountId,fetch,{context:event?.context,eventId});
     const capabilities=account?.configuration?.recipient?.capabilities?.stripe_balance;
     const transferStatus=capabilities?.stripe_transfers?.status;
     const payoutStatus=capabilities?.payouts?.status;
