@@ -449,11 +449,13 @@ class PaymentStateLedgerEnforcementTests(unittest.TestCase):
         self.assertIn("Number.isSafeInteger(next)", summary)
         self.assertIn("if(!Number.isSafeInteger(balance))", summary)
         self.assertIn("!Number.isSafeInteger(ledgerIn-ledgerOut)", summary)
-        self.assertIn("currency_totals:paymentCurrencyTotals", summary)
+        self.assertIn("currency_totals:safePaymentCurrencyTotals", summary)
         self.assertIn("const safePaymentCurrencyTotals=integrityErrors===0?paymentCurrencyTotals", summary)
         self.assertIn("const safeLedgerCurrencyTotals=integrityErrors===0?ledgerCurrencyTotals", summary)
         self.assertIn("manual_ledger_currency_totals:safeLedgerCurrencyTotals", summary)
         self.assertIn("const legacySafe=integrityErrors===0&&paymentCurrencyTotals.every(x=>x.currency==='EUR')", summary)
+        self.assertIn("const clientNet=Number.isSafeInteger(clientNetRaw)?clientNetRaw:null", summary)
+        self.assertIn("const platformNet=Number.isSafeInteger(platformNetRaw)?platformNetRaw:null", summary)
         self.assertIn("gross_cents:gross,gross_eur:gross===null?null:financeMoney(gross)", summary)
         self.assertNotIn("Number(x.gross_cents", summary)
         self.assertNotIn("Number(x.amount_cents", summary)
@@ -485,6 +487,15 @@ class PaymentStateLedgerEnforcementTests(unittest.TestCase):
         self.assertIn("if(format==='html')", export)
         self.assertNotIn("format==='pdf'", export)
         self.assertNotIn("montant_brut_eur", export)
+
+
+    def test_finance_dashboard_only_advertises_implemented_export_formats(self):
+        source = (ROOT / "src" / "index.js").read_text(encoding="utf-8")
+        start = source.index("async function financeDashboard")
+        end = source.index("async function financeExport", start)
+        dashboard = source[start:end]
+        self.assertIn("exports:['CSV','JSON','HTML']", dashboard)
+        self.assertNotIn("HTML/PDF", dashboard)
 
 
 if __name__ == "__main__":
