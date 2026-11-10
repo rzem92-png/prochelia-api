@@ -3345,35 +3345,62 @@ async function financeRowsForUser(env, user) {
 
 function financeSummaryFromRows(rows,user) {
   const role=String(user.role||'').toUpperCase();
-  let gross=0, refunds=0, commission=0, psp=0, netIntervenant=0, count=0;
-  for(const x of rows.payments){
+  const paymentTotals=new Map(), ledgerTotals=new Map();
+  let count=0, integrityErrors=0;
+  const add=(map,currency,key,value)=>{
+    const current=map.get(currency)||{};
+    const next=(current[key]||0)+value;
+    if(!Number.isSafeInteger(next)){integrityErrors++;return;}
+    current[key]=next;map.set(currency,current);
+  };
+  for(const x of rows.payments||[]){
     if(String(x.status||'').toLowerCase()==='failed') continue;
-    gross += Number(x.gross_cents||0);
-    refunds += Number(x.refund_cents||0);
-    commission += Number(x.commission_cents||0);
-    psp += Number(x.provider_fee_cents||0);
-    netIntervenant += Number(x.net_intervenant_cents||0);
-    count++;
+    const currency=String(x.currency||'EUR').toUpperCase();
+    if(!/^[A-Z]{3}$/.test(currency)){integrityErrors++;continue;}
+    let valid=true;
+    for(const [field,key] of [['gross_cents','gross'],['refund_cents','refunds'],['commission_cents','commission'],['provider_fee_cents','provider_fees'],['net_intervenant_cents','net_intervenant']]){
+      const value=integerCents(x[field]??0);
+      if(value===null){integrityErrors++;valid=false;break;}
+      add(paymentTotals,currency,key,value);
+    }
+    if(valid)count++;
   }
-  let ledgerIn=0, ledgerOut=0;
-  for(const x of rows.ledger){
-    const n=Number(x.amount_cents||0);
-    if(String(x.direction).toUpperCase()==='OUT') ledgerOut+=n; else ledgerIn+=n;
+  for(const x of rows.ledger||[]){
+    const currency=String(x.currency||'EUR').toUpperCase();
+    const direction=String(x.direction||'').toUpperCase();
+    const amount=integerCents(x.amount_cents??0);
+    if(!/^[A-Z]{3}$/.test(currency)||!['IN','OUT'].includes(direction)||amount===null){integrityErrors++;continue;}
+    add(ledgerTotals,currency,direction==='OUT'?'out':'in',amount);
   }
-  const clientNet = gross-refunds;
-  const platformNet = gross-refunds-commission-psp;
+  const paymentCurrencyTotals=[...paymentTotals.entries()].sort(([a],[b])=>a.localeCompare(b)).map(([currency,v])=>({
+    currency,...v,client_net_cents:v.gross-v.refunds,
+    platform_net_cents:v.gross-v.refunds-v.commission-v.provider_fees
+  }));
+  const ledgerCurrencyTotals=[...ledgerTotals.entries()].sort(([a],[b])=>a.localeCompare(b)).map(([currency,v])=>({
+    currency,in_cents:v.in||0,out_cents:v.out||0,balance_cents:(v.in||0)-(v.out||0)
+  }));
+  const legacySafe=integrityErrors===0&&paymentCurrencyTotals.every(x=>x.currency==='EUR')&&ledgerCurrencyTotals.every(x=>x.currency==='EUR');
+  const eurPayments=paymentCurrencyTotals.find(x=>x.currency==='EUR')||{};
+  const eurLedger=ledgerCurrencyTotals.find(x=>x.currency==='EUR')||{};
+  const amountOrNull=(value)=>legacySafe?(value??0):null;
+  const gross=amountOrNull(eurPayments.gross), refunds=amountOrNull(eurPayments.refunds);
+  const commission=amountOrNull(eurPayments.commission), psp=amountOrNull(eurPayments.provider_fees);
+  const netIntervenant=amountOrNull(eurPayments.net_intervenant);
+  const clientNet=gross===null?null:gross-refunds;
+  const platformNet=gross===null?null:gross-refunds-commission-psp;
+  const ledgerIn=amountOrNull(eurLedger.in), ledgerOut=amountOrNull(eurLedger.out);
   return {
-    role,
-    transactions:count,
-    gross_cents:gross, gross_eur:financeMoney(gross),
-    refunds_cents:refunds, refunds_eur:financeMoney(refunds),
-    commission_cents:commission, commission_eur:financeMoney(commission),
-    provider_fees_cents:psp, provider_fees_eur:financeMoney(psp),
-    net_intervenant_cents:netIntervenant, net_intervenant_eur:financeMoney(netIntervenant),
-    client_net_cents:clientNet, client_net_eur:financeMoney(clientNet),
-    platform_net_cents:platformNet, platform_net_eur:financeMoney(platformNet),
-    manual_ledger_in_cents:ledgerIn, manual_ledger_out_cents:ledgerOut,
-    manual_ledger_balance_cents:ledgerIn-ledgerOut
+    role,transactions:count,integrity_ok:integrityErrors===0,integrity_errors:integrityErrors,
+    currency_totals:paymentCurrencyTotals,manual_ledger_currency_totals:ledgerCurrencyTotals,
+    gross_cents:gross,gross_eur:gross===null?null:financeMoney(gross),
+    refunds_cents:refunds,refunds_eur:refunds===null?null:financeMoney(refunds),
+    commission_cents:commission,commission_eur:commission===null?null:financeMoney(commission),
+    provider_fees_cents:psp,provider_fees_eur:psp===null?null:financeMoney(psp),
+    net_intervenant_cents:netIntervenant,net_intervenant_eur:netIntervenant===null?null:financeMoney(netIntervenant),
+    client_net_cents:clientNet,client_net_eur:clientNet===null?null:financeMoney(clientNet),
+    platform_net_cents:platformNet,platform_net_eur:platformNet===null?null:financeMoney(platformNet),
+    manual_ledger_in_cents:ledgerIn,manual_ledger_out_cents:ledgerOut,
+    manual_ledger_balance_cents:ledgerIn===null?null:ledgerIn-ledgerOut
   };
 }
 
