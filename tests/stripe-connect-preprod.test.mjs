@@ -6,6 +6,29 @@ import { stripePost } from "../src/stripe.js";
 
 if (!globalThis.crypto) globalThis.crypto = webcrypto;
 
+function rateLimitDb() {
+  return {
+    prepare(sql) {
+      return {
+        bind() { return this; },
+        async run() { return { meta: { changes: 1 } }; },
+        async first() {
+          if (sql.includes("RETURNING request_count")) return { request_count: 1 };
+          return null;
+        }
+      };
+    }
+  };
+}
+
+async function stripeSignature(secret, timestamp, body) {
+  const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(secret),
+    { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  const mac = new Uint8Array(await crypto.subtle.sign("HMAC", key,
+    new TextEncoder().encode(timestamp + "." + body)));
+  return Array.from(mac, x => x.toString(16).padStart(2, "0")).join("");
+}
+
 test("payment config never exposes a Stripe publishable key before explicit test onboarding approval", async () => {
   const response = await worker.fetch(new Request("https://api.test/api/payments/config"), {
     PAYMENT_PROVIDER: "stripe",
@@ -46,6 +69,7 @@ test("Connect onboarding route is wired but disabled without explicit approval a
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ account_token: "acctok_test_12345678", stripe_terms_accepted: true })
   }), {
+    DB: rateLimitDb(),
     PAYMENT_PROVIDER: "stripe",
     STRIPE_SECRET_KEY: "sk_test_placeholder",
     STRIPE_PUBLISHABLE_KEY: "pk_test_placeholder"
@@ -56,15 +80,22 @@ test("Connect onboarding route is wired but disabled without explicit approval a
 });
 
 test("Stripe Connect webhook rejects unsupported financial event types rather than acknowledging them", async () => {
+  const secret = "whsec_placeholder";
+  const timestamp = Math.floor(Date.now() / 1000);
+  const raw = JSON.stringify({ id: "evt_financial_unsupported", type: "payment_intent.succeeded", data: { object: { id: "pi_test" } } });
+  const signature = await stripeSignature(secret, timestamp, raw);
   const response = await worker.fetch(new Request("https://api.test/api/payments/webhook", {
     method: "POST",
-    headers: { "stripe-signature": "invalid" },
-    body: JSON.stringify({ id: "evt_financial_unsupported", type: "payment_intent.succeeded", data: { object: { id: "pi_test" } } })
+    headers: { "stripe-signature": "t=" + timestamp + ",v1=" + signature },
+    body: raw
   }), {
+    DB: rateLimitDb(),
     PAYMENT_PROVIDER: "stripe",
-    STRIPE_WEBHOOK_SECRET: "whsec_placeholder"
+    STRIPE_WEBHOOK_SECRET: secret
   });
-  assert.equal(response.status, 401);
+  const body = await response.json();
+  assert.equal(response.status, 503);
+  assert.equal(body.error, "STRIPE_EVENT_NOT_SUPPORTED_BY_CONNECT_WEBHOOK");
 });
 
 test("Stripe API helper refuses non-allowlisted paths and missing idempotency", async () => {
