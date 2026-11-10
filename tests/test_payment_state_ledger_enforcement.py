@@ -499,6 +499,16 @@ class PaymentStateLedgerEnforcementTests(unittest.TestCase):
         self.assertNotIn("HTML/PDF", dashboard)
 
 
+
+    def test_finance_resolution_requires_explicit_boolean_approval(self):
+        source = (ROOT / "src" / "index.js").read_text(encoding="utf-8")
+        start = source.index("async function financeProblemResolve")
+        end = source.index("async function handleFinanceWorkspace", start)
+        resolver = source[start:end]
+        self.assertIn("const approved=b.approve===true", resolver)
+        self.assertNotIn("Boolean(b.approve)", resolver)
+        self.assertIn("const status=approved?'RESOLVED':'ESCALATED'", resolver)
+
     def test_finance_queries_fail_closed_instead_of_returning_empty_totals(self):
         source = (ROOT / "src" / "index.js").read_text(encoding="utf-8")
         start = source.index("async function financeRowsForUser")
