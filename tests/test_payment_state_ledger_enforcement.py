@@ -97,20 +97,21 @@ class PaymentStateLedgerEnforcementTests(unittest.TestCase):
         self.assertEqual(self.balances(), (14500, 0, 0))
 
 
-    def test_paid_transaction_cannot_be_inserted_without_provider_reference(self):
-        with self.assertRaises(sqlite3.IntegrityError):
-            self.db.execute(
-                """INSERT INTO payment_transactions
-                   (id,idempotency_key,type,status,gross_cents,commission_cents,
-                    net_intervenant_cents,currency,provider)
-                   VALUES('t_paid_invalid','idem-paid-invalid','MISSION_CHARGE','paid',5000,500,4500,'EUR','psp_adapter')"""
-            )
+    def test_paid_transaction_must_be_created_through_guarded_transition(self):
+        for provider_reference in (None, "ch_paid_direct"):
+            with self.assertRaises(sqlite3.IntegrityError):
+                self.db.execute(
+                    """INSERT INTO payment_transactions
+                       (id,idempotency_key,type,status,gross_cents,commission_cents,
+                        net_intervenant_cents,currency,provider,provider_payment_id)
+                       VALUES(?,?,?,?,?,?,?,?,?,?)""",
+                    ("t_paid_invalid_" + str(provider_reference), "idem-paid-" + str(provider_reference),
+                     "MISSION_CHARGE", "paid", 5000, 500, 4500, "EUR", "psp_adapter", provider_reference),
+                )
         self.assertEqual(self.balances(), (10000, 0, 0))
+        self.create_transaction("t_paid_valid")
         self.db.execute(
-            """INSERT INTO payment_transactions
-               (id,idempotency_key,type,status,gross_cents,commission_cents,
-                net_intervenant_cents,currency,provider,provider_payment_id)
-               VALUES('t_paid_valid','idem-paid-valid','MISSION_CHARGE','paid',5000,500,4500,'EUR','psp_adapter','ch_paid_valid')"""
+            "UPDATE payment_transactions SET status='paid',provider_payment_id='ch_paid_valid' WHERE id='t_paid_valid'"
         )
         self.assertEqual(self.balances(), (14500, 0, 0))
 
