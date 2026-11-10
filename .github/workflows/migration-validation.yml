@@ -6,6 +6,7 @@ on:
       - "migrations/**"
       - "tests/test_payment_migration.py"
       - "tests/test_payment_state_ledger_enforcement.py"
+      - "tests/test_atomic_rate_limit.py"
       - ".github/workflows/migration-validation.yml"
   push:
     branches: [main]
@@ -27,4 +28,4 @@ jobs:
         with:
           python-version: "3.12"
       - name: Validate payment migration in SQLite
-        run: python -m unittest tests/test_payment_migration.py tests/test_payment_state_ledger_enforcement.py
+        run: python -m unittest tests/test_payment_migration.py tests/test_payment_state_ledger_enforcement.py tests/test_atomic_rate_limit.py
