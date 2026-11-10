@@ -3398,8 +3398,10 @@ function financeSummaryFromRows(rows,user) {
   const gross=amountOrNull(eurPayments.gross), refunds=amountOrNull(eurPayments.refunds);
   const commission=amountOrNull(eurPayments.commission), psp=amountOrNull(eurPayments.provider_fees);
   const netIntervenant=amountOrNull(eurPayments.net_intervenant);
-  const clientNet=gross===null?null:gross-refunds;
-  const platformNet=gross===null?null:gross-refunds-commission-psp;
+  const clientNetRaw=gross===null?null:gross-refunds;
+  const platformNetRaw=gross===null?null:gross-refunds-commission-psp;
+  const clientNet=Number.isSafeInteger(clientNetRaw)?clientNetRaw:null;
+  const platformNet=Number.isSafeInteger(platformNetRaw)?platformNetRaw:null;
   const ledgerIn=amountOrNull(eurLedger.in), ledgerOut=amountOrNull(eurLedger.out);
   return {
     role,transactions:count,integrity_ok:integrityErrors===0,integrity_errors:integrityErrors,
@@ -3442,7 +3444,7 @@ async function financeDashboard(request,env) {
     payments:rows.payments,
     payouts:rows.payouts||[],
     ledger:rows.ledger,
-    exports:['CSV','JSON','HTML/PDF'],
+    exports:['CSV','JSON','HTML'],
     support_resolution:{automatic_for_low_impact:true,human_validation_for_sensitive:true}
   }});
 }
