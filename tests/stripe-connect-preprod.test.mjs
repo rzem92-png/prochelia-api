@@ -532,7 +532,7 @@ test("Stripe Connect webhook rejects malformed event IDs before database access"
 });
 
 
-test("financial euro parsing rejects sub-cent amounts instead of silently rounding", async () => {
+test("financial euro parsing rejects sub-cent and malformed amounts without rounding", async () => {
   const env = { DB: schemaReadyClientDb() };
   const makeRequest = amount => new Request("https://api.test/api/payments/dispute", {
     method: "POST",
@@ -540,13 +540,18 @@ test("financial euro parsing rejects sub-cent amounts instead of silently roundi
     body: JSON.stringify({ mission_id: "mission-test", reason: "test", amount_eur: amount })
   });
 
-  const subCent = await worker.fetch(makeRequest(1.005), env);
-  const subCentBody = await subCent.json();
-  assert.equal(subCent.status, 400, JSON.stringify(subCentBody));
-  assert.equal(subCentBody.error, "INVALID_DISPUTE");
+  for (const amount of [1.005, 1.0001, -1, "1e2", "1,23", "NaN", 0]) {
+    const response = await worker.fetch(makeRequest(amount), env);
+    const body = await response.json();
+    assert.equal(response.status, 400, `amount=${String(amount)} body=${JSON.stringify(body)}`);
+    assert.equal(body.error, "INVALID_DISPUTE");
+  }
 
-  const exactCents = await worker.fetch(makeRequest(1.23), env);
-  const exactCentsBody = await exactCents.json();
-  assert.equal(exactCents.status, 404);
-  assert.equal(exactCentsBody.error, "PAYMENT_NOT_FOUND_FOR_MISSION");
+  for (const amount of [1.23, "1.23", "1.2300"]) {
+    const response = await worker.fetch(makeRequest(amount), env);
+    const body = await response.json();
+    // Reaching the lookup proves the exact-cent value passed parsing/validation.
+    assert.equal(response.status, 404, `amount=${String(amount)} body=${JSON.stringify(body)}`);
+    assert.equal(body.error, "PAYMENT_NOT_FOUND_FOR_MISSION");
+  }
 });
