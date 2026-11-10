@@ -48,6 +48,7 @@ function schemaReadyClientDb() {
       return {
         bind() { return this; },
         async first() {
+          if (sql.includes("RETURNING request_count")) return { request_count: 1 };
           if (sql.includes("FROM sessions s")) {
             return {
               id: "client-user", role: "client", email: "client@example.test",
