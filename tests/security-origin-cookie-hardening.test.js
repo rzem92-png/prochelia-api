@@ -117,3 +117,27 @@ test("production readiness stays closed while payment webhooks are deliberately 
   assert.ok(audit.includes("blockingCodes=new Set(['PAYMENT_WEBHOOK_ATOMICITY'"));
   assert.match(source, /PAYMENT_WEBHOOK_DISABLED_PENDING_REVIEW/);
 });
+
+test("readiness GET performs no schema or journal writes", async () => {
+  const source = await (await import("node:fs/promises")).readFile(
+    new URL("../src/index.js", import.meta.url), "utf8"
+  );
+  const checkStart = source.indexOf("async function productionConfigCheck");
+  const checkEnd = source.indexOf("\\nasync function finalProductionAudit", checkStart);
+  assert.ok(checkStart >= 0);
+  assert.ok(checkEnd > checkStart);
+  const check = source.slice(checkStart, checkEnd);
+  assert.match(check, /productionConfigCheck\\(env, \\{ persist = false \\} = \\{\\}\\)/);
+  assert.match(check, /if \\(persist\\) \\{/);
+  assert.match(check, /if \\(persist\\) for\\(const c of checks\\)/);
+
+  const auditStart = source.indexOf("async function strictProductionAudit");
+  const auditEnd = source.indexOf("const __procheliaProductionSafetyHandle", auditStart);
+  assert.ok(auditStart >= 0);
+  assert.ok(auditEnd > auditStart);
+  const audit = source.slice(auditStart, auditEnd);
+  assert.match(audit, /productionConfigCheck\\(env\\)/);
+  assert.doesNotMatch(audit, /\\.prepare\\([\\s\\S]*?\\.run\\(/);
+  assert.doesNotMatch(audit, /journal\\(/);
+  assert.match(audit, /PAYMENT_WEBHOOK_ATOMICITY/);
+});
