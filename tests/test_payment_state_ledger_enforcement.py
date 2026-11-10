@@ -96,6 +96,24 @@ class PaymentStateLedgerEnforcementTests(unittest.TestCase):
         self.db.execute("UPDATE payment_transactions SET status='paid',provider_payment_id='ch_evidence' WHERE id='t1'")
         self.assertEqual(self.balances(), (14500, 0, 0))
 
+
+    def test_paid_transaction_cannot_be_inserted_without_provider_reference(self):
+        with self.assertRaises(sqlite3.IntegrityError):
+            self.db.execute(
+                """INSERT INTO payment_transactions
+                   (id,idempotency_key,type,status,gross_cents,commission_cents,
+                    net_intervenant_cents,currency,provider)
+                   VALUES('t_paid_invalid','idem-paid-invalid','MISSION_CHARGE','paid',5000,500,4500,'EUR','psp_adapter')"""
+            )
+        self.assertEqual(self.balances(), (10000, 0, 0))
+        self.db.execute(
+            """INSERT INTO payment_transactions
+               (id,idempotency_key,type,status,gross_cents,commission_cents,
+                net_intervenant_cents,currency,provider,provider_payment_id)
+               VALUES('t_paid_valid','idem-paid-valid','MISSION_CHARGE','paid',5000,500,4500,'EUR','psp_adapter','ch_paid_valid')"""
+        )
+        self.assertEqual(self.balances(), (14500, 0, 0))
+
     def test_payout_status_requires_provider_reference_and_initial_requested_state(self):
         with self.assertRaises(sqlite3.IntegrityError):
             self.db.execute(
@@ -341,8 +359,8 @@ class PaymentStateLedgerEnforcementTests(unittest.TestCase):
         for trigger in ("trg_payment_dispute_single_open", "trg_payment_dispute_state_guard"):
             self.assertIn(trigger, ensure)
             self.assertIn(trigger, readiness)
-        self.assertIn("Number(guards?.total || 0) !== 21", ensure)
-        self.assertIn("Number(guards?.total||0)===21", readiness)
+        self.assertIn("Number(guards?.total || 0) !== 22", ensure)
+        self.assertIn("Number(guards?.total||0)===22", readiness)
         self.assertIn("PAYMENT_LEDGER_OR_DISPUTE_GUARDS_MIGRATION_REQUIRED", readiness)
 
 
