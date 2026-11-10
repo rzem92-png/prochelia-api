@@ -78,6 +78,27 @@ test("signed webhook handler verifies signatures before accessing payment schema
   const handler = source.slice(handlerStart, handlerEnd);
   assert.ok(handlerStart >= 0);
   assert.ok(handler.indexOf("verifyWebhookSignature(request,env,raw)") < handler.indexOf("ensurePaymentSchema(env)"));
-  assert.match(source, /url\.pathname === '\/api\/payments\/webhook'[\s\S]*?return paymentWebhook\(request,env\)/);
+  assert.match(source, /url\.pathname === '\/api\/payments\/webhook'[\s\S]*?PAYMENT_WEBHOOK_DISABLED_PENDING_REVIEW/);
+  assert.doesNotMatch(source, /return paymentWebhook\(request,env\)/);
   assert.match(source, /noOriginWebhook = preflightMethod === 'POST' && preflightPath === '\/api\/payments\/webhook'/);
+});
+
+test("payment webhook endpoint returns an explicit fail-closed response", async () => {
+  const DB = {
+    prepare() {
+      return {
+        bind() { return this; },
+        async first() { return null; },
+        async run() { return { meta: { changes: 1 } }; },
+        async all() { return { results: [] }; }
+      };
+    }
+  };
+  const response = await Worker.fetch(request("/api/payments/webhook", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: "{}"
+  }), { DB });
+  assert.equal(response.status, 503);
+  assert.equal((await response.json()).error, "PAYMENT_WEBHOOK_DISABLED_PENDING_REVIEW");
 });
