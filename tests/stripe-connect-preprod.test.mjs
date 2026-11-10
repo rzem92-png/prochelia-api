@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { webcrypto } from "node:crypto";
 import worker from "../src/index.js";
-import { requireStripeAccountId, stripeGet, stripePost, verifyStripeSignature } from "../src/stripe.js";
+import { assertStripeWebhookCompletion, requireStripeAccountId, stripeGet, stripePost, verifyStripeSignature } from "../src/stripe.js";
 
 if (!globalThis.crypto) globalThis.crypto = webcrypto;
 
@@ -427,4 +427,12 @@ test("Stripe onboarding accepts only a syntactically valid connected account ID"
   assert.throws(() => requireStripeAccountId("cus_not_an_account"), /STRIPE_ACCOUNT_ID_INVALID/);
   assert.throws(() => requireStripeAccountId("acct_bad/id"), /STRIPE_ACCOUNT_ID_INVALID/);
   assert.throws(() => requireStripeAccountId(null), /STRIPE_ACCOUNT_ID_INVALID/);
+});
+
+
+test("Stripe webhook completion requires both audit and processed-state writes", () => {
+  assert.equal(assertStripeWebhookCompletion([{ meta: { changes: 1 } }, { meta: { changes: 1 } }]), true);
+  assert.throws(() => assertStripeWebhookCompletion([{ meta: { changes: 1 } }, { meta: { changes: 0 } }]), /STRIPE_WEBHOOK_COMPLETION_NOT_PERSISTED/);
+  assert.throws(() => assertStripeWebhookCompletion([{ meta: { changes: 1 } }]), /STRIPE_WEBHOOK_COMPLETION_NOT_PERSISTED/);
+  assert.throws(() => assertStripeWebhookCompletion(null), /STRIPE_WEBHOOK_COMPLETION_NOT_PERSISTED/);
 });
