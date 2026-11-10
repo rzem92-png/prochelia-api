@@ -3,7 +3,7 @@
 **Statut : intégration partielle de Connect Accounts v2, charges/payouts/remboursements non implémentés.**  
 **Cible : préproduction isolée uniquement ; aucun encaissement réel ni déploiement production autorisé.**
 
-Stripe est le prestataire de paiement retenu pour PROCHÉLIA. Sur la PR #126, les routes de paiement sont désormais raccordées au routeur ; l'onboarding Connect Accounts v2 et le webhook de synchronisation des capacités destinataire sont intégrés, mais verrouillés par défaut. Les charges, remboursements, payouts, litiges financiers et rapprochements PSP ne sont pas implémentés. Le modèle de charge marketplace (destination charge ou separate charges and transfers), la répartition des frais/pertes et le flux de versement restent à valider ; aucun encaissement n'est activé.
+Stripe est le prestataire de paiement retenu pour PROCHÉLIA. Sur la PR #127, les routes de paiement sont désormais raccordées au routeur ; l'onboarding Connect Accounts v2 et le webhook de synchronisation des capacités destinataire sont intégrés, mais verrouillés par défaut. Les charges, remboursements, payouts, litiges financiers et rapprochements PSP ne sont pas implémentés. Le modèle de charge marketplace (destination charge ou separate charges and transfers), la répartition des frais/pertes et le flux de versement restent à valider ; aucun encaissement n'est activé.
 
 ## 1. Principes non négociables
 
@@ -164,9 +164,14 @@ Aucun trafic réel avant que les tests soient verts sur un SHA unique, que le te
 ### Capacités désormais raccordées sur la PR #126
 - `GET /api/payments/config` expose la clé publique uniquement après approbation explicite de l'onboarding et validation de la paire de clés.
 - `POST /api/payments/onboard` est raccordé à Stripe Accounts v2 (création du compte connecté, Account Token, idempotence, réservation D1, lien d'onboarding à durée limitée). Il reste fermé sans `STRIPE_CONNECT_ONBOARDING_ENABLED=true`, `STRIPE_CONNECT_ONBOARDING_APPROVED=true` **et** un `STRIPE_CONNECT_CHARGE_MODEL` explicite compatible avec les responsabilités Accounts v2.
-- Le webhook Stripe accepte uniquement `v2.core.account[requirements].updated`, vérifie la signature et la fraîcheur, utilise une inbox idempotente avec lease/retry, relit le compte auprès de Stripe et synchronise l'état destinataire.
+- Le webhook Stripe accepte uniquement `v2.core.account[requirements].updated` et `v2.core.account[configuration.recipient].capability_status_updated`, vérifie la signature Stripe `t=`/`v1=` et sa fraîcheur, utilise une inbox idempotente avec lease/retry, relit le compte auprès de Stripe et synchronise l'état destinataire.
 - Les événements de paiement, remboursement ou payout ne sont pas traités par ce webhook Connect : ils reçoivent une réponse non-2xx et ne sont pas acquittés comme réussis.
 - L'activation live nécessite des clés live correspondantes, les deux verrous d'onboarding, un modèle de charge validé, ainsi que `STRIPE_CONNECT_LIVE_ENABLED=true` **et** `STRIPE_CONNECT_LIVE_APPROVED=true`. Aucun de ces verrous n'a été activé dans le cadre de ce travail.
+
+### Preuve PSP obligatoire au niveau D1
+- La migration `0011_financial_provider_evidence_guards.sql` interdit le passage d'une transaction à `paid` sans `provider_payment_id` et interdit les transitions de versement vers `processing`, `completed`, `failed` ou `canceled` sans `provider_payout_id`.
+- Une demande de versement doit obligatoirement commencer à l'état `requested`. Les triggers du ledger ne peuvent donc plus être contournés par une insertion directe dans un état terminal.
+- Les contrôles `ensurePaymentSchema` et `/api/readiness` exigent désormais les 21 triggers financiers attendus. Les tests couvrent les tentatives de règlement sans référence PSP.
 
 ### Séparation stricte des capacités
 - La capacité Accounts v2 `recipient.capabilities.stripe_balance.stripe_transfers` active indique que le compte peut recevoir des transferts de la plateforme.
@@ -177,7 +182,7 @@ Aucun trafic réel avant que les tests soient verts sur un SHA unique, que le te
 - Le compte Stripe test est accessible via la session Stripe connectée (`livemode=false`). L'audit en lecture seule a trouvé zéro PaymentIntent test, zéro endpoint webhook V1 et un solde test disponible/en attente à 0 EUR. Aucun objet Stripe n'a été créé pendant l'audit.
 - Les tests ciblés de routes/contrats utilisent des réponses Stripe et D1 simulées. Ils vérifient les gardes et les transitions codées, mais ne constituent pas une recette sandbox E2E ni une preuve de transaction réelle.
 - Sur le head courant de la PR #126, les workflows V7, migration SQL, migration validation (incluant les tests Node Stripe) et build Worker doivent tous être verts sur le même SHA avant toute validation de cette révision.
-- Les migrations 0006 et 0007 ne sont pas déclarées appliquées à D1. Le déploiement Preview n'est pas un déploiement production.
+- Les migrations 0006 à 0011 (ledger, sécurité, capacités Stripe, garde-fous litiges, unicité des comptes et références PSP obligatoires) ne sont pas déclarées appliquées à D1. Le déploiement Preview n'est pas un déploiement production.
 - Les charges, remboursements, payouts PSP, litiges financiers et rapprochements restent à développer. La recette sandbox E2E, l'exercice complet de restauration, la recette Safari/iOS et les validations juridiques/opérationnelles France restent à produire.
 
 **Conclusion : NO-GO pour les paiements et le trafic transactionnel de production.** L'onboarding Connect partiel n'est ni un adaptateur de charge, ni un système de payout, ni une autorisation de mise en service.
