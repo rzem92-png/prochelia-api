@@ -640,3 +640,66 @@ test("finance problem amounts accept only non-negative safe integer cents", asyn
   assert.ok(entry);
   assert.equal(entry.args[8], 1234);
 });
+
+
+function authenticatedManagerDb(writes = []) {
+  return {
+    prepare(sql) {
+      const statement = {
+        args: [],
+        bind(...args) { this.args = args; return this; },
+        async first() {
+          if (sql.includes("RETURNING request_count")) return { request_count: 1 };
+          if (sql.includes("FROM sessions s")) return {
+            id: "manager-user", role: "gerante", email: "manager@example.test",
+            first_name: "Manager", last_name: "Test", phone: null, status: "active",
+            created_at: "2026-01-01 00:00:00", updated_at: "2026-01-01 00:00:00",
+            session_id: "manager-session"
+          };
+          if (sql.includes("pragma_table_info")) return { total: 1 };
+          return null;
+        },
+        async all() { return { results: [] }; },
+        async run() { writes.push({ sql, args: this.args }); return { meta: { changes: 1 } }; }
+      };
+      return statement;
+    },
+    async batch(statements) {
+      for (const statement of statements) writes.push({ sql: "BATCH", args: statement.args || [] });
+      return statements.map(() => ({ meta: { changes: 1 } }));
+    }
+  };
+}
+
+
+test("loyalty update rejects fractional or malformed cents before any write", async () => {
+  const writes = [];
+  const DB = authenticatedManagerDb(writes);
+  for (const amount of [1.5, -1, "1.5", "1e3", "NaN", Number.MAX_SAFE_INTEGER + 1]) {
+    const response = await worker.fetch(new Request("https://api.test/api/loyalty/update", {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie: "prochelia_session=manager-session" },
+      body: JSON.stringify({ client_id: "client-1", amount_cents: amount })
+    }), { DB });
+    const body = await response.json();
+    assert.equal(response.status, 400, JSON.stringify(body));
+    assert.equal(body.error, "INVALID_LOYALTY_AMOUNT_CENTS");
+  }
+  assert.equal(writes.some(x => x.sql.includes("INSERT INTO loyalty_events")), false);
+});
+
+test("commercial prospect potential rejects fractional or malformed cents before insert", async () => {
+  const writes = [];
+  const DB = authenticatedManagerDb(writes);
+  for (const amount of [1.5, -1, "1.5", "1e3", "NaN", Number.MAX_SAFE_INTEGER + 1]) {
+    const response = await worker.fetch(new Request("https://api.test/api/copilot/commercial/prospect", {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie: "prochelia_session=manager-session" },
+      body: JSON.stringify({ company_name: "Test", estimated_potential_cents: amount })
+    }), { DB });
+    const body = await response.json();
+    assert.equal(response.status, 400, JSON.stringify(body));
+    assert.equal(body.error, "INVALID_PROSPECT_POTENTIAL_CENTS");
+  }
+  assert.equal(writes.some(x => x.sql.includes("INSERT INTO commercial_prospects")), false);
+});
