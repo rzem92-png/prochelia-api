@@ -2664,10 +2664,15 @@ async function executeQueuedAction(env, action) {
     } else if (action.action_type === 'PAYOUT') {
       result={performed:false,requires_provider:true,reason:'PSP_EXECUTION_REQUIRED',payload};
     } else if (action.action_type === 'ACCOUNTING_ENTRY') {
-      if (await tableExists(env,'accounting_ledger')) {
+      const amountCents=payload.amount_cents==null?0:integerCents(payload.amount_cents);
+      const debitCents=payload.debit_cents==null?0:integerCents(payload.debit_cents);
+      const creditCents=payload.credit_cents==null?0:integerCents(payload.credit_cents);
+      if(amountCents===null||debitCents===null||creditCents===null) {
+        result={performed:false,reason:'INVALID_ACCOUNTING_AMOUNT_CENTS'};
+      } else if (await tableExists(env,'accounting_ledger')) {
         const cols=await tableColumns(env,'accounting_ledger');
-        const values={id:crypto.randomUUID(),entry_type:payload.entry_type||'OPERATIONAL',amount_cents:Number(payload.amount_cents||0),
-          debit_cents:Number(payload.debit_cents||0),credit_cents:Number(payload.credit_cents||0),reference_type:action.entity_type,
+        const values={id:crypto.randomUUID(),entry_type:payload.entry_type||'OPERATIONAL',amount_cents:amountCents,
+          debit_cents:debitCents,credit_cents:creditCents,reference_type:action.entity_type,
           reference_id:action.entity_id,description:payload.description||'',metadata_json:JSON.stringify(payload)};
         const usable=Object.entries(values).filter(([k])=>cols.includes(k));
         if(usable.length){
@@ -2737,9 +2742,11 @@ async function loyaltyUpdate(request, env) {
   await ensureOperationalSchema(env);
   const b=await readJson(request)||{}; if(!b.client_id&&!b.company_id)return json({ok:false,error:'CLIENT_OR_COMPANY_REQUIRED',version:VERSION},400);
   const points=Math.max(-100000,Math.min(100000,Number(b.points||0)));
+  const amountCents=b.amount_cents==null?0:integerCents(b.amount_cents);
+  if(amountCents===null) return json({ok:false,error:'INVALID_LOYALTY_AMOUNT_CENTS',version:VERSION},400);
   const id=crypto.randomUUID();
   await env.DB.prepare(`INSERT INTO loyalty_events(id,client_id,company_id,event_type,points,amount_cents,metadata_json) VALUES(?,?,?,?,?,?,?)`)
-    .bind(id,b.client_id||null,b.company_id||null,b.event_type||'MANUAL',points,Number(b.amount_cents||0),JSON.stringify(b)).run();
+    .bind(id,b.client_id||null,b.company_id||null,b.event_type||'MANUAL',points,amountCents,JSON.stringify(b)).run();
   const existing=await env.DB.prepare('SELECT * FROM loyalty_balances WHERE client_id IS ? AND company_id IS ? LIMIT 1').bind(b.client_id||null,b.company_id||null).first();
   const total=Number(existing?.points||0)+points;
   const tier=total>=1000?'PLATINUM':total>=500?'GOLD':total>=200?'SILVER':'STANDARD';
@@ -3128,7 +3135,9 @@ async function commercialProspectCreate(request,env){
   await ensureCommercialRecruitmentSchema(env); const b=await readJson(request);
   const id=crypto.randomUUID(); const kind=String(b?.kind||'B2B').toUpperCase();
   const score=Math.max(0,Math.min(100,Number(b?.score||0)||0));
-  await env.DB.prepare(`INSERT INTO commercial_prospects(id,kind,company_name,contact_name,email,phone,website,sector,city,postal_code,source,need,estimated_potential_cents,score,next_action,notes) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(id,kind,clean(b?.company_name)||null,clean(b?.contact_name)||null,normalizeEmail(b?.email)||null,clean(b?.phone)||null,clean(b?.website)||null,clean(b?.sector)||null,clean(b?.city)||null,clean(b?.postal_code)||null,clean(b?.source)||'COPILOTE',clean(b?.need)||null,Number.isFinite(Number(b?.estimated_potential_cents))?Math.max(0,Math.round(Number(b.estimated_potential_cents))):null,score,clean(b?.next_action)||'PREMIER_CONTACT',clean(b?.notes)||null).run();
+  const potentialCents=b?.estimated_potential_cents==null?null:integerCents(b.estimated_potential_cents);
+  if(b?.estimated_potential_cents!=null&&potentialCents===null) return json({ok:false,error:'INVALID_PROSPECT_POTENTIAL_CENTS',version:VERSION},400);
+  await env.DB.prepare(`INSERT INTO commercial_prospects(id,kind,company_name,contact_name,email,phone,website,sector,city,postal_code,source,need,estimated_potential_cents,score,next_action,notes) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(id,kind,clean(b?.company_name)||null,clean(b?.contact_name)||null,normalizeEmail(b?.email)||null,clean(b?.phone)||null,clean(b?.website)||null,clean(b?.sector)||null,clean(b?.city)||null,clean(b?.postal_code)||null,clean(b?.source)||'COPILOTE',clean(b?.need)||null,potentialCents,score,clean(b?.next_action)||'PREMIER_CONTACT',clean(b?.notes)||null).run();
   await journal(env,'gerante',gate.auth.user.id,'PROSPECT_CREATED','commercial_prospect',id,'OK',{kind,score});
   return json({ok:true,version:VERSION,prospect_id:id,score,next_action:clean(b?.next_action)||'PREMIER_CONTACT'},201);
 }
