@@ -870,10 +870,6 @@ async function paymentOnboard(request, env) {
     return json({ok:false,error:'APP_BASE_URL_NOT_ALLOWED',version:VERSION},503);
   }
   const body=await readJson(request)||{};
-  const accountToken=typeof body.account_token==='string'?body.account_token.trim():'';
-  if(!/^[A-Za-z0-9_]{8,255}$/.test(accountToken) || body.stripe_terms_accepted!==true) {
-    return json({ok:false,error:'STRIPE_ACCOUNT_TOKEN_AND_TERMS_REQUIRED',version:VERSION},400);
-  }
   await ensurePaymentSchema(env);
   let existing = await env.DB.prepare('SELECT * FROM payment_accounts WHERE user_id=? LIMIT 1').bind(auth.user.id).first();
   if(existing && existing.provider!=='stripe') return json({ok:false,error:'PAYMENT_PROVIDER_CONFLICT',version:VERSION},409);
@@ -881,9 +877,17 @@ async function paymentOnboard(request, env) {
     return json({ok:true,version:VERSION,provider:'stripe',account_id:existing.provider_account_id,onboarding_status:'complete',already_connected:true},200);
   }
   let accountId=clean(existing?.provider_account_id);
+  if(accountId) {
+    try { accountId=requireStripeAccountId(accountId); }
+    catch { return json({ok:false,error:'STRIPE_CONNECT_ACCOUNT_STATE_CONFLICT',version:VERSION},409); }
+  }
   let reservationId=existing?.id || null;
   try {
     if(!accountId) {
+      const accountToken=typeof body.account_token==='string'?body.account_token.trim():'';
+      if(!/^[A-Za-z0-9_]{8,255}$/.test(accountToken) || body.stripe_terms_accepted!==true) {
+        return json({ok:false,error:'STRIPE_ACCOUNT_TOKEN_AND_TERMS_REQUIRED',version:VERSION},400);
+      }
       // Reserve the unique user_id row BEFORE contacting Stripe to prevent
       // concurrent requests from creating multiple connected accounts.
       if(existing && existing.status==='creating') return json({ok:false,error:'STRIPE_CONNECT_CREATION_IN_PROGRESS',version:VERSION},409);
