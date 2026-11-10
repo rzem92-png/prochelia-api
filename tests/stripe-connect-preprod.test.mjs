@@ -252,6 +252,7 @@ test("verified Connect transfer capability never enables bank payouts", async ()
         async first() {
           if (sql.includes("type='table'") && sql.includes("sqlite_master")) return { total: 9 };
           if (sql.includes("type='trigger'") && sql.includes("sqlite_master")) return { total: 18 };
+          if (sql.includes("type='index'") && sql.includes("sqlite_master")) return { total: 1 };
           if (sql.includes("pragma_table_info('payment_accounts')")) return { total: 1 };
           if (sql.includes("RETURNING request_count")) return { request_count: 1 };
           if (sql.includes("SELECT processed,payload_hash,received_at")) {
@@ -326,6 +327,7 @@ test("verified bank-payout capability never enables recipient transfers", async 
         async first() {
           if (sql.includes("type='table'") && sql.includes("sqlite_master")) return { total: 9 };
           if (sql.includes("type='trigger'") && sql.includes("sqlite_master")) return { total: 18 };
+          if (sql.includes("type='index'") && sql.includes("sqlite_master")) return { total: 1 };
           if (sql.includes("pragma_table_info('payment_accounts')")) return { total: 1 };
           if (sql.includes("RETURNING request_count")) return { request_count: 1 };
           if (sql.includes("SELECT processed,payload_hash,received_at")) {
