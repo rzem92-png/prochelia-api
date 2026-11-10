@@ -819,6 +819,15 @@ function moneyCents(value) {
   return Number(cents);
 }
 
+function integerCents(value) {
+  if (typeof value !== 'number' && typeof value !== 'string') return null;
+  const raw = String(value).trim();
+  if (!/^\d+$/.test(raw)) return null;
+  const cents = BigInt(raw);
+  if (cents > BigInt(Number.MAX_SAFE_INTEGER)) return null;
+  return Number(cents);
+}
+
 async function paymentAudit(env, eventType, data = {}, result = 'OK') {
   await env.DB.prepare(`INSERT INTO payment_audit
     (id,event_type,transaction_id,payout_id,mission_id,user_id,result,metadata_json)
@@ -3415,12 +3424,14 @@ async function financeEntryCreate(request,env) {
 async function financeProblemCreate(request,env) {
   const a=await financeAuth(request,env); if(a.response)return a.response;
   const {auth}=a,b=await readJson(request)||{}, [issueType,solution]=financeProblemSolution(b.issue_type);
+  const amountCents=b.amount_cents==null?null:integerCents(b.amount_cents);
+  if(b.amount_cents!=null&&amountCents===null) return json({ok:false,error:'INVALID_FINANCE_AMOUNT_CENTS',version:VERSION},400);
   const severity=['CRITICAL','HIGH','MEDIUM','LOW'].includes(String(b.severity||'').toUpperCase())?String(b.severity).toUpperCase():'LOW';
   const auto=['LOW','MEDIUM'].includes(severity) && ['PAYMENT_FAILED','EXPORT_FAILED','INVOICE_MISSING','UNKNOWN'].includes(issueType);
   const status=auto?'AUTO_RESOLUTION_PROPOSED':'OPEN';
   const id=crypto.randomUUID();
   await env.DB.prepare(`INSERT INTO finance_resolution_cases(id,user_id,role,issue_type,status,severity,description,proposed_solution,amount_cents,reference_id,metadata_json) VALUES(?,?,?,?,?,?,?,?,?,?,?)`)
-    .bind(id,auth.user.id,auth.user.role,issueType,status,severity,clean(b.description)||null,solution,Number.isFinite(Number(b.amount_cents))?Number(b.amount_cents):null,clean(b.reference_id)||null,JSON.stringify(b.metadata||{})).run();
+    .bind(id,auth.user.id,auth.user.role,issueType,status,severity,clean(b.description)||null,solution,amountCents,clean(b.reference_id)||null,JSON.stringify(b.metadata||{})).run();
   await journal(env,auth.user.role,auth.user.id,'FINANCE_PROBLEM_CREATE','finance_resolution_cases',id,status,{issue_type:issueType,auto});
   return json({ok:true,version:VERSION,case:{id,issue_type:issueType,status,severity,automatic_resolution_possible:auto,proposed_solution:solution,requires_human_validation:!auto}});
 }
