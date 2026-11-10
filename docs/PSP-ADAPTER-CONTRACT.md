@@ -161,7 +161,7 @@ Aucun trafic réel avant que les tests soient verts sur un SHA unique, que le te
 
 ## 9. État vérifié au 10 novembre 2026
 
-### Capacités désormais raccordées sur la PR #126
+### Capacités désormais raccordées sur la PR #127
 - `GET /api/payments/config` expose la clé publique uniquement après approbation explicite de l'onboarding et validation de la paire de clés.
 - `POST /api/payments/onboard` est raccordé à Stripe Accounts v2 (création du compte connecté, Account Token, idempotence, réservation D1, lien d'onboarding à durée limitée). Il reste fermé sans `STRIPE_CONNECT_ONBOARDING_ENABLED=true`, `STRIPE_CONNECT_ONBOARDING_APPROVED=true` **et** un `STRIPE_CONNECT_CHARGE_MODEL` explicite compatible avec les responsabilités Accounts v2.
 - Le webhook Stripe accepte uniquement `v2.core.account[requirements].updated` et `v2.core.account[configuration.recipient].capability_status_updated`, vérifie la signature Stripe `t=`/`v1=` et sa fraîcheur, utilise une inbox idempotente avec lease/retry, relit le compte auprès de Stripe et synchronise l'état destinataire.
@@ -181,8 +181,8 @@ Aucun trafic réel avant que les tests soient verts sur un SHA unique, que le te
 ### Preuves et limites
 - Le compte Stripe test est accessible via la session Stripe connectée (`livemode=false`). L'audit en lecture seule a trouvé zéro PaymentIntent test, zéro endpoint webhook V1 et un solde test disponible/en attente à 0 EUR. Aucun objet Stripe n'a été créé pendant l'audit.
 - Les tests ciblés de routes/contrats utilisent des réponses Stripe et D1 simulées. Ils vérifient les gardes et les transitions codées, mais ne constituent pas une recette sandbox E2E ni une preuve de transaction réelle.
-- Sur le head courant de la PR #126, les workflows V7, migration SQL, migration validation (incluant les tests Node Stripe) et build Worker doivent tous être verts sur le même SHA avant toute validation de cette révision.
-- Les migrations 0006 à 0011 (ledger, sécurité, capacités Stripe, garde-fous litiges, unicité des comptes et références PSP obligatoires) ne sont pas déclarées appliquées à D1. Le déploiement Preview n'est pas un déploiement production.
+- Sur le head courant de la PR #127, les quatre workflows (V7, migration SQL, migration validation incluant les tests Node Stripe, et build Worker) sont verts sur le SHA `2ed4f479e251c51891803785e1ea9256e94724f3`. Toute modification ultérieure doit être revalidée sur un SHA unique.
+- Les migrations 0006 à 0013 (ledger, sécurité, capacités Stripe, garde-fous litiges, unicité des comptes, références PSP obligatoires et immutables) ne sont pas déclarées appliquées à D1. Le déploiement Preview n'est pas un déploiement production.
 - Les charges, remboursements, payouts PSP, litiges financiers et rapprochements restent à développer. La recette sandbox E2E, l'exercice complet de restauration, la recette Safari/iOS et les validations juridiques/opérationnelles France restent à produire.
 
 **Conclusion : NO-GO pour les paiements et le trafic transactionnel de production.** L'onboarding Connect partiel n'est ni un adaptateur de charge, ni un système de payout, ni une autorisation de mise en service.
