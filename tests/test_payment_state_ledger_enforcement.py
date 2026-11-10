@@ -141,6 +141,28 @@ class PaymentStateLedgerEnforcementTests(unittest.TestCase):
         with self.assertRaises(sqlite3.IntegrityError):
             self.db.execute("UPDATE payout_requests SET status='failed' WHERE id='p5'")
 
+    def test_stripe_transfer_and_bank_payout_capabilities_are_separate_and_default_closed(self):
+        columns = {
+            row[1]: row for row in self.db.execute("PRAGMA table_info(payment_accounts)")
+        }
+        self.assertIn("transfers_enabled", columns)
+        self.assertIn("payouts_enabled", columns)
+        self.db.execute(
+            """INSERT INTO payment_accounts(id,user_id,provider,provider_account_id)
+               VALUES('a1','u1','stripe','acct_test')"""
+        )
+        transfers, payouts = self.db.execute(
+            "SELECT transfers_enabled,payouts_enabled FROM payment_accounts WHERE id='a1'"
+        ).fetchone()
+        self.assertEqual(transfers, 0)
+        self.assertEqual(payouts, 0)
+        source = (ROOT / "src" / "index.js").read_text(encoding="utf-8")
+        webhook = source[source.index("async function paymentWebhook"):source.index("async function productionSafetySchema")]
+        self.assertIn("capabilities?.stripe_transfers?.status", webhook)
+        self.assertIn("capabilities?.payouts?.status", webhook)
+        self.assertIn("transfers_enabled=?", webhook)
+        self.assertIn("payouts_enabled=?", webhook)
+
     def test_runtime_payment_handlers_do_not_mutate_wallet_balances_directly(self):
         source = (ROOT / "src" / "index.js").read_text(encoding="utf-8")
         self.assertNotRegex(source, r"UPDATE\s+wallets\s+SET")
