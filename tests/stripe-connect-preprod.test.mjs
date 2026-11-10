@@ -541,7 +541,7 @@ test("financial euro parsing rejects sub-cent amounts instead of silently roundi
 
   const subCent = await worker.fetch(makeRequest(1.005), env);
   const subCentBody = await subCent.json();
-  assert.equal(subCent.status, 400);
+  assert.equal(subCent.status, 400, JSON.stringify(subCentBody));
   assert.equal(subCentBody.error, "INVALID_DISPUTE");
 
   const exactCents = await worker.fetch(makeRequest(1.23), env);
