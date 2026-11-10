@@ -21,6 +21,27 @@ function rateLimitDb() {
   };
 }
 
+function authenticatedRateLimitDb() {
+  return {
+    prepare(sql) {
+      const statement = rateLimitDb().prepare(sql);
+      const first = statement.first;
+      statement.first = async function () {
+        if (sql.includes("FROM sessions s")) {
+          return {
+            id: "provider-user", role: "intervenant", email: "provider@example.test",
+            first_name: "Test", last_name: "Provider", phone: null, status: "active",
+            created_at: "2026-01-01 00:00:00", updated_at: "2026-01-01 00:00:00",
+            session_id: "session-test"
+          };
+        }
+        return first.call(this);
+      };
+      return statement;
+    }
+  };
+}
+
 async function stripeSignature(secret, timestamp, body) {
   const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(secret),
     { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
@@ -128,10 +149,10 @@ test("payment config stays closed until the charge model is explicitly selected"
 test("onboarding rejects missing charge model before contacting Stripe", async () => {
   const response = await worker.fetch(new Request("https://api.test/api/payments/onboard", {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: { "content-type": "application/json", cookie: "prochelia_session=session-test" },
     body: JSON.stringify({ account_token: "acctok_test_12345678", stripe_terms_accepted: true })
   }), {
-    DB: rateLimitDb(),
+    DB: authenticatedRateLimitDb(),
     PAYMENT_PROVIDER: "stripe",
     STRIPE_SECRET_KEY: "sk_test_placeholder",
     STRIPE_PUBLISHABLE_KEY: "pk_test_placeholder",
@@ -202,6 +223,7 @@ test("verified Connect transfer capability never enables bank payouts", async ()
         async first() {
           if (sql.includes("type='table'") && sql.includes("sqlite_master")) return { total: 9 };
           if (sql.includes("type='trigger'") && sql.includes("sqlite_master")) return { total: 16 };
+          if (sql.includes("pragma_table_info('payment_accounts')")) return { total: 1 };
           if (sql.includes("RETURNING request_count")) return { request_count: 1 };
           if (sql.includes("SELECT processed,payload_hash,received_at")) {
             return { processed: 0, payload_hash: payloadHash, received_at: "2026-11-10 07:00:00" };
@@ -243,8 +265,9 @@ test("verified Connect transfer capability never enables bank payouts", async ()
     assert.equal(response.status, 200, JSON.stringify(body));
     assert.equal(body.transfers_enabled, true);
     assert.equal(body.payouts_enabled, false);
-    const accountUpdate = calls.find(call => call.sql.includes("UPDATE payment_accounts SET charges_enabled=0,payouts_enabled=0"));
-    assert.ok(accountUpdate, "external payout flag must remain disabled");
+    const accountUpdate = calls.find(call => call.sql.includes("UPDATE payment_accounts") && call.sql.includes("transfers_enabled=?") && call.sql.includes("payouts_enabled=?"));
+    assert.ok(accountUpdate, "transfer and external payout capabilities must be persisted independently");
+    assert.deepEqual(accountUpdate.args, [1, 0, "active", "submitted", "acct_connecttest123"]);
   } finally {
     globalThis.fetch = originalFetch;
   }
