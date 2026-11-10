@@ -123,6 +123,8 @@ Avant toute activation, la direction doit valider par écrit :
 
 Ces choix nécessitent une revue juridique, fiscale, comptable et opérationnelle adaptée au pays. Le code ne doit pas les déduire automatiquement du type de compte Connect.
 
+**Contrainte Accounts v2 à traiter avant le premier compte connecté :** Stripe indique que les valeurs `defaults.responsibilities` ne sont pas modifiables après leur définition. `express` impose `fees_collector=application` et `losses_collector=application` ; `full` impose `stripe/stripe`. Pour des charges indirectes (destination charges ou separate charges and transfers), Stripe débite toujours la plateforme des frais de paiement et recommande que la plateforme porte la responsabilité des soldes négatifs. Le type de charge, le tableau de bord et la responsabilité financière doivent donc être décidés ensemble avant d'ouvrir l'onboarding.
+
 ## 8. Tests obligatoires avant activation
 
 ### Tests unitaires et contractuels
