@@ -1056,10 +1056,13 @@ async function finalizeMissionPayment(request, env) {
       WHERE id=? AND status IN ('pending','paid')`).bind(txId),
     env.DB.prepare(`INSERT INTO payment_audit
       (id,event_type,transaction_id,mission_id,user_id,result,metadata_json)
-      VALUES (?,?,?,?,?,?,?)`).bind(crypto.randomUUID(),'MISSION_PAYMENT_HELD',txId,tx.mission_id,
-        auth.user.id,'OK',JSON.stringify({reason:'ADMINISTRATIVE_HOLD'}))
+      SELECT ?,?,?,?,?,?,? WHERE EXISTS (
+        SELECT 1 FROM payment_transactions WHERE id=? AND status='held'
+      )`).bind(crypto.randomUUID(),'MISSION_PAYMENT_HELD',txId,tx.mission_id,
+        auth.user.id,'OK',JSON.stringify({reason:'ADMINISTRATIVE_HOLD'}),txId)
   ]);
-  if(!results[0]?.meta?.changes) return json({ok:false,error:'PAYMENT_STATE_CONFLICT',version:VERSION},409);
+  if(Number(results[0]?.meta?.changes||0)!==1)
+    return json({ok:false,error:'PAYMENT_STATE_CONFLICT',version:VERSION},409);
   return json({ok:true,version:VERSION,transaction_id:txId,status:'held'},200);
 }
 
@@ -1335,13 +1338,19 @@ async function openPaymentDispute(request, env) {
     updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='paid'`).bind(tx.id));
   statements.push(env.DB.prepare(`INSERT INTO payment_disputes
     (id,mission_id,transaction_id,client_id,intervenant_id,status,reason,amount_cents)
-    VALUES (?,?,?,?,?,?,?,?)`).bind(id,missionId,tx.id,tx.client_id,tx.intervenant_id,'open',reason,amount));
+    SELECT ?,?,?,?,?,?,?,? FROM payment_transactions
+     WHERE id=? AND status IN ('pending','held') AND mission_id=?`)
+    .bind(id,missionId,tx.id,tx.client_id,tx.intervenant_id,'open',reason,amount,tx.id,missionId));
   statements.push(env.DB.prepare(`INSERT INTO payment_audit
     (id,event_type,transaction_id,mission_id,user_id,result,metadata_json)
-    VALUES (?,?,?,?,?,?,?)`).bind(crypto.randomUUID(),'PAYMENT_DISPUTE_OPENED',tx.id,missionId,
-      auth.user.id,'OK',JSON.stringify({amount_cents:amount,reason})));
+    SELECT ?,?,?,?,?,?,? WHERE EXISTS (SELECT 1 FROM payment_disputes WHERE id=? AND status='open')`)
+    .bind(crypto.randomUUID(),'PAYMENT_DISPUTE_OPENED',tx.id,missionId,
+      auth.user.id,'OK',JSON.stringify({amount_cents:amount,reason}),id));
   try {
-    await env.DB.batch(statements);
+    const results=await env.DB.batch(statements);
+    const inserted=results?.[statements.length-2];
+    if(Number(inserted?.meta?.changes||0)!==1)
+      return json({ok:false,error:'PAYMENT_NOT_DISPUTABLE',version:VERSION},409);
   } catch(error) {
     if(String(error?.message||error).includes('PAYMENT_DISPUTE_ALREADY_OPEN')) {
       return json({ok:false,error:'DISPUTE_ALREADY_OPEN',version:VERSION},409);
@@ -1370,11 +1379,20 @@ async function paymentAdminResolve(request, env) {
       updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='pending'`).bind(d.transaction_id)]:[]),
     env.DB.prepare(`INSERT INTO payment_audit
       (id,event_type,transaction_id,mission_id,user_id,result,metadata_json)
-      VALUES (?,?,?,?,?,?,?)`).bind(crypto.randomUUID(),'PAYMENT_DISPUTE_CANCELED',
-        d.transaction_id||null,d.mission_id||null,auth.user.id,'OK',JSON.stringify({dispute_id:disputeId}))
+      SELECT ?,?,?,?,?,?,? WHERE EXISTS (
+        SELECT 1 FROM payment_disputes WHERE id=? AND status='resolved' AND resolution='cancel'
+      ) AND (? IS NULL OR EXISTS (
+        SELECT 1 FROM payment_transactions WHERE id=? AND status='canceled'
+      ))`).bind(crypto.randomUUID(),'PAYMENT_DISPUTE_CANCELED',
+        d.transaction_id||null,d.mission_id||null,auth.user.id,'OK',JSON.stringify({dispute_id:disputeId}),
+        disputeId,d.transaction_id||null,d.transaction_id||null)
   ];
   try {
-    await env.DB.batch(statements);
+    const results=await env.DB.batch(statements);
+    if(Number(results?.[0]?.meta?.changes||0)!==1)
+      return json({ok:false,error:'DISPUTE_STATE_CONFLICT',version:VERSION},409);
+    if(d.transaction_id && Number(results?.[1]?.meta?.changes||0)!==1)
+      return json({ok:false,error:'DISPUTE_STATE_CONFLICT',version:VERSION},409);
   } catch(error) {
     const message=String(error?.message||error);
     if(message.includes('PAYMENT_DISPUTE_STATE_CONFLICT') ||
