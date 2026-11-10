@@ -28,13 +28,26 @@ test("originless mutating requests are rejected before reaching business handler
 
 test("malformed session cookie is treated as absent and logout still clears it", async () => {
   const { default: worker } = await import("../src/index.js");
+  const DB = {
+    prepare(sql) {
+      return {
+        bind() { return this; },
+        async first() {
+          if (sql.includes("SELECT request_count FROM security_rate_limits")) return null;
+          return null;
+        },
+        async run() { return { meta: { changes: 1 } }; },
+        async all() { return { results: [] }; }
+      };
+    }
+  };
   const response = await worker.fetch(new Request("https://prochelia-api.example/api/auth/logout", {
     method: "POST",
     headers: {
       origin: "https://prochelia.pages.dev",
       cookie: "prochelia_session=%E0%A4%A"
     }
-  }), { DB: {} });
+  }), { DB });
   assert.equal(response.status, 200);
   assert.equal((await response.json()).authenticated, false);
   assert.match(response.headers.get("set-cookie"), /Max-Age=0/);
@@ -44,7 +57,20 @@ test("originless bootstrap is allowed only with the exact configured bearer toke
   const { default: worker } = await import("../src/index.js");
   const env = {
     BOOTSTRAP_TOKEN: "test-bootstrap-secret",
-    DB: { prepare: () => ({ first: async () => ({ total: 1 }) }) }
+    DB: {
+      prepare(sql) {
+        return {
+          bind() { return this; },
+          async first() {
+            if (sql.includes("SELECT request_count FROM security_rate_limits")) return null;
+            if (sql.includes("SELECT COUNT(*) AS total FROM users")) return { total: 1 };
+            return null;
+          },
+          async run() { return { meta: { changes: 1 } }; },
+          async all() { return { results: [] }; }
+        };
+      }
+    }
   };
   const denied = await worker.fetch(new Request("https://prochelia-api.example/api/auth/bootstrap", {
     method: "POST",
