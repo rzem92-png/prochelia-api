@@ -263,6 +263,13 @@ class PaymentStateLedgerEnforcementTests(unittest.TestCase):
                 "UPDATE payment_disputes SET status='resolved',resolution='cancel' WHERE id='d1'"
             )
 
+    def test_duplicate_open_dispute_is_a_conflict_not_an_internal_error(self):
+        source = (ROOT / "src" / "index.js").read_text(encoding="utf-8")
+        handler = source[source.index("async function openPaymentDispute"):source.index("async function paymentAdminResolve")]
+        self.assertIn("PAYMENT_DISPUTE_ALREADY_OPEN", handler)
+        self.assertIn("DISPUTE_ALREADY_OPEN", handler)
+        self.assertIn("},409)", handler)
+
 
 if __name__ == "__main__":
     unittest.main()
