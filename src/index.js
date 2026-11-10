@@ -1166,7 +1166,7 @@ async function stripeConnectWebhook(request, env) {
     .bind(eventId).run();
   if(Number(claim?.meta?.changes||0)!==1) return json({ok:false,error:'WEBHOOK_EVENT_PROCESSING',version:VERSION,retry_after_seconds:30},409);
   try {
-    const account=await stripeGet(env,'v2/core/accounts/'+accountId,fetch,{context:event?.context || accountId,eventId});
+    const account=await stripeGet(env,'v2/core/accounts/'+accountId,fetch,{context:event?.context,eventId});
     const capabilities=account?.configuration?.recipient?.capabilities?.stripe_balance;
     const transferStatus=capabilities?.stripe_transfers?.status;
     const payoutStatus=capabilities?.payouts?.status;
