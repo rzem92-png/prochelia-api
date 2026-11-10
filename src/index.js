@@ -808,7 +808,7 @@ function moneyCents(value) {
   // turn sub-cent input (for example 1.005 EUR) into a different cent amount.
   if (typeof value !== 'number' && typeof value !== 'string') return null;
   const raw = String(value).trim();
-  const match = /^(\\d+)(?:\\.(\\d+))?$/.exec(raw);
+  const match = /^(\d+)(?:\.(\d+))?$/.exec(raw);
   if (!match) return null;
   const whole = BigInt(match[1]);
   const fraction = match[2] || '';
