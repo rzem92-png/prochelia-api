@@ -108,7 +108,7 @@ test("production readiness stays closed while payment webhooks are deliberately 
     new URL("../src/index.js", import.meta.url), "utf8"
   );
   const start = source.indexOf("async function strictProductionAudit");
-  const end = source.indexOf("\\nconst __procheliaProductionSafetyHandle", start);
+  const end = source.indexOf("const __procheliaProductionSafetyHandle", start);
   assert.ok(start >= 0);
   assert.ok(end > start);
   const audit = source.slice(start, end);
