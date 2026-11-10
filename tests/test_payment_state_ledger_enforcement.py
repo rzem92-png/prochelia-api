@@ -316,7 +316,7 @@ class PaymentStateLedgerEnforcementTests(unittest.TestCase):
         source = (ROOT / "src" / "index.js").read_text(encoding="utf-8")
         finalize = source[source.index("async function finalizeMissionPayment"):source.index("async function payoutRequest")]
         dispute = source[source.index("async function openPaymentDispute"):source.index("async function handleBase")]
-        self.assertIn("SELECT ?,?,?,?,?,?,? WHERE EXISTS", finalize)
+        self.assertIn("SELECT ?,?,?,?,?,?,? WHERE changes()=1 AND EXISTS", finalize)
         self.assertIn("WHERE id=? AND status='open' AND (transaction_id IS NULL OR EXISTS", dispute)
         self.assertIn("WHERE id=? AND status='pending' AND EXISTS", dispute)
         self.assertIn("SELECT ?,?,?,?,?,?,? WHERE EXISTS", dispute)
