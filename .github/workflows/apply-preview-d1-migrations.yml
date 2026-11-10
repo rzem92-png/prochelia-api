@@ -31,7 +31,7 @@ jobs:
       - name: Checkout preproduction branch
         uses: actions/checkout@v4
         with:
-          ref: prelaunch/v14.5.7-consolidation-audit
+          ref: fix/stripe-recipient-capabilities-2026-11-10
 
       - name: Verify credentials, exact target and migration files
         shell: bash
@@ -43,12 +43,15 @@ jobs:
           python3 - <<'PY'
           import json
           from pathlib import Path
-          config = json.loads(Path("wrangler.jsonc").read_text())
-          assert config["name"] == "prochelia-api-staging", "Unexpected Worker name"
-          db = next(x for x in config["d1_databases"] if x["binding"] == "DB")
+          raw = Path("wrangler.preview-migrations.jsonc").read_text()
+          raw = "\\n".join(line for line in raw.splitlines() if not line.lstrip().startswith("//"))
+          config = json.loads(raw)
+          assert len(config["d1_databases"]) == 1, "Unexpected additional D1 binding"
+          db = config["d1_databases"][0]
+          assert db["binding"] == "PREVIEW_DB", "Unexpected D1 binding"
           assert db["database_name"] == "prochelia-preview-db", "Unexpected D1 name"
           assert db["database_id"] == "6adb95e5-e542-4bec-9008-fbea01042305", "Unexpected D1 UUID"
-          assert len(config["d1_databases"]) == 1, "Unexpected additional D1 binding"
+          assert db["migrations_dir"] == "migrations", "Unexpected migrations directory"
           for name in (
             "0001_core_business_schema.sql",
             "0002_server_pricing.sql",
@@ -103,7 +106,7 @@ jobs:
           set -euo pipefail
           umask 077
           mkdir -p "$RUNNER_TEMP/prochelia-backup"
-          npx --yes wrangler@4 d1 export "$EXPECTED_DB_NAME" --remote --config wrangler.jsonc --skip-confirmation --output="$RUNNER_TEMP/prochelia-backup/prochelia-preview.sql"
+          npx --yes wrangler@4 d1 export "$EXPECTED_DB_NAME" --remote --config wrangler.preview-migrations.jsonc --skip-confirmation --output="$RUNNER_TEMP/prochelia-backup/prochelia-preview.sql"
           test -s "$RUNNER_TEMP/prochelia-backup/prochelia-preview.sql"
 
       - name: Encrypt and verify fresh backup
@@ -136,17 +139,17 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          npx --yes wrangler@4 d1 migrations list "$EXPECTED_DB_NAME" --remote --config wrangler.jsonc
+          npx --yes wrangler@4 d1 migrations list "$EXPECTED_DB_NAME" --remote --config wrangler.preview-migrations.jsonc
 
       - name: Apply migrations to Preview D1 only
         shell: bash
         run: |
           set -euo pipefail
-          npx --yes wrangler@4 d1 migrations apply "$EXPECTED_DB_NAME" --remote --config wrangler.jsonc
+          npx --yes wrangler@4 d1 migrations apply "$EXPECTED_DB_NAME" --remote --config wrangler.preview-migrations.jsonc
 
       - name: Verify migration status after applying
         shell: bash
         run: |
           set -euo pipefail
-          npx --yes wrangler@4 d1 migrations list "$EXPECTED_DB_NAME" --remote --config wrangler.jsonc
+          npx --yes wrangler@4 d1 migrations list "$EXPECTED_DB_NAME" --remote --config wrangler.preview-migrations.jsonc
           echo "Migration command completed for the hard-pinned Preview D1 target."
