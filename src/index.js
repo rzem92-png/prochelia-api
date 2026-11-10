@@ -2681,7 +2681,10 @@ async function executeQueuedAction(env, action) {
       const debitCents=payload.debit_cents==null?0:integerCents(payload.debit_cents);
       const creditCents=payload.credit_cents==null?0:integerCents(payload.credit_cents);
       if(amountCents===null||debitCents===null||creditCents===null||
-        !Number.isSafeInteger(debitCents+creditCents)) {
+        !Number.isSafeInteger(debitCents+creditCents)||
+        (amountCents===0&&debitCents===0&&creditCents===0)) {
+        // A zero-value journal row has no accounting effect and can create
+        // misleading audit evidence; reject it before touching the ledger.
         result={performed:false,reason:'INVALID_ACCOUNTING_AMOUNT_CENTS'};
       } else if (await tableExists(env,'accounting_ledger')) {
         const cols=await tableColumns(env,'accounting_ledger');
