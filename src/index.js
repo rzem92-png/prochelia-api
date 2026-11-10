@@ -138,7 +138,13 @@ function getCookie(request, name) {
     const idx = part.indexOf('=');
     if (idx < 0) continue;
     const key = part.slice(0, idx).trim();
-    if (key === name) return decodeURIComponent(part.slice(idx + 1).trim());
+    if (key === name) {
+      try {
+        return decodeURIComponent(part.slice(idx + 1).trim());
+      } catch {
+        return null;
+      }
+    }
   }
   return null;
 }
@@ -2460,9 +2466,9 @@ async function processBackgroundJobs(request,env) {
 function isMutatingMethod(method){ return ['POST','PUT','PATCH','DELETE'].includes(method); }
 function securityOriginAllowed(request,env){
   const origin=request.headers.get('origin');
-  // Les clients non-navigateur peuvent ne pas envoyer Origin. Les requêtes navigateur
-  // avec Origin doivent correspondre à une origine explicitement autorisée.
-  if(!origin) return true;
+  // Les écritures sans Origin sont refusées par défaut.
+  // Le bootstrap à jeton explicite est traité séparément dans handle().
+  if(!origin) return false;
   const configured=clean(env?.CORS_ORIGIN);
   const defaults=[
     'https://prochelia.pages.dev',
@@ -2935,8 +2941,12 @@ async function handleCommercialRecruitment(request,env){
 
 async function handle(request,env){
   try {
-    if(isMutatingMethod(request.method) && !securityOriginAllowed(request,env)) return json({ok:false,error:'ORIGIN_NOT_ALLOWED',version:VERSION},403);
     const url=new URL(request.url);
+    const noOriginBootstrap = url.pathname === '/api/auth/bootstrap' &&
+      !request.headers.get('origin') &&
+      Boolean(env?.BOOTSTRAP_TOKEN) &&
+      request.headers.get('authorization') === `Bearer ${env.BOOTSTRAP_TOKEN}`;
+    if(isMutatingMethod(request.method) && !noOriginBootstrap && !securityOriginAllowed(request,env)) return json({ok:false,error:'ORIGIN_NOT_ALLOWED',version:VERSION},403);
     // Fail closed before any schema helper touches D1: unauthenticated callers
     // must not use mission validation as an existence oracle for private IDs.
     if (url.pathname === '/api/missions/validate') {
