@@ -466,5 +466,19 @@ class PaymentStateLedgerEnforcementTests(unittest.TestCase):
         self.assertIn(".bind(id,auth.user.id,auth.user.role,entryType,direction,amount,currency", handler)
 
 
+    def test_finance_exports_preserve_row_currency_and_prevent_csv_formula_injection(self):
+        source = (ROOT / "src" / "index.js").read_text(encoding="utf-8")
+        start = source.index("async function financeExport")
+        end = source.index("async function financeEntryCreate", start)
+        export = source[start:end]
+        self.assertIn("const exportAmount=value=>{const cents=integerCents(value??0)", export)
+        self.assertIn("devise:String(x.currency||'EUR').toUpperCase()", export)
+        self.assertIn("Indisponible (devises multiples ou données invalides)", export)
+        self.assertIn("if(/^\\s*[=+@-]/.test(v))v=\"'\"+v", export)
+        self.assertIn("const header=['date','type','status','mission_id','devise','montant_brut'", export)
+        self.assertIn("INVALID_FINANCE_EXPORT_FORMAT", export)
+        self.assertNotIn("montant_brut_eur", export)
+
+
 if __name__ == "__main__":
     unittest.main()
