@@ -1393,9 +1393,14 @@ async function paymentAdminResolve(request, env) {
   }
   const statements=[
     env.DB.prepare(`UPDATE payment_disputes SET status='resolved',resolution='cancel',
-      resolved_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='open'`).bind(disputeId),
+      resolved_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP
+      WHERE id=? AND status='open' AND (transaction_id IS NULL OR EXISTS (
+        SELECT 1 FROM payment_transactions WHERE id=payment_disputes.transaction_id AND status='pending'
+      ))`).bind(disputeId),
     ...(d.transaction_id?[env.DB.prepare(`UPDATE payment_transactions SET status='canceled',
-      updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='pending'`).bind(d.transaction_id)]:[]),
+      updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='pending' AND EXISTS (
+        SELECT 1 FROM payment_disputes WHERE id=? AND status='resolved' AND resolution='cancel'
+      )`).bind(d.transaction_id,disputeId)]:[]),
     env.DB.prepare(`INSERT INTO payment_audit
       (id,event_type,transaction_id,mission_id,user_id,result,metadata_json)
       SELECT ?,?,?,?,?,?,? WHERE EXISTS (
