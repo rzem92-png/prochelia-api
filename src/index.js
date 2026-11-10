@@ -804,10 +804,19 @@ async function ensurePaymentSchema(env) {
 }
 
 function moneyCents(value) {
-  const n = Number(value);
-  if (!Number.isFinite(n) || n < 0) return null;
-  const cents = Math.round(n * 100);
-  return Number.isSafeInteger(cents) ? cents : null;
+  // Parse decimal euros exactly. Binary floating-point rounding can silently
+  // turn sub-cent input (for example 1.005 EUR) into a different cent amount.
+  if (typeof value !== 'number' && typeof value !== 'string') return null;
+  const raw = String(value).trim();
+  const match = /^(\\d+)(?:\\.(\\d+))?$/.exec(raw);
+  if (!match) return null;
+  const whole = BigInt(match[1]);
+  const fraction = match[2] || '';
+  // Permit harmless trailing zeroes, but never round a fraction of a cent.
+  if (/[1-9]/.test(fraction.slice(2))) return null;
+  const cents = whole * 100n + BigInt((fraction + '00').slice(0, 2));
+  if (cents > BigInt(Number.MAX_SAFE_INTEGER)) return null;
+  return Number(cents);
 }
 
 async function paymentAudit(env, eventType, data = {}, result = 'OK') {
