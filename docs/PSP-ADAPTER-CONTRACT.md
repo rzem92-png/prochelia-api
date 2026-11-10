@@ -130,7 +130,11 @@ Ces choix nécessitent une revue juridique, fiscale, comptable et opérationnell
 - `separate_charges_and_transfers` : à retenir si PROCHÉLIA doit encaisser d'abord, puis décider de transférer après vérification/acceptation de la mission, ou répartir une opération entre plusieurs comptes. C'est plus complexe et le solde de la plateforme supporte les frais, remboursements et litiges.
 - `direct` : à réserver au cas où l'intervenant contracte et encaisse directement son client, ce qui change le parcours et la responsabilité commerciale.
 
-Le runtime exige maintenant `STRIPE_CONNECT_CHARGE_MODEL` avant d'autoriser l'onboarding. Pour `destination` et `separate_charges_and_transfers`, il impose `express + application/application`; pour `direct`, il impose `full + stripe/stripe`. Aucun modèle n'est actuellement configuré ou activé.
+**Limite exacte du runtime actuel :** le code n'accepte pour l'instant que `STRIPE_CONNECT_CHARGE_MODEL=destination`, avec `express + application/application`. Il ne prend pas encore en charge `separate_charges_and_transfers` ni `direct`, même si ces modèles sont décrits ci-dessus comme options d'architecture. L'onboarding reste fermé sans approbation explicite.
+
+**Point bloquant à trancher avant toute activation :** Stripe précise que les destination charges transfèrent automatiquement les fonds au compte connecté dans le cadre du paiement. Si PROCHÉLIA doit attendre la fin/validation de la mission avant de transférer la part de l'intervenant, le flux à étudier est `separate_charges_and_transfers`, avec transfert différé et rapprochement dédié. Ce choix ne doit pas être confondu avec un service d'entiercement/escrow : la qualification juridique et réglementaire française doit être validée séparément. Le modèle retenu conditionne la création des comptes Connect et les responsabilités de frais, pertes, remboursements et litiges.
+
+Aucun modèle n'est actuellement approuvé ou activé. Le code ne doit pas créer de comptes connectés tant que ce choix métier/juridique n'est pas arrêté.
 
 ## 8. Tests obligatoires avant activation
 
