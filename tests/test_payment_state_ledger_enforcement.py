@@ -481,6 +481,9 @@ class PaymentStateLedgerEnforcementTests(unittest.TestCase):
         self.assertIn("if(/^\\s*[=+@-]/.test(v))v=\"'\"+v", export)
         self.assertIn("const header=['date','type','status','mission_id','devise','montant_brut'", export)
         self.assertIn("INVALID_FINANCE_EXPORT_FORMAT", export)
+        self.assertIn("FINANCE_PDF_EXPORT_NOT_SUPPORTED", export)
+        self.assertIn("if(format==='html')", export)
+        self.assertNotIn("format==='pdf'", export)
         self.assertNotIn("montant_brut_eur", export)
 
 
