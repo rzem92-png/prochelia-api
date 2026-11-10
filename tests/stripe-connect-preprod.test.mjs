@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { webcrypto } from "node:crypto";
 import worker from "../src/index.js";
-import { assertStripeWebhookCompletion, requireStripeAccountId, stripeGet, stripePost, verifyStripeSignature } from "../src/stripe.js";
+import { assertStripeWebhookCompletion, mapStripeRecipientCapabilityStatus, requireStripeAccountId, stripeGet, stripePost, verifyStripeSignature } from "../src/stripe.js";
 
 if (!globalThis.crypto) globalThis.crypto = webcrypto;
 
@@ -439,4 +439,14 @@ test("Stripe webhook completion requires both audit and processed-state writes",
   assert.throws(() => assertStripeWebhookCompletion([{ meta: { changes: 1 } }, { meta: { changes: 0 } }]), /STRIPE_WEBHOOK_COMPLETION_NOT_PERSISTED/);
   assert.throws(() => assertStripeWebhookCompletion([{ meta: { changes: 1 } }]), /STRIPE_WEBHOOK_COMPLETION_NOT_PERSISTED/);
   assert.throws(() => assertStripeWebhookCompletion(null), /STRIPE_WEBHOOK_COMPLETION_NOT_PERSISTED/);
+});
+
+
+test("Stripe recipient capability states preserve restricted and rejected outcomes without enabling transfers", () => {
+  assert.deepEqual(mapStripeRecipientCapabilityStatus("active"), { status: "active", onboardingStatus: "submitted", enabled: true });
+  assert.deepEqual(mapStripeRecipientCapabilityStatus("pending"), { status: "pending", onboardingStatus: "required", enabled: false });
+  assert.deepEqual(mapStripeRecipientCapabilityStatus("restricted"), { status: "restricted", onboardingStatus: "restricted", enabled: false });
+  assert.deepEqual(mapStripeRecipientCapabilityStatus("rejected"), { status: "rejected", onboardingStatus: "rejected", enabled: false });
+  assert.deepEqual(mapStripeRecipientCapabilityStatus("unsupported"), { status: "unsupported", onboardingStatus: "unsupported", enabled: false });
+  assert.deepEqual(mapStripeRecipientCapabilityStatus("unknown_future_status"), { status: "pending", onboardingStatus: "required", enabled: false });
 });
