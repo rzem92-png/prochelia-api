@@ -919,9 +919,9 @@ async function verifyWebhookSignature(request, env, rawBody) {
 }
 
 async function paymentWebhook(request, env) {
-  await ensurePaymentSchema(env);
   const raw=await request.text();
   if(!(await verifyWebhookSignature(request,env,raw))) return json({ok:false,error:'INVALID_WEBHOOK_SIGNATURE',version:VERSION},401);
+  await ensurePaymentSchema(env);
   let event; try{event=JSON.parse(raw)}catch{return json({ok:false,error:'INVALID_WEBHOOK_JSON',version:VERSION},400);}
   const provider=clean(event?.provider)||paymentProvider(env), eventId=clean(event?.id), type=clean(event?.type);
   if(!eventId||!type) return json({ok:false,error:'INVALID_WEBHOOK_EVENT',version:VERSION},400);
@@ -2942,11 +2942,16 @@ async function handleCommercialRecruitment(request,env){
 async function handle(request,env){
   try {
     const url=new URL(request.url);
-    const noOriginBootstrap = url.pathname === '/api/auth/bootstrap' &&
+    const noOriginBootstrap = request.method === 'POST' && url.pathname === '/api/auth/bootstrap' &&
       !request.headers.get('origin') &&
       Boolean(env?.BOOTSTRAP_TOKEN) &&
       request.headers.get('authorization') === `Bearer ${env.BOOTSTRAP_TOKEN}`;
-    if(isMutatingMethod(request.method) && !noOriginBootstrap && !securityOriginAllowed(request,env)) return json({ok:false,error:'ORIGIN_NOT_ALLOWED',version:VERSION},403);
+    const noOriginWebhook = request.method === 'POST' && url.pathname === '/api/payments/webhook' && !request.headers.get('origin');
+    if(isMutatingMethod(request.method) && !noOriginBootstrap && !noOriginWebhook && !securityOriginAllowed(request,env)) return json({ok:false,error:'ORIGIN_NOT_ALLOWED',version:VERSION},403);
+    if (url.pathname === '/api/payments/webhook') {
+      if (request.method !== 'POST') return json({ok:false,error:'METHOD_NOT_ALLOWED',version:VERSION},405,{'allow':'POST'});
+      return paymentWebhook(request,env);
+    }
     // Fail closed before any schema helper touches D1: unauthenticated callers
     // must not use mission validation as an existence oracle for private IDs.
     if (url.pathname === '/api/missions/validate') {
@@ -3447,11 +3452,12 @@ handle = async function(request,env){
     const getOnlyDiagnostics = new Set(['/api/health','/api/readiness','/api/info']);
     // Bootstrap sans Origin uniquement avec le jeton initial exact.
     // Toutes les autres mutations exigent une origine explicitement autorisée.
-    const noOriginBootstrap = preflightPath === '/api/auth/bootstrap'
+    const noOriginBootstrap = preflightMethod === 'POST' && preflightPath === '/api/auth/bootstrap'
       && !request.headers.get('origin')
       && Boolean(env?.BOOTSTRAP_TOKEN)
       && request.headers.get('authorization') === `Bearer ${env.BOOTSTRAP_TOKEN}`;
-    if (isMutatingMethod(preflightMethod) && !noOriginBootstrap && !securityOriginAllowed(request,env)) {
+    const noOriginWebhook = preflightMethod === 'POST' && preflightPath === '/api/payments/webhook' && !request.headers.get('origin');
+    if (isMutatingMethod(preflightMethod) && !noOriginBootstrap && !noOriginWebhook && !securityOriginAllowed(request,env)) {
       return json({ok:false,error:'ORIGIN_NOT_ALLOWED',version:VERSION},403);
     }
     // Block anonymous mission validation before rate limiting touches D1.
