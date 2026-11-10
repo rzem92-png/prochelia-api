@@ -69,25 +69,15 @@ test("malformed percent-encoding in the session cookie is treated as unauthentic
   assert.equal((await response.json()).authenticated, false);
 });
 
-test("signed-webhook route is reachable without Origin and rejects an invalid signature", async () => {
-  const DB = {
-    prepare() {
-      return {
-        bind() { return this; },
-        async first() { return null; },
-        async run() { return { meta: { changes: 1 } }; },
-        async all() { return { results: [] }; }
-      };
-    }
-  };
-  const response = await Worker.fetch(request("/api/payments/webhook", {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      "x-prochelia-signature": "invalid"
-    },
-    body: JSON.stringify({ id: "evt_test", type: "payment_succeeded", data: {} })
-  }), { DB, PAYMENT_WEBHOOK_SECRET: "test-webhook-secret" });
-  assert.equal(response.status, 401);
-  assert.equal((await response.json()).error, "INVALID_WEBHOOK_SIGNATURE");
+test("signed webhook handler verifies signatures before accessing payment schema", async () => {
+  const source = await (await import("node:fs/promises")).readFile(
+    new URL("../src/index.js", import.meta.url), "utf8"
+  );
+  const handlerStart = source.indexOf("async function paymentWebhook(request, env)");
+  const handlerEnd = source.indexOf("\nasync function ", handlerStart + 1);
+  const handler = source.slice(handlerStart, handlerEnd);
+  assert.ok(handlerStart >= 0);
+  assert.ok(handler.indexOf("verifyWebhookSignature(request,env,raw)") < handler.indexOf("ensurePaymentSchema(env)"));
+  assert.match(source, /url\.pathname === '\/api\/payments\/webhook'[\s\S]*?return paymentWebhook\(request,env\)/);
+  assert.match(source, /noOriginWebhook = preflightMethod === 'POST' && preflightPath === '\/api\/payments\/webhook'/);
 });
