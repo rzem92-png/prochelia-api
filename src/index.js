@@ -3442,14 +3442,16 @@ async function financeExport(request,env) {
   const a=await financeAuth(request,env); if(a.response)return a.response;
   const {auth}=a, url=new URL(request.url);
   const format=String(url.searchParams.get('format')||'csv').toLowerCase();
+  if(!['csv','json','html','pdf'].includes(format))return json({ok:false,error:'INVALID_FINANCE_EXPORT_FORMAT',version:VERSION},400);
   const start=url.searchParams.get('from'), end=url.searchParams.get('to');
   const rows=await financeRowsForUser(env,auth.user);
   let payments=rows.payments.filter(x=>(!start||String(x.created_at)>=start)&&(!end||String(x.created_at)<=end));
+  const exportAmount=value=>{const cents=integerCents(value??0);return cents===null?null:financeMoney(cents);};
   const data=payments.map(x=>({
     id:x.id, mission_id:x.mission_id, type:x.type, status:x.status, date:x.created_at,
-    montant_brut_eur:financeMoney(x.gross_cents), remboursement_eur:financeMoney(x.refund_cents),
-    commission_eur:financeMoney(x.commission_cents), frais_psp_eur:financeMoney(x.provider_fee_cents),
-    remuneration_intervenant_eur:financeMoney(x.net_intervenant_cents), devise:x.currency||'EUR',
+    montant_brut:exportAmount(x.gross_cents), remboursement:exportAmount(x.refund_cents),
+    commission:exportAmount(x.commission_cents), frais_psp:exportAmount(x.provider_fee_cents),
+    remuneration_intervenant:exportAmount(x.net_intervenant_cents), devise:String(x.currency||'EUR').toUpperCase(),
     motif:x.reason||''
   }));
   const summary=financeSummaryFromRows({payments,ledger:rows.ledger},auth.user);
@@ -3461,13 +3463,21 @@ async function financeExport(request,env) {
   if(format==='json') return json({ok:true,version:VERSION,summary,rows:data,export_id:id});
   if(format==='html' || format==='pdf') {
     const escHtml=v=>String(v??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
-    const body=data.map(r=>`<tr><td>${escHtml(r.date)}</td><td>${escHtml(r.type)}</td><td>${escHtml(r.status)}</td><td>${r.montant_brut_eur.toFixed(2)}</td><td>${r.remboursement_eur.toFixed(2)}</td><td>${r.commission_eur.toFixed(2)}</td><td>${r.frais_psp_eur.toFixed(2)}</td><td>${r.remuneration_intervenant_eur.toFixed(2)}</td></tr>`).join('');
-    const html=`<!doctype html><html lang="fr"><head><meta charset="utf-8"><title>PROCHÉLIA — Export financier</title><style>body{font-family:Arial,sans-serif;margin:30px;color:#172a2a}h1{font-size:22px}table{border-collapse:collapse;width:100%;font-size:11px}th,td{border:1px solid #ddd;padding:6px}th{background:#eee}.tot{margin:14px 0}</style></head><body><h1>PROCHÉLIA — Export financier</h1><div class="tot">Période : ${escHtml(start||'Toutes')} → ${escHtml(end||'Toutes')} · Transactions : ${summary.transactions} · Brut : ${summary.gross_eur.toFixed(2)} € · Remboursements : ${summary.refunds_eur.toFixed(2)} €</div><table><thead><tr><th>Date</th><th>Type</th><th>Statut</th><th>Brut €</th><th>Remb. €</th><th>Commission €</th><th>PSP €</th><th>Intervenant €</th></tr></thead><tbody>${body}</tbody></table><script>window.onload=()=>window.print()</script></body></html>`;
+    const money=v=>v===null?'Donnée invalide':Number(v).toFixed(2);
+    const body=data.map(r=>`<tr><td>${escHtml(r.date)}</td><td>${escHtml(r.type)}</td><td>${escHtml(r.status)}</td><td>${escHtml(r.devise)}</td><td>${money(r.montant_brut)}</td><td>${money(r.remboursement)}</td><td>${money(r.commission)}</td><td>${money(r.frais_psp)}</td><td>${money(r.remuneration_intervenant)}</td></tr>`).join('');
+    const grossSummary=summary.gross_eur===null?'Indisponible (devises multiples ou données invalides)':summary.gross_eur.toFixed(2)+' €';
+    const refundSummary=summary.refunds_eur===null?'Indisponible (devises multiples ou données invalides)':summary.refunds_eur.toFixed(2)+' €';
+    const html=`<!doctype html><html lang="fr"><head><meta charset="utf-8"><title>PROCHÉLIA — Export financier</title><style>body{font-family:Arial,sans-serif;margin:30px;color:#172a2a}h1{font-size:22px}table{border-collapse:collapse;width:100%;font-size:11px}th,td{border:1px solid #ddd;padding:6px}th{background:#eee}.tot{margin:14px 0}</style></head><body><h1>PROCHÉLIA — Export financier</h1><div class="tot">Période : ${escHtml(start||'Toutes')} → ${escHtml(end||'Toutes')} · Transactions : ${summary.transactions} · Brut EUR : ${grossSummary} · Remboursements EUR : ${refundSummary}</div><table><thead><tr><th>Date</th><th>Type</th><th>Statut</th><th>Devise</th><th>Brut</th><th>Remb.</th><th>Commission</th><th>PSP</th><th>Intervenant</th></tr></thead><tbody>${body}</tbody></table><script>window.onload=()=>window.print()</script></body></html>`;
     return new Response(html,{status:200,headers:{'content-type':'text/html; charset=UTF-8','content-disposition':`inline; filename="prochelia-finance-${id}.html"`,'cache-control':'no-store'}});
   }
-  const header=['date','type','status','mission_id','montant_brut_eur','remboursement_eur','commission_eur','frais_psp_eur','remuneration_intervenant_eur','devise','motif'];
-  const csv=[header,...data.map(r=>header.map(k=>String(r[k]??'').replace(/"/g,'""')))].map(row=>row.map(v=>`"${v}"`).join(';')).join('\r\n');
-  return new Response('\ufeff'+csv,{status:200,headers:{'content-type':'text/csv; charset=UTF-8','content-disposition':`attachment; filename="prochelia-finance-${id}.csv"`,'cache-control':'no-store'}});
+  const header=['date','type','status','mission_id','devise','montant_brut','remboursement','commission','frais_psp','remuneration_intervenant','motif'];
+  const csvCell=value=>{
+    let v=String(value??'');
+    if(/^[\\s]*[=+@-]/.test(v))v="'"+v;
+    return `"${v.replace(/"/g,'""')}"`;
+  };
+  const csv=[header,...data.map(r=>header.map(k=>r[k]))].map(row=>row.map(csvCell).join(';')).join('\\r\\n');
+  return new Response('\\ufeff'+csv,{status:200,headers:{'content-type':'text/csv; charset=UTF-8','content-disposition':`attachment; filename="prochelia-finance-${id}.csv"`,'cache-control':'no-store'}});
 }
 
 async function financeEntryCreate(request,env) {
