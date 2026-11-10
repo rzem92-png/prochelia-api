@@ -844,16 +844,15 @@ async function paymentOnboard(request, env) {
   if (paymentProvider(env)!=='stripe' || !env.STRIPE_SECRET_KEY || !env.STRIPE_PUBLISHABLE_KEY || !env.STRIPE_WEBHOOK_SECRET ||
       !['express','full'].includes(dashboard) || !['application','stripe'].includes(feesCollector) ||
       !['application','stripe'].includes(lossesCollector) ||
-      !['direct','destination','separate_charges_and_transfers'].includes(chargeModel)) {
+      !['destination','separate_charges_and_transfers'].includes(chargeModel)) {
     return json({ok:false,error:'STRIPE_CONNECT_NOT_CONFIGURED',version:VERSION,required:['PAYMENT_PROVIDER=stripe','STRIPE_SECRET_KEY','STRIPE_PUBLISHABLE_KEY','STRIPE_WEBHOOK_SECRET','STRIPE_CONNECT_CHARGE_MODEL','STRIPE_DASHBOARD','STRIPE_FEES_COLLECTOR','STRIPE_LOSSES_COLLECTOR','APP_BASE_URL']},503);
   }
   // Accounts v2 responsibility defaults are immutable once set. For platform
-  // (indirect) charges, require Express + application/application. For direct
-  // charges, this integration only permits Full + stripe/stripe.
+  // This implementation is a marketplace recipient integration only.
+  // Direct charges require a separate Merchant/card_payments capability flow.
   const platformCharge=['destination','separate_charges_and_transfers'].includes(chargeModel);
-  const responsibilityModelValid=platformCharge
-    ? dashboard==='express' && feesCollector==='application' && lossesCollector==='application'
-    : dashboard==='full' && feesCollector==='stripe' && lossesCollector==='stripe';
+  const responsibilityModelValid=platformCharge && dashboard==='express' &&
+    feesCollector==='application' && lossesCollector==='application';
   if(!responsibilityModelValid) {
     return json({ok:false,error:'STRIPE_CONNECT_RESPONSIBILITY_MODEL_CONFLICT',version:VERSION,
       required:platformCharge?'destination/separate charges require express + application/application':'direct charges require full + stripe/stripe'},409);
@@ -954,10 +953,11 @@ function paymentPublicConfig(request,env) {
   const approved=env.STRIPE_CONNECT_ONBOARDING_ENABLED==='true' && env.STRIPE_CONNECT_ONBOARDING_APPROVED==='true';
   const chargeModel=clean(env.STRIPE_CONNECT_CHARGE_MODEL);
   const dashboard=clean(env.STRIPE_DASHBOARD), fees=clean(env.STRIPE_FEES_COLLECTOR), losses=clean(env.STRIPE_LOSSES_COLLECTOR);
+  // Only marketplace recipient accounts are implemented. Direct charges need
+  // Merchant/card_payments onboarding and must remain closed until implemented.
   const platformCharge=['destination','separate_charges_and_transfers'].includes(chargeModel);
-  const responsibilityModelValid=platformCharge
-    ? dashboard==='express' && fees==='application' && losses==='application'
-    : chargeModel==='direct' && dashboard==='full' && fees==='stripe' && losses==='stripe';
+  const responsibilityModelValid=platformCharge && dashboard==='express' &&
+    fees==='application' && losses==='application';
   const publishable=approved && responsibilityModelValid && (matchingTest||matchingLive) ? candidate : null;
   const onboardingReady=!!publishable && !!env.STRIPE_WEBHOOK_SECRET && !!env.APP_BASE_URL;
   return json({ok:true,version:VERSION,provider,stripe_publishable_key:publishable,
