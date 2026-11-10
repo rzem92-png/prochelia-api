@@ -39,6 +39,8 @@ export async function stripeGet(env, apiPath, fetchImpl = fetch) {
     const code = String(data?.error?.code || data?.error?.type || "unknown").replace(/[^a-zA-Z0-9_]/g, "").slice(0, 60);
     throw new Error("STRIPE_API_ERROR_" + response.status + "_" + code);
   }
+  const requestedAccountId = apiPath.slice("v2/core/accounts/".length);
+  if (!data || data.id !== requestedAccountId) throw new Error("STRIPE_ACCOUNT_ID_MISMATCH");
   return data;
 }
 
