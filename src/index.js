@@ -2417,6 +2417,15 @@ async function createPromotion(request, env) {
   if (!Number.isFinite(discount) || discount < 0) {
     return json({ok:false,error:'INVALID_DISCOUNT',version:VERSION},400);
   }
+  const minAmountCents=integerCents(b.min_amount_cents==null?0:b.min_amount_cents);
+  const maxDiscountCents=b.max_discount_cents==null?null:integerCents(b.max_discount_cents);
+  const budgetCents=b.budget_cents==null?null:integerCents(b.budget_cents);
+  const intervenantProtectionCents=integerCents(b.intervenant_protection_cents==null?0:b.intervenant_protection_cents);
+  if(minAmountCents===null||intervenantProtectionCents===null||
+    (b.max_discount_cents!=null&&maxDiscountCents===null)||
+    (b.budget_cents!=null&&budgetCents===null)) {
+    return json({ok:false,error:'INVALID_PROMOTION_AMOUNT_CENTS',version:VERSION},400);
+  }
 
   const id = crypto.randomUUID();
   const autoApply = b.auto_apply === true ? 1 : 0;
@@ -2432,9 +2441,8 @@ async function createPromotion(request, env) {
       id, code, name, type, phase, String(b.client_type || 'ALL').toUpperCase(),
       clean(b.service_code)||null, clean(b.zone_code)||null,
       String(b.discount_type || 'PERCENT').toUpperCase(), discount,
-      Number(b.min_amount_cents || 0), b.max_discount_cents == null ? null : Number(b.max_discount_cents),
-      b.budget_cents == null ? null : Number(b.budget_cents),
-      Number(b.target_margin_percent || 15), Number(b.intervenant_protection_cents || 0),
+      minAmountCents, maxDiscountCents, budgetCents,
+      Number(b.target_margin_percent || 15), intervenantProtectionCents,
       clean(b.starts_at) || new Date().toISOString(), clean(b.ends_at) || new Date(Date.now()+86400000).toISOString(),
       'DRAFT', autoApply, requiresManager, clean(b.rationale)||null,
       JSON.stringify(b.rules || {}), gate.auth.user.id
