@@ -890,11 +890,13 @@ async function paymentOnboard(request, env) {
       accountId=clean(account?.id);
       if(!accountId) throw new Error('STRIPE_ACCOUNT_ID_MISSING');
       await env.DB.prepare(`UPDATE payment_accounts SET provider='stripe',provider_account_id=?,status='pending',onboarding_status='required',updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(accountId,reservationId).run();
-      const wallet=await env.DB.prepare('SELECT id FROM wallets WHERE user_id=? LIMIT 1').bind(auth.user.id).first();
-      if(!wallet) await env.DB.prepare('INSERT INTO wallets (id,user_id) VALUES (?,?)').bind(crypto.randomUUID(),auth.user.id).run();
       await paymentAudit(env,'STRIPE_ACCOUNT_TERMS_ACCEPTED',{user_id:auth.user.id,metadata:{terms:'stripe_connected_account_v2'}},'OK');
       await paymentAudit(env,'STRIPE_CONNECT_ACCOUNT_CREATED',{user_id:auth.user.id,metadata:{provider:'stripe'}},'OK');
     }
+    // Recover a missing wallet row after any earlier partial onboarding attempt.
+    // INSERT OR IGNORE is safe because payment_accounts and wallets are keyed per user.
+    await env.DB.prepare('INSERT OR IGNORE INTO wallets (id,user_id) VALUES (?,?)')
+      .bind(crypto.randomUUID(),auth.user.id).run();
     const refreshUrl=new URL('/',appBase); refreshUrl.searchParams.set('stripe_onboarding','refresh');
     const returnUrl=new URL('/',appBase); returnUrl.searchParams.set('stripe_onboarding','return');
     const link=await stripePost(env,'v2/core/account_links',{
