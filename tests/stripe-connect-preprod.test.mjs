@@ -42,6 +42,32 @@ function authenticatedRateLimitDb() {
   };
 }
 
+function schemaReadyClientDb() {
+  return {
+    prepare(sql) {
+      return {
+        bind() { return this; },
+        async first() {
+          if (sql.includes("FROM sessions s")) {
+            return {
+              id: "client-user", role: "client", email: "client@example.test",
+              first_name: "Test", last_name: "Client", phone: null, status: "active",
+              created_at: "2026-01-01 00:00:00", updated_at: "2026-01-01 00:00:00",
+              session_id: "session-client-test"
+            };
+          }
+          if (sql.includes("pragma_table_info")) return { total: 1 };
+          if (sql.includes("ux_payment_accounts_provider_account")) return { total: 1 };
+          if (sql.includes("type='trigger'")) return { total: 24 };
+          if (sql.includes("type='table'") && sql.includes("payment_accounts")) return { total: 9 };
+          return null;
+        },
+        async run() { return { meta: { changes: 1 } }; }
+      };
+    }
+  };
+}
+
 async function stripeSignature(secret, timestamp, body) {
   const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(secret),
     { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
@@ -502,4 +528,24 @@ test("Stripe Connect webhook rejects malformed event IDs before database access"
   const body = await response.json();
   assert.equal(response.status, 400, JSON.stringify(body));
   assert.equal(body.error, "INVALID_STRIPE_CONNECT_EVENT");
+});
+
+
+test("financial euro parsing rejects sub-cent amounts instead of silently rounding", async () => {
+  const env = { DB: schemaReadyClientDb() };
+  const makeRequest = amount => new Request("https://api.test/api/payments/dispute", {
+    method: "POST",
+    headers: { "content-type": "application/json", cookie: "prochelia_session=session-client-test" },
+    body: JSON.stringify({ mission_id: "mission-test", reason: "test", amount_eur: amount })
+  });
+
+  const subCent = await worker.fetch(makeRequest(1.005), env);
+  const subCentBody = await subCent.json();
+  assert.equal(subCent.status, 400);
+  assert.equal(subCentBody.error, "INVALID_DISPUTE");
+
+  const exactCents = await worker.fetch(makeRequest(1.23), env);
+  const exactCentsBody = await exactCents.json();
+  assert.equal(exactCents.status, 404);
+  assert.equal(exactCentsBody.error, "PAYMENT_NOT_FOUND_FOR_MISSION");
 });
