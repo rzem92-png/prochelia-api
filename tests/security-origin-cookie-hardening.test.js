@@ -114,6 +114,6 @@ test("production readiness stays closed while payment webhooks are deliberately 
   const audit = source.slice(start, end);
   assert.match(audit, /PAYMENT_WEBHOOK_ATOMICITY/);
   assert.match(audit, /status:'NOT_READY'/);
-  assert.match(audit, /blockingCodes=new Set\\(\\[[^\\]]*PAYMENT_WEBHOOK_ATOMICITY/);
+  assert.ok(audit.includes("blockingCodes=new Set(['PAYMENT_WEBHOOK_ATOMICITY'"));
   assert.match(source, /PAYMENT_WEBHOOK_DISABLED_PENDING_REVIEW/);
 });
