@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { webcrypto } from "node:crypto";
 import worker from "../src/index.js";
-import { stripePost } from "../src/stripe.js";
+import { stripePost, verifyStripeSignature } from "../src/stripe.js";
 
 if (!globalThis.crypto) globalThis.crypto = webcrypto;
 
@@ -343,6 +343,19 @@ test("verified bank-payout capability never enables recipient transfers", async 
   } finally {
     globalThis.fetch = originalFetch;
   }
+});
+
+test("Stripe webhook signature verification rejects stale and malformed signatures", async () => {
+  const secret = "whsec_signature_unit_test";
+  const now = 1_800_000_000;
+  const body = JSON.stringify({ id: "evt_signature_test", type: "v2.core.account[requirements].updated" });
+  const valid = await stripeSignature(secret, now, body);
+  assert.equal(await verifyStripeSignature("t=" + now + ",v1=" + valid, secret, body, now), true);
+  assert.equal(await verifyStripeSignature("t=" + (now - 301) + ",v1=" + valid, secret, body, now), false);
+  assert.equal(await verifyStripeSignature("t=" + now + ",v1=not-a-hex-signature", secret, body, now), false);
+  assert.equal(await verifyStripeSignature("v1=" + valid, secret, body, now), false);
+  assert.equal(await verifyStripeSignature("t=" + now + ",v1=" + valid, "", body, now), false);
+  assert.equal(await verifyStripeSignature("t=" + now + ",v1=" + valid, secret, body + " ", now), false);
 });
 
 test("Stripe API helper refuses non-allowlisted paths and missing idempotency", async () => {
