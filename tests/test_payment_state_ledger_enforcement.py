@@ -163,6 +163,20 @@ class PaymentStateLedgerEnforcementTests(unittest.TestCase):
         self.assertIn("transfers_enabled=?", webhook)
         self.assertIn("payouts_enabled=?", webhook)
 
+    def test_stripe_connected_account_mapping_is_unique_across_local_users(self):
+        self.db.execute(
+            """INSERT INTO payment_accounts(id,user_id,provider,provider_account_id)
+               VALUES('stripe-a','u-stripe-a','stripe','acct_same')"""
+        )
+        with self.assertRaises(sqlite3.IntegrityError):
+            self.db.execute(
+                """INSERT INTO payment_accounts(id,user_id,provider,provider_account_id)
+                   VALUES('stripe-b','u-stripe-b','stripe','acct_same')"""
+            )
+        source = (ROOT / "src" / "index.js").read_text(encoding="utf-8")
+        ensure = source[source.index("async function ensurePaymentSchema"):source.index("function moneyCents")]
+        self.assertIn("ux_payment_accounts_provider_account", ensure)
+
     def test_runtime_payment_handlers_do_not_mutate_wallet_balances_directly(self):
         source = (ROOT / "src" / "index.js").read_text(encoding="utf-8")
         self.assertNotRegex(source, r"UPDATE\s+wallets\s+SET")
