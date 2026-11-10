@@ -1024,18 +1024,30 @@ async function createMissionPayment(request, env) {
     return json({ok:false,error:'RECIPIENT_TRANSFER_CAPABILITY_NOT_READY',version:VERSION},409);
   }
   const txId=crypto.randomUUID();
-  await env.DB.batch([
-    env.DB.prepare(`INSERT INTO payment_transactions
-      (id,idempotency_key,mission_id,client_id,intervenant_id,type,status,gross_cents,
-       commission_cents,net_intervenant_cents,currency,provider,reason)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(txId,idem,mission.id,mission.client_user_id,
-        mission.intervenant_user_id,'MISSION_CHARGE','pending',gross,commission,net,'EUR',
-        paymentProvider(env),'MISSION_PAYMENT_CREATED'),
-    env.DB.prepare(`INSERT INTO payment_audit
-      (id,event_type,transaction_id,mission_id,user_id,result,metadata_json)
-      VALUES (?,?,?,?,?,?,?)`).bind(crypto.randomUUID(),'MISSION_PAYMENT_CREATED',txId,
-        mission.id,auth.user.id,'OK',JSON.stringify({gross_cents:gross,commission_cents:commission,net_cents:net}))
-  ]);
+  try {
+    await env.DB.batch([
+      env.DB.prepare(`INSERT INTO payment_transactions
+        (id,idempotency_key,mission_id,client_id,intervenant_id,type,status,gross_cents,
+         commission_cents,net_intervenant_cents,currency,provider,reason)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(txId,idem,mission.id,mission.client_user_id,
+          mission.intervenant_user_id,'MISSION_CHARGE','pending',gross,commission,net,'EUR',
+          paymentProvider(env),'MISSION_PAYMENT_CREATED'),
+      env.DB.prepare(`INSERT INTO payment_audit
+        (id,event_type,transaction_id,mission_id,user_id,result,metadata_json)
+        SELECT ?,?,?,?,?,?,? WHERE EXISTS (SELECT 1 FROM payment_transactions WHERE id=?)`)
+        .bind(crypto.randomUUID(),'MISSION_PAYMENT_CREATED',txId,
+          mission.id,auth.user.id,'OK',JSON.stringify({gross_cents:gross,commission_cents:commission,net_cents:net}),txId)
+    ]);
+  } catch(error) {
+    // A concurrent request may win the unique idempotency key after the first read.
+    const raced=await env.DB.prepare('SELECT * FROM payment_transactions WHERE idempotency_key=? LIMIT 1').bind(idem).first();
+    if(!raced) throw error;
+    const same=raced.mission_id===mission.id&&raced.client_id===mission.client_user_id&&
+      raced.intervenant_id===mission.intervenant_user_id&&Number(raced.gross_cents)===gross&&
+      Number(raced.commission_cents)===commission&&Number(raced.net_intervenant_cents)===net&&raced.currency==='EUR';
+    if(!same) return json({ok:false,error:'IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_PAYLOAD',version:VERSION},409);
+    return json({ok:true,version:VERSION,idempotent_replay:true,transaction:raced,next:'PSP_ADAPTER_NOT_IMPLEMENTED'},200);
+  }
   return json({ok:true,version:VERSION,transaction_id:txId,status:'pending',gross_cents:gross,
     commission_cents:commission,net_intervenant_cents:net,provider:paymentProvider(env),
     next:'PSP_ADAPTER_NOT_IMPLEMENTED'},201);
@@ -1099,6 +1111,13 @@ async function payoutRequest(request, env) {
   } catch(error) {
     if(String(error?.message||error).includes('PAYOUT_INSUFFICIENT_AVAILABLE_BALANCE'))
       return json({ok:false,error:'INSUFFICIENT_AVAILABLE_BALANCE',version:VERSION},409);
+    // Resolve concurrent idempotent submissions without creating a second reserve.
+    const raced=await env.DB.prepare('SELECT * FROM payout_requests WHERE idempotency_key=? LIMIT 1').bind(idem).first();
+    if(raced) {
+      if(raced.user_id!==auth.user.id||Number(raced.amount_cents)!==amount||raced.mode!==mode)
+        return json({ok:false,error:'IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_PAYLOAD',version:VERSION},409);
+      return json({ok:true,version:VERSION,idempotent_replay:true,payout:raced,next:'PSP_ADAPTER_NOT_IMPLEMENTED'},200);
+    }
     throw error;
   }
   return json({ok:true,version:VERSION,payout_id:payoutId,status:'requested',amount_cents:amount,
