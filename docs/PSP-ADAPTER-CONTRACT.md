@@ -125,6 +125,13 @@ Ces choix nécessitent une revue juridique, fiscale, comptable et opérationnell
 
 **Contrainte Accounts v2 à traiter avant le premier compte connecté :** Stripe indique que les valeurs `defaults.responsibilities` ne sont pas modifiables après leur définition. `express` impose `fees_collector=application` et `losses_collector=application` ; `full` impose `stripe/stripe`. Pour des charges indirectes (destination charges ou separate charges and transfers), Stripe débite toujours la plateforme des frais de paiement et recommande que la plateforme porte la responsabilité des soldes négatifs. Le type de charge, le tableau de bord et la responsabilité financière doivent donc être décidés ensemble avant d'ouvrir l'onboarding.
 
+**Orientation technique provisoire — non approuvée :**
+- `destination` : adapté à une mission avec un seul intervenant lorsque le transfert au compte connecté peut intervenir dès l'encaissement. C'est le flux Stripe illustré pour les marketplaces de services à prestataires indépendants.
+- `separate_charges_and_transfers` : à retenir si PROCHÉLIA doit encaisser d'abord, puis décider de transférer après vérification/acceptation de la mission, ou répartir une opération entre plusieurs comptes. C'est plus complexe et le solde de la plateforme supporte les frais, remboursements et litiges.
+- `direct` : à réserver au cas où l'intervenant contracte et encaisse directement son client, ce qui change le parcours et la responsabilité commerciale.
+
+Le runtime exige maintenant `STRIPE_CONNECT_CHARGE_MODEL` avant d'autoriser l'onboarding. Pour `destination` et `separate_charges_and_transfers`, il impose `express + application/application`; pour `direct`, il impose `full + stripe/stripe`. Aucun modèle n'est actuellement configuré ou activé.
+
 ## 8. Tests obligatoires avant activation
 
 ### Tests unitaires et contractuels
@@ -156,10 +163,10 @@ Aucun trafic réel avant que les tests soient verts sur un SHA unique, que le te
 
 ### Capacités désormais raccordées sur la PR #126
 - `GET /api/payments/config` expose la clé publique uniquement après approbation explicite de l'onboarding et validation de la paire de clés.
-- `POST /api/payments/onboard` est raccordé à Stripe Accounts v2 (création du compte connecté, Account Token, idempotence, réservation D1, lien d'onboarding à durée limitée). Il reste fermé sans `STRIPE_CONNECT_ONBOARDING_ENABLED=true` **et** `STRIPE_CONNECT_ONBOARDING_APPROVED=true`.
+- `POST /api/payments/onboard` est raccordé à Stripe Accounts v2 (création du compte connecté, Account Token, idempotence, réservation D1, lien d'onboarding à durée limitée). Il reste fermé sans `STRIPE_CONNECT_ONBOARDING_ENABLED=true`, `STRIPE_CONNECT_ONBOARDING_APPROVED=true` **et** un `STRIPE_CONNECT_CHARGE_MODEL` explicite compatible avec les responsabilités Accounts v2.
 - Le webhook Stripe accepte uniquement `v2.core.account[requirements].updated`, vérifie la signature et la fraîcheur, utilise une inbox idempotente avec lease/retry, relit le compte auprès de Stripe et synchronise l'état destinataire.
 - Les événements de paiement, remboursement ou payout ne sont pas traités par ce webhook Connect : ils reçoivent une réponse non-2xx et ne sont pas acquittés comme réussis.
-- L'activation live nécessite des clés live correspondantes, les deux verrous d'onboarding, ainsi que `STRIPE_CONNECT_LIVE_ENABLED=true` **et** `STRIPE_CONNECT_LIVE_APPROVED=true`. Aucun de ces verrous n'a été activé dans le cadre de ce travail.
+- L'activation live nécessite des clés live correspondantes, les deux verrous d'onboarding, un modèle de charge validé, ainsi que `STRIPE_CONNECT_LIVE_ENABLED=true` **et** `STRIPE_CONNECT_LIVE_APPROVED=true`. Aucun de ces verrous n'a été activé dans le cadre de ce travail.
 
 ### Séparation stricte des capacités
 - La capacité Accounts v2 `recipient.capabilities.stripe_balance.stripe_transfers` active indique que le compte peut recevoir des transferts de la plateforme.
