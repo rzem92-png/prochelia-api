@@ -783,11 +783,12 @@ async function ensurePaymentSchema(env) {
       'trg_payment_wallet_ledger_apply','trg_payment_wallet_ledger_no_update',
       'trg_payment_wallet_ledger_no_delete','trg_payment_dispute_hold_paid_tx','trg_payment_tx_status_guard',
       'trg_payment_tx_credit_ledger','trg_payment_tx_credit_disputed_ledger','trg_payment_tx_hold_ledger',
-      'trg_payment_tx_settle_held_ledger','trg_payout_request_guard',
+      'trg_payment_tx_settle_held_ledger','trg_payment_dispute_single_open','trg_payment_dispute_state_guard',
+      'trg_payout_request_guard',
       'trg_payout_request_reserve_ledger','trg_payout_status_guard',
       'trg_payout_settle_ledger','trg_payout_release_ledger'
     )`).first();
-  if (Number(tables?.total || 0) !== 9 || Number(guards?.total || 0) !== 16 ||
+  if (Number(tables?.total || 0) !== 9 || Number(guards?.total || 0) !== 18 ||
       Number(capabilityColumn?.total || 0) !== 1) {
     throw new Error('PAYMENT_SCHEMA_OR_LEDGER_MIGRATION_REQUIRED');
   }
@@ -1530,17 +1531,18 @@ async function handleBase(request, env) {
        'trg_payment_wallet_ledger_apply','trg_payment_wallet_ledger_no_update',
        'trg_payment_wallet_ledger_no_delete','trg_payment_dispute_hold_paid_tx','trg_payment_tx_status_guard',
        'trg_payment_tx_credit_ledger','trg_payment_tx_credit_disputed_ledger','trg_payment_tx_hold_ledger','trg_payment_tx_settle_held_ledger',
+       'trg_payment_dispute_single_open','trg_payment_dispute_state_guard',
        'trg_payout_request_guard','trg_payout_request_reserve_ledger',
        'trg_payout_status_guard','trg_payout_settle_ledger','trg_payout_release_ledger'
       )`).first();
     const databaseReady=h?.ok===1, coreSchemaReady=!!s0?.sql&&!!u0?.sql;
-    const ledgerReady=Number(paymentTables?.total||0)===9&&Number(guards?.total||0)===16;
+    const ledgerReady=Number(paymentTables?.total||0)===9&&Number(guards?.total||0)===18;
     const infrastructureReady=databaseReady&&coreSchemaReady;
     return json({ok:true,ready:false,infrastructure_ready:infrastructureReady,database:databaseReady,
       core_schema_ready:coreSchemaReady,payment_ledger_enforcement_ready:ledgerReady,
       payments_live_ready:false,real_traffic_authorized:false,release_status:'NO_GO',
       blockers:[...(!infrastructureReady?['DATABASE_OR_CORE_SCHEMA_NOT_READY']:[]),
-        ...(!ledgerReady?['PAYMENT_LEDGER_MIGRATION_0006_REQUIRED']:[]),
+        ...(!ledgerReady?['PAYMENT_LEDGER_OR_DISPUTE_GUARDS_MIGRATION_REQUIRED']:[]),
         'PSP_CHARGE_AND_PAYOUT_ADAPTER_NOT_IMPLEMENTED',
         'END_TO_END_SECURITY_AND_OPERATIONAL_RELEASE_GATES_NOT_SIGNED'],
       version:VERSION});
