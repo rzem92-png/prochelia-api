@@ -1,11 +1,10 @@
--- PROCHÉLIA — reject direct insertion of already-settled payments without PSP evidence.
--- Complements the UPDATE guard from migration 0011: all paths into the paid state
--- require an immutable provider payment reference before ledger credit can occur.
+-- PROCHÉLIA — a payment transaction cannot be inserted already settled.
+-- Settlement must be a guarded transition from a non-terminal state so the
+-- existing ledger triggers can atomically apply the corresponding wallet credit.
 
-CREATE TRIGGER IF NOT EXISTS trg_payment_tx_paid_insert_requires_provider_reference
+CREATE TRIGGER IF NOT EXISTS trg_payment_tx_paid_insert_state_guard
 BEFORE INSERT ON payment_transactions
 WHEN NEW.status = 'paid'
- AND (NEW.provider_payment_id IS NULL OR length(trim(NEW.provider_payment_id)) = 0)
 BEGIN
-  SELECT RAISE(ABORT,'PAYMENT_SETTLEMENT_REQUIRES_PROVIDER_REFERENCE');
+  SELECT RAISE(ABORT,'PAYMENT_SETTLEMENT_MUST_TRANSITION');
 END;
