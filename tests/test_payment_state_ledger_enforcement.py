@@ -485,7 +485,8 @@ class PaymentStateLedgerEnforcementTests(unittest.TestCase):
         self.assertIn("INVALID_FINANCE_EXPORT_FORMAT", export)
         self.assertIn("FINANCE_PDF_EXPORT_NOT_SUPPORTED", export)
         self.assertIn("if(format==='html')", export)
-        self.assertNotIn("format==='pdf'", export)
+        self.assertIn("format==='pdf'?'FINANCE_PDF_EXPORT_NOT_SUPPORTED'", export)
+        self.assertNotIn("if(format==='pdf')", export)
         self.assertNotIn("montant_brut_eur", export)
 
 
