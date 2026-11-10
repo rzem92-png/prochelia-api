@@ -2743,7 +2743,7 @@ async function loyaltyUpdate(request, env) {
   await ensureOperationalSchema(env);
   const b=await readJson(request)||{}; if(!b.client_id&&!b.company_id)return json({ok:false,error:'CLIENT_OR_COMPANY_REQUIRED',version:VERSION},400);
   const rawPoints=b.points==null?0:b.points;
-  const pointsValue=typeof rawPoints==='number'?rawPoints:(typeof rawPoints==='string'&&/^-?\\d+$/.test(rawPoints.trim())?Number(rawPoints):NaN);
+  const pointsValue=typeof rawPoints==='number'?rawPoints:(typeof rawPoints==='string'&&/^-?\d+$/.test(rawPoints.trim())?Number(rawPoints):NaN);
   if(!Number.isSafeInteger(pointsValue)) return json({ok:false,error:'INVALID_LOYALTY_POINTS',version:VERSION},400);
   const points=Math.max(-100000,Math.min(100000,pointsValue));
   const amountCents=b.amount_cents==null?0:integerCents(b.amount_cents);
