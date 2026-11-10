@@ -774,6 +774,9 @@ async function ensurePaymentSchema(env) {
        'payment_webhook_events','payment_disputes','payment_reconciliation',
        'payment_audit','payment_wallet_ledger'
      )`).first();
+  const capabilityColumn = await env.DB.prepare(`
+    SELECT COUNT(*) AS total FROM pragma_table_info('payment_accounts')
+     WHERE name='transfers_enabled'`).first();
   const guards = await env.DB.prepare(`
     SELECT COUNT(*) AS total FROM sqlite_master WHERE type='trigger' AND name IN (
       'trg_payment_wallet_ledger_require_wallet','trg_payment_wallet_ledger_guard_balances',
@@ -784,7 +787,8 @@ async function ensurePaymentSchema(env) {
       'trg_payout_request_reserve_ledger','trg_payout_status_guard',
       'trg_payout_settle_ledger','trg_payout_release_ledger'
     )`).first();
-  if (Number(tables?.total || 0) !== 9 || Number(guards?.total || 0) !== 16) {
+  if (Number(tables?.total || 0) !== 9 || Number(guards?.total || 0) !== 16 ||
+      Number(capabilityColumn?.total || 0) !== 1) {
     throw new Error('PAYMENT_SCHEMA_OR_LEDGER_MIGRATION_REQUIRED');
   }
 }
@@ -973,7 +977,8 @@ async function paymentStatus(request, env) {
       pending_cents:Number(wallet?.pending_cents||0),paid_cents:Number(wallet?.paid_cents||0),
       reserved_cents:Number(wallet?.reserved_cents||0)},
     payout_account:account?{status:account.status,onboarding_status:account.onboarding_status,
-      payouts_enabled:!!account.payouts_enabled}:null,pending_payouts:Number(pending?.total||0)},200);
+      transfers_enabled:!!account.transfers_enabled,payouts_enabled:!!account.payouts_enabled}:null,
+    pending_payouts:Number(pending?.total||0)},200);
 }
 
 async function createMissionPayment(request, env) {
@@ -1131,15 +1136,20 @@ async function stripeConnectWebhook(request, env) {
   if(Number(claim?.meta?.changes||0)!==1) return json({ok:false,error:'WEBHOOK_EVENT_PROCESSING',version:VERSION,retry_after_seconds:30},409);
   try {
     const account=await stripeGet(env,'v2/core/accounts/'+accountId);
-    const transferStatus=account?.configuration?.recipient?.capabilities?.stripe_balance?.stripe_transfers?.status;
+    const capabilities=account?.configuration?.recipient?.capabilities?.stripe_balance;
+    const transferStatus=capabilities?.stripe_transfers?.status;
+    const payoutStatus=capabilities?.payouts?.status;
     const transfersEnabled=transferStatus==='active';
+    // These are independent Stripe Accounts v2 capabilities. A transfer
+    // permission never implies permission to pay out to an external bank account.
+    const payoutsEnabled=payoutStatus==='active';
     const status=transfersEnabled?'active':'pending';
     const onboardingStatus=transfersEnabled?'submitted':'required';
-    // A recipient transfer capability is not proof that external bank payouts are enabled.
-    // Keep payouts_enabled false until a separate, verified payout capability is implemented.
-    const linked=await env.DB.prepare(`UPDATE payment_accounts SET charges_enabled=0,payouts_enabled=0,status=?,
-      onboarding_status=?,updated_at=CURRENT_TIMESTAMP
-      WHERE provider='stripe' AND provider_account_id=?`).bind(status,onboardingStatus,accountId).run();
+    const linked=await env.DB.prepare(`UPDATE payment_accounts
+      SET charges_enabled=0,transfers_enabled=?,payouts_enabled=?,status=?,
+          onboarding_status=?,updated_at=CURRENT_TIMESTAMP
+      WHERE provider='stripe' AND provider_account_id=?`)
+      .bind(transfersEnabled?1:0,payoutsEnabled?1:0,status,onboardingStatus,accountId).run();
     if(Number(linked?.meta?.changes||0)!==1) {
       await env.DB.prepare(`UPDATE payment_webhook_events SET processed=0,received_at=CURRENT_TIMESTAMP
         WHERE provider='stripe' AND event_id=? AND processed=2`).bind(eventId).run();
@@ -1148,11 +1158,14 @@ async function stripeConnectWebhook(request, env) {
     await env.DB.batch([
       env.DB.prepare(`INSERT INTO payment_audit
         (id,event_type,user_id,result,metadata_json) VALUES (?,?,?,?,?)`)
-        .bind(crypto.randomUUID(),'STRIPE_CONNECT_ACCOUNT_SYNCED',null,'OK',JSON.stringify({event_id:eventId,account_id:accountId,transfers_enabled:transfersEnabled,payouts_enabled:false})),
+        .bind(crypto.randomUUID(),'STRIPE_CONNECT_ACCOUNT_SYNCED',null,'OK',JSON.stringify({
+          event_id:eventId,account_id:accountId,transfers_enabled:transfersEnabled,payouts_enabled:payoutsEnabled
+        })),
       env.DB.prepare(`UPDATE payment_webhook_events SET processed=1,processed_at=CURRENT_TIMESTAMP
         WHERE provider='stripe' AND event_id=? AND processed=2`).bind(eventId)
     ]);
-    return json({ok:true,version:VERSION,processed:true,event_id:eventId,account_id:accountId,transfers_enabled:transfersEnabled,payouts_enabled:false},200);
+    return json({ok:true,version:VERSION,processed:true,event_id:eventId,account_id:accountId,
+      transfers_enabled:transfersEnabled,payouts_enabled:payoutsEnabled},200);
   } catch(error) {
     // Keep the event retryable; never acknowledge an uncertain provider lookup or D1 write.
     await env.DB.prepare(`UPDATE payment_webhook_events SET processed=0,received_at=CURRENT_TIMESTAMP
