@@ -26,6 +26,11 @@ export async function stripePost(env, apiPath, params, idempotencyKey, fetchImpl
   return data;
 }
 
+export function assertStripeWebhookCompletion(results) {
+  if (!Array.isArray(results) || results.length !== 2 || Number(results[0]?.meta?.changes || 0) !== 1 || Number(results[1]?.meta?.changes || 0) !== 1) throw new Error("STRIPE_WEBHOOK_COMPLETION_NOT_PERSISTED");
+  return true;
+}
+
 export function requireStripeAccountId(value) {
   const accountId = typeof value === "string" ? value.trim() : "";
   if (!/^acct_[A-Za-z0-9]+$/.test(accountId)) throw new Error("STRIPE_ACCOUNT_ID_INVALID");
