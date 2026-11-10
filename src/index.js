@@ -1186,7 +1186,7 @@ async function stripeConnectWebhook(request, env) {
         WHERE provider='stripe' AND event_id=? AND processed=2`).bind(eventId).run();
       return json({ok:false,error:'STRIPE_CONNECT_ACCOUNT_NOT_LINKED',version:VERSION},503);
     }
-    await env.DB.batch([
+    const completion=await env.DB.batch([
       env.DB.prepare(`INSERT INTO payment_audit
         (id,event_type,user_id,result,metadata_json) VALUES (?,?,?,?,?)`)
         .bind(crypto.randomUUID(),'STRIPE_CONNECT_ACCOUNT_SYNCED',null,'OK',JSON.stringify({
@@ -1195,6 +1195,7 @@ async function stripeConnectWebhook(request, env) {
       env.DB.prepare(`UPDATE payment_webhook_events SET processed=1,processed_at=CURRENT_TIMESTAMP
         WHERE provider='stripe' AND event_id=? AND processed=2`).bind(eventId)
     ]);
+    assertStripeWebhookCompletion(completion);
     return json({ok:true,version:VERSION,processed:true,event_id:eventId,account_id:accountId,
       transfers_enabled:transfersEnabled,payouts_enabled:payoutsEnabled},200);
   } catch(error) {
