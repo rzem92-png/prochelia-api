@@ -3451,7 +3451,7 @@ async function financeExport(request,env) {
   const a=await financeAuth(request,env); if(a.response)return a.response;
   const {auth}=a, url=new URL(request.url);
   const format=String(url.searchParams.get('format')||'csv').toLowerCase();
-  if(!['csv','json','html','pdf'].includes(format))return json({ok:false,error:'INVALID_FINANCE_EXPORT_FORMAT',version:VERSION},400);
+  if(!['csv','json','html'].includes(format))return json({ok:false,error:format==='pdf'?'FINANCE_PDF_EXPORT_NOT_SUPPORTED':'INVALID_FINANCE_EXPORT_FORMAT',version:VERSION},400);
   const start=url.searchParams.get('from'), end=url.searchParams.get('to');
   const rows=await financeRowsForUser(env,auth.user);
   let payments=rows.payments.filter(x=>(!start||String(x.created_at)>=start)&&(!end||String(x.created_at)<=end));
@@ -3470,7 +3470,7 @@ async function financeExport(request,env) {
   await journal(env,auth.user.role,auth.user.id,'FINANCE_EXPORT','finance_export',id,'OK',{format,row_count:data.length,from:start,to:end});
 
   if(format==='json') return json({ok:true,version:VERSION,summary,rows:data,export_id:id});
-  if(format==='html' || format==='pdf') {
+  if(format==='html') {
     const escHtml=v=>String(v??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
     const money=v=>v===null?'Donnée invalide':Number(v).toFixed(2);
     const body=data.map(r=>`<tr><td>${escHtml(r.date)}</td><td>${escHtml(r.type)}</td><td>${escHtml(r.status)}</td><td>${escHtml(r.devise)}</td><td>${money(r.montant_brut)}</td><td>${money(r.remboursement)}</td><td>${money(r.commission)}</td><td>${money(r.frais_psp)}</td><td>${money(r.remuneration_intervenant)}</td></tr>`).join('');
