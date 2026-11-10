@@ -180,7 +180,7 @@ test("verified Connect transfer capability never enables bank payouts", async ()
     assert.equal(init.headers.Authorization, "Bearer sk_test_connect");
     return new Response(JSON.stringify({
       id: "acct_connect_test123",
-      configuration: { recipient: { capabilities: { stripe_balance: { stripe_transfers: { status: "active" } } } }
+      configuration: { recipient: { capabilities: { stripe_balance: { stripe_transfers: { status: "active" } } } } }
     }), { status: 200, headers: { "content-type": "application/json" } });
   };
   try {
