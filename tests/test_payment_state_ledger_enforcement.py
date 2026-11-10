@@ -157,7 +157,7 @@ class PaymentStateLedgerEnforcementTests(unittest.TestCase):
         self.assertEqual(transfers, 0)
         self.assertEqual(payouts, 0)
         source = (ROOT / "src" / "index.js").read_text(encoding="utf-8")
-        webhook = source[source.index("async function paymentWebhook"):source.index("async function productionSafetySchema")]
+        webhook = source[source.index("async function stripeConnectWebhook"):source.index("async function paymentWebhook")]
         self.assertIn("capabilities?.stripe_transfers?.status", webhook)
         self.assertIn("capabilities?.payouts?.status", webhook)
         self.assertIn("transfers_enabled=?", webhook)
