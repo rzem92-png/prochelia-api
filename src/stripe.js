@@ -26,6 +26,12 @@ export async function stripePost(env, apiPath, params, idempotencyKey, fetchImpl
   return data;
 }
 
+export function requireStripeAccountId(value) {
+  const accountId = typeof value === "string" ? value.trim() : "";
+  if (!/^acct_[A-Za-z0-9]+$/.test(accountId)) throw new Error("STRIPE_ACCOUNT_ID_INVALID");
+  return accountId;
+}
+
 export async function stripeGet(env, apiPath, fetchImpl = fetch) {
   const secret = String(env?.STRIPE_SECRET_KEY || "").trim();
   if (!secret) throw new Error("STRIPE_SECRET_KEY_NOT_CONFIGURED");
