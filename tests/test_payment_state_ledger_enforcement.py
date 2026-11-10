@@ -303,5 +303,25 @@ class PaymentStateLedgerEnforcementTests(unittest.TestCase):
         self.assertIn("PAYMENT_LEDGER_OR_DISPUTE_GUARDS_MIGRATION_REQUIRED", readiness)
 
 
+    def test_payment_and_payout_idempotency_races_return_existing_records(self):
+        source = (ROOT / "src" / "index.js").read_text(encoding="utf-8")
+        create = source[source.index("async function createMissionPayment"):source.index("async function finalizeMissionPayment")]
+        payout = source[source.index("async function payoutRequest"):source.index("async function verifyWebhookSignature")]
+        self.assertIn("const raced=await env.DB.prepare('SELECT * FROM payment_transactions WHERE idempotency_key=?", create)
+        self.assertIn("idempotent_replay:true,transaction:raced", create)
+        self.assertIn("const raced=await env.DB.prepare('SELECT * FROM payout_requests WHERE idempotency_key=?", payout)
+        self.assertIn("idempotent_replay:true,payout:raced", payout)
+
+    def test_financial_audit_records_are_conditional_on_successful_state_changes(self):
+        source = (ROOT / "src" / "index.js").read_text(encoding="utf-8")
+        finalize = source[source.index("async function finalizeMissionPayment"):source.index("async function payoutRequest")]
+        dispute = source[source.index("async function openPaymentDispute"):source.index("async function handleBase")]
+        self.assertIn("SELECT ?,?,?,?,?,?,? WHERE EXISTS", finalize)
+        self.assertIn("WHERE id=? AND status='open' AND (transaction_id IS NULL OR EXISTS", dispute)
+        self.assertIn("WHERE id=? AND status='pending' AND EXISTS", dispute)
+        self.assertIn("SELECT ?,?,?,?,?,?,? WHERE EXISTS", dispute)
+        self.assertIn("PAYMENT_NOT_DISPUTABLE", dispute)
+
+
 if __name__ == "__main__":
     unittest.main()
