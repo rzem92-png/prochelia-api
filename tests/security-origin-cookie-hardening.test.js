@@ -123,7 +123,7 @@ test("readiness GET performs no schema or journal writes", async () => {
     new URL("../src/index.js", import.meta.url), "utf8"
   );
   const checkStart = source.indexOf("async function productionConfigCheck");
-  const checkEnd = source.indexOf("\\nasync function finalProductionAudit", checkStart);
+  const checkEnd = source.indexOf("async function finalProductionAudit", checkStart);
   assert.ok(checkStart >= 0);
   assert.ok(checkEnd > checkStart);
   const check = source.slice(checkStart, checkEnd);
