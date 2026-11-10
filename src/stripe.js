@@ -88,3 +88,13 @@ export async function verifyStripeSignature(signatureHeader, secret, rawBody, no
     return mismatch === 0;
   });
 }
+
+
+export function mapStripeRecipientCapabilityStatus(value) {
+  const status = typeof value === "string" ? value.trim().toLowerCase() : "";
+  if (status === "active") return { status: "active", onboardingStatus: "submitted", enabled: true };
+  if (status === "restricted" || status === "rejected" || status === "unsupported") {
+    return { status, onboardingStatus: status, enabled: false };
+  }
+  return { status: "pending", onboardingStatus: "required", enabled: false };
+}
