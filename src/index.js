@@ -3313,7 +3313,7 @@ async function financeRowsForUser(env, user) {
        FROM payment_transactions WHERE ${where}
       ORDER BY created_at DESC LIMIT 5000`
   ).bind(...params).all();
-  if (paymentResult?.success === false) throw new Error('FINANCE_PAYMENT_QUERY_FAILED');
+  if (!paymentResult || paymentResult.success === false || !Array.isArray(paymentResult.results)) throw new Error('FINANCE_PAYMENT_QUERY_FAILED');
   const payments = paymentResult.results || [];
 
   const ledgerResult = ['GERANTE','ADMIN','FINANCE'].includes(role)
@@ -3325,14 +3325,14 @@ async function financeRowsForUser(env, user) {
         `SELECT id,entry_type,direction,amount_cents,currency,label,reference_type,reference_id,status,created_at
            FROM finance_workspace_entries WHERE user_id=? ORDER BY created_at DESC LIMIT 5000`
       ).bind(uid).all();
-  if (ledgerResult?.success === false) throw new Error('FINANCE_LEDGER_QUERY_FAILED');
+  if (!ledgerResult || ledgerResult.success === false || !Array.isArray(ledgerResult.results)) throw new Error('FINANCE_LEDGER_QUERY_FAILED');
   const ledger = ledgerResult.results || [];
 
   const payoutQuery = ['GERANTE','ADMIN','FINANCE'].includes(role)
     ? env.DB.prepare(`SELECT id,user_id,amount_cents,currency,mode,status,provider,provider_payout_id,failure_code,requested_at,completed_at FROM payout_requests ORDER BY requested_at DESC LIMIT 5000`)
     : env.DB.prepare(`SELECT id,user_id,amount_cents,currency,mode,status,provider,provider_payout_id,failure_code,requested_at,completed_at FROM payout_requests WHERE user_id=? ORDER BY requested_at DESC LIMIT 5000`).bind(uid);
   const payoutResult = await payoutQuery.all();
-  if (payoutResult?.success === false) throw new Error('FINANCE_PAYOUT_QUERY_FAILED');
+  if (!payoutResult || payoutResult.success === false || !Array.isArray(payoutResult.results)) throw new Error('FINANCE_PAYOUT_QUERY_FAILED');
   const payouts = payoutResult.results || [];
 
   return {payments,ledger,payouts};
