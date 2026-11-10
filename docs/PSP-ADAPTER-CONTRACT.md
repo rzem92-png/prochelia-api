@@ -171,7 +171,7 @@ Aucun trafic réel avant que les tests soient verts sur un SHA unique, que le te
 ### Preuve PSP obligatoire au niveau D1
 - La migration `0011_financial_provider_evidence_guards.sql` interdit le passage d'une transaction à `paid` sans `provider_payment_id` et interdit les transitions de versement vers `processing`, `completed`, `failed` ou `canceled` sans `provider_payout_id`.
 - Une demande de versement doit obligatoirement commencer à l'état `requested`. Les triggers du ledger ne peuvent donc plus être contournés par une insertion directe dans un état terminal.
-- Les contrôles `ensurePaymentSchema` et `/api/readiness` exigent désormais les 22 triggers financiers attendus. Une insertion directe au statut `paid`, comme une transition vers `paid`, est refusée sans référence PSP ; les tests couvrent les deux chemins.
+- Les contrôles `ensurePaymentSchema` et `/api/readiness` exigent désormais les 22 triggers financiers attendus. Une insertion directe au statut `paid` est interdite, même avec une référence PSP : le règlement doit passer par une transition contrôlée depuis un état non réglé, avec référence PSP, afin que les triggers du ledger créditent le wallet atomiquement.
 
 ### Séparation stricte des capacités
 - La capacité Accounts v2 `recipient.capabilities.stripe_balance.stripe_transfers` active indique que le compte peut recevoir des transferts de la plateforme.
