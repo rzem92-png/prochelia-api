@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { webcrypto } from "node:crypto";
 import worker from "../src/index.js";
-import { stripeGet, stripePost, verifyStripeSignature } from "../src/stripe.js";
+import { requireStripeAccountId, stripeGet, stripePost, verifyStripeSignature } from "../src/stripe.js";
 
 if (!globalThis.crypto) globalThis.crypto = webcrypto;
 
@@ -418,4 +418,13 @@ test("Stripe API helper refuses non-allowlisted paths and missing idempotency", 
     stripePost({ STRIPE_SECRET_KEY: "sk_test_placeholder" }, "v2/core/accounts", {}, ""),
     /STRIPE_IDEMPOTENCY_KEY_REQUIRED/
   );
+});
+
+
+test("Stripe onboarding accepts only a syntactically valid connected account ID", () => {
+  assert.equal(requireStripeAccountId("acct_Valid123"), "acct_Valid123");
+  assert.throws(() => requireStripeAccountId(""), /STRIPE_ACCOUNT_ID_INVALID/);
+  assert.throws(() => requireStripeAccountId("cus_not_an_account"), /STRIPE_ACCOUNT_ID_INVALID/);
+  assert.throws(() => requireStripeAccountId("acct_bad/id"), /STRIPE_ACCOUNT_ID_INVALID/);
+  assert.throws(() => requireStripeAccountId(null), /STRIPE_ACCOUNT_ID_INVALID/);
 });
