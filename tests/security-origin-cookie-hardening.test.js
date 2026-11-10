@@ -102,3 +102,18 @@ test("payment webhook endpoint returns an explicit fail-closed response", async 
   assert.equal(response.status, 503);
   assert.equal((await response.json()).error, "PAYMENT_WEBHOOK_DISABLED_PENDING_REVIEW");
 });
+
+test("production readiness stays closed while payment webhooks are deliberately disabled", async () => {
+  const source = await (await import("node:fs/promises")).readFile(
+    new URL("../src/index.js", import.meta.url), "utf8"
+  );
+  const start = source.indexOf("async function strictProductionAudit");
+  const end = source.indexOf("\\nconst __procheliaProductionSafetyHandle", start);
+  assert.ok(start >= 0);
+  assert.ok(end > start);
+  const audit = source.slice(start, end);
+  assert.match(audit, /PAYMENT_WEBHOOK_ATOMICITY/);
+  assert.match(audit, /status:'NOT_READY'/);
+  assert.match(audit, /blockingCodes=new Set\\(\\[[^\\]]*PAYMENT_WEBHOOK_ATOMICITY/);
+  assert.match(source, /PAYMENT_WEBHOOK_DISABLED_PENDING_REVIEW/);
+});
