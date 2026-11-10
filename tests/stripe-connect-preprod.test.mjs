@@ -69,7 +69,7 @@ test("payment config exposes only the publishable key after both explicit flags 
     STRIPE_SECRET_KEY: "sk_test_placeholder",
     STRIPE_PUBLISHABLE_KEY: "pk_test_placeholder",
     STRIPE_WEBHOOK_SECRET: "whsec_placeholder",
-    STRIPE_CONNECT_CHARGE_MODEL: "separate_charges_and_transfers",
+    STRIPE_CONNECT_CHARGE_MODEL: "destination",
     STRIPE_DASHBOARD: "express",
     STRIPE_FEES_COLLECTOR: "application",
     STRIPE_LOSSES_COLLECTOR: "application",
