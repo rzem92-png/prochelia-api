@@ -345,7 +345,7 @@ test("verified bank-payout capability never enables recipient transfers", async 
   globalThis.fetch = async (url, init) => {
     assert.equal(String(url), "https://api.stripe.com/v2/core/accounts/acct_payoutonly123?include%5B%5D=configuration.recipient");
     assert.equal(init.headers.Authorization, "Bearer sk_test_connect");
-    assert.equal(init.headers["Stripe-Context"], "acct_payoutonly123");
+    assert.equal(init.headers["Stripe-Context"], undefined);
     assert.equal(init.headers["Stripe-Request-Trigger"], "event=evt_connectpayoutonly");
     return new Response(JSON.stringify({
       id: "acct_payoutonly123",
@@ -445,6 +445,7 @@ test("Stripe webhook completion requires both audit and processed-state writes",
 test("Stripe recipient capability states preserve restricted and rejected outcomes without enabling transfers", () => {
   assert.deepEqual(mapStripeRecipientCapabilityStatus("active"), { status: "active", onboardingStatus: "submitted", enabled: true });
   assert.deepEqual(mapStripeRecipientCapabilityStatus("pending"), { status: "pending", onboardingStatus: "required", enabled: false });
+  assert.deepEqual(mapStripeRecipientCapabilityStatus("inactive"), { status: "inactive", onboardingStatus: "required", enabled: false });
   assert.deepEqual(mapStripeRecipientCapabilityStatus("restricted"), { status: "restricted", onboardingStatus: "restricted", enabled: false });
   assert.deepEqual(mapStripeRecipientCapabilityStatus("rejected"), { status: "rejected", onboardingStatus: "rejected", enabled: false });
   assert.deepEqual(mapStripeRecipientCapabilityStatus("unsupported"), { status: "unsupported", onboardingStatus: "unsupported", enabled: false });
