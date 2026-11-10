@@ -3471,10 +3471,14 @@ async function financeEntryCreate(request,env) {
   const a=await financeAuth(request,env); if(a.response)return a.response;
   const {auth}=a, b=await readJson(request)||{};
   const amount=moneyCents(b.amount_eur);
-  if(amount===null||amount<=0||!b.entry_type) return json({ok:false,error:'INVALID_FINANCE_ENTRY',version:VERSION},400);
+  const direction=String(b.direction??'IN').trim().toUpperCase();
+  const currency=String(b.currency??'EUR').trim().toUpperCase();
+  const entryType=clean(b.entry_type);
+  if(amount===null||amount<=0||!entryType||!['IN','OUT'].includes(direction)||!/^[A-Z]{3}$/.test(currency))
+    return json({ok:false,error:'INVALID_FINANCE_ENTRY',version:VERSION},400);
   const id=crypto.randomUUID();
   await env.DB.prepare(`INSERT INTO finance_workspace_entries(id,user_id,role,entry_type,direction,amount_cents,currency,label,reference_type,reference_id,metadata_json) VALUES(?,?,?,?,?,?,?,?,?,?,?)`)
-    .bind(id,auth.user.id,auth.user.role,String(b.entry_type),String(b.direction||'IN').toUpperCase()==='OUT'?'OUT':'IN',amount,b.currency||'EUR',clean(b.label)||null,clean(b.reference_type)||null,clean(b.reference_id)||null,JSON.stringify(b.metadata||{})).run();
+    .bind(id,auth.user.id,auth.user.role,entryType,direction,amount,currency,clean(b.label)||null,clean(b.reference_type)||null,clean(b.reference_id)||null,JSON.stringify(b.metadata||{})).run();
   await journal(env,auth.user.role,auth.user.id,'FINANCE_ENTRY_CREATE','finance_workspace_entries',id,'OK',{entry_type:b.entry_type});
   return json({ok:true,version:VERSION,id});
 }
