@@ -44,7 +44,7 @@ test("outbox execution claims pending work once and does not replay completed ef
   const start = source.indexOf("async function executeQueuedAction(");
   const end = source.indexOf("\n\nasync function operationalExecute(", start);
   const h = source.slice(start, end);
-  assert.match(h, /status IN \('PENDING','FAILED'\)/);
+  assert.match(h, /status='PENDING'/);
   assert.match(h, /ACTION_ALREADY_CLAIMED_OR_FINAL/);
   assert.match(h, /idempotent_replay:true/);
 });
