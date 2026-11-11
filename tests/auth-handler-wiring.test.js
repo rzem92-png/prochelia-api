@@ -14,3 +14,11 @@ test("system scale and backup routes require a manager session", () => {
   assert.equal((routes.match(/getSessionUser\(request,env\)/g) || []).length >= 3, true);
   assert.match(routes, /auth\.user\|\|String\(auth\.user\.role\|\|''\)\.toUpperCase\(\)!=='GERANTE'/);
 });
+
+
+test("session cookie parsing never URI-decodes attacker-controlled cookie bytes", () => {
+  const match = source.match(/function getCookie\(request, name\) \{[\s\S]*?\n\}/);
+  assert.ok(match, "getCookie must exist");
+  assert.doesNotMatch(match[0], /decodeURIComponent/);
+  assert.match(match[0], /return part\.slice\(idx \+ 1\)\.trim\(\)/);
+});
