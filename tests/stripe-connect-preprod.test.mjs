@@ -260,3 +260,26 @@ test("Stripe API helper refuses non-allowlisted paths and missing idempotency", 
     /STRIPE_IDEMPOTENCY_KEY_REQUIRED/
   );
 });
+
+
+test("originless mutation with a browser session cookie is rejected before authentication or D1", async () => {
+  const response = await worker.fetch(new Request("https://api.test/api/payments/onboard", {
+    method: "POST",
+    headers: { cookie: "__Host-prochelia_session=malformed%ZZ" },
+    body: "{}"
+  }), {});
+  const body = await response.json();
+  assert.equal(response.status, 403);
+  assert.equal(body.error, "ORIGIN_NOT_ALLOWED");
+});
+
+test("originless server-to-server mutation without a browser session reaches authentication", async () => {
+  const response = await worker.fetch(new Request("https://api.test/api/payments/onboard", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: "{}"
+  }), {});
+  const body = await response.json();
+  assert.equal(response.status, 401);
+  assert.equal(body.error, "UNAUTHENTICATED");
+});
