@@ -2246,12 +2246,35 @@ async function loyaltyUpdate(request, env) {
 }
 
 async function qualityCreate(request, env) {
-  const gate=await requireAuthRole(request,env,['gerante','client','entreprise']); if(gate.error)return gate.error;
-  await ensureOperationalSchema(env); const b=await readJson(request)||{};
-  if(!b.mission_id)return json({ok:false,error:'MISSION_ID_REQUIRED',version:VERSION},400);
+  const gate=await requireAuthRole(request,env,['gerante','client','intervenant']);
+  if(gate.error)return gate.error;
+  const parsed=await readJsonLimited(request,8192);
+  if(!parsed.ok)return json({ok:false,error:parsed.error==='PAYLOAD_TOO_LARGE'?'PAYLOAD_TOO_LARGE':'INVALID_JSON',version:VERSION},parsed.error==='PAYLOAD_TOO_LARGE'?413:400);
+  const b=parsed.value;
+  if(!b || typeof b!=='object' || Array.isArray(b))return json({ok:false,error:'INVALID_BODY',version:VERSION},400);
+  if(typeof b.mission_id!=='string' || !b.mission_id.trim() || b.mission_id.length>128)return json({ok:false,error:'MISSION_ID_REQUIRED',version:VERSION},400);
+  if(b.rating!==undefined && b.rating!==null && (!Number.isInteger(b.rating) || b.rating<1 || b.rating>5))return json({ok:false,error:'INVALID_RATING',version:VERSION},400);
+  if(b.category!==undefined && (typeof b.category!=='string' || b.category.trim().length>80))return json({ok:false,error:'INVALID_CATEGORY',version:VERSION},400);
+  if(b.comment!==undefined && (typeof b.comment!=='string' || b.comment.length>2000))return json({ok:false,error:'INVALID_COMMENT',version:VERSION},400);
+  const severity=String(b.severity||'LOW').toUpperCase();
+  if(!['LOW','MEDIUM','HIGH','CRITICAL'].includes(severity))return json({ok:false,error:'INVALID_SEVERITY',version:VERSION},400);
+
+  await ensureOperationalSchema(env);
+  const mission=await env.DB.prepare('SELECT id,client_id,intervenant_id FROM missions WHERE id=? LIMIT 1').bind(b.mission_id.trim()).first();
+  if(!mission)return json({ok:false,error:'MISSION_NOT_FOUND',version:VERSION},404);
+  const role=gate.auth.user.role;
+  if(role==='client') {
+    const owner=await env.DB.prepare('SELECT id FROM clients WHERE id=? AND user_id=? LIMIT 1').bind(mission.client_id,gate.auth.user.id).first();
+    if(!owner)return json({ok:false,error:'FORBIDDEN',version:VERSION},403);
+  } else if(role==='intervenant') {
+    const owner=await env.DB.prepare('SELECT id FROM intervenants WHERE id=? AND user_id=? LIMIT 1').bind(mission.intervenant_id,gate.auth.user.id).first();
+    if(!owner)return json({ok:false,error:'FORBIDDEN',version:VERSION},403);
+  }
+
   const id=crypto.randomUUID();
+  const metadata={actor_user_id:gate.auth.user.id,actor_role:role};
   await env.DB.prepare(`INSERT INTO quality_events(id,mission_id,client_id,company_id,intervenant_id,rating,category,comment,severity,metadata_json) VALUES(?,?,?,?,?,?,?,?,?,?)`)
-    .bind(id,b.mission_id,b.client_id||null,b.company_id||null,b.intervenant_id||null,b.rating==null?null:Number(b.rating),b.category||'GENERAL',b.comment||'',b.severity||'LOW',JSON.stringify(b)).run();
+    .bind(id,mission.id,mission.client_id,null,mission.intervenant_id,b.rating??null,(b.category||'GENERAL').trim(),(b.comment||'').trim(),severity,JSON.stringify(metadata)).run();
   return json({ok:true,version:VERSION,id});
 }
 
