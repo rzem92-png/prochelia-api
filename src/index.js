@@ -3272,7 +3272,7 @@ async function supportCreate(request,env){
   if(auto){
     autoResult=await supportAutoResolve(env,id,a.auth.user.id,a.role,scenario);
   }
-  return json({ok:true,version:VERSION,case_id:id,scenario,automatic_resolution:!!auto,auto_result:autoResult,manager_approval_required:!auto});
+  return json({ok:true,version:VERSION,case_id:id,scenario,automatic_resolution:false,auto_check:!!auto,auto_result:autoResult,manager_approval_required:auto ? true : requiresManager});
 }
 
 async function supportAutoResolve(env,caseId,actorId,actorRole,scenario) {
