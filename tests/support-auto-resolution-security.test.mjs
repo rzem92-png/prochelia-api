@@ -59,3 +59,12 @@ test("support API never claims an automatic resolution while action is pending",
   assert.match(creator, /auto_check:!!auto/);
   assert.doesNotMatch(creator, /automatic_resolution:!!auto|manager_approval_required:!auto/);
 });
+
+test("support creation validates payload, severity, category and description size", () => {
+  assert.match(creator, /INVALID_SUPPORT_PAYLOAD/);
+  assert.match(creator, /INVALID_SUPPORT_CATEGORY/);
+  assert.match(creator, /INVALID_SUPPORT_SEVERITY/);
+  assert.match(creator, /INVALID_SUPPORT_DESCRIPTION/);
+  assert.match(creator, /length>4000/);
+  assert.match(creator, /\['LOW','MEDIUM','HIGH','CRITICAL'\]/);
+});
