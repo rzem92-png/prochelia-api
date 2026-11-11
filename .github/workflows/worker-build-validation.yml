@@ -6,6 +6,7 @@ on:
       - "src/**"
       - "tests/stripe-connect-preprod.test.mjs"
       - "tests/production-release-gate.test.mjs"
+      - "tests/operational-route-auth.test.mjs"
       - "wrangler.jsonc"
       - ".github/workflows/worker-build-validation.yml"
   push:
@@ -40,5 +41,7 @@ jobs:
         run: node --experimental-default-type=module --test tests/stripe-connect-preprod.test.mjs
       - name: Production release gate security regressions
         run: node --experimental-default-type=module --test tests/production-release-gate.test.mjs
+      - name: Operational route authorization regressions
+        run: node --experimental-default-type=module --test tests/operational-route-auth.test.mjs
       - name: Wrangler bundle validation only (no deploy)
         run: npx --yes wrangler@4 deploy --dry-run --config wrangler.jsonc --outdir "$RUNNER_TEMP/prochelia-worker-dry-run"
