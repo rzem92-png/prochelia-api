@@ -793,6 +793,9 @@ async function ensurePaymentSchema(env) {
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     )`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS idx_payment_accounts_provider_account
+       ON payment_accounts(provider,provider_account_id)
+       WHERE provider_account_id IS NOT NULL AND provider_account_id <> ''`,
     `CREATE TABLE IF NOT EXISTS wallets (
       id TEXT PRIMARY KEY, user_id TEXT NOT NULL UNIQUE, currency TEXT NOT NULL DEFAULT 'EUR',
       available_cents INTEGER NOT NULL DEFAULT 0, pending_cents INTEGER NOT NULL DEFAULT 0,
