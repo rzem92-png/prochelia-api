@@ -885,8 +885,19 @@ async function createMissionPayment(request, env) {
   const clientId=String(mission.client_id), intervenantId=String(mission.intervenant_id);
   const idem=clean(request.headers.get('idempotency-key'))||clean(body?.idempotency_key);
   if(!idem) return json({ok:false,error:'IDEMPOTENCY_KEY_REQUIRED',version:VERSION},400);
+  if(idem.length>200) return json({ok:false,error:'INVALID_IDEMPOTENCY_KEY',version:VERSION},400);
   const old=await env.DB.prepare('SELECT * FROM payment_transactions WHERE idempotency_key=? LIMIT 1').bind(idem).first();
-  if(old) return json({ok:true,version:VERSION,idempotent_replay:true,transaction:old},200);
+  if(old) {
+    const sameRequest=String(old.type)==='MISSION_CHARGE'
+      && String(old.mission_id)===missionId
+      && String(old.client_id)===clientId
+      && String(old.intervenant_id)===intervenantId
+      && Number(old.gross_cents)===gross
+      && Number(old.commission_cents)===commission
+      && String(old.currency||'EUR').toUpperCase()==='EUR';
+    if(!sameRequest) return json({ok:false,error:'IDEMPOTENCY_KEY_REUSED',version:VERSION},409);
+    return json({ok:true,version:VERSION,idempotent_replay:true,transaction:old},200);
+  }
   const net=gross-commission;
   const txId=crypto.randomUUID();
   await env.DB.prepare(`INSERT INTO payment_transactions
@@ -2942,9 +2953,17 @@ async function financeRowsForUser(env, user) {
   if (['GERANTE','ADMIN','FINANCE'].includes(role)) {
     where = '1=1';
   } else if (role === 'INTERVENANT') {
-    where = 'intervenant_id=?'; params.push(uid);
+    const profile = await env.DB.prepare('SELECT id FROM intervenants WHERE user_id=? LIMIT 1').bind(uid).first();
+    if (!profile?.id) where = '1=0';
+    else { where = 'intervenant_id=?'; params.push(String(profile.id)); }
+  } else if (role === 'CLIENT') {
+    const profile = await env.DB.prepare('SELECT id FROM clients WHERE user_id=? LIMIT 1').bind(uid).first();
+    if (!profile?.id) where = '1=0';
+    else { where = 'client_id=?'; params.push(String(profile.id)); }
   } else {
-    where = 'client_id=?'; params.push(uid);
+    // Unknown/company roles have no verified profile-to-transaction mapping.
+    // Fail closed instead of querying with an unrelated auth user ID.
+    where = '1=0';
   }
 
   let payments = [];
@@ -3083,15 +3102,30 @@ async function financeExport(request,env) {
   return new Response('\ufeff'+csv,{status:200,headers:{'content-type':'text/csv; charset=UTF-8','content-disposition':`attachment; filename="prochelia-finance-${id}.csv"`,'cache-control':'no-store'}});
 }
 
-async function financeEntryCreate(request,env) {
+async async function financeEntryCreate(request,env) {
   const a=await financeAuth(request,env); if(a.response)return a.response;
-  const {auth}=a, b=await readJson(request)||{};
+  const {auth}=a;
+  const parsed=await readJsonLimited(request,8192);
+  if(!parsed.ok) return json({ok:false,error:parsed.error==='PAYLOAD_TOO_LARGE'?'PAYLOAD_TOO_LARGE':'INVALID_JSON',version:VERSION},parsed.error==='PAYLOAD_TOO_LARGE'?413:400);
+  const b=parsed.value;
+  if(!b || typeof b!=='object' || Array.isArray(b)) return json({ok:false,error:'INVALID_BODY',version:VERSION},400);
   const amount=Math.round(Number(b.amount_eur)*100);
-  if(!Number.isFinite(amount)||amount<=0||!b.entry_type) return json({ok:false,error:'INVALID_FINANCE_ENTRY',version:VERSION},400);
+  const entryType=typeof b.entry_type==='string'?b.entry_type.trim().toUpperCase():'';
+  const direction=typeof b.direction==='string'?b.direction.trim().toUpperCase():'IN';
+  const currency=typeof b.currency==='string'?b.currency.trim().toUpperCase():'EUR';
+  const allowedTypes=new Set(['INCOME','EXPENSE','ADJUSTMENT','COMMISSION','REFUND','FEE','OTHER']);
+  if(!Number.isSafeInteger(amount)||amount<=0||amount>100000000000||!allowedTypes.has(entryType)
+    ||!['IN','OUT'].includes(direction)||currency!=='EUR'
+    ||(b.label!==undefined && (typeof b.label!=='string'||b.label.length>240))
+    ||(b.reference_type!==undefined && (typeof b.reference_type!=='string'||b.reference_type.length>80))
+    ||(b.reference_id!==undefined && (typeof b.reference_id!=='string'||b.reference_id.length>128))
+    ||(b.metadata!==undefined && (!b.metadata||typeof b.metadata!=='object'||Array.isArray(b.metadata)))) {
+    return json({ok:false,error:'INVALID_FINANCE_ENTRY',version:VERSION},400);
+  }
   const id=crypto.randomUUID();
   await env.DB.prepare(`INSERT INTO finance_workspace_entries(id,user_id,role,entry_type,direction,amount_cents,currency,label,reference_type,reference_id,metadata_json) VALUES(?,?,?,?,?,?,?,?,?,?,?)`)
-    .bind(id,auth.user.id,auth.user.role,String(b.entry_type),String(b.direction||'IN').toUpperCase()==='OUT'?'OUT':'IN',amount,b.currency||'EUR',clean(b.label)||null,clean(b.reference_type)||null,clean(b.reference_id)||null,JSON.stringify(b.metadata||{})).run();
-  await journal(env,auth.user.role,auth.user.id,'FINANCE_ENTRY_CREATE','finance_workspace_entries',id,'OK',{entry_type:b.entry_type});
+    .bind(id,auth.user.id,auth.user.role,entryType,direction,amount,currency,clean(b.label)||null,clean(b.reference_type)||null,clean(b.reference_id)||null,JSON.stringify(b.metadata||{})).run();
+  await journal(env,auth.user.role,auth.user.id,'FINANCE_ENTRY_CREATE','finance_workspace_entries',id,'OK',{entry_type:entryType});
   return json({ok:true,version:VERSION,id});
 }
 
