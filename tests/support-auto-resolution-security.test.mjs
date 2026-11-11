@@ -41,7 +41,8 @@ const managerResolver = source.slice(resolveStart, resolveEnd);
 
 test("manager resolution validates input and uses an allowed-state compare-and-set", () => {
   assert.match(managerResolver, /suppliedResolution\.length>2000/);
-  assert.match(managerResolver, /status IN/);\n  assert.match(managerResolver, /OPEN.*WAITING_ACTION.*ESCALATED/);
+  assert.match(managerResolver, /status IN/);
+  assert.match(managerResolver, /OPEN.*WAITING_ACTION.*ESCALATED/);
   assert.match(managerResolver, /update\?\.meta\?\.changes/);
   assert.match(managerResolver, /CASE_STATE_CONFLICT/);
 });
