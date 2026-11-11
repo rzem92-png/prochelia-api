@@ -75,3 +75,12 @@ except sqlite3.IntegrityError:
     pass
 
 print(f"PASS: {len(list(MIGRATIONS.glob('*.sql')))} migrations; payment schema, atomic ledger, immutability and idempotency verified.")
+
+# The Preview migration workflow must persist an encrypted backup in EU R2
+# and verify a byte-for-byte download before applying any schema writes.
+workflow = (ROOT / ".github" / "workflows" / "apply-preview-d1-migrations.yml").read_text(encoding="utf-8")
+assert "prochelia-preview-backups-eu/" in workflow, "Missing EU R2 backup destination"
+assert "r2 object put" in workflow and "r2 object get" in workflow, "R2 backup round-trip is not verified"
+assert "cmp " in workflow, "R2 backup download is not compared byte-for-byte"
+assert workflow.index("r2 object put") < workflow.index("Apply migrations to Preview D1 only"), "Backup must be persisted before migrations"
+assert "--jurisdiction eu" in workflow, "Preview backup must use EU jurisdiction"
