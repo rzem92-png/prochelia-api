@@ -3764,7 +3764,10 @@ async function financeProblemResolve(request,env) {
   const owner=String(row.user_id)===String(auth.user.id);
   const manager=['GERANTE','ADMIN','FINANCE'].includes(role);
   if(!owner&&!manager)return json({ok:false,error:'FORBIDDEN',version:VERSION},403);
-  const approved=b.approve===true;
+  // A requester may add information/escalate their own issue, but cannot
+  // self-certify a financial resolution as complete.
+  if(!manager && b.approve===true) return json({ok:false,error:'FINANCE_MANAGER_APPROVAL_REQUIRED',version:VERSION},403);
+  const approved=manager && b.approve===true;
   const resolution=clean(b.resolution)||row.proposed_solution||'Résolution contrôlée par le Copilote.';
   const status=approved?'RESOLVED':'ESCALATED';
   await env.DB.prepare(`UPDATE finance_resolution_cases SET status=?,resolution=?,resolved_at=CURRENT_TIMESTAMP WHERE id=?`).bind(status,resolution,id).run();
