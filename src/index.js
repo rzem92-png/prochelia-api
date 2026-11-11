@@ -3078,9 +3078,6 @@ async function financeProblemResolve(request,env) {
   if(!owner&&!manager)return json({ok:false,error:'FORBIDDEN',version:VERSION},403);
   if(typeof b.approve!=='boolean') return json({ok:false,error:'APPROVAL_DECISION_REQUIRED',version:VERSION},400);
   const approved=b.approve;
-  const role=String(auth.user.role||'').toUpperCase();
-  const owner=String(row.user_id)===String(auth.user.id);
-  const manager=['GERANTE','ADMIN','FINANCE'].includes(role);
   if(approved && !manager) return json({ok:false,error:'MANAGER_APPROVAL_REQUIRED',version:VERSION},403);
   if(!owner && !manager) return json({ok:false,error:'FORBIDDEN',version:VERSION},403);
   if(b.resolution!==undefined && (typeof b.resolution!=='string' || b.resolution.length>2000)) return json({ok:false,error:'INVALID_RESOLUTION',version:VERSION},400);
