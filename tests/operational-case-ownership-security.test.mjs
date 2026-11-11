@@ -28,3 +28,23 @@ test("non-manager reports cannot trigger automatic execution or forged downstrea
   assert.match(handler, /steps:\['qualify','verify_ownership','manager_review','audit'\]/);
   assert.match(handler, /journal\(env,role,gate\.auth\.user\.id,'CASE_CREATED'/);
 });
+
+
+test("operational execution uses only the persisted server plan, never browser-supplied actions", () => {
+  const start = source.indexOf("async function operationalExecute(");
+  const end = source.indexOf("\n\nasync function scoreClients(", start);
+  const h = source.slice(start, end);
+  assert.match(h, /Array\.isArray\(solution\.actions\)/);
+  assert.doesNotMatch(h, /Array\.isArray\(b\.actions\)/);
+  assert.match(h, /CASE_ALREADY_FINAL/);
+  assert.match(h, /ACTION_ENTITY_MISMATCH/);
+});
+
+test("outbox execution claims pending work once and does not replay completed effects", () => {
+  const start = source.indexOf("async function executeQueuedAction(");
+  const end = source.indexOf("\n\nasync function operationalExecute(", start);
+  const h = source.slice(start, end);
+  assert.match(h, /status IN \('PENDING','FAILED'\)/);
+  assert.match(h, /ACTION_ALREADY_CLAIMED_OR_FINAL/);
+  assert.match(h, /idempotent_replay:true/);
+});
