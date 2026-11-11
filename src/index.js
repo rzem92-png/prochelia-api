@@ -3321,8 +3321,17 @@ async function supportResolve(request,env){
   if(!id)return json({ok:false,error:'CASE_ID_REQUIRED',version:VERSION},400);
   const row=await env.DB.prepare(`SELECT * FROM support_cases WHERE id=? LIMIT 1`).bind(id).first();
   if(!row)return json({ok:false,error:'CASE_NOT_FOUND',version:VERSION},404);
-  const resolution=clean(b.resolution)||'Résolution validée par la Gérante après contrôle du dossier.';
-  await env.DB.prepare(`UPDATE support_cases SET status='RESOLVED',resolution=?,resolved_at=CURRENT_TIMESTAMP,requires_manager=0 WHERE id=?`).bind(resolution,id).run();
+  const suppliedResolution=typeof b.resolution==='string'?b.resolution.trim():'';
+  if(suppliedResolution.length>2000) return json({ok:false,error:'RESOLUTION_TOO_LONG',version:VERSION},400);
+  const resolution=suppliedResolution||'Résolution validée par la Gérante après contrôle du dossier.';
+  const update=await env.DB.prepare(
+    `UPDATE support_cases
+        SET status='RESOLVED',resolution=?,resolved_at=CURRENT_TIMESTAMP,requires_manager=0
+      WHERE id=? AND status IN ('OPEN','WAITING_ACTION','ESCALATED')`
+  ).bind(resolution,id).run();
+  if(Number(update?.meta?.changes||0)!==1){
+    return json({ok:false,error:'CASE_STATE_CONFLICT',version:VERSION},409);
+  }
   await supportEvent(env,id,a.role,a.auth.user.id,'MANAGER_RESOLVED',{resolution});
   await journal(env,a.role,a.auth.user.id,'SUPPORT_CASE_MANAGER_RESOLVE','support_cases',id,'RESOLVED',{resolution});
   return json({ok:true,version:VERSION,case_id:id,status:'RESOLVED',resolution});
