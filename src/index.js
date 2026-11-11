@@ -1694,7 +1694,7 @@ async function complaintCreate(request, env) {
     if(!mission)return json({ok:false,error:'MISSION_NOT_FOUND',version:VERSION},404);
     if(gate.auth.user.role==='client' && mission.client_id!==clientId)return json({ok:false,error:'FORBIDDEN',version:VERSION},403);
     if(gate.auth.user.role==='gerante' && clientId && clientId!==mission.client_id)return json({ok:false,error:'MISSION_CLIENT_MISMATCH',version:VERSION},400);
-    missionId=mission.id;clientId=mission.client_id;intervenantId=mission.intervenant_id;
+    missionId=mission.id;clientId=mission.client_id;intervenantId=mission.intervenant_id;companyId=null;
   }
 
   const id=crypto.randomUUID();
