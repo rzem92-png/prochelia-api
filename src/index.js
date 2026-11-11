@@ -3585,6 +3585,18 @@ function financePublicPaymentRows(rows,user) {
   return [];
 }
 
+function financePublicPayoutRows(rows,user) {
+  const role=String(user?.role||'').toUpperCase();
+  if(['GERANTE','ADMIN','FINANCE'].includes(role)) return rows;
+  // Only the payee may see their own payout amount and lifecycle. Provider
+  // references, processor identity and failure metadata remain internal.
+  if(role==='INTERVENANT') return rows.map(x=>({
+    id:x.id,amount_cents:x.amount_cents,currency:x.currency,mode:x.mode,
+    status:x.status,requested_at:x.requested_at,completed_at:x.completed_at
+  }));
+  return [];
+}
+
 function financePublicSummary(summary,user) {
   const role=String(user?.role||'').toUpperCase();
   if(['GERANTE','ADMIN','FINANCE'].includes(role)) return summary;
@@ -3635,7 +3647,7 @@ async function financeDashboard(request,env) {
     owner:{id:auth.user.id,role:auth.user.role,email:auth.user.email},
     summary,
     payments:financePublicPaymentRows(rows.payments,auth.user),
-    payouts:rows.payouts||[],
+    payouts:financePublicPayoutRows(rows.payouts||[],auth.user),
     ledger:rows.ledger,
     exports:['CSV','JSON','HTML'],
     support_resolution:{automatic_for_low_impact:true,human_validation_for_sensitive:true}
