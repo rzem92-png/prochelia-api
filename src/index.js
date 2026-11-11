@@ -2336,21 +2336,30 @@ async function dynamicUpdate(env, table, id, updates) {
 
 async function queueAction(env, actionType, entityType, entityId, payload, idem) {
   const key = idem || crypto.randomUUID();
+  const payloadJson=JSON.stringify(payload||{});
   const existing = await env.DB.prepare('SELECT * FROM action_outbox WHERE idempotency_key=? LIMIT 1').bind(key).first();
-  if (existing) return existing;
+  if (existing) {
+    let priorPayload='{}'; try { priorPayload=JSON.stringify(JSON.parse(existing.payload_json||'{}')); } catch {}
+    const same=String(existing.action_type)===String(actionType)
+      && String(existing.entity_type||'')===String(entityType||'')
+      && String(existing.entity_id||'')===String(entityId||'')
+      && priorPayload===payloadJson;
+    return same?existing:{...existing,idempotency_conflict:true};
+  }
   const id = crypto.randomUUID();
   await env.DB.prepare(`INSERT INTO action_outbox(id,action_type,entity_type,entity_id,idempotency_key,payload_json) VALUES(?,?,?,?,?,?)`)
-    .bind(id,actionType,entityType||null,entityId||null,key,JSON.stringify(payload||{})).run();
+    .bind(id,actionType,entityType||null,entityId||null,key,payloadJson).run();
   return await env.DB.prepare('SELECT * FROM action_outbox WHERE id=?').bind(id).first();
 }
 
 async function executeQueuedAction(env, action) {
   if (!action) return {ok:false,error:'ACTION_NOT_FOUND'};
+  if (action.idempotency_conflict) return {ok:false,error:'ACTION_IDEMPOTENCY_KEY_REUSED'};
   if (['DONE','WAITING_PROVIDER'].includes(String(action.status||'').toUpperCase())) {
     let prior={}; try { prior=JSON.parse(action.result_json||'{}'); } catch {}
     return {ok:true,status:String(action.status).toUpperCase(),result:prior,idempotent_replay:true};
   }
-  const claim=await env.DB.prepare(`UPDATE action_outbox SET status='PROCESSING',updated_at=CURRENT_TIMESTAMP WHERE id=? AND status IN ('PENDING','FAILED')`).bind(action.id).run();
+  const claim=await env.DB.prepare(`UPDATE action_outbox SET status='PROCESSING',updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='PENDING'`).bind(action.id).run();
   if(Number(claim?.meta?.changes||0)!==1) return {ok:false,error:'ACTION_ALREADY_CLAIMED_OR_FINAL',status:action.status||'UNKNOWN'};
   const payload = JSON.parse(action.payload_json||'{}');
   const now = new Date().toISOString();
