@@ -2297,6 +2297,12 @@ async function queueAction(env, actionType, entityType, entityId, payload, idem)
 
 async function executeQueuedAction(env, action) {
   if (!action) return {ok:false,error:'ACTION_NOT_FOUND'};
+  if (['DONE','WAITING_PROVIDER'].includes(String(action.status||'').toUpperCase())) {
+    let prior={}; try { prior=JSON.parse(action.result_json||'{}'); } catch {}
+    return {ok:true,status:String(action.status).toUpperCase(),result:prior,idempotent_replay:true};
+  }
+  const claim=await env.DB.prepare(`UPDATE action_outbox SET status='PROCESSING',updated_at=CURRENT_TIMESTAMP WHERE id=? AND status IN ('PENDING','FAILED')`).bind(action.id).run();
+  if(Number(claim?.meta?.changes||0)!==1) return {ok:false,error:'ACTION_ALREADY_CLAIMED_OR_FINAL',status:action.status||'UNKNOWN'};
   const payload = JSON.parse(action.payload_json||'{}');
   const now = new Date().toISOString();
   try {
@@ -2359,12 +2365,22 @@ async function operationalExecute(request, env) {
   if(!b.case_id)return json({ok:false,error:'CASE_ID_REQUIRED',version:VERSION},400);
   const c=await env.DB.prepare('SELECT * FROM operational_cases WHERE id=? LIMIT 1').bind(b.case_id).first();
   if(!c)return json({ok:false,error:'CASE_NOT_FOUND',version:VERSION},404);
+  if(['RESOLVED','CLOSED'].includes(String(c.status||'').toUpperCase()))
+    return json({ok:false,error:'CASE_ALREADY_FINAL',version:VERSION},409);
   const solution=JSON.parse(c.proposed_solution_json||'{}');
-  const actions=Array.isArray(b.actions)?b.actions:(Array.isArray(solution.actions)?solution.actions:[]);
-  if(!actions.length)return json({ok:false,error:'NO_ACTIONS_DEFINED',version:VERSION},400);
+  // The executable plan is server-persisted. Browser-supplied action arrays are never authoritative.
+  const actions=Array.isArray(solution.actions)?solution.actions:[];
+  if(!actions.length)return json({ok:false,error:'NO_SERVER_APPROVED_ACTIONS',version:VERSION},409);
+  const allowedActions=new Set(['NOTIFY','RESCHEDULE_MISSION','ASSIGN_REPLACEMENT','REFUND','PAYOUT','ACCOUNTING_ENTRY']);
+  if(actions.some(a=>!a || !allowedActions.has(String(a.action_type||a.type||'').toUpperCase())))
+    return json({ok:false,error:'UNSUPPORTED_SERVER_ACTION',version:VERSION},409);
+  if(c.mission_id && actions.some(a=>a.entity_id && String(a.entity_id)!==String(c.mission_id)))
+    return json({ok:false,error:'ACTION_ENTITY_MISMATCH',version:VERSION},409);
   const results=[];
   for(const a of actions){
-    const q=await queueAction(env,a.action_type||a.type,c.mission_id?'MISSION':'CASE',a.entity_id||c.mission_id,{...a},a.idempotency_key);
+    const actionType=String(a.action_type||a.type||'').toUpperCase();
+    const entityId=a.entity_id||c.mission_id||c.id;
+    const q=await queueAction(env,actionType,c.mission_id?'MISSION':'CASE',entityId,{...a},a.idempotency_key||`${c.id}:${actionType}:${entityId}`);
     results.push(await executeQueuedAction(env,q));
   }
   const allDone=results.every(x=>x.ok && ['DONE'].includes(x.status));
