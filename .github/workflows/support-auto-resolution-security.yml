@@ -11,7 +11,7 @@ on:
       - "tests/quality-ownership-security.test.mjs"
       - "tests/promotion-listing-privacy.test.mjs"
       - "tests/operational-case-ownership-security.test.mjs"
-      - "tests/complaint-ownership-security.test.mjs"
+      - "tests/complaint-ownership-security.test.mjs"\n      - "tests/payment-mission-ownership-security.test.mjs"
       - ".github/workflows/support-auto-resolution-security.yml"
   pull_request:
     branches:
