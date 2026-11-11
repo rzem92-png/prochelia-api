@@ -3777,7 +3777,15 @@ async function financeProblemResolve(request,env) {
   const approved=manager && b.approve===true;
   const resolution=clean(b.resolution)||row.proposed_solution||'Résolution contrôlée par le Copilote.';
   const status=approved?'RESOLVED':'ESCALATED';
-  await env.DB.prepare(`UPDATE finance_resolution_cases SET status=?,resolution=?,resolved_at=CURRENT_TIMESTAMP WHERE id=?`).bind(status,resolution,id).run();
+  if(['RESOLVED','CLOSED'].includes(String(row.status||'').toUpperCase()))
+    return json({ok:false,error:'FINANCE_CASE_ALREADY_CLOSED',version:VERSION},409);
+  // Compare-and-set prevents concurrent approvals/escalations from overwriting
+  // a newer decision after the initial ownership and state read.
+  const update=await env.DB.prepare(`UPDATE finance_resolution_cases
+    SET status=?,resolution=?,resolved_at=CURRENT_TIMESTAMP
+    WHERE id=? AND status=? AND resolved_at IS NULL`).bind(status,resolution,id,row.status).run();
+  if(Number(update?.meta?.changes||0)!==1)
+    return json({ok:false,error:'FINANCE_CASE_STATE_CHANGED',version:VERSION},409);
   await journal(env,auth.user.role,auth.user.id,'FINANCE_PROBLEM_RESOLVE','finance_resolution_cases',id,status,{approved});
   return json({ok:true,version:VERSION,case_id:id,status,resolution});
 }
