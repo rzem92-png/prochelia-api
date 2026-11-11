@@ -479,7 +479,8 @@ class PaymentStateLedgerEnforcementTests(unittest.TestCase):
         export = source[start:end]
         self.assertIn("const exportAmount=value=>{const cents=integerCents(value??0)", export)
         self.assertIn("devise:String(x.currency||'EUR').toUpperCase()", export)
-        self.assertIn("Indisponible (devises multiples ou données invalides)", export)
+        self.assertIn("summary.gross_eur==null?'Indisponible'", export)
+        self.assertIn("summary.refunds_eur==null?'Indisponible'", export)
         self.assertIn("if(/^\\s*[=+@-]/.test(v))v=\"'\"+v", export)
         self.assertIn("const header=['date','type','status','mission_id','devise','montant_brut'", export)
         self.assertIn("INVALID_FINANCE_EXPORT_FORMAT", export)
