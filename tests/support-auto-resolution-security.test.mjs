@@ -32,3 +32,16 @@ test("supportCreate does not pass the raw request body to the resolver", () => {
   assert.match(source, /supportAutoResolve\(env,id,a\.auth\.user\.id,a\.role,scenario\)/);
   assert.doesNotMatch(source, /supportAutoResolve\(env,id,a\.auth\.user\.id,a\.role,scenario,b\)/);
 });
+
+const resolveStart = source.indexOf("async function supportResolve");
+const resolveEnd = source.indexOf("\\nasync function ", resolveStart + 20);
+assert.notEqual(resolveStart, -1, "supportResolve must exist");
+assert.notEqual(resolveEnd, -1, "supportResolve must have a following function boundary");
+const managerResolver = source.slice(resolveStart, resolveEnd);
+
+test("manager resolution validates input and uses an allowed-state compare-and-set", () => {
+  assert.match(managerResolver, /suppliedResolution\.length>2000/);
+  assert.match(managerResolver, /status IN \\('OPEN','WAITING_ACTION','ESCALATED'\\)/);
+  assert.match(managerResolver, /update\?\.meta\?\.changes/);
+  assert.match(managerResolver, /CASE_STATE_CONFLICT/);
+});
