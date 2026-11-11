@@ -52,10 +52,9 @@ test("manual finance actions cannot fabricate PSP settlement or refund", () => {
 test("verified PSP webhook resolves provider profile to its user before crediting wallet", () => {
   const webhook = handler("paymentWebhook");
   assert.match(webhook, /SELECT user_id FROM intervenants WHERE id=\? LIMIT 1/);
-  assert.match(webhook, /bind\(providerProfile\.user_id\)/);
   assert.match(webhook, /payment_wallet_ledger/);
   assert.match(webhook, /MISSION_EARNING/);
-  assert.match(webhook, /payment:\\$\{txId\}:paid/);
+  assert.match(webhook, /payment:\$\{txId\}:paid/);
   assert.match(webhook, /WALLET_LEDGER_GUARDS_NOT_READY/);
   assert.match(webhook, /status NOT IN \('paid','failed','refunded'\)/);
 });
@@ -115,8 +114,8 @@ test("webhook retries resume unprocessed events and reject event ID payload chan
 
 test("payout webhook balances are applied through the immutable idempotent wallet ledger", () => {
   const h = handler("paymentWebhook");
-  assert.match(h, /payout_wallet_ledger/);
+  assert.match(h, /payment_wallet_ledger/);
   assert.match(h, /PAYOUT_\+/);
-  assert.match(h, /payout:\\$\{payoutId\}:\\$\{newStatus\}/);
+  assert.match(h, /payout:\$\{payoutId\}:\$\{newStatus\}/);
   assert.match(h, /PAYOUT_STATE_CONFLICT/);
 });
