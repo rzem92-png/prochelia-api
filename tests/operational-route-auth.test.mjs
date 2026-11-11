@@ -239,3 +239,18 @@ test("finance issue resolution uses a compare-and-set state transition", () => {
   assert.match(handler, /FINANCE_CASE_STATE_CHANGED/);
   assert.match(handler, /Number\(update\?\.meta\?\.changes\|\|0\)!==1/);
 });
+
+test("finance payment ownership uses account IDs stored by mission payment creation", () => {
+  const rowsStart = indexSource.indexOf("async function financeRowsForUser");
+  const rowsEnd = indexSource.indexOf("function financeSummaryFromRows", rowsStart);
+  const createStart = indexSource.indexOf("async function createMissionPayment");
+  const createEnd = indexSource.indexOf("async function finalizeMissionPayment", createStart);
+  assert.ok(rowsStart >= 0 && rowsEnd > rowsStart && createStart >= 0 && createEnd > createStart);
+  const rows = indexSource.slice(rowsStart, rowsEnd);
+  const create = indexSource.slice(createStart, createEnd);
+  assert.match(create, /mission\.client_user_id/);
+  assert.match(create, /mission\.intervenant_user_id/);
+  assert.match(rows, /where = 'client_id=\?'; params\.push\(uid\)/);
+  assert.match(rows, /where = 'intervenant_id=\?'; params\.push\(uid\)/);
+  assert.doesNotMatch(rows, /params\.push\(profile\.id\)/);
+});
