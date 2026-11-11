@@ -3880,8 +3880,13 @@ async function productionRateLimit(request,env){
 
 async function strictProductionAudit(request,env){
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
+  // This audit is deliberately read-only: no schema creation, config-check
+  // inserts, journal writes, queue processing, or other persistence.
   const result=await productionConfigCheck(env);
   const extra=[
+    // Payment settlement stays blocked until atomic ledger, replay,
+    // idempotency, refunds and payout reconciliation are independently tested.
+    {code:'PAYMENT_WEBHOOK_ATOMICITY',status:'NOT_READY',reason:'PAYMENT_WEBHOOK_DISABLED_PENDING_REVIEW'},
     {code:'SECURITY_CODE_DELIVERY',status:finalSecretConfigured(env,'SECURITY_CODE_WEBHOOK')&&finalSecretConfigured(env,'SECURITY_CODE_WEBHOOK_SECRET')?'OK':'NOT_CONFIGURED'},
     {code:'CORS_ORIGIN',status:finalSecretConfigured(env,'CORS_ORIGIN')?'OK':'NOT_CONFIGURED'},
     {code:'BACKUP_R2',status:env.BACKUP_BUCKET&&finalSecretConfigured(env,'BACKUP_ENCRYPTION_KEY')?'OK':'NOT_CONFIGURED'},
@@ -3889,16 +3894,11 @@ async function strictProductionAudit(request,env){
     {code:'MAPS_PROVIDER',status:finalSecretConfigured(env,'MAPS_API_KEY')?'OK':'NOT_CONFIGURED'}
   ];
   const checks=[...(result.checks||[]),...extra];
-  const blockingCodes=new Set(['SECRET:PAYMENT_PROVIDER','SECRET:PAYMENT_WEBHOOK_SECRET','SECURITY_CODE_DELIVERY','CORS_ORIGIN','BACKUP_R2']);
+  const blockingCodes=new Set(['PAYMENT_WEBHOOK_ATOMICITY','SECRET:PAYMENT_PROVIDER','SECRET:PAYMENT_WEBHOOK_SECRET','SECURITY_CODE_DELIVERY','CORS_ORIGIN','BACKUP_R2']);
   const blocking=checks.filter(x=>blockingCodes.has(x.code)&&x.status!=='OK');
   const configurationReady=blocking.length===0 && result.blocking===0;
-  for(const c of extra){
-    await env.DB.prepare(`INSERT INTO system_config_checks(id,check_code,status,details_json) VALUES(?,?,?,?)`).bind(crypto.randomUUID(),c.code,c.status,JSON.stringify(c)).run();
-  }
-  await journal(env,'gerante',gate.auth.user.id,'STRICT_PRODUCTION_AUDIT','system',null,configurationReady?'CONFIGURATION_READY':'ATTENTION',{blocking:blocking.map(x=>x.code)});
-  // Configuration presence is not proof of operational acceptance.
-  // Real traffic remains disabled until sandbox, E2E, restore, security and legal gates are independently attested.
-  return json({ok:true,version:VERSION,production_gate:configurationReady?'CONFIGURATION_READY':'CLOSED',configuration_ready:configurationReady,ready_for_real_traffic:false,real_traffic_authorized:false,checks,blocking:blocking.map(x=>x.code),additional_gates_required:['PSP_SANDBOX_AND_WEBHOOK_RECONCILIATION','CLIENT_PROVIDER_MANAGER_E2E','IOS_ANDROID_DESKTOP_ACCEPTANCE','BACKUP_RESTORE_DRILL','INDEPENDENT_SECURITY_REVIEW','RGPD_AND_LEGAL_APPROVAL','EXPLICIT_RELEASE_AUTHORIZATION'],note:'Configuration audit only. This endpoint can never authorize real traffic; independent operational acceptance and explicit release approval remain mandatory.'});
+  // A configuration audit is never a production release authorization.
+  return json({ok:true,version:VERSION,production_gate:configurationReady?'CONFIGURATION_READY':'CLOSED',configuration_ready:configurationReady,ready_for_real_traffic:false,real_traffic_authorized:false,checks,blocking:blocking.map(x=>x.code),additional_gates_required:['PSP_SANDBOX_AND_WEBHOOK_RECONCILIATION','CLIENT_PROVIDER_MANAGER_E2E','IOS_ANDROID_DESKTOP_ACCEPTANCE','BACKUP_RESTORE_DRILL','INDEPENDENT_SECURITY_REVIEW','RGPD_AND_LEGAL_APPROVAL','EXPLICIT_RELEASE_AUTHORIZATION'],note:'Read-only configuration audit only. Payment webhook settlement remains blocked pending atomicity and reconciliation validation; this endpoint can never authorize real traffic.'});
 }
 
 const __procheliaProductionSafetyHandle = handle;
