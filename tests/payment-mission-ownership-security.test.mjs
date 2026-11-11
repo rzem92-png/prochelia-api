@@ -31,7 +31,7 @@ test("client payment disputes require ownership and cannot exceed paid transacti
   assert.match(h, /SELECT id FROM clients WHERE user_id=\? LIMIT 1/);
   assert.match(h, /String\(tx\.client_id\)!==String\(own\.id\)/);
   assert.match(h, /amount>Number\(tx\.gross_cents\|\|0\)/);
-  assert.match(h, /tx\.status!=='paid'/);
+  assert.match(h, /mission_id=\? AND status='paid'/);
   assert.match(h, /String\(auth\.user\.role\|\|'\'\)\.toUpperCase\(\)==='CLIENT'/);
   assert.match(h, /readJsonLimited\(request,8192\)/);
   assert.match(h, /status='paid' ORDER BY created_at DESC LIMIT 1/);
