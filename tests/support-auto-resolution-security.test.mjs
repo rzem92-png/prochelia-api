@@ -63,6 +63,7 @@ test("support API never claims an automatic resolution while action is pending",
 test("support creation validates payload, severity, category and description size", () => {
   assert.match(creator, /INVALID_SUPPORT_PAYLOAD/);
   assert.match(creator, /INVALID_SUPPORT_CATEGORY/);
+  assert.match(creator, /'GENERAL','DELAY','TECHNICAL','DOCUMENT','PAYMENT','COMPLAINT'/);
   assert.match(creator, /INVALID_SUPPORT_SEVERITY/);
   assert.match(creator, /INVALID_SUPPORT_DESCRIPTION/);
   assert.match(creator, /length>4000/);
