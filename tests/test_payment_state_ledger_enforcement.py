@@ -507,7 +507,9 @@ class PaymentStateLedgerEnforcementTests(unittest.TestCase):
         start = source.index("async function financeProblemResolve")
         end = source.index("async function handleFinanceWorkspace", start)
         resolver = source[start:end]
-        self.assertIn("const approved=b.approve===true", resolver)
+        self.assertIn("if(!manager && b.approve===true)", resolver)
+        self.assertIn("FINANCE_MANAGER_APPROVAL_REQUIRED", resolver)
+        self.assertIn("const approved=manager && b.approve===true", resolver)
         self.assertNotIn("Boolean(b.approve)", resolver)
         self.assertIn("const status=approved?'RESOLVED':'ESCALATED'", resolver)
 
