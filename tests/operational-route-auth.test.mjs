@@ -105,3 +105,38 @@ test("official finance ledger writes are restricted to finance staff roles", () 
   assert.match(handler, /FINANCE_LEDGER_WRITE_FORBIDDEN/);
   assert.ok(handler.indexOf("FINANCE_LEDGER_WRITE_FORBIDDEN") < handler.indexOf("INSERT INTO finance_workspace_entries"));
 });
+
+test("mission security binds mission participants and uses profile IDs consistently", () => {
+  const prepStart = indexSource.indexOf("async function securityPrepareMission");
+  const prepEnd = indexSource.indexOf("async function securityPresence", prepStart);
+  const presenceStart = prepEnd;
+  const verifyStart = indexSource.indexOf("async function securityVerifyCode", presenceStart);
+  const resendStart = indexSource.indexOf("async function securityResendCodes", verifyStart);
+  assert.ok(prepStart >= 0 && prepEnd > prepStart && verifyStart > presenceStart && resendStart > verifyStart);
+  const prep = indexSource.slice(prepStart, prepEnd);
+  const presence = indexSource.slice(presenceStart, verifyStart);
+  const verify = indexSource.slice(verifyStart, resendStart);
+  assert.match(prep, /SELECT id,client_id,intervenant_id FROM missions WHERE id=\?/);
+  assert.match(prep, /MISSION_PARTICIPANTS_MISMATCH/);
+  assert.match(prep, /SELECT user_id FROM intervenants WHERE id=\?/);
+  assert.match(prep, /requireVerifiedIntervenant\(env,providerProfile\.user_id\)/);
+  assert.match(presence, /SELECT id FROM intervenants WHERE user_id=\?/);
+  assert.match(presence, /mission_security WHERE mission_id=\? AND intervenant_id=\?/);
+  assert.doesNotMatch(presence, /intervenant_id=\? LIMIT 1'\)\.bind\(missionId,auth\.user\.id\)/);
+  assert.match(verify, /SELECT id FROM intervenants WHERE user_id=\?/);
+  assert.match(verify, /mission_security WHERE mission_id=\? AND intervenant_id=\?/);
+});
+
+test("client dispute and security resend checks use the client profile ID", () => {
+  const resendStart = indexSource.indexOf("async function securityResendCodes");
+  const resendEnd = indexSource.indexOf("async function securityClientCode", resendStart);
+  const disputeStart = indexSource.indexOf("async function openPaymentDispute");
+  const disputeEnd = indexSource.indexOf("async function paymentAdminResolve", disputeStart);
+  assert.ok(resendStart >= 0 && resendEnd > resendStart && disputeStart >= 0 && disputeEnd > disputeStart);
+  const resend = indexSource.slice(resendStart, resendEnd);
+  const dispute = indexSource.slice(disputeStart, disputeEnd);
+  assert.match(resend, /SELECT id FROM clients WHERE user_id=\?/);
+  assert.match(resend, /String\(sec\.client_id\)!==String\(clientProfile\.id\)/);
+  assert.match(dispute, /SELECT id FROM clients WHERE user_id=\?/);
+  assert.match(dispute, /String\(tx\.client_id\)!==String\(clientProfile\.id\)/);
+});
