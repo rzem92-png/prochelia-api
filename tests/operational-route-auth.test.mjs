@@ -140,3 +140,12 @@ test("client dispute and security resend checks use the client profile ID", () =
   assert.match(dispute, /SELECT id FROM clients WHERE user_id=\?/);
   assert.match(dispute, /String\(tx\.client_id\)!==String\(clientProfile\.id\)/);
 });
+
+test("public service catalogue excludes inactive and internal fields", () => {
+  const start = indexSource.indexOf("async function getPrestations");
+  const end = indexSource.indexOf("async function health", start);
+  assert.ok(start >= 0 && end > start);
+  const handler = indexSource.slice(start, end);
+  assert.match(handler, /SELECT id,name,description FROM prestations WHERE active=1/);
+  assert.doesNotMatch(handler, /SELECT \* FROM prestations/);
+});
