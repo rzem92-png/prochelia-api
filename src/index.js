@@ -902,6 +902,9 @@ async function finalizeMissionPayment(request, env) {
   if(!txId||!['paid','failed','refunded','held'].includes(outcome)) return json({ok:false,error:'INVALID_PAYMENT_FINALIZATION',version:VERSION},400);
   const tx=await env.DB.prepare('SELECT * FROM payment_transactions WHERE id=? LIMIT 1').bind(txId).first();
   if(!tx) return json({ok:false,error:'TRANSACTION_NOT_FOUND',version:VERSION},404);
+  // A dashboard action is not proof of settlement: only a verified provider
+  // webhook may mark money paid or refunded and release wallet balances.
+  if(['paid','refunded'].includes(outcome)) return json({ok:false,error:'PSP_SERVER_CONFIRMATION_REQUIRED',version:VERSION},409);
   if(['paid','refunded','failed'].includes(tx.status) && tx.status!==outcome) return json({ok:false,error:'PAYMENT_STATE_CONFLICT',version:VERSION,status:tx.status},409);
   if(outcome==='paid'){
     const wallet=await env.DB.prepare('SELECT * FROM wallets WHERE user_id=? LIMIT 1').bind(tx.intervenant_id).first();
@@ -1023,13 +1026,13 @@ async function paymentAdminResolve(request, env) {
   if(!disputeId||!['release','partial_refund','full_refund','cancel'].includes(resolution)) return json({ok:false,error:'INVALID_DISPUTE_RESOLUTION',version:VERSION},400);
   const d=await env.DB.prepare('SELECT * FROM payment_disputes WHERE id=? LIMIT 1').bind(disputeId).first();
   if(!d||d.status==='resolved') return json({ok:false,error:'DISPUTE_NOT_FOUND_OR_ALREADY_RESOLVED',version:VERSION},409);
-  await env.DB.prepare(`UPDATE payment_disputes SET status='resolved',resolution=?,resolved_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(resolution,disputeId).run();
-  if(d.transaction_id){
-    const newStatus=resolution==='release'?'paid':resolution==='full_refund'?'refunded':resolution==='cancel'?'canceled':'held';
-    await env.DB.prepare('UPDATE payment_transactions SET status=?,updated_at=CURRENT_TIMESTAMP WHERE id=?').bind(newStatus,d.transaction_id).run();
-  }
-  await paymentAudit(env,'PAYMENT_DISPUTE_RESOLVED',{transaction_id:d.transaction_id,mission_id:d.mission_id,user_id:auth.user.id,metadata:{dispute_id:disputeId,resolution}},'OK');
-  return json({ok:true,version:VERSION,dispute_id:disputeId,status:'resolved',resolution},200);
+  // Dispute decisions cannot settle, refund or release money without a
+  // verified PSP operation. Keep the transaction held and record the decision
+  // as pending provider execution instead of fabricating a financial outcome.
+  const update=await env.DB.prepare(`UPDATE payment_disputes SET status='resolution_pending',resolution=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND status IN ('open','pending')`).bind(resolution,disputeId).run();
+  if(Number(update?.meta?.changes||0)!==1) return json({ok:false,error:'DISPUTE_STATE_CONFLICT',version:VERSION},409);
+  await paymentAudit(env,'PAYMENT_DISPUTE_DECISION_PENDING_PROVIDER',{transaction_id:d.transaction_id,mission_id:d.mission_id,user_id:auth.user.id,metadata:{dispute_id:disputeId,resolution}},'PENDING');
+  return json({ok:true,version:VERSION,dispute_id:disputeId,status:'resolution_pending',resolution,financial_status_unchanged:true,provider_confirmation_required:true},202);
 }
 
 async function handleBase(request, env) {
