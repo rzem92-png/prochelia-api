@@ -1766,9 +1766,62 @@ async function copilotRecommend(env, input) {
   return { action, mode: solution.automatic ? 'AUTO' : 'MANAGER_APPROVAL', confidence: simple ? 0.95 : 0.82, solution, context, phase };
 }
 
+async function enforceCaseActorScope(env, user, body) {
+  const role = String(user?.role || '');
+  if (role === 'gerante') return { ok: true, body };
+  if (role === 'entreprise') {
+    // No verified company-membership relation exists in the current schema.
+    // Fail closed rather than accepting a caller-supplied company_id as proof.
+    return { ok: false, response: json({ok:false,error:'COMPANY_SCOPE_NOT_CONFIGURED',version:VERSION},403) };
+  }
+  if (role === 'client') {
+    const client = await env.DB.prepare('SELECT id FROM clients WHERE user_id=? LIMIT 1').bind(user.id).first();
+    if (!client || (body.client_id && String(body.client_id) !== String(client.id))) {
+      return { ok: false, response: json({ok:false,error:'FORBIDDEN',version:VERSION},403) };
+    }
+    body.client_id = client.id;
+    if (body.mission_id) {
+      const mission = await env.DB.prepare('SELECT id,client_id,intervenant_id FROM missions WHERE id=? AND client_id=? LIMIT 1')
+        .bind(String(body.mission_id), client.id).first();
+      if (!mission || (body.intervenant_id && String(body.intervenant_id) !== String(mission.intervenant_id || ''))) {
+        return { ok: false, response: json({ok:false,error:'MISSION_NOT_OWNED',version:VERSION},403) };
+      }
+      body.intervenant_id = mission.intervenant_id || null;
+    } else if (body.intervenant_id || body.company_id) {
+      return { ok: false, response: json({ok:false,error:'RELATED_ENTITY_REQUIRES_OWNED_MISSION',version:VERSION},403) };
+    }
+    body.company_id = null;
+    return { ok: true, body };
+  }
+  if (role === 'intervenant') {
+    const intervenant = await env.DB.prepare('SELECT id FROM intervenants WHERE user_id=? LIMIT 1').bind(user.id).first();
+    if (!intervenant || (body.intervenant_id && String(body.intervenant_id) !== String(intervenant.id))) {
+      return { ok: false, response: json({ok:false,error:'FORBIDDEN',version:VERSION},403) };
+    }
+    body.intervenant_id = intervenant.id;
+    if (!body.mission_id) {
+      if (body.client_id || body.company_id) {
+        return { ok: false, response: json({ok:false,error:'RELATED_ENTITY_REQUIRES_OWNED_MISSION',version:VERSION},403) };
+      }
+    } else {
+      const mission = await env.DB.prepare('SELECT id,client_id,intervenant_id FROM missions WHERE id=? AND intervenant_id=? LIMIT 1')
+        .bind(String(body.mission_id), intervenant.id).first();
+      if (!mission || (body.client_id && String(body.client_id) !== String(mission.client_id))) {
+        return { ok: false, response: json({ok:false,error:'MISSION_NOT_ASSIGNED',version:VERSION},403) };
+      }
+      body.client_id = mission.client_id;
+    }
+    body.company_id = null;
+    return { ok: true, body };
+  }
+  return { ok: false, response: json({ok:false,error:'FORBIDDEN',version:VERSION},403) };
+}
+
 async function createOperationalCase(request, env) {
   const gate=await requireAuthRole(request,env,['gerante','client','intervenant','entreprise']); if(gate.error)return gate.error;
   const body=await readJson(request)||{};
+  const scoped = await enforceCaseActorScope(env, gate.auth.user, body);
+  if (!scoped.ok) return scoped.response;
   const caseType=clean(body.case_type); if(!caseType)return json({ok:false,error:'CASE_TYPE_REQUIRED',version:VERSION},400);
   const phase=String(await getSetting(env,'project_phase','TEST')).toUpperCase();
   const impact=String(body.impact_level||'LOW').toUpperCase();
@@ -2111,7 +2164,10 @@ async function financeSummary(request, env) {
 
 async function complaintCreate(request, env) {
   const gate=await requireAuthRole(request,env,['gerante','client','entreprise']); if(gate.error)return gate.error;
-  const b=await readJson(request)||{};if(!b.category)return json({ok:false,error:'CATEGORY_REQUIRED',version:VERSION},400);
+  const b=await readJson(request)||{};
+  const scoped = await enforceCaseActorScope(env, gate.auth.user, b);
+  if (!scoped.ok) return scoped.response;
+  if(!b.category)return json({ok:false,error:'CATEGORY_REQUIRED',version:VERSION},400);
   const id=crypto.randomUUID();await env.DB.prepare(`INSERT INTO complaints(id,client_type,client_id,company_id,mission_id,category,severity,description) VALUES(?,?,?,?,?,?,?,?)`).bind(id,String(b.client_type||'B2C'),b.client_id||null,b.company_id||null,b.mission_id||null,b.category,String(b.severity||'LOW'),b.description||null).run();
   const caseType=SIMPLE_CASES.has(b.category)?b.category:'reclamation_client';
   const fakeReq=new Request(request.url,{method:'POST',headers:request.headers,body:JSON.stringify({case_type:caseType,client_id:b.client_id,company_id:b.company_id,mission_id:b.mission_id,description:b.description,impact_level:b.severity||'LOW',context:{complaint_id:id}})});
