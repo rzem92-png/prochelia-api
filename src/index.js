@@ -1022,19 +1022,23 @@ async function openPaymentDispute(request, env) {
   const auth=await getSessionUser(request,env);
   if(!requireRole(auth,['client','gerante'])) return json({ok:false,error:auth?.user?'FORBIDDEN':'UNAUTHENTICATED',version:VERSION},auth?.user?403:401);
   await ensurePaymentSchema(env);
-  const body=await readJson(request), missionId=clean(body?.mission_id), reason=clean(body?.reason), amount=moneyCents(body?.amount_eur);
-  if(!missionId||!reason||amount===null) return json({ok:false,error:'INVALID_DISPUTE',version:VERSION},400);
-  const tx=await env.DB.prepare(`SELECT * FROM payment_transactions WHERE mission_id=? ORDER BY created_at DESC LIMIT 1`).bind(missionId).first();
-  if(!tx) return json({ok:false,error:'PAYMENT_NOT_FOUND_FOR_MISSION',version:VERSION},404);
-  if(auth.user.role==='client'){
+  const parsed=await readJsonLimited(request,8192);
+  if(!parsed.ok) return json({ok:false,error:parsed.error==='PAYLOAD_TOO_LARGE'?'PAYLOAD_TOO_LARGE':'INVALID_JSON',version:VERSION},parsed.error==='PAYLOAD_TOO_LARGE'?413:400);
+  const body=parsed.value, missionId=clean(body?.mission_id), reason=clean(body?.reason), amount=moneyCents(body?.amount_eur);
+  if(!missionId||!reason||reason.length>2000||amount===null) return json({ok:false,error:'INVALID_DISPUTE',version:VERSION},400);
+  const tx=await env.DB.prepare(`SELECT * FROM payment_transactions WHERE mission_id=? AND status='paid' ORDER BY created_at DESC LIMIT 1`).bind(missionId).first();
+  if(!tx) return json({ok:false,error:'PAYMENT_NOT_FOUND_OR_NOT_DISPUTABLE',version:VERSION},404);
+  if(String(auth.user.role||'').toUpperCase()==='CLIENT'){
     const own=await env.DB.prepare('SELECT id FROM clients WHERE user_id=? LIMIT 1').bind(auth.user.id).first();
     if(!own || String(tx.client_id)!==String(own.id)) return json({ok:false,error:'FORBIDDEN',version:VERSION},403);
   }
   if(amount<=0 || amount>Number(tx.gross_cents||0)) return json({ok:false,error:'INVALID_DISPUTE_AMOUNT',version:VERSION},400);
-  if(tx.status!=='paid') return json({ok:false,error:'PAYMENT_NOT_DISPUTABLE',version:VERSION},409);
-  if(tx.status==='paid') await env.DB.prepare(`UPDATE payment_transactions SET status='held',updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(tx.id).run();
   const id=crypto.randomUUID();
-  await env.DB.prepare(`INSERT INTO payment_disputes (id,mission_id,transaction_id,client_id,intervenant_id,status,reason,amount_cents) VALUES (?,?,?,?,?,?,?,?)`).bind(id,missionId,tx.id,tx.client_id,tx.intervenant_id,'open',reason,amount).run();
+  const results=await env.DB.batch([
+    env.DB.prepare(`UPDATE payment_transactions SET status='held',updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='paid'`).bind(tx.id),
+    env.DB.prepare(`INSERT INTO payment_disputes (id,mission_id,transaction_id,client_id,intervenant_id,status,reason,amount_cents) VALUES (?,?,?,?,?,?,?,?)`).bind(id,missionId,tx.id,tx.client_id,tx.intervenant_id,'open',reason,amount)
+  ]);
+  if(Number(results?.[0]?.meta?.changes||0)!==1) return json({ok:false,error:'PAYMENT_STATE_CONFLICT',version:VERSION},409);
   await paymentAudit(env,'PAYMENT_DISPUTE_OPENED',{transaction_id:tx.id,mission_id:missionId,user_id:auth.user.id,metadata:{amount_cents:amount,reason}},'OK');
   return json({ok:true,version:VERSION,dispute_id:id,status:'open',payment_status:'held'},201);
 }
