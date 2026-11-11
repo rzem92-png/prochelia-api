@@ -2961,10 +2961,75 @@ async function handleCommercialRecruitment(request,env){
   return null;
 }
 
+
+/**
+ * Read only the authenticated user's own profile, or a manager's paginated
+ * directory. Company access is deliberately denied until a verified
+ * company-membership relation exists in the schema.
+ */
+async function profileDirectory(request, env, kind) {
+  if (request.method !== 'GET') {
+    return json({ ok:false, error:'METHOD_NOT_ALLOWED', version:VERSION },405);
+  }
+  if (!env?.DB) return json({ ok:false, error:'DATABASE_UNAVAILABLE', version:VERSION },503);
+
+  const auth = await getSessionUser(request, env).catch(() => null);
+  if (!auth?.user?.id) return json({ ok:false, error:'UNAUTHENTICATED', version:VERSION },401);
+
+  const role = String(auth.user.role || '').toLowerCase();
+  const manager = role === 'gerante';
+  const ownRole = kind === 'clients' ? role === 'client' : role === 'intervenant';
+  if (!manager && !ownRole) {
+    return json({ ok:false, error:'FORBIDDEN', version:VERSION },403);
+  }
+
+  const url = new URL(request.url);
+  const rawLimit = url.searchParams.get('limit');
+  const rawOffset = url.searchParams.get('offset');
+  const limit = rawLimit === null ? 50 : Number(rawLimit);
+  const offset = rawOffset === null ? 0 : Number(rawOffset);
+  if (!Number.isInteger(limit) || limit < 1 || limit > 100 ||
+      !Number.isInteger(offset) || offset < 0 || offset > 1000000) {
+    return json({ ok:false, error:'INVALID_PAGINATION', version:VERSION },400);
+  }
+
+  const table = kind === 'clients' ? 'clients' : 'intervenants';
+  const projection = kind === 'clients'
+    ? 'p.id, u.first_name, u.last_name, p.city, u.status AS account_status'
+    : 'p.id, u.first_name, u.last_name, p.service_area, p.professional_status, p.validation_status';
+  const where = manager ? '' : 'WHERE p.user_id = ?';
+  const binds = manager ? [limit, offset] : [auth.user.id, limit, offset];
+
+  try {
+    const rows = await env.DB.prepare(
+      `SELECT ${projection}
+         FROM ${table} p
+         JOIN users u ON u.id = p.user_id
+         ${where}
+        ORDER BY p.created_at DESC, p.id ASC
+        LIMIT ? OFFSET ?`
+    ).bind(...binds).all();
+    const count = await env.DB.prepare(
+      `SELECT COUNT(*) AS total FROM ${table} p ${where}`
+    ).bind(...(manager ? [] : [auth.user.id])).first();
+    return json({
+      ok:true, version:VERSION, items:rows.results || [],
+      pagination:{ limit, offset, total:Number(count?.total || 0) }
+    },200,{'cache-control':'no-store'});
+  } catch (_) {
+    // A missing profile migration is an unavailable feature, never a reason
+    // to fall back to localStorage or disclose raw SQL/schema errors.
+    return json({ ok:false, error:'PROFILE_SCHEMA_UNAVAILABLE', version:VERSION },503);
+  }
+}
+
 async function handle(request,env){
   try {
     if(isMutatingMethod(request.method) && !securityOriginAllowed(request,env)) return json({ok:false,error:'ORIGIN_NOT_ALLOWED',version:VERSION},403);
     const url=new URL(request.url);
+    if (url.pathname === '/api/clients') return profileDirectory(request,env,'clients');
+    if (url.pathname === '/api/intervenants') return profileDirectory(request,env,'intervenants');
+
     // Fail closed before any schema helper touches D1: unauthenticated callers
     // must not use mission validation as an existence oracle for private IDs.
     if (url.pathname === '/api/missions/validate') {
