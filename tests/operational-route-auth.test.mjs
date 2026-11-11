@@ -149,3 +149,29 @@ test("public service catalogue excludes inactive and internal fields", () => {
   assert.match(handler, /SELECT id,name,description FROM prestations WHERE active=1/);
   assert.doesNotMatch(handler, /SELECT \* FROM prestations/);
 });
+
+test("finance dashboard and exports redact margin and counterparty fields by role", () => {
+  const rowsStart = indexSource.indexOf("function financePublicPaymentRows");
+  const summaryStart = indexSource.indexOf("function financePublicSummary", rowsStart);
+  const solutionStart = indexSource.indexOf("function financeProblemSolution", summaryStart);
+  const dashboardStart = indexSource.indexOf("async function financeDashboard");
+  const exportStart = indexSource.indexOf("async function financeExport", dashboardStart);
+  const entryStart = indexSource.indexOf("async function financeEntryCreate", exportStart);
+  assert.ok(rowsStart >= 0 && summaryStart > rowsStart && solutionStart > summaryStart);
+  assert.ok(dashboardStart >= 0 && exportStart > dashboardStart && entryStart > exportStart);
+  const rowView = indexSource.slice(rowsStart, summaryStart);
+  const summaryView = indexSource.slice(summaryStart, solutionStart);
+  const dashboard = indexSource.slice(dashboardStart, exportStart);
+  const exportHandler = indexSource.slice(exportStart, entryStart);
+  assert.match(rowView, /role==='CLIENT'\|\|role==='CLIENT_SOCIAL'/);
+  assert.match(rowView, /net_intervenant_cents:x\.net_intervenant_cents/);
+  assert.doesNotMatch(rowView, /provider_payment_id/);
+  assert.match(summaryView, /platform_net_cents/);
+  assert.match(summaryView, /net_intervenant_eur/);
+  assert.match(dashboard, /financePublicSummary\(/);
+  assert.match(dashboard, /financePublicPaymentRows\(/);
+  assert.match(exportHandler, /role==='INTERVENANT'/);
+  assert.match(exportHandler, /Votre rémunération EUR/);
+  assert.match(exportHandler, /const header=/);
+  assert.match(exportHandler, /role==='CLIENT'\|\|role==='CLIENT_SOCIAL'/);
+});
