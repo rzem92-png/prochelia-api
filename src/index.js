@@ -3585,7 +3585,6 @@ async function handle(request,env){
       '/api/journal',
       '/api/cases/approve',
       '/api/metiers/suggest',
-      '/api/settings/phase',
       '/api/settings/phase'
     ]);
     const requiresAdminSession =
