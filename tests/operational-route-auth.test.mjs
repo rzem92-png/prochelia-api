@@ -221,7 +221,8 @@ test("consolidated schema writes occur only after route authorization", () => {
   ]) {
     const start = indexSource.indexOf("async function " + name + "(");
     assert.ok(start >= 0, name + " handler exists");
-    const section = indexSource.slice(start, start + 900);
+    const next = indexSource.indexOf("\\nasync function ", start + 1);
+    const section = indexSource.slice(start, next > start ? next : indexSource.length);
     const auth = section.indexOf("requireAuthRole(");
     const schema = section.indexOf("ensureConsolidatedSchema(");
     assert.ok(auth >= 0 && schema > auth, name + " must authorize before schema writes");
