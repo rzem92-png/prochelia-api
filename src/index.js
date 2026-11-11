@@ -222,6 +222,64 @@ async function coreAccountsSchema(env) {
   });
 }
 
+async function listClients(request, env) {
+  const auth = await getSessionUser(request, env);
+  if (!requireRole(auth, ['gerante'])) {
+    return json({ok:false,error:auth?.user?'FORBIDDEN':'UNAUTHENTICATED',version:VERSION},auth?.user?403:401);
+  }
+  const result = await env.DB.prepare(`
+    SELECT c.id,u.first_name,u.last_name,u.status AS account_status,c.city
+      FROM clients c JOIN users u ON u.id=c.user_id
+     ORDER BY u.last_name,u.first_name LIMIT 500
+  `).all();
+  return json({ok:true,version:VERSION,items:result.results||[]},200);
+}
+
+async function listIntervenants(request, env) {
+  const auth = await getSessionUser(request, env);
+  if (!requireRole(auth, ['gerante'])) {
+    return json({ok:false,error:auth?.user?'FORBIDDEN':'UNAUTHENTICATED',version:VERSION},auth?.user?403:401);
+  }
+  const result = await env.DB.prepare(`
+    SELECT i.id,u.first_name,u.last_name,u.status AS account_status,
+           i.service_area,i.professional_status,i.validation_status
+      FROM intervenants i JOIN users u ON u.id=i.user_id
+     ORDER BY u.last_name,u.first_name LIMIT 500
+  `).all();
+  return json({ok:true,version:VERSION,items:result.results||[]},200);
+}
+
+async function listMissions(request, env) {
+  const auth = await getSessionUser(request, env);
+  if (!auth) return json({ok:false,error:'UNAUTHENTICATED',version:VERSION},401);
+  const role = auth.user.role;
+  let where = '';
+  let params = [];
+  let financialColumns = 'm.price_client,m.price_intervenant,m.commission';
+  if (role === 'gerante') {
+    where = '1=1';
+  } else if (role === 'client') {
+    const client = await env.DB.prepare('SELECT id FROM clients WHERE user_id=? LIMIT 1').bind(auth.user.id).first();
+    if (!client) return json({ok:false,error:'CLIENT_PROFILE_NOT_FOUND',version:VERSION},404);
+    where = 'm.client_id=?'; params = [client.id];
+    financialColumns = 'm.price_client';
+  } else if (role === 'intervenant') {
+    const intervenant = await env.DB.prepare('SELECT id FROM intervenants WHERE user_id=? LIMIT 1').bind(auth.user.id).first();
+    if (!intervenant) return json({ok:false,error:'INTERVENANT_PROFILE_NOT_FOUND',version:VERSION},404);
+    where = 'm.intervenant_id=?'; params = [intervenant.id];
+    financialColumns = 'm.price_intervenant';
+  } else {
+    return json({ok:false,error:'FORBIDDEN',version:VERSION},403);
+  }
+  const result = await env.DB.prepare(`
+    SELECT m.id,m.client_id,m.intervenant_id,m.prestation_id,p.name AS prestation_name,
+           m.start_at,m.end_at,m.address,${financialColumns},m.status,m.created_at,m.updated_at
+      FROM missions m JOIN prestations p ON p.id=m.prestation_id
+     WHERE ${where} ORDER BY m.start_at DESC LIMIT 500
+  `).bind(...params).all();
+  return json({ok:true,version:VERSION,items:result.results||[]},200);
+}
+
 async function missionsSchema(env) {
   if (!env.DB) return json({ ok: false, database: false, version: VERSION }, 503);
   const row = await env.DB.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='missions';").first();
@@ -1566,6 +1624,18 @@ async function handleBase(request, env) {
     // ownership/participation checks. Otherwise this endpoint can be used as
     // an unauthenticated oracle for client, provider and service IDs.
     return json({ ok: false, error: 'AUTHENTICATED_VALIDATION_REQUIRED', version: VERSION, write_enabled: false }, 403);
+  }
+
+  if (url.pathname === '/api/clients') {
+    if (request.method !== 'GET') return json({ok:false,error:'METHOD_NOT_ALLOWED',version:VERSION},405);
+    return listClients(request, env);
+  }
+  if (url.pathname === '/api/intervenants') {
+    if (request.method !== 'GET') return json({ok:false,error:'METHOD_NOT_ALLOWED',version:VERSION},405);
+    return listIntervenants(request, env);
+  }
+  if (url.pathname === '/api/missions' && request.method === 'GET') {
+    return listMissions(request, env);
   }
 
   if (url.pathname === '/api/missions') {
