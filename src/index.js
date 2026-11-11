@@ -989,6 +989,8 @@ async function paymentWebhook(request, env) {
     if(tx){
       const statusMap={payment_succeeded:'paid',charge_succeeded:'paid',payment_failed:'failed',charge_failed:'failed',payment_refunded:'refunded'};
       const newStatus=statusMap[type];
+      if(newStatus==='refunded')
+        return json({ok:false,error:'REFUND_LEDGER_FLOW_NOT_READY',version:VERSION},503);
       if(newStatus && !['paid','failed','refunded'].includes(String(tx.status||'').toLowerCase())){
         if(newStatus==='paid') {
           // A paid event must be credited through the immutable, idempotent wallet ledger.
