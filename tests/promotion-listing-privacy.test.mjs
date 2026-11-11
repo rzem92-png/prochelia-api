@@ -15,7 +15,7 @@ test("only the manager can request the internal promotion directory", () => {
 test("client and company see only active current offers for their audience", () => {
   assert.match(handler, /const audience=role==='entreprise'\?'B2B':'B2C'/);
   assert.match(handler, /WHERE status='ACTIVE'/);
-  assert.match(handler, /starts_at<=CURRENT_TIMESTAMP AND ends_at>CURRENT_TIMESTAMP/);
+  assert.match(handler, /datetime\(starts_at\)<=CURRENT_TIMESTAMP AND datetime\(ends_at\)>CURRENT_TIMESTAMP/);
   assert.match(handler, /client_type IN \('ALL',\?\)/);
 });
 
