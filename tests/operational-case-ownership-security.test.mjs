@@ -48,3 +48,21 @@ test("outbox execution claims pending work once and does not replay completed ef
   assert.match(h, /ACTION_ALREADY_CLAIMED_OR_FINAL/);
   assert.match(h, /idempotent_replay:true/);
 });
+
+
+test("operational outbox rejects idempotency-key reuse with different action payloads", () => {
+  const start = source.indexOf("async function queueAction(");
+  const end = source.indexOf("\n\nasync function executeQueuedAction(", start);
+  const h = source.slice(start, end);
+  assert.match(h, /idempotency_conflict:true/);
+  assert.match(h, /priorPayload===payloadJson/);
+  assert.match(h, /String\(existing\.action_type\)===String\(actionType\)/);
+});
+
+test("failed operational side effects are not blindly retried", () => {
+  const start = source.indexOf("async function executeQueuedAction(");
+  const end = source.indexOf("\n\nasync function operationalExecute(", start);
+  const h = source.slice(start, end);
+  assert.match(h, /status='PENDING'/);
+  assert.doesNotMatch(h, /status IN \('PENDING','FAILED'\)/);
+});
