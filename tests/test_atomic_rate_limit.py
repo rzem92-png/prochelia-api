@@ -15,6 +15,13 @@ class AtomicRateLimitTests(unittest.TestCase):
         self.assertNotIn("request.headers.get('X-Forwarded-For')", source)
         self.assertNotIn('request.headers.get("X-Forwarded-For")', source)
 
+
+    def test_cookie_authenticated_mutations_require_origin(self):
+        source = SOURCE.read_text(encoding="utf-8")
+        guard = source[source.index("function securityOriginAllowed"):source.index("async function ensureCommercialRecruitmentSchema")]
+        self.assertIn("if(!origin) return !getCookie(request,SESSION_COOKIE);", guard)
+        self.assertIn("getCookie(request,SESSION_COOKIE)", guard)
+
     def test_upsert_counts_every_request_without_lost_updates(self):
         db = sqlite3.connect(":memory:")
         try:
