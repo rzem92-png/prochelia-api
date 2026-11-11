@@ -33,3 +33,13 @@ test("client payment disputes require ownership and cannot exceed paid transacti
   assert.match(h, /amount>Number\(tx\.gross_cents\|\|0\)/);
   assert.match(h, /tx\.status!=='paid'/);
 });
+
+test("manual finance actions cannot fabricate PSP settlement or refund", () => {
+  const finalize = handler("finalizeMissionPayment");
+  assert.match(finalize, /PSP_SERVER_CONFIRMATION_REQUIRED/);
+  assert.match(finalize, /if\(\['paid','refunded'\]\.includes\(outcome\)\)/);
+  const resolve = handler("paymentAdminResolve");
+  assert.match(resolve, /status='resolution_pending'/);
+  assert.match(resolve, /financial_status_unchanged:true/);
+  assert.doesNotMatch(resolve, /SET status=\?,updated_at=CURRENT_TIMESTAMP WHERE id=\?/);
+});
