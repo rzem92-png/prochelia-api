@@ -846,7 +846,9 @@ async function paymentOnboard(request, env) {
   await ensurePaymentSchema(env);
   const body = await readJson(request);
   const provider = paymentProvider(env);
-  const accountId = clean(body?.provider_account_id) || null;
+  // Provider account identifiers must come from a verified server-side PSP
+  // onboarding response, never from a browser-supplied value.
+  const accountId = null;
   const existing = await env.DB.prepare('SELECT * FROM payment_accounts WHERE user_id=? LIMIT 1').bind(auth.user.id).first();
   if (existing) return json({ok:true,version:VERSION,account:existing,action:'REUSE_EXISTING'},200);
   const id=crypto.randomUUID();
@@ -2378,11 +2380,26 @@ async function scoreClients(request, env) {
 async function loyaltyUpdate(request, env) {
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
   await ensureOperationalSchema(env);
-  const b=await readJson(request)||{}; if(!b.client_id&&!b.company_id)return json({ok:false,error:'CLIENT_OR_COMPANY_REQUIRED',version:VERSION},400);
-  const points=Math.max(-100000,Math.min(100000,Number(b.points||0)));
+  const parsed=await readJsonLimited(request,8192);
+  if(!parsed.ok)return json({ok:false,error:parsed.error==='PAYLOAD_TOO_LARGE'?'PAYLOAD_TOO_LARGE':'INVALID_JSON',version:VERSION},parsed.error==='PAYLOAD_TOO_LARGE'?413:400);
+  const b=parsed.value;
+  if(!b || typeof b!=='object' || Array.isArray(b))return json({ok:false,error:'INVALID_BODY',version:VERSION},400);
+  if(Boolean(b.client_id)===Boolean(b.company_id))return json({ok:false,error:'EXACTLY_ONE_LOYALTY_OWNER_REQUIRED',version:VERSION},400);
+  if(b.points===undefined || !Number.isInteger(Number(b.points)) || Number(b.points)<-100000 || Number(b.points)>100000)return json({ok:false,error:'INVALID_POINTS',version:VERSION},400);
+  const amountCents=b.amount_cents===undefined?0:Number(b.amount_cents);
+  if(!Number.isSafeInteger(amountCents) || amountCents<0 || amountCents>1000000000)return json({ok:false,error:'INVALID_AMOUNT_CENTS',version:VERSION},400);
+  const eventType=String(b.event_type||'MANUAL').toUpperCase();
+  if(!['MANUAL','PURCHASE','MISSION_COMPLETED','ADJUSTMENT','REVERSAL'].includes(eventType))return json({ok:false,error:'INVALID_EVENT_TYPE',version:VERSION},400);
+  if(b.client_id){
+    if(typeof b.client_id!=='string' || b.client_id.length>128 || !await env.DB.prepare('SELECT id FROM clients WHERE id=? LIMIT 1').bind(b.client_id).first())return json({ok:false,error:'CLIENT_NOT_FOUND',version:VERSION},404);
+  }
+  if(b.company_id){
+    if(typeof b.company_id!=='string' || b.company_id.length>128 || !await env.DB.prepare('SELECT id FROM business_profiles WHERE id=? LIMIT 1').bind(b.company_id).first())return json({ok:false,error:'COMPANY_NOT_FOUND',version:VERSION},404);
+  }
+  const points=Number(b.points);
   const id=crypto.randomUUID();
   await env.DB.prepare(`INSERT INTO loyalty_events(id,client_id,company_id,event_type,points,amount_cents,metadata_json) VALUES(?,?,?,?,?,?,?)`)
-    .bind(id,b.client_id||null,b.company_id||null,b.event_type||'MANUAL',points,Number(b.amount_cents||0),JSON.stringify(b)).run();
+    .bind(id,b.client_id||null,b.company_id||null,eventType,points,amountCents,JSON.stringify({source:'manager_manual_adjustment'})).run();
   const existing=await env.DB.prepare('SELECT * FROM loyalty_balances WHERE client_id IS ? AND company_id IS ? LIMIT 1').bind(b.client_id||null,b.company_id||null).first();
   const total=Number(existing?.points||0)+points;
   const tier=total>=1000?'PLATINUM':total>=500?'GOLD':total>=200?'SILVER':'STANDARD';
