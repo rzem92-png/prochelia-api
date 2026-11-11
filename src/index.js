@@ -971,31 +971,55 @@ async function paymentWebhook(request, env) {
   const raw=await request.text();
   if(!(await verifyWebhookSignature(request,env,raw))) return json({ok:false,error:'INVALID_WEBHOOK_SIGNATURE',version:VERSION},401);
   let event; try{event=JSON.parse(raw)}catch{return json({ok:false,error:'INVALID_WEBHOOK_JSON',version:VERSION},400);}
-  const provider=clean(event?.provider)||paymentProvider(env), eventId=clean(event?.id), type=clean(event?.type);
-  if(!eventId||!type) return json({ok:false,error:'INVALID_WEBHOOK_EVENT',version:VERSION},400);
+  const provider=paymentProvider(env), suppliedProvider=clean(event?.provider), eventId=clean(event?.id), type=clean(event?.type);
+  if((suppliedProvider && suppliedProvider!==provider)||!eventId||eventId.length>200||!type||type.length>120)
+    return json({ok:false,error:'INVALID_WEBHOOK_EVENT',version:VERSION},400);
   const payloadHash=await sha256Base64url(raw);
   const inserted=await env.DB.prepare(`INSERT OR IGNORE INTO payment_webhook_events (id,provider,event_id,event_type,signature_valid,payload_hash) VALUES (?,?,?,?,1,?)`).bind(crypto.randomUUID(),provider,eventId,type,payloadHash).run();
-  if(!inserted.meta?.changes) return json({ok:true,version:VERSION,duplicate:true,event_id:eventId},200);
+  if(!inserted.meta?.changes) {
+    const prior=await env.DB.prepare('SELECT processed,payload_hash FROM payment_webhook_events WHERE provider=? AND event_id=? LIMIT 1').bind(provider,eventId).first();
+    if(!prior || String(prior.payload_hash||'')!==payloadHash)
+      return json({ok:false,error:'WEBHOOK_EVENT_ID_CONFLICT',version:VERSION},409);
+    if(Number(prior.processed)===1) return json({ok:true,version:VERSION,duplicate:true,event_id:eventId},200);
+    // An unprocessed event is retried safely; do not discard it as a duplicate.
+  }
   const txId=clean(event?.data?.transaction_id), payoutId=clean(event?.data?.payout_id);
   if(txId){
     const tx=await env.DB.prepare('SELECT * FROM payment_transactions WHERE id=? LIMIT 1').bind(txId).first();
     if(tx){
       const statusMap={payment_succeeded:'paid',charge_succeeded:'paid',payment_failed:'failed',charge_failed:'failed',payment_refunded:'refunded'};
       const newStatus=statusMap[type];
-      if(newStatus){
-        const alreadyFinal = ['paid','failed','refunded'].includes(tx.status);
-        if(!alreadyFinal){
-          await env.DB.prepare('UPDATE payment_transactions SET status=?,provider_payment_id=COALESCE(?,provider_payment_id),updated_at=CURRENT_TIMESTAMP WHERE id=?').bind(newStatus,clean(event?.data?.provider_payment_id)||null,txId).run();
-          if(newStatus==='paid'){
-            const providerProfile=await env.DB.prepare('SELECT user_id FROM intervenants WHERE id=? LIMIT 1').bind(tx.intervenant_id).first();
-            if(!providerProfile?.user_id) {
-              await paymentAudit(env,'PSP_PAYMENT_PAID_WALLET_ACCOUNT_MISSING',{transaction_id:txId,mission_id:tx.mission_id,metadata:{intervenant_id:tx.intervenant_id}},'ERROR');
-            } else {
-              const wallet=await env.DB.prepare('SELECT * FROM wallets WHERE user_id=? LIMIT 1').bind(providerProfile.user_id).first();
-              if(wallet) await env.DB.prepare('UPDATE wallets SET available_cents=available_cents+?,updated_at=CURRENT_TIMESTAMP WHERE id=?').bind(tx.net_intervenant_cents,wallet.id).run();
-              else await paymentAudit(env,'PSP_PAYMENT_PAID_WALLET_MISSING',{transaction_id:txId,mission_id:tx.mission_id,metadata:{intervenant_user_id:providerProfile.user_id}},'ERROR');
-            }
+      if(newStatus && !['paid','failed','refunded'].includes(String(tx.status||'').toLowerCase())){
+        if(newStatus==='paid') {
+          // A paid event must be credited through the immutable, idempotent wallet ledger.
+          // If the ledger migration is absent, leave the event unprocessed for safe retry.
+          if(!await tableExists(env,'payment_wallet_ledger'))
+            return json({ok:false,error:'WALLET_LEDGER_NOT_READY',version:VERSION},503);
+          const ledgerTriggers=await env.DB.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE type='trigger' AND name IN ('trg_payment_wallet_ledger_apply','trg_payment_wallet_ledger_require_wallet','trg_payment_wallet_ledger_guard_balances')").first();
+          if(Number(ledgerTriggers?.n||0)!==3)
+            return json({ok:false,error:'WALLET_LEDGER_GUARDS_NOT_READY',version:VERSION},503);
+          const providerProfile=await env.DB.prepare('SELECT user_id FROM intervenants WHERE id=? LIMIT 1').bind(tx.intervenant_id).first();
+          if(!providerProfile?.user_id)
+            return json({ok:false,error:'INTERVENANT_ACCOUNT_NOT_FOUND',version:VERSION},409);
+          const ledgerKey=`payment:${txId}:paid`;
+          const results=await env.DB.batch([
+            env.DB.prepare(`INSERT OR IGNORE INTO payment_wallet_ledger
+              (id,idempotency_key,transaction_id,payout_id,user_id,entry_type,available_delta_cents,pending_delta_cents,reserved_delta_cents,paid_delta_cents,currency,metadata_json)
+              SELECT ?,?,?,NULL,i.user_id,'MISSION_EARNING',?,0,0,0,?,?
+              FROM intervenants i JOIN payment_transactions t ON t.intervenant_id=i.id
+              WHERE t.id=? AND t.status NOT IN ('paid','failed','refunded') AND t.currency='EUR'`)
+              .bind(crypto.randomUUID(),ledgerKey,txId,Number(tx.net_intervenant_cents),String(tx.currency||'EUR'),JSON.stringify({provider,event_id:eventId}),txId),
+            env.DB.prepare(`UPDATE payment_transactions SET status='paid',provider_payment_id=COALESCE(?,provider_payment_id),updated_at=CURRENT_TIMESTAMP
+              WHERE id=? AND status NOT IN ('paid','failed','refunded')`).bind(clean(event?.data?.provider_payment_id)||null,txId)
+          ]);
+          if(Number(results?.[1]?.meta?.changes||0)!==1) {
+            const current=await env.DB.prepare('SELECT status FROM payment_transactions WHERE id=? LIMIT 1').bind(txId).first();
+            if(!['paid','failed','refunded'].includes(String(current?.status||'').toLowerCase()))
+              return json({ok:false,error:'PAYMENT_STATE_CONFLICT',version:VERSION},409);
           }
+        } else {
+          await env.DB.prepare(`UPDATE payment_transactions SET status=?,provider_payment_id=COALESCE(?,provider_payment_id),updated_at=CURRENT_TIMESTAMP
+            WHERE id=? AND status NOT IN ('paid','failed','refunded')`).bind(newStatus,clean(event?.data?.provider_payment_id)||null,txId).run();
         }
       }
     }
