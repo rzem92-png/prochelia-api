@@ -1956,7 +1956,7 @@ async function promotionList(request, env) {
       discount_type,discount_value,min_amount_cents,max_discount_cents,starts_at,ends_at
     FROM promotions
     WHERE status='ACTIVE'
-      AND starts_at<=CURRENT_TIMESTAMP AND ends_at>CURRENT_TIMESTAMP
+      AND datetime(starts_at)<=CURRENT_TIMESTAMP AND datetime(ends_at)>CURRENT_TIMESTAMP
       AND client_type IN ('ALL',?)
     ORDER BY starts_at ASC LIMIT 100`).bind(audience).all();
   return json({ok:true,version:VERSION,promotions:r.results||[]},200,{'cache-control':'no-store'});
