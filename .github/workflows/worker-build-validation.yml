@@ -15,6 +15,7 @@ on:
       - "src/**"
       - "tests/stripe-connect-preprod.test.mjs"
       - "tests/production-release-gate.test.mjs"
+      - "tests/operational-route-auth.test.mjs"
       - "wrangler.jsonc"
       - ".github/workflows/worker-build-validation.yml"
 
