@@ -1959,7 +1959,7 @@ async function promotionList(request, env) {
       AND starts_at<=CURRENT_TIMESTAMP AND ends_at>CURRENT_TIMESTAMP
       AND client_type IN ('ALL',?)
     ORDER BY starts_at ASC LIMIT 100`).bind(audience).all();
-  return json({ok:true,version:VERSION,promotions:r.results||[]},{headers:{'cache-control':'no-store'}});
+  return json({ok:true,version:VERSION,promotions:r.results||[]},200,{'cache-control':'no-store'});
 }
 
 async function activatePromotion(request, env) {
