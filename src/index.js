@@ -3783,7 +3783,7 @@ async function financeProblemResolve(request,env) {
   // a newer decision after the initial ownership and state read.
   const update=await env.DB.prepare(`UPDATE finance_resolution_cases
     SET status=?,resolution=?,resolved_at=CURRENT_TIMESTAMP
-    WHERE id=? AND status=? AND resolved_at IS NULL`).bind(status,resolution,id,row.status).run();
+    WHERE id=? AND status=?`).bind(status,resolution,id,row.status).run();
   if(Number(update?.meta?.changes||0)!==1)
     return json({ok:false,error:'FINANCE_CASE_STATE_CHANGED',version:VERSION},409);
   await journal(env,auth.user.role,auth.user.id,'FINANCE_PROBLEM_RESOLVE','finance_resolution_cases',id,status,{approved});
