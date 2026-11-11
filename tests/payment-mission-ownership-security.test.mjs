@@ -43,3 +43,10 @@ test("manual finance actions cannot fabricate PSP settlement or refund", () => {
   assert.match(resolve, /financial_status_unchanged:true/);
   assert.doesNotMatch(resolve, /SET status=\?,updated_at=CURRENT_TIMESTAMP WHERE id=\?/);
 });
+
+test("verified PSP webhook resolves provider profile to its user before crediting wallet", () => {
+  const webhook = handler("paymentWebhook");
+  assert.match(webhook, /SELECT user_id FROM intervenants WHERE id=\? LIMIT 1/);
+  assert.match(webhook, /bind\(providerProfile\.user_id\)/);
+  assert.doesNotMatch(webhook, /bind\(tx\.intervenant_id\)\.first\(\)/);
+});
