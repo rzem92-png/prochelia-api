@@ -34,3 +34,23 @@ test("V7 route failures never disclose internal exception messages", () => {
   assert.match(routesSource, /error: "INTERNAL_ERROR"/);
   assert.doesNotMatch(routesSource, /error:\s*error\?\.message/);
 });
+
+test("client and provider case creation is bound to the authenticated profile and mission", () => {
+  const scopeStart = indexSource.indexOf("async function enforceCaseActorScope");
+  const scopeEnd = indexSource.indexOf("async function createOperationalCase", scopeStart);
+  assert.ok(scopeStart >= 0 && scopeEnd > scopeStart);
+  const scope = indexSource.slice(scopeStart, scopeEnd);
+  assert.match(scope, /SELECT id FROM clients WHERE user_id=\?/);
+  assert.match(scope, /SELECT id FROM intervenants WHERE user_id=\?/);
+  assert.match(scope, /WHERE id=\? AND client_id=\?/);
+  assert.match(scope, /WHERE id=\? AND intervenant_id=\?/);
+  assert.match(scope, /COMPANY_SCOPE_NOT_CONFIGURED/);
+  const caseStart = indexSource.indexOf("async function createOperationalCase");
+  const caseEnd = indexSource.indexOf("async function getTableColumns", caseStart);
+  const handler = indexSource.slice(caseStart, caseEnd);
+  assert.ok(handler.indexOf("enforceCaseActorScope") < handler.indexOf("INSERT INTO operational_cases"));
+  const complaintStart = indexSource.indexOf("async function complaintCreate");
+  const complaintEnd = indexSource.indexOf("\n}", complaintStart);
+  const complaint = indexSource.slice(complaintStart, complaintEnd);
+  assert.ok(complaint.indexOf("enforceCaseActorScope") < complaint.indexOf("INSERT INTO complaints"));
+});
