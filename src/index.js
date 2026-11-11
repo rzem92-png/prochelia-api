@@ -3625,7 +3625,10 @@ async function financeExport(request,env) {
 
 async function financeEntryCreate(request,env) {
   const a=await financeAuth(request,env); if(a.response)return a.response;
-  const {auth}=a, b=await readJson(request)||{};
+  const {auth}=a;
+  if(!['GERANTE','ADMIN','FINANCE'].includes(String(auth.user.role||'').toUpperCase()))
+    return json({ok:false,error:'FINANCE_LEDGER_WRITE_FORBIDDEN',version:VERSION},403);
+  const b=await readJson(request)||{};
   const amount=moneyCents(b.amount_eur);
   const direction=String(b.direction??'IN').trim().toUpperCase();
   const currency=String(b.currency??'EUR').trim().toUpperCase();
