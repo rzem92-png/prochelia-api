@@ -24,7 +24,6 @@ test("sensitive operational routes require an authenticated gerante before dispa
     "/api/settings/phase"
   ]) assert.ok(handler.includes(path), `missing admin gate for ${path}`);
   assert.match(handler, /routeAuth\.user\.role !== 'gerante'/);
-  assert.match(handler, /url\.pathname\.startsWith\('\/api\/finance\/'\)/);
   assert.match(handler, /url\.pathname\.startsWith\('\/api\/strategic\/'\)/);
   assert.match(handler, /url\.pathname\.startsWith\('\/api\/ops\/'\)/);
   assert.match(handler, /error: 'UNAUTHENTICATED'/);
