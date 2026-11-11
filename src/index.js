@@ -687,7 +687,12 @@ async function securityPrepareMission(request, env) {
   const body = await readJson(request);
   const missionId=clean(body?.mission_id), clientId=clean(body?.client_id), intervenantId=clean(body?.intervenant_id);
   if(!missionId||!clientId||!intervenantId) return json({ok:false,error:'MISSION_SECURITY_FIELDS_REQUIRED',version:VERSION},400);
-  const verified = await requireVerifiedIntervenant(env,intervenantId);
+  const mission = await env.DB.prepare('SELECT id,client_id,intervenant_id FROM missions WHERE id=? LIMIT 1').bind(missionId).first();
+  if(!mission || String(mission.client_id)!==clientId || String(mission.intervenant_id||'')!==intervenantId)
+    return json({ok:false,error:'MISSION_PARTICIPANTS_MISMATCH',version:VERSION},403);
+  const providerProfile = await env.DB.prepare('SELECT user_id FROM intervenants WHERE id=? LIMIT 1').bind(intervenantId).first();
+  if(!providerProfile?.user_id) return json({ok:false,error:'INTERVENANT_PROFILE_NOT_FOUND',version:VERSION},404);
+  const verified = await requireVerifiedIntervenant(env,providerProfile.user_id);
   if(!verified) return json({ok:false,error:'INTERVENANT_IDENTITY_NOT_VERIFIED',version:VERSION},409);
   const existing=await env.DB.prepare('SELECT id,status FROM mission_security WHERE mission_id=? LIMIT 1').bind(missionId).first();
   if(existing) return json({ok:false,error:'MISSION_SECURITY_ALREADY_PREPARED',version:VERSION,status:existing.status},409);
@@ -722,9 +727,11 @@ async function securityPresence(request, env) {
   await ensureSecuritySchema(env);
   const identity = await requireVerifiedIntervenant(env, auth.user.id);
   if(!identity) return json({ok:false,error:'INTERVENANT_IDENTITY_NOT_VERIFIED',version:VERSION},403);
+  const providerProfile = await env.DB.prepare('SELECT id FROM intervenants WHERE user_id=? LIMIT 1').bind(auth.user.id).first();
+  if(!providerProfile) return json({ok:false,error:'INTERVENANT_PROFILE_NOT_FOUND',version:VERSION},404);
   const body=await readJson(request), missionId=clean(body?.mission_id);
   if(!missionId) return json({ok:false,error:'MISSION_ID_REQUIRED',version:VERSION},400);
-  const sec=await env.DB.prepare('SELECT * FROM mission_security WHERE mission_id=? AND intervenant_id=? LIMIT 1').bind(missionId,auth.user.id).first();
+  const sec=await env.DB.prepare('SELECT * FROM mission_security WHERE mission_id=? AND intervenant_id=? LIMIT 1').bind(missionId,providerProfile.id).first();
   if(!sec) return json({ok:false,error:'MISSION_NOT_ASSIGNED_OR_NOT_PREPARED',version:VERSION},404);
   const device=await deviceHash(request,auth.user.id);
   await env.DB.prepare(`INSERT INTO trusted_devices (id,user_id,device_hash,expires_at) VALUES (?,?,?,datetime('now',?)) ON CONFLICT(user_id,device_hash) DO UPDATE SET last_seen_at=CURRENT_TIMESTAMP,expires_at=excluded.expires_at,status='active'`)
@@ -740,7 +747,9 @@ async function securityVerifyCode(request, env) {
   await ensureSecuritySchema(env);
   const body=await readJson(request), missionId=clean(body?.mission_id), purpose=clean(body?.purpose), code=clean(body?.code);
   if(!missionId||!['ARRIVAL','END'].includes(purpose)||!/^[0-9]{6}$/.test(code)) return json({ok:false,error:'INVALID_SECURITY_CODE_REQUEST',version:VERSION},400);
-  const sec=await env.DB.prepare('SELECT * FROM mission_security WHERE mission_id=? AND intervenant_id=? LIMIT 1').bind(missionId,auth.user.id).first();
+  const providerProfile = await env.DB.prepare('SELECT id FROM intervenants WHERE user_id=? LIMIT 1').bind(auth.user.id).first();
+  if(!providerProfile) return json({ok:false,error:'INTERVENANT_PROFILE_NOT_FOUND',version:VERSION},404);
+  const sec=await env.DB.prepare('SELECT * FROM mission_security WHERE mission_id=? AND intervenant_id=? LIMIT 1').bind(missionId,providerProfile.id).first();
   if(!sec) return json({ok:false,error:'MISSION_NOT_ASSIGNED_OR_NOT_PREPARED',version:VERSION},404);
   const identity = await requireVerifiedIntervenant(env, auth.user.id);
   if(!identity) {
@@ -798,7 +807,10 @@ async function securityResendCodes(request, env) {
   if(!missionId) return json({ok:false,error:'MISSION_ID_REQUIRED',version:VERSION},400);
   const sec=await env.DB.prepare('SELECT * FROM mission_security WHERE mission_id=? LIMIT 1').bind(missionId).first();
   if(!sec) return json({ok:false,error:'MISSION_SECURITY_NOT_FOUND',version:VERSION},404);
-  if(auth.user.role==='client' && sec.client_id!==auth.user.id) return json({ok:false,error:'FORBIDDEN',version:VERSION},403);
+  if(auth.user.role==='client') {
+    const clientProfile = await env.DB.prepare('SELECT id FROM clients WHERE user_id=? LIMIT 1').bind(auth.user.id).first();
+    if(!clientProfile || String(sec.client_id)!==String(clientProfile.id)) return json({ok:false,error:'FORBIDDEN',version:VERSION},403);
+  }
   if(sec.status==='completed') return json({ok:false,error:'MISSION_ALREADY_COMPLETED',version:VERSION},409);
   return json({ok:false,error:'SECURITY_CODE_RESEND_REQUIRES_REGENERATION_FLOW',version:VERSION,message:'Pour éviter la réutilisation d’un ancien secret, la réémission doit générer de nouveaux codes et invalider les précédents.'},409);
 }
@@ -1444,7 +1456,10 @@ async function openPaymentDispute(request, env) {
   if(!missionId||!reason||amount===null||amount<=0) return json({ok:false,error:'INVALID_DISPUTE',version:VERSION},400);
   const tx=await env.DB.prepare('SELECT * FROM payment_transactions WHERE mission_id=? ORDER BY created_at DESC LIMIT 1').bind(missionId).first();
   if(!tx) return json({ok:false,error:'PAYMENT_NOT_FOUND_FOR_MISSION',version:VERSION},404);
-  if(auth.user.role==='client'&&tx.client_id!==auth.user.id) return json({ok:false,error:'FORBIDDEN',version:VERSION},403);
+  if(auth.user.role==='client') {
+    const clientProfile = await env.DB.prepare('SELECT id FROM clients WHERE user_id=? LIMIT 1').bind(auth.user.id).first();
+    if(!clientProfile || String(tx.client_id)!==String(clientProfile.id)) return json({ok:false,error:'FORBIDDEN',version:VERSION},403);
+  }
   if(amount>Number(tx.gross_cents)) return json({ok:false,error:'DISPUTE_AMOUNT_EXCEEDS_PAYMENT',version:VERSION},400);
   if(!['pending','paid','held'].includes(tx.status)) return json({ok:false,error:'PAYMENT_NOT_DISPUTABLE',version:VERSION,status:tx.status},409);
   const id=crypto.randomUUID(), statements=[];
