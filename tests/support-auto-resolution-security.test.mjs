@@ -69,3 +69,11 @@ test("support creation validates payload, severity, category and description siz
   assert.match(creator, /length>4000/);
   assert.match(creator, /\['LOW','MEDIUM','HIGH','CRITICAL'\]/);
 });
+
+test("support creation bounds raw JSON body before parsing", () => {
+  assert.match(source, /async function readJsonLimited\(request,maxBytes=16384\)/);
+  assert.match(source, /total>maxBytes/);
+  assert.match(creator, /readJsonLimited\(request,16384\)/);
+  assert.match(creator, /PAYLOAD_TOO_LARGE/);
+  assert.match(creator, /tooLarge\?413:400/);
+});
