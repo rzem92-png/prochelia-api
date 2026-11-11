@@ -68,3 +68,31 @@ test("loyalty adjustments validate owner, points, amount and event type", () => 
   assert.match(h, /SELECT id FROM business_profiles WHERE id=\? LIMIT 1/);
   assert.match(h, /INVALID_EVENT_TYPE/);
 });
+
+
+test("mission payment idempotency keys cannot replay a different mission or amount", () => {
+  const h = handler("createMissionPayment");
+  assert.match(h, /old\.type\)===\x27MISSION_CHARGE\x27/);
+  assert.match(h, /old\.mission_id\)===missionId/);
+  assert.match(h, /old\.client_id\)===clientId/);
+  assert.match(h, /old\.intervenant_id\)===intervenantId/);
+  assert.match(h, /Number\(old\.gross_cents\)===gross/);
+  assert.match(h, /Number\(old\.commission_cents\)===commission/);
+  assert.match(h, /IDEMPOTENCY_KEY_REUSED/);
+});
+
+test("finance payment history maps auth users to profile IDs and fails closed for unknown roles", () => {
+  const h = source.slice(source.indexOf("async function financeRowsForUser("), source.indexOf("\nfunction financeSummaryFromRows"));
+  assert.match(h, /SELECT id FROM intervenants WHERE user_id=\?/);
+  assert.match(h, /SELECT id FROM clients WHERE user_id=\?/);
+  assert.match(h, /where = '1=0'/);
+});
+
+test("manual finance entries enforce bounded integer cents and strict enums", () => {
+  const h = handler("financeEntryCreate");
+  assert.match(h, /readJsonLimited\(request,8192\)/);
+  assert.match(h, /Number\.isSafeInteger\(amount\)/);
+  assert.match(h, /allowedTypes\.has\(entryType\)/);
+  assert.match(h, /!\['IN','OUT'\]\.includes\(direction\)/);
+  assert.match(h, /currency!=='EUR'/);
+});
