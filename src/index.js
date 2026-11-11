@@ -2825,9 +2825,10 @@ async function processBackgroundJobs(request,env) {
 function isMutatingMethod(method){ return ['POST','PUT','PATCH','DELETE'].includes(method); }
 function securityOriginAllowed(request,env){
   const origin=request.headers.get('origin');
-  // Les clients non-navigateur peuvent ne pas envoyer Origin. Les requêtes navigateur
-  // avec Origin doivent correspondre à une origine explicitement autorisée.
-  if(!origin) return true;
+  // A mutation without Origin is acceptable only for server-to-server callers
+  // that do not carry a browser session cookie. A cookie-bearing request must
+  // prove its browser origin; otherwise a cross-site request could bypass CSRF.
+  if(!origin) return !getCookie(request,SESSION_COOKIE);
   const configured=clean(env?.CORS_ORIGIN);
   const defaults=[
     'https://prochelia.pages.dev',
