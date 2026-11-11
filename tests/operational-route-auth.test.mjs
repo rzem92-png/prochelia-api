@@ -166,12 +166,25 @@ test("finance dashboard and exports redact margin and counterparty fields by rol
   assert.match(rowView, /role==='CLIENT'\|\|role==='CLIENT_SOCIAL'/);
   assert.match(rowView, /net_intervenant_cents:x\.net_intervenant_cents/);
   assert.doesNotMatch(rowView, /provider_payment_id/);
-  assert.match(summaryView, /platform_net_cents/);
-  assert.match(summaryView, /net_intervenant_eur/);
+  assert.doesNotMatch(summaryView, /platform_net_cents/);
+  assert.match(summaryView, /client_net_eur/);\n  assert.match(summaryView, /net_intervenant_eur/);
   assert.match(dashboard, /financePublicSummary\(/);
   assert.match(dashboard, /financePublicPaymentRows\(/);
   assert.match(exportHandler, /role==='INTERVENANT'/);
   assert.match(exportHandler, /Votre rémunération EUR/);
   assert.match(exportHandler, /const header=/);
   assert.match(exportHandler, /role==='CLIENT'\|\|role==='CLIENT_SOCIAL'/);
+});
+
+test("non-finance roles cannot see payout processor references or failures", () => {
+  const start = indexSource.indexOf("function financePublicPayoutRows");
+  const end = indexSource.indexOf("function financePublicSummary", start);
+  assert.ok(start >= 0 && end > start);
+  const helper = indexSource.slice(start, end);
+  assert.match(helper, /role==='INTERVENANT'/);
+  assert.match(helper, /amount_cents:x\.amount_cents/);
+  assert.doesNotMatch(helper, /provider_payout_id/);
+  assert.doesNotMatch(helper, /failure_code/);
+  assert.doesNotMatch(helper, /provider:/);
+  assert.match(helper, /return \[\]/);
 });
