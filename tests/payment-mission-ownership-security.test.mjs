@@ -59,6 +59,9 @@ test("verified PSP webhook resolves provider profile to its user before creditin
   assert.match(webhook, /MISSION_EARNING/);
   assert.match(webhook, /payment:\$\{txId\}:paid/);
   assert.match(webhook, /WALLET_LEDGER_GUARDS_NOT_READY/);
+  assert.match(webhook, /trg_payment_wallet_ledger_no_update/);
+  assert.match(webhook, /trg_payment_wallet_ledger_no_delete/);
+  assert.match(webhook, /ledgerTriggers\?\.n\|\|0\)!==5/);
   assert.match(webhook, /status NOT IN \('paid','failed','refunded'\)/);
   assert.match(webhook, /REFUND_LEDGER_FLOW_NOT_READY/);
 });
