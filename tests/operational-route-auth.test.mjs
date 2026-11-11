@@ -198,3 +198,13 @@ test("internal pricing engine is manager-only until public server tariffs are im
   assert.match(handler, /requireAuthRole\(request,env,\['gerante'\]\)/);
   assert.doesNotMatch(handler, /\['gerante','client','entreprise','intervenant'\]/);
 });
+
+test("finance issue owners cannot self-approve financial resolution", () => {
+  const start = indexSource.indexOf("async function financeProblemResolve");
+  const end = indexSource.indexOf("async function handleFinanceWorkspace", start);
+  assert.ok(start >= 0 && end > start);
+  const handler = indexSource.slice(start, end);
+  assert.match(handler, /if\(!manager && b\.approve===true\).*FINANCE_MANAGER_APPROVAL_REQUIRED/);
+  assert.match(handler, /const approved=manager && b\.approve===true/);
+  assert.match(handler, /if\(!owner&&!manager\).*FORBIDDEN/);
+});
