@@ -11,7 +11,8 @@ on:
       - "tests/quality-ownership-security.test.mjs"
       - "tests/promotion-listing-privacy.test.mjs"
       - "tests/operational-case-ownership-security.test.mjs"
-      - "tests/complaint-ownership-security.test.mjs"\n      - "tests/payment-mission-ownership-security.test.mjs"
+      - "tests/complaint-ownership-security.test.mjs"
+      - "tests/payment-mission-ownership-security.test.mjs"
       - ".github/workflows/support-auto-resolution-security.yml"
   pull_request:
     branches:
@@ -24,6 +25,7 @@ on:
       - "tests/promotion-listing-privacy.test.mjs"
       - "tests/operational-case-ownership-security.test.mjs"
       - "tests/complaint-ownership-security.test.mjs"
+      - "tests/payment-mission-ownership-security.test.mjs"
       - ".github/workflows/support-auto-resolution-security.yml"
 
 permissions:
@@ -41,4 +43,4 @@ jobs:
       - name: Check Worker syntax
         run: node --experimental-default-type=module --check src/index.js
       - name: Run support resolution security regressions
-        run: node --experimental-default-type=module --test tests/support-auto-resolution-security.test.mjs tests/profile-directory-isolation.test.mjs tests/quality-ownership-security.test.mjs tests/promotion-listing-privacy.test.mjs tests/operational-case-ownership-security.test.mjs tests/complaint-ownership-security.test.mjs
+        run: node --experimental-default-type=module --test tests/support-auto-resolution-security.test.mjs tests/profile-directory-isolation.test.mjs tests/quality-ownership-security.test.mjs tests/promotion-listing-privacy.test.mjs tests/operational-case-ownership-security.test.mjs tests/complaint-ownership-security.test.mjs tests/payment-mission-ownership-security.test.mjs
