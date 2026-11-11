@@ -1911,6 +1911,7 @@ async function createOperationalCase(request, env) {
   const body=await readJson(request)||{};
   const scoped = await enforceCaseActorScope(env, gate.auth.user, body);
   if (!scoped.ok) return scoped.response;
+  await ensureConsolidatedSchema(env);
   const caseType=clean(body.case_type); if(!caseType)return json({ok:false,error:'CASE_TYPE_REQUIRED',version:VERSION},400);
   const phase=String(await getSetting(env,'project_phase','TEST')).toUpperCase();
   const impact=String(body.impact_level||'LOW').toUpperCase();
@@ -2046,6 +2047,7 @@ async function executeOperationalCase(env, caseId, approverId=null, automatic=fa
 
 async function approveOperationalCase(request, env) {
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
+  await ensureConsolidatedSchema(env);
   const body=await readJson(request)||{}; if(!body.case_id)return json({ok:false,error:'CASE_ID_REQUIRED',version:VERSION},400);
   const result=await executeOperationalCase(env,body.case_id,gate.auth.user.id,false);
   return json({...result,version:VERSION},result.ok?200:409);
@@ -2053,6 +2055,7 @@ async function approveOperationalCase(request, env) {
 
 async function getOperationsDashboard(request, env) {
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
+  await ensureConsolidatedSchema(env);
   const queries={
     open_cases:"SELECT COUNT(*) AS n FROM operational_cases WHERE status NOT IN ('RESOLVED','CLOSED')",
     auto_cases:"SELECT COUNT(*) AS n FROM operational_cases WHERE status='RESOLVED' AND auto_mode='AUTO'",
@@ -2068,6 +2071,7 @@ async function getOperationsDashboard(request, env) {
 
 async function getJournal(request, env) {
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
+  await ensureConsolidatedSchema(env);
   const type=new URL(request.url).searchParams.get('type');
   const tables={copilot_log:'SELECT * FROM copilot_log ORDER BY created_at DESC LIMIT 200',activity_journal:'SELECT * FROM activity_journal ORDER BY created_at DESC LIMIT 200',commercial_tasks:'SELECT * FROM commercial_tasks ORDER BY created_at DESC LIMIT 200',recruitment_tasks:'SELECT * FROM recruitment_tasks ORDER BY created_at DESC LIMIT 200',operational_cases:'SELECT * FROM operational_cases ORDER BY created_at DESC LIMIT 200'};
   if(type && !tables[type])return json({ok:false,error:'UNKNOWN_JOURNAL',version:VERSION},400);
@@ -2078,12 +2082,14 @@ async function getJournal(request, env) {
 
 async function metiers(request, env) {
   const gate=await requireAuthRole(request,env,['gerante','entreprise','client','intervenant']); if(gate.error)return gate.error;
+  await ensureConsolidatedSchema(env);
   const r=await env.DB.prepare('SELECT * FROM métier_catalog WHERE active=1 ORDER BY category,label').all();
   return json({ok:true,version:VERSION,metiers:r.results||[]});
 }
 
 async function suggestMetier(request, env) {
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
+  await ensureConsolidatedSchema(env);
   const body=await readJson(request)||{};const label=clean(body.label);if(!label)return json({ok:false,error:'LABEL_REQUIRED',version:VERSION},400);
   const id=crypto.randomUUID();await env.DB.prepare('INSERT INTO metier_suggestions(id,label,reason,source) VALUES(?,?,?,?)').bind(id,label,clean(body.reason)||'Opportunité détectée par le Copilote',clean(body.source)||'copilot').run();
   await journal(env,'gerante',gate.auth.user.id,'METIER_SUGGESTED','metier_suggestion',id,'OK');
@@ -2194,7 +2200,8 @@ async function pricingQuote(request, env) {
   // never disclose platform margin, provider floor or PSP costs to customers.
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
   const b=await readJson(request)||{};
-  const phase=String(b.phase||await getSetting(env,'project_phase','TEST')).toUpperCase();
+  const phase=String(b.phase||await getSetting(env,'project_phase','TEST')).toUpperCase();  await ensureConsolidatedSchema(env);
+
   const cfg=PROJECT_PHASES[phase]||PROJECT_PHASES.TEST;
   const distance=Number(b.distance_km||0);const duration=Number(b.duration_minutes||60);
   const base=Number(b.base_price_cents||0);
@@ -2245,6 +2252,7 @@ async function pricingQuote(request, env) {
 
 async function financeSummary(request, env) {
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
+  await ensureConsolidatedSchema(env);
   const tx=await env.DB.prepare(`SELECT COALESCE(SUM(gross_cents),0) gross,COALESCE(SUM(commission_cents),0) commission,COALESCE(SUM(provider_fee_cents),0) provider_fee,COALESCE(SUM(refund_cents),0) refunds,COALESCE(SUM(net_intervenant_cents),0) intervenant FROM payment_transactions`).first();
   const ledger=await env.DB.prepare(`SELECT COALESCE(SUM(CASE WHEN direction='CREDIT' THEN amount_cents ELSE -amount_cents END),0) balance FROM accounting_ledger`).first();
   const expenses=await env.DB.prepare(`SELECT COALESCE(SUM(amount_cents),0) total FROM business_expenses`).first();
@@ -2260,7 +2268,8 @@ async function complaintCreate(request, env) {
   const b=await readJson(request)||{};
   const scoped = await enforceCaseActorScope(env, gate.auth.user, b);
   if (!scoped.ok) return scoped.response;
-  if(!b.category)return json({ok:false,error:'CATEGORY_REQUIRED',version:VERSION},400);
+  if(!b.category)  await ensureConsolidatedSchema(env);
+return json({ok:false,error:'CATEGORY_REQUIRED',version:VERSION},400);
   const id=crypto.randomUUID();await env.DB.prepare(`INSERT INTO complaints(id,client_type,client_id,company_id,mission_id,category,severity,description) VALUES(?,?,?,?,?,?,?,?)`).bind(id,String(b.client_type||'B2C'),b.client_id||null,b.company_id||null,b.mission_id||null,b.category,String(b.severity||'LOW'),b.description||null).run();
   const caseType=SIMPLE_CASES.has(b.category)?b.category:'reclamation_client';
   const fakeReq=new Request(request.url,{method:'POST',headers:request.headers,body:JSON.stringify({case_type:caseType,client_id:b.client_id,company_id:b.company_id,mission_id:b.mission_id,description:b.description,impact_level:b.severity||'LOW',context:{complaint_id:id}})});
@@ -2271,6 +2280,7 @@ async function complaintCreate(request, env) {
 
 async function setPhase(request, env) {
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
+  await ensureConsolidatedSchema(env);
   const b=await readJson(request)||{};const phase=String(b.phase||'').toUpperCase();if(!PROJECT_PHASES[phase])return json({ok:false,error:'INVALID_PHASE',allowed:Object.keys(PROJECT_PHASES),version:VERSION},400);
   await env.DB.prepare(`INSERT INTO platform_settings(key,value_json,updated_at) VALUES('project_phase',?,CURRENT_TIMESTAMP) ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json,updated_at=CURRENT_TIMESTAMP`).bind(JSON.stringify(phase)).run();
   await journal(env,'gerante',gate.auth.user.id,'PHASE_CHANGED','platform','project', 'OK',{phase});
@@ -2278,16 +2288,13 @@ async function setPhase(request, env) {
 }
 
 async function consolidatedInfo(env) {
-  const phase=await getSetting(env,'project_phase','TEST');
+  let phase='TEST';
+  try { phase=await getSetting(env,'project_phase','TEST'); } catch { /* public read-only info: no schema writes */ }
   return json({ok:true,version:VERSION,architecture:'UNIQUE_TRANSVERSAL_ENGINE',phase,automation:'simple_low_impact_auto_sensitive_manager',mobile_pc:'responsive_web_required',domains:['B2C','B2B','missions','matching','metiers','incidents','remplacement','paiements','finance','comptabilite','reclamations','commercial','recrutement','RGPD','securite','audit','copilote'],b2b_rule:'societe paie intervenant; PROCHÉLIA facture commissions/service',b2c_rule:'client paie la prestation; orchestration du reversement intervenant',note:'Aucune opération financière réelle n’est simulée : les fonds passent par un PSP configuré et vérifié.'});
 }
 
 async function handleConsolidated(request, env) {
   const url=new URL(request.url);
-  const consolidatedPath = ['/api/consolidated/info','/api/ops/dashboard','/api/journal','/api/cases','/api/cases/approve','/api/metiers','/api/metiers/suggest','/api/pricing/quote','/api/finance/summary','/api/complaints','/api/settings/phase'].includes(url.pathname);
-  if (consolidatedPath) {
-    try { await ensureConsolidatedSchema(env); } catch (e) { return json({ok:false,error:'CONSOLIDATED_SCHEMA_ERROR',version:VERSION,message:e.message},500); }
-  }
   if(url.pathname==='/api/consolidated/info' && request.method==='GET') return consolidatedInfo(env);
   if(url.pathname==='/api/ops/dashboard' && request.method==='GET') return getOperationsDashboard(request,env);
   if(url.pathname==='/api/journal' && request.method==='GET') return getJournal(request,env);
