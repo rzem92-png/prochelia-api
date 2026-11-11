@@ -123,3 +123,12 @@ test("payout webhook balances are applied through the immutable idempotent walle
   assert.match(h, /payout:\$\{payoutId\}:\$\{newStatus\}/);
   assert.match(h, /PAYOUT_STATE_CONFLICT/);
 });
+
+
+test("payment creation and webhook requests have explicit payload size limits", () => {
+  const create = handler("createMissionPayment");
+  const webhook = handler("paymentWebhook");
+  assert.match(create, /readJsonLimited\(request,8192\)/);
+  assert.match(webhook, /WEBHOOK_PAYLOAD_TOO_LARGE/);
+  assert.match(webhook, /raw\.length>65536/);
+});
