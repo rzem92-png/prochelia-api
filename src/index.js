@@ -3580,7 +3580,14 @@ async function handle(request,env){
       '/api/system/final-audit',
       '/api/system/production-check',
       '/api/copilot/next-actions',
-      '/api/jobs/process'
+      '/api/jobs/process',
+      '/api/ops/dashboard',
+      '/api/journal',
+      '/api/cases',
+      '/api/cases/approve',
+      '/api/metiers/suggest',
+      '/api/settings/phase',
+      '/api/pricing/quote'
     ]);
     const requiresAdminSession =
       adminOnlyPaths.has(url.pathname) ||
