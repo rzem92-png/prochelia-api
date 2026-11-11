@@ -3462,11 +3462,13 @@ async function financeRowsForUser(env, user) {
   } else if (role === 'INTERVENANT') {
     const profile = await env.DB.prepare('SELECT id FROM intervenants WHERE user_id=? LIMIT 1').bind(uid).first();
     if (!profile) throw new Error('FINANCE_INTERVENANT_PROFILE_NOT_FOUND');
-    where = 'intervenant_id=?'; params.push(profile.id);
+    // payment_transactions.intervenant_id stores the authenticated user ID (see createMissionPayment).
+    where = 'intervenant_id=?'; params.push(uid);
   } else if (['CLIENT','CLIENT_SOCIAL'].includes(role)) {
     const profile = await env.DB.prepare('SELECT id FROM clients WHERE user_id=? LIMIT 1').bind(uid).first();
     if (!profile) throw new Error('FINANCE_CLIENT_PROFILE_NOT_FOUND');
-    where = 'client_id=?'; params.push(profile.id);
+    // payment_transactions.client_id stores the authenticated user ID (see createMissionPayment).
+    where = 'client_id=?'; params.push(uid);
   } else {
     throw new Error('FINANCE_ROLE_SCOPE_NOT_CONFIGURED');
   }
