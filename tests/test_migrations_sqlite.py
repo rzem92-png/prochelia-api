@@ -76,7 +76,7 @@ except sqlite3.IntegrityError:
 
 print(f"PASS: {len(list(MIGRATIONS.glob('*.sql')))} migrations; payment schema, atomic ledger, immutability and idempotency verified.")
 
-# The Preview migration workflow must persist an encrypted backup in EU R2
+# The Preview migration workflow must persist an encrypted backup in the WEUR R2 bucket
 # and verify a byte-for-byte download before applying any schema writes.
 workflow = (ROOT / ".github" / "workflows" / "apply-preview-d1-migrations.yml").read_text(encoding="utf-8")
 assert "prochelia-preview-backups-eu/" in workflow, "Missing EU R2 backup destination"
