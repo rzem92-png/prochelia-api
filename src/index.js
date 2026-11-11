@@ -3076,10 +3076,18 @@ async function financeProblemResolve(request,env) {
   const owner=String(row.user_id)===String(auth.user.id);
   const manager=['GERANTE','ADMIN','FINANCE'].includes(role);
   if(!owner&&!manager)return json({ok:false,error:'FORBIDDEN',version:VERSION},403);
-  const approved=Boolean(b.approve);
-  const resolution=clean(b.resolution)||row.proposed_solution||'Résolution contrôlée par le Copilote.';
+  if(typeof b.approve!=='boolean') return json({ok:false,error:'APPROVAL_DECISION_REQUIRED',version:VERSION},400);
+  const approved=b.approve;
+  const role=String(auth.user.role||'').toUpperCase();
+  const owner=String(row.user_id)===String(auth.user.id);
+  const manager=['GERANTE','ADMIN','FINANCE'].includes(role);
+  if(approved && !manager) return json({ok:false,error:'MANAGER_APPROVAL_REQUIRED',version:VERSION},403);
+  if(!owner && !manager) return json({ok:false,error:'FORBIDDEN',version:VERSION},403);
+  if(b.resolution!==undefined && (typeof b.resolution!=='string' || b.resolution.length>2000)) return json({ok:false,error:'INVALID_RESOLUTION',version:VERSION},400);
+  const resolution=clean(b.resolution)||row.proposed_solution||'Résolution contrôlée par le responsable financier.';
   const status=approved?'RESOLVED':'ESCALATED';
-  await env.DB.prepare(`UPDATE finance_resolution_cases SET status=?,resolution=?,resolved_at=CURRENT_TIMESTAMP WHERE id=?`).bind(status,resolution,id).run();
+  const update=await env.DB.prepare(`UPDATE finance_resolution_cases SET status=?,resolution=?,resolved_at=CASE WHEN ?='RESOLVED' THEN CURRENT_TIMESTAMP ELSE NULL END WHERE id=? AND status IN ('OPEN','AUTO_RESOLUTION_PROPOSED','ESCALATED')`).bind(status,resolution,status,id).run();
+  if(Number(update?.meta?.changes||0)!==1) return json({ok:false,error:'CASE_STATE_CONFLICT',version:VERSION},409);
   await journal(env,auth.user.role,auth.user.id,'FINANCE_PROBLEM_RESOLVE','finance_resolution_cases',id,status,{approved});
   return json({ok:true,version:VERSION,case_id:id,status,resolution});
 }
@@ -3514,6 +3522,30 @@ async function supportCreate(request,env){
   const severity=rawSeverity.trim().toUpperCase();
   if(b.description!==undefined && (typeof b.description!=='string' || b.description.length>4000)){
     return json({ok:false,error:'INVALID_SUPPORT_DESCRIPTION',version:VERSION},400);
+  }
+  // Never accept relationship IDs from an ordinary requester: otherwise a
+  // forged company/mission/complaint ID could attach a ticket to another account.
+  const isManager=['GERANTE','ADMIN'].includes(a.role);
+  const linkedFields=['company_id','mission_id','complaint_id'];
+  if(!isManager && linkedFields.some(k=>b[k]!==undefined && b[k]!==null && b[k]!=='')){
+    return json({ok:false,error:'LINKED_CASE_REQUIRES_MANAGER_VALIDATION',version:VERSION},403);
+  }
+  if(isManager){
+    if(b.mission_id!==undefined && b.mission_id!==null){
+      if(typeof b.mission_id!=='string' || b.mission_id.length>128) return json({ok:false,error:'INVALID_MISSION_ID',version:VERSION},400);
+      const linkedMission=await env.DB.prepare('SELECT id FROM missions WHERE id=? LIMIT 1').bind(b.mission_id).first();
+      if(!linkedMission) return json({ok:false,error:'MISSION_NOT_FOUND',version:VERSION},404);
+    }
+    if(b.complaint_id!==undefined && b.complaint_id!==null){
+      if(typeof b.complaint_id!=='string' || b.complaint_id.length>128) return json({ok:false,error:'INVALID_COMPLAINT_ID',version:VERSION},400);
+      const linkedComplaint=await env.DB.prepare('SELECT id FROM complaints WHERE id=? LIMIT 1').bind(b.complaint_id).first();
+      if(!linkedComplaint) return json({ok:false,error:'COMPLAINT_NOT_FOUND',version:VERSION},404);
+    }
+    if(b.company_id!==undefined && b.company_id!==null){
+      if(typeof b.company_id!=='string' || b.company_id.length>128) return json({ok:false,error:'INVALID_COMPANY_ID',version:VERSION},400);
+      const linkedCompany=await env.DB.prepare('SELECT id FROM business_profiles WHERE id=? LIMIT 1').bind(b.company_id).first();
+      if(!linkedCompany) return json({ok:false,error:'COMPANY_NOT_FOUND',version:VERSION},404);
+    }
   }
   const scenario=supportScenarioFor(category,severity);
   const rule=await env.DB.prepare(`SELECT * FROM copilot_resolution_rules WHERE scenario_key=? LIMIT 1`).bind(scenario).first();
