@@ -228,3 +228,14 @@ test("consolidated schema writes occur only after route authorization", () => {
     assert.ok(auth >= 0 && schema > auth, name + " must authorize before schema writes");
   }
 });
+
+test("finance issue resolution uses a compare-and-set state transition", () => {
+  const start = indexSource.indexOf("async function financeProblemResolve");
+  const end = indexSource.indexOf("async function handleFinanceWorkspace", start);
+  assert.ok(start >= 0 && end > start);
+  const handler = indexSource.slice(start, end);
+  assert.match(handler, /FINANCE_CASE_ALREADY_CLOSED/);
+  assert.match(handler, /WHERE id=\? AND status=\? AND resolved_at IS NULL/);
+  assert.match(handler, /FINANCE_CASE_STATE_CHANGED/);
+  assert.match(handler, /Number\(update\?\.meta\?\.changes\|\|0\)!==1/);
+});
