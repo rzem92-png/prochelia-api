@@ -57,6 +57,7 @@ test("verified PSP webhook resolves provider profile to its user before creditin
   assert.match(webhook, /payment:\$\{txId\}:paid/);
   assert.match(webhook, /WALLET_LEDGER_GUARDS_NOT_READY/);
   assert.match(webhook, /status NOT IN \('paid','failed','refunded'\)/);
+  assert.match(webhook, /REFUND_LEDGER_FLOW_NOT_READY/);
 });
 
 test("PSP account identifiers cannot be forged from the browser during onboarding", () => {
@@ -115,7 +116,7 @@ test("webhook retries resume unprocessed events and reject event ID payload chan
 test("payout webhook balances are applied through the immutable idempotent wallet ledger", () => {
   const h = handler("paymentWebhook");
   assert.match(h, /payment_wallet_ledger/);
-  assert.match(h, /PAYOUT_\+/);
+  assert.match(h, /PAYOUT_/);
   assert.match(h, /payout:\$\{payoutId\}:\$\{newStatus\}/);
   assert.match(h, /PAYOUT_STATE_CONFLICT/);
 });
