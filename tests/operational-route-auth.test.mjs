@@ -77,3 +77,21 @@ test("frontend directory endpoints exist and expose only manager-scoped director
   assert.match(indexSource, /url\.pathname === '\/api\/intervenants'/);
   assert.match(indexSource, /url\.pathname === '\/api\/missions' && request\.method === 'GET'/);
 });
+
+test("finance workspace uses verified profile IDs and fails closed for unmapped roles", () => {
+  const roleStart = indexSource.indexOf("function financeRoleAllowed");
+  const rowsStart = indexSource.indexOf("async function financeRowsForUser");
+  const rowsEnd = indexSource.indexOf("function financeSummaryFromRows", rowsStart);
+  assert.ok(roleStart >= 0 && rowsStart > roleStart && rowsEnd > rowsStart);
+  const roleFn = indexSource.slice(roleStart, rowsStart);
+  const rowsFn = indexSource.slice(rowsStart, rowsEnd);
+  assert.match(roleFn, /\['CLIENT','CLIENT_SOCIAL','INTERVENANT','GERANTE','ADMIN','FINANCE'\]/);
+  assert.doesNotMatch(roleFn, /'SUPPORT'|'SOCIETE'|'COMPANY'/);
+  assert.match(rowsFn, /SELECT id FROM intervenants WHERE user_id=\?/);
+  assert.match(rowsFn, /intervenant_id=\?/);
+  assert.match(rowsFn, /SELECT id FROM clients WHERE user_id=\?/);
+  assert.match(rowsFn, /client_id=\?/);
+  assert.match(rowsFn, /FINANCE_ROLE_SCOPE_NOT_CONFIGURED/);
+  assert.match(rowsFn, /finance_workspace_entries WHERE user_id=\?/);
+  assert.match(rowsFn, /payout_requests WHERE user_id=\?/);
+});
