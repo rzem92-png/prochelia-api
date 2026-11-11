@@ -3260,7 +3260,7 @@ async function supportCreate(request,env){
     return json({ok:false,error:'INVALID_SUPPORT_PAYLOAD',version:VERSION},400);
   }
   const rawCategory=b.category===undefined?'GENERAL':b.category;
-  if(typeof rawCategory!=='string' || rawCategory.trim().length<2 || rawCategory.trim().length>40 || !/^[A-Za-z0-9_-]+$/.test(rawCategory.trim())){
+  if(typeof rawCategory!=='string' || !['GENERAL','DELAY','TECHNICAL','DOCUMENT','PAYMENT','COMPLAINT','SECURITY','RGPD_SECURITY','LEGAL','REPLACEMENT','IDENTITY','FRAUD','DATA_BREACH','RGPD','LITIGE','ABSENCE','DUPLICATE','DOUBLE_PAYMENT','FACTURE','RETARD','NOTIFICATION'].includes(rawCategory.trim().toUpperCase())){
     return json({ok:false,error:'INVALID_SUPPORT_CATEGORY',version:VERSION},400);
   }
   const category=rawCategory.trim().toUpperCase();
