@@ -1317,6 +1317,13 @@ async function createOperationalCase(request, env) {
   const priority=CASE_PRIORITIES[impact];
   const context=body.context||{};
   const rec=await copilotRecommend(env,{caseType,impact,phase,context});
+  // Non-manager submissions are reports only: client-controlled case types
+  // must never trigger automatic execution or provider replacement workflows.
+  if(role!=='gerante') {
+    rec.action='ANALYZE_AND_PROPOSE';
+    rec.mode='MANAGER_APPROVAL';
+    rec.solution={steps:['qualify','verify_ownership','manager_review','audit'],automatic:false};
+  }
   const id=crypto.randomUUID();
   const requiresManager=rec.mode==='MANAGER_APPROVAL' ? 1 : 0;
   const status=rec.action==='AUTO_RESOLVE' ? 'AUTO_PENDING' : 'OPEN';
