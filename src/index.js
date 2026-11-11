@@ -1028,12 +1028,35 @@ async function paymentWebhook(request, env) {
     const payout=await env.DB.prepare('SELECT * FROM payout_requests WHERE id=? LIMIT 1').bind(payoutId).first();
     const statusMap={payout_processing:'processing',payout_paid:'completed',payout_failed:'failed',payout_canceled:'canceled'};
     const newStatus=statusMap[type];
-    if(payout&&newStatus){
-      const alreadyFinal=['completed','failed','canceled'].includes(payout.status);
-      if(!alreadyFinal){
-        if(newStatus==='completed') await env.DB.prepare(`UPDATE wallets SET reserved_cents=MAX(0,reserved_cents-?),paid_cents=paid_cents+?,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(payout.amount_cents,payout.amount_cents,payout.wallet_id).run();
-        if(['failed','canceled'].includes(newStatus)) await env.DB.prepare(`UPDATE wallets SET reserved_cents=MAX(0,reserved_cents-?),available_cents=available_cents+?,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(payout.amount_cents,payout.amount_cents,payout.wallet_id).run();
-        await env.DB.prepare(`UPDATE payout_requests SET status=?,provider_payout_id=COALESCE(?,provider_payout_id),failure_code=?,failure_message=?,completed_at=CASE WHEN ?='completed' THEN CURRENT_TIMESTAMP ELSE completed_at END,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(newStatus,clean(event?.data?.provider_payout_id)||null,clean(event?.data?.failure_code)||null,clean(event?.data?.failure_message)||null,newStatus,payoutId).run();
+    if(payout&&newStatus&&!['completed','failed','canceled'].includes(String(payout.status||'').toLowerCase())){
+      if(['completed','failed','canceled'].includes(newStatus)) {
+        if(!await tableExists(env,'payment_wallet_ledger'))
+          return json({ok:false,error:'WALLET_LEDGER_NOT_READY',version:VERSION},503);
+        const ledgerTriggers=await env.DB.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE type='trigger' AND name IN ('trg_payment_wallet_ledger_apply','trg_payment_wallet_ledger_require_wallet','trg_payment_wallet_ledger_guard_balances')").first();
+        if(Number(ledgerTriggers?.n||0)!==3)
+          return json({ok:false,error:'WALLET_LEDGER_GUARDS_NOT_READY',version:VERSION},503);
+        const availableDelta=['failed','canceled'].includes(newStatus)?Number(payout.amount_cents):0;
+        const reservedDelta=-Number(payout.amount_cents);
+        const paidDelta=newStatus==='completed'?Number(payout.amount_cents):0;
+        const ledgerKey=`payout:${payoutId}:${newStatus}`;
+        const results=await env.DB.batch([
+          env.DB.prepare(`INSERT OR IGNORE INTO payment_wallet_ledger
+            (id,idempotency_key,transaction_id,payout_id,user_id,entry_type,available_delta_cents,pending_delta_cents,reserved_delta_cents,paid_delta_cents,currency,metadata_json)
+            SELECT ?,?,NULL,id,user_id,?,?,0,?,?,currency,?
+            FROM payout_requests WHERE id=? AND status NOT IN ('completed','failed','canceled')`)
+            .bind(crypto.randomUUID(),ledgerKey,'PAYOUT_'+newStatus.toUpperCase(),availableDelta,reservedDelta,paidDelta,JSON.stringify({provider,event_id:eventId}),payoutId),
+          env.DB.prepare(`UPDATE payout_requests SET status=?,provider_payout_id=COALESCE(?,provider_payout_id),failure_code=?,failure_message=?,completed_at=CASE WHEN ?='completed' THEN CURRENT_TIMESTAMP ELSE completed_at END,updated_at=CURRENT_TIMESTAMP
+            WHERE id=? AND status NOT IN ('completed','failed','canceled')`)
+            .bind(newStatus,clean(event?.data?.provider_payout_id)||null,clean(event?.data?.failure_code)||null,clean(event?.data?.failure_message)||null,newStatus,payoutId)
+        ]);
+        if(Number(results?.[1]?.meta?.changes||0)!==1) {
+          const current=await env.DB.prepare('SELECT status FROM payout_requests WHERE id=? LIMIT 1').bind(payoutId).first();
+          if(!['completed','failed','canceled'].includes(String(current?.status||'').toLowerCase()))
+            return json({ok:false,error:'PAYOUT_STATE_CONFLICT',version:VERSION},409);
+        }
+      } else {
+        await env.DB.prepare(`UPDATE payout_requests SET status=?,provider_payout_id=COALESCE(?,provider_payout_id),updated_at=CURRENT_TIMESTAMP
+          WHERE id=? AND status NOT IN ('completed','failed','canceled')`).bind(newStatus,clean(event?.data?.provider_payout_id)||null,payoutId).run();
       }
     }
   }
