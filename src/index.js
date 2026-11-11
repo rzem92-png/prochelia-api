@@ -1258,25 +1258,76 @@ async function copilotRecommend(env, input) {
 }
 
 async function createOperationalCase(request, env) {
-  const gate=await requireAuthRole(request,env,['gerante','client','intervenant','entreprise']); if(gate.error)return gate.error;
-  const body=await readJson(request)||{};
-  const caseType=clean(body.case_type); if(!caseType)return json({ok:false,error:'CASE_TYPE_REQUIRED',version:VERSION},400);
-  const phase=String(await getSetting(env,'project_phase','TEST')).toUpperCase();
+  const gate=await requireAuthRole(request,env,['gerante','client','intervenant']);
+  if(gate.error)return gate.error;
+  const parsed=await readJsonLimited(request,16384);
+  if(!parsed.ok)return json({ok:false,error:parsed.error==='PAYLOAD_TOO_LARGE'?'PAYLOAD_TOO_LARGE':'INVALID_JSON',version:VERSION},parsed.error==='PAYLOAD_TOO_LARGE'?413:400);
+  const body=parsed.value;
+  if(!body || typeof body!=='object' || Array.isArray(body))return json({ok:false,error:'INVALID_BODY',version:VERSION},400);
+  const caseType=clean(body.case_type);
+  if(typeof caseType!=='string' || !caseType || caseType.length>80)return json({ok:false,error:'CASE_TYPE_REQUIRED',version:VERSION},400);
   const impact=String(body.impact_level||'LOW').toUpperCase();
-  const priority=CASE_PRIORITIES[impact]||10;
-  const rec=await copilotRecommend(env,{caseType,impact,phase,context:body.context||{}});
+  if(!Object.prototype.hasOwnProperty.call(CASE_PRIORITIES,impact))return json({ok:false,error:'INVALID_IMPACT_LEVEL',version:VERSION},400);
+  if(body.description!==undefined && (typeof body.description!=='string' || body.description.length>2000))return json({ok:false,error:'INVALID_DESCRIPTION',version:VERSION},400);
+  if(body.context!==undefined && (!body.context || typeof body.context!=='object' || Array.isArray(body.context)))return json({ok:false,error:'INVALID_CONTEXT',version:VERSION},400);
+
+  await ensureConsolidatedSchema(env);
+  const role=gate.auth.user.role;
+  let clientId=null, intervenantId=null, companyId=null, missionId=null;
+  if(role==='client') {
+    const own=await env.DB.prepare('SELECT id FROM clients WHERE user_id=? LIMIT 1').bind(gate.auth.user.id).first();
+    if(!own)return json({ok:false,error:'CLIENT_PROFILE_REQUIRED',version:VERSION},403);
+    clientId=own.id;
+  } else if(role==='intervenant') {
+    const own=await env.DB.prepare('SELECT id FROM intervenants WHERE user_id=? LIMIT 1').bind(gate.auth.user.id).first();
+    if(!own)return json({ok:false,error:'INTERVENANT_PROFILE_REQUIRED',version:VERSION},403);
+    intervenantId=own.id;
+  }
+
+  if(body.mission_id!==undefined && body.mission_id!==null && body.mission_id!=='') {
+    if(typeof body.mission_id!=='string' || body.mission_id.length>128)return json({ok:false,error:'INVALID_MISSION_ID',version:VERSION},400);
+    const mission=await env.DB.prepare('SELECT id,client_id,intervenant_id FROM missions WHERE id=? LIMIT 1').bind(body.mission_id).first();
+    if(!mission)return json({ok:false,error:'MISSION_NOT_FOUND',version:VERSION},404);
+    if(role==='client' && mission.client_id!==clientId)return json({ok:false,error:'FORBIDDEN',version:VERSION},403);
+    if(role==='intervenant' && mission.intervenant_id!==intervenantId)return json({ok:false,error:'FORBIDDEN',version:VERSION},403);
+    missionId=mission.id; clientId=mission.client_id; intervenantId=mission.intervenant_id;
+  }
+
+  if(role==='gerante' && !missionId) {
+    if(body.client_id!==undefined && body.client_id!==null) {
+      const row=await env.DB.prepare('SELECT id FROM clients WHERE id=? LIMIT 1').bind(String(body.client_id)).first();
+      if(!row)return json({ok:false,error:'CLIENT_NOT_FOUND',version:VERSION},404);
+      clientId=row.id;
+    }
+    if(body.intervenant_id!==undefined && body.intervenant_id!==null) {
+      const row=await env.DB.prepare('SELECT id FROM intervenants WHERE id=? LIMIT 1').bind(String(body.intervenant_id)).first();
+      if(!row)return json({ok:false,error:'INTERVENANT_NOT_FOUND',version:VERSION},404);
+      intervenantId=row.id;
+    }
+    if(body.company_id!==undefined && body.company_id!==null) {
+      const row=await env.DB.prepare('SELECT id FROM business_profiles WHERE id=? LIMIT 1').bind(String(body.company_id)).first();
+      if(!row)return json({ok:false,error:'COMPANY_NOT_FOUND',version:VERSION},404);
+      companyId=row.id;
+    }
+  } else if(role==='gerante' && missionId) {
+    companyId=null;
+  }
+
+  const phase=String(await getSetting(env,'project_phase','TEST')).toUpperCase();
+  const priority=CASE_PRIORITIES[impact];
+  const context=body.context||{};
+  const rec=await copilotRecommend(env,{caseType,impact,phase,context});
   const id=crypto.randomUUID();
   const requiresManager=rec.mode==='MANAGER_APPROVAL' ? 1 : 0;
   const status=rec.action==='AUTO_RESOLVE' ? 'AUTO_PENDING' : 'OPEN';
   await env.DB.prepare(`INSERT INTO operational_cases(id,case_type,source,phase,priority,status,auto_mode,client_id,company_id,intervenant_id,mission_id,impact_level,description,context_json,proposed_solution_json,requires_manager) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
-    .bind(id,caseType,'API',phase,priority,status,rec.mode,clean(body.client_id)||null,clean(body.company_id)||null,clean(body.intervenant_id)||null,clean(body.mission_id)||null,impact,clean(body.description)||null,JSON.stringify(body.context||{}),JSON.stringify(rec),requiresManager).run();
+    .bind(id,caseType,'API',phase,priority,status,rec.mode,clientId,companyId,intervenantId,missionId,impact,typeof body.description==='string'?body.description.trim():null,JSON.stringify(context),JSON.stringify(rec),requiresManager).run();
   await env.DB.prepare(`INSERT INTO copilot_log(id,case_id,action_type,recommendation,confidence,mode) VALUES(?,?,?,?,?,?)`)
     .bind(crypto.randomUUID(),id,rec.action,JSON.stringify(rec.solution),rec.confidence,rec.mode).run();
-  await journal(env,'copilot',null,'CASE_CREATED','operational_case',id,'OK',{caseType,impact});
-  if(rec.action==='AUTO_RESOLVE') await executeOperationalCase(env,id,null,true);
+  await journal(env,role,gate.auth.user.id,'CASE_CREATED','operational_case',id,'OK',{caseType,impact});
+  if(rec.action==='AUTO_RESOLVE') await executeOperationalCase(env,id,gate.auth.user.id,true);
   return json({ok:true,version:VERSION,case_id:id,recommendation:rec,status:rec.action==='AUTO_RESOLVE'?'AUTO_EXECUTED':'WAITING_MANAGER'},201);
 }
-
 
 async function getTableColumns(env, table) {
   if (!env.DB) return [];
