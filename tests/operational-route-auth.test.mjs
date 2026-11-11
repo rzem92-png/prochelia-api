@@ -54,3 +54,26 @@ test("client and provider case creation is bound to the authenticated profile an
   const complaint = indexSource.slice(complaintStart, complaintEnd);
   assert.ok(complaint.indexOf("enforceCaseActorScope") < complaint.indexOf("INSERT INTO complaints"));
 });
+
+test("frontend directory endpoints exist and expose only manager-scoped directory data", () => {
+  const clientsStart = indexSource.indexOf("async function listClients");
+  const intervenantsStart = indexSource.indexOf("async function listIntervenants");
+  const missionsStart = indexSource.indexOf("async function listMissions");
+  const schemaStart = indexSource.indexOf("async function missionsSchema");
+  assert.ok(clientsStart >= 0 && intervenantsStart > clientsStart && missionsStart > intervenantsStart && schemaStart > missionsStart);
+  const clients = indexSource.slice(clientsStart, intervenantsStart);
+  const intervenants = indexSource.slice(intervenantsStart, missionsStart);
+  const missions = indexSource.slice(missionsStart, schemaStart);
+  assert.match(clients, /requireRole\(auth, \['gerante'\]\)/);
+  assert.match(clients, /items:result\.results\|\|\[\]/);
+  assert.match(intervenants, /requireRole\(auth, \['gerante'\]\)/);
+  assert.match(intervenants, /items:result\.results\|\|\[\]/);
+  assert.match(missions, /m\.client_id=\?/);
+  assert.match(missions, /m\.intervenant_id=\?/);
+  assert.match(missions, /financialColumns = 'm\.price_client'/);
+  assert.match(missions, /financialColumns = 'm\.price_intervenant'/);
+  assert.match(missions, /role === 'gerante'/);
+  assert.match(indexSource, /url\.pathname === '\/api\/clients'/);
+  assert.match(indexSource, /url\.pathname === '\/api\/intervenants'/);
+  assert.match(indexSource, /url\.pathname === '\/api\/missions' && request\.method === 'GET'/);
+});
