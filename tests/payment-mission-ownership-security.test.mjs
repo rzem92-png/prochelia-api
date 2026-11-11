@@ -50,3 +50,20 @@ test("verified PSP webhook resolves provider profile to its user before creditin
   assert.match(webhook, /bind\(providerProfile\.user_id\)/);
   assert.doesNotMatch(webhook, /bind\(tx\.intervenant_id\)\.first\(\)/);
 });
+
+test("PSP account identifiers cannot be forged from the browser during onboarding", () => {
+  const onboard = handler("paymentOnboard");
+  assert.match(onboard, /const accountId = null/);
+  assert.match(onboard, /server-side PSP/);
+  assert.doesNotMatch(onboard, /clean\(body\?\.provider_account_id\)/);
+});
+
+test("loyalty adjustments validate owner, points, amount and event type", () => {
+  const h = handler("loyaltyUpdate");
+  assert.match(h, /EXACTLY_ONE_LOYALTY_OWNER_REQUIRED/);
+  assert.match(h, /Number\.isInteger\(Number\(b\.points\)\)/);
+  assert.match(h, /Number\.isSafeInteger\(amountCents\)/);
+  assert.match(h, /SELECT id FROM clients WHERE id=\? LIMIT 1/);
+  assert.match(h, /SELECT id FROM business_profiles WHERE id=\? LIMIT 1/);
+  assert.match(h, /INVALID_EVENT_TYPE/);
+});
