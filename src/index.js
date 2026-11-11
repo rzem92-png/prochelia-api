@@ -3569,6 +3569,47 @@ function financeSummaryFromRows(rows,user) {
   };
 }
 
+function financePublicPaymentRows(rows,user) {
+  const role=String(user?.role||'').toUpperCase();
+  if(['GERANTE','ADMIN','FINANCE'].includes(role)) return rows;
+  if(role==='CLIENT'||role==='CLIENT_SOCIAL') return rows.map(x=>({
+    id:x.id,mission_id:x.mission_id,type:x.type,status:x.status,
+    gross_cents:x.gross_cents,refund_cents:x.refund_cents,
+    currency:x.currency,reason:x.reason,created_at:x.created_at
+  }));
+  if(role==='INTERVENANT') return rows.map(x=>({
+    id:x.id,mission_id:x.mission_id,type:x.type,status:x.status,
+    net_intervenant_cents:x.net_intervenant_cents,
+    currency:x.currency,created_at:x.created_at
+  }));
+  return [];
+}
+
+function financePublicSummary(summary,user) {
+  const role=String(user?.role||'').toUpperCase();
+  if(['GERANTE','ADMIN','FINANCE'].includes(role)) return summary;
+  const base={role:summary.role,transactions:summary.transactions,
+    integrity_ok:summary.integrity_ok,integrity_errors:summary.integrity_errors};
+  if(role==='CLIENT'||role==='CLIENT_SOCIAL') return {
+    ...base,
+    currency_totals:(summary.currency_totals||[]).map(x=>({
+      currency:x.currency,gross:x.gross,refunds:x.refunds,client_net_cents:x.client_net_cents
+    })),
+    gross_cents:summary.gross_cents,gross_eur:summary.gross_eur,
+    refunds_cents:summary.refunds_cents,refunds_eur:summary.refunds_eur,
+    client_net_cents:summary.client_net_cents,client_net_eur:summary.client_net_eur
+  };
+  if(role==='INTERVENANT') return {
+    ...base,
+    currency_totals:(summary.currency_totals||[]).map(x=>({
+      currency:x.currency,net_intervenant:x.net_intervenant
+    })),
+    net_intervenant_cents:summary.net_intervenant_cents,
+    net_intervenant_eur:summary.net_intervenant_eur
+  };
+  return base;
+}
+
 function financeProblemSolution(issueType) {
   const k=String(issueType||'').toUpperCase();
   const map={
@@ -3588,11 +3629,12 @@ function financeProblemSolution(issueType) {
 
 async function financeDashboard(request,env) {
   const a=await financeAuth(request,env); if(a.response)return a.response;
-  const {auth}=a, rows=await financeRowsForUser(env,auth.user), summary=financeSummaryFromRows(rows,auth.user);
+  const {auth}=a, rows=await financeRowsForUser(env,auth.user);
+  const summary=financePublicSummary(financeSummaryFromRows(rows,auth.user),auth.user);
   return json({ok:true,version:VERSION,workspace:{
     owner:{id:auth.user.id,role:auth.user.role,email:auth.user.email},
     summary,
-    payments:rows.payments,
+    payments:financePublicPaymentRows(rows.payments,auth.user),
     payouts:rows.payouts||[],
     ledger:rows.ledger,
     exports:['CSV','JSON','HTML'],
@@ -3609,14 +3651,24 @@ async function financeExport(request,env) {
   const rows=await financeRowsForUser(env,auth.user);
   let payments=rows.payments.filter(x=>(!start||String(x.created_at)>=start)&&(!end||String(x.created_at)<=end));
   const exportAmount=value=>{const cents=integerCents(value??0);return cents===null?null:financeMoney(cents);};
-  const data=payments.map(x=>({
-    id:x.id, mission_id:x.mission_id, type:x.type, status:x.status, date:x.created_at,
-    montant_brut:exportAmount(x.gross_cents), remboursement:exportAmount(x.refund_cents),
-    commission:exportAmount(x.commission_cents), frais_psp:exportAmount(x.provider_fee_cents),
-    remuneration_intervenant:exportAmount(x.net_intervenant_cents), devise:String(x.currency||'EUR').toUpperCase(),
-    motif:x.reason||''
-  }));
-  const summary=financeSummaryFromRows({payments,ledger:rows.ledger},auth.user);
+  const role=String(auth.user.role||'').toUpperCase();
+  const data=payments.map(x=>{
+    const base={id:x.id,mission_id:x.mission_id,type:x.type,status:x.status,date:x.created_at,
+      devise:String(x.currency||'EUR').toUpperCase(),motif:x.reason||''};
+    if(['GERANTE','ADMIN','FINANCE'].includes(role)) return {
+      ...base,montant_brut:exportAmount(x.gross_cents),remboursement:exportAmount(x.refund_cents),
+      commission:exportAmount(x.commission_cents),frais_psp:exportAmount(x.provider_fee_cents),
+      remuneration_intervenant:exportAmount(x.net_intervenant_cents)
+    };
+    if(role==='CLIENT'||role==='CLIENT_SOCIAL') return {
+      ...base,montant_brut:exportAmount(x.gross_cents),remboursement:exportAmount(x.refund_cents)
+    };
+    if(role==='INTERVENANT') return {
+      ...base,remuneration_intervenant:exportAmount(x.net_intervenant_cents)
+    };
+    return base;
+  });
+  const summary=financePublicSummary(financeSummaryFromRows({payments,ledger:rows.ledger},auth.user),auth.user);
   const id=crypto.randomUUID();
   await env.DB.prepare(`INSERT INTO finance_export_log(id,user_id,role,format,period_start,period_end,row_count) VALUES(?,?,?,?,?,?,?)`)
     .bind(id,auth.user.id,auth.user.role,format,start,end,data.length).run();
