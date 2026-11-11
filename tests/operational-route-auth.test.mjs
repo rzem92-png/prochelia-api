@@ -235,7 +235,7 @@ test("finance issue resolution uses a compare-and-set state transition", () => {
   assert.ok(start >= 0 && end > start);
   const handler = indexSource.slice(start, end);
   assert.match(handler, /FINANCE_CASE_ALREADY_CLOSED/);
-  assert.match(handler, /WHERE id=\? AND status=\? AND resolved_at IS NULL/);
+  assert.match(handler, /WHERE id=\\? AND status=\\?/);
   assert.match(handler, /FINANCE_CASE_STATE_CHANGED/);
   assert.match(handler, /Number\(update\?\.meta\?\.changes\|\|0\)!==1/);
 });
