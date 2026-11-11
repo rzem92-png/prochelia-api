@@ -3102,7 +3102,7 @@ async function financeExport(request,env) {
   return new Response('\ufeff'+csv,{status:200,headers:{'content-type':'text/csv; charset=UTF-8','content-disposition':`attachment; filename="prochelia-finance-${id}.csv"`,'cache-control':'no-store'}});
 }
 
-async async function financeEntryCreate(request,env) {
+async function financeEntryCreate(request,env) {
   const a=await financeAuth(request,env); if(a.response)return a.response;
   const {auth}=a;
   const parsed=await readJsonLimited(request,8192);
