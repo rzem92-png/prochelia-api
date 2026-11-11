@@ -19,7 +19,9 @@ test("sensitive operational routes require an authenticated gerante before dispa
     "/api/clients/score", "/api/loyalty/update", "/api/quality",
     "/api/capacity/dashboard", "/api/finance/forecast", "/api/system/audit",
     "/api/system/final-audit", "/api/system/production-check",
-    "/api/copilot/next-actions", "/api/jobs/process"
+    "/api/copilot/next-actions", "/api/jobs/process", "/api/ops/dashboard",
+    "/api/journal", "/api/cases", "/api/cases/approve", "/api/metiers/suggest",
+    "/api/settings/phase", "/api/pricing/quote"
   ]) assert.ok(handler.includes(path), `missing admin gate for ${path}`);
   assert.match(handler, /routeAuth\.user\.role !== 'gerante'/);
   assert.match(handler, /url\.pathname\.startsWith\('\/api\/finance\/'\)/);
