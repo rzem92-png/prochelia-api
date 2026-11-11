@@ -676,23 +676,14 @@ export async function handleV7Route(
     return null;
 
   } catch (error) {
-
+    // Do not expose parser, database, or implementation details to callers.
     return Response.json(
-
       {
         ok: false,
-
-        version:
-          procheliaV7.version,
-
-        error:
-          error?.message ||
-          "Erreur V7"
+        version: procheliaV7.version,
+        error: "INTERNAL_ERROR"
       },
-
-      {
-        status: 500
-      }
+      { status: 500 }
     );
   }
 }

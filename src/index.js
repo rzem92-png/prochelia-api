@@ -139,7 +139,10 @@ function getCookie(request, name) {
     const idx = part.indexOf('=');
     if (idx < 0) continue;
     const key = part.slice(0, idx).trim();
-    if (key === name) return decodeURIComponent(part.slice(idx + 1).trim());
+    if (key === name) {
+      try { return decodeURIComponent(part.slice(idx + 1).trim()); }
+      catch { return null; }
+    }
   }
   return null;
 }
@@ -185,7 +188,11 @@ function requireRole(auth, roles) {
 
 async function getPrestations(env) {
   if (!env.DB) return json({ ok: false, database: false, message: 'D1 non connectée' }, 503);
-  const result = await env.DB.prepare('SELECT * FROM prestations ORDER BY id').all();
+  // Public catalog exposes only active, customer-facing fields; never return
+  // internal timestamps or inactive catalogue entries.
+  const result = await env.DB.prepare(
+    'SELECT id,name,description FROM prestations WHERE active=1 ORDER BY name,id'
+  ).all();
   return json({ ok: true, source: 'D1', total: result.results?.length || 0, prestations: result.results || [] });
 }
 
@@ -217,6 +224,64 @@ async function coreAccountsSchema(env) {
     tables: results,
     note: 'Audit structurel uniquement : aucune donnée utilisateur ni aucun secret n’est renvoyé.'
   });
+}
+
+async function listClients(request, env) {
+  const auth = await getSessionUser(request, env);
+  if (!requireRole(auth, ['gerante'])) {
+    return json({ok:false,error:auth?.user?'FORBIDDEN':'UNAUTHENTICATED',version:VERSION},auth?.user?403:401);
+  }
+  const result = await env.DB.prepare(`
+    SELECT c.id,u.first_name,u.last_name,u.status AS account_status,c.city
+      FROM clients c JOIN users u ON u.id=c.user_id
+     ORDER BY u.last_name,u.first_name LIMIT 500
+  `).all();
+  return json({ok:true,version:VERSION,items:result.results||[]},200);
+}
+
+async function listIntervenants(request, env) {
+  const auth = await getSessionUser(request, env);
+  if (!requireRole(auth, ['gerante'])) {
+    return json({ok:false,error:auth?.user?'FORBIDDEN':'UNAUTHENTICATED',version:VERSION},auth?.user?403:401);
+  }
+  const result = await env.DB.prepare(`
+    SELECT i.id,u.first_name,u.last_name,u.status AS account_status,
+           i.service_area,i.professional_status,i.validation_status
+      FROM intervenants i JOIN users u ON u.id=i.user_id
+     ORDER BY u.last_name,u.first_name LIMIT 500
+  `).all();
+  return json({ok:true,version:VERSION,items:result.results||[]},200);
+}
+
+async function listMissions(request, env) {
+  const auth = await getSessionUser(request, env);
+  if (!auth) return json({ok:false,error:'UNAUTHENTICATED',version:VERSION},401);
+  const role = auth.user.role;
+  let where = '';
+  let params = [];
+  let financialColumns = 'm.price_client,m.price_intervenant,m.commission';
+  if (role === 'gerante') {
+    where = '1=1';
+  } else if (role === 'client') {
+    const client = await env.DB.prepare('SELECT id FROM clients WHERE user_id=? LIMIT 1').bind(auth.user.id).first();
+    if (!client) return json({ok:false,error:'CLIENT_PROFILE_NOT_FOUND',version:VERSION},404);
+    where = 'm.client_id=?'; params = [client.id];
+    financialColumns = 'm.price_client';
+  } else if (role === 'intervenant') {
+    const intervenant = await env.DB.prepare('SELECT id FROM intervenants WHERE user_id=? LIMIT 1').bind(auth.user.id).first();
+    if (!intervenant) return json({ok:false,error:'INTERVENANT_PROFILE_NOT_FOUND',version:VERSION},404);
+    where = 'm.intervenant_id=?'; params = [intervenant.id];
+    financialColumns = 'm.price_intervenant';
+  } else {
+    return json({ok:false,error:'FORBIDDEN',version:VERSION},403);
+  }
+  const result = await env.DB.prepare(`
+    SELECT m.id,m.client_id,m.intervenant_id,m.prestation_id,p.name AS prestation_name,
+           m.start_at,m.end_at,m.address,${financialColumns},m.status,m.created_at,m.updated_at
+      FROM missions m JOIN prestations p ON p.id=m.prestation_id
+     WHERE ${where} ORDER BY m.start_at DESC LIMIT 500
+  `).bind(...params).all();
+  return json({ok:true,version:VERSION,items:result.results||[]},200);
 }
 
 async function missionsSchema(env) {
@@ -626,7 +691,12 @@ async function securityPrepareMission(request, env) {
   const body = await readJson(request);
   const missionId=clean(body?.mission_id), clientId=clean(body?.client_id), intervenantId=clean(body?.intervenant_id);
   if(!missionId||!clientId||!intervenantId) return json({ok:false,error:'MISSION_SECURITY_FIELDS_REQUIRED',version:VERSION},400);
-  const verified = await requireVerifiedIntervenant(env,intervenantId);
+  const mission = await env.DB.prepare('SELECT id,client_id,intervenant_id FROM missions WHERE id=? LIMIT 1').bind(missionId).first();
+  if(!mission || String(mission.client_id)!==clientId || String(mission.intervenant_id||'')!==intervenantId)
+    return json({ok:false,error:'MISSION_PARTICIPANTS_MISMATCH',version:VERSION},403);
+  const providerProfile = await env.DB.prepare('SELECT user_id FROM intervenants WHERE id=? LIMIT 1').bind(intervenantId).first();
+  if(!providerProfile?.user_id) return json({ok:false,error:'INTERVENANT_PROFILE_NOT_FOUND',version:VERSION},404);
+  const verified = await requireVerifiedIntervenant(env,providerProfile.user_id);
   if(!verified) return json({ok:false,error:'INTERVENANT_IDENTITY_NOT_VERIFIED',version:VERSION},409);
   const existing=await env.DB.prepare('SELECT id,status FROM mission_security WHERE mission_id=? LIMIT 1').bind(missionId).first();
   if(existing) return json({ok:false,error:'MISSION_SECURITY_ALREADY_PREPARED',version:VERSION,status:existing.status},409);
@@ -661,9 +731,11 @@ async function securityPresence(request, env) {
   await ensureSecuritySchema(env);
   const identity = await requireVerifiedIntervenant(env, auth.user.id);
   if(!identity) return json({ok:false,error:'INTERVENANT_IDENTITY_NOT_VERIFIED',version:VERSION},403);
+  const providerProfile = await env.DB.prepare('SELECT id FROM intervenants WHERE user_id=? LIMIT 1').bind(auth.user.id).first();
+  if(!providerProfile) return json({ok:false,error:'INTERVENANT_PROFILE_NOT_FOUND',version:VERSION},404);
   const body=await readJson(request), missionId=clean(body?.mission_id);
   if(!missionId) return json({ok:false,error:'MISSION_ID_REQUIRED',version:VERSION},400);
-  const sec=await env.DB.prepare('SELECT * FROM mission_security WHERE mission_id=? AND intervenant_id=? LIMIT 1').bind(missionId,auth.user.id).first();
+  const sec=await env.DB.prepare('SELECT * FROM mission_security WHERE mission_id=? AND intervenant_id=? LIMIT 1').bind(missionId,providerProfile.id).first();
   if(!sec) return json({ok:false,error:'MISSION_NOT_ASSIGNED_OR_NOT_PREPARED',version:VERSION},404);
   const device=await deviceHash(request,auth.user.id);
   await env.DB.prepare(`INSERT INTO trusted_devices (id,user_id,device_hash,expires_at) VALUES (?,?,?,datetime('now',?)) ON CONFLICT(user_id,device_hash) DO UPDATE SET last_seen_at=CURRENT_TIMESTAMP,expires_at=excluded.expires_at,status='active'`)
@@ -679,7 +751,9 @@ async function securityVerifyCode(request, env) {
   await ensureSecuritySchema(env);
   const body=await readJson(request), missionId=clean(body?.mission_id), purpose=clean(body?.purpose), code=clean(body?.code);
   if(!missionId||!['ARRIVAL','END'].includes(purpose)||!/^[0-9]{6}$/.test(code)) return json({ok:false,error:'INVALID_SECURITY_CODE_REQUEST',version:VERSION},400);
-  const sec=await env.DB.prepare('SELECT * FROM mission_security WHERE mission_id=? AND intervenant_id=? LIMIT 1').bind(missionId,auth.user.id).first();
+  const providerProfile = await env.DB.prepare('SELECT id FROM intervenants WHERE user_id=? LIMIT 1').bind(auth.user.id).first();
+  if(!providerProfile) return json({ok:false,error:'INTERVENANT_PROFILE_NOT_FOUND',version:VERSION},404);
+  const sec=await env.DB.prepare('SELECT * FROM mission_security WHERE mission_id=? AND intervenant_id=? LIMIT 1').bind(missionId,providerProfile.id).first();
   if(!sec) return json({ok:false,error:'MISSION_NOT_ASSIGNED_OR_NOT_PREPARED',version:VERSION},404);
   const identity = await requireVerifiedIntervenant(env, auth.user.id);
   if(!identity) {
@@ -737,7 +811,10 @@ async function securityResendCodes(request, env) {
   if(!missionId) return json({ok:false,error:'MISSION_ID_REQUIRED',version:VERSION},400);
   const sec=await env.DB.prepare('SELECT * FROM mission_security WHERE mission_id=? LIMIT 1').bind(missionId).first();
   if(!sec) return json({ok:false,error:'MISSION_SECURITY_NOT_FOUND',version:VERSION},404);
-  if(auth.user.role==='client' && sec.client_id!==auth.user.id) return json({ok:false,error:'FORBIDDEN',version:VERSION},403);
+  if(auth.user.role==='client') {
+    const clientProfile = await env.DB.prepare('SELECT id FROM clients WHERE user_id=? LIMIT 1').bind(auth.user.id).first();
+    if(!clientProfile || String(sec.client_id)!==String(clientProfile.id)) return json({ok:false,error:'FORBIDDEN',version:VERSION},403);
+  }
   if(sec.status==='completed') return json({ok:false,error:'MISSION_ALREADY_COMPLETED',version:VERSION},409);
   return json({ok:false,error:'SECURITY_CODE_RESEND_REQUIRES_REGENERATION_FLOW',version:VERSION,message:'Pour éviter la réutilisation d’un ancien secret, la réémission doit générer de nouveaux codes et invalider les précédents.'},409);
 }
@@ -1383,7 +1460,10 @@ async function openPaymentDispute(request, env) {
   if(!missionId||!reason||amount===null||amount<=0) return json({ok:false,error:'INVALID_DISPUTE',version:VERSION},400);
   const tx=await env.DB.prepare('SELECT * FROM payment_transactions WHERE mission_id=? ORDER BY created_at DESC LIMIT 1').bind(missionId).first();
   if(!tx) return json({ok:false,error:'PAYMENT_NOT_FOUND_FOR_MISSION',version:VERSION},404);
-  if(auth.user.role==='client'&&tx.client_id!==auth.user.id) return json({ok:false,error:'FORBIDDEN',version:VERSION},403);
+  if(auth.user.role==='client') {
+    const clientProfile = await env.DB.prepare('SELECT id FROM clients WHERE user_id=? LIMIT 1').bind(auth.user.id).first();
+    if(!clientProfile || String(tx.client_id)!==String(clientProfile.id)) return json({ok:false,error:'FORBIDDEN',version:VERSION},403);
+  }
   if(amount>Number(tx.gross_cents)) return json({ok:false,error:'DISPUTE_AMOUNT_EXCEEDS_PAYMENT',version:VERSION},400);
   if(!['pending','paid','held'].includes(tx.status)) return json({ok:false,error:'PAYMENT_NOT_DISPUTABLE',version:VERSION,status:tx.status},409);
   const id=crypto.randomUUID(), statements=[];
@@ -1563,6 +1643,18 @@ async function handleBase(request, env) {
     // ownership/participation checks. Otherwise this endpoint can be used as
     // an unauthenticated oracle for client, provider and service IDs.
     return json({ ok: false, error: 'AUTHENTICATED_VALIDATION_REQUIRED', version: VERSION, write_enabled: false }, 403);
+  }
+
+  if (url.pathname === '/api/clients') {
+    if (request.method !== 'GET') return json({ok:false,error:'METHOD_NOT_ALLOWED',version:VERSION},405);
+    return listClients(request, env);
+  }
+  if (url.pathname === '/api/intervenants') {
+    if (request.method !== 'GET') return json({ok:false,error:'METHOD_NOT_ALLOWED',version:VERSION},405);
+    return listIntervenants(request, env);
+  }
+  if (url.pathname === '/api/missions' && request.method === 'GET') {
+    return listMissions(request, env);
   }
 
   if (url.pathname === '/api/missions') {
@@ -1763,9 +1855,63 @@ async function copilotRecommend(env, input) {
   return { action, mode: solution.automatic ? 'AUTO' : 'MANAGER_APPROVAL', confidence: simple ? 0.95 : 0.82, solution, context, phase };
 }
 
+async function enforceCaseActorScope(env, user, body) {
+  const role = String(user?.role || '');
+  if (role === 'gerante') return { ok: true, body };
+  if (role === 'entreprise') {
+    // No verified company-membership relation exists in the current schema.
+    // Fail closed rather than accepting a caller-supplied company_id as proof.
+    return { ok: false, response: json({ok:false,error:'COMPANY_SCOPE_NOT_CONFIGURED',version:VERSION},403) };
+  }
+  if (role === 'client') {
+    const client = await env.DB.prepare('SELECT id FROM clients WHERE user_id=? LIMIT 1').bind(user.id).first();
+    if (!client || (body.client_id && String(body.client_id) !== String(client.id))) {
+      return { ok: false, response: json({ok:false,error:'FORBIDDEN',version:VERSION},403) };
+    }
+    body.client_id = client.id;
+    if (body.mission_id) {
+      const mission = await env.DB.prepare('SELECT id,client_id,intervenant_id FROM missions WHERE id=? AND client_id=? LIMIT 1')
+        .bind(String(body.mission_id), client.id).first();
+      if (!mission || (body.intervenant_id && String(body.intervenant_id) !== String(mission.intervenant_id || ''))) {
+        return { ok: false, response: json({ok:false,error:'MISSION_NOT_OWNED',version:VERSION},403) };
+      }
+      body.intervenant_id = mission.intervenant_id || null;
+    } else if (body.intervenant_id || body.company_id) {
+      return { ok: false, response: json({ok:false,error:'RELATED_ENTITY_REQUIRES_OWNED_MISSION',version:VERSION},403) };
+    }
+    body.company_id = null;
+    return { ok: true, body };
+  }
+  if (role === 'intervenant') {
+    const intervenant = await env.DB.prepare('SELECT id FROM intervenants WHERE user_id=? LIMIT 1').bind(user.id).first();
+    if (!intervenant || (body.intervenant_id && String(body.intervenant_id) !== String(intervenant.id))) {
+      return { ok: false, response: json({ok:false,error:'FORBIDDEN',version:VERSION},403) };
+    }
+    body.intervenant_id = intervenant.id;
+    if (!body.mission_id) {
+      if (body.client_id || body.company_id) {
+        return { ok: false, response: json({ok:false,error:'RELATED_ENTITY_REQUIRES_OWNED_MISSION',version:VERSION},403) };
+      }
+    } else {
+      const mission = await env.DB.prepare('SELECT id,client_id,intervenant_id FROM missions WHERE id=? AND intervenant_id=? LIMIT 1')
+        .bind(String(body.mission_id), intervenant.id).first();
+      if (!mission || (body.client_id && String(body.client_id) !== String(mission.client_id))) {
+        return { ok: false, response: json({ok:false,error:'MISSION_NOT_ASSIGNED',version:VERSION},403) };
+      }
+      body.client_id = mission.client_id;
+    }
+    body.company_id = null;
+    return { ok: true, body };
+  }
+  return { ok: false, response: json({ok:false,error:'FORBIDDEN',version:VERSION},403) };
+}
+
 async function createOperationalCase(request, env) {
   const gate=await requireAuthRole(request,env,['gerante','client','intervenant','entreprise']); if(gate.error)return gate.error;
   const body=await readJson(request)||{};
+  const scoped = await enforceCaseActorScope(env, gate.auth.user, body);
+  if (!scoped.ok) return scoped.response;
+  await ensureConsolidatedSchema(env);
   const caseType=clean(body.case_type); if(!caseType)return json({ok:false,error:'CASE_TYPE_REQUIRED',version:VERSION},400);
   const phase=String(await getSetting(env,'project_phase','TEST')).toUpperCase();
   const impact=String(body.impact_level||'LOW').toUpperCase();
@@ -1901,6 +2047,7 @@ async function executeOperationalCase(env, caseId, approverId=null, automatic=fa
 
 async function approveOperationalCase(request, env) {
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
+  await ensureConsolidatedSchema(env);
   const body=await readJson(request)||{}; if(!body.case_id)return json({ok:false,error:'CASE_ID_REQUIRED',version:VERSION},400);
   const result=await executeOperationalCase(env,body.case_id,gate.auth.user.id,false);
   return json({...result,version:VERSION},result.ok?200:409);
@@ -1908,6 +2055,7 @@ async function approveOperationalCase(request, env) {
 
 async function getOperationsDashboard(request, env) {
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
+  await ensureConsolidatedSchema(env);
   const queries={
     open_cases:"SELECT COUNT(*) AS n FROM operational_cases WHERE status NOT IN ('RESOLVED','CLOSED')",
     auto_cases:"SELECT COUNT(*) AS n FROM operational_cases WHERE status='RESOLVED' AND auto_mode='AUTO'",
@@ -1923,6 +2071,7 @@ async function getOperationsDashboard(request, env) {
 
 async function getJournal(request, env) {
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
+  await ensureConsolidatedSchema(env);
   const type=new URL(request.url).searchParams.get('type');
   const tables={copilot_log:'SELECT * FROM copilot_log ORDER BY created_at DESC LIMIT 200',activity_journal:'SELECT * FROM activity_journal ORDER BY created_at DESC LIMIT 200',commercial_tasks:'SELECT * FROM commercial_tasks ORDER BY created_at DESC LIMIT 200',recruitment_tasks:'SELECT * FROM recruitment_tasks ORDER BY created_at DESC LIMIT 200',operational_cases:'SELECT * FROM operational_cases ORDER BY created_at DESC LIMIT 200'};
   if(type && !tables[type])return json({ok:false,error:'UNKNOWN_JOURNAL',version:VERSION},400);
@@ -1933,12 +2082,14 @@ async function getJournal(request, env) {
 
 async function metiers(request, env) {
   const gate=await requireAuthRole(request,env,['gerante','entreprise','client','intervenant']); if(gate.error)return gate.error;
+  await ensureConsolidatedSchema(env);
   const r=await env.DB.prepare('SELECT * FROM métier_catalog WHERE active=1 ORDER BY category,label').all();
   return json({ok:true,version:VERSION,metiers:r.results||[]});
 }
 
 async function suggestMetier(request, env) {
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
+  await ensureConsolidatedSchema(env);
   const body=await readJson(request)||{};const label=clean(body.label);if(!label)return json({ok:false,error:'LABEL_REQUIRED',version:VERSION},400);
   const id=crypto.randomUUID();await env.DB.prepare('INSERT INTO metier_suggestions(id,label,reason,source) VALUES(?,?,?,?)').bind(id,label,clean(body.reason)||'Opportunité détectée par le Copilote',clean(body.source)||'copilot').run();
   await journal(env,'gerante',gate.auth.user.id,'METIER_SUGGESTED','metier_suggestion',id,'OK');
@@ -2043,9 +2194,14 @@ function financeStrategicQuote({basePriceCents=0,phaseFactor=1,urgency='normal',
 }
 
 async function pricingQuote(request, env) {
-  const gate=await requireAuthRole(request,env,['gerante','client','entreprise','intervenant']); if(gate.error)return gate.error;
+  // Pricing inputs currently include internal cost/margin overrides and the
+  // public contract has no verified server-owned tariff lookup for all roles.
+  // Keep quote generation manager-only until that contract is implemented;
+  // never disclose platform margin, provider floor or PSP costs to customers.
+  const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
   const b=await readJson(request)||{};
-  const phase=String(b.phase||await getSetting(env,'project_phase','TEST')).toUpperCase();
+  const phase=String(b.phase||await getSetting(env,'project_phase','TEST')).toUpperCase();  await ensureConsolidatedSchema(env);
+
   const cfg=PROJECT_PHASES[phase]||PROJECT_PHASES.TEST;
   const distance=Number(b.distance_km||0);const duration=Number(b.duration_minutes||60);
   const base=Number(b.base_price_cents||0);
@@ -2096,6 +2252,7 @@ async function pricingQuote(request, env) {
 
 async function financeSummary(request, env) {
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
+  await ensureConsolidatedSchema(env);
   const tx=await env.DB.prepare(`SELECT COALESCE(SUM(gross_cents),0) gross,COALESCE(SUM(commission_cents),0) commission,COALESCE(SUM(provider_fee_cents),0) provider_fee,COALESCE(SUM(refund_cents),0) refunds,COALESCE(SUM(net_intervenant_cents),0) intervenant FROM payment_transactions`).first();
   const ledger=await env.DB.prepare(`SELECT COALESCE(SUM(CASE WHEN direction='CREDIT' THEN amount_cents ELSE -amount_cents END),0) balance FROM accounting_ledger`).first();
   const expenses=await env.DB.prepare(`SELECT COALESCE(SUM(amount_cents),0) total FROM business_expenses`).first();
@@ -2108,7 +2265,11 @@ async function financeSummary(request, env) {
 
 async function complaintCreate(request, env) {
   const gate=await requireAuthRole(request,env,['gerante','client','entreprise']); if(gate.error)return gate.error;
-  const b=await readJson(request)||{};if(!b.category)return json({ok:false,error:'CATEGORY_REQUIRED',version:VERSION},400);
+  const b=await readJson(request)||{};
+  const scoped = await enforceCaseActorScope(env, gate.auth.user, b);
+  if (!scoped.ok) return scoped.response;
+  if(!b.category)  await ensureConsolidatedSchema(env);
+return json({ok:false,error:'CATEGORY_REQUIRED',version:VERSION},400);
   const id=crypto.randomUUID();await env.DB.prepare(`INSERT INTO complaints(id,client_type,client_id,company_id,mission_id,category,severity,description) VALUES(?,?,?,?,?,?,?,?)`).bind(id,String(b.client_type||'B2C'),b.client_id||null,b.company_id||null,b.mission_id||null,b.category,String(b.severity||'LOW'),b.description||null).run();
   const caseType=SIMPLE_CASES.has(b.category)?b.category:'reclamation_client';
   const fakeReq=new Request(request.url,{method:'POST',headers:request.headers,body:JSON.stringify({case_type:caseType,client_id:b.client_id,company_id:b.company_id,mission_id:b.mission_id,description:b.description,impact_level:b.severity||'LOW',context:{complaint_id:id}})});
@@ -2119,6 +2280,7 @@ async function complaintCreate(request, env) {
 
 async function setPhase(request, env) {
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
+  await ensureConsolidatedSchema(env);
   const b=await readJson(request)||{};const phase=String(b.phase||'').toUpperCase();if(!PROJECT_PHASES[phase])return json({ok:false,error:'INVALID_PHASE',allowed:Object.keys(PROJECT_PHASES),version:VERSION},400);
   await env.DB.prepare(`INSERT INTO platform_settings(key,value_json,updated_at) VALUES('project_phase',?,CURRENT_TIMESTAMP) ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json,updated_at=CURRENT_TIMESTAMP`).bind(JSON.stringify(phase)).run();
   await journal(env,'gerante',gate.auth.user.id,'PHASE_CHANGED','platform','project', 'OK',{phase});
@@ -2126,16 +2288,13 @@ async function setPhase(request, env) {
 }
 
 async function consolidatedInfo(env) {
-  const phase=await getSetting(env,'project_phase','TEST');
+  let phase='TEST';
+  try { phase=await getSetting(env,'project_phase','TEST'); } catch { /* public read-only info: no schema writes */ }
   return json({ok:true,version:VERSION,architecture:'UNIQUE_TRANSVERSAL_ENGINE',phase,automation:'simple_low_impact_auto_sensitive_manager',mobile_pc:'responsive_web_required',domains:['B2C','B2B','missions','matching','metiers','incidents','remplacement','paiements','finance','comptabilite','reclamations','commercial','recrutement','RGPD','securite','audit','copilote'],b2b_rule:'societe paie intervenant; PROCHÉLIA facture commissions/service',b2c_rule:'client paie la prestation; orchestration du reversement intervenant',note:'Aucune opération financière réelle n’est simulée : les fonds passent par un PSP configuré et vérifié.'});
 }
 
 async function handleConsolidated(request, env) {
   const url=new URL(request.url);
-  const consolidatedPath = ['/api/consolidated/info','/api/ops/dashboard','/api/journal','/api/cases','/api/cases/approve','/api/metiers','/api/metiers/suggest','/api/pricing/quote','/api/finance/summary','/api/complaints','/api/settings/phase'].includes(url.pathname);
-  if (consolidatedPath) {
-    try { await ensureConsolidatedSchema(env); } catch (e) { return json({ok:false,error:'CONSOLIDATED_SCHEMA_ERROR',version:VERSION,message:e.message},500); }
-  }
   if(url.pathname==='/api/consolidated/info' && request.method==='GET') return consolidatedInfo(env);
   if(url.pathname==='/api/ops/dashboard' && request.method==='GET') return getOperationsDashboard(request,env);
   if(url.pathname==='/api/journal' && request.method==='GET') return getJournal(request,env);
@@ -3270,7 +3429,9 @@ async function ensureFinanceWorkspaceSchema(env) {
 }
 
 function financeRoleAllowed(role) {
-  return ['CLIENT','CLIENT_SOCIAL','SOCIETE','COMPANY','INTERVENANT','GERANTE','ADMIN','FINANCE','SUPPORT'].includes(String(role||'').toUpperCase());
+  // Finance access is limited to roles with a verified ownership mapping.
+  // Company/support profiles are denied until their server-side scope relation exists.
+  return ['CLIENT','CLIENT_SOCIAL','INTERVENANT','GERANTE','ADMIN','FINANCE'].includes(String(role||'').toUpperCase());
 }
 
 async function financeAuth(request, env) {
@@ -3299,9 +3460,17 @@ async function financeRowsForUser(env, user) {
   if (['GERANTE','ADMIN','FINANCE'].includes(role)) {
     where = '1=1';
   } else if (role === 'INTERVENANT') {
+    const profile = await env.DB.prepare('SELECT id FROM intervenants WHERE user_id=? LIMIT 1').bind(uid).first();
+    if (!profile) throw new Error('FINANCE_INTERVENANT_PROFILE_NOT_FOUND');
+    // payment_transactions.intervenant_id stores the authenticated user ID (see createMissionPayment).
     where = 'intervenant_id=?'; params.push(uid);
-  } else {
+  } else if (['CLIENT','CLIENT_SOCIAL'].includes(role)) {
+    const profile = await env.DB.prepare('SELECT id FROM clients WHERE user_id=? LIMIT 1').bind(uid).first();
+    if (!profile) throw new Error('FINANCE_CLIENT_PROFILE_NOT_FOUND');
+    // payment_transactions.client_id stores the authenticated user ID (see createMissionPayment).
     where = 'client_id=?'; params.push(uid);
+  } else {
+    throw new Error('FINANCE_ROLE_SCOPE_NOT_CONFIGURED');
   }
 
   // Never turn a failed financial query into an apparently valid empty ledger.
@@ -3413,6 +3582,59 @@ function financeSummaryFromRows(rows,user) {
   };
 }
 
+function financePublicPaymentRows(rows,user) {
+  const role=String(user?.role||'').toUpperCase();
+  if(['GERANTE','ADMIN','FINANCE'].includes(role)) return rows;
+  if(role==='CLIENT'||role==='CLIENT_SOCIAL') return rows.map(x=>({
+    id:x.id,mission_id:x.mission_id,type:x.type,status:x.status,
+    gross_cents:x.gross_cents,refund_cents:x.refund_cents,
+    currency:x.currency,reason:x.reason,created_at:x.created_at
+  }));
+  if(role==='INTERVENANT') return rows.map(x=>({
+    id:x.id,mission_id:x.mission_id,type:x.type,status:x.status,
+    net_intervenant_cents:x.net_intervenant_cents,
+    currency:x.currency,created_at:x.created_at
+  }));
+  return [];
+}
+
+function financePublicPayoutRows(rows,user) {
+  const role=String(user?.role||'').toUpperCase();
+  if(['GERANTE','ADMIN','FINANCE'].includes(role)) return rows;
+  // Only the payee may see their own payout amount and lifecycle. Provider
+  // references, processor identity and failure metadata remain internal.
+  if(role==='INTERVENANT') return rows.map(x=>({
+    id:x.id,amount_cents:x.amount_cents,currency:x.currency,mode:x.mode,
+    status:x.status,requested_at:x.requested_at,completed_at:x.completed_at
+  }));
+  return [];
+}
+
+function financePublicSummary(summary,user) {
+  const role=String(user?.role||'').toUpperCase();
+  if(['GERANTE','ADMIN','FINANCE'].includes(role)) return summary;
+  const base={role:summary.role,transactions:summary.transactions,
+    integrity_ok:summary.integrity_ok,integrity_errors:summary.integrity_errors};
+  if(role==='CLIENT'||role==='CLIENT_SOCIAL') return {
+    ...base,
+    currency_totals:(summary.currency_totals||[]).map(x=>({
+      currency:x.currency,gross:x.gross,refunds:x.refunds,client_net_cents:x.client_net_cents
+    })),
+    gross_cents:summary.gross_cents,gross_eur:summary.gross_eur,
+    refunds_cents:summary.refunds_cents,refunds_eur:summary.refunds_eur,
+    client_net_cents:summary.client_net_cents,client_net_eur:summary.client_net_eur
+  };
+  if(role==='INTERVENANT') return {
+    ...base,
+    currency_totals:(summary.currency_totals||[]).map(x=>({
+      currency:x.currency,net_intervenant:x.net_intervenant
+    })),
+    net_intervenant_cents:summary.net_intervenant_cents,
+    net_intervenant_eur:summary.net_intervenant_eur
+  };
+  return base;
+}
+
 function financeProblemSolution(issueType) {
   const k=String(issueType||'').toUpperCase();
   const map={
@@ -3432,12 +3654,13 @@ function financeProblemSolution(issueType) {
 
 async function financeDashboard(request,env) {
   const a=await financeAuth(request,env); if(a.response)return a.response;
-  const {auth}=a, rows=await financeRowsForUser(env,auth.user), summary=financeSummaryFromRows(rows,auth.user);
+  const {auth}=a, rows=await financeRowsForUser(env,auth.user);
+  const summary=financePublicSummary(financeSummaryFromRows(rows,auth.user),auth.user);
   return json({ok:true,version:VERSION,workspace:{
     owner:{id:auth.user.id,role:auth.user.role,email:auth.user.email},
     summary,
-    payments:rows.payments,
-    payouts:rows.payouts||[],
+    payments:financePublicPaymentRows(rows.payments,auth.user),
+    payouts:financePublicPayoutRows(rows.payouts||[],auth.user),
     ledger:rows.ledger,
     exports:['CSV','JSON','HTML'],
     support_resolution:{automatic_for_low_impact:true,human_validation_for_sensitive:true}
@@ -3453,14 +3676,24 @@ async function financeExport(request,env) {
   const rows=await financeRowsForUser(env,auth.user);
   let payments=rows.payments.filter(x=>(!start||String(x.created_at)>=start)&&(!end||String(x.created_at)<=end));
   const exportAmount=value=>{const cents=integerCents(value??0);return cents===null?null:financeMoney(cents);};
-  const data=payments.map(x=>({
-    id:x.id, mission_id:x.mission_id, type:x.type, status:x.status, date:x.created_at,
-    montant_brut:exportAmount(x.gross_cents), remboursement:exportAmount(x.refund_cents),
-    commission:exportAmount(x.commission_cents), frais_psp:exportAmount(x.provider_fee_cents),
-    remuneration_intervenant:exportAmount(x.net_intervenant_cents), devise:String(x.currency||'EUR').toUpperCase(),
-    motif:x.reason||''
-  }));
-  const summary=financeSummaryFromRows({payments,ledger:rows.ledger},auth.user);
+  const role=String(auth.user.role||'').toUpperCase();
+  const data=payments.map(x=>{
+    const base={id:x.id,mission_id:x.mission_id,type:x.type,status:x.status,date:x.created_at,
+      devise:String(x.currency||'EUR').toUpperCase(),motif:x.reason||''};
+    if(['GERANTE','ADMIN','FINANCE'].includes(role)) return {
+      ...base,montant_brut:exportAmount(x.gross_cents),remboursement:exportAmount(x.refund_cents),
+      commission:exportAmount(x.commission_cents),frais_psp:exportAmount(x.provider_fee_cents),
+      remuneration_intervenant:exportAmount(x.net_intervenant_cents)
+    };
+    if(role==='CLIENT'||role==='CLIENT_SOCIAL') return {
+      ...base,montant_brut:exportAmount(x.gross_cents),remboursement:exportAmount(x.refund_cents)
+    };
+    if(role==='INTERVENANT') return {
+      ...base,remuneration_intervenant:exportAmount(x.net_intervenant_cents)
+    };
+    return base;
+  });
+  const summary=financePublicSummary(financeSummaryFromRows({payments,ledger:rows.ledger},auth.user),auth.user);
   const id=crypto.randomUUID();
   await env.DB.prepare(`INSERT INTO finance_export_log(id,user_id,role,format,period_start,period_end,row_count) VALUES(?,?,?,?,?,?,?)`)
     .bind(id,auth.user.id,auth.user.role,format,start,end,data.length).run();
@@ -3469,14 +3702,24 @@ async function financeExport(request,env) {
   if(format==='json') return json({ok:true,version:VERSION,summary,rows:data,export_id:id});
   if(format==='html') {
     const escHtml=v=>String(v??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
-    const money=v=>v===null?'Donnée invalide':Number(v).toFixed(2);
-    const body=data.map(r=>`<tr><td>${escHtml(r.date)}</td><td>${escHtml(r.type)}</td><td>${escHtml(r.status)}</td><td>${escHtml(r.devise)}</td><td>${money(r.montant_brut)}</td><td>${money(r.remboursement)}</td><td>${money(r.commission)}</td><td>${money(r.frais_psp)}</td><td>${money(r.remuneration_intervenant)}</td></tr>`).join('');
-    const grossSummary=summary.gross_eur===null?'Indisponible (devises multiples ou données invalides)':summary.gross_eur.toFixed(2)+' €';
-    const refundSummary=summary.refunds_eur===null?'Indisponible (devises multiples ou données invalides)':summary.refunds_eur.toFixed(2)+' €';
-    const html=`<!doctype html><html lang="fr"><head><meta charset="utf-8"><title>PROCHÉLIA — Export financier</title><style>body{font-family:Arial,sans-serif;margin:30px;color:#172a2a}h1{font-size:22px}table{border-collapse:collapse;width:100%;font-size:11px}th,td{border:1px solid #ddd;padding:6px}th{background:#eee}.tot{margin:14px 0}</style></head><body><h1>PROCHÉLIA — Export financier</h1><div class="tot">Période : ${escHtml(start||'Toutes')} → ${escHtml(end||'Toutes')} · Transactions : ${summary.transactions} · Brut EUR : ${grossSummary} · Remboursements EUR : ${refundSummary}</div><table><thead><tr><th>Date</th><th>Type</th><th>Statut</th><th>Devise</th><th>Brut</th><th>Remb.</th><th>Commission</th><th>PSP</th><th>Intervenant</th></tr></thead><tbody>${body}</tbody></table><script>window.onload=()=>window.print()</script></body></html>`;
+    const money=v=>v==null?'—':Number(v).toFixed(2);
+    const columns=['GERANTE','ADMIN','FINANCE'].includes(role)
+      ? [['date','Date'],['type','Type'],['status','Statut'],['devise','Devise'],['montant_brut','Brut'],['remboursement','Remb.'],['commission','Commission'],['frais_psp','PSP'],['remuneration_intervenant','Intervenant']]
+      : (role==='CLIENT'||role==='CLIENT_SOCIAL')
+        ? [['date','Date'],['type','Type'],['status','Statut'],['devise','Devise'],['montant_brut','Brut'],['remboursement','Remb.']]
+        : [['date','Date'],['type','Type'],['status','Statut'],['devise','Devise'],['remuneration_intervenant','Votre rémunération']];
+    const body=data.map(r=>`<tr>${columns.map(([key])=>`<td>${escHtml(['montant_brut','remboursement','commission','frais_psp','remuneration_intervenant'].includes(key)?money(r[key]):r[key])}</td>`).join('')}</tr>`).join('');
+    const amountSummary = ['GERANTE','ADMIN','FINANCE'].includes(role) || role==='CLIENT' || role==='CLIENT_SOCIAL'
+      ? `Brut EUR : ${summary.gross_eur==null?'Indisponible':summary.gross_eur.toFixed(2)+' €'} · Remboursements EUR : ${summary.refunds_eur==null?'Indisponible':summary.refunds_eur.toFixed(2)+' €'}`
+      : `Votre rémunération EUR : ${summary.net_intervenant_eur==null?'Indisponible':summary.net_intervenant_eur.toFixed(2)+' €'}`;
+    const html=`<!doctype html><html lang="fr"><head><meta charset="utf-8"><title>PROCHÉLIA — Export financier</title><style>body{font-family:Arial,sans-serif;margin:30px;color:#172a2a}h1{font-size:22px}table{border-collapse:collapse;width:100%;font-size:11px}th,td{border:1px solid #ddd;padding:6px}th{background:#eee}.tot{margin:14px 0}</style></head><body><h1>PROCHÉLIA — Export financier</h1><div class="tot">Période : ${escHtml(start||'Toutes')} → ${escHtml(end||'Toutes')} · Transactions : ${summary.transactions} · ${amountSummary}</div><table><thead><tr>${columns.map(([,label])=>`<th>${label}</th>`).join('')}</tr></thead><tbody>${body}</tbody></table><script>window.onload=()=>window.print()</script></body></html>`;
     return new Response(html,{status:200,headers:{'content-type':'text/html; charset=UTF-8','content-disposition':`inline; filename="prochelia-finance-${id}.html"`,'cache-control':'no-store'}});
   }
-  const header=['date','type','status','mission_id','devise','montant_brut','remboursement','commission','frais_psp','remuneration_intervenant','motif'];
+  const header=['GERANTE','ADMIN','FINANCE'].includes(role)
+    ? ['date','type','status','mission_id','devise','montant_brut','remboursement','commission','frais_psp','remuneration_intervenant','motif']
+    : (role==='CLIENT'||role==='CLIENT_SOCIAL')
+      ? ['date','type','status','mission_id','devise','montant_brut','remboursement','motif']
+      : ['date','type','status','mission_id','devise','remuneration_intervenant','motif'];
   const csvCell=value=>{
     let v=String(value??'');
     if(/^\s*[=+@-]/.test(v))v="'"+v;
@@ -3488,7 +3731,10 @@ async function financeExport(request,env) {
 
 async function financeEntryCreate(request,env) {
   const a=await financeAuth(request,env); if(a.response)return a.response;
-  const {auth}=a, b=await readJson(request)||{};
+  const {auth}=a;
+  if(!['GERANTE','ADMIN','FINANCE'].includes(String(auth.user.role||'').toUpperCase()))
+    return json({ok:false,error:'FINANCE_LEDGER_WRITE_FORBIDDEN',version:VERSION},403);
+  const b=await readJson(request)||{};
   const amount=moneyCents(b.amount_eur);
   const direction=String(b.direction??'IN').trim().toUpperCase();
   const currency=String(b.currency??'EUR').trim().toUpperCase();
@@ -3527,10 +3773,21 @@ async function financeProblemResolve(request,env) {
   const owner=String(row.user_id)===String(auth.user.id);
   const manager=['GERANTE','ADMIN','FINANCE'].includes(role);
   if(!owner&&!manager)return json({ok:false,error:'FORBIDDEN',version:VERSION},403);
-  const approved=b.approve===true;
+  // A requester may add information/escalate their own issue, but cannot
+  // self-certify a financial resolution as complete.
+  if(!manager && b.approve===true) return json({ok:false,error:'FINANCE_MANAGER_APPROVAL_REQUIRED',version:VERSION},403);
+  const approved=manager && b.approve===true;
   const resolution=clean(b.resolution)||row.proposed_solution||'Résolution contrôlée par le Copilote.';
   const status=approved?'RESOLVED':'ESCALATED';
-  await env.DB.prepare(`UPDATE finance_resolution_cases SET status=?,resolution=?,resolved_at=CURRENT_TIMESTAMP WHERE id=?`).bind(status,resolution,id).run();
+  if(['RESOLVED','CLOSED'].includes(String(row.status||'').toUpperCase()))
+    return json({ok:false,error:'FINANCE_CASE_ALREADY_CLOSED',version:VERSION},409);
+  // Compare-and-set prevents concurrent approvals/escalations from overwriting
+  // a newer decision after the initial ownership and state read.
+  const update=await env.DB.prepare(`UPDATE finance_resolution_cases
+    SET status=?,resolution=?,resolved_at=CURRENT_TIMESTAMP
+    WHERE id=? AND status=?`).bind(status,resolution,id,row.status).run();
+  if(Number(update?.meta?.changes||0)!==1)
+    return json({ok:false,error:'FINANCE_CASE_STATE_CHANGED',version:VERSION},409);
   await journal(env,auth.user.role,auth.user.id,'FINANCE_PROBLEM_RESOLVE','finance_resolution_cases',id,status,{approved});
   return json({ok:true,version:VERSION,case_id:id,status,resolution});
 }
@@ -3561,6 +3818,47 @@ async function handle(request,env){
   try {
     if(isMutatingMethod(request.method) && !securityOriginAllowed(request,env)) return json({ok:false,error:'ORIGIN_NOT_ALLOWED',version:VERSION},403);
     const url=new URL(request.url);
+    // Sensitive operational/admin endpoints are never public. Enforce the
+    // authenticated server-side session and administrator role before any
+    // handler can read or mutate operational, financial, or audit data.
+    const adminOnlyPaths = new Set([
+      '/api/ops/case/execute',
+      '/api/ops/outbox/process',
+      '/api/copilot/briefing',
+      '/api/clients/score',
+      '/api/loyalty/update',
+      '/api/quality',
+      '/api/capacity/dashboard',
+      '/api/finance/forecast',
+      '/api/system/audit',
+      '/api/system/final-audit',
+      '/api/system/production-check',
+      '/api/copilot/next-actions',
+      '/api/jobs/process',
+      '/api/ops/dashboard',
+      '/api/journal',
+      '/api/cases/approve',
+      '/api/metiers/suggest',
+      '/api/settings/phase',
+      '/api/core/schema',
+      '/api/missions/schema'
+    ]);
+    const requiresAdminSession =
+      adminOnlyPaths.has(url.pathname) ||
+      url.pathname.startsWith('/api/ops/') ||
+      url.pathname.startsWith('/api/strategic/') ||
+      url.pathname.startsWith('/api/copilot/commercial/') ||
+      url.pathname.startsWith('/api/copilot/recruitment/') ||
+      url.pathname === '/api/copilot/growth-dashboard';
+    if (requiresAdminSession) {
+      const routeAuth = await getSessionUser(request, env).catch(() => null);
+      if (!routeAuth?.user) {
+        return json({ ok: false, error: 'UNAUTHENTICATED', version: VERSION }, 401);
+      }
+      if (routeAuth.user.role !== 'gerante') {
+        return json({ ok: false, error: 'FORBIDDEN', version: VERSION }, 403);
+      }
+    }
     // Fail closed before any schema helper touches D1: unauthenticated callers
     // must not use mission validation as an existence oracle for private IDs.
     if (url.pathname === '/api/missions/validate') {
@@ -3714,7 +4012,7 @@ handle = async function(request,env){
       return json(await runNationalBackup(env,'MANUAL'));
     }
     return __procheliaNationalHandle(request,env);
-  }catch(e){return json({ok:false,error:'NATIONAL_CONTINUITY_ERROR',message:String(e.message||e)},500)}
+  }catch(e){return json({ok:false,error:'NATIONAL_CONTINUITY_ERROR'},500)}
 };
 
 /* ============================================================================
@@ -3969,7 +4267,7 @@ handle = async function(request,env){
     if((u.pathname==='/api/support/cases/resolve')&&request.method==='POST') return supportResolve(request,env);
     if((u.pathname==='/api/support/dashboard')&&request.method==='GET') return supportDashboard(request,env);
     return __procheliaComplementHandle(request,env);
-  }catch(e){return json({ok:false,error:'MASTER_COMPLEMENT_ERROR',version:VERSION,message:String(e.message||e)},500)}
+  }catch(e){return json({ok:false,error:'MASTER_COMPLEMENT_ERROR',version:VERSION},500)}
 };
 
 /* ============================================================================
@@ -4039,6 +4337,9 @@ async function strictProductionAudit(request,env){
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
   const result=await productionConfigCheck(env);
   const extra=[
+    // Configuration presence is not proof that webhook settlement is atomic,
+    // replay-safe, reconciled, or operationally approved. Keep this gate closed.
+    {code:'PAYMENT_WEBHOOK_ATOMICITY',status:'NOT_READY',reason:'PAYMENT_WEBHOOK_DISABLED_PENDING_REVIEW'},
     {code:'SECURITY_CODE_DELIVERY',status:finalSecretConfigured(env,'SECURITY_CODE_WEBHOOK')&&finalSecretConfigured(env,'SECURITY_CODE_WEBHOOK_SECRET')?'OK':'NOT_CONFIGURED'},
     {code:'CORS_ORIGIN',status:finalSecretConfigured(env,'CORS_ORIGIN')?'OK':'NOT_CONFIGURED'},
     {code:'BACKUP_R2',status:env.BACKUP_BUCKET&&finalSecretConfigured(env,'BACKUP_ENCRYPTION_KEY')?'OK':'NOT_CONFIGURED'},
@@ -4047,15 +4348,22 @@ async function strictProductionAudit(request,env){
   ];
   const checks=[...(result.checks||[]),...extra];
   const blockingCodes=new Set([
-    'SECRET:PAYMENT_PROVIDER','SECRET:PAYMENT_WEBHOOK_SECRET','SECURITY_CODE_DELIVERY',
+    'PAYMENT_WEBHOOK_ATOMICITY','SECRET:PAYMENT_PROVIDER','SECRET:PAYMENT_WEBHOOK_SECRET','SECURITY_CODE_DELIVERY',
     'CORS_ORIGIN','BACKUP_R2','PSP_RUNTIME_ADAPTER','PSP_SANDBOX_E2E',
     'BACKUP_RESTORE_DRILL','IOS_SAFARI_ACCEPTANCE','FR_LEGAL_OPERATIONAL_SIGNOFF',
     'PRODUCTION_DEPLOYMENT_APPROVAL'
   ]);
   const blocking=checks.filter(x=>blockingCodes.has(x.code)&&x.status!=='OK');
-  const overall=blocking.length===0 && result.blocking===0;
-  // GET production-check is read-only: no config writes or journal side effects.
-  return json({ok:true,version:VERSION,production_gate:overall?'OPEN':'CLOSED',ready_for_real_traffic:overall,checks,blocking:blocking.map(x=>x.code),note:overall?'Configuration gate passed. A real production launch still requires sandbox/acceptance tests for PSP, notifications, identity/security, backups/restore and critical user journeys.':'Production traffic remains blocked until the listed blocking controls are configured and tested.'});
+  const configurationReady=blocking.length===0 && result.blocking===0;
+  // A configuration audit is never a production release authorization.
+  // Payment settlement remains explicitly blocked pending independent validation.
+  return json({ok:true,version:VERSION,production_gate:configurationReady?'CONFIGURATION_READY':'CLOSED',
+    configuration_ready:configurationReady,ready_for_real_traffic:false,real_traffic_authorized:false,
+    checks,blocking:blocking.map(x=>x.code),
+    additional_gates_required:['PSP_SANDBOX_AND_WEBHOOK_RECONCILIATION','CLIENT_PROVIDER_MANAGER_E2E',
+      'IOS_ANDROID_DESKTOP_ACCEPTANCE','BACKUP_RESTORE_DRILL','INDEPENDENT_SECURITY_REVIEW',
+      'RGPD_AND_LEGAL_APPROVAL','EXPLICIT_RELEASE_AUTHORIZATION'],
+    note:'Read-only configuration audit only. This endpoint can never authorize real traffic; payment webhook settlement remains blocked pending atomicity and reconciliation validation.'});
 }
 
 const __procheliaProductionSafetyHandle = handle;

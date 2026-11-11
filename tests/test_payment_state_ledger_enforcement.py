@@ -479,9 +479,11 @@ class PaymentStateLedgerEnforcementTests(unittest.TestCase):
         export = source[start:end]
         self.assertIn("const exportAmount=value=>{const cents=integerCents(value??0)", export)
         self.assertIn("devise:String(x.currency||'EUR').toUpperCase()", export)
-        self.assertIn("Indisponible (devises multiples ou données invalides)", export)
+        self.assertIn("summary.gross_eur==null?'Indisponible'", export)
+        self.assertIn("summary.refunds_eur==null?'Indisponible'", export)
         self.assertIn("if(/^\\s*[=+@-]/.test(v))v=\"'\"+v", export)
-        self.assertIn("const header=['date','type','status','mission_id','devise','montant_brut'", export)
+        self.assertIn("? ['date','type','status','mission_id','devise','montant_brut'", export)
+        self.assertIn(": ['date','type','status','mission_id','devise','remuneration_intervenant'", export)
         self.assertIn("INVALID_FINANCE_EXPORT_FORMAT", export)
         self.assertIn("FINANCE_PDF_EXPORT_NOT_SUPPORTED", export)
         self.assertIn("if(format==='html')", export)
@@ -505,7 +507,9 @@ class PaymentStateLedgerEnforcementTests(unittest.TestCase):
         start = source.index("async function financeProblemResolve")
         end = source.index("async function handleFinanceWorkspace", start)
         resolver = source[start:end]
-        self.assertIn("const approved=b.approve===true", resolver)
+        self.assertIn("if(!manager && b.approve===true)", resolver)
+        self.assertIn("FINANCE_MANAGER_APPROVAL_REQUIRED", resolver)
+        self.assertIn("const approved=manager && b.approve===true", resolver)
         self.assertNotIn("Boolean(b.approve)", resolver)
         self.assertIn("const status=approved?'RESOLVED':'ESCALATED'", resolver)
 
