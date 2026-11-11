@@ -3255,9 +3255,23 @@ async function interfaceConfigEndpoint(request,env){
 async function supportCreate(request,env){
   const a=await supportAuth(request,env); if(a.response)return a.response;
   await ensureProcheliaMasterComplementSchema(env);
-  const b=await readJson(request)||{};
-  const category=clean(b.category)||'GENERAL';
-  const severity=String(b.severity||'LOW').toUpperCase();
+  const b=await readJson(request);
+  if(!b || typeof b!=='object' || Array.isArray(b)){
+    return json({ok:false,error:'INVALID_SUPPORT_PAYLOAD',version:VERSION},400);
+  }
+  const rawCategory=b.category===undefined?'GENERAL':b.category;
+  if(typeof rawCategory!=='string' || rawCategory.trim().length<2 || rawCategory.trim().length>40 || !/^[A-Za-z0-9_-]+$/.test(rawCategory.trim())){
+    return json({ok:false,error:'INVALID_SUPPORT_CATEGORY',version:VERSION},400);
+  }
+  const category=rawCategory.trim().toUpperCase();
+  const rawSeverity=b.severity===undefined?'LOW':b.severity;
+  if(typeof rawSeverity!=='string' || !['LOW','MEDIUM','HIGH','CRITICAL'].includes(rawSeverity.trim().toUpperCase())){
+    return json({ok:false,error:'INVALID_SUPPORT_SEVERITY',version:VERSION},400);
+  }
+  const severity=rawSeverity.trim().toUpperCase();
+  if(b.description!==undefined && (typeof b.description!=='string' || b.description.length>4000)){
+    return json({ok:false,error:'INVALID_SUPPORT_DESCRIPTION',version:VERSION},400);
+  }
   const scenario=supportScenarioFor(category,severity);
   const rule=await env.DB.prepare(`SELECT * FROM copilot_resolution_rules WHERE scenario_key=? LIMIT 1`).bind(scenario).first();
   const auto=Number(rule?.auto_allowed||0)===1 && String(severity)!=='CRITICAL' && String(severity)!=='HIGH';
