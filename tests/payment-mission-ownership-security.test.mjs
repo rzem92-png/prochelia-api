@@ -36,6 +36,9 @@ test("client payment disputes require ownership and cannot exceed paid transacti
   assert.match(h, /readJsonLimited\(request,8192\)/);
   assert.match(h, /status='paid' ORDER BY created_at DESC LIMIT 1/);
   assert.match(h, /PAYMENT_STATE_CONFLICT/);
+  assert.match(h, /INSERT INTO payment_disputes[\\s\\S]*?status='paid'/);
+  assert.match(h, /DELETE FROM payment_disputes[\\s\\S]*?status='held'/);
+  assert.match(h, /NOT EXISTS \\(SELECT 1 FROM payment_disputes WHERE transaction_id=\\? AND status IN/);
   assert.match(h, /PAYMENT_DISPUTE:/);
 });
 
