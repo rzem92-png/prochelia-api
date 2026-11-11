@@ -30,6 +30,34 @@ async function readJson(request) {
   catch { return null; }
 }
 
+async function readJsonLimited(request,maxBytes=16384) {
+  const reader=request.body?.getReader();
+  if(!reader) return {ok:false,error:'JSON_BODY_REQUIRED'};
+  const chunks=[];
+  let total=0;
+  try {
+    while(true) {
+      const {done,value}=await reader.read();
+      if(done) break;
+      total+=value.byteLength;
+      if(total>maxBytes) {
+        await reader.cancel().catch(()=>{});
+        return {ok:false,error:'PAYLOAD_TOO_LARGE'};
+      }
+      chunks.push(value);
+    }
+    const bytes=new Uint8Array(total);
+    let offset=0;
+    for(const chunk of chunks){bytes.set(chunk,offset);offset+=chunk.byteLength;}
+    const value=JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(bytes));
+    return {ok:true,value};
+  } catch {
+    return {ok:false,error:'INVALID_JSON'};
+  } finally {
+    try{reader.releaseLock();}catch{}
+  }
+}
+
 function clean(value) {
   return typeof value === 'string' ? value.trim() : value;
 }
@@ -3255,7 +3283,12 @@ async function interfaceConfigEndpoint(request,env){
 async function supportCreate(request,env){
   const a=await supportAuth(request,env); if(a.response)return a.response;
   await ensureProcheliaMasterComplementSchema(env);
-  const b=await readJson(request);
+  const parsed=await readJsonLimited(request,16384);
+  if(!parsed.ok){
+    const tooLarge=parsed.error==='PAYLOAD_TOO_LARGE';
+    return json({ok:false,error:parsed.error,version:VERSION},tooLarge?413:400);
+  }
+  const b=parsed.value;
   if(!b || typeof b!=='object' || Array.isArray(b)){
     return json({ok:false,error:'INVALID_SUPPORT_PAYLOAD',version:VERSION},400);
   }
