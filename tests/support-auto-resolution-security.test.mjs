@@ -81,7 +81,7 @@ test("support creation bounds raw JSON body before parsing", () => {
 
 test("support tickets cannot be linked to arbitrary records by non-managers", () => {
   const start = source.indexOf("async function supportCreate(");
-  const end = source.indexOf("\\nasync function supportAutoResolve(", start);
+  const end = source.indexOf("\nasync function supportAutoResolve(", start);
   const handler = source.slice(start, end);
   assert.match(handler, /const isManager=\['GERANTE','ADMIN'\]\.includes\(a\.role\)/);
   assert.match(handler, /linkedFields\.some\(k=>b\[k\]!==undefined && b\[k\]!==null && b\[k\]!==''\)/);
@@ -92,7 +92,7 @@ test("support tickets cannot be linked to arbitrary records by non-managers", ()
 
 test("finance case owners cannot self-approve and state transitions are compare-and-set", () => {
   const start = source.indexOf("async function financeProblemResolve(");
-  const end = source.indexOf("\\n}", start) + 2;
+  const end = source.indexOf("\n}", start) + 2;
   const handler = source.slice(start, end);
   assert.match(handler, /if\(approved && !manager\).*MANAGER_APPROVAL_REQUIRED/);
   assert.match(handler, /typeof b\.approve!=='boolean'/);
