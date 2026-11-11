@@ -875,7 +875,9 @@ async function createMissionPayment(request, env) {
   const auth=await getSessionUser(request,env);
   if(!requireRole(auth,['gerante'])) return json({ok:false,error:auth?.user?'FORBIDDEN':'UNAUTHENTICATED',version:VERSION},auth?.user?403:401);
   await ensurePaymentSchema(env);
-  const body=await readJson(request);
+  const parsed=await readJsonLimited(request,8192);
+  if(!parsed.ok) return json({ok:false,error:parsed.error==='PAYLOAD_TOO_LARGE'?'PAYLOAD_TOO_LARGE':'INVALID_JSON',version:VERSION},parsed.error==='PAYLOAD_TOO_LARGE'?413:400);
+  const body=parsed.value;
   const missionId=clean(body?.mission_id), suppliedClientId=clean(body?.client_id), suppliedIntervenantId=clean(body?.intervenant_id);
   const gross=moneyCents(body?.gross_eur), commission=moneyCents(body?.commission_eur);
   if(!missionId||gross===null||commission===null||gross<=0||commission<0||commission>gross) return json({ok:false,error:'INVALID_PAYMENT_AMOUNT_OR_PARTIES',version:VERSION},400);
@@ -968,7 +970,10 @@ async function verifyWebhookSignature(request, env, rawBody) {
 
 async function paymentWebhook(request, env) {
   await ensurePaymentSchema(env);
+  const declaredLength=Number(request.headers.get('content-length')||0);
+  if(Number.isFinite(declaredLength)&&declaredLength>65536) return json({ok:false,error:'WEBHOOK_PAYLOAD_TOO_LARGE',version:VERSION},413);
   const raw=await request.text();
+  if(raw.length>65536) return json({ok:false,error:'WEBHOOK_PAYLOAD_TOO_LARGE',version:VERSION},413);
   if(!(await verifyWebhookSignature(request,env,raw))) return json({ok:false,error:'INVALID_WEBHOOK_SIGNATURE',version:VERSION},401);
   let event; try{event=JSON.parse(raw)}catch{return json({ok:false,error:'INVALID_WEBHOOK_JSON',version:VERSION},400);}
   const provider=paymentProvider(env), suppliedProvider=clean(event?.provider), eventId=clean(event?.id), type=clean(event?.type);
