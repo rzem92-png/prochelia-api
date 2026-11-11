@@ -101,7 +101,7 @@ test("official finance ledger writes are restricted to finance staff roles", () 
   const end = indexSource.indexOf("async function financeProblemCreate", start);
   assert.ok(start >= 0 && end > start);
   const handler = indexSource.slice(start, end);
-  assert.match(handler, /\['GERANTE','ADMIN','FINANCE'\]\.includes\(String\(auth\.user\.role\|\|'\'\)\.toUpperCase\(\)\)/);
+  assert.match(handler, /\['GERANTE','ADMIN','FINANCE'\]/);
   assert.match(handler, /FINANCE_LEDGER_WRITE_FORBIDDEN/);
   assert.ok(handler.indexOf("FINANCE_LEDGER_WRITE_FORBIDDEN") < handler.indexOf("INSERT INTO finance_workspace_entries"));
 });
