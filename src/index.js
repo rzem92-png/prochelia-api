@@ -2188,7 +2188,11 @@ function financeStrategicQuote({basePriceCents=0,phaseFactor=1,urgency='normal',
 }
 
 async function pricingQuote(request, env) {
-  const gate=await requireAuthRole(request,env,['gerante','client','entreprise','intervenant']); if(gate.error)return gate.error;
+  // Pricing inputs currently include internal cost/margin overrides and the
+  // public contract has no verified server-owned tariff lookup for all roles.
+  // Keep quote generation manager-only until that contract is implemented;
+  // never disclose platform margin, provider floor or PSP costs to customers.
+  const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
   const b=await readJson(request)||{};
   const phase=String(b.phase||await getSetting(env,'project_phase','TEST')).toUpperCase();
   const cfg=PROJECT_PHASES[phase]||PROJECT_PHASES.TEST;
