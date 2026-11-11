@@ -8,7 +8,8 @@ on:
       - "src/index.js"
       - "tests/support-auto-resolution-security.test.mjs"
       - "tests/profile-directory-isolation.test.mjs"
-      - "tests/quality-ownership-security.test.mjs"
+      - "tests/quality-ownership-security.test.mjs tests/promotion-listing-privacy.test.mjs"
+      - "tests/promotion-listing-privacy.test.mjs"
       - ".github/workflows/support-auto-resolution-security.yml"
   pull_request:
     branches:
