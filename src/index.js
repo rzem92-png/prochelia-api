@@ -3564,6 +3564,33 @@ async function handle(request,env){
   try {
     if(isMutatingMethod(request.method) && !securityOriginAllowed(request,env)) return json({ok:false,error:'ORIGIN_NOT_ALLOWED',version:VERSION},403);
     const url=new URL(request.url);
+    // Sensitive operational/admin endpoints are never public. Enforce the
+    // authenticated server-side session and administrator role before any
+    // handler can read or mutate operational, financial, or audit data.
+    const adminOnlyPaths = new Set([
+      '/api/ops/case/execute',
+      '/api/ops/outbox/process',
+      '/api/copilot/briefing',
+      '/api/clients/score',
+      '/api/loyalty/update',
+      '/api/quality',
+      '/api/capacity/dashboard',
+      '/api/finance/forecast',
+      '/api/system/audit',
+      '/api/system/final-audit',
+      '/api/system/production-check',
+      '/api/copilot/next-actions',
+      '/api/jobs/process'
+    ]);
+    if (adminOnlyPaths.has(url.pathname)) {
+      const routeAuth = await getSessionUser(request, env).catch(() => null);
+      if (!routeAuth?.user) {
+        return json({ ok: false, error: 'UNAUTHENTICATED', version: VERSION }, 401);
+      }
+      if (routeAuth.user.role !== 'gerante') {
+        return json({ ok: false, error: 'FORBIDDEN', version: VERSION }, 403);
+      }
+    }
     // Fail closed before any schema helper touches D1: unauthenticated callers
     // must not use mission validation as an existence oracle for private IDs.
     if (url.pathname === '/api/missions/validate') {
