@@ -1084,12 +1084,19 @@ async function openPaymentDispute(request, env) {
   if(amount<=0 || amount>Number(tx.gross_cents||0)) return json({ok:false,error:'INVALID_DISPUTE_AMOUNT',version:VERSION},400);
   const id=crypto.randomUUID(), disputeMarker=`PAYMENT_DISPUTE:${id}`;
   const results=await env.DB.batch([
-    env.DB.prepare(`UPDATE payment_transactions SET status='held',reason=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='paid'`).bind(disputeMarker,tx.id),
     env.DB.prepare(`INSERT INTO payment_disputes (id,mission_id,transaction_id,client_id,intervenant_id,status,reason,amount_cents)
-      SELECT ?,?,?,?,?,?,?,? WHERE EXISTS (SELECT 1 FROM payment_transactions WHERE id=? AND status='held' AND reason=?)`)
-      .bind(id,missionId,tx.id,tx.client_id,tx.intervenant_id,'open',reason,amount,tx.id,disputeMarker)
+      SELECT ?,?,?,?,?,?,?,? WHERE EXISTS (SELECT 1 FROM payment_transactions WHERE id=? AND status='paid')
+        AND NOT EXISTS (SELECT 1 FROM payment_disputes WHERE transaction_id=? AND status IN ('open','pending','resolution_pending'))`)
+      .bind(id,missionId,tx.id,tx.client_id,tx.intervenant_id,'open',reason,amount,tx.id,tx.id),
+    env.DB.prepare(`UPDATE payment_transactions SET status='held',reason=?,updated_at=CURRENT_TIMESTAMP
+      WHERE id=? AND status='paid' AND EXISTS (SELECT 1 FROM payment_disputes WHERE id=?)`)
+      .bind(disputeMarker,tx.id,id),
+    env.DB.prepare(`DELETE FROM payment_disputes WHERE id=?
+      AND NOT EXISTS (SELECT 1 FROM payment_transactions WHERE id=? AND status='held' AND reason=?)`)
+      .bind(id,tx.id,disputeMarker)
   ]);
-  if(Number(results?.[0]?.meta?.changes||0)!==1 || Number(results?.[1]?.meta?.changes||0)!==1)
+  if(Number(results?.[0]?.meta?.changes||0)!==1 || Number(results?.[1]?.meta?.changes||0)!==1
+    || Number(results?.[2]?.meta?.changes||0)!==0)
     return json({ok:false,error:'PAYMENT_STATE_CONFLICT',version:VERSION},409);
   await paymentAudit(env,'PAYMENT_DISPUTE_OPENED',{transaction_id:tx.id,mission_id:missionId,user_id:auth.user.id,metadata:{amount_cents:amount,reason}},'OK');
   return json({ok:true,version:VERSION,dispute_id:id,status:'open',payment_status:'held'},201);
