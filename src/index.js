@@ -3399,7 +3399,9 @@ async function ensureFinanceWorkspaceSchema(env) {
 }
 
 function financeRoleAllowed(role) {
-  return ['CLIENT','CLIENT_SOCIAL','SOCIETE','COMPANY','INTERVENANT','GERANTE','ADMIN','FINANCE','SUPPORT'].includes(String(role||'').toUpperCase());
+  // Finance access is limited to roles with a verified ownership mapping.
+  // Company/support profiles are denied until their server-side scope relation exists.
+  return ['CLIENT','CLIENT_SOCIAL','INTERVENANT','GERANTE','ADMIN','FINANCE'].includes(String(role||'').toUpperCase());
 }
 
 async function financeAuth(request, env) {
@@ -3428,9 +3430,15 @@ async function financeRowsForUser(env, user) {
   if (['GERANTE','ADMIN','FINANCE'].includes(role)) {
     where = '1=1';
   } else if (role === 'INTERVENANT') {
-    where = 'intervenant_id=?'; params.push(uid);
+    const profile = await env.DB.prepare('SELECT id FROM intervenants WHERE user_id=? LIMIT 1').bind(uid).first();
+    if (!profile) throw new Error('FINANCE_INTERVENANT_PROFILE_NOT_FOUND');
+    where = 'intervenant_id=?'; params.push(profile.id);
+  } else if (['CLIENT','CLIENT_SOCIAL'].includes(role)) {
+    const profile = await env.DB.prepare('SELECT id FROM clients WHERE user_id=? LIMIT 1').bind(uid).first();
+    if (!profile) throw new Error('FINANCE_CLIENT_PROFILE_NOT_FOUND');
+    where = 'client_id=?'; params.push(profile.id);
   } else {
-    where = 'client_id=?'; params.push(uid);
+    throw new Error('FINANCE_ROLE_SCOPE_NOT_CONFIGURED');
   }
 
   // Never turn a failed financial query into an apparently valid empty ledger.
