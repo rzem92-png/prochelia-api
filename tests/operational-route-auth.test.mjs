@@ -167,7 +167,8 @@ test("finance dashboard and exports redact margin and counterparty fields by rol
   assert.match(rowView, /net_intervenant_cents:x\.net_intervenant_cents/);
   assert.doesNotMatch(rowView, /provider_payment_id/);
   assert.doesNotMatch(summaryView, /platform_net_cents/);
-  assert.match(summaryView, /client_net_eur/);\n  assert.match(summaryView, /net_intervenant_eur/);
+  assert.match(summaryView, /client_net_eur/);
+  assert.match(summaryView, /net_intervenant_eur/);
   assert.match(dashboard, /financePublicSummary\(/);
   assert.match(dashboard, /financePublicPaymentRows\(/);
   assert.match(exportHandler, /role==='INTERVENANT'/);
