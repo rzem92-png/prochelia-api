@@ -3583,16 +3583,14 @@ async function handle(request,env){
       '/api/jobs/process',
       '/api/ops/dashboard',
       '/api/journal',
-      '/api/cases',
       '/api/cases/approve',
       '/api/metiers/suggest',
       '/api/settings/phase',
-      '/api/pricing/quote'
+      '/api/settings/phase'
     ]);
     const requiresAdminSession =
       adminOnlyPaths.has(url.pathname) ||
       url.pathname.startsWith('/api/ops/') ||
-      url.pathname.startsWith('/api/finance/') ||
       url.pathname.startsWith('/api/strategic/') ||
       url.pathname.startsWith('/api/copilot/commercial/') ||
       url.pathname.startsWith('/api/copilot/recruitment/') ||
