@@ -3582,7 +3582,15 @@ async function handle(request,env){
       '/api/copilot/next-actions',
       '/api/jobs/process'
     ]);
-    if (adminOnlyPaths.has(url.pathname)) {
+    const requiresAdminSession =
+      adminOnlyPaths.has(url.pathname) ||
+      url.pathname.startsWith('/api/ops/') ||
+      url.pathname.startsWith('/api/finance/') ||
+      url.pathname.startsWith('/api/strategic/') ||
+      url.pathname.startsWith('/api/copilot/commercial/') ||
+      url.pathname.startsWith('/api/copilot/recruitment/') ||
+      url.pathname === '/api/copilot/growth-dashboard';
+    if (requiresAdminSession) {
       const routeAuth = await getSessionUser(request, env).catch(() => null);
       if (!routeAuth?.user) {
         return json({ ok: false, error: 'UNAUTHENTICATED', version: VERSION }, 401);
