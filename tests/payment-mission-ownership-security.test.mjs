@@ -48,7 +48,8 @@ test("verified PSP webhook resolves provider profile to its user before creditin
   const webhook = handler("paymentWebhook");
   assert.match(webhook, /SELECT user_id FROM intervenants WHERE id=\? LIMIT 1/);
   assert.match(webhook, /bind\(providerProfile\.user_id\)/);
-  assert.doesNotMatch(webhook, /bind\(tx\.intervenant_id\)\.first\(\)/);
+  assert.match(webhook, /SELECT \* FROM wallets WHERE user_id=\? LIMIT 1/);
+  assert.match(webhook, /bind\(providerProfile\.user_id\)\.first\(\)/);
 });
 
 test("PSP account identifiers cannot be forged from the browser during onboarding", () => {
