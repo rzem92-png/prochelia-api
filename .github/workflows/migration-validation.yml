@@ -5,12 +5,14 @@ on:
     paths:
       - "migrations/**"
       - "tests/test_payment_migration.py"
+      - "tests/test_atomic_rate_limit.py"
       - ".github/workflows/migration-validation.yml"
   push:
     branches: [main]
     paths:
       - "migrations/**"
       - "tests/test_payment_migration.py"
+      - "tests/test_atomic_rate_limit.py"
       - ".github/workflows/migration-validation.yml"
 
 permissions:
@@ -26,3 +28,6 @@ jobs:
           python-version: "3.12"
       - name: Validate payment migration in SQLite
         run: python -m unittest tests/test_payment_migration.py
+      - name: Validate atomic rate-limit protection
+        run: python -m unittest tests/test_atomic_rate_limit.py
+      # Covers missing-Origin cookie protection, atomic limiter, and payment ledger migrations.

@@ -138,7 +138,10 @@ function getCookie(request, name) {
     const idx = part.indexOf('=');
     if (idx < 0) continue;
     const key = part.slice(0, idx).trim();
-    if (key === name) return decodeURIComponent(part.slice(idx + 1).trim());
+    // Session tokens are base64url and need no percent-decoding. Keeping the
+    // raw cookie value avoids URIError on malformed percent escapes and makes
+    // a malformed session cookie remain present for the Origin/CSRF guard.
+    if (key === name) return part.slice(idx + 1).trim();
   }
   return null;
 }
@@ -293,12 +296,67 @@ async function postMissions(request, env) {
   }, 503);
 }
 
+async function ensureLoginSecuritySchema(env) {
+  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS login_attempts (
+    id TEXT PRIMARY KEY, key_hash TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  )`).run();
+  await env.DB.prepare(`CREATE INDEX IF NOT EXISTS idx_login_attempts_key_created ON login_attempts(key_hash,created_at)`).run();
+}
+
+async function loginAttemptKey(request,email) {
+  // Hash both the email+edge-IP pair and the edge IP alone. Do not trust
+  // caller-supplied X-Forwarded-For for authentication throttling.
+  const ip=clean(request.headers.get('CF-Connecting-IP'))||'unknown';
+  return {
+    emailIpHash:await sha256Base64url(`LOGIN_EMAIL_IP:${normalizeEmail(email)}|${ip}`),
+    ipHash:await sha256Base64url(`LOGIN_IP:${ip}`)
+  };
+}
+
+async function recordLoginFailure(env,keys) {
+  // Conditional INSERTs enforce limits in the database, including concurrent
+  // failures that would otherwise pass the same stale COUNT result.
+  const results=await env.DB.batch([
+    env.DB.prepare(`INSERT INTO login_attempts (id,key_hash)
+      SELECT ?,? WHERE (SELECT COUNT(*) FROM login_attempts WHERE key_hash=? AND created_at>=datetime('now','-15 minutes')) < ?`)
+      .bind(crypto.randomUUID(),keys.emailIpHash,keys.emailIpHash,5),
+    env.DB.prepare(`INSERT INTO login_attempts (id,key_hash)
+      SELECT ?,? WHERE (SELECT COUNT(*) FROM login_attempts WHERE key_hash=? AND created_at>=datetime('now','-15 minutes')) < ?`)
+      .bind(crypto.randomUUID(),keys.ipHash,keys.ipHash,25)
+  ]);
+  if(Number(results?.[0]?.meta?.changes||0)!==1 || Number(results?.[1]?.meta?.changes||0)!==1) {
+    return {rateLimited:true};
+  }
+  const [emailRow,ipRow]=await Promise.all([
+    env.DB.prepare(`SELECT COUNT(*) AS total FROM login_attempts WHERE key_hash=? AND created_at>=datetime('now','-15 minutes')`).bind(keys.emailIpHash).first(),
+    env.DB.prepare(`SELECT COUNT(*) AS total FROM login_attempts WHERE key_hash=? AND created_at>=datetime('now','-15 minutes')`).bind(keys.ipHash).first()
+  ]);
+  return {
+    rateLimited:Number(emailRow?.total||0)>=5 || Number(ipRow?.total||0)>=25
+  };
+}
+
 async function login(request, env) {
   if (!env.DB) return json({ ok: false, database: false, version: VERSION }, 503);
+  await ensureLoginSecuritySchema(env);
   const body = await readJson(request);
   const email = normalizeEmail(body?.email);
   const password = body?.password;
+  const keys=await loginAttemptKey(request,email);
+
+  // Keep only one day of hashed throttle evidence; active window is 15 minutes.
+  await env.DB.prepare(`DELETE FROM login_attempts WHERE created_at<datetime('now','-1 day')`).run();
+  const [currentEmail,currentIp]=await Promise.all([
+    env.DB.prepare(`SELECT COUNT(*) AS total FROM login_attempts WHERE key_hash=? AND created_at>=datetime('now','-15 minutes')`).bind(keys.emailIpHash).first(),
+    env.DB.prepare(`SELECT COUNT(*) AS total FROM login_attempts WHERE key_hash=? AND created_at>=datetime('now','-15 minutes')`).bind(keys.ipHash).first()
+  ]);
+  if(Number(currentEmail?.total||0)>=5 || Number(currentIp?.total||0)>=25) {
+    return json({ok:false,error:'LOGIN_RATE_LIMITED',version:VERSION,retry_after_seconds:900},429,{'retry-after':'900'});
+  }
+
   if (!validEmail(email) || !validPassword(password)) {
+    const attempts=await recordLoginFailure(env,keys);
+    if(attempts.rateLimited) return json({ok:false,error:'LOGIN_RATE_LIMITED',version:VERSION,retry_after_seconds:900},429,{'retry-after':'900'});
     return json({ ok: false, error: 'INVALID_CREDENTIALS', version: VERSION }, 401);
   }
 
@@ -308,10 +366,14 @@ async function login(request, env) {
   ).bind(email).first();
 
   if (!user || user.status !== 'active' || !user.password_hash || !(await verifyPassword(password, user.password_hash))) {
+    const attempts=await recordLoginFailure(env,keys);
+    if(attempts.rateLimited) return json({ok:false,error:'LOGIN_RATE_LIMITED',version:VERSION,retry_after_seconds:900},429,{'retry-after':'900'});
     return json({ ok: false, error: 'INVALID_CREDENTIALS', version: VERSION }, 401);
   }
 
-  // Remove expired sessions for this user before creating a fresh one.
+  // A successful login clears the identity/IP bucket but keeps IP-wide
+  // failures so password spraying across many accounts remains throttled.
+  await env.DB.prepare('DELETE FROM login_attempts WHERE key_hash=?').bind(keys.emailIpHash).run();
   await env.DB.prepare(`DELETE FROM sessions WHERE user_id = ? AND expires_at <= CURRENT_TIMESTAMP`).bind(user.id).run();
 
   const token = await createSession(env, user.id);
@@ -350,11 +412,6 @@ async function bootstrap(request, env) {
     return json({ ok: false, error: 'UNAUTHORIZED', version: VERSION }, 401);
   }
 
-  const count = await env.DB.prepare('SELECT COUNT(*) AS total FROM users').first();
-  if (Number(count?.total || 0) !== 0) {
-    return json({ ok: false, error: 'BOOTSTRAP_ALREADY_USED', version: VERSION }, 409);
-  }
-
   const body = await readJson(request);
   const email = normalizeEmail(body?.email);
   const firstName = clean(body?.first_name);
@@ -369,10 +426,18 @@ async function bootstrap(request, env) {
   const passwordHash = await hashPassword(password);
   const userId = crypto.randomUUID();
 
-  await env.DB.prepare(
+  // Enforce first-account bootstrap in the INSERT itself. A separate
+  // COUNT followed by INSERT permits two concurrent requests to create two
+  // initial managers before either request observes the other's write.
+  const created = await env.DB.prepare(
     `INSERT INTO users (id, role, email, first_name, last_name, phone, status, password_hash)
-     VALUES (?, 'gerante', ?, ?, ?, ?, 'active', ?)`
-  ).bind(userId, email, firstName, lastName, phone, passwordHash).run();
+     SELECT ?, 'gerante', ?, ?, ?, ?, 'active', ?
+      WHERE NOT EXISTS (SELECT 1 FROM users)
+     RETURNING id`
+  ).bind(userId, email, firstName, lastName, phone, passwordHash).first();
+  if (!created?.id) {
+    return json({ ok: false, error: 'BOOTSTRAP_ALREADY_USED', version: VERSION }, 409);
+  }
 
   return json({
     ok: true,
@@ -731,6 +796,9 @@ async function ensurePaymentSchema(env) {
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     )`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS idx_payment_accounts_provider_account
+       ON payment_accounts(provider,provider_account_id)
+       WHERE provider_account_id IS NOT NULL AND provider_account_id <> ''`,
     `CREATE TABLE IF NOT EXISTS wallets (
       id TEXT PRIMARY KEY, user_id TEXT NOT NULL UNIQUE, currency TEXT NOT NULL DEFAULT 'EUR',
       available_cents INTEGER NOT NULL DEFAULT 0, pending_cents INTEGER NOT NULL DEFAULT 0,
@@ -2460,9 +2528,9 @@ async function processBackgroundJobs(request,env) {
 function isMutatingMethod(method){ return ['POST','PUT','PATCH','DELETE'].includes(method); }
 function securityOriginAllowed(request,env){
   const origin=request.headers.get('origin');
-  // Les clients non-navigateur peuvent ne pas envoyer Origin. Les requêtes navigateur
-  // avec Origin doivent correspondre à une origine explicitement autorisée.
-  if(!origin) return true;
+  // Une mutation authentifiée par cookie doit toujours porter un Origin vérifiable.
+  // Les clients serveur-à-serveur sans cookie peuvent omettre Origin (ex. webhook signé).
+  if(!origin) return !getCookie(request,SESSION_COOKIE);
   const configured=clean(env?.CORS_ORIGIN);
   const defaults=[
     'https://prochelia.pages.dev',
@@ -3369,7 +3437,10 @@ async function productionSafetySchema(env){
 }
 
 async function productionSubjectHash(request, route){
-  const ip=clean(request.headers.get('CF-Connecting-IP')) || clean(request.headers.get('X-Forwarded-For')) || 'unknown';
+  // CF-Connecting-IP is injected by Cloudflare at the edge. Never fall back
+  // to X-Forwarded-For: callers can supply that header themselves unless a
+  // separately trusted proxy chain has explicitly sanitized it.
+  const ip=clean(request.headers.get('CF-Connecting-IP')) || 'unknown';
   return sha256Hex(`${ip}|${route}`);
 }
 
@@ -3391,13 +3462,19 @@ async function productionRateLimit(request,env){
   const now=Math.floor(Date.now()/1000);
   const start=new Date(Math.floor(now/windowSeconds)*windowSeconds*1000).toISOString();
   await ensureFinalHardeningSchema(env);
-  const existing=await env.DB.prepare(`SELECT request_count FROM security_rate_limits WHERE bucket=? AND subject_hash=? AND window_start=? LIMIT 1`).bind(bucket,subject,start).first();
-  const count=Number(existing?.request_count||0)+1;
-  if(existing){
-    await env.DB.prepare(`UPDATE security_rate_limits SET request_count=? WHERE bucket=? AND subject_hash=? AND window_start=?`).bind(count,bucket,subject,start).run();
-  }else{
-    await env.DB.prepare(`INSERT INTO security_rate_limits(id,bucket,subject_hash,window_start,request_count) VALUES(?,?,?,?,1)`).bind(crypto.randomUUID(),bucket,subject,start).run();
+  // One atomic SQLite statement prevents concurrent requests from losing
+  // increments or bypassing the configured threshold through a read/write race.
+  const counter=await env.DB.prepare(`INSERT INTO security_rate_limits
+    (id,bucket,subject_hash,window_start,request_count)
+    VALUES(?,?,?,?,1)
+    ON CONFLICT(bucket,subject_hash,window_start)
+    DO UPDATE SET request_count=security_rate_limits.request_count+1
+    RETURNING request_count`)
+    .bind(crypto.randomUUID(),bucket,subject,start).first();
+  if(!counter || !Number.isSafeInteger(Number(counter.request_count))){
+    throw new Error('RATE_LIMIT_COUNTER_UNAVAILABLE');
   }
+  const count=Number(counter.request_count);
   if(count>limit){
     await productionSafetySchema(env);
     await env.DB.prepare(`INSERT INTO production_security_events(id,event_type,route,subject_hash,decision,details_json) VALUES(?,?,?,?,?,?)`)
