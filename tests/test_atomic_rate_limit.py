@@ -22,6 +22,47 @@ class AtomicRateLimitTests(unittest.TestCase):
         self.assertIn("if(!origin) return !getCookie(request,SESSION_COOKIE);", guard)
         self.assertIn("getCookie(request,SESSION_COOKIE)", guard)
 
+
+    def test_wallet_balance_guard_migration_blocks_negative_balances_and_overflow(self):
+        migration = ROOT / "migrations" / "0006_restore_wallet_balance_guard.sql"
+        db = sqlite3.connect(":memory:")
+        try:
+            db.executescript("""
+                CREATE TABLE wallets (
+                    user_id TEXT PRIMARY KEY, currency TEXT NOT NULL,
+                    available_cents INTEGER NOT NULL DEFAULT 0,
+                    pending_cents INTEGER NOT NULL DEFAULT 0,
+                    reserved_cents INTEGER NOT NULL DEFAULT 0,
+                    paid_cents INTEGER NOT NULL DEFAULT 0
+                );
+                CREATE TABLE payment_wallet_ledger (
+                    id TEXT PRIMARY KEY, user_id TEXT NOT NULL, currency TEXT NOT NULL,
+                    available_delta_cents INTEGER NOT NULL DEFAULT 0,
+                    pending_delta_cents INTEGER NOT NULL DEFAULT 0,
+                    reserved_delta_cents INTEGER NOT NULL DEFAULT 0,
+                    paid_delta_cents INTEGER NOT NULL DEFAULT 0
+                );
+            """)
+            db.executescript(migration.read_text(encoding="utf-8"))
+            db.execute("INSERT INTO wallets(user_id,currency) VALUES('u1','EUR')")
+            with self.assertRaisesRegex(sqlite3.IntegrityError, "PAYMENT_WALLET_NEGATIVE_PROTECTED_BALANCE"):
+                db.execute(
+                    "INSERT INTO payment_wallet_ledger(id,user_id,currency,pending_delta_cents) VALUES('bad','u1','EUR',-1)"
+                )
+            db.execute(
+                "UPDATE wallets SET available_cents=9223372036854775807 WHERE user_id='u1'"
+            )
+            with self.assertRaisesRegex(sqlite3.IntegrityError, "PAYMENT_WALLET_INTEGER_OVERFLOW"):
+                db.execute(
+                    "INSERT INTO payment_wallet_ledger(id,user_id,currency,available_delta_cents) VALUES('overflow','u1','EUR',1)"
+                )
+            with self.assertRaisesRegex(sqlite3.IntegrityError, "PAYMENT_WALLET_NOT_FOUND"):
+                db.execute(
+                    "INSERT INTO payment_wallet_ledger(id,user_id,currency) VALUES('missing','u2','EUR')"
+                )
+        finally:
+            db.close()
+
     def test_upsert_counts_every_request_without_lost_updates(self):
         db = sqlite3.connect(":memory:")
         try:
