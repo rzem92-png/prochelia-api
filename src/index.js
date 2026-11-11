@@ -907,7 +907,9 @@ async function finalizeMissionPayment(request, env) {
   if(['paid','refunded'].includes(outcome)) return json({ok:false,error:'PSP_SERVER_CONFIRMATION_REQUIRED',version:VERSION},409);
   if(['paid','refunded','failed'].includes(tx.status) && tx.status!==outcome) return json({ok:false,error:'PAYMENT_STATE_CONFLICT',version:VERSION,status:tx.status},409);
   if(outcome==='paid'){
-    const wallet=await env.DB.prepare('SELECT * FROM wallets WHERE user_id=? LIMIT 1').bind(tx.intervenant_id).first();
+    const providerProfile=await env.DB.prepare('SELECT user_id FROM intervenants WHERE id=? LIMIT 1').bind(tx.intervenant_id).first();
+    if(!providerProfile?.user_id) return json({ok:false,error:'INTERVENANT_ACCOUNT_NOT_FOUND',version:VERSION},409);
+    const wallet=await env.DB.prepare('SELECT * FROM wallets WHERE user_id=? LIMIT 1').bind(providerProfile.user_id).first();
     if(!wallet) return json({ok:false,error:'INTERVENANT_WALLET_NOT_FOUND',version:VERSION},409);
     await env.DB.prepare(`UPDATE payment_transactions SET status='paid',updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(txId).run();
     await env.DB.prepare(`UPDATE wallets SET pending_cents=pending_cents+?,available_cents=available_cents+?,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(0,tx.net_intervenant_cents,wallet.id).run();
@@ -972,8 +974,14 @@ async function paymentWebhook(request, env) {
         if(!alreadyFinal){
           await env.DB.prepare('UPDATE payment_transactions SET status=?,provider_payment_id=COALESCE(?,provider_payment_id),updated_at=CURRENT_TIMESTAMP WHERE id=?').bind(newStatus,clean(event?.data?.provider_payment_id)||null,txId).run();
           if(newStatus==='paid'){
-            const wallet=await env.DB.prepare('SELECT * FROM wallets WHERE user_id=? LIMIT 1').bind(tx.intervenant_id).first();
-            if(wallet) await env.DB.prepare('UPDATE wallets SET available_cents=available_cents+?,updated_at=CURRENT_TIMESTAMP WHERE id=?').bind(tx.net_intervenant_cents,wallet.id).run();
+            const providerProfile=await env.DB.prepare('SELECT user_id FROM intervenants WHERE id=? LIMIT 1').bind(tx.intervenant_id).first();
+            if(!providerProfile?.user_id) {
+              await paymentAudit(env,'PSP_PAYMENT_PAID_WALLET_ACCOUNT_MISSING',{transaction_id:txId,mission_id:tx.mission_id,metadata:{intervenant_id:tx.intervenant_id}},'ERROR');
+            } else {
+              const wallet=await env.DB.prepare('SELECT * FROM wallets WHERE user_id=? LIMIT 1').bind(providerProfile.user_id).first();
+              if(wallet) await env.DB.prepare('UPDATE wallets SET available_cents=available_cents+?,updated_at=CURRENT_TIMESTAMP WHERE id=?').bind(tx.net_intervenant_cents,wallet.id).run();
+              else await paymentAudit(env,'PSP_PAYMENT_PAID_WALLET_MISSING',{transaction_id:txId,mission_id:tx.mission_id,metadata:{intervenant_user_id:providerProfile.user_id}},'ERROR');
+            }
           }
         }
       }
