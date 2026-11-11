@@ -1002,8 +1002,8 @@ async function paymentWebhook(request, env) {
           // If the ledger migration is absent, leave the event unprocessed for safe retry.
           if(!await tableExists(env,'payment_wallet_ledger'))
             return json({ok:false,error:'WALLET_LEDGER_NOT_READY',version:VERSION},503);
-          const ledgerTriggers=await env.DB.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE type='trigger' AND name IN ('trg_payment_wallet_ledger_apply','trg_payment_wallet_ledger_require_wallet','trg_payment_wallet_ledger_guard_balances')").first();
-          if(Number(ledgerTriggers?.n||0)!==3)
+          const ledgerTriggers=await env.DB.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE type='trigger' AND name IN ('trg_payment_wallet_ledger_apply','trg_payment_wallet_ledger_require_wallet','trg_payment_wallet_ledger_guard_balances','trg_payment_wallet_ledger_no_update','trg_payment_wallet_ledger_no_delete')").first();
+          if(Number(ledgerTriggers?.n||0)!==5)
             return json({ok:false,error:'WALLET_LEDGER_GUARDS_NOT_READY',version:VERSION},503);
           const providerProfile=await env.DB.prepare('SELECT user_id FROM intervenants WHERE id=? LIMIT 1').bind(tx.intervenant_id).first();
           if(!providerProfile?.user_id)
@@ -1039,8 +1039,8 @@ async function paymentWebhook(request, env) {
       if(['completed','failed','canceled'].includes(newStatus)) {
         if(!await tableExists(env,'payment_wallet_ledger'))
           return json({ok:false,error:'WALLET_LEDGER_NOT_READY',version:VERSION},503);
-        const ledgerTriggers=await env.DB.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE type='trigger' AND name IN ('trg_payment_wallet_ledger_apply','trg_payment_wallet_ledger_require_wallet','trg_payment_wallet_ledger_guard_balances')").first();
-        if(Number(ledgerTriggers?.n||0)!==3)
+        const ledgerTriggers=await env.DB.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE type='trigger' AND name IN ('trg_payment_wallet_ledger_apply','trg_payment_wallet_ledger_require_wallet','trg_payment_wallet_ledger_guard_balances','trg_payment_wallet_ledger_no_update','trg_payment_wallet_ledger_no_delete')").first();
+        if(Number(ledgerTriggers?.n||0)!==5)
           return json({ok:false,error:'WALLET_LEDGER_GUARDS_NOT_READY',version:VERSION},503);
         const availableDelta=['failed','canceled'].includes(newStatus)?Number(payout.amount_cents):0;
         const reservedDelta=-Number(payout.amount_cents);
