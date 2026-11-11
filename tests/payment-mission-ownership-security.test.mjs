@@ -53,8 +53,11 @@ test("verified PSP webhook resolves provider profile to its user before creditin
   const webhook = handler("paymentWebhook");
   assert.match(webhook, /SELECT user_id FROM intervenants WHERE id=\? LIMIT 1/);
   assert.match(webhook, /bind\(providerProfile\.user_id\)/);
-  assert.match(webhook, /SELECT \* FROM wallets WHERE user_id=\? LIMIT 1/);
-  assert.match(webhook, /bind\(providerProfile\.user_id\)\.first\(\)/);
+  assert.match(webhook, /payment_wallet_ledger/);
+  assert.match(webhook, /MISSION_EARNING/);
+  assert.match(webhook, /payment:\\$\{txId\}:paid/);
+  assert.match(webhook, /WALLET_LEDGER_GUARDS_NOT_READY/);
+  assert.match(webhook, /status NOT IN \('paid','failed','refunded'\)/);
 });
 
 test("PSP account identifiers cannot be forged from the browser during onboarding", () => {
@@ -100,4 +103,20 @@ test("manual finance entries enforce bounded integer cents and strict enums", ()
   assert.match(h, /allowedTypes\.has\(entryType\)/);
   assert.match(h, /!\['IN','OUT'\]\.includes\(direction\)/);
   assert.match(h, /currency!=='EUR'/);
+});
+
+
+test("webhook retries resume unprocessed events and reject event ID payload changes", () => {
+  const h = handler("paymentWebhook");
+  assert.match(h, /prior\.processed/);
+  assert.match(h, /WEBHOOK_EVENT_ID_CONFLICT/);
+  assert.match(h, /An unprocessed event is retried safely/);
+});
+
+test("payout webhook balances are applied through the immutable idempotent wallet ledger", () => {
+  const h = handler("paymentWebhook");
+  assert.match(h, /payout_wallet_ledger/);
+  assert.match(h, /PAYOUT_\+/);
+  assert.match(h, /payout:\\$\{payoutId\}:\\$\{newStatus\}/);
+  assert.match(h, /PAYOUT_STATE_CONFLICT/);
 });
