@@ -125,7 +125,7 @@ test("payment config stays closed until the charge model is explicitly selected"
   assert.equal(body.connect_onboarding_ready, false);
 });
 
-test("onboarding rejects missing charge model before contacting Stripe", async () => {
+test("onboarding rejects unauthenticated callers before evaluating Stripe configuration", async () => {
   const response = await worker.fetch(new Request("https://api.test/api/payments/onboard", {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -143,8 +143,8 @@ test("onboarding rejects missing charge model before contacting Stripe", async (
     STRIPE_CONNECT_ONBOARDING_APPROVED: "true"
   });
   const body = await response.json();
-  assert.equal(response.status, 503);
-  assert.equal(body.error, "STRIPE_CONNECT_NOT_CONFIGURED");
+  assert.equal(response.status, 401);
+  assert.equal(body.error, "UNAUTHENTICATED");
 });
 
 test("Connect onboarding route is wired but disabled without explicit approval and creates no external request", async () => {
