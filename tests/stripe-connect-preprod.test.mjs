@@ -283,3 +283,39 @@ test("originless server-to-server mutation without a browser session reaches aut
   assert.equal(response.status, 503);
   assert.equal(body.error, "DATABASE_UNAVAILABLE");
 });
+
+
+test("mutation with a session cookie and an allowlisted Origin passes the Origin guard", async () => {
+  const response = await worker.fetch(new Request("https://api.test/api/payments/onboard", {
+    method: "POST",
+    headers: {
+      origin: "https://preview.prochelia.pages.dev",
+      cookie: "prochelia_session=malformed%ZZ",
+      "content-type": "application/json"
+    },
+    body: "{}"
+  }), {
+    CORS_ORIGIN: "https://preview.prochelia.pages.dev"
+  });
+  const body = await response.json();
+  assert.notEqual(response.status, 403);
+  assert.notEqual(body.error, "ORIGIN_NOT_ALLOWED");
+  assert.equal(response.status, 503);
+  assert.equal(body.error, "DATABASE_UNAVAILABLE");
+});
+
+test("mutation from a non-allowlisted Origin is rejected even without a session cookie", async () => {
+  const response = await worker.fetch(new Request("https://api.test/api/payments/onboard", {
+    method: "POST",
+    headers: {
+      origin: "https://attacker.invalid",
+      "content-type": "application/json"
+    },
+    body: "{}"
+  }), {
+    CORS_ORIGIN: "https://preview.prochelia.pages.dev"
+  });
+  const body = await response.json();
+  assert.equal(response.status, 403);
+  assert.equal(body.error, "ORIGIN_NOT_ALLOWED");
+});
