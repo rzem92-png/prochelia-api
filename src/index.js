@@ -3585,7 +3585,9 @@ async function handle(request,env){
       '/api/journal',
       '/api/cases/approve',
       '/api/metiers/suggest',
-      '/api/settings/phase'
+      '/api/settings/phase',
+      '/api/core/schema',
+      '/api/missions/schema'
     ]);
     const requiresAdminSession =
       adminOnlyPaths.has(url.pathname) ||
