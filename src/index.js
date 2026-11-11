@@ -139,7 +139,10 @@ function getCookie(request, name) {
     const idx = part.indexOf('=');
     if (idx < 0) continue;
     const key = part.slice(0, idx).trim();
-    if (key === name) return decodeURIComponent(part.slice(idx + 1).trim());
+    // Session tokens are base64url and need no percent-decoding. Keeping the
+    // raw cookie value avoids URIError on malformed percent escapes and makes
+    // a malformed session cookie remain present for the Origin/CSRF guard.
+    if (key === name) return part.slice(idx + 1).trim();
   }
   return null;
 }
