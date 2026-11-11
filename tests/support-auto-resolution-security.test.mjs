@@ -46,3 +46,16 @@ test("manager resolution validates input and uses an allowed-state compare-and-s
   assert.match(managerResolver, /update\?\.meta\?\.changes/);
   assert.match(managerResolver, /CASE_STATE_CONFLICT/);
 });
+
+const createStart = source.indexOf("async function supportCreate");
+const createEnd = source.indexOf("\nasync function supportAutoResolve", createStart + 20);
+assert.notEqual(createStart, -1, "supportCreate must exist");
+assert.notEqual(createEnd, -1, "supportCreate must have a following function boundary");
+const creator = source.slice(createStart, createEnd);
+
+test("support API never claims an automatic resolution while action is pending", () => {
+  assert.match(creator, /automatic_resolution:false/);
+  assert.match(creator, /manager_approval_required:auto \? true : requiresManager/);
+  assert.match(creator, /auto_check:!!auto/);
+  assert.doesNotMatch(creator, /automatic_resolution:!!auto|manager_approval_required:!auto/);
+});
