@@ -188,3 +188,12 @@ test("non-finance roles cannot see payout processor references or failures", () 
   assert.doesNotMatch(helper, /provider:/);
   assert.match(helper, /return \[\]/);
 });
+
+test("internal pricing engine is manager-only until public server tariffs are implemented", () => {
+  const start = indexSource.indexOf("async function pricingQuote");
+  const end = indexSource.indexOf("async function financeSummary", start);
+  assert.ok(start >= 0 && end > start);
+  const handler = indexSource.slice(start, end);
+  assert.match(handler, /requireAuthRole\(request,env,\['gerante'\]\)/);
+  assert.doesNotMatch(handler, /\['gerante','client','entreprise','intervenant'\]/);
+});
