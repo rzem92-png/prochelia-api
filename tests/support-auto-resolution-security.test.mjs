@@ -92,7 +92,8 @@ test("support tickets cannot be linked to arbitrary records by non-managers", ()
 
 test("finance case owners cannot self-approve and state transitions are compare-and-set", () => {
   const start = source.indexOf("async function financeProblemResolve(");
-  const end = source.indexOf("\n}", start) + 2;
+  const next = source.indexOf("\nasync function ", start + 1);
+  const end = next < 0 ? source.length : next;
   const handler = source.slice(start, end);
   assert.match(handler, /if\(approved && !manager\).*MANAGER_APPROVAL_REQUIRED/);
   assert.match(handler, /typeof b\.approve!=='boolean'/);
