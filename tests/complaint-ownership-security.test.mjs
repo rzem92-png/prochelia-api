@@ -25,3 +25,4 @@ test("failed linked case creation compensates by removing the orphan complaint",
   assert.match(handler, /if\(!caseResponse\.ok \|\| !caseJson\.case_id\)/);
   assert.match(handler, /DELETE FROM complaints WHERE id=\?/);
 });
+  assert.match(handler, /\\.bind\\(id,clientType,clientId,companyId,missionId/);
