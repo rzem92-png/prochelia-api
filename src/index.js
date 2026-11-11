@@ -2522,9 +2522,9 @@ async function processBackgroundJobs(request,env) {
 function isMutatingMethod(method){ return ['POST','PUT','PATCH','DELETE'].includes(method); }
 function securityOriginAllowed(request,env){
   const origin=request.headers.get('origin');
-  // Les clients non-navigateur peuvent ne pas envoyer Origin. Les requêtes navigateur
-  // avec Origin doivent correspondre à une origine explicitement autorisée.
-  if(!origin) return true;
+  // Une mutation authentifiée par cookie doit toujours porter un Origin vérifiable.
+  // Les clients serveur-à-serveur sans cookie peuvent omettre Origin (ex. webhook signé).
+  if(!origin) return !getCookie(request,SESSION_COOKIE);
   const configured=clean(env?.CORS_ORIGIN);
   const defaults=[
     'https://prochelia.pages.dev',
