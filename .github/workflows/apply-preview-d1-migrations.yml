@@ -136,6 +136,17 @@ jobs:
           rm -f "$plaintext" "$RUNNER_TEMP/prochelia-backup/decrypted-check.sql"
           printf 'database=%s\ncreated_utc=%s\nencrypted_file=prochelia-preview.sql.gpg\n' "$EXPECTED_DB_NAME" "$(date -u +%FT%TZ)" > "$RUNNER_TEMP/prochelia-backup/README.txt"
 
+      - name: Persist encrypted backup in EU R2 and verify round-trip
+        shell: bash
+        run: |
+          set -euo pipefail
+          backup_key="pre-migration/${EXPECTED_DB_NAME}/$(date -u +%Y%m%dT%H%M%SZ)-${GITHUB_RUN_ID}.sql.gpg"
+          npx --yes wrangler@4 r2 object put "prochelia-preview-backups-eu/${backup_key}" --file "$RUNNER_TEMP/prochelia-backup/prochelia-preview.sql.gpg" --remote --jurisdiction eu
+          npx --yes wrangler@4 r2 object get "prochelia-preview-backups-eu/${backup_key}" --file "$RUNNER_TEMP/prochelia-backup/r2-roundtrip.sql.gpg" --remote --jurisdiction eu
+          cmp "$RUNNER_TEMP/prochelia-backup/prochelia-preview.sql.gpg" "$RUNNER_TEMP/prochelia-backup/r2-roundtrip.sql.gpg"
+          test -s "$RUNNER_TEMP/prochelia-backup/r2-roundtrip.sql.gpg"
+          echo "Encrypted Preview D1 backup persisted and byte-for-byte verified in EU R2."
+
       - name: Publish encrypted backup before any schema write
         uses: actions/upload-artifact@v4
         with:
