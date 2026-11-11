@@ -188,7 +188,11 @@ function requireRole(auth, roles) {
 
 async function getPrestations(env) {
   if (!env.DB) return json({ ok: false, database: false, message: 'D1 non connectée' }, 503);
-  const result = await env.DB.prepare('SELECT * FROM prestations ORDER BY id').all();
+  // Public catalog exposes only active, customer-facing fields; never return
+  // internal timestamps or inactive catalogue entries.
+  const result = await env.DB.prepare(
+    'SELECT id,name,description FROM prestations WHERE active=1 ORDER BY name,id'
+  ).all();
   return json({ ok: true, source: 'D1', total: result.results?.length || 0, prestations: result.results || [] });
 }
 
