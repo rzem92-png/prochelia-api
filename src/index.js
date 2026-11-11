@@ -1939,12 +1939,27 @@ async function promotionList(request, env) {
   const gate = await requireAuthRole(request, env, ['gerante','entreprise','client']);
   if (gate.error) return gate.error;
   await ensureStrategicSchema(env);
-  const status = new URL(request.url).searchParams.get('status');
-  const q = status
-    ? 'SELECT * FROM promotions WHERE status=? ORDER BY created_at DESC LIMIT 200'
-    : 'SELECT * FROM promotions ORDER BY created_at DESC LIMIT 200';
-  const r = status ? await env.DB.prepare(q).bind(status).all() : await env.DB.prepare(q).all();
-  return json({ok:true,version:VERSION,promotions:r.results||[]});
+  const role=gate.auth.user.role;
+  if(role==='gerante') {
+    const status = new URL(request.url).searchParams.get('status');
+    const q = status
+      ? 'SELECT * FROM promotions WHERE status=? ORDER BY created_at DESC LIMIT 200'
+      : 'SELECT * FROM promotions ORDER BY created_at DESC LIMIT 200';
+    const r = status ? await env.DB.prepare(q).bind(status).all() : await env.DB.prepare(q).all();
+    return json({ok:true,version:VERSION,promotions:r.results||[]});
+  }
+
+  // Non-manager roles receive only currently published offer fields.
+  // Internal budgets, usage, rules, approval flags, creator and rationale stay private.
+  const audience=role==='entreprise'?'B2B':'B2C';
+  const r=await env.DB.prepare(`SELECT code,name,type,client_type,service_code,zone_code,
+      discount_type,discount_value,min_amount_cents,max_discount_cents,starts_at,ends_at
+    FROM promotions
+    WHERE status='ACTIVE'
+      AND starts_at<=CURRENT_TIMESTAMP AND ends_at>CURRENT_TIMESTAMP
+      AND client_type IN ('ALL',?)
+    ORDER BY starts_at ASC LIMIT 100`).bind(audience).all();
+  return json({ok:true,version:VERSION,promotions:r.results||[]},{headers:{'cache-control':'no-store'}});
 }
 
 async function activatePromotion(request, env) {
