@@ -1,0 +1,321 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { webcrypto } from "node:crypto";
+import worker from "../src/index.js";
+import { stripePost } from "../src/stripe.js";
+
+if (!globalThis.crypto) globalThis.crypto = webcrypto;
+
+function rateLimitDb() {
+  return {
+    prepare(sql) {
+      return {
+        bind() { return this; },
+        async run() { return { meta: { changes: 1 } }; },
+        async first() {
+          if (sql.includes("RETURNING request_count")) return { request_count: 1 };
+          return null;
+        }
+      };
+    }
+  };
+}
+
+async function stripeSignature(secret, timestamp, body) {
+  const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(secret),
+    { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  const mac = new Uint8Array(await crypto.subtle.sign("HMAC", key,
+    new TextEncoder().encode(timestamp + "." + body)));
+  return Array.from(mac, x => x.toString(16).padStart(2, "0")).join("");
+}
+
+test("payment config never exposes a Stripe publishable key before explicit test onboarding approval", async () => {
+  const response = await worker.fetch(new Request("https://api.test/api/payments/config"), {
+    PAYMENT_PROVIDER: "stripe",
+    STRIPE_SECRET_KEY: "sk_test_placeholder",
+    STRIPE_PUBLISHABLE_KEY: "pk_test_placeholder",
+    STRIPE_CONNECT_ONBOARDING_ENABLED: "true"
+  });
+  const body = await response.json();
+  assert.equal(response.status, 200);
+  assert.equal(body.stripe_publishable_key, null);
+  assert.equal(body.connect_onboarding_ready, false);
+});
+
+test("payment config exposes only the publishable key after both explicit flags and matching test keys", async () => {
+  const response = await worker.fetch(new Request("https://api.test/api/payments/config"), {
+    PAYMENT_PROVIDER: "stripe",
+    STRIPE_SECRET_KEY: "sk_test_placeholder",
+    STRIPE_PUBLISHABLE_KEY: "pk_test_placeholder",
+    STRIPE_WEBHOOK_SECRET: "whsec_placeholder",
+    STRIPE_CONNECT_CHARGE_MODEL: "separate_charges_and_transfers",
+    STRIPE_DASHBOARD: "express",
+    STRIPE_FEES_COLLECTOR: "application",
+    STRIPE_LOSSES_COLLECTOR: "application",
+    APP_BASE_URL: "https://prochelia.pages.dev",
+    STRIPE_CONNECT_ONBOARDING_ENABLED: "true",
+    STRIPE_CONNECT_ONBOARDING_APPROVED: "true"
+  });
+  const body = await response.json();
+  assert.equal(response.status, 200);
+  assert.equal(body.stripe_publishable_key, "pk_test_placeholder");
+  assert.equal(body.connect_onboarding_ready, true);
+  assert.equal(JSON.stringify(body).includes("sk_test_placeholder"), false);
+  assert.equal(JSON.stringify(body).includes("whsec_placeholder"), false);
+});
+
+test("payment config rejects invalid Accounts v2 dashboard and responsibility combinations", async () => {
+  const response = await worker.fetch(new Request("https://api.test/api/payments/config"), {
+    PAYMENT_PROVIDER: "stripe",
+    STRIPE_SECRET_KEY: "sk_test_placeholder",
+    STRIPE_PUBLISHABLE_KEY: "pk_test_placeholder",
+    STRIPE_WEBHOOK_SECRET: "whsec_placeholder",
+    STRIPE_CONNECT_CHARGE_MODEL: "separate_charges_and_transfers",
+    STRIPE_DASHBOARD: "full",
+    STRIPE_FEES_COLLECTOR: "stripe",
+    STRIPE_LOSSES_COLLECTOR: "stripe",
+    APP_BASE_URL: "https://prochelia.pages.dev",
+    STRIPE_CONNECT_ONBOARDING_ENABLED: "true",
+    STRIPE_CONNECT_ONBOARDING_APPROVED: "true"
+  });
+  const body = await response.json();
+  assert.equal(response.status, 200);
+  assert.equal(body.stripe_publishable_key, null);
+  assert.equal(body.connect_onboarding_ready, false);
+});
+
+test("live Connect config requires a separate live approval in addition to onboarding approval", async () => {
+  const response = await worker.fetch(new Request("https://api.test/api/payments/config"), {
+    PAYMENT_PROVIDER: "stripe",
+    STRIPE_SECRET_KEY: "sk_live_placeholder",
+    STRIPE_PUBLISHABLE_KEY: "pk_live_placeholder",
+    STRIPE_WEBHOOK_SECRET: "whsec_placeholder",
+    STRIPE_CONNECT_CHARGE_MODEL: "direct",
+    STRIPE_DASHBOARD: "full",
+    STRIPE_FEES_COLLECTOR: "stripe",
+    STRIPE_LOSSES_COLLECTOR: "stripe",
+    APP_BASE_URL: "https://prochelia.pages.dev",
+    STRIPE_CONNECT_ONBOARDING_ENABLED: "true",
+    STRIPE_CONNECT_ONBOARDING_APPROVED: "true",
+    STRIPE_CONNECT_LIVE_ENABLED: "true"
+  });
+  const body = await response.json();
+  assert.equal(response.status, 200);
+  assert.equal(body.stripe_publishable_key, null);
+  assert.equal(body.connect_onboarding_ready, false);
+});
+
+test("payment config stays closed until the charge model is explicitly selected", async () => {
+  const response = await worker.fetch(new Request("https://api.test/api/payments/config"), {
+    PAYMENT_PROVIDER: "stripe",
+    STRIPE_SECRET_KEY: "sk_test_placeholder",
+    STRIPE_PUBLISHABLE_KEY: "pk_test_placeholder",
+    STRIPE_WEBHOOK_SECRET: "whsec_placeholder",
+    STRIPE_DASHBOARD: "express",
+    STRIPE_FEES_COLLECTOR: "application",
+    STRIPE_LOSSES_COLLECTOR: "application",
+    APP_BASE_URL: "https://prochelia.pages.dev",
+    STRIPE_CONNECT_ONBOARDING_ENABLED: "true",
+    STRIPE_CONNECT_ONBOARDING_APPROVED: "true"
+  });
+  const body = await response.json();
+  assert.equal(response.status, 200);
+  assert.equal(body.connect_charge_model, null);
+  assert.equal(body.stripe_publishable_key, null);
+  assert.equal(body.connect_onboarding_ready, false);
+});
+
+test("onboarding rejects unauthenticated callers before evaluating Stripe configuration", async () => {
+  const response = await worker.fetch(new Request("https://api.test/api/payments/onboard", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ account_token: "acctok_test_12345678", stripe_terms_accepted: true })
+  }), {
+    DB: rateLimitDb(),
+    PAYMENT_PROVIDER: "stripe",
+    STRIPE_SECRET_KEY: "sk_test_placeholder",
+    STRIPE_PUBLISHABLE_KEY: "pk_test_placeholder",
+    STRIPE_WEBHOOK_SECRET: "whsec_placeholder",
+    STRIPE_DASHBOARD: "express",
+    STRIPE_FEES_COLLECTOR: "application",
+    STRIPE_LOSSES_COLLECTOR: "application",
+    STRIPE_CONNECT_ONBOARDING_ENABLED: "true",
+    STRIPE_CONNECT_ONBOARDING_APPROVED: "true"
+  });
+  const body = await response.json();
+  assert.equal(response.status, 401);
+  assert.equal(body.error, "UNAUTHENTICATED");
+});
+
+test("Connect onboarding route is wired but disabled without explicit approval and creates no external request", async () => {
+  const response = await worker.fetch(new Request("https://api.test/api/payments/onboard", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ account_token: "acctok_test_12345678", stripe_terms_accepted: true })
+  }), {
+    DB: rateLimitDb(),
+    PAYMENT_PROVIDER: "stripe",
+    STRIPE_SECRET_KEY: "sk_test_placeholder",
+    STRIPE_PUBLISHABLE_KEY: "pk_test_placeholder"
+  });
+  const body = await response.json();
+  assert.equal(response.status, 503);
+  assert.equal(body.error, "STRIPE_CONNECT_ONBOARDING_DISABLED_OR_NOT_APPROVED");
+});
+
+test("Stripe Connect webhook rejects unsupported financial event types rather than acknowledging them", async () => {
+  const secret = "whsec_placeholder";
+  const timestamp = Math.floor(Date.now() / 1000);
+  const raw = JSON.stringify({ id: "evt_financial_unsupported", type: "payment_intent.succeeded", data: { object: { id: "pi_test" } } });
+  const signature = await stripeSignature(secret, timestamp, raw);
+  const response = await worker.fetch(new Request("https://api.test/api/payments/webhook", {
+    method: "POST",
+    headers: { "stripe-signature": "t=" + timestamp + ",v1=" + signature },
+    body: raw
+  }), {
+    DB: rateLimitDb(),
+    PAYMENT_PROVIDER: "stripe",
+    STRIPE_WEBHOOK_SECRET: secret
+  });
+  const body = await response.json();
+  assert.equal(response.status, 503);
+  assert.equal(body.error, "STRIPE_EVENT_NOT_SUPPORTED_BY_CONNECT_WEBHOOK");
+});
+
+test("verified Connect transfer capability never enables bank payouts", async () => {
+  const secret = "whsec_connect_test";
+  const timestamp = Math.floor(Date.now() / 1000);
+  const raw = JSON.stringify({
+    id: "evt_connect_capability_test",
+    type: "v2.core.account[requirements].updated",
+    data: { object: { id: "acct_connecttest123" } }
+  });
+  const signature = await stripeSignature(secret, timestamp, raw);
+  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(raw)));
+  const payloadHash = btoa(String.fromCharCode(...digest)).split("+").join("-").split("/").join("_").replace(/=+$/g, "");
+  const calls = [];
+  const DB = {
+    prepare(sql) {
+      const statement = {
+        args: [],
+        bind(...args) { this.args = args; return this; },
+        async first() {
+          if (sql.includes("type='table'") && sql.includes("sqlite_master")) return { total: 9 };
+          if (sql.includes("type='trigger'") && sql.includes("sqlite_master")) return { total: 16 };
+          if (sql.includes("RETURNING request_count")) return { request_count: 1 };
+          if (sql.includes("SELECT processed,payload_hash,received_at")) {
+            return { processed: 0, payload_hash: payloadHash, received_at: "2026-11-10 07:00:00" };
+          }
+          return null;
+        },
+        async run() {
+          calls.push({ sql, args: this.args });
+          return { meta: { changes: 1 } };
+        }
+      };
+      return statement;
+    },
+    async batch(statements) {
+      return Promise.all(statements.map(statement => statement.run()));
+    }
+  };
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    assert.equal(String(url), "https://api.stripe.com/v2/core/accounts/acct_connecttest123");
+    assert.equal(init.headers.Authorization, "Bearer sk_test_connect");
+    return new Response(JSON.stringify({
+      id: "acct_connecttest123",
+      configuration: { recipient: { capabilities: { stripe_balance: { stripe_transfers: { status: "active" } } } } }
+    }), { status: 200, headers: { "content-type": "application/json" } });
+  };
+  try {
+    const response = await worker.fetch(new Request("https://api.test/api/payments/webhook", {
+      method: "POST",
+      headers: { "stripe-signature": "t=" + timestamp + ",v1=" + signature },
+      body: raw
+    }), {
+      DB,
+      PAYMENT_PROVIDER: "stripe",
+      STRIPE_SECRET_KEY: "sk_test_connect",
+      STRIPE_WEBHOOK_SECRET: secret
+    });
+    const body = await response.json();
+    assert.equal(response.status, 200, JSON.stringify(body));
+    assert.equal(body.transfers_enabled, true);
+    assert.equal(body.payouts_enabled, false);
+    const accountUpdate = calls.find(call => call.sql.includes("UPDATE payment_accounts SET charges_enabled=0,payouts_enabled=0"));
+    assert.ok(accountUpdate, "external payout flag must remain disabled");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("Stripe API helper refuses non-allowlisted paths and missing idempotency", async () => {
+  await assert.rejects(
+    stripePost({ STRIPE_SECRET_KEY: "sk_test_placeholder" }, "v1/payment_intents", {}, "idem-test"),
+    /STRIPE_PATH_NOT_ALLOWED/
+  );
+  await assert.rejects(
+    stripePost({ STRIPE_SECRET_KEY: "sk_test_placeholder" }, "v2/core/accounts", {}, ""),
+    /STRIPE_IDEMPOTENCY_KEY_REQUIRED/
+  );
+});
+
+
+test("originless mutation with a browser session cookie is rejected before authentication or D1", async () => {
+  const response = await worker.fetch(new Request("https://api.test/api/payments/onboard", {
+    method: "POST",
+    headers: { cookie: "prochelia_session=malformed%ZZ" },
+    body: "{}"
+  }), {});
+  const body = await response.json();
+  assert.equal(response.status, 403);
+  assert.equal(body.error, "ORIGIN_NOT_ALLOWED");
+});
+
+test("originless server-to-server mutation without a browser session reaches authentication", async () => {
+  const response = await worker.fetch(new Request("https://api.test/api/payments/onboard", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: "{}"
+  }), {});
+  const body = await response.json();
+  assert.equal(response.status, 503);
+  assert.equal(body.error, "DATABASE_UNAVAILABLE");
+});
+
+
+test("mutation with a session cookie and an allowlisted Origin passes the Origin guard", async () => {
+  const response = await worker.fetch(new Request("https://api.test/api/payments/onboard", {
+    method: "POST",
+    headers: {
+      origin: "https://preview.prochelia.pages.dev",
+      cookie: "prochelia_session=malformed%ZZ",
+      "content-type": "application/json"
+    },
+    body: "{}"
+  }), {
+    CORS_ORIGIN: "https://preview.prochelia.pages.dev"
+  });
+  const body = await response.json();
+  assert.notEqual(response.status, 403);
+  assert.notEqual(body.error, "ORIGIN_NOT_ALLOWED");
+  assert.equal(response.status, 503);
+  assert.equal(body.error, "DATABASE_UNAVAILABLE");
+});
+
+test("mutation from a non-allowlisted Origin is rejected even without a session cookie", async () => {
+  const response = await worker.fetch(new Request("https://api.test/api/payments/onboard", {
+    method: "POST",
+    headers: {
+      origin: "https://attacker.invalid",
+      "content-type": "application/json"
+    },
+    body: "{}"
+  }), {
+    CORS_ORIGIN: "https://preview.prochelia.pages.dev"
+  });
+  const body = await response.json();
+  assert.equal(response.status, 403);
+  assert.equal(body.error, "ORIGIN_NOT_ALLOWED");
+});
