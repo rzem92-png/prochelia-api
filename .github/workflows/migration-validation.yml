@@ -30,3 +30,4 @@ jobs:
         run: python -m unittest tests/test_payment_migration.py
       - name: Validate atomic rate-limit protection
         run: python -m unittest tests/test_atomic_rate_limit.py
+      # Covers missing-Origin cookie protection, atomic limiter, and payment ledger migrations.
