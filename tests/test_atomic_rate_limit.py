@@ -23,6 +23,34 @@ class AtomicRateLimitTests(unittest.TestCase):
         self.assertIn("getCookie(request,SESSION_COOKIE)", guard)
 
 
+
+    def test_unique_provider_account_migration_prevents_duplicate_ownership(self):
+        migration = ROOT / "migrations" / "0007_unique_provider_account.sql"
+        db = sqlite3.connect(":memory:")
+        try:
+            db.execute("""
+                CREATE TABLE payment_accounts (
+                    id TEXT PRIMARY KEY, user_id TEXT NOT NULL UNIQUE,
+                    provider TEXT NOT NULL, provider_account_id TEXT
+                )
+            """)
+            db.executescript(migration.read_text(encoding="utf-8"))
+            db.execute(
+                "INSERT INTO payment_accounts(id,user_id,provider,provider_account_id) VALUES('a1','u1','stripe','acct_shared')"
+            )
+            with self.assertRaisesRegex(sqlite3.IntegrityError, "UNIQUE constraint failed"):
+                db.execute(
+                    "INSERT INTO payment_accounts(id,user_id,provider,provider_account_id) VALUES('a2','u2','stripe','acct_shared')"
+                )
+            db.execute(
+                "INSERT INTO payment_accounts(id,user_id,provider,provider_account_id) VALUES('a3','u3','stripe',NULL)"
+            )
+            db.execute(
+                "INSERT INTO payment_accounts(id,user_id,provider,provider_account_id) VALUES('a4','u4','stripe',NULL)"
+            )
+        finally:
+            db.close()
+
     def test_wallet_balance_guard_migration_blocks_negative_balances_and_overflow(self):
         migration = ROOT / "migrations" / "0006_restore_wallet_balance_guard.sql"
         db = sqlite3.connect(":memory:")
