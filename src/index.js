@@ -139,7 +139,10 @@ function getCookie(request, name) {
     const idx = part.indexOf('=');
     if (idx < 0) continue;
     const key = part.slice(0, idx).trim();
-    if (key === name) return decodeURIComponent(part.slice(idx + 1).trim());
+    if (key === name) {
+      try { return decodeURIComponent(part.slice(idx + 1).trim()); }
+      catch { return null; }
+    }
   }
   return null;
 }
@@ -3714,7 +3717,7 @@ handle = async function(request,env){
       return json(await runNationalBackup(env,'MANUAL'));
     }
     return __procheliaNationalHandle(request,env);
-  }catch(e){return json({ok:false,error:'NATIONAL_CONTINUITY_ERROR',message:String(e.message||e)},500)}
+  }catch(e){return json({ok:false,error:'NATIONAL_CONTINUITY_ERROR'},500)}
 };
 
 /* ============================================================================
@@ -3969,7 +3972,7 @@ handle = async function(request,env){
     if((u.pathname==='/api/support/cases/resolve')&&request.method==='POST') return supportResolve(request,env);
     if((u.pathname==='/api/support/dashboard')&&request.method==='GET') return supportDashboard(request,env);
     return __procheliaComplementHandle(request,env);
-  }catch(e){return json({ok:false,error:'MASTER_COMPLEMENT_ERROR',version:VERSION,message:String(e.message||e)},500)}
+  }catch(e){return json({ok:false,error:'MASTER_COMPLEMENT_ERROR',version:VERSION},500)}
 };
 
 /* ============================================================================
@@ -4039,6 +4042,9 @@ async function strictProductionAudit(request,env){
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
   const result=await productionConfigCheck(env);
   const extra=[
+    // Configuration presence is not proof that webhook settlement is atomic,
+    // replay-safe, reconciled, or operationally approved. Keep this gate closed.
+    {code:'PAYMENT_WEBHOOK_ATOMICITY',status:'NOT_READY',reason:'PAYMENT_WEBHOOK_DISABLED_PENDING_REVIEW'},
     {code:'SECURITY_CODE_DELIVERY',status:finalSecretConfigured(env,'SECURITY_CODE_WEBHOOK')&&finalSecretConfigured(env,'SECURITY_CODE_WEBHOOK_SECRET')?'OK':'NOT_CONFIGURED'},
     {code:'CORS_ORIGIN',status:finalSecretConfigured(env,'CORS_ORIGIN')?'OK':'NOT_CONFIGURED'},
     {code:'BACKUP_R2',status:env.BACKUP_BUCKET&&finalSecretConfigured(env,'BACKUP_ENCRYPTION_KEY')?'OK':'NOT_CONFIGURED'},
@@ -4047,15 +4053,22 @@ async function strictProductionAudit(request,env){
   ];
   const checks=[...(result.checks||[]),...extra];
   const blockingCodes=new Set([
-    'SECRET:PAYMENT_PROVIDER','SECRET:PAYMENT_WEBHOOK_SECRET','SECURITY_CODE_DELIVERY',
+    'PAYMENT_WEBHOOK_ATOMICITY','SECRET:PAYMENT_PROVIDER','SECRET:PAYMENT_WEBHOOK_SECRET','SECURITY_CODE_DELIVERY',
     'CORS_ORIGIN','BACKUP_R2','PSP_RUNTIME_ADAPTER','PSP_SANDBOX_E2E',
     'BACKUP_RESTORE_DRILL','IOS_SAFARI_ACCEPTANCE','FR_LEGAL_OPERATIONAL_SIGNOFF',
     'PRODUCTION_DEPLOYMENT_APPROVAL'
   ]);
   const blocking=checks.filter(x=>blockingCodes.has(x.code)&&x.status!=='OK');
-  const overall=blocking.length===0 && result.blocking===0;
-  // GET production-check is read-only: no config writes or journal side effects.
-  return json({ok:true,version:VERSION,production_gate:overall?'OPEN':'CLOSED',ready_for_real_traffic:overall,checks,blocking:blocking.map(x=>x.code),note:overall?'Configuration gate passed. A real production launch still requires sandbox/acceptance tests for PSP, notifications, identity/security, backups/restore and critical user journeys.':'Production traffic remains blocked until the listed blocking controls are configured and tested.'});
+  const configurationReady=blocking.length===0 && result.blocking===0;
+  // A configuration audit is never a production release authorization.
+  // Payment settlement remains explicitly blocked pending independent validation.
+  return json({ok:true,version:VERSION,production_gate:configurationReady?'CONFIGURATION_READY':'CLOSED',
+    configuration_ready:configurationReady,ready_for_real_traffic:false,real_traffic_authorized:false,
+    checks,blocking:blocking.map(x=>x.code),
+    additional_gates_required:['PSP_SANDBOX_AND_WEBHOOK_RECONCILIATION','CLIENT_PROVIDER_MANAGER_E2E',
+      'IOS_ANDROID_DESKTOP_ACCEPTANCE','BACKUP_RESTORE_DRILL','INDEPENDENT_SECURITY_REVIEW',
+      'RGPD_AND_LEGAL_APPROVAL','EXPLICIT_RELEASE_AUTHORIZATION'],
+    note:'Read-only configuration audit only. This endpoint can never authorize real traffic; payment webhook settlement remains blocked pending atomicity and reconciliation validation.'});
 }
 
 const __procheliaProductionSafetyHandle = handle;
