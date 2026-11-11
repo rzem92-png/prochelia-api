@@ -7,6 +7,7 @@ on:
     paths:
       - "src/index.js"
       - "tests/support-auto-resolution-security.test.mjs"
+      - "tests/profile-directory-isolation.test.mjs"
       - ".github/workflows/support-auto-resolution-security.yml"
   pull_request:
     branches:
@@ -31,4 +32,4 @@ jobs:
       - name: Check Worker syntax
         run: node --experimental-default-type=module --check src/index.js
       - name: Run support resolution security regressions
-        run: node --experimental-default-type=module --test tests/support-auto-resolution-security.test.mjs
+        run: node --experimental-default-type=module --test tests/support-auto-resolution-security.test.mjs tests/profile-directory-isolation.test.mjs
