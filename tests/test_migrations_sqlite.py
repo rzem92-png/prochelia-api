@@ -83,4 +83,4 @@ assert "prochelia-preview-backups-eu/" in workflow, "Missing EU R2 backup destin
 assert "r2 object put" in workflow and "r2 object get" in workflow, "R2 backup round-trip is not verified"
 assert "cmp " in workflow, "R2 backup download is not compared byte-for-byte"
 assert workflow.index("r2 object put") < workflow.index("Apply migrations to Preview D1 only"), "Backup must be persisted before migrations"
-assert "--jurisdiction eu" in workflow, "Preview backup must use EU jurisdiction"
+assert "--jurisdiction default" in workflow, "Preview backup must match the existing bucket jurisdiction"
