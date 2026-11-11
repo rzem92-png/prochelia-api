@@ -208,3 +208,22 @@ test("finance issue owners cannot self-approve financial resolution", () => {
   assert.match(handler, /const approved=manager && b\.approve===true/);
   assert.match(handler, /if\(!owner&&!manager\).*FORBIDDEN/);
 });
+
+test("consolidated schema writes occur only after route authorization", () => {
+  const routerStart = indexSource.indexOf("async function handleConsolidated");
+  const routerEnd = indexSource.indexOf("PROCHÉLIA V13.7.0", routerStart);
+  assert.ok(routerStart >= 0 && routerEnd > routerStart);
+  assert.doesNotMatch(indexSource.slice(routerStart, routerEnd), /ensureConsolidatedSchema/);
+  for (const name of [
+    "createOperationalCase", "approveOperationalCase", "getOperationsDashboard",
+    "getJournal", "metiers", "suggestMetier", "pricingQuote",
+    "financeSummary", "complaintCreate", "setPhase"
+  ]) {
+    const start = indexSource.indexOf("async function " + name + "(");
+    assert.ok(start >= 0, name + " handler exists");
+    const section = indexSource.slice(start, start + 900);
+    const auth = section.indexOf("requireAuthRole(");
+    const schema = section.indexOf("ensureConsolidatedSchema(");
+    assert.ok(auth >= 0 && schema > auth, name + " must authorize before schema writes");
+  }
+});
