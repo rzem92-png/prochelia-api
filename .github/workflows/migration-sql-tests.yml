@@ -5,6 +5,8 @@ on:
     paths:
       - "migrations/**"
       - "tests/test_migrations_sqlite.py"
+      - "scripts/prepare-d1-restore.py"
+      - "tests/test_prepare_d1_restore.py"
       - ".github/workflows/migration-sql-tests.yml"
   push:
     branches: [main]
@@ -22,4 +24,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Validate migration SQL and payment ledger invariants in isolated SQLite
-        run: python3 tests/test_migrations_sqlite.py
+        run: |
+          python3 tests/test_migrations_sqlite.py
+          python3 tests/test_prepare_d1_restore.py
