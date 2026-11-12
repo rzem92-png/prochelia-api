@@ -34,6 +34,10 @@ jobs:
       R2_BUCKET: prochelia-production-backups-eu
       R2_ENDPOINT: https://f2a79e9fa41566a8ec80fb24c02c60eb.r2.cloudflarestorage.com
     steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
       - name: Verify secrets and immutable isolated target
         shell: bash
         env:
@@ -157,6 +161,20 @@ jobs:
           chmod 600 "$sql"
           echo "Local decrypted dump validated; row data is not printed."
 
+      - name: Prepare dependency-ordered D1 import and validate it locally
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/prepare-d1-restore.py \
+            --source "$RUNNER_TEMP/prochelia-prod-restore/validation.sqlite" \
+            --output "$RUNNER_TEMP/prochelia-prod-restore/production.d1-compatible.sql"
+          sqlite3 "$RUNNER_TEMP/prochelia-prod-restore/prepared-validation.sqlite" < "$RUNNER_TEMP/prochelia-prod-restore/production.d1-compatible.sql"
+          prepared_integrity="$(sqlite3 "$RUNNER_TEMP/prochelia-prod-restore/prepared-validation.sqlite" 'PRAGMA integrity_check;')"
+          [[ "$prepared_integrity" == "ok" ]] || { echo "::error::Prepared SQL local integrity_check failed."; exit 1; }
+          sqlite3 "$RUNNER_TEMP/prochelia-prod-restore/prepared-validation.sqlite" 'PRAGMA foreign_key_check;' > "$RUNNER_TEMP/prochelia-prod-restore/prepared-fk.txt"
+          [[ ! -s "$RUNNER_TEMP/prochelia-prod-restore/prepared-fk.txt" ]] || { echo "::error::Prepared SQL local foreign-key check failed."; exit 1; }
+          echo "Prepared D1 import locally reconstituted with integrity OK and zero foreign-key violations."
+
       - name: Install Node.js for Wrangler D1 import
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
@@ -183,7 +201,7 @@ jobs:
           set -euo pipefail
           [[ "$RESTORE_DB_ID" == "9db489a0-4f96-4e93-b1f4-8a8e755871a7" ]]
           [[ "$RESTORE_DB_ID" != "$EXPECTED_PRODUCTION_D1_ID" ]]
-          npx --yes wrangler@4 d1 execute "$RESTORE_DB_NAME" --remote --config "$RUNNER_TEMP/wrangler.restore.json" --file="$RUNNER_TEMP/prochelia-prod-restore/production.sql" --yes
+          npx --yes wrangler@4 d1 execute "$RESTORE_DB_NAME" --remote --config "$RUNNER_TEMP/wrangler.restore.json" --file="$RUNNER_TEMP/prochelia-prod-restore/production.d1-compatible.sql" --yes
           echo "Encrypted production backup imported into the isolated restore-test D1."
 
       - name: Verify restored D1 integrity and required schema
