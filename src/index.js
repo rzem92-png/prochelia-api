@@ -3355,39 +3355,31 @@ async function supportCreate(request,env){
   const severity=String(b.severity||'LOW').toUpperCase();
   const scenario=supportScenarioFor(category,severity);
   const rule=await env.DB.prepare(`SELECT * FROM copilot_resolution_rules WHERE scenario_key=? LIMIT 1`).bind(scenario).first();
-  const auto=Number(rule?.auto_allowed||0)===1 && String(severity)!=='CRITICAL' && String(severity)!=='HIGH';
-  const requiresManager=Number(rule?.manager_approval_required||1)===1 || !auto;
+  const autoCheckAllowed=Number(rule?.auto_allowed||0)===1 && String(severity)!=='CRITICAL' && String(severity)!=='HIGH';
+  // No trusted server-side action receipt is connected: suggestions never close a case.
+  const requiresManager=true;
   const id=crypto.randomUUID();
   const proposed=rule?JSON.parse(rule.steps_json||'[]'):{steps:['collect_evidence','copilot_analysis','notify','audit']};
   await env.DB.prepare(`INSERT INTO support_cases(id,source_role,requester_id,company_id,mission_id,complaint_id,category,severity,status,description,proposed_resolution,requires_manager) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`)
-    .bind(id,a.role,a.auth.user.id,b.company_id||null,b.mission_id||null,b.complaint_id||null,category,severity,auto?'PROCESSING':'OPEN',clean(b.description)||null,JSON.stringify({scenario,steps:proposed.steps||proposed}),requiresManager?1:0).run();
-  await supportEvent(env,id,a.role,a.auth.user.id,'CREATED',{scenario,auto,requiresManager});
-  await journal(env,a.role,a.auth.user.id,'SUPPORT_CASE_CREATE','support_cases',id,'OK',{scenario,severity,auto});
+    .bind(id,a.role,a.auth.user.id,b.company_id||null,b.mission_id||null,b.complaint_id||null,category,severity,autoCheckAllowed?'WAITING_ACTION':'OPEN',clean(b.description)||null,JSON.stringify({scenario,steps:proposed.steps||proposed}),1).run();
+  await supportEvent(env,id,a.role,a.auth.user.id,'CREATED',{scenario,auto_check_allowed:autoCheckAllowed,requiresManager});
+  await journal(env,a.role,a.auth.user.id,'SUPPORT_CASE_CREATE','support_cases',id,'OK',{scenario,severity,auto_check_allowed:autoCheckAllowed});
   let autoResult=null;
-  if(auto){
-    autoResult=await supportAutoResolve(env,id,a.auth.user.id,a.role,scenario,b);
-  }
-  return json({ok:true,version:VERSION,case_id:id,scenario,automatic_resolution:!!auto,auto_result:autoResult,manager_approval_required:!auto});
+  if(autoCheckAllowed) autoResult=await supportAutoResolve(env,id,a.auth.user.id,a.role,scenario,{});
+  return json({ok:true,version:VERSION,case_id:id,scenario,automatic_resolution:false,automatic_check:autoCheckAllowed,auto_result:autoResult,action_required:true,manager_approval_required:true});
 }
 
 async function supportAutoResolve(env,caseId,actorId,actorRole,scenario,context={}){
   const safeAuto=['DELAY_LIGHT','NOTIFICATION_FAILED','DOCUMENT_REMINDER','SIMPLE_REFUND_CHECK','CLIENT_COMPLAINT'];
   if(!safeAuto.includes(scenario)) return {ok:false,status:'MANAGER_REQUIRED'};
-  // Sécurité de production : le Copilote ne doit jamais déclarer une résolution
-  // simplement parce qu'il a généré une proposition. Une résolution automatique
-  // n'est clôturée que lorsqu'une action downstream vérifiable a confirmé son succès.
-  const verified=String(context?.execution_verified||'').toLowerCase()==='true' || context?.execution_verified===true;
-  const resolution={scenario,actions:['verify_context','apply_only_reversible_or_preapproved_action','notify_requester','journal'],context:context||{}};
-  if(!verified){
-    await env.DB.prepare(`UPDATE support_cases SET status='WAITING_ACTION',resolution=?,resolved_at=NULL WHERE id=?`).bind(JSON.stringify({...resolution,status:'ACTION_REQUIRED'}),caseId).run();
-    await supportEvent(env,caseId,actorRole,actorId,'AUTO_CHECKED_WAITING_ACTION',resolution);
-    await journal(env,actorRole,actorId,'SUPPORT_CASE_AUTO_CHECK','support_cases',caseId,'WAITING_ACTION',{scenario});
-    return {ok:true,status:'WAITING_ACTION',scenario,closed:false,reason:'NO_VERIFIED_DOWNSTREAM_ACTION'};
-  }
-  await env.DB.prepare(`UPDATE support_cases SET status='RESOLVED',resolution=?,resolved_at=CURRENT_TIMESTAMP WHERE id=?`).bind(JSON.stringify(resolution),caseId).run();
-  await supportEvent(env,caseId,actorRole,actorId,'AUTO_RESOLVED_VERIFIED',resolution);
-  await journal(env,actorRole,actorId,'SUPPORT_CASE_AUTO_RESOLVE','support_cases',caseId,'RESOLVED',{scenario});
-  return {ok:true,status:'RESOLVED',scenario,closed:true};
+  // A client-supplied flag is not proof of an executed action. Until a trusted
+  // internal action adapter/receipt exists, keep the case open for manager review.
+  const resolution={scenario,actions:['verify_context','propose_preapproved_action','notify_requester','journal'],status:'ACTION_REQUIRED'};
+  await env.DB.prepare(`UPDATE support_cases SET status='WAITING_ACTION',resolution=?,resolved_at=NULL,requires_manager=1 WHERE id=? AND status NOT IN ('RESOLVED','CLOSED')`)
+    .bind(JSON.stringify(resolution),caseId).run();
+  await supportEvent(env,caseId,actorRole,actorId,'AUTO_CHECKED_WAITING_ACTION',resolution);
+  await journal(env,actorRole,actorId,'SUPPORT_CASE_AUTO_CHECK','support_cases',caseId,'WAITING_ACTION',{scenario});
+  return {ok:true,status:'WAITING_ACTION',scenario,closed:false,reason:'NO_TRUSTED_DOWNSTREAM_ACTION_RECEIPT'};
 }
 
 async function supportList(request,env){
