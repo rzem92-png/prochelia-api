@@ -92,7 +92,7 @@ test("directory listing validates offsets and returns a bounded pagination contr
   const rows=Array.from({length:101},(_,i)=>({id:"client-"+i}));
   let boundValues;
   const env={DB:{prepare(){return {bind(...values){boundValues=values;return this;},async all(){return {results:rows};}};}}};
-  const invalid=await directoryList(new Request("https://example.test/api/clients?offset=50001"),env,"clients",async()=>({user:{id:"manager",role:"gerante"}}));
+  const invalid=await directoryList(new Request("https://example.test/api/clients?offset=not-a-number"),env,"clients",async()=>({user:{id:"manager",role:"gerante"}}));
   assert.equal(invalid.status,400);
   const response=await directoryList(new Request("https://example.test/api/clients"),env,"clients",async()=>({user:{id:"manager",role:"gerante"}}));
   assert.equal(response.status,200);
@@ -101,6 +101,9 @@ test("directory listing validates offsets and returns a bounded pagination contr
   assert.equal(body.has_more,true);
   assert.equal(body.next_offset,100);
   assert.deepEqual(boundValues,[101,0]);
+  const large=await directoryList(new Request("https://example.test/api/clients?offset=50001"),env,"clients",async()=>({user:{id:"manager",role:"gerante"}}));
+  assert.equal(large.status,200);
+  assert.deepEqual(boundValues,[101,50001]);
 });
 
 test("intervenant directory returns the deterministic final-page contract", async () => {
