@@ -81,6 +81,9 @@ test("PSP webhooks are bound to the stored provider and immutable event payload"
   assert.equal((handler.match(/WEBHOOK_PROVIDER_MISMATCH/g) || []).length, 2);
   assert.match(handler, /WEBHOOK_EVENT_ID_PAYLOAD_CONFLICT/);
   assert.match(handler, /prior\?\.payload_hash && prior\.payload_hash!==payloadHash/);
+  assert.match(handler, /UPDATE payment_webhook_events SET processed=1,processed_at=CURRENT_TIMESTAMP\\s+WHERE provider=\\? AND event_id=\\? AND changes\\(\\)=1/);
+  assert.match(handler, /WEBHOOK_STATE_TRANSITION_NOT_APPLIED/);
+  assert.match(handler, /const processed=!!results\.at\(-1\)\?\.meta\?\.changes/);
 });
 
 test("wallet ledger protects pending, reserved and paid balances while allowing refund receivables", () => {
