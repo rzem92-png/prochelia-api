@@ -174,3 +174,20 @@ test("admin dispute release updates the held payment before resolving the disput
   assert.match(handler, /WHERE id=\? AND status='open' AND changes\(\)=1/);
   assert.match(handler, /!results\[0\]\?\.meta\?\.changes \|\| !results\[1\]\?\.meta\?\.changes/);
 });
+
+test("client and intervenant directory routes are manager-only and paginated", () => {
+  const router = source.slice(source.indexOf("async function handleBase(request, env)"));
+  assert.match(router, /url\.pathname === '\/api\/clients'[\s\S]*?listClients\(request,env\)/);
+  assert.match(router, /url\.pathname === '\/api\/intervenants'[\s\S]*?listIntervenants\(request,env\)/);
+  const clients = source.slice(source.indexOf("async function listClients"), source.indexOf("async function listIntervenants"));
+  const intervenants = source.slice(source.indexOf("async function listIntervenants"), source.indexOf("async function getPrestations"));
+  for (const handler of [clients, intervenants]) {
+    assert.match(handler, /getSessionUser\(request, env\)/);
+    assert.match(handler, /requireRole\(auth, \['gerante'\]\)/);
+    assert.match(handler, /LIMIT 101 OFFSET \?/);
+    assert.match(handler, /next_offset/);
+    assert.match(handler, /INVALID_DIRECTORY_OFFSET/);
+  }
+  assert.match(clients, /INNER JOIN users u ON u\.id = c\.user_id/);
+  assert.match(intervenants, /INNER JOIN users u ON u\.id = i\.user_id/);
+});
