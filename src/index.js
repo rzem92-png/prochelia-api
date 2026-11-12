@@ -144,15 +144,12 @@ function getCookie(request, name) {
 }
 
 function getSessionToken(request){
-  const cookie=getCookie(request,SESSION_COOKIE);
-  if(cookie) return cookie;
-  const authorization=request.headers.get('authorization')||'';
-  const match=authorization.match(/^Bearer\s+([A-Za-z0-9_-]{32,})$/i);
-  return match?match[1]:null;
+  // Browser sessions are cookie-only: never expose session secrets to page JavaScript.
+  return getCookie(request,SESSION_COOKIE);
 }
 
 function sessionCookie(token, maxAge = SESSION_TTL_SECONDS) {
-  return `${SESSION_COOKIE}=${encodeURIComponent(token)}; Max-Age=${maxAge}; Path=/; HttpOnly; Secure; SameSite=None`;
+  return `${SESSION_COOKIE}=${encodeURIComponent(token)}; Max-Age=${maxAge}; Path=/; HttpOnly; Secure; SameSite=Lax`;
 }
 
 async function createSession(env, userId) {
@@ -324,7 +321,7 @@ async function login(request, env) {
 
   const token = await createSession(env, user.id);
   return json(
-    { ok: true, version: VERSION, user: safeUser(user), token, session: { authenticated: true, expires_in: SESSION_TTL_SECONDS, token_storage: 'memory_only' } },
+    { ok: true, version: VERSION, user: safeUser(user), session: { authenticated: true, expires_in: SESSION_TTL_SECONDS } },
     200,
     { 'set-cookie': sessionCookie(token) }
   );
@@ -1086,7 +1083,8 @@ async function paymentWebhook(request, env) {
   if(!(await verifyWebhookSignature(request,env,raw))) return json({ok:false,error:'INVALID_WEBHOOK_SIGNATURE',version:VERSION},401);
   let event; try{event=JSON.parse(raw)}catch{return json({ok:false,error:'INVALID_WEBHOOK_JSON',version:VERSION},400);}
   await ensurePaymentSchema(env);
-  const provider=clean(event?.provider)||paymentProvider(env), eventId=clean(event?.id), type=clean(event?.type);
+  const provider=paymentProvider(env), payloadProvider=clean(event?.provider), eventId=clean(event?.id), type=clean(event?.type);
+  if(payloadProvider && payloadProvider!==provider) return json({ok:false,error:'WEBHOOK_PROVIDER_MISMATCH',version:VERSION},403);
   if(!eventId||!type||eventId.length>255) return json({ok:false,error:'INVALID_WEBHOOK_EVENT',version:VERSION},400);
   const txId=clean(event?.data?.transaction_id), payoutId=clean(event?.data?.payout_id);
   const txMap={payment_succeeded:'paid',charge_succeeded:'paid',payment_failed:'failed',charge_failed:'failed',payment_refunded:'refunded'};
