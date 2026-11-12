@@ -178,7 +178,7 @@ jobs:
             [prefix+'client-session',clientUsers[0].id,hash(clientToken)]
           ].map(x=>'('+[...x.map(q),"datetime('now','+2 hours')"].join(',')+')').join(',\n');
           const seed = [
-            'INSERT INTO users (id,role,email,first_name,last_name,status) VALUES',
+            'INSERT INTO users (id,role,email,first_name,last_name,status,password_hash) VALUES',
             userValues + ';',
             'INSERT INTO clients (id,user_id,address,city,postal_code,notes) VALUES',
             clientValues + ';',
