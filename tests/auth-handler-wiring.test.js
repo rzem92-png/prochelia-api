@@ -85,3 +85,10 @@ test("PSP webhook bodies are size-bounded before signature work, parsing, or D1 
   assert.ok(handler.indexOf("verifyWebhookSignature(request,env,raw)") < handler.indexOf("ensurePaymentSchema(env)"));
   assert.match(handler, /PAYLOAD_TOO_LARGE/);
 });
+
+test("confirmed PSP refunds can reverse a payment while its dispute is open", () => {
+  const handler = source.slice(source.indexOf("async function paymentWebhook"), source.indexOf("async function openPaymentDispute"));
+  assert.match(handler, /txStatus==='refunded'\?"'paid','held'"/);
+  assert.match(handler, /const disputeGuard=txStatus==='refunded'\?'':/);
+  assert.match(handler, /transitionBindings=txStatus==='refunded'\?\[txStatus,providerPaymentId,txId\]/);
+});
