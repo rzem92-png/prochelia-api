@@ -175,6 +175,10 @@ jobs:
           [[ ! -s "$RUNNER_TEMP/prochelia-prod-restore/prepared-fk.txt" ]] || { echo "::error::Prepared SQL local foreign-key check failed."; exit 1; }
           echo "Prepared D1 import locally reconstituted with integrity OK and zero foreign-key violations."
 
+      - name: Test D1 restore preparation logic
+        shell: bash
+        run: python3 -m unittest tests/test_prepare_d1_restore.py
+
       - name: Install Node.js for Wrangler D1 import
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
