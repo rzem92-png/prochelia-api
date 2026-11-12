@@ -950,8 +950,6 @@ async function createMissionPayment(request, env) {
   const authoritativeGross=moneyCents(mission.price_client), authoritativeCommission=moneyCents(mission.commission);
   if(authoritativeGross===null||authoritativeCommission===null||gross!==authoritativeGross||commission!==authoritativeCommission) return json({ok:false,error:'PAYMENT_AMOUNT_MISMATCH_WITH_MISSION',version:VERSION},409);
   if(['cancelled','canceled','refunded'].includes(String(mission.status||'').toLowerCase())) return json({ok:false,error:'MISSION_NOT_PAYABLE',version:VERSION,status:mission.status},409);
-  const activePayment=await env.DB.prepare("SELECT id,status FROM payment_transactions WHERE mission_id=? AND status IN ('pending','processing','held','paid') LIMIT 1").bind(missionId).first();
-  if(activePayment) return json({ok:false,error:'MISSION_ALREADY_HAS_ACTIVE_PAYMENT',version:VERSION,transaction_id:activePayment.id,status:activePayment.status},409);
   const idem=clean(request.headers.get('idempotency-key'))||clean(body?.idempotency_key);
   if(!idem) return json({ok:false,error:'IDEMPOTENCY_KEY_REQUIRED',version:VERSION},400);
   const old=await env.DB.prepare('SELECT * FROM payment_transactions WHERE idempotency_key=? LIMIT 1').bind(idem).first();
@@ -961,6 +959,8 @@ async function createMissionPayment(request, env) {
     if(!sameRequest) return json({ok:false,error:'IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_REQUEST',version:VERSION},409);
     return json({ok:true,version:VERSION,idempotent_replay:true,transaction:old},200);
   }
+  const activePayment=await env.DB.prepare("SELECT id,status FROM payment_transactions WHERE mission_id=? AND status IN ('pending','processing','held','paid') LIMIT 1").bind(missionId).first();
+  if(activePayment) return json({ok:false,error:'MISSION_ALREADY_HAS_ACTIVE_PAYMENT',version:VERSION,transaction_id:activePayment.id,status:activePayment.status},409);
   const net=gross-commission;
   const txId=crypto.randomUUID();
   await env.DB.prepare(`INSERT INTO payment_transactions
