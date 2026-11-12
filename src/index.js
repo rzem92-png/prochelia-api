@@ -144,7 +144,7 @@ function getCookie(request, name) {
 }
 
 function sessionCookie(token, maxAge = SESSION_TTL_SECONDS) {
-  return `${SESSION_COOKIE}=${encodeURIComponent(token)}; Max-Age=${maxAge}; Path=/; HttpOnly; Secure; SameSite=Lax`;
+  return `${SESSION_COOKIE}=${encodeURIComponent(token)}; Max-Age=${maxAge}; Path=/; HttpOnly; Secure; SameSite=None`;
 }
 
 async function createSession(env, userId) {
@@ -2555,15 +2555,16 @@ async function processBackgroundJobs(request,env) {
 function isMutatingMethod(method){ return ['POST','PUT','PATCH','DELETE'].includes(method); }
 function securityOriginAllowed(request,env){
   const origin=request.headers.get('origin');
-  // Les clients non-navigateur peuvent ne pas envoyer Origin. Les requêtes navigateur
-  // avec Origin doivent correspondre à une origine explicitement autorisée.
+  // Non-browser clients may omit Origin. Browser origins must be allowlisted.
   if(!origin) return true;
   const configured=clean(env?.CORS_ORIGIN);
   const defaults=[
+    'https://prochelia.fr',
+    'https://www.prochelia.fr',
     'https://prochelia.pages.dev',
     'https://56b01f85.prochelia.pages.dev'
   ];
-  const allowed=(configured ? configured.split(',') : defaults)
+  const allowed=[...new Set([...defaults,...(configured?configured.split(','):[])])]
     .map(x=>String(x).trim()).filter(Boolean);
   return allowed.includes(origin);
 }
@@ -3554,4 +3555,30 @@ handle = async function(request,env){
   }catch(e){
     return json({ok:false,error:'PRODUCTION_SAFETY_ERROR',version:VERSION},500);
   }
+};
+
+
+// Cross-origin browser session support: exact allowlist + credentialed cookies.
+const __procheliaCorsWrappedHandle=handle;
+handle=async function(request,env){
+  const origin=request.headers.get('origin');
+  if(origin&&!securityOriginAllowed(request,env)) return json({ok:false,error:'ORIGIN_NOT_ALLOWED',version:VERSION},403);
+  if(request.method==='OPTIONS'){
+    if(!origin) return new Response(null,{status:204});
+    return new Response(null,{status:204,headers:{
+      'access-control-allow-origin':origin,
+      'access-control-allow-credentials':'true',
+      'access-control-allow-methods':'GET, HEAD, POST, PUT, PATCH, DELETE, OPTIONS',
+      'access-control-allow-headers':'Content-Type, Accept, Authorization, Idempotency-Key, X-Prochelia-Signature, X-Webhook-Signature',
+      'access-control-max-age':'600',
+      'vary':'Origin'
+    }});
+  }
+  const response=await __procheliaCorsWrappedHandle(request,env);
+  if(!origin) return response;
+  const headers=new Headers(response.headers);
+  headers.set('access-control-allow-origin',origin);
+  headers.set('access-control-allow-credentials','true');
+  headers.append('vary','Origin');
+  return new Response(response.body,{status:response.status,statusText:response.statusText,headers});
 };
