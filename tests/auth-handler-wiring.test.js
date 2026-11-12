@@ -4,6 +4,17 @@ import { readFile } from "node:fs/promises";
 
 const source = await readFile(new URL("../src/index.js", import.meta.url), "utf8");
 
+
+test("mutations without Origin are denied except exact bootstrap and signed-webhook entry points", () => {
+  const policy = source.slice(source.indexOf("function isMutatingMethod"), source.indexOf("async function ensureCommercialRecruitmentSchema"));
+  assert.match(policy, /function originlessMutationAllowed/);
+  assert.match(policy, /url\.pathname==='\/api\/auth\/bootstrap'/);
+  assert.match(policy, /url\.pathname==='\/api\/payments\/webhook'/);
+  assert.match(policy, /return !isMutatingMethod\(request\.method\) \|\| originlessMutationAllowed\(request,env\)/);
+  assert.match(policy, /if\(!configured\) return false/);
+  assert.doesNotMatch(policy, /const defaults=/);
+});
+
 test("Bearer session fallback accepts a standard Authorization header", () => {
   assert.match(source, /authorization\.match\(\/\^Bearer\\s\+/);
 });
