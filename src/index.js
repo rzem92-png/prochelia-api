@@ -2701,20 +2701,26 @@ async function processBackgroundJobs(request,env) {
 }
 
 function isMutatingMethod(method){ return ['POST','PUT','PATCH','DELETE'].includes(method); }
+function originlessMutationAllowed(request,env){
+  if(request.method!=='POST' || request.headers.get('origin')) return false;
+  const url=new URL(request.url);
+  // The one-time bootstrap is protected again by its exact bearer secret in
+  // the handler. PSP webhooks are admitted here only to reach mandatory HMAC
+  // verification in paymentWebhook; a header alone never authenticates them.
+  if(url.pathname==='/api/auth/bootstrap' && env?.BOOTSTRAP_TOKEN){
+    return request.headers.get('authorization')===`Bearer ${env.BOOTSTRAP_TOKEN}`;
+  }
+  if(url.pathname==='/api/payments/webhook'){
+    return Boolean(request.headers.get('x-prochelia-signature') || request.headers.get('x-webhook-signature'));
+  }
+  return false;
+}
 function securityOriginAllowed(request,env){
   const origin=request.headers.get('origin');
-  // Non-browser clients may omit Origin. Browser origins must be allowlisted.
-  if(!origin) return true;
+  if(!origin) return !isMutatingMethod(request.method) || originlessMutationAllowed(request,env);
   const configured=clean(env?.CORS_ORIGIN);
-  const defaults=[
-    'https://prochelia.fr',
-    'https://www.prochelia.fr',
-    'https://prochelia.rzem92.workers.dev',
-    'https://prochelia.pages.dev',
-    'https://56b01f85.prochelia.pages.dev'
-  ];
-  const allowed=[...new Set([...defaults,...(configured?configured.split(','):[])])]
-    .map(x=>String(x).trim()).filter(Boolean);
+  if(!configured) return false;
+  const allowed=configured.split(',').map(x=>String(x).trim()).filter(Boolean);
   return allowed.includes(origin);
 }
 
