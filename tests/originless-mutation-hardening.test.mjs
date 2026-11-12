@@ -66,8 +66,21 @@ test("originless bootstrap requires the exact configured bearer token", async ()
   assert.notEqual(allowedPastOriginGate.status, 403);
 });
 
-test("payment webhook route is disabled before its settlement handler can run", () => {
-  assert.match(source, /if\(url\.pathname==='\/api\/payments\/webhook'\)\{[\s\S]*?PAYMENT_WEBHOOK_DISABLED_PENDING_REVIEW[\s\S]*?\},503\)/);
+test("payment webhook is disabled before rate limiting and every D1 access", () => {
+  const start=source.indexOf("const __procheliaProductionSafetyHandle = handle;");
+  const end=source.indexOf("const __procheliaCredentialedCorsHandle = handle;",start);
+  assert.ok(start>=0 && end>start);
+  const wrapper=source.slice(start,end);
+  const route=wrapper.indexOf("preflightPath === '/api/payments/webhook'");
+  assert.ok(route>=0);
+  assert.ok(route < wrapper.indexOf("const rate=await productionRateLimit"));
+  assert.match(wrapper,/PAYMENT_WEBHOOK_DISABLED_PENDING_REVIEW/);
+  assert.match(wrapper,/\},503\)/);
+  const helperStart=source.indexOf("function originlessMutationAllowed");
+  const helperEnd=source.indexOf("\n\n",helperStart);
+  const helper=source.slice(helperStart,helperEnd);
+  assert.ok(helperStart>=0 && helperEnd>helperStart);
+  assert.doesNotMatch(helper,/payments\/webhook/);
 });
 
 test("originless webhook receives the explicit disabled response; bootstrap remains token-gated", () => {
