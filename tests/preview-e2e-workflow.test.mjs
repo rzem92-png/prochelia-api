@@ -32,8 +32,8 @@ test("Pages binding mismatch diagnostics expose only non-secret deployment metad
 });
 
 test("Preview E2E synthetic users provide every required users field, including password_hash", () => {
-  assert.match(workflow, /INSERT INTO users \\(id,role,email,first_name,last_name,status,password_hash\\) VALUES/);
-  assert.match(workflow, /q\\('active'\\),q\\(hash\\(randomBytes\\(48\\)\\.toString\\('base64url'\\)\\)\\)/);
+  assert.match(workflow, /INSERT INTO users \(id,role,email,first_name,last_name,status,password_hash\) VALUES/);
+  assert.match(workflow, /q\('active'\),q\(hash\(randomBytes\(48\)\.toString\('base64url'\)\)\)/);
 });
 
 test("Synthetic Preview E2E fixtures are cleaned up and cleanup is verified", () => {
