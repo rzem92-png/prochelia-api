@@ -18,12 +18,13 @@ test("Preview deploy pins isolated Worker and Preview D1, never production", () 
   assert.match(workflow, /keep_vars:\s*true/);
 });
 
-test("Preview deploy runs tests and dry-run before the only deployment command", () => {
-  const tests = workflow.indexOf("Run backend contract and security tests");
+test("Preview deploy runs the complete security suite and dry-run before the only deployment command", () => {
+  const tests = workflow.indexOf("Run backend contract and complete security regression suite");
   const dryRun = workflow.indexOf("Validate Wrangler bundle without deployment");
   const deploy = workflow.indexOf("Deploy ONLY the isolated Preview Worker");
   assert.ok(tests >= 0 && dryRun > tests && deploy > dryRun);
   assert.match(workflow, /tests\/directory-api\.test\.js/);
+  assert.match(workflow, /tests\/bootstrap-atomic\.test\.js/);
   assert.match(workflow, /--dry-run/);
   assert.match(workflow, /wrangler@4 deploy --config wrangler\.preview\.generated\.json --keep-vars/);
   assert.doesNotMatch(workflow, /d1 migrations apply/);
