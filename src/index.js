@@ -1020,121 +1020,14 @@ async function verifyWebhookSignature(request, env, rawBody) {
 }
 
 async function paymentWebhook(request, env) {
-  // Bound untrusted webhook input before HMAC/JSON processing to prevent memory DoS.
-  // Preserve the exact UTF-8 body text used by the provider signature.
-  const bounded=await readBoundedRequestBody(request,64*1024);
-  if(!bounded.ok) {
-    const status=bounded.reason==='TOO_LARGE'?413:400;
-    return json({ok:false,error:bounded.reason==='TOO_LARGE'?'WEBHOOK_BODY_TOO_LARGE':'INVALID_WEBHOOK_BODY',version:VERSION},status);
-  }
-  const raw=bounded.text;
-  if(!(await verifyWebhookSignature(request,env,raw))) return json({ok:false,error:'INVALID_WEBHOOK_SIGNATURE',version:VERSION},401);
-  // Do not touch D1 or create payment tables until the provider signature is valid.
-  await ensurePaymentSchema(env);
-  let event; try{event=JSON.parse(raw)}catch{return json({ok:false,error:'INVALID_WEBHOOK_JSON',version:VERSION},400);}
-  const provider=clean(event?.provider)||paymentProvider(env), eventId=clean(event?.id), type=clean(event?.type);
-  if(!eventId||!type) return json({ok:false,error:'INVALID_WEBHOOK_EVENT',version:VERSION},400);
-  // This deployment has one configured PSP adapter. Never let a signed payload
-  // select another provider namespace or bypass provider-specific verification.
-  if(provider!==paymentProvider(env)) return json({ok:false,error:'PAYMENT_PROVIDER_MISMATCH',version:VERSION},400);
-  const txId=clean(event?.data?.transaction_id), payoutId=clean(event?.data?.payout_id);
-  const providerPaymentId=clean(event?.data?.provider_payment_id);
-  const paymentEvents=['payment_succeeded','charge_succeeded','payment_failed','charge_failed'];
-  const payoutEvents=['payout_processing','payout_paid','payout_failed','payout_canceled'];
-  const supportedEvents=[...paymentEvents,...payoutEvents];
-  if(!supportedEvents.includes(type)) {
-    return json({ok:false,error:type==='payment_refunded'?'REFUND_RECONCILIATION_NOT_IMPLEMENTED':'UNSUPPORTED_WEBHOOK_EVENT',version:VERSION},501);
-  }
-  if(['payment_succeeded','charge_succeeded'].includes(type) && (!txId||!providerPaymentId)) {
-    return json({ok:false,error:'PSP_PAYMENT_REFERENCE_REQUIRED',version:VERSION},400);
-  }
-  if(paymentEvents.includes(type)&&!txId) return json({ok:false,error:'PAYMENT_TRANSACTION_REFERENCE_REQUIRED',version:VERSION},400);
-  if(payoutEvents.includes(type)&&!payoutId) return json({ok:false,error:'PAYOUT_REFERENCE_REQUIRED',version:VERSION},400);
-  const payloadHash=await sha256Base64url(raw);
-  const inserted=await env.DB.prepare(`INSERT OR IGNORE INTO payment_webhook_events (id,provider,event_id,event_type,signature_valid,payload_hash) VALUES (?,?,?,?,1,?)`).bind(crypto.randomUUID(),provider,eventId,type,payloadHash).run();
-  const existing=await env.DB.prepare('SELECT * FROM payment_webhook_events WHERE provider=? AND event_id=? LIMIT 1').bind(provider,eventId).first();
-  if(!existing) return json({ok:false,error:'WEBHOOK_EVENT_PERSISTENCE_FAILED',version:VERSION},503);
-  if(existing.payload_hash && existing.payload_hash!==payloadHash) {
-    await paymentAudit(env,'PSP_WEBHOOK_ID_COLLISION',{metadata:{provider,event_id:eventId,event_type:type}},'REJECTED');
-    return json({ok:false,error:'WEBHOOK_EVENT_ID_PAYLOAD_CONFLICT',version:VERSION},409);
-  }
-  if(Number(existing.processed)===1) return json({ok:true,version:VERSION,duplicate:true,event_id:eventId},200);
-  // Atomic claim prevents two concurrent deliveries from crediting the same wallet.
-  // An abandoned claim becomes retryable after five minutes.
-  const claim=await env.DB.prepare(`UPDATE payment_webhook_events SET processed=2,received_at=CURRENT_TIMESTAMP
-    WHERE provider=? AND event_id=? AND (processed=0 OR (processed=2 AND received_at < datetime('now','-5 minutes')))`).bind(provider,eventId).run();
-  if(!claim.meta?.changes) return json({ok:true,version:VERSION,accepted:true,processing:true,event_id:eventId,retry_after_seconds:30},202);
-  try {
-    if(txId){
-      const tx=await env.DB.prepare('SELECT * FROM payment_transactions WHERE id=? LIMIT 1').bind(txId).first();
-      if(!tx) throw new Error('PAYMENT_TRANSACTION_NOT_FOUND');
-      if(clean(tx.provider)!==provider) throw new Error('PAYMENT_PROVIDER_MISMATCH');
-      if(['payment_succeeded','charge_succeeded'].includes(type)) {
-        const amount=event?.data?.amount_cents, currency=clean(event?.data?.currency)?.toUpperCase();
-        if(!Number.isSafeInteger(amount)||amount!==Number(tx.gross_cents)||currency!==String(tx.currency||'EUR').toUpperCase()) {
-          throw new Error('PSP_PAYMENT_AMOUNT_OR_CURRENCY_MISMATCH');
-        }
-      }
-      const statusMap={payment_succeeded:'paid',charge_succeeded:'paid',payment_failed:'failed',charge_failed:'failed',payment_refunded:'refunded'};
-      const newStatus=statusMap[type];
-      if(newStatus){
-        const alreadyFinal = ['paid','failed','refunded'].includes(tx.status);
-        if(!alreadyFinal){
-          const wallet=newStatus==='paid'
-            ? await env.DB.prepare('SELECT * FROM wallets WHERE user_id=? LIMIT 1').bind(tx.intervenant_id).first()
-            : null;
-          if(newStatus==='paid'&&!wallet) throw new Error('INTERVENANT_WALLET_NOT_FOUND');
-          const txUpdate=env.DB.prepare(`UPDATE payment_transactions SET status=?,provider_payment_id=COALESCE(?,provider_payment_id),updated_at=CURRENT_TIMESTAMP WHERE id=? AND status NOT IN ('paid','failed','refunded')`).bind(newStatus,providerPaymentId||null,txId);
-          if(newStatus==='paid'){
-            // D1 batch is transactional. The second statement runs only when
-            // the guarded state transition changed exactly one row.
-            const walletCredit=env.DB.prepare(`UPDATE wallets SET available_cents=available_cents+?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND changes()=1`).bind(tx.net_intervenant_cents,wallet.id);
-            await env.DB.batch([txUpdate,walletCredit]);
-          } else {
-            await txUpdate.run();
-          }
-        }
-      }
-    }
-    if(payoutId){
-      const payout=await env.DB.prepare('SELECT * FROM payout_requests WHERE id=? LIMIT 1').bind(payoutId).first();
-      if(!payout) throw new Error('PAYOUT_REQUEST_NOT_FOUND');
-      if(clean(payout.provider)!==provider) throw new Error('PAYOUT_PROVIDER_MISMATCH');
-      if(type==='payout_paid') {
-        const amount=event?.data?.amount_cents, currency=clean(event?.data?.currency)?.toUpperCase();
-        const providerPayoutId=clean(event?.data?.provider_payout_id);
-        if(!providerPayoutId) throw new Error('PSP_PAYOUT_REFERENCE_REQUIRED');
-        if(!Number.isSafeInteger(amount)||amount!==Number(payout.amount_cents)||currency!==String(payout.currency||'EUR').toUpperCase()) {
-          throw new Error('PSP_PAYOUT_AMOUNT_OR_CURRENCY_MISMATCH');
-        }
-      }
-      const statusMap={payout_processing:'processing',payout_paid:'completed',payout_failed:'failed',payout_canceled:'canceled'};
-      const newStatus=statusMap[type];
-      if(newStatus){
-        const alreadyFinal=['completed','failed','canceled'].includes(payout.status);
-        if(!alreadyFinal){
-          // State transition is conditional; a retry cannot apply wallet movements twice.
-          const payoutUpdate=env.DB.prepare(`UPDATE payout_requests SET status=?,provider_payout_id=COALESCE(?,provider_payout_id),failure_code=?,failure_message=?,completed_at=CASE WHEN ?='completed' THEN CURRENT_TIMESTAMP ELSE completed_at END,updated_at=CURRENT_TIMESTAMP WHERE id=? AND status NOT IN ('completed','failed','canceled')`).bind(newStatus,clean(event?.data?.provider_payout_id)||null,clean(event?.data?.failure_code)||null,clean(event?.data?.failure_message)||null,newStatus,payoutId);
-          if(newStatus==='completed'){
-            const settle=env.DB.prepare(`UPDATE wallets SET reserved_cents=MAX(0,reserved_cents-?),paid_cents=paid_cents+?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND changes()=1`).bind(payout.amount_cents,payout.amount_cents,payout.wallet_id);
-            await env.DB.batch([payoutUpdate,settle]);
-          } else if(['failed','canceled'].includes(newStatus)){
-            const release=env.DB.prepare(`UPDATE wallets SET reserved_cents=MAX(0,reserved_cents-?),available_cents=available_cents+?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND changes()=1`).bind(payout.amount_cents,payout.amount_cents,payout.wallet_id);
-            await env.DB.batch([payoutUpdate,release]);
-          } else {
-            await payoutUpdate.run();
-          }
-        }
-      }
-    }
-    await paymentAudit(env,'PSP_WEBHOOK_PROCESSED',{transaction_id:txId,payout_id:payoutId,metadata:{provider,event_id:eventId,event_type:type}},'OK');
-    await env.DB.prepare('UPDATE payment_webhook_events SET processed=1,processed_at=CURRENT_TIMESTAMP WHERE provider=? AND event_id=? AND processed=2').bind(provider,eventId).run();
-    return json({ok:true,version:VERSION,processed:true,event_id:eventId},200);
-  } catch(e) {
-    await env.DB.prepare('UPDATE payment_webhook_events SET processed=0 WHERE provider=? AND event_id=? AND processed=2').bind(provider,eventId).run();
-    await paymentAudit(env,'PSP_WEBHOOK_PROCESSING_FAILED',{transaction_id:txId,payout_id:payoutId,metadata:{provider,event_id:eventId,event_type:type,error:String(e.message||e).slice(0,180)}},'RETRYABLE').catch(()=>{});
-    return json({ok:false,error:'WEBHOOK_PROCESSING_FAILED',retryable:true,version:VERSION},503);
-  }
+  // Fail closed until atomic ledger settlement, replay/idempotency, refund
+  // transitions and payout reconciliation pass isolated D1 concurrency tests.
+  // This endpoint intentionally performs no schema creation or database writes.
+  return json({
+    ok:false,
+    error:'PAYMENT_WEBHOOK_DISABLED_PENDING_REVIEW',
+    version:VERSION
+  },503);
 }
 async function openPaymentDispute(request, env) {
   const auth=await getSessionUser(request,env);
@@ -2926,8 +2819,12 @@ function securityOriginAllowed(request,env){
 // Seul le bootstrap initial peut être appelé sans Origin, et uniquement avec
 // le secret serveur exact. Le handler bootstrap revérifie également ce jeton.
 function originlessBootstrapAllowed(request,env){
-  if(request.method!=='POST' || !env?.BOOTSTRAP_TOKEN || request.headers.get('origin')) return false;
+  if(request.method!=='POST' || request.headers.get('origin')) return false;
   const url=new URL(request.url);
+  // The PSP webhook is deliberately disabled below and performs no D1 work.
+  // Let it return an explicit 503 instead of treating a server callback as CORS.
+  if(url.pathname==='/api/payments/webhook') return true;
+  if(!env?.BOOTSTRAP_TOKEN) return false;
   return url.pathname==='/api/auth/bootstrap' &&
     request.headers.get('authorization')===`Bearer ${env.BOOTSTRAP_TOKEN}`;
 }
