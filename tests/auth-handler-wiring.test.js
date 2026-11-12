@@ -15,8 +15,12 @@ test("mutations without Origin are denied except exact bootstrap and signed-webh
   assert.doesNotMatch(policy, /const defaults=/);
 });
 
-test("Bearer session fallback accepts a standard Authorization header", () => {
-  assert.match(source, /authorization\.match\(\/\^Bearer\\s\+/);
+test("browser sessions remain HttpOnly cookie-only and are not returned in login JSON", () => {
+  assert.match(source, /return getCookie\(request,SESSION_COOKIE\)/);
+  assert.doesNotMatch(source, /authorization\.match\(\/\^Bearer\\s\+/);
+  assert.match(source, /HttpOnly; Secure; SameSite=Lax/);
+  const handler = source.slice(source.indexOf("async function login"), source.indexOf("async function logout"));
+  assert.doesNotMatch(handler, /user: safeUser\(user\), token/);
 });
 
 test("manual payment finalization cannot mark a transaction paid or refunded without a signed PSP event", () => {
@@ -80,6 +84,8 @@ test("PSP webhooks are bound to the stored provider and immutable event payload"
   const handler = source.slice(source.indexOf("async function paymentWebhook"), source.indexOf("async function openPaymentDispute"));
   assert.equal((handler.match(/WEBHOOK_PROVIDER_MISMATCH/g) || []).length, 2);
   assert.match(handler, /WEBHOOK_EVENT_ID_PAYLOAD_CONFLICT/);
+  assert.match(handler, /const provider=paymentProvider\(env\), payloadProvider=clean\(event\?\.provider\)/);
+  assert.match(handler, /if\(payloadProvider && payloadProvider!==provider\).*WEBHOOK_PROVIDER_MISMATCH/);
   assert.match(handler, /prior\?\.payload_hash && prior\.payload_hash!==payloadHash/);
   assert.match(handler, /UPDATE payment_webhook_events SET processed=1,processed_at=CURRENT_TIMESTAMP\\s+WHERE provider=\\? AND event_id=\\? AND changes\\(\\)=1/);
   assert.match(handler, /WEBHOOK_STATE_TRANSITION_NOT_APPLIED/);
