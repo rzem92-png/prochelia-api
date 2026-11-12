@@ -1009,18 +1009,7 @@ async function finalizeMissionPayment(request, env) {
   if(!txId||!['failed','held'].includes(outcome)) return json({ok:false,error:'PSP_CONFIRMED_OUTCOME_REQUIRED',version:VERSION,message:'Les statuts paid/refunded ne peuvent être appliqués que par un webhook PSP signé et vérifié.'},409);
   const tx=await env.DB.prepare('SELECT * FROM payment_transactions WHERE id=? LIMIT 1').bind(txId).first();
   if(!tx) return json({ok:false,error:'TRANSACTION_NOT_FOUND',version:VERSION},404);
-  if(outcome==='paid'){
-    const result=await creditMissionPaymentOnce(env,tx);
-    if(!result.ok) return json({ok:false,error:result.error||'PAYMENT_NOT_CREDITED',version:VERSION,status:result.status||null},409);
-    await paymentAudit(env,'MISSION_PAYMENT_FINALIZED',{transaction_id:txId,mission_id:tx.mission_id,user_id:auth.user.id,metadata:{outcome,idempotent_replay:!result.transitioned}},'OK');
-    return json({ok:true,version:VERSION,transaction_id:txId,status:'paid',idempotent_replay:!result.transitioned},200);
-  }
-  if(outcome==='refunded'){
-    const result=await refundMissionPaymentOnce(env,tx);
-    if(!result.ok) return json({ok:false,error:result.error||'PAYMENT_REFUND_CONFLICT',version:VERSION,status:result.status||null},409);
-    await paymentAudit(env,'MISSION_PAYMENT_FINALIZED',{transaction_id:txId,mission_id:tx.mission_id,user_id:auth.user.id,metadata:{outcome,idempotent_replay:!result.transitioned}},'OK');
-    return json({ok:true,version:VERSION,transaction_id:txId,status:'refunded',idempotent_replay:!result.transitioned},200);
-  }
+  // Successful payments and refunds are applied only by verified PSP webhooks.
   const update=await env.DB.prepare(`UPDATE payment_transactions SET status=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND status IN ('pending','held')`).bind(outcome,txId).run();
   if(!update.meta?.changes){
     const latest=await env.DB.prepare('SELECT status FROM payment_transactions WHERE id=?').bind(txId).first();
