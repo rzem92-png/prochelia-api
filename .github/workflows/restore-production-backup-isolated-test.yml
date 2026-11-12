@@ -76,12 +76,16 @@ jobs:
             .head_branch == "main" and
             .event == "workflow_dispatch"
           ' "$RUNNER_TEMP/backup-run.json" >/dev/null || { echo "::error::Run is not a successful manual production-backup run on main."; exit 1; }
+          backup_created="$(jq -r '.created_at' "$RUNNER_TEMP/backup-run.json")"
+          backup_epoch="$(date -u -d "$backup_created" +%s)"
+          now_epoch="$(date -u +%s)"
+          (( backup_epoch <= now_epoch && now_epoch - backup_epoch <= 86400 )) || { echo "::error::Production backup must be less than 24 hours old. Create a fresh encrypted backup first."; exit 1; }
           backup_sha="$(jq -r '.head_sha' "$RUNNER_TEMP/backup-run.json")"
           [[ "$backup_sha" =~ ^[0-9a-f]{40}$ ]]
           gh run view "$BACKUP_RUN_ID" --repo "$GITHUB_REPOSITORY" --log > "$RUNNER_TEMP/backup-run.log"
           grep -Fq "PASS: encrypted production backup uploaded, downloaded, decrypted and checksum-verified." "$RUNNER_TEMP/backup-run.log"
-          grep -Fq "PASS: live D1 identity verified:" "$RUNNER_TEMP/backup-run.log"
-          key="$(grep -oE "production-d1/(prochelia-api|prochelia-db)/[0-9]{4}/[0-9]{2}/[0-9]{2}/${BACKUP_RUN_ID}-${backup_sha:0:12}\.sql\.gpg" "$RUNNER_TEMP/backup-run.log" | tail -n 1)"
+          grep -Fq "PASS: live D1 identity verified: prochelia-db (04f52830-ef5a-4f17-a640-42bbc2381bba)." "$RUNNER_TEMP/backup-run.log"
+          key="$(grep -oE "production-d1/prochelia-db/[0-9]{4}/[0-9]{2}/[0-9]{2}/${BACKUP_RUN_ID}-${backup_sha:0:12}\.sql\.gpg" "$RUNNER_TEMP/backup-run.log" | tail -n 1)"
           [[ -n "$key" ]] || { echo "::error::Could not recover the exact encrypted R2 object key from the successful run logs."; exit 1; }
           echo "R2_OBJECT_KEY=$key" >> "$GITHUB_ENV"
           echo "Successful production backup run and exact object key authenticated."
