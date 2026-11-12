@@ -1099,7 +1099,7 @@ async function paymentAdminResolve(request, env) {
   if(!d||d.status!=='open') return json({ok:false,error:'DISPUTE_NOT_FOUND_OR_ALREADY_RESOLVED',version:VERSION},409);
   const results=await env.DB.batch([
     env.DB.prepare(`UPDATE payment_disputes SET status='resolved',resolution='release',resolved_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP
-      WHERE id=? AND status='open'`).bind(disputeId),
+      WHERE id=? AND status='open' AND EXISTS (SELECT 1 FROM payment_transactions WHERE id=payment_disputes.transaction_id AND status='held')`).bind(disputeId),
     env.DB.prepare(`UPDATE payment_transactions SET status='paid',updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='held' AND changes()=1`).bind(d.transaction_id)
   ]);
   if(!results[0]?.meta?.changes) return json({ok:false,error:'DISPUTE_STATE_CONFLICT',version:VERSION},409);
