@@ -83,9 +83,12 @@ test("PSP webhooks are bound to the stored provider and immutable event payload"
   assert.match(handler, /prior\?\.payload_hash && prior\.payload_hash!==payloadHash/);
 });
 
-test("wallet ledger rejects any entry that would make available balance negative", () => {
+test("wallet ledger protects pending, reserved and paid balances while allowing refund receivables", () => {
   const schema = source.slice(source.indexOf("CREATE TRIGGER IF NOT EXISTS trg_payment_wallet_ledger_guard_balances"), source.indexOf("CREATE TRIGGER IF NOT EXISTS trg_payment_wallet_ledger_apply"));
-  assert.match(schema, /available_cents FROM wallets WHERE user_id=NEW\.user_id\)\+NEW\.available_delta_cents<0/);
+  assert.doesNotMatch(schema, /available_cents FROM wallets WHERE user_id=NEW\.user_id\)\+NEW\.available_delta_cents<0/);
+  assert.match(schema, /pending_cents FROM wallets WHERE user_id=NEW\.user_id\)\+NEW\.pending_delta_cents<0/);
+  assert.match(schema, /reserved_cents FROM wallets WHERE user_id=NEW\.user_id\)\+NEW\.reserved_delta_cents<0/);
+  assert.match(schema, /paid_cents FROM wallets WHERE user_id=NEW\.user_id\)\+NEW\.paid_delta_cents<0/);
   assert.match(schema, /PAYMENT_WALLET_NEGATIVE_PROTECTED_BALANCE/);
 });
 
