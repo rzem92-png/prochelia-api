@@ -74,6 +74,24 @@ jobs:
           printf '%s\n' "$who"
           printf '%s' "$who" | grep -Fq "$EXPECTED_ACCOUNT_ID"
 
+      - name: Verify live production D1 name and UUID through Cloudflare API
+        shell: bash
+        run: |
+          set -euo pipefail
+          response="$(curl --fail --silent --show-error \\
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \\
+            -H "Content-Type: application/json" \\
+            "https://api.cloudflare.com/client/v4/accounts/$EXPECTED_ACCOUNT_ID/d1/database/$EXPECTED_DB_ID")"
+          DB_RESPONSE="$response" python3 - "$EXPECTED_DB_NAME" "$EXPECTED_DB_ID" <<'PY'
+          import json, os, sys
+          payload = json.loads(os.environ["DB_RESPONSE"])
+          assert payload.get("success") is True, "Cloudflare D1 identity lookup failed"
+          database = payload["result"]
+          assert database["name"] == sys.argv[1], f"Unexpected live D1 name: {database['name']}"
+          assert database["uuid"] == sys.argv[2], f"Unexpected live D1 UUID: {database['uuid']}"
+          print(f"PASS: live D1 identity verified: {database['name']} ({database['uuid']}).")
+          PY
+
       - name: Install export integrity tools
         run: |
           sudo apt-get update
