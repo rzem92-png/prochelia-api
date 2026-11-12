@@ -56,7 +56,9 @@ class PrepareD1RestoreTests(unittest.TestCase):
             self.assertEqual(restored.execute("PRAGMA integrity_check").fetchone()[0], "ok")
             self.assertEqual(restored.execute("PRAGMA foreign_key_check").fetchall(), [])
             self.assertEqual(restored.execute("SELECT COUNT(*) FROM children").fetchone()[0], 1)
-            self.assertEqual(restored.execute("SELECT COUNT(*) FROM audit").fetchone()[0], 0)
+            self.assertEqual(restored.execute("SELECT COUNT(*) FROM audit").fetchone()[0], 1)
+            restored.execute("INSERT INTO children VALUES ('c2', 'p1', 'child 2')")
+            self.assertEqual(restored.execute("SELECT COUNT(*) FROM audit").fetchone()[0], 2)
             restored.close()
 
     def test_circular_foreign_key_graph_is_rejected(self):
