@@ -40,6 +40,15 @@ test("system scale and backup routes require a manager session", () => {
   assert.match(routes, /!auth\?\.user\|\|String\(auth\.user\.role\|\|''\)\.toUpperCase\(\)!=='GERANTE'/);
 });
 
+test("payment onboarding reuse and payout readiness stay bound to the configured PSP", () => {
+  const onboarding = source.slice(source.indexOf("async function paymentOnboard"), source.indexOf("async function paymentStatus"));
+  assert.match(onboarding, /existing && String\(existing\.provider\|\|'\'\)!==provider/);
+  assert.match(onboarding, /PAYMENT_ACCOUNT_PROVIDER_MISMATCH/);
+  const payout = source.slice(source.indexOf("async function payoutRequest"), source.indexOf("async function verifyWebhookSignature"));
+  assert.match(payout, /String\(account\.provider\|\|'\'\)!==paymentProvider\(env\)/);
+  assert.match(payout, /PAYOUT_PROVIDER_MISMATCH/);
+});
+
 test("all payment handlers are wired into the active base router with explicit methods", () => {
   const router = source.slice(source.indexOf("async function handleBase(request, env)"));
   const routes = [
