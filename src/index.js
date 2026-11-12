@@ -3798,9 +3798,52 @@ async function interfaceConfigEndpoint(request,env){
 async function supportCreate(request,env){
   const a=await supportAuth(request,env); if(a.response)return a.response;
   await ensureProcheliaMasterComplementSchema(env);
-  const b=await readJson(request)||{};
-  const category=clean(b.category)||'GENERAL';
-  const severity=String(b.severity||'LOW').toUpperCase();
+  const parsed=await readJsonLimited(request,16384);
+  if(!parsed.ok){
+    const tooLarge=parsed.error==='PAYLOAD_TOO_LARGE';
+    return json({ok:false,error:parsed.error,version:VERSION},tooLarge?413:400);
+  }
+  const b=parsed.value;
+  if(!b || typeof b!=='object' || Array.isArray(b)){
+    return json({ok:false,error:'INVALID_SUPPORT_PAYLOAD',version:VERSION},400);
+  }
+  const rawCategory=b.category===undefined?'GENERAL':b.category;
+  if(typeof rawCategory!=='string' || !['GENERAL','DELAY','TECHNICAL','DOCUMENT','PAYMENT','COMPLAINT','SECURITY','RGPD_SECURITY','LEGAL','REPLACEMENT','IDENTITY','FRAUD','DATA_BREACH','RGPD','LITIGE','ABSENCE','DUPLICATE','DOUBLE_PAYMENT','FACTURE','RETARD','NOTIFICATION'].includes(rawCategory.trim().toUpperCase())){
+    return json({ok:false,error:'INVALID_SUPPORT_CATEGORY',version:VERSION},400);
+  }
+  const category=rawCategory.trim().toUpperCase();
+  const rawSeverity=b.severity===undefined?'LOW':b.severity;
+  if(typeof rawSeverity!=='string' || !['LOW','MEDIUM','HIGH','CRITICAL'].includes(rawSeverity.trim().toUpperCase())){
+    return json({ok:false,error:'INVALID_SUPPORT_SEVERITY',version:VERSION},400);
+  }
+  const severity=rawSeverity.trim().toUpperCase();
+  if(b.description!==undefined && (typeof b.description!=='string' || b.description.length>4000)){
+    return json({ok:false,error:'INVALID_SUPPORT_DESCRIPTION',version:VERSION},400);
+  }
+  // Never accept relationship IDs from an ordinary requester: otherwise a
+  // forged company/mission/complaint ID could attach a ticket to another account.
+  const isManager=['GERANTE','ADMIN'].includes(a.role);
+  const linkedFields=['company_id','mission_id','complaint_id'];
+  if(!isManager && linkedFields.some(k=>b[k]!==undefined && b[k]!==null && b[k]!=='')){
+    return json({ok:false,error:'LINKED_CASE_REQUIRES_MANAGER_VALIDATION',version:VERSION},403);
+  }
+  if(isManager){
+    if(b.mission_id!==undefined && b.mission_id!==null){
+      if(typeof b.mission_id!=='string' || b.mission_id.length>128) return json({ok:false,error:'INVALID_MISSION_ID',version:VERSION},400);
+      const linkedMission=await env.DB.prepare('SELECT id FROM missions WHERE id=? LIMIT 1').bind(b.mission_id).first();
+      if(!linkedMission) return json({ok:false,error:'MISSION_NOT_FOUND',version:VERSION},404);
+    }
+    if(b.complaint_id!==undefined && b.complaint_id!==null){
+      if(typeof b.complaint_id!=='string' || b.complaint_id.length>128) return json({ok:false,error:'INVALID_COMPLAINT_ID',version:VERSION},400);
+      const linkedComplaint=await env.DB.prepare('SELECT id FROM complaints WHERE id=? LIMIT 1').bind(b.complaint_id).first();
+      if(!linkedComplaint) return json({ok:false,error:'COMPLAINT_NOT_FOUND',version:VERSION},404);
+    }
+    if(b.company_id!==undefined && b.company_id!==null){
+      if(typeof b.company_id!=='string' || b.company_id.length>128) return json({ok:false,error:'INVALID_COMPANY_ID',version:VERSION},400);
+      const linkedCompany=await env.DB.prepare('SELECT id FROM business_profiles WHERE id=? LIMIT 1').bind(b.company_id).first();
+      if(!linkedCompany) return json({ok:false,error:'COMPANY_NOT_FOUND',version:VERSION},404);
+    }
+  }
   const scenario=supportScenarioFor(category,severity);
   const rule=await env.DB.prepare(`SELECT * FROM copilot_resolution_rules WHERE scenario_key=? LIMIT 1`).bind(scenario).first();
   const auto=Number(rule?.auto_allowed||0)===1 && String(severity)!=='CRITICAL' && String(severity)!=='HIGH';
@@ -3813,9 +3856,9 @@ async function supportCreate(request,env){
   await journal(env,a.role,a.auth.user.id,'SUPPORT_CASE_CREATE','support_cases',id,'OK',{scenario,severity,auto});
   let autoResult=null;
   if(auto){
-    autoResult=await supportAutoResolve(env,id,a.auth.user.id,a.role,scenario,b);
+    autoResult=await supportAutoResolve(env,id,a.auth.user.id,a.role,scenario);
   }
-  return json({ok:true,version:VERSION,case_id:id,scenario,automatic_resolution:!!auto,auto_result:autoResult,manager_approval_required:!auto});
+  return json({ok:true,version:VERSION,case_id:id,scenario,automatic_resolution:false,auto_check:!!auto,auto_result:autoResult,manager_approval_required:auto ? true : requiresManager});
 }
 
 async function supportAutoResolve(env,caseId,actorId,actorRole,scenario) {
