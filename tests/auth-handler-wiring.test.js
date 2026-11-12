@@ -87,7 +87,7 @@ test("PSP webhooks are bound to the stored provider and immutable event payload"
   assert.match(handler, /const provider=paymentProvider\(env\), payloadProvider=clean\(event\?\.provider\)/);
   assert.match(handler, /if\(payloadProvider && payloadProvider!==provider\).*WEBHOOK_PROVIDER_MISMATCH/);
   assert.match(handler, /prior\?\.payload_hash && prior\.payload_hash!==payloadHash/);
-  assert.match(handler, /UPDATE payment_webhook_events SET processed=1,processed_at=CURRENT_TIMESTAMP\\s+WHERE provider=\\? AND event_id=\\? AND changes\\(\\)=1/);
+  assert.match(handler, /UPDATE payment_webhook_events SET processed=1,processed_at=CURRENT_TIMESTAMP\s+WHERE provider=\? AND event_id=\? AND changes\(\)=1/);
   assert.match(handler, /WEBHOOK_STATE_TRANSITION_NOT_APPLIED/);
   assert.match(handler, /const processed=!!results\.at\(-1\)\?\.meta\?\.changes/);
 });
