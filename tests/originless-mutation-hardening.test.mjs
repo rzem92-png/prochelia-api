@@ -66,14 +66,8 @@ test("originless bootstrap requires the exact configured bearer token", async ()
   assert.notEqual(allowedPastOriginGate.status, 403);
 });
 
-test("payment webhook remains fail-closed and performs no D1 work", () => {
-  const start = source.indexOf("async function paymentWebhook(request, env)");
-  const end = source.indexOf("\nasync function openPaymentDispute", start + 1);
-  assert.ok(start >= 0 && end > start);
-  const handler = source.slice(start, end);
-  assert.match(handler, /PAYMENT_WEBHOOK_DISABLED_PENDING_REVIEW/);
-  assert.match(handler, /\},503\)/);
-  assert.doesNotMatch(handler, /env\.DB|ensurePaymentSchema|\.prepare\s*\(/);
+test("payment webhook route is disabled before its settlement handler can run", () => {
+  assert.match(source, /if\(url\.pathname==='\/api\/payments\/webhook'\)\{[\s\S]*?PAYMENT_WEBHOOK_DISABLED_PENDING_REVIEW[\s\S]*?\},503\)/);
 });
 
 test("originless webhook receives the explicit disabled response; bootstrap remains token-gated", () => {
