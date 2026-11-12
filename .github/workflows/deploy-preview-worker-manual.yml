@@ -86,7 +86,6 @@ jobs:
             tests/payment-webhook-settlement-gate.test.js \
             tests/bootstrap-atomic.test.js \
             tests/preview-e2e-workflow.test.mjs
-            tests/preview-e2e-workflow.test.mjs
       - name: Test D1 backup restore preparation logic
         run: python3 -m unittest tests/test_prepare_d1_restore.py
       - name: Validate Wrangler bundle without deployment
