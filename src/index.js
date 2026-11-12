@@ -2928,9 +2928,6 @@ function securityOriginAllowed(request,env){
 function originlessMutationAllowed(request,env){
   if(request.method!=='POST' || request.headers.get('origin')) return false;
   const url=new URL(request.url);
-  // The PSP webhook is deliberately disabled below and performs no D1 work.
-  // Let it return an explicit 503 instead of treating a server callback as CORS.
-  if(url.pathname==='/api/payments/webhook') return true;
   if(!env?.BOOTSTRAP_TOKEN) return false;
   return url.pathname==='/api/auth/bootstrap' &&
     request.headers.get('authorization')===`Bearer ${env.BOOTSTRAP_TOKEN}`;
@@ -3927,6 +3924,11 @@ handle = async function(request,env){
     const preflightPath = preflightUrl.pathname;
     const preflightMethod = request.method.toUpperCase();
     const getOnlyDiagnostics = new Set(['/api/health','/api/readiness','/api/info']);
+    // Disabled PSP webhook is rejected before rate limiting or any D1 access.
+    if (preflightPath === '/api/payments/webhook') {
+      if (preflightMethod !== 'POST') return json({ok:false,error:'METHOD_NOT_ALLOWED',version:VERSION},405,{'allow':'POST'});
+      return json({ok:false,error:'PAYMENT_WEBHOOK_DISABLED_PENDING_REVIEW',version:VERSION},503);
+    }
     // Apply browser-origin rejection before rate limiting or any D1 access.
     // This keeps forbidden cross-origin writes a deterministic 403 even when
     // the database is unavailable, instead of masking them as a generic 500.
