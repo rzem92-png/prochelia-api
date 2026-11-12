@@ -71,7 +71,7 @@ test("payment webhook route is disabled before its settlement handler can run", 
 });
 
 test("originless webhook receives the explicit disabled response; bootstrap remains token-gated", () => {
-  const start = source.indexOf("function originlessBootstrapAllowed");
+  const start = source.indexOf("function originlessMutationAllowed");
   const end = source.indexOf("\n\n", start);
   assert.ok(start >= 0 && end > start);
   const helper = source.slice(start, end);
