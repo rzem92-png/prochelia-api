@@ -106,8 +106,8 @@ test("confirmed PSP refunds can reverse a payment while its dispute is open", ()
 
 test("runtime wallet trigger permits confirmed refund receivables like the SQL migration", () => {
   const schema = source.slice(source.indexOf("CREATE TRIGGER IF NOT EXISTS trg_payment_wallet_ledger_guard_balances"), source.indexOf("CREATE TRIGGER IF NOT EXISTS trg_payment_wallet_ledger_apply"));
-  assert.doesNotMatch(schema, /available_cents FROM wallets WHERE user_id=NEW\\.user_id\\)\\+NEW\\.available_delta_cents<0/);
-  assert.match(schema, /pending_cents FROM wallets WHERE user_id=NEW\\.user_id\\)\\+NEW\\.pending_delta_cents<0/);
-  assert.match(schema, /reserved_cents FROM wallets WHERE user_id=NEW\\.user_id\\)\\+NEW\\.reserved_delta_cents<0/);
-  assert.match(schema, /paid_cents FROM wallets WHERE user_id=NEW\\.user_id\\)\\+NEW\\.paid_delta_cents<0/);
+  assert.equal(schema.includes("available_cents FROM wallets WHERE user_id=NEW.user_id)+NEW.available_delta_cents<0"), false);
+  assert.equal(schema.includes("pending_cents FROM wallets WHERE user_id=NEW.user_id)+NEW.pending_delta_cents<0"), true);
+  assert.equal(schema.includes("reserved_cents FROM wallets WHERE user_id=NEW.user_id)+NEW.reserved_delta_cents<0"), true);
+  assert.equal(schema.includes("paid_cents FROM wallets WHERE user_id=NEW.user_id)+NEW.paid_delta_cents<0"), true);
 });
