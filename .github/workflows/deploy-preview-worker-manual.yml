@@ -73,10 +73,18 @@ jobs:
           node --experimental-default-type=module --check src/index.js
           node --experimental-default-type=module --check src/v7.js
           node --experimental-default-type=module --check src/v7-routes.js
-      - name: Run backend contract and security tests
+      - name: Run backend contract and complete security regression suite
         run: |
           node --test tests/auth-handler-wiring.test.js tests/directory-api.test.js
-          node --experimental-default-type=module --test tests/v7-security.test.js
+          node --experimental-default-type=module --test \
+            tests/v7-security.test.js \
+            tests/deploy-preview-workflow.test.mjs \
+            tests/payment-webhook-security.test.js \
+            tests/mission-security-atomic.test.js \
+            tests/payout-atomicity.test.js \
+            tests/payment-settlement-guard.test.js \
+            tests/payment-webhook-settlement-gate.test.js \
+            tests/bootstrap-atomic.test.js
       - name: Validate Wrangler bundle without deployment
         run: npx --yes wrangler@4 deploy --dry-run --config wrangler.preview.generated.json --outdir "$RUNNER_TEMP/prochelia-preview-dry-run"
       - name: Verify Cloudflare token and Preview Worker access
