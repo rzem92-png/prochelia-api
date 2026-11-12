@@ -98,9 +98,12 @@ def prepare(source: Path, destination: Path) -> dict[str, int]:
             sql = (row["sql"] or "").lstrip().upper()
             if sql.startswith("CREATE VIRTUAL TABLE"):
                 raise ValueError(f"Virtual table requires a dedicated restore adapter: {row['name']}")
-            # D1 SQLite accepts AUTOINCREMENT, but its sqlite_sequence rows must
-            # be restored explicitly; rejecting it is safer than silently resetting IDs.
-            if "AUTOINCREMENT" in sql:
+            # D1's migration ledger is metadata, not application data. Export/import
+            # it as ordinary rows in a plain INTEGER PRIMARY KEY table so that the
+            # destination receives the exact applied migration IDs and timestamps
+            # without depending on sqlite_sequence (which is D1-managed metadata).
+            # Other AUTOINCREMENT tables remain blocked until a sequence adapter exists.
+            if "AUTOINCREMENT" in sql and row["name"] != "d1_migrations":
                 raise ValueError(f"AUTOINCREMENT sequence requires a dedicated restore adapter: {row['name']}")
 
         # Cloudflare D1 maintains internal metadata tables. They must not be copied
