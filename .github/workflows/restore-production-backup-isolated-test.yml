@@ -11,10 +11,6 @@ on:
         description: "Type RESTORE_PRODUCTION_BACKUP_TO_ISOLATED_TEST_D1"
         required: true
         type: string
-  workflow_run:
-    workflows:
-      - PROCHÉLIA — encrypted production D1 backup to R2
-    types: [completed]
 
 permissions:
   contents: read
@@ -26,14 +22,7 @@ concurrency:
 
 jobs:
   restore-isolated:
-    if: >-
-      github.ref == 'refs/heads/main' &&
-      (
-        (github.event_name == 'workflow_dispatch' && inputs.confirmation == 'RESTORE_PRODUCTION_BACKUP_TO_ISOLATED_TEST_D1') ||
-        (github.event_name == 'workflow_run' &&
-         github.event.workflow_run.conclusion == 'success' &&
-         github.event.workflow_run.head_branch == 'main')
-      )
+    if: github.ref == 'refs/heads/main' && inputs.confirmation == 'RESTORE_PRODUCTION_BACKUP_TO_ISOLATED_TEST_D1'
     runs-on: ubuntu-latest
     timeout-minutes: 35
     env:
@@ -41,7 +30,7 @@ jobs:
       EXPECTED_PRODUCTION_D1_ID: 04f52830-ef5a-4f17-a640-42bbc2381bba
       RESTORE_DB_NAME: prochelia-prod-restore-test-2026-11-12
       RESTORE_DB_ID: 9db489a0-4f96-4e93-b1f4-8a8e755871a7
-      BACKUP_RUN_ID: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.id || inputs.backup_run_id }}
+      BACKUP_RUN_ID: ${{ inputs.backup_run_id }}
       R2_BUCKET: prochelia-production-backups-eu
       R2_ENDPOINT: https://f2a79e9fa41566a8ec80fb24c02c60eb.r2.cloudflarestorage.com
     steps:
