@@ -2101,11 +2101,24 @@ async function promotionList(request, env) {
   const gate = await requireAuthRole(request, env, ['gerante','entreprise','client']);
   if (gate.error) return gate.error;
   await ensureStrategicSchema(env);
-  const status = new URL(request.url).searchParams.get('status');
-  const q = status
-    ? 'SELECT * FROM promotions WHERE status=? ORDER BY created_at DESC LIMIT 200'
-    : 'SELECT * FROM promotions ORDER BY created_at DESC LIMIT 200';
-  const r = status ? await env.DB.prepare(q).bind(status).all() : await env.DB.prepare(q).all();
+  const status = clean(new URL(request.url).searchParams.get('status')||'');
+  const manager=['GERANTE','ADMIN'].includes(String(gate.auth.user.role||'').toUpperCase());
+  let r;
+  if(manager){
+    const q=status
+      ? 'SELECT * FROM promotions WHERE status=? ORDER BY created_at DESC LIMIT 200'
+      : 'SELECT * FROM promotions ORDER BY created_at DESC LIMIT 200';
+    r=status?await env.DB.prepare(q).bind(status).all():await env.DB.prepare(q).all();
+  }else{
+    // Clients and companies must never see drafts, expired offers or another
+    // market segment's private promotion rules.
+    const segment=String(gate.auth.user.role||'').toUpperCase()==='ENTREPRISE'?'B2B':'B2C';
+    r=await env.DB.prepare(`SELECT id,code,name,type,phase,client_type,service_code,zone_code,discount_type,discount_value,min_amount_cents,max_discount_cents,starts_at,ends_at,rationale
+      FROM promotions
+      WHERE status='ACTIVE' AND datetime(starts_at)<=CURRENT_TIMESTAMP AND datetime(ends_at)>=CURRENT_TIMESTAMP
+        AND client_type IN ('ALL',?)
+      ORDER BY created_at DESC LIMIT 200`).bind(segment).all();
+  }
   return json({ok:true,version:VERSION,promotions:r.results||[]});
 }
 
