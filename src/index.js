@@ -1141,7 +1141,7 @@ function parseDirectoryOffset(url) {
   const raw = url.searchParams.get('offset') ?? '0';
   if (!/^(0|[1-9][0-9]*)$/.test(raw)) return null;
   const value = Number(raw);
-  return Number.isSafeInteger(value) && value <= 50000 ? value : null;
+  return Number.isSafeInteger(value) && value >= 0 ? value : null;
 }
 
 export async function directoryList(request, env, kind, resolveSession = getSessionUser) {
