@@ -840,6 +840,28 @@ async function ensurePaymentSchema(env) {
   for (const sql of statements) await env.DB.prepare(sql).run();
 }
 
+async function refundMissionPaymentOnce(env, tx) {
+  const results=await env.DB.batch([
+    env.DB.prepare(`UPDATE payment_transactions SET status='refunded',updated_at=CURRENT_TIMESTAMP
+      WHERE id=? AND status='paid'`).bind(tx.id),
+    env.DB.prepare(`INSERT OR IGNORE INTO payment_wallet_ledger
+      (id,idempotency_key,transaction_id,user_id,entry_type,available_delta_cents,currency,metadata_json)
+      SELECT ?,?,?,?,'MISSION_REFUND',?,?,?
+      WHERE changes()=1`)
+      .bind(crypto.randomUUID(),'mission-refund:'+tx.id,tx.id,tx.intervenant_id,
+        -Number(tx.net_intervenant_cents||0),tx.currency||'EUR',
+        JSON.stringify({source:'manager_refund_finalization'}))
+  ]);
+  const latest=await env.DB.prepare('SELECT status FROM payment_transactions WHERE id=? LIMIT 1').bind(tx.id).first();
+  if(latest?.status==='paid') return {ok:false,error:'REFUND_TRANSITION_FAILED',status:latest.status};
+  if(latest?.status==='pending'||latest?.status==='held'){
+    const pending=await env.DB.prepare(`UPDATE payment_transactions SET status='refunded',updated_at=CURRENT_TIMESTAMP WHERE id=? AND status IN ('pending','held')`).bind(tx.id).run();
+    const after=await env.DB.prepare('SELECT status FROM payment_transactions WHERE id=? LIMIT 1').bind(tx.id).first();
+    return {ok:after?.status==='refunded',transitioned:!!pending.meta?.changes,credited:false,status:after?.status};
+  }
+  return {ok:latest?.status==='refunded',transitioned:!!results[0]?.meta?.changes,credited:!!results[1]?.meta?.changes,status:latest?.status};
+}
+
 async function creditMissionPaymentOnce(env, tx, providerPaymentId=null) {
   const wallet=await env.DB.prepare('SELECT id FROM wallets WHERE user_id=? LIMIT 1').bind(tx.intervenant_id).first();
   if(!wallet) return {ok:false,error:'INTERVENANT_WALLET_NOT_FOUND'};
@@ -944,6 +966,12 @@ async function finalizeMissionPayment(request, env) {
     if(!result.ok) return json({ok:false,error:result.error||'PAYMENT_NOT_CREDITED',version:VERSION,status:result.status||null},409);
     await paymentAudit(env,'MISSION_PAYMENT_FINALIZED',{transaction_id:txId,mission_id:tx.mission_id,user_id:auth.user.id,metadata:{outcome,idempotent_replay:!result.transitioned}},'OK');
     return json({ok:true,version:VERSION,transaction_id:txId,status:'paid',idempotent_replay:!result.transitioned},200);
+  }
+  if(outcome==='refunded'){
+    const result=await refundMissionPaymentOnce(env,tx);
+    if(!result.ok) return json({ok:false,error:result.error||'PAYMENT_REFUND_CONFLICT',version:VERSION,status:result.status||null},409);
+    await paymentAudit(env,'MISSION_PAYMENT_FINALIZED',{transaction_id:txId,mission_id:tx.mission_id,user_id:auth.user.id,metadata:{outcome,idempotent_replay:!result.transitioned}},'OK');
+    return json({ok:true,version:VERSION,transaction_id:txId,status:'refunded',idempotent_replay:!result.transitioned},200);
   }
   const update=await env.DB.prepare(`UPDATE payment_transactions SET status=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND status IN ('pending','held')`).bind(outcome,txId).run();
   if(!update.meta?.changes){
