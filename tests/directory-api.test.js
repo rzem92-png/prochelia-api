@@ -37,7 +37,8 @@ function makeEnv({ role = "gerante", rows = [] } = {}) {
 }
 
 function request(path, { cookie = true, method = "GET" } = {}) {
-  const headers = { origin: "https://prochelia.pages.dev" };\n  if (cookie) headers.cookie = "prochelia_session=test-session";
+  const headers = { origin: "https://prochelia.pages.dev" };
+  if (cookie) headers.cookie = "prochelia_session=test-session";
   return new Request("https://prochelia.pages.dev" + path, { method, headers });
 }
 
