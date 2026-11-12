@@ -1020,7 +1020,6 @@ async function verifyWebhookSignature(request, env, rawBody) {
 }
 
 async function paymentWebhook(request, env) {
-  await ensurePaymentSchema(env);
   // Bound untrusted webhook input before HMAC/JSON processing to prevent memory DoS.
   // Preserve the exact UTF-8 body text used by the provider signature.
   const bounded=await readBoundedRequestBody(request,64*1024);
@@ -1030,6 +1029,8 @@ async function paymentWebhook(request, env) {
   }
   const raw=bounded.text;
   if(!(await verifyWebhookSignature(request,env,raw))) return json({ok:false,error:'INVALID_WEBHOOK_SIGNATURE',version:VERSION},401);
+  // Do not touch D1 or create payment tables until the provider signature is valid.
+  await ensurePaymentSchema(env);
   let event; try{event=JSON.parse(raw)}catch{return json({ok:false,error:'INVALID_WEBHOOK_JSON',version:VERSION},400);}
   const provider=clean(event?.provider)||paymentProvider(env), eventId=clean(event?.id), type=clean(event?.type);
   if(!eventId||!type) return json({ok:false,error:'INVALID_WEBHOOK_EVENT',version:VERSION},400);
@@ -2913,17 +2914,22 @@ async function processBackgroundJobs(request,env) {
 function isMutatingMethod(method){ return ['POST','PUT','PATCH','DELETE'].includes(method); }
 function securityOriginAllowed(request,env){
   const origin=request.headers.get('origin');
-  // Les clients non-navigateur peuvent ne pas envoyer Origin. Les requêtes navigateur
-  // avec Origin doivent correspondre à une origine explicitement autorisée.
-  if(!origin) return true;
+  // Toute mutation doit porter une origine explicite et strictement autorisée.
+  if(!origin) return false;
   const configured=clean(env?.CORS_ORIGIN);
-  const defaults=[
-    'https://prochelia.pages.dev',
-    'https://56b01f85.prochelia.pages.dev'
-  ];
-  const allowed=(configured ? configured.split(',') : defaults)
-    .map(x=>String(x).trim()).filter(Boolean);
+  // Aucune origine par défaut : une configuration absente ou vide ferme l'accès.
+  if(!configured) return false;
+  const allowed=configured.split(',').map(x=>String(x).trim()).filter(Boolean);
   return allowed.includes(origin);
+}
+
+// Seul le bootstrap initial peut être appelé sans Origin, et uniquement avec
+// le secret serveur exact. Le handler bootstrap revérifie également ce jeton.
+function originlessBootstrapAllowed(request,env){
+  if(request.method!=='POST' || !env?.BOOTSTRAP_TOKEN || request.headers.get('origin')) return false;
+  const url=new URL(request.url);
+  return url.pathname==='/api/auth/bootstrap' &&
+    request.headers.get('authorization')===`Bearer ${env.BOOTSTRAP_TOKEN}`;
 }
 
 
@@ -3388,7 +3394,7 @@ async function handleCommercialRecruitment(request,env){
 
 async function handle(request,env){
   try {
-    if(isMutatingMethod(request.method) && !securityOriginAllowed(request,env)) return json({ok:false,error:'ORIGIN_NOT_ALLOWED',version:VERSION},403);
+    if(isMutatingMethod(request.method) && !securityOriginAllowed(request,env) && !originlessBootstrapAllowed(request,env)) return json({ok:false,error:'ORIGIN_NOT_ALLOWED',version:VERSION},403);
     const url=new URL(request.url);
     // Fail closed before any schema helper touches D1: unauthenticated callers
     // must not use mission validation as an existence oracle for private IDs.
@@ -3914,7 +3920,7 @@ handle = async function(request,env){
     // Apply browser-origin rejection before rate limiting or any D1 access.
     // This keeps forbidden cross-origin writes a deterministic 403 even when
     // the database is unavailable, instead of masking them as a generic 500.
-    if (isMutatingMethod(preflightMethod) && !securityOriginAllowed(request,env)) {
+    if (isMutatingMethod(preflightMethod) && !securityOriginAllowed(request,env) && !originlessBootstrapAllowed(request,env)) {
       return json({ok:false,error:'ORIGIN_NOT_ALLOWED',version:VERSION},403);
     }
     // Block anonymous mission validation before rate limiting touches D1.
