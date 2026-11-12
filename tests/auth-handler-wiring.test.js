@@ -33,7 +33,7 @@ test("all support/system authorization helpers reference the real session resolv
 test("system scale and backup routes require a manager session", () => {
   const routes = source.slice(source.indexOf("const __procheliaNationalHandle = handle"));
   assert.equal((routes.match(/getSessionUser\(request,env\)/g) || []).length >= 3, true);
-  assert.match(routes, /auth\.user\|\|String\(auth\.user\.role\|\|''\)\.toUpperCase\(\)!=='GERANTE'/);
+  assert.match(routes, /!auth\?\.user\|\|String\(auth\.user\.role\|\|''\)\.toUpperCase\(\)!=='GERANTE'/);
 });
 
 test("all payment handlers are wired into the active base router with explicit methods", () => {
@@ -80,7 +80,7 @@ test("PSP webhooks are bound to the stored provider and immutable event payload"
   const handler = source.slice(source.indexOf("async function paymentWebhook"), source.indexOf("async function openPaymentDispute"));
   assert.equal((handler.match(/WEBHOOK_PROVIDER_MISMATCH/g) || []).length, 2);
   assert.match(handler, /WEBHOOK_EVENT_ID_PAYLOAD_CONFLICT/);
-  assert.match(handler, /prior\?\.payload_hash!==payloadHash/);
+  assert.match(handler, /prior\?\.payload_hash && prior\.payload_hash!==payloadHash/);
 });
 
 test("wallet ledger rejects any entry that would make available balance negative", () => {
