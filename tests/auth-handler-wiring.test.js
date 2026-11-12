@@ -8,6 +8,12 @@ test("Bearer session fallback accepts a standard Authorization header", () => {
   assert.match(source, /authorization\.match\(\/\^Bearer\\s\+/);
 });
 
+test("manual payment finalization cannot mark a transaction paid or refunded without a signed PSP event", () => {
+  const handler = source.slice(source.indexOf("async function finalizeMissionPayment"), source.indexOf("async function payoutRequest"));
+  assert.match(handler, /PSP_CONFIRMED_OUTCOME_REQUIRED/);
+  assert.match(handler, /!\[\x27failed\x27,\x27held\x27\]\.includes\(outcome\)/);
+});
+
 test("all support/system authorization helpers reference the real session resolver", () => {
   assert.equal(/\bgetAuth\s*\(/.test(source), false, "undefined getAuth() calls must not remain");
   assert.match(source, /async function supportAuth\(request,env\)[\s\S]*?getSessionUser\(request,env\)/);
