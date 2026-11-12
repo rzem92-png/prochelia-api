@@ -1108,10 +1108,15 @@ async function paymentWebhook(request, env) {
     if(!tx) return json({ok:false,error:'PAYMENT_TRANSACTION_NOT_FOUND',version:VERSION},404);
     if(String(tx.provider||'')!==provider) return json({ok:false,error:'WEBHOOK_PROVIDER_MISMATCH',version:VERSION},403);
     const providerPaymentId=clean(event?.data?.provider_payment_id)||null;
+    if(tx.provider_payment_id && providerPaymentId && String(tx.provider_payment_id)!==providerPaymentId)
+      return json({ok:false,error:'WEBHOOK_PROVIDER_PAYMENT_ID_MISMATCH',version:VERSION},403);
     const allowedPrevious=txStatus==='refunded'?"'paid','held'":"'pending','held'";
     const disputeGuard=txStatus==='refunded'?'':"AND NOT EXISTS (SELECT 1 FROM payment_disputes WHERE transaction_id=? AND status='open')";
-    const transitionBindings=txStatus==='refunded'?[txStatus,providerPaymentId,txId]:[txStatus,providerPaymentId,txId,txId];
-    statements.push(env.DB.prepare(`UPDATE payment_transactions SET status=?,provider_payment_id=COALESCE(?,provider_payment_id),updated_at=CURRENT_TIMESTAMP
+    const transitionBindings=txStatus==='refunded'
+      ?[txStatus,providerPaymentId,txStatus,txId]
+      :[txStatus,providerPaymentId,txStatus,txId,txId];
+    statements.push(env.DB.prepare(`UPDATE payment_transactions SET status=?,provider_payment_id=COALESCE(?,provider_payment_id),
+      refund_cents=CASE WHEN ?='refunded' THEN gross_cents ELSE refund_cents END,updated_at=CURRENT_TIMESTAMP
       WHERE id=? AND status IN (${allowedPrevious}) AND changes()=1 ${disputeGuard}`)
       .bind(...transitionBindings));
     if(txStatus==='paid'||txStatus==='refunded'){
