@@ -46,7 +46,6 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: "22"
-          package-manager-cache: false
 
       - name: Verify Preview D1 identity and generate pinned Wrangler config
         shell: bash
@@ -57,14 +56,33 @@ jobs:
           [[ -n "${CLOUDFLARE_API_TOKEN:-}" ]] || { echo "::error::Cloudflare API token is missing."; exit 1; }
           token="${CLOUDFLARE_API_TOKEN#Bearer }"
           token="$(printf '%s' "$token" | tr -d '\r\n')"
-          status="$(curl --silent --show-error --output "$RUNNER_TEMP/token.json" --write-out '%{http_code}' -H "Authorization: Bearer $token" "https://api.cloudflare.com/client/v4/user/tokens/verify")"
-          [[ "$status" == "200" ]]
-          jq -e '.success == true and .result.status == "active"' "$RUNNER_TEMP/token.json" >/dev/null
-          status="$(curl --silent --show-error --output "$RUNNER_TEMP/preview-d1.json" --write-out '%{http_code}' -H "Authorization: Bearer $token" "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/d1/database/$PREVIEW_DB_ID")"
-          [[ "$status" == "200" ]]
-          jq -e --arg name "$PREVIEW_DB_NAME" --arg id "$PREVIEW_DB_ID" '.success == true and .result.name == $name and .result.uuid == $id' "$RUNNER_TEMP/preview-d1.json" >/dev/null
-          status="$(curl --silent --show-error --output "$RUNNER_TEMP/pages-preview.json" --write-out '%{http_code}' -H "Authorization: Bearer $token" "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/pages/projects/prochelia/deployments/$PAGES_DEPLOYMENT_ID")"
-          [[ "$status" == "200" ]]
+          cf_request() {
+            local label="$1" url="$2" output="$3" status
+            status="$(curl --silent --show-error --output "$output" --write-out '%{http_code}' \
+              -H "Authorization: Bearer $token" "$url")"
+            if [[ "$status" != "200" ]] || ! jq -e '.success == true' "$output" >/dev/null; then
+              echo "::error::$label failed (HTTP $status). Cloudflare response:"
+              jq -c '{success, errors: [.errors[]? | {code, message}], messages: [.messages[]? | {code, message}]}' "$output" 2>/dev/null || echo "No JSON diagnostic body returned."
+              return 1
+            fi
+            echo "PASS: $label (HTTP $status)."
+          }
+          cf_request "Cloudflare token verification" \
+            "https://api.cloudflare.com/client/v4/user/tokens/verify" "$RUNNER_TEMP/token.json"
+          jq -e '.result.status == "active"' "$RUNNER_TEMP/token.json" >/dev/null || {
+            echo "::error::Cloudflare token verification returned HTTP 200 but token status is not active."
+            jq -c '{result: {status: .result.status}, errors}' "$RUNNER_TEMP/token.json"
+            exit 1
+          }
+          cf_request "Preview D1 access" \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/d1/database/$PREVIEW_DB_ID" "$RUNNER_TEMP/preview-d1.json"
+          jq -e --arg name "$PREVIEW_DB_NAME" --arg id "$PREVIEW_DB_ID" '.result.name == $name and .result.uuid == $id' "$RUNNER_TEMP/preview-d1.json" >/dev/null || {
+            echo "::error::Preview D1 identity mismatch (name/UUID does not match the pinned Preview database)."
+            jq -c '{result: {name: .result.name, uuid: .result.uuid}, errors}' "$RUNNER_TEMP/preview-d1.json"
+            exit 1
+          }
+          cf_request "Pages Preview deployment access" \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/pages/projects/prochelia/deployments/$PAGES_DEPLOYMENT_ID" "$RUNNER_TEMP/pages-preview.json"
           jq -e --arg db "$PREVIEW_DB_ID" --arg worker "prochelia-api-preview" --arg commit "e69fde70fb28405aa8117eaf041aed618d3da664" '
             .success == true and
             .result.environment == "preview" and
