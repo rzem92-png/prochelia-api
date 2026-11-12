@@ -83,14 +83,29 @@ jobs:
           }
           cf_request "Pages Preview deployment access" \
             "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/pages/projects/prochelia/deployments/$PAGES_DEPLOYMENT_ID" "$RUNNER_TEMP/pages-preview.json"
-          jq -e --arg db "$PREVIEW_DB_ID" --arg worker "prochelia-api-preview" --arg commit "e69fde70fb28405aa8117eaf041aed618d3da664" '
+          if ! jq -e --arg db "$PREVIEW_DB_ID" --arg worker "prochelia-api-preview" --arg commit "e69fde70fb28405aa8117eaf041aed618d3da664" '
             .success == true and
             .result.environment == "preview" and
             .result.uses_functions == true and
             .result.d1_databases.DB.id == $db and
             .result.services.PROCHELIA_API.service == $worker and
             .result.deployment_trigger.metadata.commit_hash == $commit
-          ' "$RUNNER_TEMP/pages-preview.json" >/dev/null || { echo "::error::Pages Preview deployment bindings/commit mismatch."; exit 1; }
+          ' "$RUNNER_TEMP/pages-preview.json" >/dev/null; then
+            echo "::error::Pages Preview deployment bindings/commit mismatch. Safe metadata diagnostic follows."
+            jq -c --arg db "$PREVIEW_DB_ID" --arg worker "prochelia-api-preview" --arg commit "e69fde70fb28405aa8117eaf041aed618d3da664" '
+              {
+                expected: {environment: "preview", uses_functions: true, d1_database_id: $db, worker_service: $worker, commit_hash: $commit},
+                observed: {
+                  environment: .result.environment,
+                  uses_functions: .result.uses_functions,
+                  d1_database_id: .result.d1_databases.DB.id,
+                  worker_service: .result.services.PROCHELIA_API.service,
+                  commit_hash: .result.deployment_trigger.metadata.commit_hash
+                }
+              }
+            ' "$RUNNER_TEMP/pages-preview.json"
+            exit 1
+          fi
           [[ "$PREVIEW_DB_ID" != "04f52830-ef5a-4f17-a640-42bbc2381bba" ]]
           cat > "$RUNNER_TEMP/wrangler.preview.json" <<'JSON'
           {
