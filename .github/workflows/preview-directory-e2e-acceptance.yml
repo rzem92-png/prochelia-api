@@ -47,6 +47,9 @@ jobs:
         with:
           node-version: "22"
 
+      - name: Validate E2E workflow and synthetic fixture contract
+        run: node --experimental-default-type=module --test tests/preview-e2e-workflow.test.mjs
+
       - name: Verify Preview D1 identity and generate pinned Wrangler config
         shell: bash
         env:
