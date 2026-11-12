@@ -125,3 +125,10 @@ test("runtime wallet trigger permits confirmed refund receivables like the SQL m
   assert.equal(schema.includes("reserved_cents FROM wallets WHERE user_id=NEW.user_id)+NEW.reserved_delta_cents<0"), true);
   assert.equal(schema.includes("paid_cents FROM wallets WHERE user_id=NEW.user_id)+NEW.paid_delta_cents<0"), true);
 });
+
+test("admin dispute release updates the held payment before resolving the dispute and checks both transitions", () => {
+  const handler = source.slice(source.indexOf("async function paymentAdminResolve"), source.indexOf("async function handleBase"));
+  assert.ok(handler.indexOf("UPDATE payment_transactions SET status='paid'") < handler.indexOf("UPDATE payment_disputes SET status='resolved'"));
+  assert.match(handler, /WHERE id=\? AND status='open' AND changes\(\)=1/);
+  assert.match(handler, /!results\[0\]\?\.meta\?\.changes \|\| !results\[1\]\?\.meta\?\.changes/);
+});
