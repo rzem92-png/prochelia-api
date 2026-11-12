@@ -3903,17 +3903,23 @@ async function supportResolve(request,env){
   const a=await supportAuth(request,env); if(a.response)return a.response;
   if(a.role!=='GERANTE'&&a.role!=='ADMIN') return json({ok:false,error:'MANAGER_APPROVAL_REQUIRED',version:VERSION},403);
   await ensureProcheliaMasterComplementSchema(env);
-  const b=await readJson(request)||{}; const id=clean(b.case_id);
-  if(!id)return json({ok:false,error:'CASE_ID_REQUIRED',version:VERSION},400);
+  const parsed=await readJsonLimited(request,8192);
+  if(!parsed.ok) return json({ok:false,error:parsed.error,version:VERSION},parsed.error==='PAYLOAD_TOO_LARGE'?413:400);
+  const b=parsed.value;
+  if(!b || typeof b!=='object' || Array.isArray(b)) return json({ok:false,error:'INVALID_SUPPORT_RESOLUTION',version:VERSION},400);
+  const id=clean(b.case_id);
+  if(typeof id!=='string' || !id || id.length>128) return json({ok:false,error:'CASE_ID_REQUIRED',version:VERSION},400);
+  if(b.resolution!==undefined && (typeof b.resolution!=='string' || b.resolution.length>4000)) return json({ok:false,error:'INVALID_RESOLUTION',version:VERSION},400);
   const row=await env.DB.prepare(`SELECT * FROM support_cases WHERE id=? LIMIT 1`).bind(id).first();
   if(!row)return json({ok:false,error:'CASE_NOT_FOUND',version:VERSION},404);
+  if(row.status==='RESOLVED') return json({ok:false,error:'CASE_ALREADY_RESOLVED',version:VERSION},409);
   const resolution=clean(b.resolution)||'Résolution validée par la Gérante après contrôle du dossier.';
-  await env.DB.prepare(`UPDATE support_cases SET status='RESOLVED',resolution=?,resolved_at=CURRENT_TIMESTAMP,requires_manager=0 WHERE id=?`).bind(resolution,id).run();
+  const updated=await env.DB.prepare(`UPDATE support_cases SET status='RESOLVED',resolution=?,resolved_at=CURRENT_TIMESTAMP,requires_manager=0 WHERE id=? AND status=?`).bind(resolution,id,row.status).run();
+  if(Number(updated?.meta?.changes||0)!==1) return json({ok:false,error:'CASE_STATE_CONFLICT',version:VERSION},409);
   await supportEvent(env,id,a.role,a.auth.user.id,'MANAGER_RESOLVED',{resolution});
   await journal(env,a.role,a.auth.user.id,'SUPPORT_CASE_MANAGER_RESOLVE','support_cases',id,'RESOLVED',{resolution});
   return json({ok:true,version:VERSION,case_id:id,status:'RESOLVED',resolution});
 }
-
 async function supportDashboard(request,env){
   const a=await supportAuth(request,env); if(a.response)return a.response;
   if(a.role!=='GERANTE'&&a.role!=='ADMIN') return json({ok:false,error:'FORBIDDEN'},403);
