@@ -998,6 +998,13 @@ export async function verifyWebhookSignature(request, env, rawBody) {
   return constantTimeStringEqual(supplied, base64url(mac));
 }
 
+export function requiresAtomicFinancialSettlement(eventType) {
+  return new Set([
+    'payment_succeeded','charge_succeeded','payment_failed','charge_failed',
+    'payment_refunded','payout_paid','payout_failed','payout_canceled'
+  ]).has(String(eventType || '').trim());
+}
+
 async function paymentWebhook(request, env) {
   // Reject unauthenticated and malformed events before any D1 schema access.
   // This prevents arbitrary callers from triggering CREATE TABLE/INDEX writes.
@@ -1009,6 +1016,11 @@ async function paymentWebhook(request, env) {
   const eventId = clean(event?.id), type = clean(event?.type);
   if (!eventId || !type || typeof event !== 'object' || Array.isArray(event)) {
     return json({ok:false,error:'INVALID_WEBHOOK_EVENT',version:VERSION},400);
+  }
+  // Do not accept financial state transitions until the settlement ledger can
+  // atomically deduplicate by transaction/payout, not only by provider event ID.
+  if (requiresAtomicFinancialSettlement(type)) {
+    return json({ok:false,error:'ATOMIC_SETTLEMENT_LEDGER_REQUIRED',version:VERSION,retryable:true},503);
   }
   await ensurePaymentSchema(env);
   const payloadHash=await sha256Base64url(raw);
