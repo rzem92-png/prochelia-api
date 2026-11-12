@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { handleV7Route } from "../src/v7-routes.js";
-import { directoryList } from "./helpers/directory-api-handler.mjs";
+import { directoryList } from "../src/index.js";
 
 const post = (path, body) => new Request("https://example.test" + path, {
   method: "POST",
