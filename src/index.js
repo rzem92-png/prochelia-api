@@ -143,6 +143,11 @@ function getCookie(request, name) {
   return null;
 }
 
+function getSessionToken(request){
+  // Browser sessions are cookie-only: never expose session secrets to page JavaScript.
+  return getCookie(request,SESSION_COOKIE);
+}
+
 function sessionCookie(token, maxAge = SESSION_TTL_SECONDS) {
   return `${SESSION_COOKIE}=${encodeURIComponent(token)}; Max-Age=${maxAge}; Path=/; HttpOnly; Secure; SameSite=Lax`;
 }
@@ -160,7 +165,7 @@ async function createSession(env, userId) {
 
 async function getSessionUser(request, env) {
   if (!env.DB) return null;
-  const token = getCookie(request, SESSION_COOKIE);
+  const token = getSessionToken(request);
   if (!token) return null;
   const tokenHash = await sha256Base64url(token);
   const row = await env.DB.prepare(
@@ -175,6 +180,32 @@ async function getSessionUser(request, env) {
   if (!row) return null;
   if (row.status !== 'active') return null;
   return { user: safeUser(row), session_id: row.session_id, token_hash: tokenHash };
+}
+
+async function csrfTokenForSession(auth) {
+  const key=await crypto.subtle.importKey(
+    'raw',
+    new TextEncoder().encode(auth.token_hash),
+    {name:'HMAC',hash:'SHA-256'},
+    false,
+    ['sign']
+  );
+  const message=new TextEncoder().encode(`PROCHELIA-CSRF-v1:${auth.session_id}`);
+  const signature=await crypto.subtle.sign('HMAC',key,message);
+  return base64url(new Uint8Array(signature));
+}
+
+function constantTimeStringEqual(left,right) {
+  if(typeof left!=='string'||typeof right!=='string'||left.length!==right.length) return false;
+  let diff=0;
+  for(let i=0;i<left.length;i++) diff|=left.charCodeAt(i)^right.charCodeAt(i);
+  return diff===0;
+}
+
+async function authCsrf(request,env) {
+  const auth=await getSessionUser(request,env);
+  if(!auth) return json({ok:false,error:'UNAUTHENTICATED',version:VERSION},401);
+  return json({ok:true,csrf_token:await csrfTokenForSession(auth),version:VERSION},200,{'cache-control':'no-store','pragma':'no-cache'});
 }
 
 function requireRole(auth, roles) {
@@ -324,7 +355,7 @@ async function login(request, env) {
 
 async function logout(request, env) {
   if (!env.DB) return json({ ok: false, database: false, version: VERSION }, 503);
-  const token = getCookie(request, SESSION_COOKIE);
+  const token = getSessionToken(request);
   const headers = { 'set-cookie': sessionCookie('', 0) };
   if (token) {
     const tokenHash = await sha256Base64url(token);
@@ -581,6 +612,10 @@ async function securityPrepareMission(request, env) {
   const body = await readJson(request);
   const missionId=clean(body?.mission_id), clientId=clean(body?.client_id), intervenantId=clean(body?.intervenant_id);
   if(!missionId||!clientId||!intervenantId) return json({ok:false,error:'MISSION_SECURITY_FIELDS_REQUIRED',version:VERSION},400);
+  const mission=await env.DB.prepare('SELECT id,client_id,intervenant_id,status FROM missions WHERE id=? LIMIT 1').bind(missionId).first();
+  if(!mission) return json({ok:false,error:'MISSION_NOT_FOUND',version:VERSION},404);
+  if(String(mission.client_id)!==clientId||String(mission.intervenant_id||'')!==intervenantId) return json({ok:false,error:'MISSION_PARTICIPANTS_MISMATCH',version:VERSION},403);
+  if(['completed','cancelled','canceled','refunded'].includes(String(mission.status||'').toLowerCase())) return json({ok:false,error:'MISSION_NOT_ELIGIBLE_FOR_SECURITY_PREPARATION',version:VERSION,status:mission.status},409);
   const verified = await requireVerifiedIntervenant(env,intervenantId);
   if(!verified) return json({ok:false,error:'INTERVENANT_IDENTITY_NOT_VERIFIED',version:VERSION},409);
   const existing=await env.DB.prepare('SELECT id,status FROM mission_security WHERE mission_id=? LIMIT 1').bind(missionId).first();
@@ -764,6 +799,55 @@ async function ensurePaymentSchema(env) {
       processed INTEGER NOT NULL DEFAULT 0, payload_hash TEXT, received_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       processed_at TEXT, UNIQUE(provider, event_id)
     )`,
+    `CREATE TABLE IF NOT EXISTS payment_wallet_ledger (
+      id TEXT PRIMARY KEY, idempotency_key TEXT NOT NULL UNIQUE, transaction_id TEXT, payout_id TEXT,
+      user_id TEXT NOT NULL, entry_type TEXT NOT NULL,
+      available_delta_cents INTEGER NOT NULL DEFAULT 0, pending_delta_cents INTEGER NOT NULL DEFAULT 0,
+      reserved_delta_cents INTEGER NOT NULL DEFAULT 0, paid_delta_cents INTEGER NOT NULL DEFAULT 0,
+      currency TEXT NOT NULL DEFAULT 'EUR', metadata_json TEXT NOT NULL DEFAULT '{}',
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_wallet_ledger_user_date ON payment_wallet_ledger(user_id,created_at)`,
+    `CREATE INDEX IF NOT EXISTS idx_wallet_ledger_tx ON payment_wallet_ledger(transaction_id,entry_type)`,
+    `CREATE TRIGGER IF NOT EXISTS trg_payment_wallet_ledger_require_wallet
+      BEFORE INSERT ON payment_wallet_ledger BEGIN
+        SELECT CASE WHEN NOT EXISTS (SELECT 1 FROM wallets WHERE user_id=NEW.user_id AND currency=NEW.currency)
+        THEN RAISE(ABORT,'PAYMENT_WALLET_NOT_FOUND_OR_CURRENCY_MISMATCH') END;
+      END`,
+    `CREATE TRIGGER IF NOT EXISTS trg_payment_wallet_ledger_guard_balances
+      BEFORE INSERT ON payment_wallet_ledger BEGIN
+        SELECT CASE
+          WHEN NOT EXISTS (SELECT 1 FROM wallets WHERE user_id=NEW.user_id) THEN RAISE(ABORT,'PAYMENT_WALLET_NOT_FOUND')
+          WHEN typeof((SELECT available_cents FROM wallets WHERE user_id=NEW.user_id)+NEW.available_delta_cents)<>'integer'
+            OR typeof((SELECT pending_cents FROM wallets WHERE user_id=NEW.user_id)+NEW.pending_delta_cents)<>'integer'
+            OR typeof((SELECT reserved_cents FROM wallets WHERE user_id=NEW.user_id)+NEW.reserved_delta_cents)<>'integer'
+            OR typeof((SELECT paid_cents FROM wallets WHERE user_id=NEW.user_id)+NEW.paid_delta_cents)<>'integer'
+            THEN RAISE(ABORT,'PAYMENT_WALLET_INTEGER_OVERFLOW')
+          -- Available may become negative after a confirmed PSP refund reversal;
+          -- this is a receivable, while pending/reserved/paid remain protected.
+          WHEN (SELECT pending_cents FROM wallets WHERE user_id=NEW.user_id)+NEW.pending_delta_cents<0
+            OR (SELECT reserved_cents FROM wallets WHERE user_id=NEW.user_id)+NEW.reserved_delta_cents<0
+            OR (SELECT paid_cents FROM wallets WHERE user_id=NEW.user_id)+NEW.paid_delta_cents<0
+            THEN RAISE(ABORT,'PAYMENT_WALLET_NEGATIVE_PROTECTED_BALANCE')
+        END;
+      END`,
+    `CREATE TRIGGER IF NOT EXISTS trg_payment_wallet_ledger_apply
+      AFTER INSERT ON payment_wallet_ledger BEGIN
+        UPDATE wallets SET available_cents=available_cents+NEW.available_delta_cents,
+          pending_cents=pending_cents+NEW.pending_delta_cents,
+          reserved_cents=reserved_cents+NEW.reserved_delta_cents,
+          paid_cents=paid_cents+NEW.paid_delta_cents,updated_at=CURRENT_TIMESTAMP
+        WHERE user_id=NEW.user_id;
+      END`,
+    `CREATE TRIGGER IF NOT EXISTS trg_payment_wallet_ledger_no_update
+      BEFORE UPDATE ON payment_wallet_ledger BEGIN SELECT RAISE(ABORT,'PAYMENT_WALLET_LEDGER_IMMUTABLE'); END`,
+    `CREATE TRIGGER IF NOT EXISTS trg_payment_wallet_ledger_no_delete
+      BEFORE DELETE ON payment_wallet_ledger BEGIN SELECT RAISE(ABORT,'PAYMENT_WALLET_LEDGER_IMMUTABLE'); END`,
+    `CREATE TABLE IF NOT EXISTS payment_dispute_holds (
+      dispute_id TEXT PRIMARY KEY, transaction_id TEXT NOT NULL UNIQUE, wallet_id TEXT NOT NULL,
+      amount_cents INTEGER NOT NULL DEFAULT 0, status TEXT NOT NULL DEFAULT 'held',
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, resolved_at TEXT
+    )`,
     `CREATE TABLE IF NOT EXISTS payment_disputes (
       id TEXT PRIMARY KEY, mission_id TEXT, transaction_id TEXT, client_id TEXT, intervenant_id TEXT,
       status TEXT NOT NULL DEFAULT 'open', reason TEXT, amount_cents INTEGER NOT NULL DEFAULT 0,
@@ -783,6 +867,46 @@ async function ensurePaymentSchema(env) {
     )`
   ];
   for (const sql of statements) await env.DB.prepare(sql).run();
+}
+
+async function refundMissionPaymentOnce(env, tx) {
+  const results=await env.DB.batch([
+    env.DB.prepare(`UPDATE payment_transactions SET status='refunded',refund_cents=gross_cents,updated_at=CURRENT_TIMESTAMP
+      WHERE id=? AND status='paid'`).bind(tx.id),
+    env.DB.prepare(`INSERT OR IGNORE INTO payment_wallet_ledger
+      (id,idempotency_key,transaction_id,user_id,entry_type,available_delta_cents,currency,metadata_json)
+      SELECT ?,?,?,?,'MISSION_REFUND',?,?,?
+      WHERE changes()=1`)
+      .bind(crypto.randomUUID(),'mission-refund:'+tx.id,tx.id,tx.intervenant_id,
+        -Number(tx.net_intervenant_cents||0),tx.currency||'EUR',
+        JSON.stringify({source:'manager_refund_finalization'}))
+  ]);
+  const latest=await env.DB.prepare('SELECT status FROM payment_transactions WHERE id=? LIMIT 1').bind(tx.id).first();
+  if(latest?.status==='paid') return {ok:false,error:'REFUND_TRANSITION_FAILED',status:latest.status};
+  if(latest?.status==='pending'||latest?.status==='held'){
+    const pending=await env.DB.prepare(`UPDATE payment_transactions SET status='refunded',updated_at=CURRENT_TIMESTAMP WHERE id=? AND status IN ('pending','held')`).bind(tx.id).run();
+    const after=await env.DB.prepare('SELECT status FROM payment_transactions WHERE id=? LIMIT 1').bind(tx.id).first();
+    return {ok:after?.status==='refunded',transitioned:!!pending.meta?.changes,credited:false,status:after?.status};
+  }
+  return {ok:latest?.status==='refunded',transitioned:!!results[0]?.meta?.changes,credited:!!results[1]?.meta?.changes,status:latest?.status};
+}
+
+async function creditMissionPaymentOnce(env, tx, providerPaymentId=null) {
+  const wallet=await env.DB.prepare('SELECT id FROM wallets WHERE user_id=? LIMIT 1').bind(tx.intervenant_id).first();
+  if(!wallet) return {ok:false,error:'INTERVENANT_WALLET_NOT_FOUND'};
+  const results=await env.DB.batch([
+    env.DB.prepare(`UPDATE payment_transactions SET status='paid',provider_payment_id=COALESCE(?,provider_payment_id),updated_at=CURRENT_TIMESTAMP
+      WHERE id=? AND status IN ('pending','held')
+      AND NOT EXISTS (SELECT 1 FROM payment_disputes WHERE transaction_id=? AND status='open')`).bind(providerPaymentId,tx.id,tx.id),
+    env.DB.prepare(`INSERT OR IGNORE INTO payment_wallet_ledger
+      (id,idempotency_key,transaction_id,user_id,entry_type,available_delta_cents,currency,metadata_json)
+      SELECT ?,?,?,?,'MISSION_CREDIT',?,? ,?
+      WHERE changes()=1 AND EXISTS (SELECT 1 FROM payment_transactions WHERE id=? AND status='paid')`)
+      .bind(crypto.randomUUID(),'mission-credit:'+tx.id,tx.id,tx.intervenant_id,Number(tx.net_intervenant_cents||0),tx.currency||'EUR',
+        JSON.stringify({source:'payment_finalization'}),tx.id)
+  ]);
+  const latest=await env.DB.prepare('SELECT status FROM payment_transactions WHERE id=? LIMIT 1').bind(tx.id).first();
+  return {ok:latest?.status==='paid',status:latest?.status,transitioned:!!results[0]?.meta?.changes,credited:!!results[1]?.meta?.changes};
 }
 
 function moneyCents(value) {
@@ -816,6 +940,9 @@ async function paymentOnboard(request, env) {
   const provider = paymentProvider(env);
   const accountId = clean(body?.provider_account_id) || null;
   const existing = await env.DB.prepare('SELECT * FROM payment_accounts WHERE user_id=? LIMIT 1').bind(auth.user.id).first();
+  if (existing && String(existing.provider||'')!==provider) {
+    return json({ok:false,error:'PAYMENT_ACCOUNT_PROVIDER_MISMATCH',version:VERSION},409);
+  }
   if (existing) return json({ok:true,version:VERSION,account:existing,action:'REUSE_EXISTING'},200);
   const id=crypto.randomUUID();
   await env.DB.prepare(`INSERT INTO payment_accounts
@@ -840,15 +967,31 @@ async function paymentStatus(request, env) {
 async function createMissionPayment(request, env) {
   const auth=await getSessionUser(request,env);
   if(!requireRole(auth,['gerante'])) return json({ok:false,error:auth?.user?'FORBIDDEN':'UNAUTHENTICATED',version:VERSION},auth?.user?403:401);
+  if(!paymentsConfigured(env)) return json({ok:false,error:'PAYMENT_PROVIDER_NOT_CONFIGURED',version:VERSION},503);
   await ensurePaymentSchema(env);
   const body=await readJson(request);
   const missionId=clean(body?.mission_id), clientId=clean(body?.client_id), intervenantId=clean(body?.intervenant_id);
   const gross=moneyCents(body?.gross_eur), commission=moneyCents(body?.commission_eur);
   if(!missionId||!clientId||!intervenantId||gross===null||commission===null||commission>gross) return json({ok:false,error:'INVALID_PAYMENT_AMOUNT_OR_PARTIES',version:VERSION},400);
+  const mission=await env.DB.prepare('SELECT id,client_id,intervenant_id,price_client,price_intervenant,commission,status FROM missions WHERE id=? LIMIT 1').bind(missionId).first();
+  if(!mission) return json({ok:false,error:'MISSION_NOT_FOUND',version:VERSION},404);
+  if(String(mission.client_id)!==clientId||String(mission.intervenant_id||'')!==intervenantId) return json({ok:false,error:'MISSION_PARTICIPANTS_MISMATCH',version:VERSION},403);
+  const authoritativeGross=moneyCents(mission.price_client), authoritativeIntervenant=moneyCents(mission.price_intervenant), authoritativeCommission=moneyCents(mission.commission);
+  if(authoritativeGross===null||authoritativeIntervenant===null||authoritativeCommission===null
+    ||gross!==authoritativeGross||commission!==authoritativeCommission
+    ||gross-authoritativeCommission!==authoritativeIntervenant) return json({ok:false,error:'PAYMENT_AMOUNT_MISMATCH_WITH_MISSION',version:VERSION},409);
+  if(['cancelled','canceled','refunded'].includes(String(mission.status||'').toLowerCase())) return json({ok:false,error:'MISSION_NOT_PAYABLE',version:VERSION,status:mission.status},409);
   const idem=clean(request.headers.get('idempotency-key'))||clean(body?.idempotency_key);
   if(!idem) return json({ok:false,error:'IDEMPOTENCY_KEY_REQUIRED',version:VERSION},400);
   const old=await env.DB.prepare('SELECT * FROM payment_transactions WHERE idempotency_key=? LIMIT 1').bind(idem).first();
-  if(old) return json({ok:true,version:VERSION,idempotent_replay:true,transaction:old},200);
+  if(old){
+    const sameRequest=old.mission_id===missionId&&old.client_id===clientId&&old.intervenant_id===intervenantId
+      &&Number(old.gross_cents)===gross&&Number(old.commission_cents)===commission;
+    if(!sameRequest) return json({ok:false,error:'IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_REQUEST',version:VERSION},409);
+    return json({ok:true,version:VERSION,idempotent_replay:true,transaction:old},200);
+  }
+  const activePayment=await env.DB.prepare("SELECT id,status FROM payment_transactions WHERE mission_id=? AND status IN ('pending','processing','held','paid') LIMIT 1").bind(missionId).first();
+  if(activePayment) return json({ok:false,error:'MISSION_ALREADY_HAS_ACTIVE_PAYMENT',version:VERSION,transaction_id:activePayment.id,status:activePayment.status},409);
   const net=gross-commission;
   const txId=crypto.randomUUID();
   await env.DB.prepare(`INSERT INTO payment_transactions
@@ -863,40 +1006,55 @@ async function finalizeMissionPayment(request, env) {
   if(!requireRole(auth,['gerante'])) return json({ok:false,error:auth?.user?'FORBIDDEN':'UNAUTHENTICATED',version:VERSION},auth?.user?403:401);
   await ensurePaymentSchema(env);
   const body=await readJson(request), txId=clean(body?.transaction_id), outcome=clean(body?.outcome);
-  if(!txId||!['paid','failed','refunded','held'].includes(outcome)) return json({ok:false,error:'INVALID_PAYMENT_FINALIZATION',version:VERSION},400);
+  if(!txId||!['failed','held'].includes(outcome)) return json({ok:false,error:'PSP_CONFIRMED_OUTCOME_REQUIRED',version:VERSION,message:'Les statuts paid/refunded ne peuvent être appliqués que par un webhook PSP signé et vérifié.'},409);
   const tx=await env.DB.prepare('SELECT * FROM payment_transactions WHERE id=? LIMIT 1').bind(txId).first();
   if(!tx) return json({ok:false,error:'TRANSACTION_NOT_FOUND',version:VERSION},404);
-  if(['paid','refunded','failed'].includes(tx.status) && tx.status!==outcome) return json({ok:false,error:'PAYMENT_STATE_CONFLICT',version:VERSION,status:tx.status},409);
-  if(outcome==='paid'){
-    const wallet=await env.DB.prepare('SELECT * FROM wallets WHERE user_id=? LIMIT 1').bind(tx.intervenant_id).first();
-    if(!wallet) return json({ok:false,error:'INTERVENANT_WALLET_NOT_FOUND',version:VERSION},409);
-    await env.DB.prepare(`UPDATE payment_transactions SET status='paid',updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(txId).run();
-    await env.DB.prepare(`UPDATE wallets SET pending_cents=pending_cents+?,available_cents=available_cents+?,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(0,tx.net_intervenant_cents,wallet.id).run();
-  } else if(outcome==='held') {
-    await env.DB.prepare(`UPDATE payment_transactions SET status='held',updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(txId).run();
-  } else {
-    await env.DB.prepare(`UPDATE payment_transactions SET status=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(outcome,txId).run();
+  // Successful payments and refunds are applied only by verified PSP webhooks.
+  const update=await env.DB.prepare(`UPDATE payment_transactions SET status=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND status IN ('pending','held')`).bind(outcome,txId).run();
+  if(!update.meta?.changes){
+    const latest=await env.DB.prepare('SELECT status FROM payment_transactions WHERE id=?').bind(txId).first();
+    if(latest?.status!==outcome) return json({ok:false,error:'PAYMENT_STATE_CONFLICT',version:VERSION,status:latest?.status},409);
   }
-  await paymentAudit(env,'MISSION_PAYMENT_FINALIZED',{transaction_id:txId,mission_id:tx.mission_id,user_id:auth.user.id,metadata:{outcome}},'OK');
-  return json({ok:true,version:VERSION,transaction_id:txId,status:outcome},200);
+  await paymentAudit(env,'MISSION_PAYMENT_FINALIZED',{transaction_id:txId,mission_id:tx.mission_id,user_id:auth.user.id,metadata:{outcome,idempotent_replay:!update.meta?.changes}},'OK');
+  return json({ok:true,version:VERSION,transaction_id:txId,status:outcome,idempotent_replay:!update.meta?.changes},200);
 }
 
 async function payoutRequest(request, env) {
   const auth=await getSessionUser(request,env);
   if(!requireRole(auth,['intervenant'])) return json({ok:false,error:auth?.user?'FORBIDDEN':'UNAUTHENTICATED',version:VERSION},auth?.user?403:401);
+  if(!paymentsConfigured(env)) return json({ok:false,error:'PAYMENT_PROVIDER_NOT_CONFIGURED',version:VERSION},503);
   await ensurePaymentSchema(env);
   const body=await readJson(request), amount=moneyCents(body?.amount_eur), mode=clean(body?.mode)||'standard';
   const idem=clean(request.headers.get('idempotency-key'))||clean(body?.idempotency_key);
-  if(amount===null||amount<=0||!['standard','express'].includes(mode)||!idem) return json({ok:false,error:'INVALID_PAYOUT_REQUEST',version:VERSION},400);
+  if(amount===null||amount<=0||!['standard','express'].includes(mode)||!idem||idem.length>200) return json({ok:false,error:'INVALID_PAYOUT_REQUEST',version:VERSION},400);
   const old=await env.DB.prepare('SELECT * FROM payout_requests WHERE idempotency_key=? LIMIT 1').bind(idem).first();
-  if(old) return json({ok:true,version:VERSION,idempotent_replay:true,payout:old},200);
+  if(old){
+    if(old.user_id!==auth.user.id||Number(old.amount_cents)!==amount||old.mode!==mode) return json({ok:false,error:'IDEMPOTENCY_KEY_CONFLICT',version:VERSION},409);
+    return json({ok:true,version:VERSION,idempotent_replay:true,payout:old},200);
+  }
+  const openDispute=await env.DB.prepare(`SELECT id FROM payment_disputes WHERE intervenant_id=? AND status='open' LIMIT 1`).bind(auth.user.id).first();
+  if(openDispute) return json({ok:false,error:'PAYOUT_BLOCKED_BY_OPEN_DISPUTE',version:VERSION,dispute_id:openDispute.id},409);
   const account=await env.DB.prepare(`SELECT * FROM payment_accounts WHERE user_id=? LIMIT 1`).bind(auth.user.id).first();
+  if(account && String(account.provider||'')!==paymentProvider(env)) return json({ok:false,error:'PAYOUT_PROVIDER_MISMATCH',version:VERSION},409);
   if(!account||Number(account.payouts_enabled)!==1) return json({ok:false,error:'PAYOUT_ACCOUNT_NOT_READY',version:VERSION,message:'Le compte de paiement de l’intervenant doit être vérifié et activé par le PSP.'},409);
   const wallet=await env.DB.prepare('SELECT * FROM wallets WHERE user_id=? LIMIT 1').bind(auth.user.id).first();
   if(!wallet||Number(wallet.available_cents)<amount) return json({ok:false,error:'INSUFFICIENT_AVAILABLE_BALANCE',version:VERSION,available_cents:Number(wallet?.available_cents||0)},409);
   const payoutId=crypto.randomUUID();
-  await env.DB.prepare(`UPDATE wallets SET available_cents=available_cents-?,reserved_cents=reserved_cents+?,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(amount,amount,wallet.id).run();
-  await env.DB.prepare(`INSERT INTO payout_requests (id,idempotency_key,wallet_id,user_id,amount_cents,mode,provider,status) VALUES (?,?,?,?,?,?,?,'requested')`).bind(payoutId,idem,wallet.id,auth.user.id,amount,mode,paymentProvider(env)).run();
+  const result=await env.DB.batch([
+    env.DB.prepare(`INSERT OR IGNORE INTO payout_requests (id,idempotency_key,wallet_id,user_id,amount_cents,mode,provider,status)
+      SELECT ?,?,?,?,?,?,?,'requested' FROM wallets WHERE id=? AND user_id=? AND available_cents>=?`)
+      .bind(payoutId,idem,wallet.id,auth.user.id,amount,mode,paymentProvider(env),wallet.id,auth.user.id,amount),
+    env.DB.prepare(`INSERT OR IGNORE INTO payment_wallet_ledger
+      (id,idempotency_key,payout_id,user_id,entry_type,available_delta_cents,reserved_delta_cents,currency,metadata_json)
+      SELECT ?,?,?,?,'PAYOUT_RESERVE',?,?,? ,?
+      WHERE changes()=1`)
+      .bind(crypto.randomUUID(),'payout-reserve:'+idem,payoutId,auth.user.id,-amount,amount,wallet.currency||'EUR',JSON.stringify({mode,amount_cents:amount}))
+  ]);
+  if(!result[0]?.meta?.changes){
+    const latest=await env.DB.prepare('SELECT * FROM payout_requests WHERE idempotency_key=?').bind(idem).first();
+    if(latest?.user_id===auth.user.id&&Number(latest.amount_cents)===amount&&latest.mode===mode) return json({ok:true,version:VERSION,idempotent_replay:true,payout:latest},200);
+    return json({ok:false,error:'INSUFFICIENT_BALANCE_OR_IDEMPOTENCY_CONFLICT',version:VERSION},409);
+  }
   await paymentAudit(env,'PAYOUT_REQUESTED',{payout_id:payoutId,user_id:auth.user.id,metadata:{amount_cents:amount,mode}},'OK');
   return json({ok:true,version:VERSION,payout_id:payoutId,status:'requested',amount_cents:amount,mode,provider:paymentProvider(env),next:paymentsConfigured(env)?'PSP_PAYOUT_REQUIRED':'PAYMENT_PROVIDER_NOT_CONFIGURED'},201);
 }
@@ -912,50 +1070,142 @@ async function verifyWebhookSignature(request, env, rawBody) {
   return signature===expected || signature===`sha256=${expected}`;
 }
 
+async function readPaymentWebhookBody(request, maxBytes=65536) {
+  const declaredLength=Number(request.headers.get('content-length')||0);
+  if(Number.isFinite(declaredLength) && declaredLength>maxBytes) return {ok:false,error:'PAYLOAD_TOO_LARGE'};
+  if(!request.body) return {ok:true,raw:''};
+  const reader=request.body.getReader();
+  const chunks=[];
+  let total=0;
+  try {
+    while(true) {
+      const {done,value}=await reader.read();
+      if(done) break;
+      total+=value.byteLength;
+      if(total>maxBytes) {
+        await reader.cancel();
+        return {ok:false,error:'PAYLOAD_TOO_LARGE'};
+      }
+      chunks.push(value);
+    }
+    const bytes=new Uint8Array(total);
+    let offset=0;
+    for(const chunk of chunks) { bytes.set(chunk,offset); offset+=chunk.byteLength; }
+    return {ok:true,raw:new TextDecoder('utf-8',{fatal:true}).decode(bytes)};
+  } catch {
+    return {ok:false,error:'INVALID_WEBHOOK_BODY'};
+  }
+}
+
 async function paymentWebhook(request, env) {
-  await ensurePaymentSchema(env);
-  const raw=await request.text();
+  const body=await readPaymentWebhookBody(request);
+  if(!body.ok) return json({ok:false,error:body.error,version:VERSION},body.error==='PAYLOAD_TOO_LARGE'?413:400);
+  const raw=body.raw;
   if(!(await verifyWebhookSignature(request,env,raw))) return json({ok:false,error:'INVALID_WEBHOOK_SIGNATURE',version:VERSION},401);
   let event; try{event=JSON.parse(raw)}catch{return json({ok:false,error:'INVALID_WEBHOOK_JSON',version:VERSION},400);}
-  const provider=clean(event?.provider)||paymentProvider(env), eventId=clean(event?.id), type=clean(event?.type);
-  if(!eventId||!type) return json({ok:false,error:'INVALID_WEBHOOK_EVENT',version:VERSION},400);
-  const payloadHash=await sha256Base64url(raw);
-  const inserted=await env.DB.prepare(`INSERT OR IGNORE INTO payment_webhook_events (id,provider,event_id,event_type,signature_valid,payload_hash) VALUES (?,?,?,?,1,?)`).bind(crypto.randomUUID(),provider,eventId,type,payloadHash).run();
-  if(!inserted.meta?.changes) return json({ok:true,version:VERSION,duplicate:true,event_id:eventId},200);
+  await ensurePaymentSchema(env);
+  const provider=paymentProvider(env), payloadProvider=clean(event?.provider), eventId=clean(event?.id), type=clean(event?.type);
+  if(payloadProvider && payloadProvider!==provider) return json({ok:false,error:'WEBHOOK_PROVIDER_MISMATCH',version:VERSION},403);
+  if(!eventId||!type||eventId.length>255) return json({ok:false,error:'INVALID_WEBHOOK_EVENT',version:VERSION},400);
   const txId=clean(event?.data?.transaction_id), payoutId=clean(event?.data?.payout_id);
-  if(txId){
+  const txMap={payment_succeeded:'paid',charge_succeeded:'paid',payment_failed:'failed',charge_failed:'failed',payment_refunded:'refunded'};
+  const payoutMap={payout_processing:'processing',payout_paid:'completed',payout_failed:'failed',payout_canceled:'canceled'};
+  const txStatus=txMap[type], payoutStatus=payoutMap[type];
+  if(!txStatus&&!payoutStatus) return json({ok:false,error:'UNSUPPORTED_WEBHOOK_EVENT_TYPE',version:VERSION},400);
+  if((txStatus&&!txId)||(payoutStatus&&!payoutId)) return json({ok:false,error:'WEBHOOK_RESOURCE_ID_REQUIRED',version:VERSION},400);
+  const payloadHash=await sha256Base64url(raw);
+  const eventInsert=env.DB.prepare(`INSERT OR IGNORE INTO payment_webhook_events
+    (id,provider,event_id,event_type,signature_valid,payload_hash) VALUES (?,?,?,?,1,?)`)
+    .bind(crypto.randomUUID(),provider,eventId,type,payloadHash);
+  let statements=[eventInsert];
+  if(txStatus){
     const tx=await env.DB.prepare('SELECT * FROM payment_transactions WHERE id=? LIMIT 1').bind(txId).first();
-    if(tx){
-      const statusMap={payment_succeeded:'paid',charge_succeeded:'paid',payment_failed:'failed',charge_failed:'failed',payment_refunded:'refunded'};
-      const newStatus=statusMap[type];
-      if(newStatus){
-        const alreadyFinal = ['paid','failed','refunded'].includes(tx.status);
-        if(!alreadyFinal){
-          await env.DB.prepare('UPDATE payment_transactions SET status=?,provider_payment_id=COALESCE(?,provider_payment_id),updated_at=CURRENT_TIMESTAMP WHERE id=?').bind(newStatus,clean(event?.data?.provider_payment_id)||null,txId).run();
-          if(newStatus==='paid'){
-            const wallet=await env.DB.prepare('SELECT * FROM wallets WHERE user_id=? LIMIT 1').bind(tx.intervenant_id).first();
-            if(wallet) await env.DB.prepare('UPDATE wallets SET available_cents=available_cents+?,updated_at=CURRENT_TIMESTAMP WHERE id=?').bind(tx.net_intervenant_cents,wallet.id).run();
-          }
-        }
-      }
+    if(!tx) return json({ok:false,error:'PAYMENT_TRANSACTION_NOT_FOUND',version:VERSION},404);
+    if(String(tx.provider||'')!==provider) return json({ok:false,error:'WEBHOOK_PROVIDER_MISMATCH',version:VERSION},403);
+    const providerPaymentId=clean(event?.data?.provider_payment_id)||null;
+    if(tx.provider_payment_id && providerPaymentId && String(tx.provider_payment_id)!==providerPaymentId)
+      return json({ok:false,error:'WEBHOOK_PROVIDER_PAYMENT_ID_MISMATCH',version:VERSION},403);
+    if(txStatus==='refunded'){
+      const refundAmountCents=Number(event?.data?.refund_amount_cents);
+      if(!tx.provider_payment_id || !providerPaymentId || String(tx.provider_payment_id)!==providerPaymentId)
+        return json({ok:false,error:'REFUND_PROVIDER_PAYMENT_REFERENCE_REQUIRED',version:VERSION},403);
+      if(!Number.isSafeInteger(refundAmountCents) || refundAmountCents!==Number(tx.gross_cents))
+        return json({ok:false,error:'REFUND_AMOUNT_MISMATCH',version:VERSION},409);
     }
-  }
-  if(payoutId){
+    const allowedPrevious=txStatus==='refunded'?"'paid','held'":"'pending','held'";
+    const disputeGuard=txStatus==='refunded'?'':"AND NOT EXISTS (SELECT 1 FROM payment_disputes WHERE transaction_id=? AND status='open')";
+    const transitionBindings=txStatus==='refunded'
+      ?[txStatus,providerPaymentId,txStatus,txId]
+      :[txStatus,providerPaymentId,txStatus,txId,txId];
+    statements.push(env.DB.prepare(`UPDATE payment_transactions SET status=?,provider_payment_id=COALESCE(?,provider_payment_id),
+      refund_cents=CASE WHEN ?='refunded' THEN gross_cents ELSE refund_cents END,updated_at=CURRENT_TIMESTAMP
+      WHERE id=? AND status IN (${allowedPrevious}) AND changes()=1 ${disputeGuard}`)
+      .bind(...transitionBindings));
+    if(txStatus==='paid'||txStatus==='refunded'){
+      const delta=txStatus==='paid'?Number(tx.net_intervenant_cents||0):-Number(tx.net_intervenant_cents||0);
+      statements.push(env.DB.prepare(`INSERT OR IGNORE INTO payment_wallet_ledger
+        (id,idempotency_key,transaction_id,user_id,entry_type,available_delta_cents,currency,metadata_json)
+        SELECT ?,?,?,?, ?,?,?,?
+        WHERE changes()=1`)
+        .bind(crypto.randomUUID(),txStatus==='paid'?'mission-credit:'+tx.id:'mission-refund:'+tx.id,
+          tx.id,tx.intervenant_id,txStatus==='paid'?'MISSION_CREDIT':'MISSION_REFUND',
+          delta,tx.currency||'EUR',JSON.stringify({source:'psp_webhook',event_id:eventId})));
+    }
+  } else {
     const payout=await env.DB.prepare('SELECT * FROM payout_requests WHERE id=? LIMIT 1').bind(payoutId).first();
-    const statusMap={payout_processing:'processing',payout_paid:'completed',payout_failed:'failed',payout_canceled:'canceled'};
-    const newStatus=statusMap[type];
-    if(payout&&newStatus){
-      const alreadyFinal=['completed','failed','canceled'].includes(payout.status);
-      if(!alreadyFinal){
-        if(newStatus==='completed') await env.DB.prepare(`UPDATE wallets SET reserved_cents=MAX(0,reserved_cents-?),paid_cents=paid_cents+?,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(payout.amount_cents,payout.amount_cents,payout.wallet_id).run();
-        if(['failed','canceled'].includes(newStatus)) await env.DB.prepare(`UPDATE wallets SET reserved_cents=MAX(0,reserved_cents-?),available_cents=available_cents+?,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(payout.amount_cents,payout.amount_cents,payout.wallet_id).run();
-        await env.DB.prepare(`UPDATE payout_requests SET status=?,provider_payout_id=COALESCE(?,provider_payout_id),failure_code=?,failure_message=?,completed_at=CASE WHEN ?='completed' THEN CURRENT_TIMESTAMP ELSE completed_at END,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(newStatus,clean(event?.data?.provider_payout_id)||null,clean(event?.data?.failure_code)||null,clean(event?.data?.failure_message)||null,newStatus,payoutId).run();
-      }
+    if(!payout) return json({ok:false,error:'PAYOUT_NOT_FOUND',version:VERSION},404);
+    if(String(payout.provider||'')!==provider) return json({ok:false,error:'WEBHOOK_PROVIDER_MISMATCH',version:VERSION},403);
+    statements.push(env.DB.prepare(`UPDATE payout_requests SET status=?,provider_payout_id=COALESCE(?,provider_payout_id),
+      failure_code=?,failure_message=?,completed_at=CASE WHEN ?='completed' THEN CURRENT_TIMESTAMP ELSE completed_at END,
+      updated_at=CURRENT_TIMESTAMP WHERE id=? AND status IN ('requested','processing') AND changes()=1`)
+      .bind(payoutStatus,clean(event?.data?.provider_payout_id)||null,clean(event?.data?.failure_code)||null,
+        clean(event?.data?.failure_message)||null,payoutStatus,payoutId));
+    // A processing notification changes status only; funds remain reserved.
+    if(payoutStatus!=='processing'){
+      const availableDelta=payoutStatus==='completed'?0:Number(payout.amount_cents);
+      const reservedDelta=-Number(payout.amount_cents);
+      const paidDelta=payoutStatus==='completed'?Number(payout.amount_cents):0;
+      statements.push(env.DB.prepare(`INSERT OR IGNORE INTO payment_wallet_ledger
+        (id,idempotency_key,payout_id,user_id,entry_type,available_delta_cents,reserved_delta_cents,paid_delta_cents,currency,metadata_json)
+        SELECT ?,?,?,?, ?,?,?,?, ?,?
+        WHERE changes()=1`)
+        .bind(crypto.randomUUID(),'payout-settle:'+payout.id,payout.id,payout.user_id,
+          payoutStatus==='completed'?'PAYOUT_PAID':'PAYOUT_RELEASE',availableDelta,reservedDelta,paidDelta,
+          payout.currency||'EUR',JSON.stringify({event_id:eventId,status:payoutStatus})));
     }
   }
-  await env.DB.prepare('UPDATE payment_webhook_events SET processed=1,processed_at=CURRENT_TIMESTAMP WHERE provider=? AND event_id=?').bind(provider,eventId).run();
-  await paymentAudit(env,'PSP_WEBHOOK_PROCESSED',{transaction_id:txId,payout_id:payoutId,metadata:{provider,event_id:eventId,event_type:type}},'OK');
-  return json({ok:true,version:VERSION,processed:true,event_id:eventId},200);
+  // Acknowledge only when the persisted business state matches this signed event.
+  // Do not rely on SQLite changes() here: the preceding statement may be an idempotent
+  // ledger INSERT OR IGNORE, which can report zero even after the payment transition succeeded.
+  let processedStateGuard, processedBindings;
+  if(txStatus){
+    const ledgerGuard=txStatus==='failed'
+      ?'1=1'
+      :`EXISTS (SELECT 1 FROM payment_wallet_ledger l WHERE l.idempotency_key='mission-${txStatus==='paid'?'credit':'refund'}:'||t.id)`;
+    const refundGuard=txStatus==='refunded'?'AND t.refund_cents=t.gross_cents':'';
+    processedStateGuard=`EXISTS (SELECT 1 FROM payment_transactions t WHERE t.id=? AND t.status=? ${refundGuard} AND ${ledgerGuard})`;
+    processedBindings=[provider,eventId,payloadHash,txId,txStatus];
+  } else {
+    const ledgerGuard=payoutStatus==='processing'
+      ?'1=1'
+      :`EXISTS (SELECT 1 FROM payment_wallet_ledger l WHERE l.idempotency_key='payout-settle:'||p.id)`;
+    processedStateGuard=`EXISTS (SELECT 1 FROM payout_requests p WHERE p.id=? AND p.status=? AND ${ledgerGuard})`;
+    processedBindings=[provider,eventId,payloadHash,payoutId,payoutStatus];
+  }
+  statements.push(env.DB.prepare(`UPDATE payment_webhook_events SET processed=1,processed_at=CURRENT_TIMESTAMP
+    WHERE provider=? AND event_id=? AND payload_hash=? AND ${processedStateGuard}`).bind(...processedBindings));
+  const results=await env.DB.batch(statements);
+  const inserted=!!results[0]?.meta?.changes;
+  const processed=!!results.at(-1)?.meta?.changes;
+  if(!processed){
+    const prior=await env.DB.prepare('SELECT payload_hash,processed FROM payment_webhook_events WHERE provider=? AND event_id=? LIMIT 1').bind(provider,eventId).first();
+    if(prior?.payload_hash && prior.payload_hash!==payloadHash) return json({ok:false,error:'WEBHOOK_EVENT_ID_PAYLOAD_CONFLICT',version:VERSION},409);
+    // A previously completed duplicate is acknowledged idempotently. A newly inserted
+    // or previously unprocessed event whose guarded transition did not apply must not be.
+    if(Number(prior?.processed)!==1) return json({ok:false,error:'WEBHOOK_STATE_TRANSITION_NOT_APPLIED',version:VERSION},409);
+  }
+  await paymentAudit(env,'PSP_WEBHOOK_PROCESSED',{transaction_id:txId||null,payout_id:payoutId||null,metadata:{provider,event_id:eventId,event_type:type,duplicate:!inserted}},'OK');
+  return json({ok:true,version:VERSION,processed:true,duplicate:!inserted,event_id:eventId},200);
 }
 
 async function openPaymentDispute(request, env) {
@@ -963,14 +1213,24 @@ async function openPaymentDispute(request, env) {
   if(!requireRole(auth,['client','gerante'])) return json({ok:false,error:auth?.user?'FORBIDDEN':'UNAUTHENTICATED',version:VERSION},auth?.user?403:401);
   await ensurePaymentSchema(env);
   const body=await readJson(request), missionId=clean(body?.mission_id), reason=clean(body?.reason), amount=moneyCents(body?.amount_eur);
-  if(!missionId||!reason||amount===null) return json({ok:false,error:'INVALID_DISPUTE',version:VERSION},400);
+  if(!missionId||!reason||amount===null||amount<=0) return json({ok:false,error:'INVALID_DISPUTE',version:VERSION},400);
   const tx=await env.DB.prepare(`SELECT * FROM payment_transactions WHERE mission_id=? ORDER BY created_at DESC LIMIT 1`).bind(missionId).first();
   if(!tx) return json({ok:false,error:'PAYMENT_NOT_FOUND_FOR_MISSION',version:VERSION},404);
-  if(tx.status==='paid') await env.DB.prepare(`UPDATE payment_transactions SET status='held',updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(tx.id).run();
+  if(auth.user.role==='client' && tx.client_id!==auth.user.id) return json({ok:false,error:'FORBIDDEN_PAYMENT_OWNER_MISMATCH',version:VERSION},403);
+  if(amount>Number(tx.gross_cents||0)) return json({ok:false,error:'DISPUTE_AMOUNT_EXCEEDS_PAYMENT',version:VERSION},400);
+  if(tx.status!=='paid') return json({ok:false,error:'PAYMENT_NOT_DISPUTABLE_IN_CURRENT_STATE',version:VERSION,status:tx.status},409);
+  const existing=await env.DB.prepare(`SELECT id FROM payment_disputes WHERE transaction_id=? AND status='open' LIMIT 1`).bind(tx.id).first();
+  if(existing) return json({ok:true,version:VERSION,dispute_id:existing.id,status:'open',idempotent_replay:true},200);
   const id=crypto.randomUUID();
-  await env.DB.prepare(`INSERT INTO payment_disputes (id,mission_id,transaction_id,client_id,intervenant_id,status,reason,amount_cents) VALUES (?,?,?,?,?,?,?,?)`).bind(id,missionId,tx.id,tx.client_id,tx.intervenant_id,'open',reason,amount).run();
+  const results=await env.DB.batch([
+    env.DB.prepare(`UPDATE payment_transactions SET status='held',updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='paid'
+      AND NOT EXISTS (SELECT 1 FROM payment_disputes WHERE transaction_id=? AND status='open')`).bind(tx.id,tx.id),
+    env.DB.prepare(`INSERT INTO payment_disputes(id,mission_id,transaction_id,client_id,intervenant_id,status,reason,amount_cents)
+      SELECT ?,?,?,?,?,?,?,? WHERE changes()=1`).bind(id,missionId,tx.id,tx.client_id,tx.intervenant_id,'open',reason,amount)
+  ]);
+  if(!results[1]?.meta?.changes) return json({ok:false,error:'DISPUTE_ALREADY_OPEN_OR_PAYMENT_STATE_CHANGED',version:VERSION},409);
   await paymentAudit(env,'PAYMENT_DISPUTE_OPENED',{transaction_id:tx.id,mission_id:missionId,user_id:auth.user.id,metadata:{amount_cents:amount,reason}},'OK');
-  return json({ok:true,version:VERSION,dispute_id:id,status:'open',payment_status:'held'},201);
+  return json({ok:true,version:VERSION,dispute_id:id,status:'open',payment_status:'held',payouts_blocked_for_intervenant:true},201);
 }
 
 async function paymentAdminResolve(request, env) {
@@ -979,19 +1239,44 @@ async function paymentAdminResolve(request, env) {
   await ensurePaymentSchema(env);
   const body=await readJson(request), disputeId=clean(body?.dispute_id), resolution=clean(body?.resolution);
   if(!disputeId||!['release','partial_refund','full_refund','cancel'].includes(resolution)) return json({ok:false,error:'INVALID_DISPUTE_RESOLUTION',version:VERSION},400);
-  const d=await env.DB.prepare('SELECT * FROM payment_disputes WHERE id=? LIMIT 1').bind(disputeId).first();
-  if(!d||d.status==='resolved') return json({ok:false,error:'DISPUTE_NOT_FOUND_OR_ALREADY_RESOLVED',version:VERSION},409);
-  await env.DB.prepare(`UPDATE payment_disputes SET status='resolved',resolution=?,resolved_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(resolution,disputeId).run();
-  if(d.transaction_id){
-    const newStatus=resolution==='release'?'paid':resolution==='full_refund'?'refunded':resolution==='cancel'?'canceled':'held';
-    await env.DB.prepare('UPDATE payment_transactions SET status=?,updated_at=CURRENT_TIMESTAMP WHERE id=?').bind(newStatus,d.transaction_id).run();
-  }
-  await paymentAudit(env,'PAYMENT_DISPUTE_RESOLVED',{transaction_id:d.transaction_id,mission_id:d.mission_id,user_id:auth.user.id,metadata:{dispute_id:disputeId,resolution}},'OK');
-  return json({ok:true,version:VERSION,dispute_id:disputeId,status:'resolved',resolution},200);
+  if(resolution!=='release') return json({ok:false,error:'PSP_REFUND_OR_CANCELLATION_NOT_CONFIGURED',version:VERSION,message:'Le remboursement ou l’annulation PSP doit être exécuté et confirmé par le prestataire avant clôture du litige.'},409);
+  const d=await env.DB.prepare(`SELECT * FROM payment_disputes WHERE id=? LIMIT 1`).bind(disputeId).first();
+  if(!d||d.status!=='open') return json({ok:false,error:'DISPUTE_NOT_FOUND_OR_ALREADY_RESOLVED',version:VERSION},409);
+  const results=await env.DB.batch([
+    // Restore the held payment first; resolve the dispute only if that transition succeeded.
+    env.DB.prepare(`UPDATE payment_transactions SET status='paid',updated_at=CURRENT_TIMESTAMP
+      WHERE id=? AND status='held' AND EXISTS (SELECT 1 FROM payment_disputes WHERE id=? AND status='open')`).bind(d.transaction_id,disputeId),
+    env.DB.prepare(`UPDATE payment_disputes SET status='resolved',resolution='release',resolved_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP
+      WHERE id=? AND status='open' AND changes()=1`).bind(disputeId)
+  ]);
+  if(!results[0]?.meta?.changes || !results[1]?.meta?.changes) return json({ok:false,error:'DISPUTE_STATE_CONFLICT',version:VERSION},409);
+  await paymentAudit(env,'PAYMENT_DISPUTE_RESOLVED',{transaction_id:d.transaction_id,mission_id:d.mission_id,user_id:auth.user.id,metadata:{dispute_id:disputeId,resolution:'release'}},'OK');
+  return json({ok:true,version:VERSION,dispute_id:disputeId,status:'resolved',resolution:'release'},200);
 }
 
 async function handleBase(request, env) {
   const url = new URL(request.url);
+
+  // Paiements : enregistrer explicitement chaque route dans le routeur actif.
+  // Ces handlers existaient mais n'étaient pas raccordés au routeur principal.
+  const paymentRoutes = {
+    '/api/payments/onboard': ['POST', paymentOnboard],
+    '/api/payments/status': ['GET', paymentStatus],
+    '/api/payments/mission/create': ['POST', createMissionPayment],
+    '/api/payments/mission/finalize': ['POST', finalizeMissionPayment],
+    '/api/payments/payout': ['POST', payoutRequest],
+    '/api/payments/webhook': ['POST', paymentWebhook],
+    '/api/payments/dispute': ['POST', openPaymentDispute],
+    '/api/payments/dispute/resolve': ['POST', paymentAdminResolve]
+  };
+  const paymentRoute = paymentRoutes[url.pathname];
+  if (paymentRoute) {
+    const [allowedMethod, handler] = paymentRoute;
+    if (request.method !== allowedMethod) {
+      return json({ok:false,error:'METHOD_NOT_ALLOWED',version:VERSION},405,{'allow':allowedMethod});
+    }
+    return handler(request,env);
+  }
 
 
   if (url.pathname === '/api/security/identity/start') {
@@ -1060,6 +1345,11 @@ async function handleBase(request, env) {
     return postMissions(request, env);
   }
 
+  if (url.pathname === '/api/auth/csrf') {
+    if (request.method !== 'GET') return json({ ok: false, error: 'METHOD_NOT_ALLOWED', version: VERSION }, 405);
+    return authCsrf(request, env);
+  }
+
   if (url.pathname === '/api/auth/status') {
     if (request.method !== 'GET') return json({ ok: false, error: 'METHOD_NOT_ALLOWED', version: VERSION }, 405);
     return authStatus(request, env);
@@ -1111,7 +1401,7 @@ async function handleBase(request, env) {
       routes: [
         '/api/health','/api/prestations','/api/core/schema',
         '/api/missions/schema','/api/missions/validate','/api/missions',
-        '/api/auth/status','/api/auth/login','/api/auth/logout','/api/auth/me',
+        '/api/auth/status','/api/auth/csrf','/api/auth/login','/api/auth/logout','/api/auth/me',
         '/api/auth/bootstrap','/api/security/identity/start','/api/security/identity/approve','/api/security/mission/prepare','/api/security/presence','/api/security/code/verify','/api/security/resend','/api/security/client-code','/api/security/status','/api/payments/onboard','/api/payments/status','/api/payments/mission/create','/api/payments/mission/finalize','/api/payments/payout','/api/payments/webhook','/api/payments/dispute','/api/payments/dispute/resolve','/api/readiness','/api/info'
       ],
       writes: { missions: false, bootstrap: true },
@@ -1557,7 +1847,7 @@ async function pricingQuote(request, env) {
 
 async function financeSummary(request, env) {
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
-  const tx=await env.DB.prepare(`SELECT COALESCE(SUM(gross_cents),0) gross,COALESCE(SUM(commission_cents),0) commission,COALESCE(SUM(provider_fee_cents),0) provider_fee,COALESCE(SUM(refund_cents),0) refunds,COALESCE(SUM(net_intervenant_cents),0) intervenant FROM payment_transactions`).first();
+  const tx=await env.DB.prepare(`SELECT COALESCE(SUM(CASE WHEN status IN ('paid','refunded') THEN gross_cents ELSE 0 END),0) gross,COALESCE(SUM(CASE WHEN status IN ('paid','refunded') THEN commission_cents ELSE 0 END),0) commission,COALESCE(SUM(CASE WHEN status IN ('paid','refunded') THEN provider_fee_cents ELSE 0 END),0) provider_fee,COALESCE(SUM(CASE WHEN status='refunded' THEN refund_cents ELSE 0 END),0) refunds,COALESCE(SUM(CASE WHEN status='paid' THEN net_intervenant_cents ELSE 0 END),0) intervenant FROM payment_transactions`).first();
   const ledger=await env.DB.prepare(`SELECT COALESCE(SUM(CASE WHEN direction='CREDIT' THEN amount_cents ELSE -amount_cents END),0) balance FROM accounting_ledger`).first();
   const expenses=await env.DB.prepare(`SELECT COALESCE(SUM(amount_cents),0) total FROM business_expenses`).first();
   const pending=await env.DB.prepare(`SELECT COALESCE(SUM(gross_cents),0) total,COUNT(*) n FROM payment_transactions WHERE status IN ('pending','processing','held')`).first();
@@ -1911,11 +2201,24 @@ async function promotionList(request, env) {
   const gate = await requireAuthRole(request, env, ['gerante','entreprise','client']);
   if (gate.error) return gate.error;
   await ensureStrategicSchema(env);
-  const status = new URL(request.url).searchParams.get('status');
-  const q = status
-    ? 'SELECT * FROM promotions WHERE status=? ORDER BY created_at DESC LIMIT 200'
-    : 'SELECT * FROM promotions ORDER BY created_at DESC LIMIT 200';
-  const r = status ? await env.DB.prepare(q).bind(status).all() : await env.DB.prepare(q).all();
+  const status = clean(new URL(request.url).searchParams.get('status')||'');
+  const manager=['GERANTE','ADMIN'].includes(String(gate.auth.user.role||'').toUpperCase());
+  let r;
+  if(manager){
+    const q=status
+      ? 'SELECT * FROM promotions WHERE status=? ORDER BY created_at DESC LIMIT 200'
+      : 'SELECT * FROM promotions ORDER BY created_at DESC LIMIT 200';
+    r=status?await env.DB.prepare(q).bind(status).all():await env.DB.prepare(q).all();
+  }else{
+    // Clients and companies must never see drafts, expired offers or another
+    // market segment's private promotion rules.
+    const segment=String(gate.auth.user.role||'').toUpperCase()==='ENTREPRISE'?'B2B':'B2C';
+    r=await env.DB.prepare(`SELECT id,code,name,type,phase,client_type,service_code,zone_code,discount_type,discount_value,min_amount_cents,max_discount_cents,starts_at,ends_at,rationale
+      FROM promotions
+      WHERE status='ACTIVE' AND datetime(starts_at)<=CURRENT_TIMESTAMP AND datetime(ends_at)>=CURRENT_TIMESTAMP
+        AND client_type IN ('ALL',?)
+      ORDER BY created_at DESC LIMIT 200`).bind(segment).all();
+  }
   return json({ok:true,version:VERSION,promotions:r.results||[]});
 }
 
@@ -2243,7 +2546,7 @@ async function capacityDashboard(request, env) {
 async function financeForecast(request, env) {
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
   const months=Math.max(1,Math.min(12,Number((await readJson(request)||{}).months||3)));
-  const tx=await env.DB.prepare(`SELECT COALESCE(SUM(gross_cents),0) gross,COALESCE(SUM(commission_cents),0) commission,COALESCE(SUM(provider_fee_cents),0) provider_fee,COALESCE(SUM(refund_cents),0) refunds,COALESCE(SUM(net_intervenant_cents),0) intervenant FROM payment_transactions WHERE created_at>=datetime('now','-90 day')`).first();
+  const tx=await env.DB.prepare(`SELECT COALESCE(SUM(CASE WHEN status IN ('paid','refunded') THEN gross_cents ELSE 0 END),0) gross,COALESCE(SUM(CASE WHEN status IN ('paid','refunded') THEN commission_cents ELSE 0 END),0) commission,COALESCE(SUM(CASE WHEN status IN ('paid','refunded') THEN provider_fee_cents ELSE 0 END),0) provider_fee,COALESCE(SUM(CASE WHEN status='refunded' THEN refund_cents ELSE 0 END),0) refunds,COALESCE(SUM(CASE WHEN status='paid' THEN net_intervenant_cents ELSE 0 END),0) intervenant FROM payment_transactions WHERE created_at>=datetime('now','-90 day')`).first();
   const base=Number(tx?.gross||0)/3;
   const rows=[];
   for(let i=1;i<=months;i++){
@@ -2252,7 +2555,7 @@ async function financeForecast(request, env) {
     const payout=Math.round(Number(tx?.intervenant||0)/3*(1+0.03*i));
     const provider=Math.round(Number(tx?.provider_fee||0)/3*(1+0.03*i));
     const refunds=Math.round(Number(tx?.refunds||0)/3*(1+0.03*i));
-    const margin=revenue-commission*0+payout*-1+commission-provider-refunds;
+    const margin=revenue-payout-provider-refunds;
     const period=new Date(); period.setMonth(period.getMonth()+i); const key=period.toISOString().slice(0,7);
     await env.DB.prepare(`INSERT INTO finance_forecasts(id,period,scenario,revenue_cents,commission_cents,payout_cents,provider_fee_cents,refund_cents,estimated_margin_cents,confidence) VALUES(?,?,?,?,?,?,?,?,?,?)`)
       .bind(crypto.randomUUID(),key,'BASE',revenue,commission,payout,provider,refunds,margin,0.55).run();
@@ -2272,7 +2575,8 @@ async function copilotBriefing(request, env) {
   const alerts=await env.DB.prepare(`SELECT * FROM strategic_alerts WHERE status='OPEN' ORDER BY CASE severity WHEN 'CRITICAL' THEN 100 WHEN 'HIGH' THEN 60 ELSE 30 END DESC,created_at ASC LIMIT 10`).all();
   for(const a of (alerts.results||[])) items.push({priority:a.severity==='CRITICAL'?100:a.severity==='HIGH'?60:30,category:'RISK',title:a.alert_type,recommendation:a.recommendation,entity_type:a.entity_type,entity_id:a.entity_id});
   items.sort((a,b)=>b.priority-a.priority);
-  for(const x of items.slice(0,25)) await env.DB.prepare(`INSERT INTO copilot_briefings(id,phase,priority,category,title,recommendation,action_type,entity_type,entity_id,impact_json) VALUES(?,?,?,?,?,?,?,?,?,?)`).bind(crypto.randomUUID(),phase,x.priority,x.category,x.title,String(x.recommendation).slice(0,4000),x.action_type||null,x.entity_type||null,x.entity_id||null,JSON.stringify(x)).run();
+  // GET /api/copilot/briefing is read-only: do not create duplicate snapshots on refresh.
+  // Persisting a briefing must be an explicit, separately authorized write operation.
   return json({ok:true,version:VERSION,phase,top_actions:items.slice(0,25)});
 }
 
@@ -2458,18 +2762,26 @@ async function processBackgroundJobs(request,env) {
 }
 
 function isMutatingMethod(method){ return ['POST','PUT','PATCH','DELETE'].includes(method); }
+function originlessMutationAllowed(request,env){
+  if(request.method!=='POST' || request.headers.get('origin')) return false;
+  const url=new URL(request.url);
+  // The one-time bootstrap is protected again by its exact bearer secret in
+  // the handler. PSP webhooks are admitted here only to reach mandatory HMAC
+  // verification in paymentWebhook; a header alone never authenticates them.
+  if(url.pathname==='/api/auth/bootstrap' && env?.BOOTSTRAP_TOKEN){
+    return request.headers.get('authorization')===`Bearer ${env.BOOTSTRAP_TOKEN}`;
+  }
+  if(url.pathname==='/api/payments/webhook'){
+    return Boolean(request.headers.get('x-prochelia-signature') || request.headers.get('x-webhook-signature'));
+  }
+  return false;
+}
 function securityOriginAllowed(request,env){
   const origin=request.headers.get('origin');
-  // Les clients non-navigateur peuvent ne pas envoyer Origin. Les requêtes navigateur
-  // avec Origin doivent correspondre à une origine explicitement autorisée.
-  if(!origin) return true;
+  if(!origin) return !isMutatingMethod(request.method) || originlessMutationAllowed(request,env);
   const configured=clean(env?.CORS_ORIGIN);
-  const defaults=[
-    'https://prochelia.pages.dev',
-    'https://56b01f85.prochelia.pages.dev'
-  ];
-  const allowed=(configured ? configured.split(',') : defaults)
-    .map(x=>String(x).trim()).filter(Boolean);
+  if(!configured) return false;
+  const allowed=configured.split(',').map(x=>String(x).trim()).filter(Boolean);
   return allowed.includes(origin);
 }
 
@@ -2937,6 +3249,15 @@ async function handle(request,env){
   try {
     if(isMutatingMethod(request.method) && !securityOriginAllowed(request,env)) return json({ok:false,error:'ORIGIN_NOT_ALLOWED',version:VERSION},403);
     const url=new URL(request.url);
+    const csrfExemptPaths=new Set(['/api/auth/login','/api/auth/bootstrap','/api/payments/webhook']);
+    if(isMutatingMethod(request.method) && !csrfExemptPaths.has(url.pathname) && getSessionToken(request)){
+      const auth=await getSessionUser(request,env);
+      if(!auth) return json({ok:false,error:'UNAUTHENTICATED',version:VERSION},401);
+      const supplied=request.headers.get('x-csrf-token')||'';
+      const expected=await csrfTokenForSession(auth);
+      if(!constantTimeStringEqual(supplied,expected))
+        return json({ok:false,error:'CSRF_TOKEN_INVALID',version:VERSION},403);
+    }
     // Fail closed before any schema helper touches D1: unauthenticated callers
     // must not use mission validation as an existence oracle for private IDs.
     if (url.pathname === '/api/missions/validate') {
@@ -3260,39 +3581,31 @@ async function supportCreate(request,env){
   const severity=String(b.severity||'LOW').toUpperCase();
   const scenario=supportScenarioFor(category,severity);
   const rule=await env.DB.prepare(`SELECT * FROM copilot_resolution_rules WHERE scenario_key=? LIMIT 1`).bind(scenario).first();
-  const auto=Number(rule?.auto_allowed||0)===1 && String(severity)!=='CRITICAL' && String(severity)!=='HIGH';
-  const requiresManager=Number(rule?.manager_approval_required||1)===1 || !auto;
+  const autoCheckAllowed=Number(rule?.auto_allowed||0)===1 && String(severity)!=='CRITICAL' && String(severity)!=='HIGH';
+  // No trusted server-side action receipt is connected: suggestions never close a case.
+  const requiresManager=true;
   const id=crypto.randomUUID();
   const proposed=rule?JSON.parse(rule.steps_json||'[]'):{steps:['collect_evidence','copilot_analysis','notify','audit']};
   await env.DB.prepare(`INSERT INTO support_cases(id,source_role,requester_id,company_id,mission_id,complaint_id,category,severity,status,description,proposed_resolution,requires_manager) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`)
-    .bind(id,a.role,a.auth.user.id,b.company_id||null,b.mission_id||null,b.complaint_id||null,category,severity,auto?'PROCESSING':'OPEN',clean(b.description)||null,JSON.stringify({scenario,steps:proposed.steps||proposed}),requiresManager?1:0).run();
-  await supportEvent(env,id,a.role,a.auth.user.id,'CREATED',{scenario,auto,requiresManager});
-  await journal(env,a.role,a.auth.user.id,'SUPPORT_CASE_CREATE','support_cases',id,'OK',{scenario,severity,auto});
+    .bind(id,a.role,a.auth.user.id,b.company_id||null,b.mission_id||null,b.complaint_id||null,category,severity,autoCheckAllowed?'WAITING_ACTION':'OPEN',clean(b.description)||null,JSON.stringify({scenario,steps:proposed.steps||proposed}),1).run();
+  await supportEvent(env,id,a.role,a.auth.user.id,'CREATED',{scenario,auto_check_allowed:autoCheckAllowed,requiresManager});
+  await journal(env,a.role,a.auth.user.id,'SUPPORT_CASE_CREATE','support_cases',id,'OK',{scenario,severity,auto_check_allowed:autoCheckAllowed});
   let autoResult=null;
-  if(auto){
-    autoResult=await supportAutoResolve(env,id,a.auth.user.id,a.role,scenario,b);
-  }
-  return json({ok:true,version:VERSION,case_id:id,scenario,automatic_resolution:!!auto,auto_result:autoResult,manager_approval_required:!auto});
+  if(autoCheckAllowed) autoResult=await supportAutoResolve(env,id,a.auth.user.id,a.role,scenario,{});
+  return json({ok:true,version:VERSION,case_id:id,scenario,automatic_resolution:false,automatic_check:autoCheckAllowed,auto_result:autoResult,action_required:true,manager_approval_required:true});
 }
 
 async function supportAutoResolve(env,caseId,actorId,actorRole,scenario,context={}){
   const safeAuto=['DELAY_LIGHT','NOTIFICATION_FAILED','DOCUMENT_REMINDER','SIMPLE_REFUND_CHECK','CLIENT_COMPLAINT'];
   if(!safeAuto.includes(scenario)) return {ok:false,status:'MANAGER_REQUIRED'};
-  // Sécurité de production : le Copilote ne doit jamais déclarer une résolution
-  // simplement parce qu'il a généré une proposition. Une résolution automatique
-  // n'est clôturée que lorsqu'une action downstream vérifiable a confirmé son succès.
-  const verified=String(context?.execution_verified||'').toLowerCase()==='true' || context?.execution_verified===true;
-  const resolution={scenario,actions:['verify_context','apply_only_reversible_or_preapproved_action','notify_requester','journal'],context:context||{}};
-  if(!verified){
-    await env.DB.prepare(`UPDATE support_cases SET status='WAITING_ACTION',resolution=?,resolved_at=NULL WHERE id=?`).bind(JSON.stringify({...resolution,status:'ACTION_REQUIRED'}),caseId).run();
-    await supportEvent(env,caseId,actorRole,actorId,'AUTO_CHECKED_WAITING_ACTION',resolution);
-    await journal(env,actorRole,actorId,'SUPPORT_CASE_AUTO_CHECK','support_cases',caseId,'WAITING_ACTION',{scenario});
-    return {ok:true,status:'WAITING_ACTION',scenario,closed:false,reason:'NO_VERIFIED_DOWNSTREAM_ACTION'};
-  }
-  await env.DB.prepare(`UPDATE support_cases SET status='RESOLVED',resolution=?,resolved_at=CURRENT_TIMESTAMP WHERE id=?`).bind(JSON.stringify(resolution),caseId).run();
-  await supportEvent(env,caseId,actorRole,actorId,'AUTO_RESOLVED_VERIFIED',resolution);
-  await journal(env,actorRole,actorId,'SUPPORT_CASE_AUTO_RESOLVE','support_cases',caseId,'RESOLVED',{scenario});
-  return {ok:true,status:'RESOLVED',scenario,closed:true};
+  // A client-supplied flag is not proof of an executed action. Until a trusted
+  // internal action adapter/receipt exists, keep the case open for manager review.
+  const resolution={scenario,actions:['verify_context','propose_preapproved_action','notify_requester','journal'],status:'ACTION_REQUIRED'};
+  await env.DB.prepare(`UPDATE support_cases SET status='WAITING_ACTION',resolution=?,resolved_at=NULL,requires_manager=1 WHERE id=? AND status NOT IN ('RESOLVED','CLOSED')`)
+    .bind(JSON.stringify(resolution),caseId).run();
+  await supportEvent(env,caseId,actorRole,actorId,'AUTO_CHECKED_WAITING_ACTION',resolution);
+  await journal(env,actorRole,actorId,'SUPPORT_CASE_AUTO_CHECK','support_cases',caseId,'WAITING_ACTION',{scenario});
+  return {ok:true,status:'WAITING_ACTION',scenario,closed:false,reason:'NO_TRUSTED_DOWNSTREAM_ACTION_RECEIPT'};
 }
 
 async function supportList(request,env){
@@ -3467,4 +3780,30 @@ handle = async function(request,env){
   }catch(e){
     return json({ok:false,error:'PRODUCTION_SAFETY_ERROR',version:VERSION},500);
   }
+};
+
+
+// Cross-origin browser session support: exact allowlist + credentialed cookies.
+const __procheliaCorsWrappedHandle=handle;
+handle=async function(request,env){
+  const origin=request.headers.get('origin');
+  if(origin&&!securityOriginAllowed(request,env)) return json({ok:false,error:'ORIGIN_NOT_ALLOWED',version:VERSION},403);
+  if(request.method==='OPTIONS'){
+    if(!origin) return new Response(null,{status:204});
+    return new Response(null,{status:204,headers:{
+      'access-control-allow-origin':origin,
+      'access-control-allow-credentials':'true',
+      'access-control-allow-methods':'GET, HEAD, POST, PUT, PATCH, DELETE, OPTIONS',
+      'access-control-allow-headers':'Content-Type, Accept, Authorization, Idempotency-Key, X-Prochelia-Signature, X-Webhook-Signature',
+      'access-control-max-age':'600',
+      'vary':'Origin'
+    }});
+  }
+  const response=await __procheliaCorsWrappedHandle(request,env);
+  if(!origin) return response;
+  const headers=new Headers(response.headers);
+  headers.set('access-control-allow-origin',origin);
+  headers.set('access-control-allow-credentials','true');
+  headers.append('vary','Origin');
+  return new Response(response.body,{status:response.status,statusText:response.statusText,headers});
 };

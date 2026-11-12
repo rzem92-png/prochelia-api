@@ -1,0 +1,31 @@
+name: PROCHÉLIA backend contract tests
+
+on:
+  pull_request:
+    paths:
+      - "src/index.js"
+      - "tests/auth-handler-wiring.test.js"
+      - ".github/workflows/prochelia-backend-contract-tests.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "src/index.js"
+      - "tests/auth-handler-wiring.test.js"
+      - ".github/workflows/prochelia-backend-contract-tests.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  backend-contracts:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - name: Run backend security and payment contract tests
+        run: node --test tests/auth-handler-wiring.test.js
