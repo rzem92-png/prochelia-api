@@ -339,6 +339,17 @@ async function me(request, env) {
   return json({ ok: true, authenticated: true, version: VERSION, user: auth.user });
 }
 
+export async function createFirstManagerAtomically(env, input) {
+  if (!env?.DB || !input?.id || !input?.email || !input?.passwordHash) return false;
+  const result = await env.DB.prepare(`INSERT INTO users
+    (id, role, email, first_name, last_name, phone, status, password_hash)
+    SELECT ?, 'gerante', ?, ?, ?, ?, 'active', ?
+    WHERE NOT EXISTS (SELECT 1 FROM users)`)
+    .bind(input.id,input.email,input.firstName,input.lastName,input.phone || null,input.passwordHash)
+    .run();
+  return Number(result?.meta?.changes || 0) === 1;
+}
+
 async function bootstrap(request, env) {
   if (!env.DB) return json({ ok: false, database: false, version: VERSION }, 503);
   if (!env.BOOTSTRAP_TOKEN) {
@@ -348,11 +359,6 @@ async function bootstrap(request, env) {
   const supplied = request.headers.get('authorization') || '';
   if (supplied !== `Bearer ${env.BOOTSTRAP_TOKEN}`) {
     return json({ ok: false, error: 'UNAUTHORIZED', version: VERSION }, 401);
-  }
-
-  const count = await env.DB.prepare('SELECT COUNT(*) AS total FROM users').first();
-  if (Number(count?.total || 0) !== 0) {
-    return json({ ok: false, error: 'BOOTSTRAP_ALREADY_USED', version: VERSION }, 409);
   }
 
   const body = await readJson(request);
@@ -369,10 +375,17 @@ async function bootstrap(request, env) {
   const passwordHash = await hashPassword(password);
   const userId = crypto.randomUUID();
 
-  await env.DB.prepare(
-    `INSERT INTO users (id, role, email, first_name, last_name, phone, status, password_hash)
-     VALUES (?, 'gerante', ?, ?, ?, ?, 'active', ?)`
-  ).bind(userId, email, firstName, lastName, phone, passwordHash).run();
+  let created;
+  try {
+    created = await createFirstManagerAtomically(env, {
+      id:userId, email, firstName, lastName, phone, passwordHash
+    });
+  } catch (error) {
+    // A concurrent first-admin attempt can also collide on the unique email.
+    console.error('BOOTSTRAP_CREATE_FAILED', error?.name || 'D1_ERROR');
+    return json({ok:false,error:'BOOTSTRAP_CONFLICT_OR_DATABASE_ERROR',version:VERSION},409);
+  }
+  if (!created) return json({ok:false,error:'BOOTSTRAP_ALREADY_USED',version:VERSION},409);
 
   return json({
     ok: true,
