@@ -165,7 +165,10 @@ jobs:
             ...clientUsers.map(u=>[u.id,'client',u.email,u.first,u.last]),
             [providerId,'intervenant',`e2e+${run}-provider@example.test`,'E2EProvider','\u{10FFFF}E2E'+run]
           ];
-          const userValues = users.map(u=>'('+[...u.map(q),q('active')].join(',')+')').join(',\n');
+          // The production users schema requires password_hash even for synthetic E2E accounts.
+          // Use an unguessable, non-login-capable fixture value; the E2E authenticates via
+          // independently generated session tokens and SHA-256 token hashes.
+          const userValues = users.map(u=>'('+[...u.map(q),q('active'),q(hash(randomBytes(48).toString('base64url')))].join(',')+')').join(',\n');
           const clientValues = clientUsers.map((u,i)=>'('+[
             q(prefix+'client-'+String(i).padStart(3,'0')),q(u.id),
             q('Synthetic address '+i),q('E2E Test City'),q('00000'),q('Synthetic test fixture')
