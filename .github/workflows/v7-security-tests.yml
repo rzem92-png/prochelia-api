@@ -8,6 +8,8 @@ on:
       - "src/index.js"
       - "tests/**"
       - ".github/workflows/v7-security-tests.yml"
+      - ".github/workflows/deploy-preview-worker-manual.yml"
+      - ".github/workflows/preview-directory-e2e-acceptance.yml"
   push:
     branches: [main]
     paths:
@@ -16,6 +18,8 @@ on:
       - "src/index.js"
       - "tests/**"
       - ".github/workflows/v7-security-tests.yml"
+      - ".github/workflows/deploy-preview-worker-manual.yml"
+      - ".github/workflows/preview-directory-e2e-acceptance.yml"
 
 permissions:
   contents: read
