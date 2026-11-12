@@ -17,12 +17,13 @@ concurrency:
 
 jobs:
   preview-only:
-    if: github.ref == 'refs/heads/fix/api-directory-contract-2026-11-12' && inputs.confirmation == 'DEPLOY_PREVIEW_ONLY'
+    if: github.ref == 'refs/heads/main' && inputs.confirmation == 'DEPLOY_PREVIEW_ONLY'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
+          ref: d68d53826a8437237f36803ee5560c82db702a99
           persist-credentials: false
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
@@ -80,5 +81,6 @@ jobs:
           {
             echo 'Preview Worker only: prochelia-api-preview.'
             echo 'D1 binding is pinned to Preview DB 6adb95e5-e542-4bec-9008-fbea01042305.'
+            echo 'Backend source is pinned to d68d53826a8437237f36803ee5560c82db702a99.'
             echo 'Dashboard vars and existing secrets are preserved. No migrations, no production Worker, and no production D1 changes.'
           } >> "$GITHUB_STEP_SUMMARY"
