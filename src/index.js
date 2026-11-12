@@ -901,24 +901,37 @@ async function payoutRequest(request, env) {
   return json({ok:true,version:VERSION,payout_id:payoutId,status:'requested',amount_cents:amount,mode,provider:paymentProvider(env),next:paymentsConfigured(env)?'PSP_PAYOUT_REQUIRED':'PAYMENT_PROVIDER_NOT_CONFIGURED'},201);
 }
 
-async function verifyWebhookSignature(request, env, rawBody) {
-  const secret=env.PAYMENT_WEBHOOK_SECRET;
-  if(!secret) return false;
-  const signature=request.headers.get('x-prochelia-signature') || request.headers.get('x-webhook-signature') || '';
-  if(!signature) return false;
-  const key=await crypto.subtle.importKey('raw',new TextEncoder().encode(secret),{name:'HMAC',hash:'SHA-256'},false,['sign']);
-  const mac=new Uint8Array(await crypto.subtle.sign('HMAC',key,new TextEncoder().encode(rawBody)));
-  const expected=base64url(mac);
-  return signature===expected || signature===`sha256=${expected}`;
+function constantTimeStringEqual(actual, expected) {
+  if (typeof actual !== 'string' || typeof expected !== 'string' || actual.length !== expected.length) return false;
+  let difference = 0;
+  for (let i = 0; i < actual.length; i++) difference |= actual.charCodeAt(i) ^ expected.charCodeAt(i);
+  return difference === 0;
+}
+
+export async function verifyWebhookSignature(request, env, rawBody) {
+  const secret = env?.PAYMENT_WEBHOOK_SECRET;
+  if (typeof secret !== 'string' || !secret) return false;
+  const signature = request.headers.get('x-prochelia-signature') || request.headers.get('x-webhook-signature') || '';
+  const supplied = signature.startsWith('sha256=') ? signature.slice(7) : signature;
+  if (!/^[A-Za-z0-9_-]{43}$/.test(supplied)) return false;
+  const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+  const mac = new Uint8Array(await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(rawBody)));
+  return constantTimeStringEqual(supplied, base64url(mac));
 }
 
 async function paymentWebhook(request, env) {
+  // Reject unauthenticated and malformed events before any D1 schema access.
+  // This prevents arbitrary callers from triggering CREATE TABLE/INDEX writes.
+  const raw = await request.text();
+  if (!(await verifyWebhookSignature(request, env, raw))) return json({ok:false,error:'INVALID_WEBHOOK_SIGNATURE',version:VERSION},401);
+  let event;
+  try { event = JSON.parse(raw); } catch { return json({ok:false,error:'INVALID_WEBHOOK_JSON',version:VERSION},400); }
+  const provider = clean(event?.provider) || paymentProvider(env);
+  const eventId = clean(event?.id), type = clean(event?.type);
+  if (!eventId || !type || typeof event !== 'object' || Array.isArray(event)) {
+    return json({ok:false,error:'INVALID_WEBHOOK_EVENT',version:VERSION},400);
+  }
   await ensurePaymentSchema(env);
-  const raw=await request.text();
-  if(!(await verifyWebhookSignature(request,env,raw))) return json({ok:false,error:'INVALID_WEBHOOK_SIGNATURE',version:VERSION},401);
-  let event; try{event=JSON.parse(raw)}catch{return json({ok:false,error:'INVALID_WEBHOOK_JSON',version:VERSION},400);}
-  const provider=clean(event?.provider)||paymentProvider(env), eventId=clean(event?.id), type=clean(event?.type);
-  if(!eventId||!type) return json({ok:false,error:'INVALID_WEBHOOK_EVENT',version:VERSION},400);
   const payloadHash=await sha256Base64url(raw);
   const inserted=await env.DB.prepare(`INSERT OR IGNORE INTO payment_webhook_events (id,provider,event_id,event_type,signature_valid,payload_hash) VALUES (?,?,?,?,1,?)`).bind(crypto.randomUUID(),provider,eventId,type,payloadHash).run();
   if(!inserted.meta?.changes) return json({ok:true,version:VERSION,duplicate:true,event_id:eventId},200);
