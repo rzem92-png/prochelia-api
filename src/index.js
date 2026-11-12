@@ -1150,6 +1150,27 @@ async function paymentAdminResolve(request, env) {
 async function handleBase(request, env) {
   const url = new URL(request.url);
 
+  // Paiements : enregistrer explicitement chaque route dans le routeur actif.
+  // Ces handlers existaient mais n'étaient pas raccordés au routeur principal.
+  const paymentRoutes = {
+    '/api/payments/onboard': ['POST', paymentOnboard],
+    '/api/payments/status': ['GET', paymentStatus],
+    '/api/payments/mission/create': ['POST', createMissionPayment],
+    '/api/payments/mission/finalize': ['POST', finalizeMissionPayment],
+    '/api/payments/payout': ['POST', payoutRequest],
+    '/api/payments/webhook': ['POST', paymentWebhook],
+    '/api/payments/dispute': ['POST', openPaymentDispute],
+    '/api/payments/dispute/resolve': ['POST', paymentAdminResolve]
+  };
+  const paymentRoute = paymentRoutes[url.pathname];
+  if (paymentRoute) {
+    const [allowedMethod, handler] = paymentRoute;
+    if (request.method !== allowedMethod) {
+      return json({ok:false,error:'METHOD_NOT_ALLOWED',version:VERSION},405,{'allow':allowedMethod});
+    }
+    return handler(request,env);
+  }
+
 
   if (url.pathname === '/api/security/identity/start') {
     if (request.method !== 'POST') return json({ ok:false,error:'METHOD_NOT_ALLOWED',version:VERSION },405);
