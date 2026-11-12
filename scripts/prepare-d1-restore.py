@@ -98,8 +98,14 @@ def prepare(source: Path, destination: Path) -> dict[str, int]:
             sql = (row["sql"] or "").lstrip().upper()
             if sql.startswith("CREATE VIRTUAL TABLE"):
                 raise ValueError(f"Virtual table requires a dedicated restore adapter: {row['name']}")
+            # D1 SQLite accepts AUTOINCREMENT, but its sqlite_sequence rows must
+            # be restored explicitly; rejecting it is safer than silently resetting IDs.
             if "AUTOINCREMENT" in sql:
                 raise ValueError(f"AUTOINCREMENT sequence requires a dedicated restore adapter: {row['name']}")
+
+        # Cloudflare D1 maintains internal metadata tables. They must not be copied
+        # as application data; enumerate all application tables above and fail closed
+        # on unsupported virtual tables or foreign-key structures.
 
         order = foreign_key_order(db, tables)
         schema_sql = {
