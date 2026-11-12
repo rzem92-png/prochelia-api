@@ -139,7 +139,9 @@ jobs:
           writeFileSync(seedPath,seed,{mode:0o600});
           writeFileSync(cleanupPath,cleanup,{mode:0o600});
           appendFileSync(process.env.GITHUB_ENV,
-            `E2E_MANAGER_TOKEN=${managerToken}\nE2E_CLIENT_TOKEN=${clientToken}\nE2E_PREFIX=${prefix}\nE2E_PROVIDER_USER_ID=${providerId}\n`);
+            `E2E_MANAGER_TOKEN=${managerToken}\nE2E_CLIENT_TOKEN=${clientToken}\nE2E_PREFIX=${prefix}\n`);
+          console.log('::add-mask::' + managerToken);
+          console.log('::add-mask::' + clientToken);
           console.log('Synthetic fixture SQL and cleanup SQL prepared; no credentials or personal data printed.');
           NODE
 
@@ -156,13 +158,6 @@ jobs:
 
       - name: Exercise Pages proxy, session authentication, role checks and pagination
         shell: bash
-        env:
-          E2E_MANAGER_TOKEN: ${{ env.E2E_MANAGER_TOKEN }}
-          E2E_CLIENT_TOKEN: ${{ env.E2E_CLIENT_TOKEN }}
-          E2E_PREFIX: ${{ env.E2E_PREFIX }}
-          E2E_CLIENT_OFFSET: ${{ env.E2E_CLIENT_OFFSET }}
-          E2E_INTERVENANT_OFFSET: ${{ env.E2E_INTERVENANT_OFFSET }}
-          PAGES_PREVIEW_URL: ${{ env.PAGES_PREVIEW_URL }}
         run: |
           set -euo pipefail
           node --input-type=module <<'NODE'
