@@ -1,0 +1,240 @@
+name: PROCHÉLIA — Preview directory API end-to-end acceptance
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirmation:
+        description: "Type RUN_PREVIEW_DIRECTORY_E2E to seed synthetic Preview data and test the live Pages-to-Worker path"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: prochelia-preview-directory-e2e
+  cancel-in-progress: false
+
+jobs:
+  preview-directory-e2e:
+    if: github.ref == 'refs/heads/main' && inputs.confirmation == 'RUN_PREVIEW_DIRECTORY_E2E'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      CLOUDFLARE_ACCOUNT_ID: f2a79e9fa41566a8ec80fb24c02c60eb
+      PREVIEW_DB_NAME: prochelia-preview-db
+      PREVIEW_DB_ID: 6adb95e5-e542-4bec-9008-fbea01042305
+      PAGES_PREVIEW_URL: https://c3ceec86.prochelia.pages.dev
+      PAGES_DEPLOYMENT_ID: c3ceec86-8372-462d-b932-cfe18ca55085
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22"
+          package-manager-cache: false
+
+      - name: Verify Preview D1 identity and generate pinned Wrangler config
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          [[ -n "${CLOUDFLARE_API_TOKEN:-}" ]] || { echo "::error::Cloudflare API token is missing."; exit 1; }
+          token="${CLOUDFLARE_API_TOKEN#Bearer }"
+          token="$(printf '%s' "$token" | tr -d '\r\n')"
+          status="$(curl --silent --show-error --output "$RUNNER_TEMP/token.json" --write-out '%{http_code}' -H "Authorization: Bearer $token" "https://api.cloudflare.com/client/v4/user/tokens/verify")"
+          [[ "$status" == "200" ]]
+          jq -e '.success == true and .result.status == "active"' "$RUNNER_TEMP/token.json" >/dev/null
+          status="$(curl --silent --show-error --output "$RUNNER_TEMP/preview-d1.json" --write-out '%{http_code}' -H "Authorization: Bearer $token" "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/d1/database/$PREVIEW_DB_ID")"
+          [[ "$status" == "200" ]]
+          jq -e --arg name "$PREVIEW_DB_NAME" --arg id "$PREVIEW_DB_ID" '.success == true and .result.name == $name and .result.uuid == $id' "$RUNNER_TEMP/preview-d1.json" >/dev/null
+          status="$(curl --silent --show-error --output "$RUNNER_TEMP/pages-preview.json" --write-out '%{http_code}' -H "Authorization: Bearer $token" "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/pages/projects/prochelia/deployments/$PAGES_DEPLOYMENT_ID")"
+          [[ "$status" == "200" ]]
+          jq -e --arg db "$PREVIEW_DB_ID" --arg worker "prochelia-api-preview" --arg commit "e69fde70fb28405aa8117eaf041aed618d3da664" '
+            .success == true and
+            .result.environment == "preview" and
+            .result.uses_functions == true and
+            .result.d1_databases.DB.id == $db and
+            .result.services.PROCHELIA_API.service == $worker and
+            .result.deployment_trigger.metadata.commit_hash == $commit
+          ' "$RUNNER_TEMP/pages-preview.json" >/dev/null || { echo "::error::Pages Preview deployment bindings/commit mismatch."; exit 1; }
+          [[ "$PREVIEW_DB_ID" != "04f52830-ef5a-4f17-a640-42bbc2381bba" ]]
+          cat > "$RUNNER_TEMP/wrangler.preview.json" <<'JSON'
+          {
+            "name": "prochelia-preview-e2e",
+            "compatibility_date": "2026-09-25",
+            "d1_databases": [{
+              "binding": "DB",
+              "database_name": "prochelia-preview-db",
+              "database_id": "6adb95e5-e542-4bec-9008-fbea01042305"
+            }]
+          }
+          JSON
+          printf 'CLOUDFLARE_API_TOKEN=%s\n' "$token" >> "$GITHUB_ENV"
+          echo "Exact isolated Preview D1 identity verified."
+
+      - name: Read current directory offsets without reading personal rows
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          payload='{"sql":"SELECT (SELECT COUNT(*) FROM clients) AS clients, (SELECT COUNT(*) FROM intervenants) AS intervenants"}'
+          status="$(curl --silent --show-error --output "$RUNNER_TEMP/preview-counts.json" --write-out '%{http_code}' \
+            -X POST -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -H "Content-Type: application/json" \
+            --data "$payload" "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/d1/database/$PREVIEW_DB_ID/query")"
+          [[ "$status" == "200" ]]
+          jq -e '.success == true' "$RUNNER_TEMP/preview-counts.json" >/dev/null
+          clients="$(jq -r '.result[0].results[0].clients' "$RUNNER_TEMP/preview-counts.json")"
+          intervenants="$(jq -r '.result[0].results[0].intervenants' "$RUNNER_TEMP/preview-counts.json")"
+          [[ "$clients" =~ ^[0-9]+$ && "$intervenants" =~ ^[0-9]+$ ]]
+          printf 'E2E_CLIENT_OFFSET=%s\nE2E_INTERVENANT_OFFSET=%s\n' "$clients" "$intervenants" >> "$GITHUB_ENV"
+          echo "Existing row counts captured; no personal row data read."
+
+      - name: Generate synthetic test fixtures and guaranteed cleanup SQL
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          import { randomBytes, createHash } from 'node:crypto';
+          import { appendFileSync, writeFileSync } from 'node:fs';
+          const run = process.env.GITHUB_RUN_ID;
+          const prefix = `e2e-${run}-`;
+          const managerToken = randomBytes(32).toString('base64url');
+          const clientToken = randomBytes(32).toString('base64url');
+          const hash = value => createHash('sha256').update(value).digest('base64url');
+          const q = value => "'" + String(value).replaceAll("'", "''") + "'";
+          const managerId = prefix + 'manager';
+          const clientUsers = Array.from({length:101},(_,i)=>({
+            id: prefix + 'client-user-' + String(i).padStart(3,'0'),
+            email: `e2e+${run}-client-${i}@example.test`,
+            first: 'Synthetic' + String(i).padStart(3,'0'),
+            last: '\u{10FFFF}E2E' + run
+          }));
+          const providerId = prefix + 'provider-user';
+          const users = [
+            [managerId,'gerante',`e2e+${run}-manager@example.test`,'E2E','Manager'],
+            ...clientUsers.map(u=>[u.id,'client',u.email,u.first,u.last]),
+            [providerId,'intervenant',`e2e+${run}-provider@example.test`,'E2EProvider','\u{10FFFF}E2E'+run]
+          ];
+          const userValues = users.map(u=>'('+[...u.map(q),q('active')].join(',')+')').join(',\n');
+          const clientValues = clientUsers.map((u,i)=>'('+[
+            q(prefix+'client-'+String(i).padStart(3,'0')),q(u.id),
+            q('Synthetic address '+i),q('E2E Test City'),q('00000'),q('Synthetic test fixture')
+          ].join(',')+')').join(',\n');
+          const sessionValues = [
+            [prefix+'manager-session',managerId,hash(managerToken)],
+            [prefix+'client-session',clientUsers[0].id,hash(clientToken)]
+          ].map(x=>'('+[...x.map(q),"datetime('now','+2 hours')"].join(',')+')').join(',\n');
+          const seed = [
+            'INSERT INTO users (id,role,email,first_name,last_name,status) VALUES',
+            userValues + ';',
+            'INSERT INTO clients (id,user_id,address,city,postal_code,notes) VALUES',
+            clientValues + ';',
+            'INSERT INTO intervenants (id,user_id,professional_status,description,service_area,hourly_rate,validation_status) VALUES',
+            '('+[q(prefix+'intervenant'),q(providerId),q('independent'),q('Synthetic E2E provider'),q('E2E Test City'),'20',q('approved')].join(',')+');',
+            'INSERT INTO sessions (id,user_id,token_hash,expires_at) VALUES',
+            sessionValues + ';'
+          ].join('\n');
+          const cleanup = [
+            `DELETE FROM sessions WHERE id LIKE ${q(prefix+'%')};`,
+            `DELETE FROM clients WHERE id LIKE ${q(prefix+'%')};`,
+            `DELETE FROM intervenants WHERE id LIKE ${q(prefix+'%')};`,
+            `DELETE FROM users WHERE id LIKE ${q(prefix+'%')};`
+          ].join('\n');
+          const seedPath = process.env.RUNNER_TEMP + '/preview-e2e-seed.sql';
+          const cleanupPath = process.env.RUNNER_TEMP + '/preview-e2e-cleanup.sql';
+          writeFileSync(seedPath,seed,{mode:0o600});
+          writeFileSync(cleanupPath,cleanup,{mode:0o600});
+          appendFileSync(process.env.GITHUB_ENV,
+            `E2E_MANAGER_TOKEN=${managerToken}\nE2E_CLIENT_TOKEN=${clientToken}\nE2E_PREFIX=${prefix}\n`);
+          console.log('::add-mask::' + managerToken);
+          console.log('::add-mask::' + clientToken);
+          console.log('Synthetic fixture SQL and cleanup SQL prepared; no credentials or personal data printed.');
+          NODE
+
+      - name: Seed only the isolated Preview D1
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          [[ "$PREVIEW_DB_ID" == "6adb95e5-e542-4bec-9008-fbea01042305" ]]
+          [[ "$PREVIEW_DB_ID" != "04f52830-ef5a-4f17-a640-42bbc2381bba" ]]
+          npx --yes wrangler@4 d1 execute "$PREVIEW_DB_NAME" --remote --config "$RUNNER_TEMP/wrangler.preview.json" --file="$RUNNER_TEMP/preview-e2e-seed.sql" --yes
+          echo "Synthetic fixtures inserted into Preview D1 only."
+
+      - name: Exercise Pages proxy, session authentication, role checks and pagination
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          const base = process.env.PAGES_PREVIEW_URL;
+          const prefix = process.env.E2E_PREFIX;
+          const manager = process.env.E2E_MANAGER_TOKEN;
+          const client = process.env.E2E_CLIENT_TOKEN;
+          const clientOffset = Number(process.env.E2E_CLIENT_OFFSET);
+          const providerOffset = Number(process.env.E2E_INTERVENANT_OFFSET);
+          async function request(path, token) {
+            const headers = { accept: 'application/json', origin: base };
+            if (token) headers.cookie = 'prochelia_session=' + token;
+            return fetch(base + path, { headers, redirect: 'manual' });
+          }
+          async function expectStatus(path, token, expected) {
+            const response = await request(path, token);
+            if (response.status !== expected) throw new Error(`${path}: expected HTTP ${expected}, got ${response.status}`);
+            return response;
+          }
+          const unauthClients = await expectStatus('/api/clients', null, 401);
+          const unauthProviders = await expectStatus('/api/intervenants', null, 401);
+          const deniedClients = await expectStatus('/api/clients', client, 403);
+          const deniedProviders = await expectStatus('/api/intervenants', client, 403);
+          const invalidOffset = await expectStatus('/api/clients?offset=50001', manager, 400);
+          const first = await expectStatus('/api/clients?offset=' + clientOffset, manager, 200);
+          const firstBody = await first.json();
+          if (!Array.isArray(firstBody.items) || firstBody.items.length !== 100 || firstBody.has_more !== true || firstBody.next_offset !== clientOffset + 100) {
+            throw new Error('Client directory first-page pagination contract mismatch');
+          }
+          if (!firstBody.items.every(row => row.id.startsWith(prefix + 'client-'))) {
+            throw new Error('Client directory page contains an unexpected row or sort offset');
+          }
+          const second = await expectStatus('/api/clients?offset=' + (clientOffset + 100), manager, 200);
+          const secondBody = await second.json();
+          if (secondBody.items.length !== 1 || secondBody.has_more !== false || secondBody.next_offset !== null || !secondBody.items[0].id.startsWith(prefix + 'client-')) {
+            throw new Error('Client directory final-page contract mismatch');
+          }
+          const providers = await expectStatus('/api/intervenants?offset=' + providerOffset, manager, 200);
+          const providerBody = await providers.json();
+          if (!providerBody.items.some(row => row.id === prefix + 'intervenant')) {
+            throw new Error('Intervenant directory did not return the synthetic Preview fixture');
+          }
+          if (providerBody.has_more !== false || providerBody.next_offset !== null) {
+            throw new Error('Intervenant directory pagination end marker mismatch');
+          }
+          console.log('PASS: Pages proxy reaches Preview Worker; unauthenticated 401; client role 403; invalid offset 400; manager directory pagination and provider listing verified.');
+          NODE
+
+      - name: Always remove synthetic Preview fixtures and verify cleanup
+        if: always()
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [[ ! -f "$RUNNER_TEMP/preview-e2e-cleanup.sql" || ! -f "$RUNNER_TEMP/wrangler.preview.json" ]]; then
+            echo "No synthetic Preview fixtures were created; cleanup not required."
+            exit 0
+          fi
+          [[ "$PREVIEW_DB_ID" == "6adb95e5-e542-4bec-9008-fbea01042305" ]]
+          npx --yes wrangler@4 d1 execute "$PREVIEW_DB_NAME" --remote --config "$RUNNER_TEMP/wrangler.preview.json" --file="$RUNNER_TEMP/preview-e2e-cleanup.sql" --yes
+          payload="{\"sql\":\"SELECT (SELECT COUNT(*) FROM users WHERE id LIKE 'e2e-$GITHUB_RUN_ID-%') AS users, (SELECT COUNT(*) FROM sessions WHERE id LIKE 'e2e-$GITHUB_RUN_ID-%') AS sessions, (SELECT COUNT(*) FROM clients WHERE id LIKE 'e2e-$GITHUB_RUN_ID-%') AS clients, (SELECT COUNT(*) FROM intervenants WHERE id LIKE 'e2e-$GITHUB_RUN_ID-%') AS intervenants\"}"
+          status="$(curl --silent --show-error --output "$RUNNER_TEMP/cleanup-check.json" --write-out '%{http_code}' \
+            -X POST -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -H "Content-Type: application/json" \
+            --data "$payload" "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/d1/database/$PREVIEW_DB_ID/query")"
+          [[ "$status" == "200" ]]
+          jq -e '.success == true and .result[0].results[0].users == 0 and .result[0].results[0].sessions == 0 and .result[0].results[0].clients == 0 and .result[0].results[0].intervenants == 0' "$RUNNER_TEMP/cleanup-check.json" >/dev/null
+          echo "PASS: all synthetic Preview test rows and sessions removed."
+
