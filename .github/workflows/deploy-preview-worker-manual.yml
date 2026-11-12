@@ -23,12 +23,11 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
-          ref: d68d53826a8437237f36803ee5560c82db702a99
+          ref: ${{ github.sha }}
           persist-credentials: false
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '22'
-          package-manager-cache: false
       - name: Verify isolated Preview target and generate deployment config
         shell: bash
         run: |
@@ -138,6 +137,6 @@ jobs:
           {
             echo 'Preview Worker only: prochelia-api-preview.'
             echo 'D1 binding is pinned to Preview DB 6adb95e5-e542-4bec-9008-fbea01042305.'
-            echo 'Backend source is pinned to d68d53826a8437237f36803ee5560c82db702a99. Preview CORS allowlist includes the exact Pages Preview origin.'
+            echo "Backend source deployed from commit ${GITHUB_SHA}. Preview CORS allowlist includes the exact Pages Preview origin."
             echo 'Dashboard vars and existing secrets are preserved. No migrations, no production Worker, and no production D1 changes.'
           } >> "$GITHUB_STEP_SUMMARY"
