@@ -914,6 +914,9 @@ async function paymentOnboard(request, env) {
   const provider = paymentProvider(env);
   const accountId = clean(body?.provider_account_id) || null;
   const existing = await env.DB.prepare('SELECT * FROM payment_accounts WHERE user_id=? LIMIT 1').bind(auth.user.id).first();
+  if (existing && String(existing.provider||'')!==provider) {
+    return json({ok:false,error:'PAYMENT_ACCOUNT_PROVIDER_MISMATCH',version:VERSION},409);
+  }
   if (existing) return json({ok:true,version:VERSION,account:existing,action:'REUSE_EXISTING'},200);
   const id=crypto.randomUUID();
   await env.DB.prepare(`INSERT INTO payment_accounts
@@ -1015,6 +1018,7 @@ async function payoutRequest(request, env) {
   const openDispute=await env.DB.prepare(`SELECT id FROM payment_disputes WHERE intervenant_id=? AND status='open' LIMIT 1`).bind(auth.user.id).first();
   if(openDispute) return json({ok:false,error:'PAYOUT_BLOCKED_BY_OPEN_DISPUTE',version:VERSION,dispute_id:openDispute.id},409);
   const account=await env.DB.prepare(`SELECT * FROM payment_accounts WHERE user_id=? LIMIT 1`).bind(auth.user.id).first();
+  if(account && String(account.provider||'')!==paymentProvider(env)) return json({ok:false,error:'PAYOUT_PROVIDER_MISMATCH',version:VERSION},409);
   if(!account||Number(account.payouts_enabled)!==1) return json({ok:false,error:'PAYOUT_ACCOUNT_NOT_READY',version:VERSION,message:'Le compte de paiement de l’intervenant doit être vérifié et activé par le PSP.'},409);
   const wallet=await env.DB.prepare('SELECT * FROM wallets WHERE user_id=? LIMIT 1').bind(auth.user.id).first();
   if(!wallet||Number(wallet.available_cents)<amount) return json({ok:false,error:'INSUFFICIENT_AVAILABLE_BALANCE',version:VERSION,available_cents:Number(wallet?.available_cents||0)},409);
