@@ -33,6 +33,35 @@ async function readJson(request) {
   catch { return null; }
 }
 
+async function readJsonLimited(request,maxBytes=16384) {
+  const reader=request.body?.getReader();
+  if(!reader) return {ok:false,error:'JSON_BODY_REQUIRED'};
+  const chunks=[];
+  let total=0;
+  try {
+    while(true) {
+      const {done,value}=await reader.read();
+      if(done) break;
+      total+=value.byteLength;
+      if(total>maxBytes) {
+        await reader.cancel().catch(()=>{});
+        return {ok:false,error:'PAYLOAD_TOO_LARGE'};
+      }
+      chunks.push(value);
+    }
+    const bytes=new Uint8Array(total);
+    let offset=0;
+    for(const chunk of chunks){bytes.set(chunk,offset);offset+=chunk.byteLength;}
+    const value=JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(bytes));
+    return {ok:true,value};
+  } catch {
+    return {ok:false,error:'INVALID_JSON'};
+  } finally {
+    try{reader.releaseLock();}catch{}
+  }
+}
+
+
 function clean(value) {
   return typeof value === 'string' ? value.trim() : value;
 }
@@ -1020,7 +1049,6 @@ async function verifyWebhookSignature(request, env, rawBody) {
 }
 
 async function paymentWebhook(request, env) {
-  await ensurePaymentSchema(env);
   // Bound untrusted webhook input before HMAC/JSON processing to prevent memory DoS.
   // Preserve the exact UTF-8 body text used by the provider signature.
   const bounded=await readBoundedRequestBody(request,64*1024);
@@ -1030,6 +1058,8 @@ async function paymentWebhook(request, env) {
   }
   const raw=bounded.text;
   if(!(await verifyWebhookSignature(request,env,raw))) return json({ok:false,error:'INVALID_WEBHOOK_SIGNATURE',version:VERSION},401);
+  // Do not create or inspect payment schema until the PSP signature is valid.
+  await ensurePaymentSchema(env);
   let event; try{event=JSON.parse(raw)}catch{return json({ok:false,error:'INVALID_WEBHOOK_JSON',version:VERSION},400);}
   const provider=clean(event?.provider)||paymentProvider(env), eventId=clean(event?.id), type=clean(event?.type);
   if(!eventId||!type) return json({ok:false,error:'INVALID_WEBHOOK_EVENT',version:VERSION},400);
@@ -1968,14 +1998,63 @@ async function financeSummary(request, env) {
 }
 
 async function complaintCreate(request, env) {
-  const gate=await requireAuthRole(request,env,['gerante','client','entreprise']); if(gate.error)return gate.error;
-  const b=await readJson(request)||{};if(!b.category)return json({ok:false,error:'CATEGORY_REQUIRED',version:VERSION},400);
-  const id=crypto.randomUUID();await env.DB.prepare(`INSERT INTO complaints(id,client_type,client_id,company_id,mission_id,category,severity,description) VALUES(?,?,?,?,?,?,?,?)`).bind(id,String(b.client_type||'B2C'),b.client_id||null,b.company_id||null,b.mission_id||null,b.category,String(b.severity||'LOW'),b.description||null).run();
+  const gate=await requireAuthRole(request,env,['gerante','client']);
+  if(gate.error)return gate.error;
+  const parsed=await readJsonLimited(request,8192);
+  if(!parsed.ok)return json({ok:false,error:parsed.error==='PAYLOAD_TOO_LARGE'?'PAYLOAD_TOO_LARGE':'INVALID_JSON',version:VERSION},parsed.error==='PAYLOAD_TOO_LARGE'?413:400);
+  const b=parsed.value;
+  if(!b || typeof b!=='object' || Array.isArray(b))return json({ok:false,error:'INVALID_BODY',version:VERSION},400);
+  if(typeof b.category!=='string' || !b.category.trim() || b.category.length>80)return json({ok:false,error:'CATEGORY_REQUIRED',version:VERSION},400);
+  const severity=String(b.severity||'LOW').toUpperCase();
+  if(!['LOW','MEDIUM','HIGH','CRITICAL'].includes(severity))return json({ok:false,error:'INVALID_SEVERITY',version:VERSION},400);
+  if(b.description!==undefined && (typeof b.description!=='string' || b.description.length>2000))return json({ok:false,error:'INVALID_DESCRIPTION',version:VERSION},400);
+
+  let clientId=null,intervenantId=null,companyId=null,missionId=null;
+  if(gate.auth.user.role==='client') {
+    const own=await env.DB.prepare('SELECT id FROM clients WHERE user_id=? LIMIT 1').bind(gate.auth.user.id).first();
+    if(!own)return json({ok:false,error:'CLIENT_PROFILE_REQUIRED',version:VERSION},403);
+    clientId=own.id;
+  } else {
+    if(b.client_id!==undefined && b.client_id!==null) {
+      const own=await env.DB.prepare('SELECT id FROM clients WHERE id=? LIMIT 1').bind(String(b.client_id)).first();
+      if(!own)return json({ok:false,error:'CLIENT_NOT_FOUND',version:VERSION},404);
+      clientId=own.id;
+    }
+    if(b.intervenant_id!==undefined && b.intervenant_id!==null) {
+      const own=await env.DB.prepare('SELECT id FROM intervenants WHERE id=? LIMIT 1').bind(String(b.intervenant_id)).first();
+      if(!own)return json({ok:false,error:'INTERVENANT_NOT_FOUND',version:VERSION},404);
+      intervenantId=own.id;
+    }
+    if(b.company_id!==undefined && b.company_id!==null) {
+      const company=await env.DB.prepare('SELECT id FROM business_profiles WHERE id=? LIMIT 1').bind(String(b.company_id)).first();
+      if(!company)return json({ok:false,error:'COMPANY_NOT_FOUND',version:VERSION},404);
+      companyId=company.id;
+    }
+  }
+
+  if(b.mission_id!==undefined && b.mission_id!==null && b.mission_id!=='') {
+    if(typeof b.mission_id!=='string' || b.mission_id.length>128)return json({ok:false,error:'INVALID_MISSION_ID',version:VERSION},400);
+    const mission=await env.DB.prepare('SELECT id,client_id,intervenant_id FROM missions WHERE id=? LIMIT 1').bind(b.mission_id).first();
+    if(!mission)return json({ok:false,error:'MISSION_NOT_FOUND',version:VERSION},404);
+    if(gate.auth.user.role==='client' && mission.client_id!==clientId)return json({ok:false,error:'FORBIDDEN',version:VERSION},403);
+    if(gate.auth.user.role==='gerante' && clientId && clientId!==mission.client_id)return json({ok:false,error:'MISSION_CLIENT_MISMATCH',version:VERSION},400);
+    missionId=mission.id;clientId=mission.client_id;intervenantId=mission.intervenant_id;companyId=null;
+  }
+
+  const id=crypto.randomUUID();
+  const clientType=companyId?'B2B':'B2C';
+  await env.DB.prepare(`INSERT INTO complaints(id,client_type,client_id,company_id,mission_id,category,severity,description) VALUES(?,?,?,?,?,?,?,?)`)
+    .bind(id,clientType,clientId,companyId,missionId,b.category.trim(),severity,typeof b.description==='string'?b.description.trim():null).run();
   const caseType=SIMPLE_CASES.has(b.category)?b.category:'reclamation_client';
-  const fakeReq=new Request(request.url,{method:'POST',headers:request.headers,body:JSON.stringify({case_type:caseType,client_id:b.client_id,company_id:b.company_id,mission_id:b.mission_id,description:b.description,impact_level:b.severity||'LOW',context:{complaint_id:id}})});
-  const caseResponse=await createOperationalCase(fakeReq,env);const caseJson=await caseResponse.json();
-  if(caseJson.case_id)await env.DB.prepare('UPDATE complaints SET resolution_case_id=? WHERE id=?').bind(caseJson.case_id,id).run();
-  return json({ok:true,version:VERSION,complaint_id:id,resolution_case_id:caseJson.case_id||null,copilot:caseJson.recommendation||null},201);
+  const fakeReq=new Request(request.url,{method:'POST',headers:request.headers,body:JSON.stringify({case_type:caseType,client_id:clientId,company_id:companyId,intervenant_id:intervenantId,mission_id:missionId,description:b.description,impact_level:severity,context:{complaint_id:id}})});
+  const caseResponse=await createOperationalCase(fakeReq,env);
+  const caseJson=await caseResponse.json();
+  if(!caseResponse.ok || !caseJson.case_id) {
+    await env.DB.prepare('DELETE FROM complaints WHERE id=?').bind(id).run();
+    return json({ok:false,error:'CASE_CREATION_FAILED',version:VERSION},caseResponse.status>=400?caseResponse.status:500);
+  }
+  await env.DB.prepare('UPDATE complaints SET resolution_case_id=? WHERE id=?').bind(caseJson.case_id,id).run();
+  return json({ok:true,version:VERSION,complaint_id:id,resolution_case_id:caseJson.case_id,copilot:caseJson.recommendation||null},201);
 }
 
 async function setPhase(request, env) {
@@ -2913,17 +2992,23 @@ async function processBackgroundJobs(request,env) {
 function isMutatingMethod(method){ return ['POST','PUT','PATCH','DELETE'].includes(method); }
 function securityOriginAllowed(request,env){
   const origin=request.headers.get('origin');
-  // Les clients non-navigateur peuvent ne pas envoyer Origin. Les requêtes navigateur
-  // avec Origin doivent correspondre à une origine explicitement autorisée.
-  if(!origin) return true;
+  // Toute mutation doit porter une origine explicite et strictement autorisée.
+  if(!origin) return false;
   const configured=clean(env?.CORS_ORIGIN);
-  const defaults=[
-    'https://prochelia.pages.dev',
-    'https://56b01f85.prochelia.pages.dev'
-  ];
-  const allowed=(configured ? configured.split(',') : defaults)
-    .map(x=>String(x).trim()).filter(Boolean);
+  // Aucune origine par défaut : une configuration absente ou vide ferme l'accès.
+  if(!configured) return false;
+  const allowed=configured.split(',').map(x=>String(x).trim()).filter(Boolean);
   return allowed.includes(origin);
+}
+
+// Seul le bootstrap initial peut être appelé sans Origin, et uniquement avec
+// le secret serveur exact. Le handler bootstrap revérifie également ce jeton.
+function originlessMutationAllowed(request,env){
+  if(request.method!=='POST' || request.headers.get('origin')) return false;
+  const url=new URL(request.url);
+  if(!env?.BOOTSTRAP_TOKEN) return false;
+  return url.pathname==='/api/auth/bootstrap' &&
+    request.headers.get('authorization')===`Bearer ${env.BOOTSTRAP_TOKEN}`;
 }
 
 
@@ -3388,8 +3473,14 @@ async function handleCommercialRecruitment(request,env){
 
 async function handle(request,env){
   try {
-    if(isMutatingMethod(request.method) && !securityOriginAllowed(request,env)) return json({ok:false,error:'ORIGIN_NOT_ALLOWED',version:VERSION},403);
+    if(isMutatingMethod(request.method) && !securityOriginAllowed(request,env) && !originlessMutationAllowed(request,env)) return json({ok:false,error:'ORIGIN_NOT_ALLOWED',version:VERSION},403);
     const url=new URL(request.url);
+    // PSP settlement remains explicitly disabled at the route boundary until
+    // atomic ledger, replay/idempotency, refunds and payout reconciliation pass.
+    if(url.pathname==='/api/payments/webhook'){
+      if(request.method!=='POST') return json({ok:false,error:'METHOD_NOT_ALLOWED',version:VERSION},405,{'allow':'POST'});
+      return json({ok:false,error:'PAYMENT_WEBHOOK_DISABLED_PENDING_REVIEW',version:VERSION},503);
+    }
     // Fail closed before any schema helper touches D1: unauthenticated callers
     // must not use mission validation as an existence oracle for private IDs.
     if (url.pathname === '/api/missions/validate') {
@@ -3707,9 +3798,52 @@ async function interfaceConfigEndpoint(request,env){
 async function supportCreate(request,env){
   const a=await supportAuth(request,env); if(a.response)return a.response;
   await ensureProcheliaMasterComplementSchema(env);
-  const b=await readJson(request)||{};
-  const category=clean(b.category)||'GENERAL';
-  const severity=String(b.severity||'LOW').toUpperCase();
+  const parsed=await readJsonLimited(request,16384);
+  if(!parsed.ok){
+    const tooLarge=parsed.error==='PAYLOAD_TOO_LARGE';
+    return json({ok:false,error:parsed.error,version:VERSION},tooLarge?413:400);
+  }
+  const b=parsed.value;
+  if(!b || typeof b!=='object' || Array.isArray(b)){
+    return json({ok:false,error:'INVALID_SUPPORT_PAYLOAD',version:VERSION},400);
+  }
+  const rawCategory=b.category===undefined?'GENERAL':b.category;
+  if(typeof rawCategory!=='string' || !['GENERAL','DELAY','TECHNICAL','DOCUMENT','PAYMENT','COMPLAINT','SECURITY','RGPD_SECURITY','LEGAL','REPLACEMENT','IDENTITY','FRAUD','DATA_BREACH','RGPD','LITIGE','ABSENCE','DUPLICATE','DOUBLE_PAYMENT','FACTURE','RETARD','NOTIFICATION'].includes(rawCategory.trim().toUpperCase())){
+    return json({ok:false,error:'INVALID_SUPPORT_CATEGORY',version:VERSION},400);
+  }
+  const category=rawCategory.trim().toUpperCase();
+  const rawSeverity=b.severity===undefined?'LOW':b.severity;
+  if(typeof rawSeverity!=='string' || !['LOW','MEDIUM','HIGH','CRITICAL'].includes(rawSeverity.trim().toUpperCase())){
+    return json({ok:false,error:'INVALID_SUPPORT_SEVERITY',version:VERSION},400);
+  }
+  const severity=rawSeverity.trim().toUpperCase();
+  if(b.description!==undefined && (typeof b.description!=='string' || b.description.length>4000)){
+    return json({ok:false,error:'INVALID_SUPPORT_DESCRIPTION',version:VERSION},400);
+  }
+  // Never accept relationship IDs from an ordinary requester: otherwise a
+  // forged company/mission/complaint ID could attach a ticket to another account.
+  const isManager=['GERANTE','ADMIN'].includes(a.role);
+  const linkedFields=['company_id','mission_id','complaint_id'];
+  if(!isManager && linkedFields.some(k=>b[k]!==undefined && b[k]!==null && b[k]!=='')){
+    return json({ok:false,error:'LINKED_CASE_REQUIRES_MANAGER_VALIDATION',version:VERSION},403);
+  }
+  if(isManager){
+    if(b.mission_id!==undefined && b.mission_id!==null){
+      if(typeof b.mission_id!=='string' || b.mission_id.length>128) return json({ok:false,error:'INVALID_MISSION_ID',version:VERSION},400);
+      const linkedMission=await env.DB.prepare('SELECT id FROM missions WHERE id=? LIMIT 1').bind(b.mission_id).first();
+      if(!linkedMission) return json({ok:false,error:'MISSION_NOT_FOUND',version:VERSION},404);
+    }
+    if(b.complaint_id!==undefined && b.complaint_id!==null){
+      if(typeof b.complaint_id!=='string' || b.complaint_id.length>128) return json({ok:false,error:'INVALID_COMPLAINT_ID',version:VERSION},400);
+      const linkedComplaint=await env.DB.prepare('SELECT id FROM complaints WHERE id=? LIMIT 1').bind(b.complaint_id).first();
+      if(!linkedComplaint) return json({ok:false,error:'COMPLAINT_NOT_FOUND',version:VERSION},404);
+    }
+    if(b.company_id!==undefined && b.company_id!==null){
+      if(typeof b.company_id!=='string' || b.company_id.length>128) return json({ok:false,error:'INVALID_COMPANY_ID',version:VERSION},400);
+      const linkedCompany=await env.DB.prepare('SELECT id FROM business_profiles WHERE id=? LIMIT 1').bind(b.company_id).first();
+      if(!linkedCompany) return json({ok:false,error:'COMPANY_NOT_FOUND',version:VERSION},404);
+    }
+  }
   const scenario=supportScenarioFor(category,severity);
   const rule=await env.DB.prepare(`SELECT * FROM copilot_resolution_rules WHERE scenario_key=? LIMIT 1`).bind(scenario).first();
   const auto=Number(rule?.auto_allowed||0)===1 && String(severity)!=='CRITICAL' && String(severity)!=='HIGH';
@@ -3722,31 +3856,35 @@ async function supportCreate(request,env){
   await journal(env,a.role,a.auth.user.id,'SUPPORT_CASE_CREATE','support_cases',id,'OK',{scenario,severity,auto});
   let autoResult=null;
   if(auto){
-    autoResult=await supportAutoResolve(env,id,a.auth.user.id,a.role,scenario,b);
+    autoResult=await supportAutoResolve(env,id,a.auth.user.id,a.role,scenario);
   }
-  return json({ok:true,version:VERSION,case_id:id,scenario,automatic_resolution:!!auto,auto_result:autoResult,manager_approval_required:!auto});
+  return json({ok:true,version:VERSION,case_id:id,scenario,automatic_resolution:false,auto_check:!!auto,auto_result:autoResult,manager_approval_required:auto ? true : requiresManager});
 }
 
-async function supportAutoResolve(env,caseId,actorId,actorRole,scenario,context={}){
+async function supportAutoResolve(env,caseId,actorId,actorRole,scenario) {
   const safeAuto=['DELAY_LIGHT','NOTIFICATION_FAILED','DOCUMENT_REMINDER','SIMPLE_REFUND_CHECK','CLIENT_COMPLAINT'];
-  if(!safeAuto.includes(scenario)) return {ok:false,status:'MANAGER_REQUIRED'};
-  // Sécurité de production : le Copilote ne doit jamais déclarer une résolution
-  // simplement parce qu'il a généré une proposition. Une résolution automatique
-  // n'est clôturée que lorsqu'une action downstream vérifiable a confirmé son succès.
-  const verified=String(context?.execution_verified||'').toLowerCase()==='true' || context?.execution_verified===true;
-  const resolution={scenario,actions:['verify_context','apply_only_reversible_or_preapproved_action','notify_requester','journal'],context:context||{}};
-  if(!verified){
-    await env.DB.prepare(`UPDATE support_cases SET status='WAITING_ACTION',resolution=?,resolved_at=NULL WHERE id=?`).bind(JSON.stringify({...resolution,status:'ACTION_REQUIRED'}),caseId).run();
-    await supportEvent(env,caseId,actorRole,actorId,'AUTO_CHECKED_WAITING_ACTION',resolution);
-    await journal(env,actorRole,actorId,'SUPPORT_CASE_AUTO_CHECK','support_cases',caseId,'WAITING_ACTION',{scenario});
-    return {ok:true,status:'WAITING_ACTION',scenario,closed:false,reason:'NO_VERIFIED_DOWNSTREAM_ACTION'};
+  const eligible=safeAuto.includes(scenario);
+  // Fail closed: no browser/client field can attest that a downstream action ran.
+  // Until a server-owned adapter returns durable evidence, the case always awaits action.
+  const reason=eligible?'NO_TRUSTED_DOWNSTREAM_ACTION':'SCENARIO_REQUIRES_MANAGER';
+  const resolution={
+    scenario,
+    status:eligible?'ACTION_REQUIRED':'MANAGER_REQUIRED',
+    actions:['verify_context','apply_only_reversible_or_preapproved_action','notify_requester','journal'],
+    verification:{verified:false,source:'SERVER_SIDE_DOWNSTREAM',reason}
+  };
+  const update=await env.DB.prepare(
+    `UPDATE support_cases
+        SET status='WAITING_ACTION',resolution=?,resolved_at=NULL,requires_manager=1
+      WHERE id=? AND status='PROCESSING'`
+  ).bind(JSON.stringify(resolution),caseId).run();
+  if(Number(update?.meta?.changes||0)!==1){
+    return {ok:false,status:'STATE_CONFLICT',scenario,closed:false,reason:'CASE_NOT_PROCESSING'};
   }
-  await env.DB.prepare(`UPDATE support_cases SET status='RESOLVED',resolution=?,resolved_at=CURRENT_TIMESTAMP WHERE id=?`).bind(JSON.stringify(resolution),caseId).run();
-  await supportEvent(env,caseId,actorRole,actorId,'AUTO_RESOLVED_VERIFIED',resolution);
-  await journal(env,actorRole,actorId,'SUPPORT_CASE_AUTO_RESOLVE','support_cases',caseId,'RESOLVED',{scenario});
-  return {ok:true,status:'RESOLVED',scenario,closed:true};
+  await supportEvent(env,caseId,actorRole,actorId,'AUTO_CHECKED_WAITING_ACTION',resolution);
+  await journal(env,actorRole,actorId,'SUPPORT_CASE_AUTO_CHECK','support_cases',caseId,'WAITING_ACTION',{scenario,reason});
+  return {ok:true,status:'WAITING_ACTION',scenario,closed:false,manager_approval_required:true,reason};
 }
-
 async function supportList(request,env){
   const a=await supportAuth(request,env); if(a.response)return a.response;
   await ensureProcheliaMasterComplementSchema(env);
@@ -3765,17 +3903,23 @@ async function supportResolve(request,env){
   const a=await supportAuth(request,env); if(a.response)return a.response;
   if(a.role!=='GERANTE'&&a.role!=='ADMIN') return json({ok:false,error:'MANAGER_APPROVAL_REQUIRED',version:VERSION},403);
   await ensureProcheliaMasterComplementSchema(env);
-  const b=await readJson(request)||{}; const id=clean(b.case_id);
-  if(!id)return json({ok:false,error:'CASE_ID_REQUIRED',version:VERSION},400);
+  const parsed=await readJsonLimited(request,8192);
+  if(!parsed.ok) return json({ok:false,error:parsed.error,version:VERSION},parsed.error==='PAYLOAD_TOO_LARGE'?413:400);
+  const b=parsed.value;
+  if(!b || typeof b!=='object' || Array.isArray(b)) return json({ok:false,error:'INVALID_SUPPORT_RESOLUTION',version:VERSION},400);
+  const id=clean(b.case_id);
+  if(typeof id!=='string' || !id || id.length>128) return json({ok:false,error:'CASE_ID_REQUIRED',version:VERSION},400);
+  if(b.resolution!==undefined && (typeof b.resolution!=='string' || b.resolution.length>4000)) return json({ok:false,error:'INVALID_RESOLUTION',version:VERSION},400);
   const row=await env.DB.prepare(`SELECT * FROM support_cases WHERE id=? LIMIT 1`).bind(id).first();
   if(!row)return json({ok:false,error:'CASE_NOT_FOUND',version:VERSION},404);
+  if(row.status==='RESOLVED') return json({ok:false,error:'CASE_ALREADY_RESOLVED',version:VERSION},409);
   const resolution=clean(b.resolution)||'Résolution validée par la Gérante après contrôle du dossier.';
-  await env.DB.prepare(`UPDATE support_cases SET status='RESOLVED',resolution=?,resolved_at=CURRENT_TIMESTAMP,requires_manager=0 WHERE id=?`).bind(resolution,id).run();
+  const updated=await env.DB.prepare(`UPDATE support_cases SET status='RESOLVED',resolution=?,resolved_at=CURRENT_TIMESTAMP,requires_manager=0 WHERE id=? AND status=?`).bind(resolution,id,row.status).run();
+  if(Number(updated?.meta?.changes||0)!==1) return json({ok:false,error:'CASE_STATE_CONFLICT',version:VERSION},409);
   await supportEvent(env,id,a.role,a.auth.user.id,'MANAGER_RESOLVED',{resolution});
   await journal(env,a.role,a.auth.user.id,'SUPPORT_CASE_MANAGER_RESOLVE','support_cases',id,'RESOLVED',{resolution});
   return json({ok:true,version:VERSION,case_id:id,status:'RESOLVED',resolution});
 }
-
 async function supportDashboard(request,env){
   const a=await supportAuth(request,env); if(a.response)return a.response;
   if(a.role!=='GERANTE'&&a.role!=='ADMIN') return json({ok:false,error:'FORBIDDEN'},403);
@@ -3880,8 +4024,13 @@ async function productionRateLimit(request,env){
 
 async function strictProductionAudit(request,env){
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
+  // This audit is deliberately read-only: no schema creation, config-check
+  // inserts, journal writes, queue processing, or other persistence.
   const result=await productionConfigCheck(env);
   const extra=[
+    // Payment settlement stays blocked until atomic ledger, replay,
+    // idempotency, refunds and payout reconciliation are independently tested.
+    {code:'PAYMENT_WEBHOOK_ATOMICITY',status:'NOT_READY',reason:'PAYMENT_WEBHOOK_DISABLED_PENDING_REVIEW'},
     {code:'SECURITY_CODE_DELIVERY',status:finalSecretConfigured(env,'SECURITY_CODE_WEBHOOK')&&finalSecretConfigured(env,'SECURITY_CODE_WEBHOOK_SECRET')?'OK':'NOT_CONFIGURED'},
     {code:'CORS_ORIGIN',status:finalSecretConfigured(env,'CORS_ORIGIN')?'OK':'NOT_CONFIGURED'},
     {code:'BACKUP_R2',status:env.BACKUP_BUCKET&&finalSecretConfigured(env,'BACKUP_ENCRYPTION_KEY')?'OK':'NOT_CONFIGURED'},
@@ -3889,16 +4038,11 @@ async function strictProductionAudit(request,env){
     {code:'MAPS_PROVIDER',status:finalSecretConfigured(env,'MAPS_API_KEY')?'OK':'NOT_CONFIGURED'}
   ];
   const checks=[...(result.checks||[]),...extra];
-  const blockingCodes=new Set(['SECRET:PAYMENT_PROVIDER','SECRET:PAYMENT_WEBHOOK_SECRET','SECURITY_CODE_DELIVERY','CORS_ORIGIN','BACKUP_R2']);
+  const blockingCodes=new Set(['PAYMENT_WEBHOOK_ATOMICITY','SECRET:PAYMENT_PROVIDER','SECRET:PAYMENT_WEBHOOK_SECRET','SECURITY_CODE_DELIVERY','CORS_ORIGIN','BACKUP_R2']);
   const blocking=checks.filter(x=>blockingCodes.has(x.code)&&x.status!=='OK');
   const configurationReady=blocking.length===0 && result.blocking===0;
-  for(const c of extra){
-    await env.DB.prepare(`INSERT INTO system_config_checks(id,check_code,status,details_json) VALUES(?,?,?,?)`).bind(crypto.randomUUID(),c.code,c.status,JSON.stringify(c)).run();
-  }
-  await journal(env,'gerante',gate.auth.user.id,'STRICT_PRODUCTION_AUDIT','system',null,configurationReady?'CONFIGURATION_READY':'ATTENTION',{blocking:blocking.map(x=>x.code)});
-  // Configuration presence is not proof of operational acceptance.
-  // Real traffic remains disabled until sandbox, E2E, restore, security and legal gates are independently attested.
-  return json({ok:true,version:VERSION,production_gate:configurationReady?'CONFIGURATION_READY':'CLOSED',configuration_ready:configurationReady,ready_for_real_traffic:false,real_traffic_authorized:false,checks,blocking:blocking.map(x=>x.code),additional_gates_required:['PSP_SANDBOX_AND_WEBHOOK_RECONCILIATION','CLIENT_PROVIDER_MANAGER_E2E','IOS_ANDROID_DESKTOP_ACCEPTANCE','BACKUP_RESTORE_DRILL','INDEPENDENT_SECURITY_REVIEW','RGPD_AND_LEGAL_APPROVAL','EXPLICIT_RELEASE_AUTHORIZATION'],note:'Configuration audit only. This endpoint can never authorize real traffic; independent operational acceptance and explicit release approval remain mandatory.'});
+  // A configuration audit is never a production release authorization.
+  return json({ok:true,version:VERSION,production_gate:configurationReady?'CONFIGURATION_READY':'CLOSED',configuration_ready:configurationReady,ready_for_real_traffic:false,real_traffic_authorized:false,checks,blocking:blocking.map(x=>x.code),additional_gates_required:['PSP_SANDBOX_AND_WEBHOOK_RECONCILIATION','CLIENT_PROVIDER_MANAGER_E2E','IOS_ANDROID_DESKTOP_ACCEPTANCE','BACKUP_RESTORE_DRILL','INDEPENDENT_SECURITY_REVIEW','RGPD_AND_LEGAL_APPROVAL','EXPLICIT_RELEASE_AUTHORIZATION'],note:'Read-only configuration audit only. independent operational acceptance, sandbox reconciliation, security review and explicit release authorization remain mandatory. Payment webhook settlement remains blocked pending atomicity and reconciliation validation; this endpoint can never authorize real traffic.'});
 }
 
 const __procheliaProductionSafetyHandle = handle;
@@ -3911,10 +4055,15 @@ handle = async function(request,env){
     const preflightPath = preflightUrl.pathname;
     const preflightMethod = request.method.toUpperCase();
     const getOnlyDiagnostics = new Set(['/api/health','/api/readiness','/api/info']);
+    // Disabled PSP webhook is rejected before rate limiting or any D1 access.
+    if (preflightPath === '/api/payments/webhook') {
+      if (preflightMethod !== 'POST') return json({ok:false,error:'METHOD_NOT_ALLOWED',version:VERSION},405,{'allow':'POST'});
+      return json({ok:false,error:'PAYMENT_WEBHOOK_DISABLED_PENDING_REVIEW',version:VERSION},503);
+    }
     // Apply browser-origin rejection before rate limiting or any D1 access.
     // This keeps forbidden cross-origin writes a deterministic 403 even when
     // the database is unavailable, instead of masking them as a generic 500.
-    if (isMutatingMethod(preflightMethod) && !securityOriginAllowed(request,env)) {
+    if (isMutatingMethod(preflightMethod) && !securityOriginAllowed(request,env) && !originlessMutationAllowed(request,env)) {
       return json({ok:false,error:'ORIGIN_NOT_ALLOWED',version:VERSION},403);
     }
     // Block anonymous mission validation before rate limiting touches D1.
