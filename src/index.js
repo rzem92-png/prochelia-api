@@ -842,7 +842,7 @@ async function ensurePaymentSchema(env) {
 
 async function refundMissionPaymentOnce(env, tx) {
   const results=await env.DB.batch([
-    env.DB.prepare(`UPDATE payment_transactions SET status='refunded',updated_at=CURRENT_TIMESTAMP
+    env.DB.prepare(`UPDATE payment_transactions SET status='refunded',refund_cents=gross_cents,updated_at=CURRENT_TIMESTAMP
       WHERE id=? AND status='paid'`).bind(tx.id),
     env.DB.prepare(`INSERT OR IGNORE INTO payment_wallet_ledger
       (id,idempotency_key,transaction_id,user_id,entry_type,available_delta_cents,currency,metadata_json)
@@ -1709,7 +1709,7 @@ async function pricingQuote(request, env) {
 
 async function financeSummary(request, env) {
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
-  const tx=await env.DB.prepare(`SELECT COALESCE(SUM(gross_cents),0) gross,COALESCE(SUM(commission_cents),0) commission,COALESCE(SUM(provider_fee_cents),0) provider_fee,COALESCE(SUM(refund_cents),0) refunds,COALESCE(SUM(net_intervenant_cents),0) intervenant FROM payment_transactions`).first();
+  const tx=await env.DB.prepare(`SELECT COALESCE(SUM(CASE WHEN status IN ('paid','refunded') THEN gross_cents ELSE 0 END),0) gross,COALESCE(SUM(CASE WHEN status IN ('paid','refunded') THEN commission_cents ELSE 0 END),0) commission,COALESCE(SUM(CASE WHEN status IN ('paid','refunded') THEN provider_fee_cents ELSE 0 END),0) provider_fee,COALESCE(SUM(CASE WHEN status='refunded' THEN refund_cents ELSE 0 END),0) refunds,COALESCE(SUM(CASE WHEN status='paid' THEN net_intervenant_cents ELSE 0 END),0) intervenant FROM payment_transactions`).first();
   const ledger=await env.DB.prepare(`SELECT COALESCE(SUM(CASE WHEN direction='CREDIT' THEN amount_cents ELSE -amount_cents END),0) balance FROM accounting_ledger`).first();
   const expenses=await env.DB.prepare(`SELECT COALESCE(SUM(amount_cents),0) total FROM business_expenses`).first();
   const pending=await env.DB.prepare(`SELECT COALESCE(SUM(gross_cents),0) total,COUNT(*) n FROM payment_transactions WHERE status IN ('pending','processing','held')`).first();
@@ -2395,7 +2395,7 @@ async function capacityDashboard(request, env) {
 async function financeForecast(request, env) {
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
   const months=Math.max(1,Math.min(12,Number((await readJson(request)||{}).months||3)));
-  const tx=await env.DB.prepare(`SELECT COALESCE(SUM(gross_cents),0) gross,COALESCE(SUM(commission_cents),0) commission,COALESCE(SUM(provider_fee_cents),0) provider_fee,COALESCE(SUM(refund_cents),0) refunds,COALESCE(SUM(net_intervenant_cents),0) intervenant FROM payment_transactions WHERE created_at>=datetime('now','-90 day')`).first();
+  const tx=await env.DB.prepare(`SELECT COALESCE(SUM(CASE WHEN status IN ('paid','refunded') THEN gross_cents ELSE 0 END),0) gross,COALESCE(SUM(CASE WHEN status IN ('paid','refunded') THEN commission_cents ELSE 0 END),0) commission,COALESCE(SUM(CASE WHEN status IN ('paid','refunded') THEN provider_fee_cents ELSE 0 END),0) provider_fee,COALESCE(SUM(CASE WHEN status='refunded' THEN refund_cents ELSE 0 END),0) refunds,COALESCE(SUM(CASE WHEN status='paid' THEN net_intervenant_cents ELSE 0 END),0) intervenant FROM payment_transactions WHERE created_at>=datetime('now','-90 day')`).first();
   const base=Number(tx?.gross||0)/3;
   const rows=[];
   for(let i=1;i<=months;i++){
@@ -2404,7 +2404,7 @@ async function financeForecast(request, env) {
     const payout=Math.round(Number(tx?.intervenant||0)/3*(1+0.03*i));
     const provider=Math.round(Number(tx?.provider_fee||0)/3*(1+0.03*i));
     const refunds=Math.round(Number(tx?.refunds||0)/3*(1+0.03*i));
-    const margin=revenue-commission*0+payout*-1+commission-provider-refunds;
+    const margin=revenue-payout-provider-refunds;
     const period=new Date(); period.setMonth(period.getMonth()+i); const key=period.toISOString().slice(0,7);
     await env.DB.prepare(`INSERT INTO finance_forecasts(id,period,scenario,revenue_cents,commission_cents,payout_cents,provider_fee_cents,refund_cents,estimated_margin_cents,confidence) VALUES(?,?,?,?,?,?,?,?,?,?)`)
       .bind(crypto.randomUUID(),key,'BASE',revenue,commission,payout,provider,refunds,margin,0.55).run();
