@@ -147,7 +147,7 @@ function getSessionToken(request){
   const cookie=getCookie(request,SESSION_COOKIE);
   if(cookie) return cookie;
   const authorization=request.headers.get('authorization')||'';
-  const match=authorization.match(/^Bearer\\s+([A-Za-z0-9_-]{32,})$/i);
+  const match=authorization.match(/^Bearer\s+([A-Za-z0-9_-]{32,})$/i);
   return match?match[1]:null;
 }
 
