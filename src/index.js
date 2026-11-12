@@ -1110,6 +1110,13 @@ async function paymentWebhook(request, env) {
     const providerPaymentId=clean(event?.data?.provider_payment_id)||null;
     if(tx.provider_payment_id && providerPaymentId && String(tx.provider_payment_id)!==providerPaymentId)
       return json({ok:false,error:'WEBHOOK_PROVIDER_PAYMENT_ID_MISMATCH',version:VERSION},403);
+    if(txStatus==='refunded'){
+      const refundAmountCents=Number(event?.data?.refund_amount_cents);
+      if(!tx.provider_payment_id || !providerPaymentId || String(tx.provider_payment_id)!==providerPaymentId)
+        return json({ok:false,error:'REFUND_PROVIDER_PAYMENT_REFERENCE_REQUIRED',version:VERSION},403);
+      if(!Number.isSafeInteger(refundAmountCents) || refundAmountCents!==Number(tx.gross_cents))
+        return json({ok:false,error:'REFUND_AMOUNT_MISMATCH',version:VERSION},409);
+    }
     const allowedPrevious=txStatus==='refunded'?"'paid','held'":"'pending','held'";
     const disputeGuard=txStatus==='refunded'?'':"AND NOT EXISTS (SELECT 1 FROM payment_disputes WHERE transaction_id=? AND status='open')";
     const transitionBindings=txStatus==='refunded'
