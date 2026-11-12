@@ -83,12 +83,12 @@ test("payment webhook is disabled before rate limiting and every D1 access", () 
   assert.doesNotMatch(helper,/payments\/webhook/);
 });
 
-test("originless webhook receives the explicit disabled response; bootstrap remains token-gated", () => {
+test("only the initial bootstrap is allowed without Origin, and it remains token-gated", () => {
   const start = source.indexOf("function originlessMutationAllowed");
   const end = source.indexOf("\n\n", start);
   assert.ok(start >= 0 && end > start);
   const helper = source.slice(start, end);
-  assert.match(helper, /url\.pathname==='\/api\/payments\/webhook'/);
   assert.match(helper, /url\.pathname==='\/api\/auth\/bootstrap'/);
   assert.match(helper, /authorization/);
+  assert.doesNotMatch(helper, /payments\/webhook/);
 });
