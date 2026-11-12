@@ -800,8 +800,9 @@ async function ensurePaymentSchema(env) {
             OR typeof((SELECT reserved_cents FROM wallets WHERE user_id=NEW.user_id)+NEW.reserved_delta_cents)<>'integer'
             OR typeof((SELECT paid_cents FROM wallets WHERE user_id=NEW.user_id)+NEW.paid_delta_cents)<>'integer'
             THEN RAISE(ABORT,'PAYMENT_WALLET_INTEGER_OVERFLOW')
-          WHEN (SELECT available_cents FROM wallets WHERE user_id=NEW.user_id)+NEW.available_delta_cents<0
-            OR (SELECT pending_cents FROM wallets WHERE user_id=NEW.user_id)+NEW.pending_delta_cents<0
+          -- Available may become negative after a confirmed PSP refund reversal;
+          -- this is a receivable, while pending/reserved/paid remain protected.
+          WHEN (SELECT pending_cents FROM wallets WHERE user_id=NEW.user_id)+NEW.pending_delta_cents<0
             OR (SELECT reserved_cents FROM wallets WHERE user_id=NEW.user_id)+NEW.reserved_delta_cents<0
             OR (SELECT paid_cents FROM wallets WHERE user_id=NEW.user_id)+NEW.paid_delta_cents<0
             THEN RAISE(ABORT,'PAYMENT_WALLET_NEGATIVE_PROTECTED_BALANCE')
