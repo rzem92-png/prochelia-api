@@ -66,19 +66,22 @@ test("originless bootstrap requires the exact configured bearer token", async ()
   assert.notEqual(allowedPastOriginGate.status, 403);
 });
 
-test("payment webhook verifies its signature before any D1 schema access", () => {
+test("payment webhook remains fail-closed and performs no D1 work", () => {
   const start = source.indexOf("async function paymentWebhook(request, env)");
-  const end = source.indexOf("\nasync function ", start + 1);
+  const end = source.indexOf("\nasync function openPaymentDispute", start + 1);
   assert.ok(start >= 0 && end > start);
   const handler = source.slice(start, end);
-  assert.ok(handler.indexOf("verifyWebhookSignature(request,env,raw)") < handler.indexOf("ensurePaymentSchema(env)"));
+  assert.match(handler, /PAYMENT_WEBHOOK_DISABLED_PENDING_REVIEW/);
+  assert.match(handler, /\},503\)/);
+  assert.doesNotMatch(handler, /env\.DB|ensurePaymentSchema|\.prepare\s*\(/);
 });
 
-test("originless webhook mutations are not implicitly exempted by the generic origin guard", () => {
+test("originless webhook receives the explicit disabled response; bootstrap remains token-gated", () => {
   const start = source.indexOf("function originlessBootstrapAllowed");
   const end = source.indexOf("\n\n", start);
   assert.ok(start >= 0 && end > start);
   const helper = source.slice(start, end);
+  assert.match(helper, /url\.pathname==='\/api\/payments\/webhook'/);
   assert.match(helper, /url\.pathname==='\/api\/auth\/bootstrap'/);
-  assert.doesNotMatch(helper, /payments\/webhook/);
+  assert.match(helper, /authorization/);
 });
