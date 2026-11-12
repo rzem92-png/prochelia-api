@@ -31,6 +31,11 @@ test("Pages binding mismatch diagnostics expose only non-secret deployment metad
   assert.doesNotMatch(block, /CLOUDFLARE_API_TOKEN|Authorization|Bearer/);
 });
 
+test("Preview E2E synthetic users provide every required users field, including password_hash", () => {
+  assert.match(workflow, /INSERT INTO users \\(id,role,email,first_name,last_name,status,password_hash\\) VALUES/);
+  assert.match(workflow, /q\\('active'\\),q\\(hash\\(randomBytes\\(48\\)\\.toString\\('base64url'\\)\\)\\)/);
+});
+
 test("Synthetic Preview E2E fixtures are cleaned up and cleanup is verified", () => {
   assert.match(workflow, /Generate synthetic test fixtures and guaranteed cleanup SQL/);
   assert.match(workflow, /Always remove synthetic Preview fixtures and verify cleanup/);
