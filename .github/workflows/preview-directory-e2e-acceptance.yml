@@ -174,7 +174,7 @@ jobs:
           const userValues = users.map(u=>'('+[...u.map(q),q('active'),q(hash(randomBytes(48).toString('base64url')))].join(',')+')').join(',\n');
           const clientValues = clientUsers.map((u,i)=>'('+[
             q(prefix+'client-'+String(i).padStart(3,'0')),q(u.id),
-            q('Synthetic address '+i),q('E2E Test City'),q('00000'),q('Synthetic test fixture')
+            q('Synthetic address '+i),q('E2E Test City'),q('00000'),q('Synthetic test fixture'),q('9999-12-31 23:59:59'),q('9999-12-31 23:59:59')
           ].join(',')+')').join(',\n');
           const sessionValues = [
             [prefix+'manager-session',managerId,hash(managerToken)],
@@ -183,10 +183,10 @@ jobs:
           const seed = [
             'INSERT INTO users (id,role,email,first_name,last_name,status,password_hash) VALUES',
             userValues + ';',
-            'INSERT INTO clients (id,user_id,address,city,postal_code,notes) VALUES',
+            'INSERT INTO clients (id,user_id,address,city,postal_code,notes,created_at,updated_at) VALUES',
             clientValues + ';',
-            'INSERT INTO intervenants (id,user_id,professional_status,description,service_area,hourly_rate,validation_status) VALUES',
-            '('+[q(prefix+'intervenant'),q(providerId),q('independent'),q('Synthetic E2E provider'),q('E2E Test City'),'20',q('approved')].join(',')+');',
+            'INSERT INTO intervenants (id,user_id,professional_status,description,service_area,hourly_rate,validation_status,created_at,updated_at) VALUES',
+            '('+[q(prefix+'intervenant'),q(providerId),q('independent'),q('Synthetic E2E provider'),q('E2E Test City'),'20',q('approved'),q('9999-12-31 23:59:59'),q('9999-12-31 23:59:59')].join(',')+');',
             'INSERT INTO sessions (id,user_id,token_hash,expires_at) VALUES',
             sessionValues + ';'
           ].join('\n');
