@@ -28,7 +28,7 @@ jobs:
       AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_PROD_SECRET_ACCESS_KEY }}
       AWS_DEFAULT_REGION: auto
       EXPECTED_ACCOUNT_ID: f2a79e9fa41566a8ec80fb24c02c60eb
-      EXPECTED_DB_NAME: prochelia-api
+      EXPECTED_DB_NAME: prochelia-db
       EXPECTED_DB_ID: 04f52830-ef5a-4f17-a640-42bbc2381bba
       R2_BUCKET: prochelia-production-backups-eu
       R2_ENDPOINT: https://f2a79e9fa41566a8ec80fb24c02c60eb.r2.cloudflarestorage.com
@@ -66,13 +66,31 @@ jobs:
           assert len(c["d1_databases"]) == 1
           d=c["d1_databases"][0]
           assert d["binding"] == "DB"
-          assert d["database_name"] == "prochelia-api"
+          assert d["database_name"] == "prochelia-db"
           assert d["database_id"] == "04f52830-ef5a-4f17-a640-42bbc2381bba"
           print("Exact production D1 target verified.")
           PY
           who="$(npx --yes wrangler@4 whoami 2>&1)"
           printf '%s\n' "$who"
           printf '%s' "$who" | grep -Fq "$EXPECTED_ACCOUNT_ID"
+
+      - name: Verify live production D1 name and UUID through Cloudflare API
+        shell: bash
+        run: |
+          set -euo pipefail
+          response="$(curl --fail --silent --show-error \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            -H "Content-Type: application/json" \
+            "https://api.cloudflare.com/client/v4/accounts/$EXPECTED_ACCOUNT_ID/d1/database/$EXPECTED_DB_ID")"
+          DB_RESPONSE="$response" python3 - "$EXPECTED_DB_NAME" "$EXPECTED_DB_ID" <<'PY'
+          import json, os, sys
+          payload = json.loads(os.environ["DB_RESPONSE"])
+          assert payload.get("success") is True, "Cloudflare D1 identity lookup failed"
+          database = payload["result"]
+          assert database["name"] == sys.argv[1], f"Unexpected live D1 name: {database['name']}"
+          assert database["uuid"] == sys.argv[2], f"Unexpected live D1 UUID: {database['uuid']}"
+          print(f"PASS: live D1 identity verified: {database['name']} ({database['uuid']}).")
+          PY
 
       - name: Install export integrity tools
         run: |
