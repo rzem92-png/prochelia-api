@@ -1,0 +1,30 @@
+name: PROCHÉLIA production backup configuration tests
+
+on:
+  pull_request:
+    paths:
+      - "wrangler.production-backup.jsonc"
+      - ".github/workflows/backup-production-d1-to-r2.yml"
+      - "tests/test_production_backup_config.py"
+      - ".github/workflows/production-backup-config-tests.yml"
+  push:
+    branches: [main]
+    paths:
+      - "wrangler.production-backup.jsonc"
+      - ".github/workflows/backup-production-d1-to-r2.yml"
+      - "tests/test_production_backup_config.py"
+      - ".github/workflows/production-backup-config-tests.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  production-backup-config:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Validate pinned production backup target and safety gates
+        run: python3 tests/test_production_backup_config.py
