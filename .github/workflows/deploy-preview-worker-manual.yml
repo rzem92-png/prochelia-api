@@ -77,6 +77,8 @@ jobs:
         run: npx --yes wrangler@4 deploy --config wrangler.preview.generated.json --keep-vars
       - name: Record deployment guardrails
         run: |
-          echo 'Preview Worker only: prochelia-api-preview.' >> "$GITHUB_STEP_SUMMARY"
-          echo 'D1 binding is pinned to Preview DB 6adb95e5-e542-4bec-9008-fbea01042305.' >> "$GITHUB_STEP_SUMMARY"
-          echo 'Dashboard vars and existing secrets are preserved. No migrations, no production Worker, and no production D1 changes.' >> "$GITHUB_STEP_SUMMARY"
+          {
+            echo 'Preview Worker only: prochelia-api-preview.'
+            echo 'D1 binding is pinned to Preview DB 6adb95e5-e542-4bec-9008-fbea01042305.'
+            echo 'Dashboard vars and existing secrets are preserved. No migrations, no production Worker, and no production D1 changes.'
+          } >> "$GITHUB_STEP_SUMMARY"
