@@ -1,0 +1,235 @@
+name: PROCHÉLIA — restore encrypted production backup to isolated D1
+
+on:
+  workflow_dispatch:
+    inputs:
+      backup_run_id:
+        description: "Successful production backup workflow run ID"
+        required: true
+        type: string
+      confirmation:
+        description: "Type RESTORE_PRODUCTION_BACKUP_TO_ISOLATED_TEST_D1"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: prochelia-production-restore-isolated-test
+  cancel-in-progress: false
+
+jobs:
+  restore-isolated:
+    if: github.ref == 'refs/heads/main' && inputs.confirmation == 'RESTORE_PRODUCTION_BACKUP_TO_ISOLATED_TEST_D1'
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      CLOUDFLARE_ACCOUNT_ID: f2a79e9fa41566a8ec80fb24c02c60eb
+      EXPECTED_PRODUCTION_D1_ID: 04f52830-ef5a-4f17-a640-42bbc2381bba
+      RESTORE_DB_NAME: prochelia-prod-restore-test-2026-11-12
+      RESTORE_DB_ID: 9db489a0-4f96-4e93-b1f4-8a8e755871a7
+      BACKUP_RUN_ID: ${{ inputs.backup_run_id }}
+      R2_BUCKET: prochelia-production-backups-eu
+      R2_ENDPOINT: https://f2a79e9fa41566a8ec80fb24c02c60eb.r2.cloudflarestorage.com
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Verify secrets and immutable isolated target
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          BACKUP_ENCRYPTION_KEY: ${{ secrets.BACKUP_ENCRYPTION_KEY }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_PROD_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_PROD_SECRET_ACCESS_KEY }}
+        run: |
+          set -euo pipefail
+          [[ "$BACKUP_RUN_ID" =~ ^[0-9]+$ ]] || { echo "::error::Invalid backup run ID."; exit 1; }
+          [[ "$RESTORE_DB_NAME" == "prochelia-prod-restore-test-2026-11-12" ]]
+          [[ "$RESTORE_DB_ID" == "9db489a0-4f96-4e93-b1f4-8a8e755871a7" ]]
+          [[ "$RESTORE_DB_ID" != "$EXPECTED_PRODUCTION_D1_ID" ]]
+          [[ "$RESTORE_DB_ID" != "6adb95e5-e542-4bec-9008-fbea01042305" ]]
+          [[ "$RESTORE_DB_ID" != "a3526c2a-39cb-49ab-97c4-979138145f33" ]]
+          [[ -n "${CLOUDFLARE_API_TOKEN:-}" && -n "${BACKUP_ENCRYPTION_KEY:-}" && -n "${AWS_ACCESS_KEY_ID:-}" && -n "${AWS_SECRET_ACCESS_KEY:-}" ]]
+          [[ "${#AWS_ACCESS_KEY_ID}" -eq 32 ]] || { echo "::error::R2 access key shape invalid."; exit 1; }
+          token="${CLOUDFLARE_API_TOKEN#Bearer }"
+          token="$(printf '%s' "$token" | tr -d '\r\n')"
+          status="$(curl --silent --show-error --output "$RUNNER_TEMP/token.json" --write-out '%{http_code}' -H "Authorization: Bearer $token" "https://api.cloudflare.com/client/v4/user/tokens/verify")"
+          [[ "$status" == "200" ]]
+          jq -e '.success == true and .result.status == "active"' "$RUNNER_TEMP/token.json" >/dev/null
+          status="$(curl --silent --show-error --output "$RUNNER_TEMP/d1.json" --write-out '%{http_code}' -H "Authorization: Bearer $token" "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/d1/database?name=$RESTORE_DB_NAME")"
+          [[ "$status" == "200" ]]
+          count="$(jq --arg n "$RESTORE_DB_NAME" --arg id "$RESTORE_DB_ID" '[.result[]? | select(.name == $n and .uuid == $id)] | length' "$RUNNER_TEMP/d1.json")"
+          [[ "$count" == "1" ]] || { echo "::error::Isolated restore database identity mismatch; no write performed."; exit 1; }
+          printf 'CLOUDFLARE_API_TOKEN=%s\n' "$token" >> "$GITHUB_ENV"
+          cat > "$RUNNER_TEMP/wrangler.restore.json" <<'JSON'
+          {
+            "name": "prochelia-prod-restore-test",
+            "compatibility_date": "2026-09-25",
+            "d1_databases": [{
+              "binding": "DB",
+              "database_name": "prochelia-prod-restore-test-2026-11-12",
+              "database_id": "9db489a0-4f96-4e93-b1f4-8a8e755871a7"
+            }]
+          }
+          JSON
+          echo "Cloudflare token active; isolated restore target identity confirmed and pinned by Wrangler config."
+
+      - name: Authenticate backup run and recover exact R2 object key
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$BACKUP_RUN_ID" > "$RUNNER_TEMP/backup-run.json"
+          jq -e '
+            .conclusion == "success" and
+            .path == ".github/workflows/backup-production-d1-to-r2.yml" and
+            .head_branch == "main" and
+            .event == "workflow_dispatch"
+          ' "$RUNNER_TEMP/backup-run.json" >/dev/null || { echo "::error::Run is not a successful manual production-backup run on main."; exit 1; }
+          backup_created="$(jq -r '.created_at' "$RUNNER_TEMP/backup-run.json")"
+          backup_epoch="$(date -u -d "$backup_created" +%s)"
+          now_epoch="$(date -u +%s)"
+          (( backup_epoch <= now_epoch && now_epoch - backup_epoch <= 86400 )) || { echo "::error::Production backup must be less than 24 hours old. Create a fresh encrypted backup first."; exit 1; }
+          backup_sha="$(jq -r '.head_sha' "$RUNNER_TEMP/backup-run.json")"
+          [[ "$backup_sha" =~ ^[0-9a-f]{40}$ ]]
+          gh run view "$BACKUP_RUN_ID" --repo "$GITHUB_REPOSITORY" --log > "$RUNNER_TEMP/backup-run.log"
+          grep -Fq "PASS: encrypted production backup uploaded, downloaded, decrypted and checksum-verified." "$RUNNER_TEMP/backup-run.log"
+          grep -Fq "PASS: live D1 identity verified: prochelia-db (04f52830-ef5a-4f17-a640-42bbc2381bba)." "$RUNNER_TEMP/backup-run.log"
+          key="$(grep -oE "production-d1/prochelia-db/[0-9]{4}/[0-9]{2}/[0-9]{2}/${BACKUP_RUN_ID}-${backup_sha:0:12}\.sql\.gpg" "$RUNNER_TEMP/backup-run.log" | tail -n 1)"
+          [[ -n "$key" ]] || { echo "::error::Could not recover the exact encrypted R2 object key from the successful run logs."; exit 1; }
+          echo "R2_OBJECT_KEY=$key" >> "$GITHUB_ENV"
+          echo "Successful production backup run and exact object key authenticated."
+
+      - name: Install SQLite, GPG and AWS CLI
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends sqlite3 gnupg
+          python3 -m pip install --user --break-system-packages awscli
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Download and authenticate encrypted production backup from R2
+        shell: bash
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_PROD_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_PROD_SECRET_ACCESS_KEY }}
+        run: |
+          set -euo pipefail
+          umask 077
+          mkdir -p "$RUNNER_TEMP/prochelia-prod-restore"
+          aws s3 cp "s3://$R2_BUCKET/$R2_OBJECT_KEY" "$RUNNER_TEMP/prochelia-prod-restore/production.sql.gpg" --endpoint-url "$R2_ENDPOINT" --region auto --only-show-errors
+          aws s3 cp "s3://$R2_BUCKET/$R2_OBJECT_KEY.sha256" "$RUNNER_TEMP/prochelia-prod-restore/manifest.sha256" --endpoint-url "$R2_ENDPOINT" --region auto --only-show-errors
+          test -s "$RUNNER_TEMP/prochelia-prod-restore/production.sql.gpg"
+          test -s "$RUNNER_TEMP/prochelia-prod-restore/manifest.sha256"
+          [[ "$(wc -l < "$RUNNER_TEMP/prochelia-prod-restore/manifest.sha256" | tr -d ' ')" -eq 1 ]]
+          grep -Eq '^[0-9a-f]{64}$' "$RUNNER_TEMP/prochelia-prod-restore/manifest.sha256"
+          echo "Encrypted archive and SHA-256 manifest downloaded."
+
+      - name: Decrypt and validate production dump locally
+        shell: bash
+        env:
+          BACKUP_ENCRYPTION_KEY: ${{ secrets.BACKUP_ENCRYPTION_KEY }}
+        run: |
+          set -euo pipefail
+          sql="$RUNNER_TEMP/prochelia-prod-restore/production.sql"
+          printf '%s' "$BACKUP_ENCRYPTION_KEY" | gpg --batch --yes --pinentry-mode loopback --passphrase-fd 0 --decrypt "$RUNNER_TEMP/prochelia-prod-restore/production.sql.gpg" > "$sql"
+          test -s "$sql"
+          actual="$(sha256sum "$sql" | awk '{print $1}')"
+          expected="$(cat "$RUNNER_TEMP/prochelia-prod-restore/manifest.sha256")"
+          [[ "$actual" == "$expected" ]] || { echo "::error::Decrypted backup checksum mismatch."; exit 1; }
+          sqlite3 "$RUNNER_TEMP/prochelia-prod-restore/validation.sqlite" < "$sql"
+          integrity="$(sqlite3 "$RUNNER_TEMP/prochelia-prod-restore/validation.sqlite" 'PRAGMA integrity_check;')"
+          [[ "$integrity" == "ok" ]] || { echo "::error::Local SQLite integrity_check failed."; exit 1; }
+          sqlite3 "$RUNNER_TEMP/prochelia-prod-restore/validation.sqlite" 'PRAGMA foreign_key_check;' > "$RUNNER_TEMP/prochelia-prod-restore/local-fk.txt"
+          [[ ! -s "$RUNNER_TEMP/prochelia-prod-restore/local-fk.txt" ]] || { echo "::error::Local dump has foreign-key violations."; exit 1; }
+          python3 - "$RUNNER_TEMP/prochelia-prod-restore/validation.sqlite" <<'PY'
+          import sqlite3, sys
+          db=sqlite3.connect(sys.argv[1])
+          tables=[r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name")]
+          required={'users','sessions','clients','intervenants','missions'}
+          missing=sorted(required-set(tables))
+          if missing:
+              raise SystemExit("Required production tables missing: "+", ".join(missing))
+          print("Local restore validated: SQLite integrity OK; foreign-key violations 0; required tables present; table count",len(tables))
+          PY
+          chmod 600 "$sql"
+          echo "Local decrypted dump validated; row data is not printed."
+
+      - name: Prepare dependency-ordered D1 import and validate it locally
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/prepare-d1-restore.py \
+            --source "$RUNNER_TEMP/prochelia-prod-restore/validation.sqlite" \
+            --output "$RUNNER_TEMP/prochelia-prod-restore/production.d1-compatible.sql"
+          sqlite3 "$RUNNER_TEMP/prochelia-prod-restore/prepared-validation.sqlite" < "$RUNNER_TEMP/prochelia-prod-restore/production.d1-compatible.sql"
+          prepared_integrity="$(sqlite3 "$RUNNER_TEMP/prochelia-prod-restore/prepared-validation.sqlite" 'PRAGMA integrity_check;')"
+          [[ "$prepared_integrity" == "ok" ]] || { echo "::error::Prepared SQL local integrity_check failed."; exit 1; }
+          sqlite3 "$RUNNER_TEMP/prochelia-prod-restore/prepared-validation.sqlite" 'PRAGMA foreign_key_check;' > "$RUNNER_TEMP/prochelia-prod-restore/prepared-fk.txt"
+          [[ ! -s "$RUNNER_TEMP/prochelia-prod-restore/prepared-fk.txt" ]] || { echo "::error::Prepared SQL local foreign-key check failed."; exit 1; }
+          echo "Prepared D1 import locally reconstituted with integrity OK and zero foreign-key violations."
+
+      - name: Test D1 restore preparation logic
+        shell: bash
+        run: python3 -m unittest tests/test_prepare_d1_restore.py
+
+      - name: Install Node.js for Wrangler D1 import
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22"
+          package-manager-cache: false
+
+      - name: Confirm isolated target is empty before restoration
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          npx --yes wrangler@4 d1 execute "$RESTORE_DB_NAME" --remote --config "$RUNNER_TEMP/wrangler.restore.json" --command="SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT GLOB '_cf_*' ORDER BY name;" --json > "$RUNNER_TEMP/pre-restore.json"
+          jq -e . "$RUNNER_TEMP/pre-restore.json" >/dev/null
+          rows="$(jq '[.. | objects | select(has("results")) | .results[]?] | length' "$RUNNER_TEMP/pre-restore.json")"
+          [[ "$rows" == "0" ]] || { echo "::error::Restore target is not empty; refusing to overwrite any data."; exit 1; }
+          echo "Isolated restore target is empty."
+
+      - name: Restore only into the isolated production-backup test database
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          [[ "$RESTORE_DB_ID" == "9db489a0-4f96-4e93-b1f4-8a8e755871a7" ]]
+          [[ "$RESTORE_DB_ID" != "$EXPECTED_PRODUCTION_D1_ID" ]]
+          npx --yes wrangler@4 d1 execute "$RESTORE_DB_NAME" --remote --config "$RUNNER_TEMP/wrangler.restore.json" --file="$RUNNER_TEMP/prochelia-prod-restore/production.d1-compatible.sql" --yes
+          echo "Encrypted production backup imported into the isolated restore-test D1."
+
+      - name: Verify restored D1 integrity and required schema
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          npx --yes wrangler@4 d1 execute "$RESTORE_DB_NAME" --remote --command="PRAGMA quick_check;" --json > "$RUNNER_TEMP/quick-check.json"
+          jq -e '[.. | strings] | any(. == "ok")' "$RUNNER_TEMP/quick-check.json" >/dev/null || { echo "::error::Remote SQLite quick_check failed."; exit 1; }
+          npx --yes wrangler@4 d1 execute "$RESTORE_DB_NAME" --remote --command="PRAGMA foreign_key_check;" --json > "$RUNNER_TEMP/foreign-key-check.json"
+          violations="$(jq '[.. | objects | select(has("results")) | .results[]?] | length' "$RUNNER_TEMP/foreign-key-check.json")"
+          [[ "$violations" == "0" ]] || { echo "::error::Remote foreign-key violations detected."; exit 1; }
+          npx --yes wrangler@4 d1 execute "$RESTORE_DB_NAME" --remote --command="SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT GLOB '_cf_*' ORDER BY name;" --json > "$RUNNER_TEMP/tables.json"
+          jq -e '[.. | objects | select(has("results")) | .results[]? | .name? // empty] | map(select(type == "string")) | index("users") != null and index("sessions") != null and index("clients") != null and index("intervenants") != null and index("missions") != null' "$RUNNER_TEMP/tables.json" >/dev/null || { echo "::error::Required tables missing after remote restore."; exit 1; }
+          table_count="$(jq '[.. | objects | select(has("results")) | .results[]? | .name? // empty] | map(select(type == "string")) | unique | length' "$RUNNER_TEMP/tables.json")"
+          echo "SUCCESS: remote restore integrity OK; foreign-key violations 0; required tables present; table count $table_count."
+          {
+            echo "## Production backup restore acceptance (isolated D1)"
+            echo "- Backup run: $BACKUP_RUN_ID"
+            echo "- Target: $RESTORE_DB_NAME (isolated D1)"
+            echo "- AES-256 decryption and SHA-256 verification: passed"
+            echo "- Local SQLite integrity and foreign-key checks: passed"
+            echo "- Remote D1 quick_check and foreign-key checks: passed"
+            echo "- Required tables present; table count: $table_count"
+            echo "- No production or Preview D1 writes were performed."
+          } >> "$GITHUB_STEP_SUMMARY"

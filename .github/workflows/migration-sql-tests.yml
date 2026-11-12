@@ -5,6 +5,8 @@ on:
     paths:
       - "migrations/**"
       - "tests/test_migrations_sqlite.py"
+      - "scripts/prepare-d1-restore.py"
+      - "tests/test_prepare_d1_restore.py"
       - ".github/workflows/migration-sql-tests.yml"
   push:
     branches: [main]
@@ -21,5 +23,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Lint isolated production restore workflow
+        run: |
+          go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
+          "$HOME/go/bin/actionlint" .github/workflows/restore-production-backup-isolated-test.yml
       - name: Validate migration SQL and payment ledger invariants in isolated SQLite
-        run: python3 tests/test_migrations_sqlite.py
+        run: |
+          python3 tests/test_migrations_sqlite.py
+          python3 tests/test_prepare_d1_restore.py
