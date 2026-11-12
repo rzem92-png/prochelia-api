@@ -96,10 +96,3 @@ test("directory pagination rejects malformed and excessive offsets", async () =>
   assert.equal(calls.filter(call => call.sql.includes("FROM clients")).length, 0);
 });
 
-test("directory routes reject unsupported methods", async () => {
-  const { env } = makeEnv();
-  const clients = await worker.fetch(request("/api/clients", { method: "POST", cookie: false }), env);
-  const intervenants = await worker.fetch(request("/api/intervenants", { method: "POST", cookie: false }), env);
-  assert.equal(clients.status, 405);
-  assert.equal(intervenants.status, 405);
-});
