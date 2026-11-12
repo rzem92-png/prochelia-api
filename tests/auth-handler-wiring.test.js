@@ -28,6 +28,6 @@ test("all payment handlers are wired into the active base router with explicit m
     ["/api/payments/dispute/resolve", "POST", "paymentAdminResolve"]
   ];
   for (const [path, method, handler] of routes) {
-    assert.match(router, new RegExp("'" + path.replace(/[.*+?^${}()|[\\]\\\\]/g, "\\\\$&") + "': \\['" + method + "', " + handler + "\\]"));
+    assert.equal(router.includes("'" + path + "': ['" + method + "', " + handler + "]"), true, path + " must be registered");
   }
 });
