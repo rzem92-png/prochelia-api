@@ -4,6 +4,10 @@ import { readFile } from "node:fs/promises";
 
 const source = await readFile(new URL("../src/index.js", import.meta.url), "utf8");
 
+test("Bearer session fallback accepts a standard Authorization header", () => {
+  assert.match(source, /authorization\.match\(\/\^Bearer\\s\+/);
+});
+
 test("all support/system authorization helpers reference the real session resolver", () => {
   assert.equal(/\bgetAuth\s*\(/.test(source), false, "undefined getAuth() calls must not remain");
   assert.match(source, /async function supportAuth\(request,env\)[\s\S]*?getSessionUser\(request,env\)/);
