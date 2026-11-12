@@ -218,19 +218,19 @@ jobs:
           npx --yes wrangler@4 d1 execute "$PREVIEW_DB_NAME" --remote --config "$RUNNER_TEMP/wrangler.preview.json" --file="$RUNNER_TEMP/preview-e2e-seed.sql" --yes
           echo "Synthetic fixtures inserted into Preview D1 only."
 
-      - name: Exercise Pages proxy, session authentication, role checks and pagination
+      - name: Exercise Preview Worker authentication, role checks and pagination
         shell: bash
         run: |
           set -euo pipefail
           node --input-type=module <<'NODE'
-          const base = process.env.PAGES_PREVIEW_URL;
+          const base = 'https://prochelia-api-preview.workers.dev';
           const prefix = process.env.E2E_PREFIX;
           const manager = process.env.E2E_MANAGER_TOKEN;
           const client = process.env.E2E_CLIENT_TOKEN;
           const clientOffset = Number(process.env.E2E_CLIENT_OFFSET);
           const providerOffset = Number(process.env.E2E_INTERVENANT_OFFSET);
           async function request(path, token) {
-            const headers = { accept: 'application/json', origin: base };
+            const headers = { accept: 'application/json' };
             if (token) headers.cookie = 'prochelia_session=' + token;
             return fetch(base + path, { headers, redirect: 'manual' });
           }
@@ -265,7 +265,7 @@ jobs:
           if (providerBody.has_more !== false || providerBody.next_offset !== null) {
             throw new Error('Intervenant directory pagination end marker mismatch');
           }
-          console.log('PASS: Pages proxy reaches Preview Worker; unauthenticated 401; client role 403; invalid offset 400; manager directory pagination and provider listing verified.');
+          console.log('PASS: Preview Worker endpoints; unauthenticated 401; client role 403; invalid offset 400; manager directory pagination and provider listing verified.');
           NODE
 
       - name: Always remove synthetic Preview fixtures and verify cleanup
