@@ -1159,10 +1159,26 @@ async function paymentWebhook(request, env) {
           payout.currency||'EUR',JSON.stringify({event_id:eventId,status:payoutStatus})));
     }
   }
-  // Mark the event processed only when its guarded state transition (and, where required,
-  // its ledger write) actually changed a row. Never acknowledge a stale/no-op event as applied.
+  // Acknowledge only when the persisted business state matches this signed event.
+  // Do not rely on SQLite changes() here: the preceding statement may be an idempotent
+  // ledger INSERT OR IGNORE, which can report zero even after the payment transition succeeded.
+  let processedStateGuard, processedBindings;
+  if(txStatus){
+    const ledgerGuard=txStatus==='failed'
+      ?'1=1'
+      :`EXISTS (SELECT 1 FROM payment_wallet_ledger l WHERE l.idempotency_key='mission-${txStatus==='paid'?'credit':'refund'}:'||t.id)`;
+    const refundGuard=txStatus==='refunded'?'AND t.refund_cents=t.gross_cents':'';
+    processedStateGuard=`EXISTS (SELECT 1 FROM payment_transactions t WHERE t.id=? AND t.status=? ${refundGuard} AND ${ledgerGuard})`;
+    processedBindings=[provider,eventId,payloadHash,txId,txStatus];
+  } else {
+    const ledgerGuard=payoutStatus==='processing'
+      ?'1=1'
+      :`EXISTS (SELECT 1 FROM payment_wallet_ledger l WHERE l.idempotency_key='payout-settle:'||p.id)`;
+    processedStateGuard=`EXISTS (SELECT 1 FROM payout_requests p WHERE p.id=? AND p.status=? AND ${ledgerGuard})`;
+    processedBindings=[provider,eventId,payloadHash,payoutId,payoutStatus];
+  }
   statements.push(env.DB.prepare(`UPDATE payment_webhook_events SET processed=1,processed_at=CURRENT_TIMESTAMP
-    WHERE provider=? AND event_id=? AND changes()=1`).bind(provider,eventId));
+    WHERE provider=? AND event_id=? AND payload_hash=? AND ${processedStateGuard}`).bind(...processedBindings));
   const results=await env.DB.batch(statements);
   const inserted=!!results[0]?.meta?.changes;
   const processed=!!results.at(-1)?.meta?.changes;
