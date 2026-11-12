@@ -1103,11 +1103,12 @@ async function paymentWebhook(request, env) {
     if(!tx) return json({ok:false,error:'PAYMENT_TRANSACTION_NOT_FOUND',version:VERSION},404);
     if(String(tx.provider||'')!==provider) return json({ok:false,error:'WEBHOOK_PROVIDER_MISMATCH',version:VERSION},403);
     const providerPaymentId=clean(event?.data?.provider_payment_id)||null;
-    const allowedPrevious=txStatus==='refunded'?"'paid'":"'pending','held'";
+    const allowedPrevious=txStatus==='refunded'?"'paid','held'":"'pending','held'";
+    const disputeGuard=txStatus==='refunded'?'':"AND NOT EXISTS (SELECT 1 FROM payment_disputes WHERE transaction_id=? AND status='open')";
+    const transitionBindings=txStatus==='refunded'?[txStatus,providerPaymentId,txId]:[txStatus,providerPaymentId,txId,txId];
     statements.push(env.DB.prepare(`UPDATE payment_transactions SET status=?,provider_payment_id=COALESCE(?,provider_payment_id),updated_at=CURRENT_TIMESTAMP
-      WHERE id=? AND status IN (${allowedPrevious}) AND changes()=1
-      AND NOT EXISTS (SELECT 1 FROM payment_disputes WHERE transaction_id=? AND status='open')`)
-      .bind(txStatus,providerPaymentId,txId,txId));
+      WHERE id=? AND status IN (${allowedPrevious}) AND changes()=1 ${disputeGuard}`)
+      .bind(...transitionBindings));
     if(txStatus==='paid'||txStatus==='refunded'){
       const delta=txStatus==='paid'?Number(tx.net_intervenant_cents||0):-Number(tx.net_intervenant_cents||0);
       statements.push(env.DB.prepare(`INSERT OR IGNORE INTO payment_wallet_ledger
