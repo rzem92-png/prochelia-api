@@ -77,3 +77,11 @@ test("wallet ledger rejects any entry that would make available balance negative
   assert.match(schema, /available_cents FROM wallets WHERE user_id=NEW\.user_id\)\+NEW\.available_delta_cents<0/);
   assert.match(schema, /PAYMENT_WALLET_NEGATIVE_PROTECTED_BALANCE/);
 });
+
+test("PSP webhook bodies are size-bounded before signature work, parsing, or D1 schema writes", () => {
+  assert.match(source, /async function readPaymentWebhookBody\(request, maxBytes=65536\)/);
+  const handler = source.slice(source.indexOf("async function paymentWebhook"), source.indexOf("async function openPaymentDispute"));
+  assert.ok(handler.indexOf("readPaymentWebhookBody(request)") < handler.indexOf("verifyWebhookSignature(request,env,raw)"));
+  assert.ok(handler.indexOf("verifyWebhookSignature(request,env,raw)") < handler.indexOf("ensurePaymentSchema(env)"));
+  assert.match(handler, /PAYLOAD_TOO_LARGE/);
+});
