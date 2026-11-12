@@ -121,6 +121,20 @@ test("PSP webhooks are bound to the stored provider and immutable event payload"
   assert.match(handler, /const processed=!!results\.at\(-1\)\?\.meta\?\.changes/);
 });
 
+test("cookie-authenticated mutations require a session-bound CSRF token", () => {
+  const csrf = source.slice(source.indexOf("async function csrfTokenForSession"), source.indexOf("async function getPrestations"));
+  const handler = source.slice(source.lastIndexOf("async function handle("));
+  assert.match(csrf, /name:'HMAC',hash:'SHA-256'/);
+  assert.match(csrf, /PROCHELIA-CSRF-v1:/);
+  assert.match(csrf, /constantTimeStringEqual/);
+  assert.match(handler, /csrfExemptPaths=new Set\(\['\/api\/auth\/login','\/api\/auth\/bootstrap','\/api\/payments\/webhook'\]\)/);
+  assert.match(handler, /getSessionToken\(request\)/);
+  assert.match(handler, /csrfTokenForSession\(auth\)/);
+  assert.match(handler, /CSRF_TOKEN_INVALID/);
+  assert.match(source, /url\.pathname === '\/api\/auth\/csrf'/);
+  assert.match(source, /return authCsrf\(request, env\)/);
+});
+
 test("wallet ledger protects pending, reserved and paid balances while allowing refund receivables", () => {
   const schema = source.slice(source.indexOf("CREATE TRIGGER IF NOT EXISTS trg_payment_wallet_ledger_guard_balances"), source.indexOf("CREATE TRIGGER IF NOT EXISTS trg_payment_wallet_ledger_apply"));
   assert.doesNotMatch(schema, /available_cents FROM wallets WHERE user_id=NEW\.user_id\)\+NEW\.available_delta_cents<0/);
