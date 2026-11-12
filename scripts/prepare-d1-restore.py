@@ -98,6 +98,8 @@ def prepare(source: Path, destination: Path) -> dict[str, int]:
             sql = (row["sql"] or "").lstrip().upper()
             if sql.startswith("CREATE VIRTUAL TABLE"):
                 raise ValueError(f"Virtual table requires a dedicated restore adapter: {row['name']}")
+            if "AUTOINCREMENT" in sql:
+                raise ValueError(f"AUTOINCREMENT sequence requires a dedicated restore adapter: {row['name']}")
 
         order = foreign_key_order(db, tables)
         schema_sql = {
@@ -127,7 +129,8 @@ def prepare(source: Path, destination: Path) -> dict[str, int]:
                 if not columns:
                     raise ValueError(f"Could not inspect columns for table: {table}")
                 column_sql = ", ".join(quote_identifier(column) for column in columns)
-                select_sql = f"SELECT * FROM {quote_identifier(table)}"
+                selected_columns = ", ".join(quote_identifier(column) for column in columns)
+                select_sql = f"SELECT {selected_columns} FROM {quote_identifier(table)}"
                 cursor = db.execute(select_sql)
                 for row in cursor:
                     values = ", ".join(sql_literal(row[column]) for column in columns)
