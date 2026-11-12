@@ -213,6 +213,69 @@ function requireRole(auth, roles) {
   return roles.includes(auth.user.role);
 }
 
+async function listClients(request, env) {
+  const auth = await getSessionUser(request, env);
+  if (!requireRole(auth, ['gerante'])) {
+    return json({ ok:false, error:auth?.user?'FORBIDDEN':'UNAUTHENTICATED', version:VERSION }, auth?.user?403:401);
+  }
+  if (!env.DB) return json({ ok:false, error:'DATABASE_UNAVAILABLE', version:VERSION },503);
+  const url = new URL(request.url);
+  const rawOffset = url.searchParams.get('offset') || '0';
+  const offset = Number(rawOffset);
+  if (!/^\d+$/.test(rawOffset) || !Number.isSafeInteger(offset) || offset < 0 || offset > 50000) {
+    return json({ ok:false, error:'INVALID_DIRECTORY_OFFSET', version:VERSION },400);
+  }
+  try {
+    const result = await env.DB.prepare(`
+      SELECT c.id, u.first_name, u.last_name, u.status AS account_status, c.city
+      FROM clients c
+      INNER JOIN users u ON u.id = c.user_id
+      ORDER BY lower(u.last_name), lower(u.first_name), c.id
+      LIMIT 101 OFFSET ?
+    `).bind(offset).all();
+    const rows = result.results || [];
+    const hasMore = rows.length > 100;
+    return json({
+      ok:true, version:VERSION, items:rows.slice(0,100),
+      next_offset:hasMore?offset+100:null, has_more:hasMore
+    });
+  } catch {
+    return json({ ok:false, error:'CLIENT_DIRECTORY_UNAVAILABLE', version:VERSION },503);
+  }
+}
+
+async function listIntervenants(request, env) {
+  const auth = await getSessionUser(request, env);
+  if (!requireRole(auth, ['gerante'])) {
+    return json({ ok:false, error:auth?.user?'FORBIDDEN':'UNAUTHENTICATED', version:VERSION }, auth?.user?403:401);
+  }
+  if (!env.DB) return json({ ok:false, error:'DATABASE_UNAVAILABLE', version:VERSION },503);
+  const url = new URL(request.url);
+  const rawOffset = url.searchParams.get('offset') || '0';
+  const offset = Number(rawOffset);
+  if (!/^\d+$/.test(rawOffset) || !Number.isSafeInteger(offset) || offset < 0 || offset > 50000) {
+    return json({ ok:false, error:'INVALID_DIRECTORY_OFFSET', version:VERSION },400);
+  }
+  try {
+    const result = await env.DB.prepare(`
+      SELECT i.id, u.first_name, u.last_name, u.status AS account_status,
+             i.professional_status, i.service_area, i.validation_status
+      FROM intervenants i
+      INNER JOIN users u ON u.id = i.user_id
+      ORDER BY lower(u.last_name), lower(u.first_name), i.id
+      LIMIT 101 OFFSET ?
+    `).bind(offset).all();
+    const rows = result.results || [];
+    const hasMore = rows.length > 100;
+    return json({
+      ok:true, version:VERSION, items:rows.slice(0,100),
+      next_offset:hasMore?offset+100:null, has_more:hasMore
+    });
+  } catch {
+    return json({ ok:false, error:'INTERVENANT_DIRECTORY_UNAVAILABLE', version:VERSION },503);
+  }
+}
+
 async function getPrestations(env) {
   if (!env.DB) return json({ ok: false, database: false, message: 'D1 non connectée' }, 503);
   const result = await env.DB.prepare('SELECT * FROM prestations ORDER BY id').all();
@@ -1259,6 +1322,15 @@ async function handleBase(request, env) {
 
   // Paiements : enregistrer explicitement chaque route dans le routeur actif.
   // Ces handlers existaient mais n'étaient pas raccordés au routeur principal.
+  if (url.pathname === '/api/clients') {
+    if (request.method !== 'GET') return json({ok:false,error:'METHOD_NOT_ALLOWED',version:VERSION},405,{allow:'GET'});
+    return listClients(request,env);
+  }
+  if (url.pathname === '/api/intervenants') {
+    if (request.method !== 'GET') return json({ok:false,error:'METHOD_NOT_ALLOWED',version:VERSION},405,{allow:'GET'});
+    return listIntervenants(request,env);
+  }
+
   const paymentRoutes = {
     '/api/payments/onboard': ['POST', paymentOnboard],
     '/api/payments/status': ['GET', paymentStatus],
