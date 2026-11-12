@@ -53,3 +53,10 @@ test("non-manager promotion listing exposes only active, current offers for the 
   assert.match(handler, /datetime\(ends_at\)>=CURRENT_TIMESTAMP/);
   assert.match(handler, /client_type IN \('ALL',\?\)/);
 });
+
+test("PSP webhooks are bound to the stored provider and immutable event payload", () => {
+  const handler = source.slice(source.indexOf("async function paymentWebhook"), source.indexOf("async function openPaymentDispute"));
+  assert.equal((handler.match(/WEBHOOK_PROVIDER_MISMATCH/g) || []).length, 2);
+  assert.match(handler, /WEBHOOK_EVENT_ID_PAYLOAD_CONFLICT/);
+  assert.match(handler, /prior\?\.payload_hash!==payloadHash/);
+});
