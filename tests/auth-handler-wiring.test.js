@@ -31,3 +31,25 @@ test("all payment handlers are wired into the active base router with explicit m
     assert.equal(router.includes("'" + path + "': ['" + method + "', " + handler + "]"), true, path + " must be registered");
   }
 });
+
+test("mission security preparation is bound to the persisted mission participants", () => {
+  const handler = source.slice(source.indexOf("async function securityPrepareMission"), source.indexOf("async function securityPresence"));
+  assert.match(handler, /SELECT id,client_id,intervenant_id,status FROM missions WHERE id=\?/);
+  assert.match(handler, /MISSION_PARTICIPANTS_MISMATCH/);
+  assert.match(handler, /MISSION_NOT_ELIGIBLE_FOR_SECURITY_PREPARATION/);
+});
+
+test("mission payment amounts come from the persisted mission and retries remain idempotent", () => {
+  const handler = source.slice(source.indexOf("async function createMissionPayment"), source.indexOf("async function finalizeMissionPayment"));
+  assert.match(handler, /SELECT id,client_id,intervenant_id,price_client,price_intervenant,commission,status FROM missions/);
+  assert.match(handler, /PAYMENT_AMOUNT_MISMATCH_WITH_MISSION/);
+  assert.ok(handler.indexOf("idempotent_replay:true") < handler.indexOf("MISSION_ALREADY_HAS_ACTIVE_PAYMENT"));
+});
+
+test("non-manager promotion listing exposes only active, current offers for the user's segment", () => {
+  const handler = source.slice(source.indexOf("async function promotionList"), source.indexOf("async function activatePromotion"));
+  assert.match(handler, /status='ACTIVE'/);
+  assert.match(handler, /datetime\(starts_at\)<=CURRENT_TIMESTAMP/);
+  assert.match(handler, /datetime\(ends_at\)>=CURRENT_TIMESTAMP/);
+  assert.match(handler, /client_type IN \('ALL',\?\)/);
+});
