@@ -2424,7 +2424,8 @@ async function copilotBriefing(request, env) {
   const alerts=await env.DB.prepare(`SELECT * FROM strategic_alerts WHERE status='OPEN' ORDER BY CASE severity WHEN 'CRITICAL' THEN 100 WHEN 'HIGH' THEN 60 ELSE 30 END DESC,created_at ASC LIMIT 10`).all();
   for(const a of (alerts.results||[])) items.push({priority:a.severity==='CRITICAL'?100:a.severity==='HIGH'?60:30,category:'RISK',title:a.alert_type,recommendation:a.recommendation,entity_type:a.entity_type,entity_id:a.entity_id});
   items.sort((a,b)=>b.priority-a.priority);
-  for(const x of items.slice(0,25)) await env.DB.prepare(`INSERT INTO copilot_briefings(id,phase,priority,category,title,recommendation,action_type,entity_type,entity_id,impact_json) VALUES(?,?,?,?,?,?,?,?,?,?)`).bind(crypto.randomUUID(),phase,x.priority,x.category,x.title,String(x.recommendation).slice(0,4000),x.action_type||null,x.entity_type||null,x.entity_id||null,JSON.stringify(x)).run();
+  // GET /api/copilot/briefing is read-only: do not create duplicate snapshots on refresh.
+  // Persisting a briefing must be an explicit, separately authorized write operation.
   return json({ok:true,version:VERSION,phase,top_actions:items.slice(0,25)});
 }
 
