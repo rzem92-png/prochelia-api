@@ -71,3 +71,9 @@ test("PSP webhooks are bound to the stored provider and immutable event payload"
   assert.match(handler, /WEBHOOK_EVENT_ID_PAYLOAD_CONFLICT/);
   assert.match(handler, /prior\?\.payload_hash!==payloadHash/);
 });
+
+test("wallet ledger rejects any entry that would make available balance negative", () => {
+  const schema = source.slice(source.indexOf("CREATE TRIGGER IF NOT EXISTS trg_payment_wallet_ledger_guard_balances"), source.indexOf("CREATE TRIGGER IF NOT EXISTS trg_payment_wallet_ledger_apply"));
+  assert.match(schema, /available_cents FROM wallets WHERE user_id=NEW\.user_id\)\+NEW\.available_delta_cents<0/);
+  assert.match(schema, /PAYMENT_WALLET_NEGATIVE_PROTECTED_BALANCE/);
+});
