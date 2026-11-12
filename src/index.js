@@ -1148,10 +1148,12 @@ async function paymentWebhook(request, env) {
   const results=await env.DB.batch(statements);
   const inserted=!!results[0]?.meta?.changes;
   const processed=!!results.at(-1)?.meta?.changes;
-  if(inserted&&!processed) return json({ok:false,error:'WEBHOOK_STATE_TRANSITION_NOT_APPLIED',version:VERSION},409);
-  if(!inserted){
-    const prior=await env.DB.prepare('SELECT payload_hash FROM payment_webhook_events WHERE provider=? AND event_id=? LIMIT 1').bind(provider,eventId).first();
+  if(!processed){
+    const prior=await env.DB.prepare('SELECT payload_hash,processed FROM payment_webhook_events WHERE provider=? AND event_id=? LIMIT 1').bind(provider,eventId).first();
     if(prior?.payload_hash && prior.payload_hash!==payloadHash) return json({ok:false,error:'WEBHOOK_EVENT_ID_PAYLOAD_CONFLICT',version:VERSION},409);
+    // A previously completed duplicate is acknowledged idempotently. A newly inserted
+    // or previously unprocessed event whose guarded transition did not apply must not be.
+    if(Number(prior?.processed)!==1) return json({ok:false,error:'WEBHOOK_STATE_TRANSITION_NOT_APPLIED',version:VERSION},409);
   }
   await paymentAudit(env,'PSP_WEBHOOK_PROCESSED',{transaction_id:txId||null,payout_id:payoutId||null,metadata:{provider,event_id:eventId,event_type:type,duplicate:!inserted}},'OK');
   return json({ok:true,version:VERSION,processed:true,duplicate:!inserted,event_id:eventId},200);
