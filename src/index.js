@@ -1069,6 +1069,7 @@ async function paymentWebhook(request, env) {
   if(txStatus){
     const tx=await env.DB.prepare('SELECT * FROM payment_transactions WHERE id=? LIMIT 1').bind(txId).first();
     if(!tx) return json({ok:false,error:'PAYMENT_TRANSACTION_NOT_FOUND',version:VERSION},404);
+    if(String(tx.provider||'')!==provider) return json({ok:false,error:'WEBHOOK_PROVIDER_MISMATCH',version:VERSION},403);
     const providerPaymentId=clean(event?.data?.provider_payment_id)||null;
     const allowedPrevious=txStatus==='refunded'?"'paid'":"'pending','held'";
     statements.push(env.DB.prepare(`UPDATE payment_transactions SET status=?,provider_payment_id=COALESCE(?,provider_payment_id),updated_at=CURRENT_TIMESTAMP
@@ -1088,6 +1089,7 @@ async function paymentWebhook(request, env) {
   } else {
     const payout=await env.DB.prepare('SELECT * FROM payout_requests WHERE id=? LIMIT 1').bind(payoutId).first();
     if(!payout) return json({ok:false,error:'PAYOUT_NOT_FOUND',version:VERSION},404);
+    if(String(payout.provider||'')!==provider) return json({ok:false,error:'WEBHOOK_PROVIDER_MISMATCH',version:VERSION},403);
     statements.push(env.DB.prepare(`UPDATE payout_requests SET status=?,provider_payout_id=COALESCE(?,provider_payout_id),
       failure_code=?,failure_message=?,completed_at=CASE WHEN ?='completed' THEN CURRENT_TIMESTAMP ELSE completed_at END,
       updated_at=CURRENT_TIMESTAMP WHERE id=? AND status IN ('requested','processing') AND changes()=1`)
@@ -1111,6 +1113,10 @@ async function paymentWebhook(request, env) {
     WHERE provider=? AND event_id=?`).bind(provider,eventId));
   const results=await env.DB.batch(statements);
   const inserted=!!results[0]?.meta?.changes;
+  if(!inserted){
+    const prior=await env.DB.prepare('SELECT payload_hash FROM payment_webhook_events WHERE provider=? AND event_id=? LIMIT 1').bind(provider,eventId).first();
+    if(prior?.payload_hash && prior.payload_hash!==payloadHash) return json({ok:false,error:'WEBHOOK_EVENT_ID_PAYLOAD_CONFLICT',version:VERSION},409);
+  }
   await paymentAudit(env,'PSP_WEBHOOK_PROCESSED',{transaction_id:txId||null,payout_id:payoutId||null,metadata:{provider,event_id:eventId,event_type:type,duplicate:!inserted}},'OK');
   return json({ok:true,version:VERSION,processed:true,duplicate:!inserted,event_id:eventId},200);
 }
