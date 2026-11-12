@@ -223,7 +223,7 @@ jobs:
         run: |
           set -euo pipefail
           node --input-type=module <<'NODE'
-          const base = 'https://prochelia-api-preview.workers.dev';
+          const base = 'https://prochelia-api-preview.rzem92.workers.dev';
           const prefix = process.env.E2E_PREFIX;
           const manager = process.env.E2E_MANAGER_TOKEN;
           const client = process.env.E2E_CLIENT_TOKEN;
