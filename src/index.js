@@ -1051,11 +1051,40 @@ async function verifyWebhookSignature(request, env, rawBody) {
   return signature===expected || signature===`sha256=${expected}`;
 }
 
+async function readPaymentWebhookBody(request, maxBytes=65536) {
+  const declaredLength=Number(request.headers.get('content-length')||0);
+  if(Number.isFinite(declaredLength) && declaredLength>maxBytes) return {ok:false,error:'PAYLOAD_TOO_LARGE'};
+  if(!request.body) return {ok:true,raw:''};
+  const reader=request.body.getReader();
+  const chunks=[];
+  let total=0;
+  try {
+    while(true) {
+      const {done,value}=await reader.read();
+      if(done) break;
+      total+=value.byteLength;
+      if(total>maxBytes) {
+        await reader.cancel();
+        return {ok:false,error:'PAYLOAD_TOO_LARGE'};
+      }
+      chunks.push(value);
+    }
+    const bytes=new Uint8Array(total);
+    let offset=0;
+    for(const chunk of chunks) { bytes.set(chunk,offset); offset+=chunk.byteLength; }
+    return {ok:true,raw:new TextDecoder('utf-8',{fatal:true}).decode(bytes)};
+  } catch {
+    return {ok:false,error:'INVALID_WEBHOOK_BODY'};
+  }
+}
+
 async function paymentWebhook(request, env) {
-  await ensurePaymentSchema(env);
-  const raw=await request.text();
+  const body=await readPaymentWebhookBody(request);
+  if(!body.ok) return json({ok:false,error:body.error,version:VERSION},body.error==='PAYLOAD_TOO_LARGE'?413:400);
+  const raw=body.raw;
   if(!(await verifyWebhookSignature(request,env,raw))) return json({ok:false,error:'INVALID_WEBHOOK_SIGNATURE',version:VERSION},401);
   let event; try{event=JSON.parse(raw)}catch{return json({ok:false,error:'INVALID_WEBHOOK_JSON',version:VERSION},400);}
+  await ensurePaymentSchema(env);
   const provider=clean(event?.provider)||paymentProvider(env), eventId=clean(event?.id), type=clean(event?.type);
   if(!eventId||!type||eventId.length>255) return json({ok:false,error:'INVALID_WEBHOOK_EVENT',version:VERSION},400);
   const txId=clean(event?.data?.transaction_id), payoutId=clean(event?.data?.payout_id);
