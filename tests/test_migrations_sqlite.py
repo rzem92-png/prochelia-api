@@ -50,6 +50,15 @@ try:
 except sqlite3.IntegrityError:
     pass
 
+# Confirmed PSP refunds may create an available-balance receivable.
+DB.execute("INSERT INTO wallets(id,user_id) VALUES('w2','u2')")
+DB.execute("""
+    INSERT INTO payment_wallet_ledger
+      (id,idempotency_key,user_id,entry_type,available_delta_cents)
+    VALUES('l-refund','idem-refund','u2','TEST_REFUND',-100)
+""")
+assert DB.execute("SELECT available_cents FROM wallets WHERE user_id='u2'").fetchone()[0] == -100
+
 # Protected balances cannot go negative.
 try:
     DB.execute("""
