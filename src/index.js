@@ -33,6 +33,35 @@ async function readJson(request) {
   catch { return null; }
 }
 
+async function readJsonLimited(request,maxBytes=16384) {
+  const reader=request.body?.getReader();
+  if(!reader) return {ok:false,error:'JSON_BODY_REQUIRED'};
+  const chunks=[];
+  let total=0;
+  try {
+    while(true) {
+      const {done,value}=await reader.read();
+      if(done) break;
+      total+=value.byteLength;
+      if(total>maxBytes) {
+        await reader.cancel().catch(()=>{});
+        return {ok:false,error:'PAYLOAD_TOO_LARGE'};
+      }
+      chunks.push(value);
+    }
+    const bytes=new Uint8Array(total);
+    let offset=0;
+    for(const chunk of chunks){bytes.set(chunk,offset);offset+=chunk.byteLength;}
+    const value=JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(bytes));
+    return {ok:true,value};
+  } catch {
+    return {ok:false,error:'INVALID_JSON'};
+  } finally {
+    try{reader.releaseLock();}catch{}
+  }
+}
+
+
 function clean(value) {
   return typeof value === 'string' ? value.trim() : value;
 }
@@ -1969,14 +1998,63 @@ async function financeSummary(request, env) {
 }
 
 async function complaintCreate(request, env) {
-  const gate=await requireAuthRole(request,env,['gerante','client','entreprise']); if(gate.error)return gate.error;
-  const b=await readJson(request)||{};if(!b.category)return json({ok:false,error:'CATEGORY_REQUIRED',version:VERSION},400);
-  const id=crypto.randomUUID();await env.DB.prepare(`INSERT INTO complaints(id,client_type,client_id,company_id,mission_id,category,severity,description) VALUES(?,?,?,?,?,?,?,?)`).bind(id,String(b.client_type||'B2C'),b.client_id||null,b.company_id||null,b.mission_id||null,b.category,String(b.severity||'LOW'),b.description||null).run();
+  const gate=await requireAuthRole(request,env,['gerante','client']);
+  if(gate.error)return gate.error;
+  const parsed=await readJsonLimited(request,8192);
+  if(!parsed.ok)return json({ok:false,error:parsed.error==='PAYLOAD_TOO_LARGE'?'PAYLOAD_TOO_LARGE':'INVALID_JSON',version:VERSION},parsed.error==='PAYLOAD_TOO_LARGE'?413:400);
+  const b=parsed.value;
+  if(!b || typeof b!=='object' || Array.isArray(b))return json({ok:false,error:'INVALID_BODY',version:VERSION},400);
+  if(typeof b.category!=='string' || !b.category.trim() || b.category.length>80)return json({ok:false,error:'CATEGORY_REQUIRED',version:VERSION},400);
+  const severity=String(b.severity||'LOW').toUpperCase();
+  if(!['LOW','MEDIUM','HIGH','CRITICAL'].includes(severity))return json({ok:false,error:'INVALID_SEVERITY',version:VERSION},400);
+  if(b.description!==undefined && (typeof b.description!=='string' || b.description.length>2000))return json({ok:false,error:'INVALID_DESCRIPTION',version:VERSION},400);
+
+  let clientId=null,intervenantId=null,companyId=null,missionId=null;
+  if(gate.auth.user.role==='client') {
+    const own=await env.DB.prepare('SELECT id FROM clients WHERE user_id=? LIMIT 1').bind(gate.auth.user.id).first();
+    if(!own)return json({ok:false,error:'CLIENT_PROFILE_REQUIRED',version:VERSION},403);
+    clientId=own.id;
+  } else {
+    if(b.client_id!==undefined && b.client_id!==null) {
+      const own=await env.DB.prepare('SELECT id FROM clients WHERE id=? LIMIT 1').bind(String(b.client_id)).first();
+      if(!own)return json({ok:false,error:'CLIENT_NOT_FOUND',version:VERSION},404);
+      clientId=own.id;
+    }
+    if(b.intervenant_id!==undefined && b.intervenant_id!==null) {
+      const own=await env.DB.prepare('SELECT id FROM intervenants WHERE id=? LIMIT 1').bind(String(b.intervenant_id)).first();
+      if(!own)return json({ok:false,error:'INTERVENANT_NOT_FOUND',version:VERSION},404);
+      intervenantId=own.id;
+    }
+    if(b.company_id!==undefined && b.company_id!==null) {
+      const company=await env.DB.prepare('SELECT id FROM business_profiles WHERE id=? LIMIT 1').bind(String(b.company_id)).first();
+      if(!company)return json({ok:false,error:'COMPANY_NOT_FOUND',version:VERSION},404);
+      companyId=company.id;
+    }
+  }
+
+  if(b.mission_id!==undefined && b.mission_id!==null && b.mission_id!=='') {
+    if(typeof b.mission_id!=='string' || b.mission_id.length>128)return json({ok:false,error:'INVALID_MISSION_ID',version:VERSION},400);
+    const mission=await env.DB.prepare('SELECT id,client_id,intervenant_id FROM missions WHERE id=? LIMIT 1').bind(b.mission_id).first();
+    if(!mission)return json({ok:false,error:'MISSION_NOT_FOUND',version:VERSION},404);
+    if(gate.auth.user.role==='client' && mission.client_id!==clientId)return json({ok:false,error:'FORBIDDEN',version:VERSION},403);
+    if(gate.auth.user.role==='gerante' && clientId && clientId!==mission.client_id)return json({ok:false,error:'MISSION_CLIENT_MISMATCH',version:VERSION},400);
+    missionId=mission.id;clientId=mission.client_id;intervenantId=mission.intervenant_id;companyId=null;
+  }
+
+  const id=crypto.randomUUID();
+  const clientType=companyId?'B2B':'B2C';
+  await env.DB.prepare(`INSERT INTO complaints(id,client_type,client_id,company_id,mission_id,category,severity,description) VALUES(?,?,?,?,?,?,?,?)`)
+    .bind(id,clientType,clientId,companyId,missionId,b.category.trim(),severity,typeof b.description==='string'?b.description.trim():null).run();
   const caseType=SIMPLE_CASES.has(b.category)?b.category:'reclamation_client';
-  const fakeReq=new Request(request.url,{method:'POST',headers:request.headers,body:JSON.stringify({case_type:caseType,client_id:b.client_id,company_id:b.company_id,mission_id:b.mission_id,description:b.description,impact_level:b.severity||'LOW',context:{complaint_id:id}})});
-  const caseResponse=await createOperationalCase(fakeReq,env);const caseJson=await caseResponse.json();
-  if(caseJson.case_id)await env.DB.prepare('UPDATE complaints SET resolution_case_id=? WHERE id=?').bind(caseJson.case_id,id).run();
-  return json({ok:true,version:VERSION,complaint_id:id,resolution_case_id:caseJson.case_id||null,copilot:caseJson.recommendation||null},201);
+  const fakeReq=new Request(request.url,{method:'POST',headers:request.headers,body:JSON.stringify({case_type:caseType,client_id:clientId,company_id:companyId,intervenant_id:intervenantId,mission_id:missionId,description:b.description,impact_level:severity,context:{complaint_id:id}})});
+  const caseResponse=await createOperationalCase(fakeReq,env);
+  const caseJson=await caseResponse.json();
+  if(!caseResponse.ok || !caseJson.case_id) {
+    await env.DB.prepare('DELETE FROM complaints WHERE id=?').bind(id).run();
+    return json({ok:false,error:'CASE_CREATION_FAILED',version:VERSION},caseResponse.status>=400?caseResponse.status:500);
+  }
+  await env.DB.prepare('UPDATE complaints SET resolution_case_id=? WHERE id=?').bind(caseJson.case_id,id).run();
+  return json({ok:true,version:VERSION,complaint_id:id,resolution_case_id:caseJson.case_id,copilot:caseJson.recommendation||null},201);
 }
 
 async function setPhase(request, env) {
@@ -3740,26 +3818,30 @@ async function supportCreate(request,env){
   return json({ok:true,version:VERSION,case_id:id,scenario,automatic_resolution:!!auto,auto_result:autoResult,manager_approval_required:!auto});
 }
 
-async function supportAutoResolve(env,caseId,actorId,actorRole,scenario,context={}){
+async function supportAutoResolve(env,caseId,actorId,actorRole,scenario) {
   const safeAuto=['DELAY_LIGHT','NOTIFICATION_FAILED','DOCUMENT_REMINDER','SIMPLE_REFUND_CHECK','CLIENT_COMPLAINT'];
-  if(!safeAuto.includes(scenario)) return {ok:false,status:'MANAGER_REQUIRED'};
-  // Sécurité de production : le Copilote ne doit jamais déclarer une résolution
-  // simplement parce qu'il a généré une proposition. Une résolution automatique
-  // n'est clôturée que lorsqu'une action downstream vérifiable a confirmé son succès.
-  const verified=String(context?.execution_verified||'').toLowerCase()==='true' || context?.execution_verified===true;
-  const resolution={scenario,actions:['verify_context','apply_only_reversible_or_preapproved_action','notify_requester','journal'],context:context||{}};
-  if(!verified){
-    await env.DB.prepare(`UPDATE support_cases SET status='WAITING_ACTION',resolution=?,resolved_at=NULL WHERE id=?`).bind(JSON.stringify({...resolution,status:'ACTION_REQUIRED'}),caseId).run();
-    await supportEvent(env,caseId,actorRole,actorId,'AUTO_CHECKED_WAITING_ACTION',resolution);
-    await journal(env,actorRole,actorId,'SUPPORT_CASE_AUTO_CHECK','support_cases',caseId,'WAITING_ACTION',{scenario});
-    return {ok:true,status:'WAITING_ACTION',scenario,closed:false,reason:'NO_VERIFIED_DOWNSTREAM_ACTION'};
+  const eligible=safeAuto.includes(scenario);
+  // Fail closed: no browser/client field can attest that a downstream action ran.
+  // Until a server-owned adapter returns durable evidence, the case always awaits action.
+  const reason=eligible?'NO_TRUSTED_DOWNSTREAM_ACTION':'SCENARIO_REQUIRES_MANAGER';
+  const resolution={
+    scenario,
+    status:eligible?'ACTION_REQUIRED':'MANAGER_REQUIRED',
+    actions:['verify_context','apply_only_reversible_or_preapproved_action','notify_requester','journal'],
+    verification:{verified:false,source:'SERVER_SIDE_DOWNSTREAM',reason}
+  };
+  const update=await env.DB.prepare(
+    `UPDATE support_cases
+        SET status='WAITING_ACTION',resolution=?,resolved_at=NULL,requires_manager=1
+      WHERE id=? AND status='PROCESSING'`
+  ).bind(JSON.stringify(resolution),caseId).run();
+  if(Number(update?.meta?.changes||0)!==1){
+    return {ok:false,status:'STATE_CONFLICT',scenario,closed:false,reason:'CASE_NOT_PROCESSING'};
   }
-  await env.DB.prepare(`UPDATE support_cases SET status='RESOLVED',resolution=?,resolved_at=CURRENT_TIMESTAMP WHERE id=?`).bind(JSON.stringify(resolution),caseId).run();
-  await supportEvent(env,caseId,actorRole,actorId,'AUTO_RESOLVED_VERIFIED',resolution);
-  await journal(env,actorRole,actorId,'SUPPORT_CASE_AUTO_RESOLVE','support_cases',caseId,'RESOLVED',{scenario});
-  return {ok:true,status:'RESOLVED',scenario,closed:true};
+  await supportEvent(env,caseId,actorRole,actorId,'AUTO_CHECKED_WAITING_ACTION',resolution);
+  await journal(env,actorRole,actorId,'SUPPORT_CASE_AUTO_CHECK','support_cases',caseId,'WAITING_ACTION',{scenario,reason});
+  return {ok:true,status:'WAITING_ACTION',scenario,closed:false,manager_approval_required:true,reason};
 }
-
 async function supportList(request,env){
   const a=await supportAuth(request,env); if(a.response)return a.response;
   await ensureProcheliaMasterComplementSchema(env);
