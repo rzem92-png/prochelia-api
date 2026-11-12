@@ -28,7 +28,7 @@ jobs:
       AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_PROD_SECRET_ACCESS_KEY }}
       AWS_DEFAULT_REGION: auto
       EXPECTED_ACCOUNT_ID: f2a79e9fa41566a8ec80fb24c02c60eb
-      EXPECTED_DB_NAME: prochelia-api
+      EXPECTED_DB_NAME: prochelia-db
       EXPECTED_DB_ID: 04f52830-ef5a-4f17-a640-42bbc2381bba
       R2_BUCKET: prochelia-production-backups-eu
       R2_ENDPOINT: https://f2a79e9fa41566a8ec80fb24c02c60eb.r2.cloudflarestorage.com
@@ -66,7 +66,7 @@ jobs:
           assert len(c["d1_databases"]) == 1
           d=c["d1_databases"][0]
           assert d["binding"] == "DB"
-          assert d["database_name"] == "prochelia-api"
+          assert d["database_name"] == "prochelia-db"
           assert d["database_id"] == "04f52830-ef5a-4f17-a640-42bbc2381bba"
           print("Exact production D1 target verified.")
           PY
