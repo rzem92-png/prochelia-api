@@ -182,6 +182,32 @@ async function getSessionUser(request, env) {
   return { user: safeUser(row), session_id: row.session_id, token_hash: tokenHash };
 }
 
+async function csrfTokenForSession(auth) {
+  const key=await crypto.subtle.importKey(
+    'raw',
+    new TextEncoder().encode(auth.token_hash),
+    {name:'HMAC',hash:'SHA-256'},
+    false,
+    ['sign']
+  );
+  const message=new TextEncoder().encode(`PROCHELIA-CSRF-v1:${auth.session_id}`);
+  const signature=await crypto.subtle.sign('HMAC',key,message);
+  return base64url(new Uint8Array(signature));
+}
+
+function constantTimeStringEqual(left,right) {
+  if(typeof left!=='string'||typeof right!=='string'||left.length!==right.length) return false;
+  let diff=0;
+  for(let i=0;i<left.length;i++) diff|=left.charCodeAt(i)^right.charCodeAt(i);
+  return diff===0;
+}
+
+async function authCsrf(request,env) {
+  const auth=await getSessionUser(request,env);
+  if(!auth) return json({ok:false,error:'UNAUTHENTICATED',version:VERSION},401);
+  return json({ok:true,csrf_token:await csrfTokenForSession(auth),version:VERSION},200,{'cache-control':'no-store','pragma':'no-cache'});
+}
+
 function requireRole(auth, roles) {
   if (!auth?.user) return false;
   return roles.includes(auth.user.role);
@@ -1330,6 +1356,11 @@ async function handleBase(request, env) {
     return postMissions(request, env);
   }
 
+  if (url.pathname === '/api/auth/csrf') {
+    if (request.method !== 'GET') return json({ ok: false, error: 'METHOD_NOT_ALLOWED', version: VERSION }, 405);
+    return authCsrf(request, env);
+  }
+
   if (url.pathname === '/api/auth/status') {
     if (request.method !== 'GET') return json({ ok: false, error: 'METHOD_NOT_ALLOWED', version: VERSION }, 405);
     return authStatus(request, env);
@@ -1381,7 +1412,7 @@ async function handleBase(request, env) {
       routes: [
         '/api/health','/api/prestations','/api/core/schema',
         '/api/missions/schema','/api/missions/validate','/api/missions',
-        '/api/auth/status','/api/auth/login','/api/auth/logout','/api/auth/me',
+        '/api/auth/status','/api/auth/csrf','/api/auth/login','/api/auth/logout','/api/auth/me',
         '/api/auth/bootstrap','/api/security/identity/start','/api/security/identity/approve','/api/security/mission/prepare','/api/security/presence','/api/security/code/verify','/api/security/resend','/api/security/client-code','/api/security/status','/api/payments/onboard','/api/payments/status','/api/payments/mission/create','/api/payments/mission/finalize','/api/payments/payout','/api/payments/webhook','/api/payments/dispute','/api/payments/dispute/resolve','/api/readiness','/api/info'
       ],
       writes: { missions: false, bootstrap: true },
@@ -3229,6 +3260,15 @@ async function handle(request,env){
   try {
     if(isMutatingMethod(request.method) && !securityOriginAllowed(request,env)) return json({ok:false,error:'ORIGIN_NOT_ALLOWED',version:VERSION},403);
     const url=new URL(request.url);
+    const csrfExemptPaths=new Set(['/api/auth/login','/api/auth/bootstrap','/api/payments/webhook']);
+    if(isMutatingMethod(request.method) && !csrfExemptPaths.has(url.pathname) && getSessionToken(request)){
+      const auth=await getSessionUser(request,env);
+      if(!auth) return json({ok:false,error:'UNAUTHENTICATED',version:VERSION},401);
+      const supplied=request.headers.get('x-csrf-token')||'';
+      const expected=await csrfTokenForSession(auth);
+      if(!constantTimeStringEqual(supplied,expected))
+        return json({ok:false,error:'CSRF_TOKEN_INVALID',version:VERSION},403);
+    }
     // Fail closed before any schema helper touches D1: unauthenticated callers
     // must not use mission validation as an existence oracle for private IDs.
     if (url.pathname === '/api/missions/validate') {
