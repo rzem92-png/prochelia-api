@@ -4,10 +4,10 @@ import { readFile } from "node:fs/promises";
 
 const workflow = await readFile(new URL("../.github/workflows/deploy-preview-worker-manual.yml", import.meta.url), "utf8");
 
-test("Preview deploy is manual and requires exact confirmation on the feature branch", () => {
+test("Preview deploy is manual and requires exact confirmation on main", () => {
   assert.match(workflow, /workflow_dispatch:/);
   assert.match(workflow, /DEPLOY_PREVIEW_ONLY/);
-  assert.match(workflow, /refs\/heads\/fix\/api-directory-contract-2026-11-12/);
+  assert.match(workflow, /github\.ref == 'refs\/heads\/main'/);
 });
 
 test("Preview deploy pins isolated Worker and Preview D1, never production", () => {
