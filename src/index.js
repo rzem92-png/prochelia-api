@@ -2466,6 +2466,7 @@ function securityOriginAllowed(request,env){
   const configured=clean(env?.CORS_ORIGIN);
   const defaults=[
     'https://prochelia.pages.dev',
+    'https://staging-prochelia-v14-restor.prochelia.pages.dev',
     'https://56b01f85.prochelia.pages.dev'
   ];
   const allowed=(configured ? configured.split(',') : defaults)
