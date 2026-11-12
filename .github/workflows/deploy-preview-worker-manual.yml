@@ -1,0 +1,82 @@
+name: Deploy PROCHÉLIA API preview only (manual)
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirmation:
+        description: "Type DEPLOY_PREVIEW_ONLY to deploy the isolated Preview Worker"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: prochelia-api-preview-deploy
+  cancel-in-progress: false
+
+jobs:
+  preview-only:
+    if: github.ref == 'refs/heads/fix/api-directory-contract-2026-11-12' && inputs.confirmation == 'DEPLOY_PREVIEW_ONLY'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+          package-manager-cache: false
+      - name: Verify isolated Preview target and generate deployment config
+        shell: bash
+        run: |
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const production = JSON.parse(fs.readFileSync('wrangler.jsonc', 'utf8'));
+          const expectedPreviewId = '6adb95e5-e542-4bec-9008-fbea01042305';
+          const expectedProductionId = '04f52830-ef5a-4f17-a640-42bbc2381bba';
+          if (production.name !== 'prochelia-api') throw new Error('Unexpected production Worker config');
+          if (!production.d1_databases?.some(db => db.binding === 'DB' && db.database_id === expectedProductionId)) {
+            throw new Error('Production D1 identity mismatch; refusing Preview deployment');
+          }
+          const preview = {
+            name: 'prochelia-api-preview',
+            main: 'src/index.js',
+            compatibility_date: '2026-09-25',
+            workers_dev: true,
+            keep_vars: true,
+            d1_databases: [{
+              binding: 'DB',
+              database_name: 'prochelia-preview-db',
+              database_id: expectedPreviewId
+            }],
+            observability: { logs: { enabled: true, invocation_logs: true } }
+          };
+          if (preview.name === production.name || preview.d1_databases.some(db => db.database_id === expectedProductionId)) {
+            throw new Error('Preview target is not isolated');
+          }
+          fs.writeFileSync('wrangler.preview.generated.json', JSON.stringify(preview, null, 2));
+          console.log('Preview Worker and Preview D1 identifiers verified; dashboard variables will be preserved.');
+          NODE
+      - name: Check Worker source syntax
+        run: |
+          node --experimental-default-type=module --check src/index.js
+          node --experimental-default-type=module --check src/v7.js
+          node --experimental-default-type=module --check src/v7-routes.js
+      - name: Run backend contract and security tests
+        run: |
+          node --test tests/auth-handler-wiring.test.js
+          node --experimental-default-type=module --test tests/v7-security.test.js
+      - name: Validate Wrangler bundle without deployment
+        run: npx --yes wrangler@4 deploy --dry-run --config wrangler.preview.generated.json --outdir "$RUNNER_TEMP/prochelia-preview-dry-run"
+      - name: Deploy ONLY the isolated Preview Worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: npx --yes wrangler@4 deploy --config wrangler.preview.generated.json --keep-vars
+      - name: Record deployment guardrails
+        run: |
+          echo 'Preview Worker only: prochelia-api-preview.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'D1 binding is pinned to Preview DB 6adb95e5-e542-4bec-9008-fbea01042305.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Dashboard vars and existing secrets are preserved. No migrations, no production Worker, and no production D1 changes.' >> "$GITHUB_STEP_SUMMARY"
