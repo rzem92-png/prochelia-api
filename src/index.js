@@ -1020,7 +1020,6 @@ async function verifyWebhookSignature(request, env, rawBody) {
 }
 
 async function paymentWebhook(request, env) {
-  await ensurePaymentSchema(env);
   // Bound untrusted webhook input before HMAC/JSON processing to prevent memory DoS.
   // Preserve the exact UTF-8 body text used by the provider signature.
   const bounded=await readBoundedRequestBody(request,64*1024);
@@ -1030,6 +1029,8 @@ async function paymentWebhook(request, env) {
   }
   const raw=bounded.text;
   if(!(await verifyWebhookSignature(request,env,raw))) return json({ok:false,error:'INVALID_WEBHOOK_SIGNATURE',version:VERSION},401);
+  // Do not create or inspect payment schema until the PSP signature is valid.
+  await ensurePaymentSchema(env);
   let event; try{event=JSON.parse(raw)}catch{return json({ok:false,error:'INVALID_WEBHOOK_JSON',version:VERSION},400);}
   const provider=clean(event?.provider)||paymentProvider(env), eventId=clean(event?.id), type=clean(event?.type);
   if(!eventId||!type) return json({ok:false,error:'INVALID_WEBHOOK_EVENT',version:VERSION},400);
@@ -2913,17 +2914,23 @@ async function processBackgroundJobs(request,env) {
 function isMutatingMethod(method){ return ['POST','PUT','PATCH','DELETE'].includes(method); }
 function securityOriginAllowed(request,env){
   const origin=request.headers.get('origin');
-  // Les clients non-navigateur peuvent ne pas envoyer Origin. Les requêtes navigateur
-  // avec Origin doivent correspondre à une origine explicitement autorisée.
-  if(!origin) return true;
+  // Toute mutation doit porter une origine explicite et strictement autorisée.
+  if(!origin) return false;
   const configured=clean(env?.CORS_ORIGIN);
-  const defaults=[
-    'https://prochelia.pages.dev',
-    'https://56b01f85.prochelia.pages.dev'
-  ];
-  const allowed=(configured ? configured.split(',') : defaults)
-    .map(x=>String(x).trim()).filter(Boolean);
+  // Aucune origine par défaut : une configuration absente ou vide ferme l'accès.
+  if(!configured) return false;
+  const allowed=configured.split(',').map(x=>String(x).trim()).filter(Boolean);
   return allowed.includes(origin);
+}
+
+// Seul le bootstrap initial peut être appelé sans Origin, et uniquement avec
+// le secret serveur exact. Le handler bootstrap revérifie également ce jeton.
+function originlessMutationAllowed(request,env){
+  if(request.method!=='POST' || request.headers.get('origin')) return false;
+  const url=new URL(request.url);
+  if(!env?.BOOTSTRAP_TOKEN) return false;
+  return url.pathname==='/api/auth/bootstrap' &&
+    request.headers.get('authorization')===`Bearer ${env.BOOTSTRAP_TOKEN}`;
 }
 
 
@@ -3388,8 +3395,14 @@ async function handleCommercialRecruitment(request,env){
 
 async function handle(request,env){
   try {
-    if(isMutatingMethod(request.method) && !securityOriginAllowed(request,env)) return json({ok:false,error:'ORIGIN_NOT_ALLOWED',version:VERSION},403);
+    if(isMutatingMethod(request.method) && !securityOriginAllowed(request,env) && !originlessMutationAllowed(request,env)) return json({ok:false,error:'ORIGIN_NOT_ALLOWED',version:VERSION},403);
     const url=new URL(request.url);
+    // PSP settlement remains explicitly disabled at the route boundary until
+    // atomic ledger, replay/idempotency, refunds and payout reconciliation pass.
+    if(url.pathname==='/api/payments/webhook'){
+      if(request.method!=='POST') return json({ok:false,error:'METHOD_NOT_ALLOWED',version:VERSION},405,{'allow':'POST'});
+      return json({ok:false,error:'PAYMENT_WEBHOOK_DISABLED_PENDING_REVIEW',version:VERSION},503);
+    }
     // Fail closed before any schema helper touches D1: unauthenticated callers
     // must not use mission validation as an existence oracle for private IDs.
     if (url.pathname === '/api/missions/validate') {
@@ -3880,8 +3893,13 @@ async function productionRateLimit(request,env){
 
 async function strictProductionAudit(request,env){
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
+  // This audit is deliberately read-only: no schema creation, config-check
+  // inserts, journal writes, queue processing, or other persistence.
   const result=await productionConfigCheck(env);
   const extra=[
+    // Payment settlement stays blocked until atomic ledger, replay,
+    // idempotency, refunds and payout reconciliation are independently tested.
+    {code:'PAYMENT_WEBHOOK_ATOMICITY',status:'NOT_READY',reason:'PAYMENT_WEBHOOK_DISABLED_PENDING_REVIEW'},
     {code:'SECURITY_CODE_DELIVERY',status:finalSecretConfigured(env,'SECURITY_CODE_WEBHOOK')&&finalSecretConfigured(env,'SECURITY_CODE_WEBHOOK_SECRET')?'OK':'NOT_CONFIGURED'},
     {code:'CORS_ORIGIN',status:finalSecretConfigured(env,'CORS_ORIGIN')?'OK':'NOT_CONFIGURED'},
     {code:'BACKUP_R2',status:env.BACKUP_BUCKET&&finalSecretConfigured(env,'BACKUP_ENCRYPTION_KEY')?'OK':'NOT_CONFIGURED'},
@@ -3889,16 +3907,11 @@ async function strictProductionAudit(request,env){
     {code:'MAPS_PROVIDER',status:finalSecretConfigured(env,'MAPS_API_KEY')?'OK':'NOT_CONFIGURED'}
   ];
   const checks=[...(result.checks||[]),...extra];
-  const blockingCodes=new Set(['SECRET:PAYMENT_PROVIDER','SECRET:PAYMENT_WEBHOOK_SECRET','SECURITY_CODE_DELIVERY','CORS_ORIGIN','BACKUP_R2']);
+  const blockingCodes=new Set(['PAYMENT_WEBHOOK_ATOMICITY','SECRET:PAYMENT_PROVIDER','SECRET:PAYMENT_WEBHOOK_SECRET','SECURITY_CODE_DELIVERY','CORS_ORIGIN','BACKUP_R2']);
   const blocking=checks.filter(x=>blockingCodes.has(x.code)&&x.status!=='OK');
   const configurationReady=blocking.length===0 && result.blocking===0;
-  for(const c of extra){
-    await env.DB.prepare(`INSERT INTO system_config_checks(id,check_code,status,details_json) VALUES(?,?,?,?)`).bind(crypto.randomUUID(),c.code,c.status,JSON.stringify(c)).run();
-  }
-  await journal(env,'gerante',gate.auth.user.id,'STRICT_PRODUCTION_AUDIT','system',null,configurationReady?'CONFIGURATION_READY':'ATTENTION',{blocking:blocking.map(x=>x.code)});
-  // Configuration presence is not proof of operational acceptance.
-  // Real traffic remains disabled until sandbox, E2E, restore, security and legal gates are independently attested.
-  return json({ok:true,version:VERSION,production_gate:configurationReady?'CONFIGURATION_READY':'CLOSED',configuration_ready:configurationReady,ready_for_real_traffic:false,real_traffic_authorized:false,checks,blocking:blocking.map(x=>x.code),additional_gates_required:['PSP_SANDBOX_AND_WEBHOOK_RECONCILIATION','CLIENT_PROVIDER_MANAGER_E2E','IOS_ANDROID_DESKTOP_ACCEPTANCE','BACKUP_RESTORE_DRILL','INDEPENDENT_SECURITY_REVIEW','RGPD_AND_LEGAL_APPROVAL','EXPLICIT_RELEASE_AUTHORIZATION'],note:'Configuration audit only. This endpoint can never authorize real traffic; independent operational acceptance and explicit release approval remain mandatory.'});
+  // A configuration audit is never a production release authorization.
+  return json({ok:true,version:VERSION,production_gate:configurationReady?'CONFIGURATION_READY':'CLOSED',configuration_ready:configurationReady,ready_for_real_traffic:false,real_traffic_authorized:false,checks,blocking:blocking.map(x=>x.code),additional_gates_required:['PSP_SANDBOX_AND_WEBHOOK_RECONCILIATION','CLIENT_PROVIDER_MANAGER_E2E','IOS_ANDROID_DESKTOP_ACCEPTANCE','BACKUP_RESTORE_DRILL','INDEPENDENT_SECURITY_REVIEW','RGPD_AND_LEGAL_APPROVAL','EXPLICIT_RELEASE_AUTHORIZATION'],note:'Read-only configuration audit only. independent operational acceptance, sandbox reconciliation, security review and explicit release authorization remain mandatory. Payment webhook settlement remains blocked pending atomicity and reconciliation validation; this endpoint can never authorize real traffic.'});
 }
 
 const __procheliaProductionSafetyHandle = handle;
@@ -3911,10 +3924,15 @@ handle = async function(request,env){
     const preflightPath = preflightUrl.pathname;
     const preflightMethod = request.method.toUpperCase();
     const getOnlyDiagnostics = new Set(['/api/health','/api/readiness','/api/info']);
+    // Disabled PSP webhook is rejected before rate limiting or any D1 access.
+    if (preflightPath === '/api/payments/webhook') {
+      if (preflightMethod !== 'POST') return json({ok:false,error:'METHOD_NOT_ALLOWED',version:VERSION},405,{'allow':'POST'});
+      return json({ok:false,error:'PAYMENT_WEBHOOK_DISABLED_PENDING_REVIEW',version:VERSION},503);
+    }
     // Apply browser-origin rejection before rate limiting or any D1 access.
     // This keeps forbidden cross-origin writes a deterministic 403 even when
     // the database is unavailable, instead of masking them as a generic 500.
-    if (isMutatingMethod(preflightMethod) && !securityOriginAllowed(request,env)) {
+    if (isMutatingMethod(preflightMethod) && !securityOriginAllowed(request,env) && !originlessMutationAllowed(request,env)) {
       return json({ok:false,error:'ORIGIN_NOT_ALLOWED',version:VERSION},403);
     }
     // Block anonymous mission validation before rate limiting touches D1.
