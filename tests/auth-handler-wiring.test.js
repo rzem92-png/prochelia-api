@@ -133,7 +133,8 @@ test("confirmed PSP refunds can reverse a payment while its dispute is open", ()
   const handler = source.slice(source.indexOf("async function paymentWebhook"), source.indexOf("async function openPaymentDispute"));
   assert.match(handler, /txStatus==='refunded'\?"'paid','held'"/);
   assert.match(handler, /const disputeGuard=txStatus==='refunded'\?'':/);
-  assert.match(handler, /transitionBindings=txStatus==='refunded'\?\[txStatus,providerPaymentId,txId\]/);
+  assert.match(handler, /transitionBindings=txStatus==='refunded'\s*\?\[txStatus,providerPaymentId,txStatus,txId\]/);
+  assert.match(handler, /:\[txStatus,providerPaymentId,txStatus,txId,txId\]/);
 });
 
 test("runtime wallet trigger permits confirmed refund receivables like the SQL migration", () => {
