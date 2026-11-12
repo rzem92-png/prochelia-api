@@ -589,6 +589,10 @@ async function securityPrepareMission(request, env) {
   const body = await readJson(request);
   const missionId=clean(body?.mission_id), clientId=clean(body?.client_id), intervenantId=clean(body?.intervenant_id);
   if(!missionId||!clientId||!intervenantId) return json({ok:false,error:'MISSION_SECURITY_FIELDS_REQUIRED',version:VERSION},400);
+  const mission=await env.DB.prepare('SELECT id,client_id,intervenant_id,status FROM missions WHERE id=? LIMIT 1').bind(missionId).first();
+  if(!mission) return json({ok:false,error:'MISSION_NOT_FOUND',version:VERSION},404);
+  if(String(mission.client_id)!==clientId||String(mission.intervenant_id||'')!==intervenantId) return json({ok:false,error:'MISSION_PARTICIPANTS_MISMATCH',version:VERSION},403);
+  if(['completed','cancelled','canceled','refunded'].includes(String(mission.status||'').toLowerCase())) return json({ok:false,error:'MISSION_NOT_ELIGIBLE_FOR_SECURITY_PREPARATION',version:VERSION,status:mission.status},409);
   const verified = await requireVerifiedIntervenant(env,intervenantId);
   if(!verified) return json({ok:false,error:'INTERVENANT_IDENTITY_NOT_VERIFIED',version:VERSION},409);
   const existing=await env.DB.prepare('SELECT id,status FROM mission_security WHERE mission_id=? LIMIT 1').bind(missionId).first();
@@ -940,6 +944,14 @@ async function createMissionPayment(request, env) {
   const missionId=clean(body?.mission_id), clientId=clean(body?.client_id), intervenantId=clean(body?.intervenant_id);
   const gross=moneyCents(body?.gross_eur), commission=moneyCents(body?.commission_eur);
   if(!missionId||!clientId||!intervenantId||gross===null||commission===null||commission>gross) return json({ok:false,error:'INVALID_PAYMENT_AMOUNT_OR_PARTIES',version:VERSION},400);
+  const mission=await env.DB.prepare('SELECT id,client_id,intervenant_id,price_client,price_intervenant,commission,status FROM missions WHERE id=? LIMIT 1').bind(missionId).first();
+  if(!mission) return json({ok:false,error:'MISSION_NOT_FOUND',version:VERSION},404);
+  if(String(mission.client_id)!==clientId||String(mission.intervenant_id||'')!==intervenantId) return json({ok:false,error:'MISSION_PARTICIPANTS_MISMATCH',version:VERSION},403);
+  const authoritativeGross=moneyCents(mission.price_client), authoritativeCommission=moneyCents(mission.commission);
+  if(authoritativeGross===null||authoritativeCommission===null||gross!==authoritativeGross||commission!==authoritativeCommission) return json({ok:false,error:'PAYMENT_AMOUNT_MISMATCH_WITH_MISSION',version:VERSION},409);
+  if(['cancelled','canceled','refunded'].includes(String(mission.status||'').toLowerCase())) return json({ok:false,error:'MISSION_NOT_PAYABLE',version:VERSION,status:mission.status},409);
+  const activePayment=await env.DB.prepare("SELECT id,status FROM payment_transactions WHERE mission_id=? AND status IN ('pending','processing','held','paid') LIMIT 1").bind(missionId).first();
+  if(activePayment) return json({ok:false,error:'MISSION_ALREADY_HAS_ACTIVE_PAYMENT',version:VERSION,transaction_id:activePayment.id,status:activePayment.status},409);
   const idem=clean(request.headers.get('idempotency-key'))||clean(body?.idempotency_key);
   if(!idem) return json({ok:false,error:'IDEMPOTENCY_KEY_REQUIRED',version:VERSION},400);
   const old=await env.DB.prepare('SELECT * FROM payment_transactions WHERE idempotency_key=? LIMIT 1').bind(idem).first();
