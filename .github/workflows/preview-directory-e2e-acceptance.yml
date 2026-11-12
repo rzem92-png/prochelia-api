@@ -25,6 +25,7 @@ jobs:
       PREVIEW_DB_NAME: prochelia-preview-db
       PREVIEW_DB_ID: 6adb95e5-e542-4bec-9008-fbea01042305
       PAGES_PREVIEW_URL: https://c3ceec86.prochelia.pages.dev
+      PAGES_DEPLOYMENT_ID: c3ceec86-8372-462d-b932-cfe18ca55085
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -50,6 +51,16 @@ jobs:
           status="$(curl --silent --show-error --output "$RUNNER_TEMP/preview-d1.json" --write-out '%{http_code}' -H "Authorization: Bearer $token" "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/d1/database/$PREVIEW_DB_ID")"
           [[ "$status" == "200" ]]
           jq -e --arg name "$PREVIEW_DB_NAME" --arg id "$PREVIEW_DB_ID" '.success == true and .result.name == $name and .result.uuid == $id' "$RUNNER_TEMP/preview-d1.json" >/dev/null
+          status="$(curl --silent --show-error --output "$RUNNER_TEMP/pages-preview.json" --write-out '%{http_code}' -H "Authorization: Bearer $token" "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/pages/projects/prochelia/deployments/$PAGES_DEPLOYMENT_ID")"
+          [[ "$status" == "200" ]]
+          jq -e --arg db "$PREVIEW_DB_ID" --arg worker "prochelia-api-preview" --arg commit "e69fde70fb28405aa8117eaf041aed618d3da664" '
+            .success == true and
+            .result.environment == "preview" and
+            .result.uses_functions == true and
+            .result.d1_databases.DB.id == $db and
+            .result.services.PROCHELIA_API.service == $worker and
+            .result.deployment_trigger.metadata.commit_hash == $commit
+          ' "$RUNNER_TEMP/pages-preview.json" >/dev/null || { echo "::error::Pages Preview deployment bindings/commit mismatch."; exit 1; }
           [[ "$PREVIEW_DB_ID" != "04f52830-ef5a-4f17-a640-42bbc2381bba" ]]
           cat > "$RUNNER_TEMP/wrangler.preview.json" <<'JSON'
           {
