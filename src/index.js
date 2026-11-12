@@ -2925,7 +2925,7 @@ function securityOriginAllowed(request,env){
 
 // Seul le bootstrap initial peut être appelé sans Origin, et uniquement avec
 // le secret serveur exact. Le handler bootstrap revérifie également ce jeton.
-function originlessBootstrapAllowed(request,env){
+function originlessMutationAllowed(request,env){
   if(request.method!=='POST' || request.headers.get('origin')) return false;
   const url=new URL(request.url);
   // The PSP webhook is deliberately disabled below and performs no D1 work.
@@ -3398,7 +3398,7 @@ async function handleCommercialRecruitment(request,env){
 
 async function handle(request,env){
   try {
-    if(isMutatingMethod(request.method) && !securityOriginAllowed(request,env) && !originlessBootstrapAllowed(request,env)) return json({ok:false,error:'ORIGIN_NOT_ALLOWED',version:VERSION},403);
+    if(isMutatingMethod(request.method) && !securityOriginAllowed(request,env) && !originlessMutationAllowed(request,env)) return json({ok:false,error:'ORIGIN_NOT_ALLOWED',version:VERSION},403);
     const url=new URL(request.url);
     // PSP settlement remains explicitly disabled at the route boundary until
     // atomic ledger, replay/idempotency, refunds and payout reconciliation pass.
@@ -3930,7 +3930,7 @@ handle = async function(request,env){
     // Apply browser-origin rejection before rate limiting or any D1 access.
     // This keeps forbidden cross-origin writes a deterministic 403 even when
     // the database is unavailable, instead of masking them as a generic 500.
-    if (isMutatingMethod(preflightMethod) && !securityOriginAllowed(request,env) && !originlessBootstrapAllowed(request,env)) {
+    if (isMutatingMethod(preflightMethod) && !securityOriginAllowed(request,env) && !originlessMutationAllowed(request,env)) {
       return json({ok:false,error:'ORIGIN_NOT_ALLOWED',version:VERSION},403);
     }
     // Block anonymous mission validation before rate limiting touches D1.
