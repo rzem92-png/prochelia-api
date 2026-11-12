@@ -1025,16 +1025,20 @@ async function paymentWebhook(request, env) {
     const tx=await env.DB.prepare('SELECT * FROM payment_transactions WHERE id=? LIMIT 1').bind(txId).first();
     if(!tx) return json({ok:false,error:'PAYMENT_TRANSACTION_NOT_FOUND',version:VERSION},404);
     const providerPaymentId=clean(event?.data?.provider_payment_id)||null;
+    const allowedPrevious=txStatus==='refunded'?"'paid'":"'pending','held'";
     statements.push(env.DB.prepare(`UPDATE payment_transactions SET status=?,provider_payment_id=COALESCE(?,provider_payment_id),updated_at=CURRENT_TIMESTAMP
-      WHERE id=? AND status IN ('pending','held') AND changes()=1
+      WHERE id=? AND status IN (${allowedPrevious}) AND changes()=1
       AND NOT EXISTS (SELECT 1 FROM payment_disputes WHERE transaction_id=? AND status='open')`)
       .bind(txStatus,providerPaymentId,txId,txId));
-    if(txStatus==='paid'){
+    if(txStatus==='paid'||txStatus==='refunded'){
+      const delta=txStatus==='paid'?Number(tx.net_intervenant_cents||0):-Number(tx.net_intervenant_cents||0);
       statements.push(env.DB.prepare(`INSERT OR IGNORE INTO payment_wallet_ledger
         (id,idempotency_key,transaction_id,user_id,entry_type,available_delta_cents,currency,metadata_json)
-        SELECT ?,?,?,?,'MISSION_CREDIT',?,?,?
+        SELECT ?,?,?,?, ?,?,?,?
         WHERE changes()=1`)
-        .bind(crypto.randomUUID(),'mission-credit:'+tx.id,tx.id,tx.intervenant_id,Number(tx.net_intervenant_cents||0),tx.currency||'EUR',JSON.stringify({source:'psp_webhook',event_id:eventId})));
+        .bind(crypto.randomUUID(),txStatus==='paid'?'mission-credit:'+tx.id:'mission-refund:'+tx.id,
+          tx.id,tx.intervenant_id,txStatus==='paid'?'MISSION_CREDIT':'MISSION_REFUND',
+          delta,tx.currency||'EUR',JSON.stringify({source:'psp_webhook',event_id:eventId})));
     }
   } else {
     const payout=await env.DB.prepare('SELECT * FROM payout_requests WHERE id=? LIMIT 1').bind(payoutId).first();
@@ -1044,16 +1048,19 @@ async function paymentWebhook(request, env) {
       updated_at=CURRENT_TIMESTAMP WHERE id=? AND status IN ('requested','processing') AND changes()=1`)
       .bind(payoutStatus,clean(event?.data?.provider_payout_id)||null,clean(event?.data?.failure_code)||null,
         clean(event?.data?.failure_message)||null,payoutStatus,payoutId));
-    const availableDelta=payoutStatus==='completed'?0:Number(payout.amount_cents);
-    const reservedDelta=-Number(payout.amount_cents);
-    const paidDelta=payoutStatus==='completed'?Number(payout.amount_cents):0;
-    statements.push(env.DB.prepare(`INSERT OR IGNORE INTO payment_wallet_ledger
-      (id,idempotency_key,payout_id,user_id,entry_type,available_delta_cents,reserved_delta_cents,paid_delta_cents,currency,metadata_json)
-      SELECT ?,?,?,?, ?,?,?,?, ?,?
-      WHERE changes()=1`)
-      .bind(crypto.randomUUID(),'payout-settle:'+payout.id,payout.id,payout.user_id,
-        payoutStatus==='completed'?'PAYOUT_PAID':'PAYOUT_RELEASE',availableDelta,reservedDelta,paidDelta,
-        payout.currency||'EUR',JSON.stringify({event_id:eventId,status:payoutStatus})));
+    // A processing notification changes status only; funds remain reserved.
+    if(payoutStatus!=='processing'){
+      const availableDelta=payoutStatus==='completed'?0:Number(payout.amount_cents);
+      const reservedDelta=-Number(payout.amount_cents);
+      const paidDelta=payoutStatus==='completed'?Number(payout.amount_cents):0;
+      statements.push(env.DB.prepare(`INSERT OR IGNORE INTO payment_wallet_ledger
+        (id,idempotency_key,payout_id,user_id,entry_type,available_delta_cents,reserved_delta_cents,paid_delta_cents,currency,metadata_json)
+        SELECT ?,?,?,?, ?,?,?,?, ?,?
+        WHERE changes()=1`)
+        .bind(crypto.randomUUID(),'payout-settle:'+payout.id,payout.id,payout.user_id,
+          payoutStatus==='completed'?'PAYOUT_PAID':'PAYOUT_RELEASE',availableDelta,reservedDelta,paidDelta,
+          payout.currency||'EUR',JSON.stringify({event_id:eventId,status:payoutStatus})));
+    }
   }
   statements.push(env.DB.prepare(`UPDATE payment_webhook_events SET processed=1,processed_at=CURRENT_TIMESTAMP
     WHERE provider=? AND event_id=?`).bind(provider,eventId));
