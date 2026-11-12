@@ -43,6 +43,7 @@ test("mission payment amounts come from the persisted mission and retries remain
   const handler = source.slice(source.indexOf("async function createMissionPayment"), source.indexOf("async function finalizeMissionPayment"));
   assert.match(handler, /SELECT id,client_id,intervenant_id,price_client,price_intervenant,commission,status FROM missions/);
   assert.match(handler, /PAYMENT_AMOUNT_MISMATCH_WITH_MISSION/);
+  assert.match(handler, /gross-authoritativeCommission!==authoritativeIntervenant/);
   assert.ok(handler.indexOf("idempotent_replay:true") < handler.indexOf("MISSION_ALREADY_HAS_ACTIVE_PAYMENT"));
 });
 
