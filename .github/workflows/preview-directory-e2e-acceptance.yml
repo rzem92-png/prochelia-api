@@ -243,7 +243,7 @@ jobs:
           await expectStatus('/api/intervenants', null, 401);
           await expectStatus('/api/clients', client, 403);
           await expectStatus('/api/intervenants', client, 403);
-          await expectStatus('/api/clients?offset=50001', manager, 400);
+          await expectStatus('/api/clients?offset=not-a-number', manager, 400);
           const first = await expectStatus('/api/clients?offset=' + clientOffset, manager, 200);
           const firstBody = await first.json();
           if (!Array.isArray(firstBody.items) || firstBody.items.length !== 100 || firstBody.has_more !== true || firstBody.next_offset !== clientOffset + 100) {
