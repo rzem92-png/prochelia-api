@@ -44,7 +44,7 @@ test("Synthetic Preview E2E fixtures are cleaned up and cleanup is verified", ()
 
 
 test("Preview directory acceptance exercises the deployed Worker and deterministic synthetic ordering", () => {
-  assert.match(workflow, /https:\/\/prochelia-api-preview\.workers\.dev/);
+  assert.match(workflow, /https:\/\/prochelia-api-preview\.rzem92\.workers\.dev/);
   assert.match(workflow, /created_at,updated_at/);
   assert.match(workflow, /9999-12-31 23:59:59/);
   assert.match(workflow, /offset=not-a-number/);
