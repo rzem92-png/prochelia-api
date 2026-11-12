@@ -1194,11 +1194,13 @@ async function paymentAdminResolve(request, env) {
   const d=await env.DB.prepare(`SELECT * FROM payment_disputes WHERE id=? LIMIT 1`).bind(disputeId).first();
   if(!d||d.status!=='open') return json({ok:false,error:'DISPUTE_NOT_FOUND_OR_ALREADY_RESOLVED',version:VERSION},409);
   const results=await env.DB.batch([
+    // Restore the held payment first; resolve the dispute only if that transition succeeded.
+    env.DB.prepare(`UPDATE payment_transactions SET status='paid',updated_at=CURRENT_TIMESTAMP
+      WHERE id=? AND status='held' AND EXISTS (SELECT 1 FROM payment_disputes WHERE id=? AND status='open')`).bind(d.transaction_id,disputeId),
     env.DB.prepare(`UPDATE payment_disputes SET status='resolved',resolution='release',resolved_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP
-      WHERE id=? AND status='open' AND EXISTS (SELECT 1 FROM payment_transactions WHERE id=payment_disputes.transaction_id AND status='held')`).bind(disputeId),
-    env.DB.prepare(`UPDATE payment_transactions SET status='paid',updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='held' AND changes()=1`).bind(d.transaction_id)
+      WHERE id=? AND status='open' AND changes()=1`).bind(disputeId)
   ]);
-  if(!results[0]?.meta?.changes) return json({ok:false,error:'DISPUTE_STATE_CONFLICT',version:VERSION},409);
+  if(!results[0]?.meta?.changes || !results[1]?.meta?.changes) return json({ok:false,error:'DISPUTE_STATE_CONFLICT',version:VERSION},409);
   await paymentAudit(env,'PAYMENT_DISPUTE_RESOLVED',{transaction_id:d.transaction_id,mission_id:d.mission_id,user_id:auth.user.id,metadata:{dispute_id:disputeId,resolution:'release'}},'OK');
   return json({ok:true,version:VERSION,dispute_id:disputeId,status:'resolved',resolution:'release'},200);
 }
