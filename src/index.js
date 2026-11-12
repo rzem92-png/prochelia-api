@@ -903,23 +903,89 @@ async function finalizeMissionPayment(request, env) {
   return json({ok:true,version:VERSION,transaction_id:txId,status:outcome},200);
 }
 
+export async function reservePayoutAtomically(env, input) {
+  const { payoutId, idempotencyKey, walletId, userId, amountCents, mode, provider } = input;
+  if (!env?.DB?.batch || !payoutId || !idempotencyKey || !walletId || !userId ||
+      !Number.isSafeInteger(amountCents) || amountCents <= 0 ||
+      !['standard', 'express'].includes(mode)) {
+    return { ok: false, reason: 'INVALID_INPUT' };
+  }
+  const statements = [
+    env.DB.prepare(`INSERT INTO payout_requests
+      (id,idempotency_key,wallet_id,user_id,amount_cents,mode,provider,status)
+      SELECT ?,?,?,?, ?,?,?, 'requested'
+      FROM wallets
+      WHERE id=? AND user_id=? AND available_cents>=?
+        AND NOT EXISTS (SELECT 1 FROM payout_requests WHERE idempotency_key=?)
+    `).bind(payoutId,idempotencyKey,walletId,userId,amountCents,mode,provider,walletId,userId,amountCents,idempotencyKey),
+    env.DB.prepare(`UPDATE wallets
+      SET available_cents=available_cents-?,reserved_cents=reserved_cents+?,updated_at=CURRENT_TIMESTAMP
+      WHERE id=? AND user_id=? AND available_cents>=?
+        AND EXISTS (SELECT 1 FROM payout_requests WHERE id=? AND user_id=? AND idempotency_key=?)
+    `).bind(amountCents,amountCents,walletId,userId,amountCents,payoutId,userId,idempotencyKey),
+    env.DB.prepare(`INSERT INTO payment_audit
+      (id,event_type,transaction_id,payout_id,mission_id,user_id,result,metadata_json)
+      SELECT ?, 'PAYOUT_REQUESTED', NULL, ?, NULL, ?, 'OK', ?
+      WHERE EXISTS (SELECT 1 FROM payout_requests WHERE id=? AND user_id=? AND idempotency_key=?)
+    `).bind(crypto.randomUUID(),payoutId,userId,JSON.stringify({amount_cents:amountCents,mode}),payoutId,userId,idempotencyKey)
+  ];
+  const results = await env.DB.batch(statements);
+  const inserted = Number(results?.[0]?.meta?.changes || 0) === 1;
+  const debited = Number(results?.[1]?.meta?.changes || 0) === 1;
+  return { ok: inserted && debited, reason: inserted && debited ? null : 'NOT_RESERVED' };
+}
+
 async function payoutRequest(request, env) {
-  const auth=await getSessionUser(request,env);
-  if(!requireRole(auth,['intervenant'])) return json({ok:false,error:auth?.user?'FORBIDDEN':'UNAUTHENTICATED',version:VERSION},auth?.user?403:401);
+  const auth = await getSessionUser(request, env);
+  if (!requireRole(auth, ['intervenant'])) return json({ok:false,error:auth?.user?'FORBIDDEN':'UNAUTHENTICATED',version:VERSION}, auth?.user ? 403 : 401);
   await ensurePaymentSchema(env);
-  const body=await readJson(request), amount=moneyCents(body?.amount_eur), mode=clean(body?.mode)||'standard';
-  const idem=clean(request.headers.get('idempotency-key'))||clean(body?.idempotency_key);
-  if(amount===null||amount<=0||!['standard','express'].includes(mode)||!idem) return json({ok:false,error:'INVALID_PAYOUT_REQUEST',version:VERSION},400);
-  const old=await env.DB.prepare('SELECT * FROM payout_requests WHERE idempotency_key=? LIMIT 1').bind(idem).first();
-  if(old) return json({ok:true,version:VERSION,idempotent_replay:true,payout:old},200);
-  const account=await env.DB.prepare(`SELECT * FROM payment_accounts WHERE user_id=? LIMIT 1`).bind(auth.user.id).first();
-  if(!account||Number(account.payouts_enabled)!==1) return json({ok:false,error:'PAYOUT_ACCOUNT_NOT_READY',version:VERSION,message:'Le compte de paiement de l’intervenant doit être vérifié et activé par le PSP.'},409);
-  const wallet=await env.DB.prepare('SELECT * FROM wallets WHERE user_id=? LIMIT 1').bind(auth.user.id).first();
-  if(!wallet||Number(wallet.available_cents)<amount) return json({ok:false,error:'INSUFFICIENT_AVAILABLE_BALANCE',version:VERSION,available_cents:Number(wallet?.available_cents||0)},409);
-  const payoutId=crypto.randomUUID();
-  await env.DB.prepare(`UPDATE wallets SET available_cents=available_cents-?,reserved_cents=reserved_cents+?,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(amount,amount,wallet.id).run();
-  await env.DB.prepare(`INSERT INTO payout_requests (id,idempotency_key,wallet_id,user_id,amount_cents,mode,provider,status) VALUES (?,?,?,?,?,?,?,'requested')`).bind(payoutId,idem,wallet.id,auth.user.id,amount,mode,paymentProvider(env)).run();
-  await paymentAudit(env,'PAYOUT_REQUESTED',{payout_id:payoutId,user_id:auth.user.id,metadata:{amount_cents:amount,mode}},'OK');
+  const body = await readJson(request);
+  const amount = moneyCents(body?.amount_eur);
+  const mode = clean(body?.mode) || 'standard';
+  const idem = clean(request.headers.get('idempotency-key')) || clean(body?.idempotency_key);
+  if (amount === null || amount <= 0 || !['standard','express'].includes(mode) || !idem || idem.length > 200) {
+    return json({ok:false,error:'INVALID_PAYOUT_REQUEST',version:VERSION},400);
+  }
+
+  // Idempotency is scoped to the authenticated owner; never return another user's payout.
+  const existing = await env.DB.prepare('SELECT * FROM payout_requests WHERE idempotency_key=? AND user_id=? LIMIT 1').bind(idem,auth.user.id).first();
+  if (existing) {
+    if (Number(existing.amount_cents) !== amount || existing.mode !== mode) {
+      return json({ok:false,error:'IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_REQUEST',version:VERSION},409);
+    }
+    return json({ok:true,version:VERSION,idempotent_replay:true,payout:existing},200);
+  }
+  const account = await env.DB.prepare('SELECT * FROM payment_accounts WHERE user_id=? LIMIT 1').bind(auth.user.id).first();
+  if (!account || Number(account.payouts_enabled) !== 1) {
+    return json({ok:false,error:'PAYOUT_ACCOUNT_NOT_READY',version:VERSION,message:'Le compte de paiement de l’intervenant doit être vérifié et activé par le PSP.'},409);
+  }
+  const wallet = await env.DB.prepare('SELECT * FROM wallets WHERE user_id=? LIMIT 1').bind(auth.user.id).first();
+  if (!wallet) return json({ok:false,error:'WALLET_NOT_FOUND',version:VERSION},409);
+
+  const payoutId = crypto.randomUUID();
+  let reservation;
+  try {
+    reservation = await reservePayoutAtomically(env, {
+      payoutId, idempotencyKey:idem, walletId:wallet.id, userId:auth.user.id,
+      amountCents:amount, mode, provider:paymentProvider(env)
+    });
+  } catch (error) {
+    console.error('PAYOUT_RESERVATION_FAILED', error?.name || 'D1_ERROR');
+    return json({ok:false,error:'PAYOUT_RESERVATION_FAILED',version:VERSION},503);
+  }
+  if (!reservation.ok) {
+    const sameOwner = await env.DB.prepare('SELECT * FROM payout_requests WHERE idempotency_key=? AND user_id=? LIMIT 1').bind(idem,auth.user.id).first();
+    if (sameOwner) {
+      if (Number(sameOwner.amount_cents) !== amount || sameOwner.mode !== mode) {
+        return json({ok:false,error:'IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_REQUEST',version:VERSION},409);
+      }
+      return json({ok:true,version:VERSION,idempotent_replay:true,payout:sameOwner},200);
+    }
+    const collision = await env.DB.prepare('SELECT 1 AS used FROM payout_requests WHERE idempotency_key=? LIMIT 1').bind(idem).first();
+    if (collision) return json({ok:false,error:'IDEMPOTENCY_KEY_CONFLICT',version:VERSION},409);
+    const latestWallet = await env.DB.prepare('SELECT available_cents FROM wallets WHERE id=? AND user_id=? LIMIT 1').bind(wallet.id,auth.user.id).first();
+    return json({ok:false,error:'INSUFFICIENT_AVAILABLE_BALANCE',version:VERSION,available_cents:Number(latestWallet?.available_cents || 0)},409);
+  }
   return json({ok:true,version:VERSION,payout_id:payoutId,status:'requested',amount_cents:amount,mode,provider:paymentProvider(env),next:paymentsConfigured(env)?'PSP_PAYOUT_REQUIRED':'PAYMENT_PROVIDER_NOT_CONFIGURED'},201);
 }
 
