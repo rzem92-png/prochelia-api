@@ -40,6 +40,13 @@ test("system scale and backup routes require a manager session", () => {
   assert.match(routes, /!auth\?\.user\|\|String\(auth\.user\.role\|\|''\)\.toUpperCase\(\)!=='GERANTE'/);
 });
 
+test("payment creation and payout reservation fail closed without PSP configuration", () => {
+  const create = source.slice(source.indexOf("async function createMissionPayment"), source.indexOf("async function finalizeMissionPayment"));
+  assert.ok(create.includes("if(!paymentsConfigured(env)) return json({ok:false,error:'PAYMENT_PROVIDER_NOT_CONFIGURED',version:VERSION},503)"));
+  const payout = source.slice(source.indexOf("async function payoutRequest"), source.indexOf("async function verifyWebhookSignature"));
+  assert.ok(payout.includes("if(!paymentsConfigured(env)) return json({ok:false,error:'PAYMENT_PROVIDER_NOT_CONFIGURED',version:VERSION},503)"));
+});
+
 test("payment onboarding reuse and payout readiness stay bound to the configured PSP", () => {
   const onboarding = source.slice(source.indexOf("async function paymentOnboard"), source.indexOf("async function paymentStatus"));
   assert.ok(onboarding.includes("existing && String(existing.provider||'')!==provider"));
