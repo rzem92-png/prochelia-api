@@ -75,3 +75,41 @@ test("audit actor is taken from authenticated session, not request body", async 
   assert.equal(body.audit.actorId, "manager-real");
   assert.equal(body.audit.actorRole, "gerante");
 });
+
+
+test("directory listing rejects anonymous and non-manager callers before database reads", async () => {
+  const requests=[];
+  const env={DB:{prepare(sql){requests.push(sql);return {bind(){return this;},async all(){return {results:[]};}};}}};
+  const unauth=await directoryList(new Request("https://example.test/api/clients"),env,"clients",async()=>null);
+  assert.equal(unauth.status,401);
+  const denied=await directoryList(new Request("https://example.test/api/clients"),env,"clients",async()=>({user:{id:"client-1",role:"client"}}));
+  assert.equal(denied.status,403);
+  assert.equal(requests.length,0);
+});
+
+test("directory listing validates offsets and returns a bounded pagination contract", async () => {
+  const rows=Array.from({length:101},(_,i)=>({id:"client-"+i}));
+  let boundValues;
+  const env={DB:{prepare(){return {bind(...values){boundValues=values;return this;},async all(){return {results:rows};}};}}};
+  const invalid=await directoryList(new Request("https://example.test/api/clients?offset=50001"),env,"clients",async()=>({user:{id:"manager",role:"gerante"}}));
+  assert.equal(invalid.status,400);
+  const response=await directoryList(new Request("https://example.test/api/clients"),env,"clients",async()=>({user:{id:"manager",role:"gerante"}}));
+  assert.equal(response.status,200);
+  const body=await response.json();
+  assert.equal(body.items.length,100);
+  assert.equal(body.has_more,true);
+  assert.equal(body.next_offset,100);
+  assert.deepEqual(boundValues,[101,0]);
+});
+
+test("intervenant directory returns the deterministic final-page contract", async () => {
+  let query;
+  const env={DB:{prepare(sql){query=sql;return {bind(){return this;},async all(){return {results:[{id:"provider-1"}]};}};}}};
+  const response=await directoryList(new Request("https://example.test/api/intervenants"),env,"intervenants",async()=>({user:{id:"manager",role:"gerante"}}));
+  assert.equal(response.status,200);
+  const body=await response.json();
+  assert.equal(body.items[0].id,"provider-1");
+  assert.equal(body.has_more,false);
+  assert.equal(body.next_offset,null);
+  assert.match(query,/FROM intervenants i JOIN users u/);
+});
