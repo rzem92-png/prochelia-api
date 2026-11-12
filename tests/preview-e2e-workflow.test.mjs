@@ -41,3 +41,12 @@ test("Synthetic Preview E2E fixtures are cleaned up and cleanup is verified", ()
   assert.match(workflow, /Always remove synthetic Preview fixtures and verify cleanup/);
   assert.match(workflow, /all synthetic Preview test rows and sessions removed/);
 });
+
+
+test("Preview directory acceptance exercises the deployed Worker and deterministic synthetic ordering", () => {
+  assert.match(workflow, /https:\/\/prochelia-api-preview\.workers\.dev/);
+  assert.match(workflow, /created_at,updated_at/);
+  assert.match(workflow, /9999-12-31 23:59:59/);
+  assert.match(workflow, /offset=not-a-number/);
+  assert.doesNotMatch(workflow, /offset=50001/);
+});
