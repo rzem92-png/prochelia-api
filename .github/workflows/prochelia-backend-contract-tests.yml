@@ -5,6 +5,7 @@ on:
     paths:
       - "src/index.js"
       - "tests/auth-handler-wiring.test.js"
+      - "tests/directory-api.test.js"
       - ".github/workflows/prochelia-backend-contract-tests.yml"
   push:
     branches:
@@ -28,4 +29,4 @@ jobs:
         with:
           node-version: 22
       - name: Run backend security and payment contract tests
-        run: node --test tests/auth-handler-wiring.test.js
+        run: node --test tests/auth-handler-wiring.test.js tests/directory-api.test.js
