@@ -89,10 +89,45 @@ jobs:
           set -euo pipefail
           test -n "$CLOUDFLARE_API_TOKEN" || { echo "::error::CLOUDFLARE_API_TOKEN is missing"; exit 1; }
           test "$CLOUDFLARE_ACCOUNT_ID" = "f2a79e9fa41566a8ec80fb24c02c60eb" || { echo "::error::CLOUDFLARE_ACCOUNT_ID does not match the verified Cloudflare account"; exit 1; }
-          verify="$(curl --silent --show-error --fail-with-body https://api.cloudflare.com/client/v4/user/tokens/verify -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN")"
-          echo "$verify" | node --input-type=module -e "let s='';for await(const c of process.stdin)s+=c;const j=JSON.parse(s);if(!j.success||j.result?.status!=='active')process.exit(1);console.log('Cloudflare API token is active.')"
-          scripts="$(curl --silent --show-error --fail-with-body "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts" -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN")"
-          echo "$scripts" | node --input-type=module -e "let s='';for await(const c of process.stdin)s+=c;const j=JSON.parse(s);if(!j.success)throw Error('Cloudflare account API check failed');const names=(j.result||[]).map(x=>x.id);if(!names.includes('prochelia-api-preview'))throw Error('Preview Worker is not visible to this token/account');console.log('Correct account confirmed; Preview Worker is visible.')"
+
+          # Accept either the raw API token or a pasted "Bearer <token>" value.
+          token="$(printf '%s' "$CLOUDFLARE_API_TOKEN" | sed -E 's/^[[:space:]]*Bearer[[:space:]]+//I; s/^[[:space:]]+//; s/[[:space:]]+$//' | tr -d '\r\n')"
+          test -n "$token" || { echo "::error::Cloudflare API token is empty after normalization"; exit 1; }
+
+          verify_http="$(curl --silent --show-error --output "$RUNNER_TEMP/cloudflare-token-verify.json" --write-out '%{http_code}' https://api.cloudflare.com/client/v4/user/tokens/verify -H "Authorization: Bearer $token")"
+          VERIFY_HTTP="$verify_http" VERIFY_FILE="$RUNNER_TEMP/cloudflare-token-verify.json" node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const http = Number(process.env.VERIFY_HTTP);
+          const body = JSON.parse(fs.readFileSync(process.env.VERIFY_FILE, 'utf8'));
+          if (http !== 200 || !body.success || body.result?.status !== 'active') {
+            console.error(`Cloudflare token verification failed (HTTP ${http}).`);
+            for (const e of [...(body.errors || []), ...(body.messages || [])]) {
+              console.error(`Cloudflare ${e.code ?? 'message'}: ${e.message ?? 'unspecified error'}`);
+            }
+            process.exit(1);
+          }
+          console.log('Cloudflare API token is active.');
+          NODE
+
+          scripts_http="$(curl --silent --show-error --output "$RUNNER_TEMP/cloudflare-workers-scripts.json" --write-out '%{http_code}' "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts" -H "Authorization: Bearer $token")"
+          SCRIPTS_HTTP="$scripts_http" SCRIPTS_FILE="$RUNNER_TEMP/cloudflare-workers-scripts.json" node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const http = Number(process.env.SCRIPTS_HTTP);
+          const body = JSON.parse(fs.readFileSync(process.env.SCRIPTS_FILE, 'utf8'));
+          if (http !== 200 || !body.success) {
+            console.error(`Cloudflare Workers access check failed (HTTP ${http}).`);
+            for (const e of [...(body.errors || []), ...(body.messages || [])]) {
+              console.error(`Cloudflare ${e.code ?? 'message'}: ${e.message ?? 'unspecified error'}`);
+            }
+            process.exit(1);
+          }
+          const names = (body.result || []).map(x => x.id);
+          if (!names.includes('prochelia-api-preview')) {
+            console.error('Preview Worker is not visible to this token/account.');
+            process.exit(1);
+          }
+          console.log('Correct account confirmed; Preview Worker is visible.');
+          NODE
       - name: Deploy ONLY the isolated Preview Worker
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
