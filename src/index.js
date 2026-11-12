@@ -966,6 +966,8 @@ async function payoutRequest(request, env) {
     if(old.user_id!==auth.user.id||Number(old.amount_cents)!==amount||old.mode!==mode) return json({ok:false,error:'IDEMPOTENCY_KEY_CONFLICT',version:VERSION},409);
     return json({ok:true,version:VERSION,idempotent_replay:true,payout:old},200);
   }
+  const openDispute=await env.DB.prepare(`SELECT id FROM payment_disputes WHERE intervenant_id=? AND status='open' LIMIT 1`).bind(auth.user.id).first();
+  if(openDispute) return json({ok:false,error:'PAYOUT_BLOCKED_BY_OPEN_DISPUTE',version:VERSION,dispute_id:openDispute.id},409);
   const account=await env.DB.prepare(`SELECT * FROM payment_accounts WHERE user_id=? LIMIT 1`).bind(auth.user.id).first();
   if(!account||Number(account.payouts_enabled)!==1) return json({ok:false,error:'PAYOUT_ACCOUNT_NOT_READY',version:VERSION,message:'Le compte de paiement de l’intervenant doit être vérifié et activé par le PSP.'},409);
   const wallet=await env.DB.prepare('SELECT * FROM wallets WHERE user_id=? LIMIT 1').bind(auth.user.id).first();
@@ -1066,14 +1068,24 @@ async function openPaymentDispute(request, env) {
   if(!requireRole(auth,['client','gerante'])) return json({ok:false,error:auth?.user?'FORBIDDEN':'UNAUTHENTICATED',version:VERSION},auth?.user?403:401);
   await ensurePaymentSchema(env);
   const body=await readJson(request), missionId=clean(body?.mission_id), reason=clean(body?.reason), amount=moneyCents(body?.amount_eur);
-  if(!missionId||!reason||amount===null) return json({ok:false,error:'INVALID_DISPUTE',version:VERSION},400);
+  if(!missionId||!reason||amount===null||amount<=0) return json({ok:false,error:'INVALID_DISPUTE',version:VERSION},400);
   const tx=await env.DB.prepare(`SELECT * FROM payment_transactions WHERE mission_id=? ORDER BY created_at DESC LIMIT 1`).bind(missionId).first();
   if(!tx) return json({ok:false,error:'PAYMENT_NOT_FOUND_FOR_MISSION',version:VERSION},404);
-  if(tx.status==='paid') await env.DB.prepare(`UPDATE payment_transactions SET status='held',updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(tx.id).run();
+  if(auth.user.role==='client' && tx.client_id!==auth.user.id) return json({ok:false,error:'FORBIDDEN_PAYMENT_OWNER_MISMATCH',version:VERSION},403);
+  if(amount>Number(tx.gross_cents||0)) return json({ok:false,error:'DISPUTE_AMOUNT_EXCEEDS_PAYMENT',version:VERSION},400);
+  if(tx.status!=='paid') return json({ok:false,error:'PAYMENT_NOT_DISPUTABLE_IN_CURRENT_STATE',version:VERSION,status:tx.status},409);
+  const existing=await env.DB.prepare(`SELECT id FROM payment_disputes WHERE transaction_id=? AND status='open' LIMIT 1`).bind(tx.id).first();
+  if(existing) return json({ok:true,version:VERSION,dispute_id:existing.id,status:'open',idempotent_replay:true},200);
   const id=crypto.randomUUID();
-  await env.DB.prepare(`INSERT INTO payment_disputes (id,mission_id,transaction_id,client_id,intervenant_id,status,reason,amount_cents) VALUES (?,?,?,?,?,?,?,?)`).bind(id,missionId,tx.id,tx.client_id,tx.intervenant_id,'open',reason,amount).run();
+  const results=await env.DB.batch([
+    env.DB.prepare(`UPDATE payment_transactions SET status='held',updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='paid'
+      AND NOT EXISTS (SELECT 1 FROM payment_disputes WHERE transaction_id=? AND status='open')`).bind(tx.id,tx.id),
+    env.DB.prepare(`INSERT INTO payment_disputes(id,mission_id,transaction_id,client_id,intervenant_id,status,reason,amount_cents)
+      SELECT ?,?,?,?,?,?,?,? WHERE changes()=1`).bind(id,missionId,tx.id,tx.client_id,tx.intervenant_id,'open',reason,amount)
+  ]);
+  if(!results[1]?.meta?.changes) return json({ok:false,error:'DISPUTE_ALREADY_OPEN_OR_PAYMENT_STATE_CHANGED',version:VERSION},409);
   await paymentAudit(env,'PAYMENT_DISPUTE_OPENED',{transaction_id:tx.id,mission_id:missionId,user_id:auth.user.id,metadata:{amount_cents:amount,reason}},'OK');
-  return json({ok:true,version:VERSION,dispute_id:id,status:'open',payment_status:'held'},201);
+  return json({ok:true,version:VERSION,dispute_id:id,status:'open',payment_status:'held',payouts_blocked_for_intervenant:true},201);
 }
 
 async function paymentAdminResolve(request, env) {
@@ -1082,15 +1094,17 @@ async function paymentAdminResolve(request, env) {
   await ensurePaymentSchema(env);
   const body=await readJson(request), disputeId=clean(body?.dispute_id), resolution=clean(body?.resolution);
   if(!disputeId||!['release','partial_refund','full_refund','cancel'].includes(resolution)) return json({ok:false,error:'INVALID_DISPUTE_RESOLUTION',version:VERSION},400);
-  const d=await env.DB.prepare('SELECT * FROM payment_disputes WHERE id=? LIMIT 1').bind(disputeId).first();
-  if(!d||d.status==='resolved') return json({ok:false,error:'DISPUTE_NOT_FOUND_OR_ALREADY_RESOLVED',version:VERSION},409);
-  await env.DB.prepare(`UPDATE payment_disputes SET status='resolved',resolution=?,resolved_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(resolution,disputeId).run();
-  if(d.transaction_id){
-    const newStatus=resolution==='release'?'paid':resolution==='full_refund'?'refunded':resolution==='cancel'?'canceled':'held';
-    await env.DB.prepare('UPDATE payment_transactions SET status=?,updated_at=CURRENT_TIMESTAMP WHERE id=?').bind(newStatus,d.transaction_id).run();
-  }
-  await paymentAudit(env,'PAYMENT_DISPUTE_RESOLVED',{transaction_id:d.transaction_id,mission_id:d.mission_id,user_id:auth.user.id,metadata:{dispute_id:disputeId,resolution}},'OK');
-  return json({ok:true,version:VERSION,dispute_id:disputeId,status:'resolved',resolution},200);
+  if(resolution!=='release') return json({ok:false,error:'PSP_REFUND_OR_CANCELLATION_NOT_CONFIGURED',version:VERSION,message:'Le remboursement ou l’annulation PSP doit être exécuté et confirmé par le prestataire avant clôture du litige.'},409);
+  const d=await env.DB.prepare(`SELECT * FROM payment_disputes WHERE id=? LIMIT 1`).bind(disputeId).first();
+  if(!d||d.status!=='open') return json({ok:false,error:'DISPUTE_NOT_FOUND_OR_ALREADY_RESOLVED',version:VERSION},409);
+  const results=await env.DB.batch([
+    env.DB.prepare(`UPDATE payment_disputes SET status='resolved',resolution='release',resolved_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP
+      WHERE id=? AND status='open'`).bind(disputeId),
+    env.DB.prepare(`UPDATE payment_transactions SET status='paid',updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='held' AND changes()=1`).bind(d.transaction_id)
+  ]);
+  if(!results[0]?.meta?.changes) return json({ok:false,error:'DISPUTE_STATE_CONFLICT',version:VERSION},409);
+  await paymentAudit(env,'PAYMENT_DISPUTE_RESOLVED',{transaction_id:d.transaction_id,mission_id:d.mission_id,user_id:auth.user.id,metadata:{dispute_id:disputeId,resolution:'release'}},'OK');
+  return json({ok:true,version:VERSION,dispute_id:disputeId,status:'resolved',resolution:'release'},200);
 }
 
 async function handleBase(request, env) {
