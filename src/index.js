@@ -1143,10 +1143,14 @@ async function paymentWebhook(request, env) {
           payout.currency||'EUR',JSON.stringify({event_id:eventId,status:payoutStatus})));
     }
   }
+  // Mark the event processed only when its guarded state transition (and, where required,
+  // its ledger write) actually changed a row. Never acknowledge a stale/no-op event as applied.
   statements.push(env.DB.prepare(`UPDATE payment_webhook_events SET processed=1,processed_at=CURRENT_TIMESTAMP
-    WHERE provider=? AND event_id=?`).bind(provider,eventId));
+    WHERE provider=? AND event_id=? AND changes()=1`).bind(provider,eventId));
   const results=await env.DB.batch(statements);
   const inserted=!!results[0]?.meta?.changes;
+  const processed=!!results.at(-1)?.meta?.changes;
+  if(inserted&&!processed) return json({ok:false,error:'WEBHOOK_STATE_TRANSITION_NOT_APPLIED',version:VERSION},409);
   if(!inserted){
     const prior=await env.DB.prepare('SELECT payload_hash FROM payment_webhook_events WHERE provider=? AND event_id=? LIMIT 1').bind(provider,eventId).first();
     if(prior?.payload_hash && prior.payload_hash!==payloadHash) return json({ok:false,error:'WEBHOOK_EVENT_ID_PAYLOAD_CONFLICT',version:VERSION},409);
