@@ -30,4 +30,4 @@ jobs:
           node-version: 22
           package-manager-cache: false
       - name: Run V7 authorization regression tests
-        run: node --experimental-default-type=module --test tests/v7-security.test.js
+        run: node --experimental-default-type=module --test tests/v7-security.test.js tests/auth-handler-wiring.test.js tests/security-origin-cookie-hardening.test.js

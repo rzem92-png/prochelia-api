@@ -85,6 +85,12 @@ async function sha256Base64url(value) {
   return base64url(new Uint8Array(digest));
 }
 
+async function sha256Hex(value) {
+  const data = new TextEncoder().encode(value);
+  const digest = await crypto.subtle.digest('SHA-256', data);
+  return Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('');
+}
+
 async function hashPassword(password) {
   const salt = randomBytes(16);
   const key = await crypto.subtle.importKey(
@@ -138,7 +144,13 @@ function getCookie(request, name) {
     const idx = part.indexOf('=');
     if (idx < 0) continue;
     const key = part.slice(0, idx).trim();
-    if (key === name) return decodeURIComponent(part.slice(idx + 1).trim());
+    if (key === name) {
+      try {
+        return decodeURIComponent(part.slice(idx + 1).trim());
+      } catch {
+        return null;
+      }
+    }
   }
   return null;
 }
@@ -913,9 +925,9 @@ async function verifyWebhookSignature(request, env, rawBody) {
 }
 
 async function paymentWebhook(request, env) {
-  await ensurePaymentSchema(env);
   const raw=await request.text();
   if(!(await verifyWebhookSignature(request,env,raw))) return json({ok:false,error:'INVALID_WEBHOOK_SIGNATURE',version:VERSION},401);
+  await ensurePaymentSchema(env);
   let event; try{event=JSON.parse(raw)}catch{return json({ok:false,error:'INVALID_WEBHOOK_JSON',version:VERSION},400);}
   const provider=clean(event?.provider)||paymentProvider(env), eventId=clean(event?.id), type=clean(event?.type);
   if(!eventId||!type) return json({ok:false,error:'INVALID_WEBHOOK_EVENT',version:VERSION},400);
@@ -2460,9 +2472,9 @@ async function processBackgroundJobs(request,env) {
 function isMutatingMethod(method){ return ['POST','PUT','PATCH','DELETE'].includes(method); }
 function securityOriginAllowed(request,env){
   const origin=request.headers.get('origin');
-  // Les clients non-navigateur peuvent ne pas envoyer Origin. Les requêtes navigateur
-  // avec Origin doivent correspondre à une origine explicitement autorisée.
-  if(!origin) return true;
+  // Les écritures sans Origin sont refusées par défaut.
+  // Le bootstrap à jeton explicite est traité séparément dans handle().
+  if(!origin) return false;
   const configured=clean(env?.CORS_ORIGIN);
   const defaults=[
     'https://prochelia.pages.dev',
@@ -2935,8 +2947,19 @@ async function handleCommercialRecruitment(request,env){
 
 async function handle(request,env){
   try {
-    if(isMutatingMethod(request.method) && !securityOriginAllowed(request,env)) return json({ok:false,error:'ORIGIN_NOT_ALLOWED',version:VERSION},403);
     const url=new URL(request.url);
+    const noOriginBootstrap = request.method === 'POST' && url.pathname === '/api/auth/bootstrap' &&
+      !request.headers.get('origin') &&
+      Boolean(env?.BOOTSTRAP_TOKEN) &&
+      request.headers.get('authorization') === `Bearer ${env.BOOTSTRAP_TOKEN}`;
+    const noOriginWebhook = request.method === 'POST' && url.pathname === '/api/payments/webhook' && !request.headers.get('origin');
+    if(isMutatingMethod(request.method) && !noOriginBootstrap && !noOriginWebhook && !securityOriginAllowed(request,env)) return json({ok:false,error:'ORIGIN_NOT_ALLOWED',version:VERSION},403);
+    if (url.pathname === '/api/payments/webhook') {
+      if (request.method !== 'POST') return json({ok:false,error:'METHOD_NOT_ALLOWED',version:VERSION},405,{'allow':'POST'});
+      // Keep real PSP events disabled until atomic idempotency, refund transitions
+      // and payout reconciliation are fully tested against D1.
+      return json({ok:false,error:'PAYMENT_WEBHOOK_DISABLED_PENDING_REVIEW',version:VERSION},503);
+    }
     // Fail closed before any schema helper touches D1: unauthenticated callers
     // must not use mission validation as an existence oracle for private IDs.
     if (url.pathname === '/api/missions/validate') {
@@ -3411,6 +3434,9 @@ async function strictProductionAudit(request,env){
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
   const result=await productionConfigCheck(env);
   const extra=[
+    // Never report the platform ready for real traffic while payment settlement
+    // webhooks are deliberately disabled pending atomic ledger/replay/refund tests.
+    {code:'PAYMENT_WEBHOOK_ATOMICITY',status:'NOT_READY',reason:'PAYMENT_WEBHOOK_DISABLED_PENDING_REVIEW'},
     {code:'SECURITY_CODE_DELIVERY',status:finalSecretConfigured(env,'SECURITY_CODE_WEBHOOK')&&finalSecretConfigured(env,'SECURITY_CODE_WEBHOOK_SECRET')?'OK':'NOT_CONFIGURED'},
     {code:'CORS_ORIGIN',status:finalSecretConfigured(env,'CORS_ORIGIN')?'OK':'NOT_CONFIGURED'},
     {code:'BACKUP_R2',status:env.BACKUP_BUCKET&&finalSecretConfigured(env,'BACKUP_ENCRYPTION_KEY')?'OK':'NOT_CONFIGURED'},
@@ -3418,7 +3444,7 @@ async function strictProductionAudit(request,env){
     {code:'MAPS_PROVIDER',status:finalSecretConfigured(env,'MAPS_API_KEY')?'OK':'NOT_CONFIGURED'}
   ];
   const checks=[...(result.checks||[]),...extra];
-  const blockingCodes=new Set(['SECRET:PAYMENT_PROVIDER','SECRET:PAYMENT_WEBHOOK_SECRET','SECURITY_CODE_DELIVERY','CORS_ORIGIN','BACKUP_R2']);
+  const blockingCodes=new Set(['PAYMENT_WEBHOOK_ATOMICITY','SECRET:PAYMENT_PROVIDER','SECRET:PAYMENT_WEBHOOK_SECRET','SECURITY_CODE_DELIVERY','CORS_ORIGIN','BACKUP_R2']);
   const blocking=checks.filter(x=>blockingCodes.has(x.code)&&x.status!=='OK');
   const overall=blocking.length===0 && result.blocking===0;
   // GET production-check is read-only: no config writes or journal side effects.
@@ -3435,10 +3461,14 @@ handle = async function(request,env){
     const preflightPath = preflightUrl.pathname;
     const preflightMethod = request.method.toUpperCase();
     const getOnlyDiagnostics = new Set(['/api/health','/api/readiness','/api/info']);
-    // Apply browser-origin rejection before rate limiting or any D1 access.
-    // This keeps forbidden cross-origin writes a deterministic 403 even when
-    // the database is unavailable, instead of masking them as a generic 500.
-    if (isMutatingMethod(preflightMethod) && !securityOriginAllowed(request,env)) {
+    // Bootstrap sans Origin uniquement avec le jeton initial exact.
+    // Toutes les autres mutations exigent une origine explicitement autorisée.
+    const noOriginBootstrap = preflightMethod === 'POST' && preflightPath === '/api/auth/bootstrap'
+      && !request.headers.get('origin')
+      && Boolean(env?.BOOTSTRAP_TOKEN)
+      && request.headers.get('authorization') === `Bearer ${env.BOOTSTRAP_TOKEN}`;
+    const noOriginWebhook = preflightMethod === 'POST' && preflightPath === '/api/payments/webhook' && !request.headers.get('origin');
+    if (isMutatingMethod(preflightMethod) && !noOriginBootstrap && !noOriginWebhook && !securityOriginAllowed(request,env)) {
       return json({ok:false,error:'ORIGIN_NOT_ALLOWED',version:VERSION},403);
     }
     // Block anonymous mission validation before rate limiting touches D1.
