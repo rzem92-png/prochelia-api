@@ -2618,6 +2618,7 @@ function securityOriginAllowed(request,env){
   const defaults=[
     'https://prochelia.fr',
     'https://www.prochelia.fr',
+    'https://prochelia.rzem92.workers.dev',
     'https://prochelia.pages.dev',
     'https://56b01f85.prochelia.pages.dev'
   ];
