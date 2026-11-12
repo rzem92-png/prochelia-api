@@ -84,7 +84,7 @@ jobs:
             tests/payout-atomicity.test.js \
             tests/payment-settlement-guard.test.js \
             tests/payment-webhook-settlement-gate.test.js \
-            tests/bootstrap-atomic.test.js
+            tests/bootstrap-atomic.test.js \
             tests/preview-e2e-workflow.test.mjs
       - name: Validate Wrangler bundle without deployment
         run: npx --yes wrangler@4 deploy --dry-run --config wrangler.preview.generated.json --outdir "$RUNNER_TEMP/prochelia-preview-dry-run"
