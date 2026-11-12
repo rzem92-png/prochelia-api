@@ -143,6 +143,14 @@ function getCookie(request, name) {
   return null;
 }
 
+function getSessionToken(request){
+  const cookie=getCookie(request,SESSION_COOKIE);
+  if(cookie) return cookie;
+  const authorization=request.headers.get('authorization')||'';
+  const match=authorization.match(/^Bearer\\s+([A-Za-z0-9_-]{32,})$/i);
+  return match?match[1]:null;
+}
+
 function sessionCookie(token, maxAge = SESSION_TTL_SECONDS) {
   return `${SESSION_COOKIE}=${encodeURIComponent(token)}; Max-Age=${maxAge}; Path=/; HttpOnly; Secure; SameSite=None`;
 }
@@ -160,7 +168,7 @@ async function createSession(env, userId) {
 
 async function getSessionUser(request, env) {
   if (!env.DB) return null;
-  const token = getCookie(request, SESSION_COOKIE);
+  const token = getSessionToken(request);
   if (!token) return null;
   const tokenHash = await sha256Base64url(token);
   const row = await env.DB.prepare(
@@ -316,7 +324,7 @@ async function login(request, env) {
 
   const token = await createSession(env, user.id);
   return json(
-    { ok: true, version: VERSION, user: safeUser(user), session: { authenticated: true, expires_in: SESSION_TTL_SECONDS } },
+    { ok: true, version: VERSION, user: safeUser(user), token, session: { authenticated: true, expires_in: SESSION_TTL_SECONDS, token_storage: 'memory_only' } },
     200,
     { 'set-cookie': sessionCookie(token) }
   );
@@ -324,7 +332,7 @@ async function login(request, env) {
 
 async function logout(request, env) {
   if (!env.DB) return json({ ok: false, database: false, version: VERSION }, 503);
-  const token = getCookie(request, SESSION_COOKIE);
+  const token = getSessionToken(request);
   const headers = { 'set-cookie': sessionCookie('', 0) };
   if (token) {
     const tokenHash = await sha256Base64url(token);
