@@ -103,5 +103,49 @@ class PrepareD1RestoreTests(unittest.TestCase):
             self.assertFalse(output.exists())
 
 
+    def test_d1_migrations_autoincrement_is_preserved_without_sqlite_sequence(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            source = root / "source.sqlite"
+            output = root / "restore.sql"
+            target = root / "target.sqlite"
+
+            db = sqlite3.connect(source)
+            db.executescript("""
+                CREATE TABLE d1_migrations (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT UNIQUE,
+                    applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL
+                );
+                INSERT INTO d1_migrations (id, name, applied_at)
+                VALUES (1, '0001_initial.sql', '2026-10-01 12:00:00'),
+                       (7, '0007_finance.sql', '2026-11-01 12:00:00');
+            """)
+            db.commit()
+            db.close()
+
+            subprocess.run(
+                [sys.executable, str(SCRIPT), "--source", str(source), "--output", str(output)],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            sql = output.read_text(encoding="utf-8")
+            self.assertIn('CREATE TABLE "d1_migrations"', sql)
+            self.assertIn('INTEGER PRIMARY KEY AUTOINCREMENT', sql)
+            self.assertIn('INSERT INTO "d1_migrations" ("id", "name", "applied_at") VALUES (7,', sql)
+
+            restored = sqlite3.connect(target)
+            restored.executescript(sql)
+            self.assertEqual(
+                restored.execute("SELECT id, name FROM d1_migrations ORDER BY id").fetchall(),
+                [(1, "0001_initial.sql"), (7, "0007_finance.sql")],
+            )
+            self.assertEqual(restored.execute("PRAGMA integrity_check").fetchone()[0], "ok")
+            self.assertEqual(restored.execute("SELECT seq FROM sqlite_sequence WHERE name='d1_migrations'").fetchone()[0], 7)
+            restored.close()
+
+
+
 if __name__ == "__main__":
     unittest.main()
