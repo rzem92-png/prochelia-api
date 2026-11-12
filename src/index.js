@@ -977,7 +977,7 @@ async function finalizeMissionPayment(request, env) {
   if(!requireRole(auth,['gerante'])) return json({ok:false,error:auth?.user?'FORBIDDEN':'UNAUTHENTICATED',version:VERSION},auth?.user?403:401);
   await ensurePaymentSchema(env);
   const body=await readJson(request), txId=clean(body?.transaction_id), outcome=clean(body?.outcome);
-  if(!txId||!['paid','failed','refunded','held'].includes(outcome)) return json({ok:false,error:'INVALID_PAYMENT_FINALIZATION',version:VERSION},400);
+  if(!txId||!['failed','held'].includes(outcome)) return json({ok:false,error:'PSP_CONFIRMED_OUTCOME_REQUIRED',version:VERSION,message:'Les statuts paid/refunded ne peuvent être appliqués que par un webhook PSP signé et vérifié.'},409);
   const tx=await env.DB.prepare('SELECT * FROM payment_transactions WHERE id=? LIMIT 1').bind(txId).first();
   if(!tx) return json({ok:false,error:'TRANSACTION_NOT_FOUND',version:VERSION},404);
   if(outcome==='paid'){
