@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - "src/**"
+      - "tests/**"
       - "wrangler.jsonc"
       - ".github/workflows/deploy-preview-worker-manual.yml"
       - ".github/workflows/worker-build-validation.yml"
@@ -11,6 +12,7 @@ on:
     branches: [main]
     paths:
       - "src/**"
+      - "tests/**"
       - "wrangler.jsonc"
       - ".github/workflows/worker-build-validation.yml"
 
@@ -32,6 +34,8 @@ jobs:
           node --experimental-default-type=module --check src/index.js
           node --experimental-default-type=module --check src/v7.js
           node --experimental-default-type=module --check src/v7-routes.js
+      - name: Run session CSRF and Origin security contract tests
+        run: node --test tests/csrf-security-contract.test.js
       - name: Lint guarded Preview deployment workflow
         run: |
           go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
