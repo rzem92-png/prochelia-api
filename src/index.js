@@ -1741,8 +1741,9 @@ export function supraApprovalProofMatches(approval, payload, caseId) {
 }
 
 export function operationalActionsPending(businessResults) {
-  return Array.isArray(businessResults) &&
-    businessResults.some(item => ['PENDING','WAITING_PROVIDER'].includes(String(item?.status || '').toUpperCase()));
+  // Fail closed: an absent/empty result set is not proof of completion.
+  return !Array.isArray(businessResults) || businessResults.length === 0 ||
+    businessResults.some(item => ['PENDING','PROCESSING','WAITING_PROVIDER','WAITING_REVIEW'].includes(String(item?.status || '').toUpperCase()));
 }
 
 async function executeOperationalCase(env, caseId, approverId=null, automatic=false, approvalId=null) {
@@ -1762,6 +1763,9 @@ async function executeOperationalCase(env, caseId, approverId=null, automatic=fa
   }
   const approvalProof=approvalId?{approval_id:approvalId,action_digest:await sha256Base64url(supraApprovalDigestInput(c)||''),case_id:caseId}:{};
   const businessResults = await executeCaseBusinessAction(env,c,rec,approverId,automatic,approvalId?approvalProof:null);
+  if (!Array.isArray(businessResults) || businessResults.length === 0) {
+    return {ok:false,error:'NO_EXECUTABLE_BUSINESS_ACTION'};
+  }
   const pendingActions = operationalActionsPending(businessResults);
   const resolution={executed:!pendingActions,pending:pendingActions,automatic,action:rec.action||'RESOLVE',approval_id:approvalProof?.approval_id||null,action_digest:approvalProof?.action_digest||null,steps:rec.solution?.steps||[],business_results:businessResults,executed_at:new Date().toISOString()};
   await env.DB.prepare(`INSERT INTO case_actions(id,case_id,action_code,mode,status,payload_json,result_json,completed_at) VALUES(?,?,?,?,?,?,?,?)`)
