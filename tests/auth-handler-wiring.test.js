@@ -15,7 +15,7 @@ test("mutations without Origin are denied except exact bootstrap and signed-webh
 });
 
 test("browser sessions remain HttpOnly cookie-only and are not returned in login JSON", () => {
-  assert.match(source, /return getCookie\\(request, SESSION_COOKIE\\)/);
+  assert.match(source, /return getCookie\(request, SESSION_COOKIE\)/);
   assert.doesNotMatch(source, /authorization\.match\(\/\^Bearer\\s\+/);
   assert.match(source, /HttpOnly; Secure; SameSite=Lax/);
   const handler = source.slice(source.indexOf("async function login"), source.indexOf("async function logout"));
@@ -27,7 +27,7 @@ test("cookie-authenticated mutations require a session-bound CSRF token", () => 
   const handler = source.slice(source.indexOf("async function handle(request,env)"));
   assert.match(csrf, /name:'HMAC',hash:'SHA-256'/);
   assert.match(csrf, /PROCHELIA-CSRF-v1:/);
-  assert.match(source, /function constantTimeStringEqual\\(/);
+  assert.match(source, /function constantTimeStringEqual\(/);
   assert.match(handler, /csrfExemptPaths = new Set\(\['\/api\/auth\/login', '\/api\/auth\/bootstrap', '\/api\/payments\/webhook'\]\)/);
   assert.match(handler, /csrfTokenForSession\(auth\)/);
   assert.match(handler, /CSRF_TOKEN_INVALID/);
@@ -59,7 +59,7 @@ test("system scale and backup routes require an authenticated GERANTE session", 
     const escapedPath = path.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     const route = new RegExp(
       "request\\.method===['\"]" + method + "['\"]&&url\\.pathname===['\"]" +
-      escapedPath + "['\"][\\s\\S]*?(?=\\n\\s*if\\(request\\.method|\\n\\s*return __procheliaNationalHandle|$)"
+      escapedPath + "['\"][\\s\\S]*?(?=\\n\\s*if\(request\\.method|\\n\\s*return __procheliaNationalHandle|$)"
     );
     const match = routes.match(route);
     assert.ok(match, `expected protected route ${method} ${path}`);
