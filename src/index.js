@@ -1877,15 +1877,77 @@ async function financeSummary(request, env) {
   return json({ok:true,version:VERSION,finance:{gross_cents:Number(tx?.gross||0),commission_cents:Number(tx?.commission||0),provider_fee_cents:Number(tx?.provider_fee||0),refund_cents:Number(tx?.refunds||0),intervenant_cents:Number(tx?.intervenant||0),ledger_balance_cents:Number(ledger?.balance||0),expenses_cents:Number(expenses?.total||0),net_estimate_cents:Number(ledger?.balance||0)-Number(expenses?.total||0),pending_cents:Number(pending?.total||0),pending_transactions:Number(pending?.n||0),paid_cents:Number(paid?.total||0),paid_transactions:Number(paid?.n||0),payouts_pending_cents:Number(payouts?.total||0),payouts_pending:Number(payouts?.n||0),disputed_cents:Number(disputed?.total||0),disputes_pending:Number(disputed?.n||0)},models:{B2C:'client -> PROCHÉLIA -> intervenant',B2B:'société -> intervenant ; PROCHÉLIA facture sa commission/service'},finance_core_version:FINANCE_STRATEGIC_VERSION});
 }
 
+export function complaintOwnershipAllowed(role,userId,client,mission=null) {
+  if (role === 'gerante') return true;
+  if (role !== 'client' || !userId || !client || client.user_id !== userId) return false;
+  if (mission && mission.client_id !== client.id) return false;
+  return true;
+}
+
 async function complaintCreate(request, env) {
   const gate=await requireAuthRole(request,env,['gerante','client','entreprise']); if(gate.error)return gate.error;
-  const b=await readJson(request)||{};if(!b.category)return json({ok:false,error:'CATEGORY_REQUIRED',version:VERSION},400);
-  const id=crypto.randomUUID();await env.DB.prepare(`INSERT INTO complaints(id,client_type,client_id,company_id,mission_id,category,severity,description) VALUES(?,?,?,?,?,?,?,?)`).bind(id,String(b.client_type||'B2C'),b.client_id||null,b.company_id||null,b.mission_id||null,b.category,String(b.severity||'LOW'),b.description||null).run();
-  const caseType=SIMPLE_CASES.has(b.category)?b.category:'reclamation_client';
-  const fakeReq=new Request(request.url,{method:'POST',headers:request.headers,body:JSON.stringify({case_type:caseType,client_id:b.client_id,company_id:b.company_id,mission_id:b.mission_id,description:b.description,impact_level:b.severity||'LOW',context:{complaint_id:id}})});
-  const caseResponse=await createOperationalCase(fakeReq,env);const caseJson=await caseResponse.json();
-  if(caseJson.case_id)await env.DB.prepare('UPDATE complaints SET resolution_case_id=? WHERE id=?').bind(caseJson.case_id,id).run();
-  return json({ok:true,version:VERSION,complaint_id:id,resolution_case_id:caseJson.case_id||null,copilot:caseJson.recommendation||null},201);
+  const b=await readJson(request)||{};
+  const category=clean(b.category);
+  if(!category)return json({ok:false,error:'CATEGORY_REQUIRED',version:VERSION},400);
+  const role=gate.auth.user.role;
+  const isManager=role==='gerante';
+  const requestedMissionId=clean(b.mission_id)||null;
+  let clientId=null;
+  let companyId=null;
+  let missionId=null;
+  let clientType='B2C';
+
+  if (isManager) {
+    clientId=clean(b.client_id)||null;
+    companyId=clean(b.company_id)||null;
+    missionId=requestedMissionId;
+    clientType=String(b.client_type||'B2C').toUpperCase();
+    if (!['B2C','B2B'].includes(clientType)) return json({ok:false,error:'CLIENT_TYPE_INVALID',version:VERSION},400);
+  } else if (role==='client') {
+    const client=await env.DB.prepare('SELECT id,user_id FROM clients WHERE user_id=? LIMIT 1').bind(gate.auth.user.id).first();
+    if (!client) return json({ok:false,error:'CLIENT_PROFILE_REQUIRED',version:VERSION},403);
+    let mission=null;
+    if (requestedMissionId) {
+      mission=await env.DB.prepare('SELECT id,client_id FROM missions WHERE id=? LIMIT 1').bind(requestedMissionId).first();
+      if (!complaintOwnershipAllowed(role,gate.auth.user.id,client,mission)) {
+        return json({ok:false,error:'MISSION_NOT_FOUND',version:VERSION},404);
+      }
+      missionId=mission.id;
+    }
+    if (!complaintOwnershipAllowed(role,gate.auth.user.id,client,mission)) {
+      return json({ok:false,error:'COMPLAINT_OWNERSHIP_DENIED',version:VERSION},403);
+    }
+    clientId=client.id;
+    clientType='B2C';
+  } else {
+    // The current mission schema has no verified company-owner relationship.
+    // Do not accept company_id or mission_id supplied by a browser until one exists.
+    return json({ok:false,error:'COMPANY_OWNERSHIP_MAPPING_REQUIRED',version:VERSION},403);
+  }
+
+  const severity=String(b.severity||'LOW').toUpperCase();
+  if (!['LOW','MEDIUM','HIGH','CRITICAL'].includes(severity)) {
+    return json({ok:false,error:'INVALID_SEVERITY',version:VERSION},400);
+  }
+  const id=crypto.randomUUID();
+  await env.DB.prepare(`INSERT INTO complaints(id,client_type,client_id,company_id,mission_id,category,severity,description) VALUES(?,?,?,?,?,?,?,?)`)
+    .bind(id,clientType,clientId,companyId,missionId,category,severity,clean(b.description)||null).run();
+
+  const caseType=SIMPLE_CASES.has(category)?category:'reclamation_client';
+  const fakeReq=new Request(request.url,{method:'POST',headers:request.headers,body:JSON.stringify({
+    case_type:caseType,mission_id:missionId,description:clean(b.description)||null,
+    impact_level:severity,client_id:isManager?clientId:undefined,
+    company_id:isManager?companyId:undefined,
+    context:isManager?{complaint_id:id}:{}
+  })});
+  const caseResponse=await createOperationalCase(fakeReq,env);
+  const caseJson=await caseResponse.json();
+  if (!caseResponse.ok || !caseJson.case_id) {
+    await env.DB.prepare('DELETE FROM complaints WHERE id=?').bind(id).run();
+    return json({ok:false,error:caseJson.error||'COMPLAINT_CASE_CREATION_FAILED',version:VERSION},caseResponse.status||409);
+  }
+  await env.DB.prepare('UPDATE complaints SET resolution_case_id=? WHERE id=?').bind(caseJson.case_id,id).run();
+  return json({ok:true,version:VERSION,complaint_id:id,resolution_case_id:caseJson.case_id,copilot:caseJson.recommendation||null},201);
 }
 
 async function setPhase(request, env) {
