@@ -50,3 +50,17 @@ test("support cases: manager may resolve references after manager authentication
  assert.equal(supportCaseReferenceAllowed("GERANTE","manager-user",null),true);
  assert.equal(supportCaseReferenceAllowed("ADMIN","admin-user",null),true);
 });
+
+
+import { operationalCaseRequiresManagerApproval } from "../src/index.js";
+
+test("all non-manager submitted operational cases require explicit manager approval", () => {
+  for (const role of ["client", "intervenant", "entreprise", "unknown", "", null]) {
+    assert.equal(operationalCaseRequiresManagerApproval(role), true);
+  }
+});
+
+test("only an authenticated manager role may use the manager-only case policy", () => {
+  assert.equal(operationalCaseRequiresManagerApproval("gerante"), false);
+  assert.equal(operationalCaseRequiresManagerApproval("GERANTE"), false);
+});
