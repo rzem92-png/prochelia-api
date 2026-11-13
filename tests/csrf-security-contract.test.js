@@ -55,6 +55,7 @@ const USER_ROW = Object.freeze({
 
 function makeEnv({ sessionId = "session-test-1", sessionRow = USER_ROW } = {}) {
   let sessionLookups = 0;
+  let rateLimitCount = 0;
   const row = sessionRow ? { ...sessionRow, session_id: sessionId } : null;
   const env = {
     CORS_ORIGIN: TEST_ORIGIN,
@@ -69,6 +70,10 @@ function makeEnv({ sessionId = "session-test-1", sessionRow = USER_ROW } = {}) {
                   sessionLookups += 1;
                   return row;
                 }
+                if (sql.includes("INSERT INTO security_rate_limits")) {
+                  rateLimitCount += 1;
+                  return { request_count: rateLimitCount };
+                }
                 return null;
               },
               async run() { return { meta: { changes: 1 } }; }
@@ -79,7 +84,7 @@ function makeEnv({ sessionId = "session-test-1", sessionRow = USER_ROW } = {}) {
       }
     }
   };
-  return { env, getSessionLookups: () => sessionLookups };
+  return { env, getSessionLookups: () => sessionLookups, getRateLimitCount: () => rateLimitCount };
 }
 
 function base64url(bytes) {
