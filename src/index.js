@@ -1644,15 +1644,18 @@ async function processActionOutbox(request, env) {
         continue;
       }
     }
-    // Provider-dependent actions stay queued until the corresponding adapter/secret is configured.
-    const external = ['PSP_REFUND_REVIEW','NOTIFY_CLIENT','SEARCH_REPLACEMENT','RESCHEDULE_MISSION','ASSIGN_REPLACEMENT'].includes(String(row.action_type));
+    // Never report success merely because an outbox row was inspected.
+    // External actions wait for a real provider adapter; all other actions
+    // remain in review until an explicitly wired, tested executor exists.
+    const external = ['PSP_REFUND_REVIEW','NOTIFY_CLIENT','SEARCH_REPLACEMENT','RESCHEDULE_MISSION','ASSIGN_REPLACEMENT','NOTIFY','REFUND','PAYOUT'].includes(String(row.action_type));
     if(external) {
-      await env.DB.prepare(`UPDATE action_outbox SET status='WAITING_PROVIDER',last_error=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind('External adapter/provider required for final execution.',row.id).run();
+      await env.DB.prepare(`UPDATE action_outbox SET status='WAITING_PROVIDER',last_error=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='PENDING'`).bind('External adapter/provider required for final execution.',row.id).run();
       processed.push({id:row.id,status:'WAITING_PROVIDER',action_type:row.action_type});
       continue;
     }
-    await env.DB.prepare(`UPDATE action_outbox SET status='COMPLETED',processed_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(row.id).run();
-    processed.push({id:row.id,status:'COMPLETED',action_type:row.action_type,payload});
+    await env.DB.prepare(`UPDATE action_outbox SET status='WAITING_REVIEW',last_error=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='PENDING'`)
+      .bind('ACTION_EXECUTOR_NOT_CONNECTED_NO_COMPLETION_CLAIM',row.id).run();
+    processed.push({id:row.id,status:'WAITING_REVIEW',action_type:row.action_type});
   }
   await journal(env,'gerante',gate.auth.user.id,'ACTION_OUTBOX_PROCESSED','system',null,'OK',{count:processed.length});
   return json({ok:true,version:VERSION,processed},200);
