@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - "src/**"
+      - "tests/**"
       - "wrangler.jsonc"
       - ".github/workflows/deploy-preview-worker-manual.yml"
       - ".github/workflows/worker-build-validation.yml"
