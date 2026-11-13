@@ -152,7 +152,7 @@ test("runtime: missing and invalid CSRF tokens block cookie-authenticated mutati
     });
     assert.equal(request.headers.get("cookie"), cookieHeader(token), "test runtime must preserve the session cookie");
     const response = await worker.fetch(request, env);
-    assert.equal(response.status, 403);
+    assert.equal(response.status, 403, JSON.stringify(await response.clone().json()));
     assert.equal((await response.json()).error, "CSRF_TOKEN_INVALID");
   }
 });
@@ -174,7 +174,7 @@ test("runtime: a CSRF token from another session is rejected", async () => {
     body: JSON.stringify({ amount_eur: 1, entry_type: "TEST" })
   }), env);
 
-  assert.equal(response.status, 403);
+  assert.equal(response.status, 403, JSON.stringify(await response.clone().json()));
   assert.equal((await response.json()).error, "CSRF_TOKEN_INVALID");
 });
 
@@ -194,7 +194,7 @@ test("runtime: valid session-bound CSRF passes the CSRF gate, while an untrusted
     },
     body: "{}"
   }), valid.env);
-  assert.equal(accepted.status, 403);
+  assert.equal(accepted.status, 403, JSON.stringify(await accepted.clone().json()));
   assert.equal((await accepted.json()).error, "AUTHENTICATED_VALIDATION_REQUIRED");
   assert.equal(valid.getSessionLookups(), 1);
 
