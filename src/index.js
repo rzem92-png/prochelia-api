@@ -1466,23 +1466,73 @@ async function copilotRecommend(env, input) {
 }
 
 async function createOperationalCase(request, env) {
-  const gate=await requireAuthRole(request,env,['gerante','client','intervenant','entreprise']); if(gate.error)return gate.error;
+  // A user-submitted report is untrusted input, never an instruction to execute.
+  const gate=await requireAuthRole(request,env,['gerante','client','intervenant']);
+  if(gate.error)return gate.error;
   const body=await readJson(request)||{};
-  const caseType=clean(body.case_type); if(!caseType)return json({ok:false,error:'CASE_TYPE_REQUIRED',version:VERSION},400);
+  const caseType=clean(body.case_type);
+  if(!caseType || caseType.length>80 || !/^[a-z0-9_]+$/i.test(caseType)) {
+    return json({ok:false,error:'INVALID_CASE_TYPE',version:VERSION},400);
+  }
+  const description=typeof body.description==='string'?body.description.trim():'';
+  if(description.length>2000) return json({ok:false,error:'DESCRIPTION_TOO_LONG',version:VERSION},400);
+
+  const missionId=clean(body.mission_id);
+  let canonical={client_id:null,intervenant_id:null};
+  if(missionId) {
+    const mission=await env.DB.prepare(`
+      SELECT m.id,c.id AS client_id,c.user_id AS client_user_id,
+             i.id AS intervenant_id,i.user_id AS intervenant_user_id
+        FROM missions m
+        JOIN clients c ON c.id=m.client_id
+        LEFT JOIN intervenants i ON i.id=m.intervenant_id
+       WHERE m.id=?
+       LIMIT 1
+    `).bind(missionId).first();
+    if(!mission) return json({ok:false,error:'MISSION_NOT_FOUND',version:VERSION},404);
+    if(gate.auth.user.role==='client' && mission.client_user_id!==gate.auth.user.id) {
+      return json({ok:false,error:'MISSION_NOT_FOUND',version:VERSION},404);
+    }
+    if(gate.auth.user.role==='intervenant' && mission.intervenant_user_id!==gate.auth.user.id) {
+      return json({ok:false,error:'MISSION_NOT_FOUND',version:VERSION},404);
+    }
+    canonical={client_id:mission.client_id,intervenant_id:mission.intervenant_id};
+  }
+
   const phase=String(await getSetting(env,'project_phase','TEST')).toUpperCase();
-  const impact=String(body.impact_level||'LOW').toUpperCase();
+  const allowedImpacts=new Set(['LOW','MEDIUM','HIGH','CRITICAL']);
+  const requestedImpact=String(body.impact_level||'LOW').toUpperCase();
+  if(!allowedImpacts.has(requestedImpact)) return json({ok:false,error:'INVALID_IMPACT_LEVEL',version:VERSION},400);
+  const impact=gate.auth.user.role==='gerante'?requestedImpact:'LOW';
   const priority=CASE_PRIORITIES[impact]||10;
-  const rec=await copilotRecommend(env,{caseType,impact,phase,context:body.context||{}});
+
+  // Whitelist report-only fields. Execution parameters (replacement IDs,
+  // reschedule timestamps, arbitrary action arrays, notification commands)
+  // are deliberately discarded and can only be entered in a separate,
+  // explicitly approved manager workflow after verification.
+  const rawContext=body.context&&typeof body.context==='object'&&!Array.isArray(body.context)?body.context:{};
+  const reportContext={
+    summary:typeof rawContext.summary==='string'?rawContext.summary.slice(0,500):'',
+    details:typeof rawContext.details==='string'?rawContext.details.slice(0,2000):'',
+    observed_at:typeof rawContext.observed_at==='string'?rawContext.observed_at.slice(0,64):''
+  };
+
+  const rec=await copilotRecommend(env,{caseType,impact,phase,context:reportContext});
+  const recommendation=rec.action;
+  rec.action='ANALYZE_AND_PROPOSE';
+  rec.mode='MANAGER_APPROVAL';
+  rec.solution={steps:['review_report','verify_mission_ownership','propose_safe_action','manager_approval','audit'],automatic:false};
+  rec.context=reportContext;
+
   const id=crypto.randomUUID();
-  const requiresManager=rec.mode==='MANAGER_APPROVAL' ? 1 : 0;
-  const status=rec.action==='AUTO_RESOLVE' ? 'AUTO_PENDING' : 'OPEN';
+  const requiresManager=1;
+  const status='OPEN';
   await env.DB.prepare(`INSERT INTO operational_cases(id,case_type,source,phase,priority,status,auto_mode,client_id,company_id,intervenant_id,mission_id,impact_level,description,context_json,proposed_solution_json,requires_manager) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
-    .bind(id,caseType,'API',phase,priority,status,rec.mode,clean(body.client_id)||null,clean(body.company_id)||null,clean(body.intervenant_id)||null,clean(body.mission_id)||null,impact,clean(body.description)||null,JSON.stringify(body.context||{}),JSON.stringify(rec),requiresManager).run();
+    .bind(id,caseType,'API',phase,priority,status,rec.mode,canonical.client_id,null,canonical.intervenant_id,missionId||null,impact,description||null,JSON.stringify(reportContext),JSON.stringify({...rec,requested_recommendation:recommendation}),requiresManager).run();
   await env.DB.prepare(`INSERT INTO copilot_log(id,case_id,action_type,recommendation,confidence,mode) VALUES(?,?,?,?,?,?)`)
-    .bind(crypto.randomUUID(),id,rec.action,JSON.stringify(rec.solution),rec.confidence,rec.mode).run();
-  await journal(env,'copilot',null,'CASE_CREATED','operational_case',id,'OK',{caseType,impact});
-  if(rec.action==='AUTO_RESOLVE') await executeOperationalCase(env,id,null,true);
-  return json({ok:true,version:VERSION,case_id:id,recommendation:rec,status:rec.action==='AUTO_RESOLVE'?'AUTO_EXECUTED':'WAITING_MANAGER'},201);
+    .bind(crypto.randomUUID(),id,'ANALYZE_AND_PROPOSE',JSON.stringify(rec.solution),rec.confidence,'MANAGER_APPROVAL').run();
+  await journal(env,gate.auth.user.role,gate.auth.user.id,'CASE_CREATED','operational_case',id,'OK',{caseType,impact,requires_manager:true});
+  return json({ok:true,version:VERSION,case_id:id,recommendation:rec,status:'WAITING_MANAGER',requested_recommendation:recommendation},201);
 }
 
 
