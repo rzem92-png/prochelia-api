@@ -5,6 +5,7 @@ import {
   supraApprovalProofMatches,
   supraCaseCreationPolicy,
   outboxActionDisposition,
+  outboxInterruptedApprovalDisposition,
   outboxIdempotencyMatches
 } from "../src/index.js";
 
@@ -70,4 +71,11 @@ test("outbox idempotency is bound to the same case, action and exact payload", (
   assert.equal(outboxIdempotencyMatches(existing, "case-1", "PSP_REFUND_REVIEW", '{"message":"approved"}'), false);
   assert.equal(outboxIdempotencyMatches(existing, "case-1", "NOTIFY_CLIENT", '{"message":"changed"}'), false);
   assert.equal(outboxIdempotencyMatches(null, "case-1", "NOTIFY_CLIENT", '{"message":"approved"}'), false);
+});
+
+test("interrupted approvals wait only for a live commit and expire into explicit review", () => {
+  assert.equal(outboxInterruptedApprovalDisposition({ approval_unexpired: 1 }), "WAITING_APPROVAL_COMMIT");
+  assert.equal(outboxInterruptedApprovalDisposition({ approval_unexpired: 0 }), "WAITING_REVIEW");
+  assert.equal(outboxInterruptedApprovalDisposition({ approval_unexpired: null }), "WAITING_REVIEW");
+  assert.equal(outboxInterruptedApprovalDisposition(null), "WAITING_REVIEW");
 });
