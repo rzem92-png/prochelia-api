@@ -26,3 +26,27 @@ test("company and unknown roles fail closed without a verified ownership mapping
 test("only a manager can bypass mission ownership verification", () => {
   assert.equal(operationalCaseOwnershipAllowed("gerante", "manager-user", null), true);
 });
+
+import { supportCaseReferenceAllowed } from "../src/index.js";
+const supportMission = { id:"mission-1", client_user_id:"client-user-1", intervenant_user_id:"worker-user-1" };
+test("support cases: client may link only their own mission", () => {
+ assert.equal(supportCaseReferenceAllowed("CLIENT","client-user-1",supportMission),true);
+ assert.equal(supportCaseReferenceAllowed("CLIENT","other-user",supportMission),false);
+});
+test("support cases: intervenant may link only their assigned mission", () => {
+ assert.equal(supportCaseReferenceAllowed("INTERVENANT","worker-user-1",supportMission),true);
+ assert.equal(supportCaseReferenceAllowed("INTERVENANT","other-user",supportMission),false);
+});
+test("support cases: complaint must belong to the same verified mission", () => {
+ assert.equal(supportCaseReferenceAllowed("CLIENT","client-user-1",supportMission,{mission_id:"mission-1"}),true);
+ assert.equal(supportCaseReferenceAllowed("CLIENT","client-user-1",supportMission,{mission_id:"other-mission"}),false);
+});
+test("support cases: company and unknown roles fail closed", () => {
+ assert.equal(supportCaseReferenceAllowed("SOCIETE","company-user",supportMission),false);
+ assert.equal(supportCaseReferenceAllowed("UNKNOWN","client-user-1",supportMission),false);
+ assert.equal(supportCaseReferenceAllowed("CLIENT","client-user-1",null),false);
+});
+test("support cases: manager may resolve references after manager authentication", () => {
+ assert.equal(supportCaseReferenceAllowed("GERANTE","manager-user",null),true);
+ assert.equal(supportCaseReferenceAllowed("ADMIN","admin-user",null),true);
+});

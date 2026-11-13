@@ -3674,10 +3674,47 @@ async function interfaceConfigEndpoint(request,env){
   return json({ok:true,version:VERSION,interfaces:PROCHELIA_UI,brand:PROCHELIA_BRAND.visual});
 }
 
+export function supportCaseReferenceAllowed(role,userId,mission,complaint=null){
+  const normalized=String(role||'').toUpperCase();
+  if(normalized==='GERANTE'||normalized==='ADMIN') return true;
+  if(!mission||!userId) return false;
+  if(complaint && complaint.mission_id!==mission.id) return false;
+  if(normalized==='CLIENT') return mission.client_user_id===userId;
+  if(normalized==='INTERVENANT') return mission.intervenant_user_id===userId;
+  // A company-to-mission ownership relation is not defined in the current schema.
+  return false;
+}
+
 async function supportCreate(request,env){
   const a=await supportAuth(request,env); if(a.response)return a.response;
   await ensureProcheliaMasterComplementSchema(env);
   const b=await readJson(request)||{};
+  const isManager=a.role==='GERANTE'||a.role==='ADMIN';
+  let mission=null, complaint=null;
+  const requestedMissionId=clean(b.mission_id)||null;
+  const requestedComplaintId=clean(b.complaint_id)||null;
+  if(!isManager && (clean(b.company_id)||requestedMissionId||requestedComplaintId)){
+    if(clean(b.company_id)) return json({ok:false,error:'SUPPORT_REFERENCE_NOT_FOUND',version:VERSION},404);
+    if(requestedComplaintId){
+      complaint=await env.DB.prepare(`SELECT id,mission_id FROM complaints WHERE id=? LIMIT 1`).bind(requestedComplaintId).first();
+      if(!complaint) return json({ok:false,error:'SUPPORT_REFERENCE_NOT_FOUND',version:VERSION},404);
+    }
+    const missionId=requestedMissionId||complaint?.mission_id||null;
+    if(missionId){
+      mission=await env.DB.prepare(`SELECT m.id,m.client_id,m.intervenant_id,
+        c.user_id AS client_user_id,i.user_id AS intervenant_user_id
+        FROM missions m
+        LEFT JOIN clients c ON c.id=m.client_id
+        LEFT JOIN intervenants i ON i.id=m.intervenant_id
+        WHERE m.id=? LIMIT 1`).bind(missionId).first();
+    }
+    if(!supportCaseReferenceAllowed(a.role,a.auth.user.id,mission,complaint)){
+      return json({ok:false,error:'SUPPORT_REFERENCE_NOT_FOUND',version:VERSION},404);
+    }
+  }
+  const companyId=isManager?(clean(b.company_id)||null):null;
+  const missionId=isManager?requestedMissionId:(mission?.id||null);
+  const complaintId=isManager?requestedComplaintId:(complaint?.id||null);
   const category=clean(b.category)||'GENERAL';
   const severity=String(b.severity||'LOW').toUpperCase();
   const scenario=supportScenarioFor(category,severity);
@@ -3687,12 +3724,13 @@ async function supportCreate(request,env){
   const id=crypto.randomUUID();
   const proposed=rule?JSON.parse(rule.steps_json||'[]'):{steps:['collect_evidence','copilot_analysis','notify','audit']};
   await env.DB.prepare(`INSERT INTO support_cases(id,source_role,requester_id,company_id,mission_id,complaint_id,category,severity,status,description,proposed_resolution,requires_manager) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`)
-    .bind(id,a.role,a.auth.user.id,b.company_id||null,b.mission_id||null,b.complaint_id||null,category,severity,auto?'PROCESSING':'OPEN',clean(b.description)||null,JSON.stringify({scenario,steps:proposed.steps||proposed}),requiresManager?1:0).run();
-  await supportEvent(env,id,a.role,a.auth.user.id,'CREATED',{scenario,auto,requiresManager});
+    .bind(id,a.role,a.auth.user.id,companyId,missionId,complaintId,category,severity,auto?'PROCESSING':'OPEN',clean(b.description)||null,JSON.stringify({scenario,steps:proposed.steps||proposed}),requiresManager?1:0).run();
+  await supportEvent(env,id,a.role,a.auth.user.id,'CREATED',{scenario,auto,requiresManager,missionLinked:!!missionId,complaintLinked:!!complaintId});
   await journal(env,a.role,a.auth.user.id,'SUPPORT_CASE_CREATE','support_cases',id,'OK',{scenario,severity,auto});
   let autoResult=null;
   if(auto){
-    autoResult=await supportAutoResolve(env,id,a.auth.user.id,a.role,scenario,b);
+    // User-supplied execution_verified/context is never accepted as proof of execution.
+    autoResult=await supportAutoResolve(env,id,a.auth.user.id,a.role,scenario,{});
   }
   return json({ok:true,version:VERSION,case_id:id,scenario,automatic_resolution:!!auto,auto_result:autoResult,manager_approval_required:!auto});
 }
@@ -3703,8 +3741,10 @@ async function supportAutoResolve(env,caseId,actorId,actorRole,scenario,context=
   // Sécurité de production : le Copilote ne doit jamais déclarer une résolution
   // simplement parce qu'il a généré une proposition. Une résolution automatique
   // n'est clôturée que lorsqu'une action downstream vérifiable a confirmé son succès.
-  const verified=String(context?.execution_verified||'').toLowerCase()==='true' || context?.execution_verified===true;
-  const resolution={scenario,actions:['verify_context','apply_only_reversible_or_preapproved_action','notify_requester','journal'],context:context||{}};
+  // No trusted downstream executor currently supplies cryptographic/persisted proof.
+  // Never let request JSON or caller-provided context mark a case as executed.
+  const verified=false;
+  const resolution={scenario,actions:['verify_context','apply_only_reversible_or_preapproved_action','notify_requester','journal']};
   if(!verified){
     await env.DB.prepare(`UPDATE support_cases SET status='WAITING_ACTION',resolution=?,resolved_at=NULL WHERE id=?`).bind(JSON.stringify({...resolution,status:'ACTION_REQUIRED'}),caseId).run();
     await supportEvent(env,caseId,actorRole,actorId,'AUTO_CHECKED_WAITING_ACTION',resolution);
