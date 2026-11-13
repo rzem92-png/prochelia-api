@@ -5,7 +5,10 @@ test("payment dispute and manual settlement routes remain fail-closed pending PS
   const source = await (await import("node:fs/promises")).readFile(new URL("../src/index.js", import.meta.url), "utf8");
   assert.match(source, /PSP_VERIFIED_SETTLEMENT_REQUIRED/);
   assert.match(source, /PSP_DISPUTE_SETTLEMENT_REQUIRED/);
-  assert.match(source, /auth\.user\.role === 'client' && tx\.client_id !== auth\.user\.id/);
+  assert.match(source, /SELECT id,user_id FROM clients WHERE user_id=\?/);
+  assert.match(source, /SELECT \* FROM payment_transactions WHERE mission_id=\? AND client_id=\? AND status='paid'/);
+  assert.match(source, /disputeClientOwnsPayment\(clientProfile,tx\)/);
   assert.match(source, /amount > Number\(tx\.gross_cents \|\| 0\)/);
+  assert.match(source, /NOT EXISTS \(SELECT 1 FROM payment_disputes WHERE transaction_id=\? AND status='open'\)/);
   assert.match(source, /WHERE id=\? AND status='paid'/);
 });
