@@ -1,0 +1,49 @@
+name: PROCHÉLIA API security contract tests
+
+on:
+  pull_request:
+    paths:
+      - "src/**"
+      - "tests/**"
+      - "migrations/**"
+      - ".github/workflows/**"
+      - "wrangler.jsonc"
+      - "wrangler.toml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: prochelia-api-security-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  security-contracts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: "22"
+      - name: Check Worker syntax
+        run: |
+          node --experimental-default-type=module --check src/index.js
+          node --experimental-default-type=module --check src/v7.js
+          node --experimental-default-type=module --check src/v7-routes.js
+      - name: Run all Node regression tests
+        shell: bash
+        run: |
+          shopt -s nullglob
+          tests=(tests/*.test.js tests/*.test.mjs)
+          if (( ${#tests[@]} == 0 )); then
+            echo "::error::No Node regression tests were discovered."
+            exit 1
+          fi
+          node --experimental-default-type=module --test "${tests[@]}"
+      - name: Run D1 restore preparation tests
+        run: python3 -m unittest tests/test_prepare_d1_restore.py
