@@ -1411,6 +1411,16 @@ const SENSITIVE_CASES = new Set([
 async function ensureConsolidatedSchema(env) {
   if (!env.DB) throw new Error('DATABASE_REQUIRED');
   const statements = [
+    `CREATE TABLE IF NOT EXISTS supra_action_approvals (
+      id TEXT PRIMARY KEY, case_id TEXT NOT NULL, action_type TEXT NOT NULL,
+      resource_type TEXT NOT NULL, resource_id TEXT NOT NULL, action_digest TEXT NOT NULL,
+      approver_user_id TEXT NOT NULL, approver_role TEXT NOT NULL,
+      status TEXT NOT NULL CHECK(status IN ('EXECUTING','CONSUMED','FAILED')),
+      expires_at TEXT NOT NULL, consumed_at TEXT,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_supra_approvals_case ON supra_action_approvals(case_id,created_at)`,
+    `CREATE INDEX IF NOT EXISTS idx_supra_approvals_status_expiry ON supra_action_approvals(status,expires_at)`,
     `CREATE TABLE IF NOT EXISTS platform_settings (key TEXT PRIMARY KEY, value_json TEXT NOT NULL, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`,
     `CREATE TABLE IF NOT EXISTS business_profiles (id TEXT PRIMARY KEY, kind TEXT NOT NULL, display_name TEXT, owner_user_id TEXT, status TEXT NOT NULL DEFAULT 'active', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`,
     `CREATE TABLE IF NOT EXISTS métier_catalog (id TEXT PRIMARY KEY, code TEXT NOT NULL UNIQUE, label TEXT NOT NULL, category TEXT, active INTEGER NOT NULL DEFAULT 1, rules_json TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`,
@@ -1527,20 +1537,22 @@ async function createOperationalCase(request, env) {
   const impact=String(body.impact_level||'LOW').toUpperCase();
   const priority=CASE_PRIORITIES[impact]||10;
   const rec=await copilotRecommend(env,{caseType,impact,phase,context:safeContext});
+  // SUPRA may recommend an action, but case creation never executes it.
+  // Every case enters a proposal state and requires an explicit, persisted manager approval.
+  const proposedAction=String(rec.action||'REVIEW').toUpperCase();
+  const casePolicy=supraCaseCreationPolicy();
+  rec.requested_recommendation=proposedAction;
+  rec.mode=casePolicy.mode;
+  rec.execution_policy='PERSISTED_ACTION_BOUND_APPROVAL_REQUIRED';
   const id=crypto.randomUUID();
-  const requiresManager=rec.mode==='MANAGER_APPROVAL' ? 1 : 0;
-  const status=rec.action==='AUTO_RESOLVE' ? 'AUTO_PENDING' : 'OPEN';
+  const requiresManager=casePolicy.requiresManager;
+  const status=casePolicy.status;
   await env.DB.prepare(`INSERT INTO operational_cases(id,case_type,source,phase,priority,status,auto_mode,client_id,company_id,intervenant_id,mission_id,impact_level,description,context_json,proposed_solution_json,requires_manager) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
     .bind(id,caseType,'API',phase,priority,status,rec.mode,clientId,companyId,intervenantId,missionId,impact,clean(body.description)||null,JSON.stringify(safeContext),JSON.stringify(rec),requiresManager).run();
   await env.DB.prepare(`INSERT INTO copilot_log(id,case_id,action_type,recommendation,confidence,mode) VALUES(?,?,?,?,?,?)`)
-    .bind(crypto.randomUUID(),id,rec.action,JSON.stringify(rec.solution),rec.confidence,rec.mode).run();
-  await journal(env,'copilot',null,'CASE_CREATED','operational_case',id,'OK',{caseType,impact,actorRole:role,missionLinked:!!missionId});
-  let autoResult=null;
-  if(rec.action==='AUTO_RESOLVE') autoResult=await executeOperationalCase(env,id,null,true);
-  const responseStatus=rec.action==='AUTO_RESOLVE'
-    ? (autoResult?.pending ? 'AUTO_QUEUED' : 'AUTO_EXECUTED')
-    : 'WAITING_MANAGER';
-  return json({ok:true,version:VERSION,case_id:id,recommendation:rec,status:responseStatus},201);
+    .bind(crypto.randomUUID(),id,proposedAction,JSON.stringify(rec.solution),rec.confidence,rec.mode).run();
+  await journal(env,'copilot',gate.auth.user.id,'CASE_CREATED','operational_case',id,'WAITING_MANAGER',{caseType,impact,actorRole:role,missionLinked:!!missionId,proposedAction});
+  return json({ok:true,version:VERSION,case_id:id,recommendation:rec,status:'WAITING_MANAGER',requires_manager_approval:true},201);
 }
 
 async function getTableColumns(env, table) {
@@ -1550,25 +1562,44 @@ async function getTableColumns(env, table) {
   return (r.results || []).map(x => String(x.name));
 }
 
-async function enqueueAction(env, caseId, actionType, payload, idempotencyKey) {
-  const key = clean(idempotencyKey) || `${caseId}:${actionType}`;
-  const existing = await env.DB.prepare('SELECT * FROM action_outbox WHERE idempotency_key=? LIMIT 1').bind(key).first();
-  if (existing) return { created:false, id:existing.id, status:existing.status };
-  const id = crypto.randomUUID();
-  await env.DB.prepare(`INSERT INTO action_outbox(id,case_id,action_type,idempotency_key,payload_json,status,attempts) VALUES(?,?,?,?,?,'PENDING',0)`)
-    .bind(id,caseId,actionType,key,JSON.stringify(payload||{})).run();
-  return { created:true, id, status:'PENDING' };
+export function outboxIdempotencyMatches(existing, caseId, actionType, payloadJson) {
+  return Boolean(existing &&
+    existing.case_id === caseId &&
+    existing.action_type === actionType &&
+    existing.payload_json === payloadJson);
 }
 
-async function executeCaseBusinessAction(env, c, rec, actorId=null, automatic=false) {
+async function enqueueAction(env, caseId, actionType, payload, idempotencyKey) {
+  const key = clean(idempotencyKey) || `${caseId}:${actionType}`;
+  const payloadJson = JSON.stringify(payload || {});
+  const id = crypto.randomUUID();
+  const inserted = await env.DB.prepare(`INSERT INTO action_outbox
+    (id,case_id,action_type,idempotency_key,payload_json,status,attempts)
+    VALUES(?,?,?,?,?,'PENDING',0)
+    ON CONFLICT(idempotency_key) DO NOTHING`)
+    .bind(id,caseId,actionType,key,payloadJson).run();
+  if (Number(inserted?.meta?.changes || 0) === 1) {
+    return { created:true, id, status:'PENDING' };
+  }
+  const existing = await env.DB.prepare('SELECT * FROM action_outbox WHERE idempotency_key=? LIMIT 1').bind(key).first();
+  if (!outboxIdempotencyMatches(existing,caseId,actionType,payloadJson)) {
+    throw new Error('OUTBOX_IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_PAYLOAD');
+  }
+  return { created:false, id:existing.id, status:existing.status };
+}
+
+async function executeCaseBusinessAction(env, c, rec, actorId=null, automatic=false, approvalProof=null) {
   const action = String(rec?.action || '').toUpperCase();
   const context = c.context_json ? JSON.parse(c.context_json) : {};
   const solution = rec?.solution || {};
   const results = [];
+  const withApproval = (outboxActionType,payload) => approvalProof
+    ? {...payload,...approvalProof,approved_outbox_action_type:outboxActionType}
+    : payload;
 
   // Safe, idempotent operational effects that do not require an external PSP/provider.
   if (c.mission_id && (action === 'AUTO_RESOLVE' || action === 'CONTINUITY' || action === 'RESOLVE_CASE')) {
-    const queued = await enqueueAction(env,c.id,'MISSION_VERIFY_AND_NOTIFY',{mission_id:c.mission_id,case_id:c.id,reason:c.case_type},`${c.id}:mission-verify-notify`);
+    const queued = await enqueueAction(env,c.id,'MISSION_VERIFY_AND_NOTIFY',withApproval('MISSION_VERIFY_AND_NOTIFY',{mission_id:c.mission_id,case_id:c.id,reason:c.case_type}),`${c.id}:mission-verify-notify`);
     results.push({action:'MISSION_VERIFY_AND_NOTIFY',...queued});
   }
 
@@ -1577,28 +1608,28 @@ async function executeCaseBusinessAction(env, c, rec, actorId=null, automatic=fa
     if (replacementId && c.mission_id) {
       // Never mutate a mission directly from a case payload. A dedicated,
       // ownership-checked and atomic mission executor must process this queue.
-      const queued=await enqueueAction(env,c.id,'ASSIGN_REPLACEMENT',{mission_id:c.mission_id,intervenant_id:replacementId},c.id+':replacement:'+replacementId);
+      const queued=await enqueueAction(env,c.id,'ASSIGN_REPLACEMENT',withApproval('ASSIGN_REPLACEMENT',{mission_id:c.mission_id,intervenant_id:replacementId}),c.id+':replacement:'+replacementId);
       results.push({action:'ASSIGN_REPLACEMENT',...queued,reason:'ATOMIC_MISSION_EXECUTOR_REQUIRED'});
     } else {
-      const queued=await enqueueAction(env,c.id,'SEARCH_REPLACEMENT',{mission_id:c.mission_id||null,criteria:context.replacement_criteria||{},case_type:c.case_type},c.id+':search-replacement');
+      const queued=await enqueueAction(env,c.id,'SEARCH_REPLACEMENT',withApproval('SEARCH_REPLACEMENT',{mission_id:c.mission_id||null,criteria:context.replacement_criteria||{},case_type:c.case_type}),c.id+':search-replacement');
       results.push({action:'SEARCH_REPLACEMENT',...queued});
     }
   }
 
   if (context.reschedule_start_at && c.mission_id) {
     // Rescheduling is always queued; no direct mission UPDATE is permitted here.
-    const queued=await enqueueAction(env,c.id,'RESCHEDULE_MISSION',{mission_id:c.mission_id,start_at:context.reschedule_start_at},c.id+':reschedule:'+context.reschedule_start_at);
+    const queued=await enqueueAction(env,c.id,'RESCHEDULE_MISSION',withApproval('RESCHEDULE_MISSION',{mission_id:c.mission_id,start_at:context.reschedule_start_at}),c.id+':reschedule:'+context.reschedule_start_at);
     results.push({action:'RESCHEDULE_MISSION',...queued,reason:'ATOMIC_MISSION_EXECUTOR_REQUIRED'});
   }
 
   if (context.client_notification || c.client_id || c.company_id) {
-    const queued=await enqueueAction(env,c.id,'NOTIFY_CLIENT',{client_id:c.client_id||null,company_id:c.company_id||null,mission_id:c.mission_id||null,message:context.client_notification||solution.notification||`Mise à jour de votre dossier PROCHÉLIA : ${c.case_type}.`},`${c.id}:notify-client`);
+    const queued=await enqueueAction(env,c.id,'NOTIFY_CLIENT',withApproval('NOTIFY_CLIENT',{client_id:c.client_id||null,company_id:c.company_id||null,mission_id:c.mission_id||null,message:context.client_notification||solution.notification||`Mise à jour de votre dossier PROCHÉLIA : ${c.case_type}.`}),`${c.id}:notify-client`);
     results.push({action:'NOTIFY_CLIENT',...queued});
   }
 
   // Financial actions are deliberately queued for the real PSP adapter; no fake money movement.
   if (context.refund_cents || action === 'REFUND_REQUEST') {
-    const queued=await enqueueAction(env,c.id,'PSP_REFUND_REVIEW',{mission_id:c.mission_id||null,amount_cents:Math.max(0,Number(context.refund_cents||0)),reason:c.description||c.case_type},`${c.id}:psp-refund`);
+    const queued=await enqueueAction(env,c.id,'PSP_REFUND_REVIEW',withApproval('PSP_REFUND_REVIEW',{mission_id:c.mission_id||null,amount_cents:Math.max(0,Number(context.refund_cents||0)),reason:c.description||c.case_type}),`${c.id}:psp-refund`);
     results.push({action:'PSP_REFUND_REVIEW',...queued});
   }
 
@@ -1606,41 +1637,164 @@ async function executeCaseBusinessAction(env, c, rec, actorId=null, automatic=fa
   return results;
 }
 
+export function outboxInterruptedApprovalDisposition(approval) {
+  return Number(approval?.approval_unexpired) === 1
+    ? 'WAITING_APPROVAL_COMMIT'
+    : 'WAITING_REVIEW';
+}
+
+export function outboxActionDisposition(actionType) {
+  const type = String(actionType || '').trim().toUpperCase();
+  const providerActions = new Set([
+    'PSP_REFUND_REVIEW', 'NOTIFY_CLIENT', 'SEARCH_REPLACEMENT',
+    'RESCHEDULE_MISSION', 'ASSIGN_REPLACEMENT', 'NOTIFY', 'REFUND', 'PAYOUT'
+  ]);
+  return providerActions.has(type) ? 'WAITING_PROVIDER' : 'WAITING_REVIEW';
+}
+
 async function processActionOutbox(request, env) {
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
   await ensureOperationalSchema(env);
+  // A previous worker may have stopped after claiming a row. This processor
+  // performs classification only (never external effects), so stale claims
+  // can safely return to PENDING for another pass.
+  await env.DB.prepare(`UPDATE action_outbox SET status='PENDING',last_error='STALE_CLASSIFICATION_CLAIM_RECOVERED',updated_at=CURRENT_TIMESTAMP WHERE status='PROCESSING' AND updated_at < datetime('now','-10 minutes')`).run();
   const rows=await env.DB.prepare(`SELECT * FROM action_outbox WHERE status='PENDING' ORDER BY created_at ASC LIMIT 50`).all();
   const processed=[];
   for(const row of (rows.results||[])) {
+    // Atomic compare-and-set: concurrent processors cannot classify the same row.
+    const claim=await env.DB.prepare(`UPDATE action_outbox SET status='PROCESSING',updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='PENDING'`).bind(row.id).run();
+    if(Number(claim?.meta?.changes||0)!==1) continue;
     const payload=row.payload_json?JSON.parse(row.payload_json):{};
-    // Provider-dependent actions stay queued until the corresponding adapter/secret is configured.
-    const external = ['PSP_REFUND_REVIEW','NOTIFY_CLIENT','SEARCH_REPLACEMENT','RESCHEDULE_MISSION','ASSIGN_REPLACEMENT'].includes(String(row.action_type));
-    if(external) {
-      await env.DB.prepare(`UPDATE action_outbox SET status='WAITING_PROVIDER',last_error=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind('External adapter/provider required for final execution.',row.id).run();
-      processed.push({id:row.id,status:'WAITING_PROVIDER',action_type:row.action_type});
-      continue;
+    if(row.case_id) {
+      const approval=payload.approval_id
+        ? await env.DB.prepare(`SELECT id,case_id,action_type,resource_type,resource_id,approver_user_id,approver_role,action_digest,status,
+            CASE WHEN expires_at>CURRENT_TIMESTAMP THEN 1 ELSE 0 END AS approval_unexpired
+            FROM supra_action_approvals WHERE id=? LIMIT 1`).bind(payload.approval_id).first()
+        : null;
+      const matchingExecutingApproval = Boolean(approval &&
+        approval.status==='EXECUTING' && approval.case_id===row.case_id &&
+        approval.action_digest===payload.action_digest && approval.id===payload.approval_id &&
+        approval.action_type===payload.action_type && approval.resource_type===payload.resource_type &&
+        approval.resource_id===payload.resource_id && approval.approver_user_id===payload.approver_user_id &&
+        approval.approver_role===payload.approver_role &&
+        payload.approved_outbox_action_type===row.action_type);
+      if(matchingExecutingApproval) {
+        const interruptedDisposition=outboxInterruptedApprovalDisposition(approval);
+        const waitingForCommit=interruptedDisposition==='WAITING_APPROVAL_COMMIT';
+        const reason=waitingForCommit
+          ? 'WAITING_APPROVAL_COMMIT'
+          : 'APPROVAL_EXPIRED_DURING_INTERRUPTED_EXECUTION_REQUIRES_REAPPROVAL';
+        await env.DB.prepare(`UPDATE action_outbox SET status=?,last_error=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='PROCESSING'`)
+          .bind(waitingForCommit?'PENDING':'WAITING_REVIEW',reason,row.id).run();
+        processed.push({id:row.id,status:interruptedDisposition,action_type:row.action_type});
+        continue;
+      }
+      if(!supraOutboxActionProofMatches(approval,payload,row.case_id,row.action_type)) {
+        await env.DB.prepare(`UPDATE action_outbox SET status='WAITING_REVIEW',last_error=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='PROCESSING'`)
+          .bind('PERSISTED_CASE_APPROVAL_PROOF_REQUIRED',row.id).run();
+        processed.push({id:row.id,status:'WAITING_REVIEW',action_type:row.action_type});
+        continue;
+      }
     }
-    await env.DB.prepare(`UPDATE action_outbox SET status='COMPLETED',processed_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(row.id).run();
-    processed.push({id:row.id,status:'COMPLETED',action_type:row.action_type,payload});
+    // Never report success merely because an outbox row was inspected.
+    // External actions wait for a real provider adapter; all other actions
+    // remain in review until an explicitly wired, tested executor exists.
+    const disposition = outboxActionDisposition(row.action_type);
+    const reason = disposition === 'WAITING_PROVIDER'
+      ? 'External adapter/provider required for final execution.'
+      : 'ACTION_EXECUTOR_NOT_CONNECTED_NO_COMPLETION_CLAIM';
+    await env.DB.prepare(`UPDATE action_outbox SET status=?,last_error=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='PROCESSING'`)
+      .bind(disposition,reason,row.id).run();
+    processed.push({id:row.id,status:disposition,action_type:row.action_type});
   }
   await journal(env,'gerante',gate.auth.user.id,'ACTION_OUTBOX_PROCESSED','system',null,'OK',{count:processed.length});
   return json({ok:true,version:VERSION,processed},200);
 }
 
-export function operationalActionsPending(businessResults) {
-  return Array.isArray(businessResults) &&
-    businessResults.some(item => ['PENDING','WAITING_PROVIDER'].includes(String(item?.status || '').toUpperCase()));
+export function supraCaseCreationPolicy() {
+  return Object.freeze({
+    mode: 'MANAGER_APPROVAL',
+    requiresManager: 1,
+    status: 'OPEN',
+    executeImmediately: false
+  });
 }
 
-async function executeOperationalCase(env, caseId, approverId=null, automatic=false) {
+export function supraApprovalDigestInput(caseRow) {
+  if (!caseRow || typeof caseRow.id !== 'string' || !caseRow.id ||
+      typeof caseRow.proposed_solution_json !== 'string' || !caseRow.proposed_solution_json) return null;
+  return JSON.stringify({
+    version: 'SUPRA_CASE_APPROVAL_V1',
+    case_id: caseRow.id,
+    case_type: String(caseRow.case_type || ''),
+    client_id: caseRow.client_id || null,
+    company_id: caseRow.company_id || null,
+    intervenant_id: caseRow.intervenant_id || null,
+    mission_id: caseRow.mission_id || null,
+    impact_level: String(caseRow.impact_level || ''),
+    description: caseRow.description || null,
+    context_json: caseRow.context_json || '{}',
+    proposed_solution_json: caseRow.proposed_solution_json
+  });
+}
+
+export function supraApprovalProofMatches(approval, payload, caseId) {
+  return Boolean(approval && payload && caseId &&
+    approval.status === 'CONSUMED' &&
+    approval.case_id === caseId &&
+    approval.action_digest === payload.action_digest &&
+    approval.id === payload.approval_id &&
+    approval.action_type === payload.action_type &&
+    approval.resource_type === payload.resource_type &&
+    approval.resource_id === payload.resource_id &&
+    approval.approver_user_id === payload.approver_user_id &&
+    approval.approver_role === 'GERANTE' &&
+    payload.approver_role === 'GERANTE');
+}
+
+export function supraOutboxActionProofMatches(approval,payload,caseId,outboxActionType) {
+  return supraApprovalProofMatches(approval,payload,caseId) &&
+    payload.approved_outbox_action_type === outboxActionType;
+}
+
+export function operationalActionsPending(businessResults) {
+  // Fail closed: an absent/empty result set is not proof of completion.
+  return !Array.isArray(businessResults) || businessResults.length === 0 ||
+    businessResults.some(item => ['PENDING','PROCESSING','WAITING_PROVIDER','WAITING_REVIEW'].includes(String(item?.status || '').toUpperCase()));
+}
+
+async function executeOperationalCase(env, caseId, approverId=null, automatic=false, approvalId=null) {
   const c=await env.DB.prepare('SELECT * FROM operational_cases WHERE id=? LIMIT 1').bind(caseId).first();
   if(!c)return {ok:false,error:'CASE_NOT_FOUND'};
   if(c.status==='RESOLVED')return {ok:true,already:true};
   const rec=c.proposed_solution_json?JSON.parse(c.proposed_solution_json):{};
-  if(c.requires_manager && !automatic && !approverId) return {ok:false,error:'MANAGER_APPROVAL_REQUIRED'};
-  const businessResults = await executeCaseBusinessAction(env,c,rec,approverId,automatic);
+  if(c.requires_manager && !automatic) {
+    if(c.status!=='APPROVAL_IN_PROGRESS') return {ok:false,error:'CASE_NOT_CLAIMED_FOR_APPROVAL'};
+    if(!approverId || !approvalId) return {ok:false,error:'PERSISTED_MANAGER_APPROVAL_REQUIRED'};
+    const approval=await env.DB.prepare(`SELECT * FROM supra_action_approvals WHERE id=? AND case_id=? AND approver_user_id=? AND approver_role='GERANTE' AND status='EXECUTING' AND expires_at>CURRENT_TIMESTAMP LIMIT 1`)
+      .bind(approvalId,caseId,approverId).first();
+    const expectedDigest=await sha256Base64url(supraApprovalDigestInput(c)||'');
+    if(!approval || approval.action_digest!==expectedDigest) return {ok:false,error:'APPROVAL_PROOF_INVALID'};
+  } else if (!automatic && !approverId) {
+    return {ok:false,error:'MANAGER_APPROVAL_REQUIRED'};
+  }
+  const approvalProof=approvalId?{
+    approval_id:approvalId,
+    action_digest:await sha256Base64url(supraApprovalDigestInput(c)||''),
+    case_id:caseId,
+    action_type:String(rec.action||'REVIEW').toUpperCase(),
+    resource_type:c.mission_id?'MISSION':'OPERATIONAL_CASE',
+    resource_id:c.mission_id||caseId,
+    approver_user_id:approverId,
+    approver_role:'GERANTE'
+  }:{};
+  const businessResults = await executeCaseBusinessAction(env,c,rec,approverId,automatic,approvalId?approvalProof:null);
+  if (!Array.isArray(businessResults) || businessResults.length === 0) {
+    return {ok:false,error:'NO_EXECUTABLE_BUSINESS_ACTION'};
+  }
   const pendingActions = operationalActionsPending(businessResults);
-  const resolution={executed:!pendingActions,pending:pendingActions,automatic,action:rec.action||'RESOLVE',steps:rec.solution?.steps||[],business_results:businessResults,executed_at:new Date().toISOString()};
+  const resolution={executed:!pendingActions,pending:pendingActions,automatic,action:rec.action||'RESOLVE',approval_id:approvalProof?.approval_id||null,action_digest:approvalProof?.action_digest||null,steps:rec.solution?.steps||[],business_results:businessResults,executed_at:new Date().toISOString()};
   await env.DB.prepare(`INSERT INTO case_actions(id,case_id,action_code,mode,status,payload_json,result_json,completed_at) VALUES(?,?,?,?,?,?,?,?)`)
     .bind(crypto.randomUUID(),caseId,rec.action||'RESOLVE',automatic?'AUTO':'MANAGER',pendingActions?'PENDING':'COMPLETED',JSON.stringify(rec),JSON.stringify(resolution),pendingActions?null:new Date().toISOString()).run();
   await env.DB.prepare(`UPDATE operational_cases SET status=?,resolution_json=?,requires_manager=0,updated_at=CURRENT_TIMESTAMP,resolved_at=? WHERE id=?`)
@@ -1652,9 +1806,40 @@ async function executeOperationalCase(env, caseId, approverId=null, automatic=fa
 
 async function approveOperationalCase(request, env) {
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
-  const body=await readJson(request)||{}; if(!body.case_id)return json({ok:false,error:'CASE_ID_REQUIRED',version:VERSION},400);
-  const result=await executeOperationalCase(env,body.case_id,gate.auth.user.id,false);
-  return json({...result,version:VERSION},result.ok?200:409);
+  const body=await readJson(request)||{}; const caseId=clean(body.case_id);
+  if(!caseId)return json({ok:false,error:'CASE_ID_REQUIRED',version:VERSION},400);
+  const row=await env.DB.prepare('SELECT * FROM operational_cases WHERE id=? LIMIT 1').bind(caseId).first();
+  if(!row)return json({ok:false,error:'CASE_NOT_FOUND',version:VERSION},404);
+  if(row.status!=='OPEN' || Number(row.requires_manager)!==1) {
+    return json({ok:false,error:'CASE_NOT_APPROVABLE',version:VERSION},409);
+  }
+  const digestInput=supraApprovalDigestInput(row);
+  if(!digestInput)return json({ok:false,error:'APPROVAL_PAYLOAD_INVALID',version:VERSION},409);
+  const digest=await sha256Base64url(digestInput);
+  const claim=await env.DB.prepare(`UPDATE operational_cases SET status='APPROVAL_IN_PROGRESS',updated_at=CURRENT_TIMESTAMP
+    WHERE id=? AND status='OPEN' AND requires_manager=1 AND proposed_solution_json=?`)
+    .bind(caseId,row.proposed_solution_json).run();
+  if(Number(claim.meta?.changes||0)!==1) {
+    return json({ok:false,error:'CASE_APPROVAL_CONFLICT',version:VERSION},409);
+  }
+  const approvalId=crypto.randomUUID();
+  try {
+    await env.DB.prepare(`INSERT INTO supra_action_approvals
+      (id,case_id,action_type,resource_type,resource_id,action_digest,approver_user_id,approver_role,status,expires_at)
+      VALUES(?,?,?,?,?,?,?,?, 'EXECUTING',datetime('now','+15 minutes'))`)
+      .bind(approvalId,caseId,String(JSON.parse(row.proposed_solution_json||'{}').action||'REVIEW').toUpperCase(),
+        row.mission_id?'MISSION':'OPERATIONAL_CASE',row.mission_id||caseId,digest,gate.auth.user.id,String(gate.auth.user.role||'gerante').toUpperCase()).run();
+    const result=await executeOperationalCase(env,caseId,gate.auth.user.id,false,approvalId);
+    await env.DB.prepare(`UPDATE supra_action_approvals SET status=?,consumed_at=CASE WHEN ?='CONSUMED' THEN CURRENT_TIMESTAMP ELSE consumed_at END
+      WHERE id=? AND status='EXECUTING'`)
+      .bind(result.ok?'CONSUMED':'FAILED',result.ok?'CONSUMED':'FAILED',approvalId).run();
+    if(!result.ok) await env.DB.prepare(`UPDATE operational_cases SET status='APPROVAL_FAILED',requires_manager=1,updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='APPROVAL_IN_PROGRESS'`).bind(caseId).run();
+    return json({...result,version:VERSION,approval_id:approvalId,approval_status:result.ok?'CONSUMED':'FAILED'},result.ok?200:409);
+  } catch (error) {
+    await env.DB.prepare(`UPDATE supra_action_approvals SET status='FAILED' WHERE id=? AND status='EXECUTING'`).bind(approvalId).run().catch(()=>null);
+    await env.DB.prepare(`UPDATE operational_cases SET status='APPROVAL_FAILED',requires_manager=1,updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='APPROVAL_IN_PROGRESS'`).bind(caseId).run().catch(()=>null);
+    return json({ok:false,error:'CASE_APPROVAL_EXECUTION_FAILED',version:VERSION},503);
+  }
 }
 
 async function getOperationsDashboard(request, env) {
@@ -2426,6 +2611,15 @@ async function handleStrategic(request, env) {
 
 async function ensureOperationalSchema(env) {
   const statements = [
+    `CREATE TABLE IF NOT EXISTS supra_action_approvals (
+      id TEXT PRIMARY KEY, case_id TEXT NOT NULL, action_type TEXT NOT NULL,
+      resource_type TEXT NOT NULL, resource_id TEXT NOT NULL, action_digest TEXT NOT NULL,
+      approver_user_id TEXT NOT NULL, approver_role TEXT NOT NULL,
+      status TEXT NOT NULL CHECK(status IN ('EXECUTING','CONSUMED','FAILED')),
+      expires_at TEXT NOT NULL, consumed_at TEXT,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_supra_approvals_case ON supra_action_approvals(case_id,created_at)`,
     `CREATE TABLE IF NOT EXISTS action_outbox (
       id TEXT PRIMARY KEY, case_id TEXT, action_type TEXT NOT NULL, entity_type TEXT,
       entity_id TEXT, idempotency_key TEXT NOT NULL UNIQUE, status TEXT NOT NULL DEFAULT 'PENDING',
@@ -2581,24 +2775,7 @@ async function executeQueuedAction(env, action) {
 async function operationalExecute(request, env) {
   const gate=await requireAuthRole(request,env,['gerante']);
   if(gate.error)return gate.error;
-  await ensureConsolidatedSchema(env); await ensureOperationalSchema(env);
-  const b=await readJson(request)||{};
-  if(!b.case_id)return json({ok:false,error:'CASE_ID_REQUIRED',version:VERSION},400);
-  const c=await env.DB.prepare('SELECT * FROM operational_cases WHERE id=? LIMIT 1').bind(b.case_id).first();
-  if(!c)return json({ok:false,error:'CASE_NOT_FOUND',version:VERSION},404);
-  const solution=JSON.parse(c.proposed_solution_json||'{}');
-  const actions=Array.isArray(b.actions)?b.actions:(Array.isArray(solution.actions)?solution.actions:[]);
-  if(!actions.length)return json({ok:false,error:'NO_ACTIONS_DEFINED',version:VERSION},400);
-  const results=[];
-  for(const a of actions){
-    const q=await queueAction(env,a.action_type||a.type,c.mission_id?'MISSION':'CASE',a.entity_id||c.mission_id,{...a},a.idempotency_key);
-    results.push(await executeQueuedAction(env,q));
-  }
-  const allDone=results.every(x=>x.ok && ['DONE'].includes(x.status));
-  await env.DB.prepare(`UPDATE operational_cases SET status=?,resolution_json=?,updated_at=CURRENT_TIMESTAMP,resolved_at=? WHERE id=?`)
-    .bind(allDone?'RESOLVED':'IN_PROGRESS',JSON.stringify({approved_by:gate.auth.user.id,results}),allDone?new Date().toISOString():null,c.id).run();
-  await journal(env,'gerante',gate.auth.user.id,'CASE_EXECUTED','operational_case',c.id,allDone?'OK':'PARTIAL',{results});
-  return json({ok:true,version:VERSION,case_id:c.id,status:allDone?'RESOLVED':'IN_PROGRESS',results});
+  return json({ok:false,error:'LEGACY_EXECUTOR_DISABLED_USE_CASE_APPROVAL',version:VERSION},409);
 }
 
 async function scoreClients(request, env) {
@@ -2798,7 +2975,7 @@ async function productionConfigCheck(env, { persist = false } = {}) {
     await ensureConsolidatedSchema(env); await ensurePaymentSchema(env); await ensureOperationalSchema(env); await ensureStrategicSchema(env); await ensureFinalHardeningSchema(env);
   }
   const checks=[];
-  const requiredTables=['users','sessions','missions','payment_transactions','payment_webhook_events','payment_disputes','operational_cases','action_outbox','notification_outbox','accounting_ledger','promotions','promotion_recommendations','activity_journal','compliance_events'];
+  const requiredTables=['users','sessions','missions','payment_transactions','payment_webhook_events','payment_disputes','operational_cases','supra_action_approvals','action_outbox','notification_outbox','accounting_ledger','promotions','promotion_recommendations','activity_journal','compliance_events'];
   for(const t of requiredTables) checks.push({code:`TABLE:${t}`,status:await tableExists(env,t)?'OK':'MISSING'});
   const pspRequired=['PAYMENT_PROVIDER','PAYMENT_WEBHOOK_SECRET'];
   for(const k of pspRequired) checks.push({code:`SECRET:${k}`,status:finalSecretConfigured(env,k)?'OK':'NOT_CONFIGURED'});
@@ -3315,6 +3492,14 @@ async function financeProblemCreate(request,env) {
   return json({ok:true,version:VERSION,case:{id,issue_type:issueType,status,severity,automatic_resolution_possible:auto,proposed_solution:solution,requires_human_validation:!auto}});
 }
 
+export function financeResolutionDecision(role, isOwner, approve) {
+  const normalized = String(role || '').trim().toUpperCase();
+  const manager = ['GERANTE', 'ADMIN', 'FINANCE'].includes(normalized);
+  if (!manager && !isOwner) return 'FORBIDDEN';
+  if (approve === true && !manager) return 'MANAGER_APPROVAL_REQUIRED';
+  return approve === true ? 'RESOLVED' : 'ESCALATED';
+}
+
 async function financeProblemResolve(request,env) {
   const a=await financeAuth(request,env); if(a.response)return a.response;
   const {auth}=a,b=await readJson(request)||{},id=clean(b.case_id);
@@ -3323,13 +3508,15 @@ async function financeProblemResolve(request,env) {
   if(!row)return json({ok:false,error:'CASE_NOT_FOUND',version:VERSION},404);
   const role=String(auth.user.role||'').toUpperCase();
   const owner=String(row.user_id)===String(auth.user.id);
-  const manager=['GERANTE','ADMIN','FINANCE'].includes(role);
-  if(!owner&&!manager)return json({ok:false,error:'FORBIDDEN',version:VERSION},403);
-  const approved=Boolean(b.approve);
-  const resolution=clean(b.resolution)||row.proposed_solution||'Résolution contrôlée par le Copilote.';
-  const status=approved?'RESOLVED':'ESCALATED';
-  await env.DB.prepare(`UPDATE finance_resolution_cases SET status=?,resolution=?,resolved_at=CURRENT_TIMESTAMP WHERE id=?`).bind(status,resolution,id).run();
-  await journal(env,auth.user.role,auth.user.id,'FINANCE_PROBLEM_RESOLVE','finance_resolution_cases',id,status,{approved});
+  const decision=financeResolutionDecision(role,owner,b.approve===true);
+  if(decision==='FORBIDDEN')return json({ok:false,error:'FORBIDDEN',version:VERSION},403);
+  if(decision==='MANAGER_APPROVAL_REQUIRED')return json({ok:false,error:'MANAGER_APPROVAL_REQUIRED',version:VERSION},403);
+  const status=decision;
+  const resolution=clean(b.resolution)||row.proposed_solution||'Résolution examinée ; action transmise pour contrôle.';
+  const update=await env.DB.prepare(`UPDATE finance_resolution_cases SET status=?,resolution=?,resolved_at=CASE WHEN ?='RESOLVED' THEN CURRENT_TIMESTAMP ELSE NULL END WHERE id=? AND status IN ('OPEN','AUTO_RESOLUTION_PROPOSED','ESCALATED')`)
+    .bind(status,resolution,status,id).run();
+  if(Number(update.meta?.changes||0)!==1)return json({ok:false,error:'CASE_STATE_CONFLICT',version:VERSION},409);
+  await journal(env,auth.user.role,auth.user.id,'FINANCE_PROBLEM_RESOLVE','finance_resolution_cases',id,status,{approved:b.approve===true,managerApproval:status==='RESOLVED'});
   return json({ok:true,version:VERSION,case_id:id,status,resolution});
 }
 
@@ -3771,6 +3958,14 @@ async function supportList(request,env){
   return json({ok:true,version:VERSION,role:a.role,cases:r.results||[]});
 }
 
+export function supportManualResolutionAllowed(role, resolution, evidence) {
+  const normalizedRole = String(role || '').trim().toUpperCase();
+  const manager = normalizedRole === 'GERANTE' || normalizedRole === 'ADMIN';
+  const reason = String(resolution || '').trim();
+  const proof = String(evidence || '').trim();
+  return Boolean(manager && reason.length >= 10 && proof.length >= 20);
+}
+
 async function supportResolve(request,env){
   const a=await supportAuth(request,env); if(a.response)return a.response;
   if(a.role!=='GERANTE'&&a.role!=='ADMIN') return json({ok:false,error:'MANAGER_APPROVAL_REQUIRED',version:VERSION},403);
@@ -3779,11 +3974,18 @@ async function supportResolve(request,env){
   if(!id)return json({ok:false,error:'CASE_ID_REQUIRED',version:VERSION},400);
   const row=await env.DB.prepare(`SELECT * FROM support_cases WHERE id=? LIMIT 1`).bind(id).first();
   if(!row)return json({ok:false,error:'CASE_NOT_FOUND',version:VERSION},404);
-  const resolution=clean(b.resolution)||'Résolution validée par la Gérante après contrôle du dossier.';
-  await env.DB.prepare(`UPDATE support_cases SET status='RESOLVED',resolution=?,resolved_at=CURRENT_TIMESTAMP,requires_manager=0 WHERE id=?`).bind(resolution,id).run();
-  await supportEvent(env,id,a.role,a.auth.user.id,'MANAGER_RESOLVED',{resolution});
-  await journal(env,a.role,a.auth.user.id,'SUPPORT_CASE_MANAGER_RESOLVE','support_cases',id,'RESOLVED',{resolution});
-  return json({ok:true,version:VERSION,case_id:id,status:'RESOLVED',resolution});
+  const resolution=clean(b.resolution);
+  const evidence=clean(b.resolution_evidence);
+  if(!supportManualResolutionAllowed(a.role,resolution,evidence)) {
+    return json({ok:false,error:'MANUAL_RESOLUTION_EVIDENCE_REQUIRED',version:VERSION},400);
+  }
+  const record={type:'MANUALLY_VERIFIED_BY_MANAGER',resolution,evidence,verified_by:a.auth.user.id,verified_at:new Date().toISOString()};
+  const update=await env.DB.prepare(`UPDATE support_cases SET status='RESOLVED',resolution=?,resolved_at=CURRENT_TIMESTAMP,requires_manager=0 WHERE id=? AND status NOT IN ('RESOLVED','CLOSED')`)
+    .bind(JSON.stringify(record),id).run();
+  if(Number(update.meta?.changes||0)!==1) return json({ok:false,error:'CASE_STATE_CONFLICT',version:VERSION},409);
+  await supportEvent(env,id,a.role,a.auth.user.id,'MANAGER_MANUALLY_VERIFIED_RESOLUTION',record);
+  await journal(env,a.role,a.auth.user.id,'SUPPORT_CASE_MANAGER_RESOLVE','support_cases',id,'RESOLVED',{resolution,evidenceProvided:true,verificationType:record.type});
+  return json({ok:true,version:VERSION,case_id:id,status:'RESOLVED',verification_type:record.type});
 }
 
 async function supportDashboard(request,env){
@@ -3831,7 +4033,9 @@ async function productionSafetySchema(env){
 }
 
 async function productionSubjectHash(request, route){
-  const ip=clean(request.headers.get('CF-Connecting-IP')) || clean(request.headers.get('X-Forwarded-For')) || 'unknown';
+  // Trust only Cloudflare's edge-populated client IP header. X-Forwarded-For
+  // can be supplied by a caller and must not be used as an identity boundary.
+  const ip=clean(request.headers.get('CF-Connecting-IP')) || 'unknown';
   return sha256Hex(`${ip}|${route}`);
 }
 
@@ -3853,13 +4057,14 @@ async function productionRateLimit(request,env){
   const now=Math.floor(Date.now()/1000);
   const start=new Date(Math.floor(now/windowSeconds)*windowSeconds*1000).toISOString();
   await ensureFinalHardeningSchema(env);
-  const existing=await env.DB.prepare(`SELECT request_count FROM security_rate_limits WHERE bucket=? AND subject_hash=? AND window_start=? LIMIT 1`).bind(bucket,subject,start).first();
-  const count=Number(existing?.request_count||0)+1;
-  if(existing){
-    await env.DB.prepare(`UPDATE security_rate_limits SET request_count=? WHERE bucket=? AND subject_hash=? AND window_start=?`).bind(count,bucket,subject,start).run();
-  }else{
-    await env.DB.prepare(`INSERT INTO security_rate_limits(id,bucket,subject_hash,window_start,request_count) VALUES(?,?,?,?,1)`).bind(crypto.randomUUID(),bucket,subject,start).run();
-  }
+  // One atomic UPSERT prevents lost increments under concurrent requests.
+  const counter=await env.DB.prepare(`INSERT INTO security_rate_limits(id,bucket,subject_hash,window_start,request_count)
+    VALUES(?,?,?,?,1)
+    ON CONFLICT(bucket,subject_hash,window_start)
+    DO UPDATE SET request_count=security_rate_limits.request_count+1
+    RETURNING request_count`).bind(crypto.randomUUID(),bucket,subject,start).first();
+  const count=Number(counter?.request_count||0);
+  if(!Number.isSafeInteger(count) || count<1) throw new Error('RATE_LIMIT_COUNTER_UNAVAILABLE');
   if(count>limit){
     await productionSafetySchema(env);
     await env.DB.prepare(`INSERT INTO production_security_events(id,event_type,route,subject_hash,decision,details_json) VALUES(?,?,?,?,?,?)`)

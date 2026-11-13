@@ -6,17 +6,53 @@ MIGRATIONS = ROOT / "migrations"
 DB = sqlite3.connect(":memory:")
 DB.execute("PRAGMA foreign_keys = ON")
 
-for path in sorted(MIGRATIONS.glob("*.sql")):
+migration_files = sorted(MIGRATIONS.glob("*.sql"))
+sequence_numbers = [path.name.split("_", 1)[0] for path in migration_files]
+assert len(sequence_numbers) == len(set(sequence_numbers)), (
+    f"Duplicate migration sequence numbers: {sequence_numbers}"
+)
+
+for path in migration_files:
     DB.executescript(path.read_text(encoding="utf-8"))
 
-# Expected payment schema objects exist.
+# Expected payment and SUPRA approval schema objects exist.
 expected = {
     "wallets", "payment_wallet_ledger", "payment_accounts",
     "payment_transactions", "payout_requests", "payment_webhook_events",
     "payment_disputes", "payment_reconciliation", "payment_audit",
+    "supra_action_approvals",
 }
 actual = {row[0] for row in DB.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-assert expected <= actual, f"Missing payment tables: {sorted(expected - actual)}"
+assert expected <= actual, f"Missing schema tables: {sorted(expected - actual)}"
+
+approval_columns = {
+    row[1] for row in DB.execute("PRAGMA table_info(supra_action_approvals)")
+}
+assert {
+    "id", "case_id", "action_type", "resource_type", "resource_id",
+    "action_digest", "approver_user_id", "approver_role", "status",
+    "expires_at", "consumed_at", "created_at",
+} <= approval_columns
+
+# Approval state is constrained to the explicit lifecycle.
+DB.execute("""
+    INSERT INTO supra_action_approvals
+      (id,case_id,action_type,resource_type,resource_id,action_digest,
+       approver_user_id,approver_role,status,expires_at)
+    VALUES('a1','c1','NOTIFY','CASE','c1','digest','u1','GERANTE',
+           'EXECUTING','2099-01-01 00:00:00')
+""")
+try:
+    DB.execute("""
+        INSERT INTO supra_action_approvals
+          (id,case_id,action_type,resource_type,resource_id,action_digest,
+           approver_user_id,approver_role,status,expires_at)
+        VALUES('a2','c1','NOTIFY','CASE','c1','digest','u1','GERANTE',
+               'APPROVED','2099-01-01 00:00:00')
+    """)
+    raise AssertionError("invalid SUPRA approval status unexpectedly accepted")
+except sqlite3.IntegrityError:
+    pass
 
 # Ledger writes atomically update wallet balances.
 DB.execute("INSERT INTO wallets(id,user_id) VALUES('w1','u1')")
@@ -69,4 +105,4 @@ try:
 except sqlite3.IntegrityError:
     pass
 
-print(f"PASS: {len(list(MIGRATIONS.glob('*.sql')))} migrations; payment schema, atomic ledger, immutability and idempotency verified.")
+print(f"PASS: {len(migration_files)} migrations; payment schema, SUPRA approvals, atomic ledger, immutability and idempotency verified.")
