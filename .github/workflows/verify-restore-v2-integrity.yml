@@ -113,10 +113,12 @@ jobs:
           echo "Counts gathered without exposing table contents."
           echo "TABLES_COUNT=$table_count" >> "$GITHUB_ENV"
           cat "$out/counts.csv"
-          echo "## restore-test-v2 integrity" >> "$GITHUB_STEP_SUMMARY"
-          echo "- SQLite quick_check: ok" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Foreign key check: 0 violations" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Tables and row counts: $table_count (report artifact)" >> "$GITHUB_STEP_SUMMARY"
+          {
+            echo "## restore-test-v2 integrity"
+            echo "- SQLite quick_check: ok"
+            echo "- Foreign key check: 0 violations"
+            echo "- Tables and row counts: $table_count (report artifact)"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload sanitized verification report
         uses: actions/upload-artifact@v6
