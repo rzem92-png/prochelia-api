@@ -1629,6 +1629,14 @@ async function processActionOutbox(request, env) {
       const approval=payload.approval_id
         ? await env.DB.prepare('SELECT id,case_id,action_digest,status FROM supra_action_approvals WHERE id=? LIMIT 1').bind(payload.approval_id).first()
         : null;
+      if(approval && approval.status==='EXECUTING' &&
+         approval.case_id===row.case_id && approval.action_digest===payload.action_digest &&
+         approval.id===payload.approval_id) {
+        // Approval is being committed by the request that enqueued this row.
+        // Leave it PENDING; a later pass will process it after CONSUMED is durable.
+        processed.push({id:row.id,status:'WAITING_APPROVAL_COMMIT',action_type:row.action_type});
+        continue;
+      }
       if(!supraApprovalProofMatches(approval,payload,row.case_id)) {
         await env.DB.prepare(`UPDATE action_outbox SET status='WAITING_REVIEW',last_error=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='PENDING'`)
           .bind('PERSISTED_CASE_APPROVAL_PROOF_REQUIRED',row.id).run();
@@ -1698,7 +1706,7 @@ async function executeOperationalCase(env, caseId, approverId=null, automatic=fa
   if(c.requires_manager && !automatic) {
     if(c.status!=='APPROVAL_IN_PROGRESS') return {ok:false,error:'CASE_NOT_CLAIMED_FOR_APPROVAL'};
     if(!approverId || !approvalId) return {ok:false,error:'PERSISTED_MANAGER_APPROVAL_REQUIRED'};
-    const approval=await env.DB.prepare(`SELECT * FROM supra_action_approvals WHERE id=? AND case_id=? AND approver_user_id=? AND status='EXECUTING' AND expires_at>CURRENT_TIMESTAMP LIMIT 1`)
+    const approval=await env.DB.prepare(`SELECT * FROM supra_action_approvals WHERE id=? AND case_id=? AND approver_user_id=? AND approver_role='GERANTE' AND status='EXECUTING' AND expires_at>CURRENT_TIMESTAMP LIMIT 1`)
       .bind(approvalId,caseId,approverId).first();
     const expectedDigest=await sha256Base64url(supraApprovalDigestInput(c)||'');
     if(!approval || approval.action_digest!==expectedDigest) return {ok:false,error:'APPROVAL_PROOF_INVALID'};
