@@ -1504,7 +1504,7 @@ async function createOperationalCase(request, env) {
   const body=await readJson(request)||{};
   const caseType=clean(body.case_type); if(!caseType)return json({ok:false,error:'CASE_TYPE_REQUIRED',version:VERSION},400);
   const role=gate.auth.user.role;
-  const isManager=role==='gerante';
+  const isManager=!operationalCaseRequiresManagerApproval(role);
   const requestedMissionId=clean(body.mission_id)||null;
   let mission=null;
   if (!isManager && requestedMissionId) {
