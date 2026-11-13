@@ -3414,6 +3414,14 @@ async function financeProblemCreate(request,env) {
   return json({ok:true,version:VERSION,case:{id,issue_type:issueType,status,severity,automatic_resolution_possible:auto,proposed_solution:solution,requires_human_validation:!auto}});
 }
 
+export function financeResolutionDecision(role, isOwner, approve) {
+  const normalized = String(role || '').trim().toUpperCase();
+  const manager = ['GERANTE', 'ADMIN', 'FINANCE'].includes(normalized);
+  if (!manager && !isOwner) return 'FORBIDDEN';
+  if (approve === true && !manager) return 'MANAGER_APPROVAL_REQUIRED';
+  return approve === true ? 'RESOLVED' : 'ESCALATED';
+}
+
 async function financeProblemResolve(request,env) {
   const a=await financeAuth(request,env); if(a.response)return a.response;
   const {auth}=a,b=await readJson(request)||{},id=clean(b.case_id);
@@ -3422,13 +3430,15 @@ async function financeProblemResolve(request,env) {
   if(!row)return json({ok:false,error:'CASE_NOT_FOUND',version:VERSION},404);
   const role=String(auth.user.role||'').toUpperCase();
   const owner=String(row.user_id)===String(auth.user.id);
-  const manager=['GERANTE','ADMIN','FINANCE'].includes(role);
-  if(!owner&&!manager)return json({ok:false,error:'FORBIDDEN',version:VERSION},403);
-  const approved=Boolean(b.approve);
-  const resolution=clean(b.resolution)||row.proposed_solution||'Résolution contrôlée par le Copilote.';
-  const status=approved?'RESOLVED':'ESCALATED';
-  await env.DB.prepare(`UPDATE finance_resolution_cases SET status=?,resolution=?,resolved_at=CURRENT_TIMESTAMP WHERE id=?`).bind(status,resolution,id).run();
-  await journal(env,auth.user.role,auth.user.id,'FINANCE_PROBLEM_RESOLVE','finance_resolution_cases',id,status,{approved});
+  const decision=financeResolutionDecision(role,owner,b.approve===true);
+  if(decision==='FORBIDDEN')return json({ok:false,error:'FORBIDDEN',version:VERSION},403);
+  if(decision==='MANAGER_APPROVAL_REQUIRED')return json({ok:false,error:'MANAGER_APPROVAL_REQUIRED',version:VERSION},403);
+  const status=decision;
+  const resolution=clean(b.resolution)||row.proposed_solution||'Résolution examinée ; action transmise pour contrôle.';
+  const update=await env.DB.prepare(`UPDATE finance_resolution_cases SET status=?,resolution=?,resolved_at=CASE WHEN ?='RESOLVED' THEN CURRENT_TIMESTAMP ELSE NULL END WHERE id=? AND status IN ('OPEN','AUTO_RESOLUTION_PROPOSED','ESCALATED')`)
+    .bind(status,resolution,status,id).run();
+  if(Number(update.meta?.changes||0)!==1)return json({ok:false,error:'CASE_STATE_CONFLICT',version:VERSION},409);
+  await journal(env,auth.user.role,auth.user.id,'FINANCE_PROBLEM_RESOLVE','finance_resolution_cases',id,status,{approved:b.approve===true,managerApproval:status==='RESOLVED'});
   return json({ok:true,version:VERSION,case_id:id,status,resolution});
 }
 
