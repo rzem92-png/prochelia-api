@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   supraApprovalDigestInput,
   supraApprovalProofMatches,
+  supraOutboxActionProofMatches,
   supraCaseCreationPolicy,
   outboxActionDisposition,
   outboxInterruptedApprovalDisposition,
@@ -67,6 +68,9 @@ test("outbox proof requires the exact consumed approval, case and digest", () =>
   assert.equal(supraApprovalProofMatches(approval, { ...payload, approver_user_id: "attacker" }, "case-1"), false);
   assert.equal(supraApprovalProofMatches({ ...approval, approver_role: "CLIENT" }, payload, "case-1"), false);
   assert.equal(supraApprovalProofMatches(null, payload, "case-1"), false);
+  assert.equal(supraOutboxActionProofMatches(approval, { ...payload, approved_outbox_action_type: "SEARCH_REPLACEMENT" }, "case-1", "SEARCH_REPLACEMENT"), true);
+  assert.equal(supraOutboxActionProofMatches(approval, { ...payload, approved_outbox_action_type: "NOTIFY_CLIENT" }, "case-1", "SEARCH_REPLACEMENT"), false);
+  assert.equal(supraOutboxActionProofMatches(approval, payload, "case-1", "SEARCH_REPLACEMENT"), false);
 });
 
 test("outbox never treats an action without an executor as completed", () => {
