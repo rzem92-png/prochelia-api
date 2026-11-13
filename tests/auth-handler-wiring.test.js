@@ -4,6 +4,30 @@ import { readFile } from "node:fs/promises";
 
 const source = await readFile(new URL("../src/index.js", import.meta.url), "utf8");
 
+test("mutations without Origin are denied except exact bootstrap and signed-webhook entry points", () => {
+  const policy = source.slice(source.indexOf("function isMutatingMethod"), source.indexOf("async function ensureCommercialRecruitmentSchema"));
+  assert.match(policy, /function originlessMutationAllowed/);
+  assert.match(policy, /url\.pathname==='\/api\/auth\/bootstrap'/);
+  assert.match(policy, /url\.pathname==='\/api\/payments\/webhook'/);
+  assert.match(policy, /return !isMutatingMethod\(request\.method\) \|\| originlessMutationAllowed\(request,env\)/);
+  assert.match(policy, /if\(!configured\) return false/);
+  assert.doesNotMatch(policy, /const defaults=/);
+});
+
+test("browser sessions remain HttpOnly cookie-only and are not returned in login JSON", () => {
+  assert.match(source, /return getCookie\(request,SESSION_COOKIE\)/);
+  assert.doesNotMatch(source, /authorization\.match\(\/\^Bearer\\s\+/);
+  assert.match(source, /HttpOnly; Secure; SameSite=Lax/);
+  const handler = source.slice(source.indexOf("async function login"), source.indexOf("async function logout"));
+  assert.doesNotMatch(handler, /user: safeUser\(user\), token/);
+});
+
+test("manual payment finalization cannot mark a transaction paid or refunded without a signed PSP event", () => {
+  const handler = source.slice(source.indexOf("async function finalizeMissionPayment"), source.indexOf("async function payoutRequest"));
+  assert.match(handler, /PSP_CONFIRMED_OUTCOME_REQUIRED/);
+  assert.match(handler, /!\[\x27failed\x27,\x27held\x27\]\.includes\(outcome\)/);
+});
+
 test("all support/system authorization helpers reference the real session resolver", () => {
   assert.equal(/\bgetAuth\s*\(/.test(source), false, "undefined getAuth() calls must not remain");
   assert.match(source, /async function supportAuth\(request,env\)[\s\S]*?getSessionUser\(request,env\)/);
