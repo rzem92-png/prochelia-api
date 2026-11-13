@@ -2554,20 +2554,15 @@ async function executeQueuedAction(env, action) {
     } else if (action.action_type === 'PAYOUT') {
       result={performed:false,requires_provider:true,reason:'PSP_EXECUTION_REQUIRED',payload};
     } else if (action.action_type === 'ACCOUNTING_ENTRY') {
-      if (await tableExists(env,'accounting_ledger')) {
-        const cols=await tableColumns(env,'accounting_ledger');
-        const values={id:crypto.randomUUID(),entry_type:payload.entry_type||'OPERATIONAL',amount_cents:Number(payload.amount_cents||0),
-          debit_cents:Number(payload.debit_cents||0),credit_cents:Number(payload.credit_cents||0),reference_type:action.entity_type,
-          reference_id:action.entity_id,description:payload.description||'',metadata_json:JSON.stringify(payload)};
-        const usable=Object.entries(values).filter(([k])=>cols.includes(k));
-        if(usable.length){
-          await env.DB.prepare(`INSERT INTO accounting_ledger(${usable.map(x=>x[0]).join(',')}) VALUES(${usable.map(()=>'?').join(',')})`).bind(...usable.map(x=>x[1])).run();
-          result={performed:true,accounting_recorded:true};
-        } else result={performed:false,reason:'ACCOUNTING_SCHEMA_INCOMPATIBLE'};
-      } else result={performed:false,reason:'ACCOUNTING_TABLE_MISSING'};
+      // A single unbalanced line is not a valid accounting journal. Keep the
+      // outbox item pending review until a balanced, idempotent journal writer
+      // with a persisted journal ID and reconciliation checks is implemented.
+      result={performed:false,requires_review:true,reason:'BALANCED_LEDGER_JOURNAL_REQUIRED'};
     } else result={performed:false,reason:'ACTION_TYPE_NOT_IMPLEMENTED'};
 
-    const finalStatus = result.performed ? 'DONE' : (result.requires_provider ? 'WAITING_PROVIDER' : 'FAILED');
+    const finalStatus = result.performed ? 'DONE'
+      : (result.requires_provider ? 'WAITING_PROVIDER'
+      : (result.requires_review ? 'WAITING_REVIEW' : 'FAILED'));
     await env.DB.prepare(`UPDATE action_outbox SET status=?,result_json=?,attempts=attempts+1,updated_at=CURRENT_TIMESTAMP,executed_at=? WHERE id=?`)
       .bind(finalStatus,JSON.stringify(result),result.performed?now:null,action.id).run();
     return {ok:true,status:finalStatus,result};
