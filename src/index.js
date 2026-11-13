@@ -2454,12 +2454,52 @@ async function loyaltyUpdate(request, env) {
 }
 
 async function qualityCreate(request, env) {
-  const gate=await requireAuthRole(request,env,['gerante','client','entreprise']); if(gate.error)return gate.error;
-  await ensureOperationalSchema(env); const b=await readJson(request)||{};
-  if(!b.mission_id)return json({ok:false,error:'MISSION_ID_REQUIRED',version:VERSION},400);
+  // Client-submitted IDs are untrusted. Resolve every relationship from the
+  // persisted mission and enforce object-level ownership before writing.
+  const gate=await requireAuthRole(request,env,['gerante','client']);
+  if(gate.error)return gate.error;
+  await ensureOperationalSchema(env);
+  const b=await readJson(request)||{};
+  const missionId=clean(b.mission_id);
+  if(!missionId)return json({ok:false,error:'MISSION_ID_REQUIRED',version:VERSION},400);
+
+  const mission=await env.DB.prepare(`
+    SELECT m.id AS mission_id,c.id AS client_id,c.user_id AS client_user_id,
+           m.intervenant_id
+      FROM missions m
+      JOIN clients c ON c.id=m.client_id
+     WHERE m.id=?
+     LIMIT 1
+  `).bind(missionId).first();
+  if(!mission)return json({ok:false,error:'MISSION_NOT_FOUND',version:VERSION},404);
+  if(gate.auth.user.role==='client' && mission.client_user_id!==gate.auth.user.id) {
+    return json({ok:false,error:'MISSION_NOT_FOUND',version:VERSION},404);
+  }
+
+  const rating=b.rating==null?null:Number(b.rating);
+  if(rating!==null && (!Number.isFinite(rating)||rating<1||rating>5)) {
+    return json({ok:false,error:'INVALID_RATING',version:VERSION},400);
+  }
+  const category=typeof b.category==='string'?b.category.trim():'GENERAL';
+  const comment=typeof b.comment==='string'?b.comment.trim():'';
+  if(!category || category.length>80 || comment.length>2000) {
+    return json({ok:false,error:'INVALID_QUALITY_EVENT',version:VERSION},400);
+  }
+  const allowedSeverities=new Set(['LOW','MEDIUM','HIGH','CRITICAL']);
+  const requestedSeverity=String(b.severity||'LOW').toUpperCase();
+  if(gate.auth.user.role==='gerante' && !allowedSeverities.has(requestedSeverity)) {
+    return json({ok:false,error:'INVALID_SEVERITY',version:VERSION},400);
+  }
+  // A client cannot set internal severity or forge client/company/provider links.
+  const severity=gate.auth.user.role==='gerante'?requestedSeverity:'LOW';
   const id=crypto.randomUUID();
-  await env.DB.prepare(`INSERT INTO quality_events(id,mission_id,client_id,company_id,intervenant_id,rating,category,comment,severity,metadata_json) VALUES(?,?,?,?,?,?,?,?,?,?)`)
-    .bind(id,b.mission_id,b.client_id||null,b.company_id||null,b.intervenant_id||null,b.rating==null?null:Number(b.rating),b.category||'GENERAL',b.comment||'',b.severity||'LOW',JSON.stringify(b)).run();
+  await env.DB.prepare(`INSERT INTO quality_events
+    (id,mission_id,client_id,company_id,intervenant_id,rating,category,comment,severity,metadata_json)
+    VALUES(?,?,?,?,?,?,?,?,?,?)`)
+    .bind(id,mission.mission_id,mission.client_id,null,mission.intervenant_id,
+      rating,category,comment,severity,
+      JSON.stringify({actor_id:gate.auth.user.id,actor_role:gate.auth.user.role,source:'api'}))
+    .run();
   return json({ok:true,version:VERSION,id});
 }
 
