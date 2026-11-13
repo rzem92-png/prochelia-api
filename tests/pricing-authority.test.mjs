@@ -76,6 +76,12 @@ test("invalid monetary amounts and extreme distances are rejected", () => {
   assert.equal(resolvePricingAuthority({
     role: "client", body: { base_price_cents: 8000, distance_km: 501 }, policy, projectPhase: "TEST", settings
   }).error, "QUOTE_INPUT_OUT_OF_RANGE");
+  assert.equal(resolvePricingAuthority({
+    role: "client", body: { base_price_cents: 8000, duration_minutes: 1.5 }, policy, projectPhase: "TEST", settings
+  }).error, "QUOTE_INPUT_OUT_OF_RANGE");
+  assert.equal(resolvePricingAuthority({
+    role: "client", body: { base_price_cents: 8000, distance_km: "not-a-number" }, policy, projectPhase: "TEST", settings
+  }).error, "QUOTE_INPUT_OUT_OF_RANGE");
 });
 
 test("manager may deliberately override a draft quote while phase remains server controlled", () => {
