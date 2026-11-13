@@ -1545,6 +1545,11 @@ async function processActionOutbox(request, env) {
   return json({ok:true,version:VERSION,processed},200);
 }
 
+export function operationalActionsPending(businessResults) {
+  return Array.isArray(businessResults) &&
+    businessResults.some(item => ['PENDING','WAITING_PROVIDER'].includes(String(item?.status || '').toUpperCase()));
+}
+
 async function executeOperationalCase(env, caseId, approverId=null, automatic=false) {
   const c=await env.DB.prepare('SELECT * FROM operational_cases WHERE id=? LIMIT 1').bind(caseId).first();
   if(!c)return {ok:false,error:'CASE_NOT_FOUND'};
@@ -1552,7 +1557,7 @@ async function executeOperationalCase(env, caseId, approverId=null, automatic=fa
   const rec=c.proposed_solution_json?JSON.parse(c.proposed_solution_json):{};
   if(c.requires_manager && !automatic && !approverId) return {ok:false,error:'MANAGER_APPROVAL_REQUIRED'};
   const businessResults = await executeCaseBusinessAction(env,c,rec,approverId,automatic);
-  const pendingActions = businessResults.some(item => ['PENDING','WAITING_PROVIDER'].includes(String(item.status||'').toUpperCase()));
+  const pendingActions = operationalActionsPending(businessResults);
   const resolution={executed:!pendingActions,pending:pendingActions,automatic,action:rec.action||'RESOLVE',steps:rec.solution?.steps||[],business_results:businessResults,executed_at:new Date().toISOString()};
   await env.DB.prepare(`INSERT INTO case_actions(id,case_id,action_code,mode,status,payload_json,result_json,completed_at) VALUES(?,?,?,?,?,?,?,?)`)
     .bind(crypto.randomUUID(),caseId,rec.action||'RESOLVE',automatic?'AUTO':'MANAGER',pendingActions?'PENDING':'COMPLETED',JSON.stringify(rec),JSON.stringify(resolution),pendingActions?null:new Date().toISOString()).run();
