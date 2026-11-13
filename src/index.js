@@ -3645,13 +3645,19 @@ async function productionRateLimit(request,env){
   const now=Math.floor(Date.now()/1000);
   const start=new Date(Math.floor(now/windowSeconds)*windowSeconds*1000).toISOString();
   await ensureFinalHardeningSchema(env);
-  const existing=await env.DB.prepare(`SELECT request_count FROM security_rate_limits WHERE bucket=? AND subject_hash=? AND window_start=? LIMIT 1`).bind(bucket,subject,start).first();
-  const count=Number(existing?.request_count||0)+1;
-  if(existing){
-    await env.DB.prepare(`UPDATE security_rate_limits SET request_count=? WHERE bucket=? AND subject_hash=? AND window_start=?`).bind(count,bucket,subject,start).run();
-  }else{
-    await env.DB.prepare(`INSERT INTO security_rate_limits(id,bucket,subject_hash,window_start,request_count) VALUES(?,?,?,?,1)`).bind(crypto.randomUUID(),bucket,subject,start).run();
-  }
+  // Atomic increment: concurrent requests for the same IP/route/window
+  // must not read the same old count and overwrite one another.
+  // The UNIQUE(bucket, subject_hash, window_start) constraint serializes
+  // competing increments in SQLite/D1.
+  const counter=await env.DB.prepare(`
+    INSERT INTO security_rate_limits(id,bucket,subject_hash,window_start,request_count)
+    VALUES(?,?,?,?,1)
+    ON CONFLICT(bucket,subject_hash,window_start)
+    DO UPDATE SET request_count=security_rate_limits.request_count+1
+    RETURNING request_count
+  `).bind(crypto.randomUUID(),bucket,subject,start).first();
+  const count=Number(counter?.request_count);
+  if(!Number.isSafeInteger(count) || count < 1) throw new Error('RATE_LIMIT_COUNTER_INVALID');
   if(count>limit){
     await productionSafetySchema(env);
     await env.DB.prepare(`INSERT INTO production_security_events(id,event_type,route,subject_hash,decision,details_json) VALUES(?,?,?,?,?,?)`)
