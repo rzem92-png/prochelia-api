@@ -58,6 +58,7 @@ function makeEnv({ sessionId = "session-test-1", sessionRow = USER_ROW } = {}) {
   const row = sessionRow ? { ...sessionRow, session_id: sessionId } : null;
   const env = {
     CORS_ORIGIN: TEST_ORIGIN,
+    TEST_MODE: true,
     DB: {
       prepare(sql) {
         const statement = {
