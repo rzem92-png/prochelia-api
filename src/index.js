@@ -143,6 +143,11 @@ function getCookie(request, name) {
   return null;
 }
 
+function getSessionToken(request) {
+  // Browser sessions are cookie-only: never expose session secrets to page JavaScript.
+  return getCookie(request, SESSION_COOKIE);
+}
+
 function sessionCookie(token, maxAge = SESSION_TTL_SECONDS) {
   return `${SESSION_COOKIE}=${encodeURIComponent(token)}; Max-Age=${maxAge}; Path=/; HttpOnly; Secure; SameSite=Lax`;
 }
@@ -160,7 +165,7 @@ async function createSession(env, userId) {
 
 async function getSessionUser(request, env) {
   if (!env.DB) return null;
-  const token = getCookie(request, SESSION_COOKIE);
+  const token = getSessionToken(request);
   if (!token) return null;
   const tokenHash = await sha256Base64url(token);
   const row = await env.DB.prepare(
@@ -175,6 +180,32 @@ async function getSessionUser(request, env) {
   if (!row) return null;
   if (row.status !== 'active') return null;
   return { user: safeUser(row), session_id: row.session_id, token_hash: tokenHash };
+}
+
+async function csrfTokenForSession(auth) {
+  const key=await crypto.subtle.importKey(
+    'raw',
+    new TextEncoder().encode(auth.token_hash),
+    {name:'HMAC',hash:'SHA-256'},
+    false,
+    ['sign']
+  );
+  const message=new TextEncoder().encode(`PROCHELIA-CSRF-v1:${auth.session_id}`);
+  const signature=await crypto.subtle.sign('HMAC',key,message);
+  return base64url(new Uint8Array(signature));
+}
+
+function constantTimeStringEqual(left,right) {
+  if(typeof left!=='string'||typeof right!=='string'||left.length!==right.length) return false;
+  let diff=0;
+  for(let i=0;i<left.length;i++) diff|=left.charCodeAt(i)^right.charCodeAt(i);
+  return diff===0;
+}
+
+async function authCsrf(request,env) {
+  const auth=await getSessionUser(request,env);
+  if(!auth) return json({ok:false,error:'UNAUTHENTICATED',version:VERSION},401);
+  return json({ok:true,csrf_token:await csrfTokenForSession(auth),version:VERSION},200,{'cache-control':'no-store','pragma':'no-cache'});
 }
 
 function requireRole(auth, roles) {
@@ -324,7 +355,7 @@ async function login(request, env) {
 
 async function logout(request, env) {
   if (!env.DB) return json({ ok: false, database: false, version: VERSION }, 503);
-  const token = getCookie(request, SESSION_COOKIE);
+  const token = getSessionToken(request);
   const headers = { 'set-cookie': sessionCookie('', 0) };
   if (token) {
     const tokenHash = await sha256Base64url(token);
@@ -1265,6 +1296,11 @@ async function handleBase(request, env) {
   if (url.pathname === '/api/missions') {
     if (request.method !== 'POST') return json({ ok: false, error: 'METHOD_NOT_ALLOWED', version: VERSION }, 405);
     return postMissions(request, env);
+  }
+
+  if (url.pathname === '/api/auth/csrf') {
+    if (request.method !== 'GET') return json({ ok: false, error: 'METHOD_NOT_ALLOWED', version: VERSION }, 405);
+    return authCsrf(request, env);
   }
 
   if (url.pathname === '/api/auth/status') {
@@ -2665,18 +2701,26 @@ async function processBackgroundJobs(request,env) {
 }
 
 function isMutatingMethod(method){ return ['POST','PUT','PATCH','DELETE'].includes(method); }
+function originlessMutationAllowed(request,env){
+  if(request.method!=='POST' || request.headers.get('origin')) return false;
+  const url=new URL(request.url);
+  // The one-time bootstrap is protected again by its exact bearer secret in
+  // the handler. PSP webhooks are admitted here only to reach mandatory HMAC
+  // verification in paymentWebhook; a header alone never authenticates them.
+  if(url.pathname==='/api/auth/bootstrap' && env?.BOOTSTRAP_TOKEN){
+    return request.headers.get('authorization')===`Bearer ${env.BOOTSTRAP_TOKEN}`;
+  }
+  if(url.pathname==='/api/payments/webhook'){
+    return Boolean(request.headers.get('x-prochelia-signature') || request.headers.get('x-webhook-signature'));
+  }
+  return false;
+}
 function securityOriginAllowed(request,env){
   const origin=request.headers.get('origin');
-  // Les clients non-navigateur peuvent ne pas envoyer Origin. Les requêtes navigateur
-  // avec Origin doivent correspondre à une origine explicitement autorisée.
-  if(!origin) return true;
+  if(!origin) return !isMutatingMethod(request.method) || originlessMutationAllowed(request,env);
   const configured=clean(env?.CORS_ORIGIN);
-  const defaults=[
-    'https://prochelia.pages.dev',
-    'https://56b01f85.prochelia.pages.dev'
-  ];
-  const allowed=(configured ? configured.split(',') : defaults)
-    .map(x=>String(x).trim()).filter(Boolean);
+  if(!configured) return false;
+  const allowed=configured.split(',').map(x=>String(x).trim()).filter(Boolean);
   return allowed.includes(origin);
 }
 
@@ -3144,6 +3188,16 @@ async function handle(request,env){
   try {
     if(isMutatingMethod(request.method) && !securityOriginAllowed(request,env)) return json({ok:false,error:'ORIGIN_NOT_ALLOWED',version:VERSION},403);
     const url=new URL(request.url);
+    const csrfExemptPaths = new Set(['/api/auth/login', '/api/auth/bootstrap', '/api/payments/webhook']);
+    if (isMutatingMethod(request.method) && !csrfExemptPaths.has(url.pathname) && getSessionToken(request)) {
+      const auth = await getSessionUser(request, env);
+      if (!auth) return json({ ok: false, error: 'UNAUTHENTICATED', version: VERSION }, 401);
+      const supplied = request.headers.get('x-csrf-token') || '';
+      const expected = await csrfTokenForSession(auth);
+      if (!constantTimeStringEqual(supplied, expected)) {
+        return json({ ok: false, error: 'CSRF_TOKEN_INVALID', version: VERSION }, 403);
+      }
+    }
     // Fail closed before any schema helper touches D1: unauthenticated callers
     // must not use mission validation as an existence oracle for private IDs.
     if (url.pathname === '/api/missions/validate') {
