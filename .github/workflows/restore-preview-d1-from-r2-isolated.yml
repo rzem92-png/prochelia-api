@@ -43,7 +43,7 @@ jobs:
           BACKUP_ENCRYPTION_KEY: ${{ secrets.BACKUP_ENCRYPTION_KEY }}
         run: |
           set -euo pipefail
-          [[ "$GITHUB_REF" == "refs/heads/feat/r2-to-isolated-d1-restore-2026-11" ]]
+          [[ "$GITHUB_REF" == "refs/heads/main" ]]
           for name in CLOUDFLARE_API_TOKEN BACKUP_ENCRYPTION_KEY AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY; do
             [[ -n "${!name:-}" ]] || { echo "::error::Secret requis absent: $name"; exit 1; }
           done
