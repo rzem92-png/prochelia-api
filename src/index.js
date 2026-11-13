@@ -1748,6 +1748,7 @@ export function supraApprovalProofMatches(approval, payload, caseId) {
     approval.approver_user_id === payload.approver_user_id &&
     approval.approver_role === 'GERANTE' &&
     payload.approver_role === 'GERANTE');
+}
 
 export function operationalActionsPending(businessResults) {
   // Fail closed: an absent/empty result set is not proof of completion.
