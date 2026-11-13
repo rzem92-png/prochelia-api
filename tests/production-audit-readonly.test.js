@@ -18,11 +18,19 @@ test("productionConfigCheck is non-mutating unless persist=true is explicitly re
 
 test("GET production audit handlers do not journal or insert check records", () => {
   const start = source.indexOf("async function finalProductionAudit");
-  const end = source.indexOf("const __procheliaProductionSafetyHandle", start);
+  const end = source.indexOf("\\nasync function copilotNextActions", start);
   assert.notEqual(start, -1);
   assert.notEqual(end, -1);
   const body = source.slice(start, end);
-  assert.doesNotMatch(body, /await journal\(/);
+  assert.doesNotMatch(body, /await journal\\(/);
   assert.doesNotMatch(body, /INSERT INTO system_config_checks/);
-  assert.match(body, /GET production-check is read-only/);
+  assert.match(body, /GET audit endpoint is intentionally read-only/);
+
+  const strictStart = source.indexOf("async function strictProductionAudit");
+  const strictEnd = source.indexOf("\\nasync function ", strictStart + 1);
+  assert.notEqual(strictStart, -1);
+  assert.notEqual(strictEnd, -1);
+  const strictBody = source.slice(strictStart, strictEnd);
+  assert.doesNotMatch(strictBody, /await journal\\(/);
+  assert.doesNotMatch(strictBody, /INSERT INTO system_config_checks/);
 });
