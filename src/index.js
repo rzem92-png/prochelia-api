@@ -1436,7 +1436,7 @@ async function copilotRecommend(env, input) {
   return { action, mode: solution.automatic ? 'AUTO' : 'MANAGER_APPROVAL', confidence: simple ? 0.95 : 0.82, solution, context, phase };
 }
 
-function operationalCaseOwnershipAllowed(role, userId, mission) {
+export function operationalCaseOwnershipAllowed(role, userId, mission) {
   if (role === 'gerante') return true;
   if (!mission || !userId) return false;
   if (role === 'client') return mission.client_user_id === userId;
