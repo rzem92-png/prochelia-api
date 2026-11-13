@@ -3629,7 +3629,7 @@ async function productionSubjectHash(request, route){
 }
 
 async function productionRateLimit(request,env){
-  if(env?.TEST_MODE === true || !isMutatingMethod(request.method)) return {ok:true};
+  if(!isMutatingMethod(request.method)) return {ok:true};
   const path=new URL(request.url).pathname;
   const sensitive =
     path.startsWith('/api/auth/') ||
