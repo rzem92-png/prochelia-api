@@ -26,6 +26,8 @@ test("approval digest binds the case, case type, mission and exact proposal", ()
   assert.ok(digestInput);
   assert.notEqual(digestInput, supraApprovalDigestInput({ ...base, id: "case-2" }));
   assert.notEqual(digestInput, supraApprovalDigestInput({ ...base, mission_id: "mission-2" }));
+  assert.notEqual(digestInput, supraApprovalDigestInput({ ...base, context_json: '{"refund_cents":100}' }));
+  assert.notEqual(digestInput, supraApprovalDigestInput({ ...base, client_id: "another-client" }));
   assert.notEqual(digestInput, supraApprovalDigestInput({ ...base, proposed_solution_json: '{"action":"REFUND_REQUEST"}' }));
   assert.equal(supraApprovalDigestInput({ ...base, proposed_solution_json: "" }), null);
 });
