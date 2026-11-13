@@ -3880,6 +3880,14 @@ async function supportList(request,env){
   return json({ok:true,version:VERSION,role:a.role,cases:r.results||[]});
 }
 
+export function supportManualResolutionAllowed(role, resolution, evidence) {
+  const normalizedRole = String(role || '').trim().toUpperCase();
+  const manager = normalizedRole === 'GERANTE' || normalizedRole === 'ADMIN';
+  const reason = String(resolution || '').trim();
+  const proof = String(evidence || '').trim();
+  return Boolean(manager && reason.length >= 10 && proof.length >= 20);
+}
+
 async function supportResolve(request,env){
   const a=await supportAuth(request,env); if(a.response)return a.response;
   if(a.role!=='GERANTE'&&a.role!=='ADMIN') return json({ok:false,error:'MANAGER_APPROVAL_REQUIRED',version:VERSION},403);
@@ -3888,11 +3896,18 @@ async function supportResolve(request,env){
   if(!id)return json({ok:false,error:'CASE_ID_REQUIRED',version:VERSION},400);
   const row=await env.DB.prepare(`SELECT * FROM support_cases WHERE id=? LIMIT 1`).bind(id).first();
   if(!row)return json({ok:false,error:'CASE_NOT_FOUND',version:VERSION},404);
-  const resolution=clean(b.resolution)||'Résolution validée par la Gérante après contrôle du dossier.';
-  await env.DB.prepare(`UPDATE support_cases SET status='RESOLVED',resolution=?,resolved_at=CURRENT_TIMESTAMP,requires_manager=0 WHERE id=?`).bind(resolution,id).run();
-  await supportEvent(env,id,a.role,a.auth.user.id,'MANAGER_RESOLVED',{resolution});
-  await journal(env,a.role,a.auth.user.id,'SUPPORT_CASE_MANAGER_RESOLVE','support_cases',id,'RESOLVED',{resolution});
-  return json({ok:true,version:VERSION,case_id:id,status:'RESOLVED',resolution});
+  const resolution=clean(b.resolution);
+  const evidence=clean(b.resolution_evidence);
+  if(!supportManualResolutionAllowed(a.role,resolution,evidence)) {
+    return json({ok:false,error:'MANUAL_RESOLUTION_EVIDENCE_REQUIRED',version:VERSION},400);
+  }
+  const record={type:'MANUALLY_VERIFIED_BY_MANAGER',resolution,evidence,verified_by:a.auth.user.id,verified_at:new Date().toISOString()};
+  const update=await env.DB.prepare(`UPDATE support_cases SET status='RESOLVED',resolution=?,resolved_at=CURRENT_TIMESTAMP,requires_manager=0 WHERE id=? AND status NOT IN ('RESOLVED','CLOSED')`)
+    .bind(JSON.stringify(record),id).run();
+  if(Number(update.meta?.changes||0)!==1) return json({ok:false,error:'CASE_STATE_CONFLICT',version:VERSION},409);
+  await supportEvent(env,id,a.role,a.auth.user.id,'MANAGER_MANUALLY_VERIFIED_RESOLUTION',record);
+  await journal(env,a.role,a.auth.user.id,'SUPPORT_CASE_MANAGER_RESOLVE','support_cases',id,'RESOLVED',{resolution,evidenceProvided:true,verificationType:record.type});
+  return json({ok:true,version:VERSION,case_id:id,status:'RESOLVED',verification_type:record.type});
 }
 
 async function supportDashboard(request,env){
@@ -3940,7 +3955,9 @@ async function productionSafetySchema(env){
 }
 
 async function productionSubjectHash(request, route){
-  const ip=clean(request.headers.get('CF-Connecting-IP')) || clean(request.headers.get('X-Forwarded-For')) || 'unknown';
+  // Trust only Cloudflare's edge-populated client IP header. X-Forwarded-For
+  // can be supplied by a caller and must not be used as an identity boundary.
+  const ip=clean(request.headers.get('CF-Connecting-IP')) || 'unknown';
   return sha256Hex(`${ip}|${route}`);
 }
 
@@ -3962,13 +3979,14 @@ async function productionRateLimit(request,env){
   const now=Math.floor(Date.now()/1000);
   const start=new Date(Math.floor(now/windowSeconds)*windowSeconds*1000).toISOString();
   await ensureFinalHardeningSchema(env);
-  const existing=await env.DB.prepare(`SELECT request_count FROM security_rate_limits WHERE bucket=? AND subject_hash=? AND window_start=? LIMIT 1`).bind(bucket,subject,start).first();
-  const count=Number(existing?.request_count||0)+1;
-  if(existing){
-    await env.DB.prepare(`UPDATE security_rate_limits SET request_count=? WHERE bucket=? AND subject_hash=? AND window_start=?`).bind(count,bucket,subject,start).run();
-  }else{
-    await env.DB.prepare(`INSERT INTO security_rate_limits(id,bucket,subject_hash,window_start,request_count) VALUES(?,?,?,?,1)`).bind(crypto.randomUUID(),bucket,subject,start).run();
-  }
+  // One atomic UPSERT prevents lost increments under concurrent requests.
+  const counter=await env.DB.prepare(`INSERT INTO security_rate_limits(id,bucket,subject_hash,window_start,request_count)
+    VALUES(?,?,?,?,1)
+    ON CONFLICT(bucket,subject_hash,window_start)
+    DO UPDATE SET request_count=security_rate_limits.request_count+1
+    RETURNING request_count`).bind(crypto.randomUUID(),bucket,subject,start).first();
+  const count=Number(counter?.request_count||0);
+  if(!Number.isSafeInteger(count) || count<1) throw new Error('RATE_LIMIT_COUNTER_UNAVAILABLE');
   if(count>limit){
     await productionSafetySchema(env);
     await env.DB.prepare(`INSERT INTO production_security_events(id,event_type,route,subject_hash,decision,details_json) VALUES(?,?,?,?,?,?)`)
