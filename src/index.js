@@ -1659,13 +1659,23 @@ async function processActionOutbox(request, env) {
     const payload=row.payload_json?JSON.parse(row.payload_json):{};
     if(row.case_id) {
       const approval=payload.approval_id
-        ? await env.DB.prepare('SELECT id,case_id,action_digest,status FROM supra_action_approvals WHERE id=? LIMIT 1').bind(payload.approval_id).first()
+        ? await env.DB.prepare(`SELECT id,case_id,action_digest,status,
+            CASE WHEN expires_at>CURRENT_TIMESTAMP THEN 1 ELSE 0 END AS approval_unexpired
+            FROM supra_action_approvals WHERE id=? LIMIT 1`).bind(payload.approval_id).first()
         : null;
-      if(approval && approval.status==='EXECUTING' &&
-         approval.case_id===row.case_id && approval.action_digest===payload.action_digest &&
-         approval.id===payload.approval_id) {
+      const matchingExecutingApproval = Boolean(approval &&
+        approval.status==='EXECUTING' && approval.case_id===row.case_id &&
+        approval.action_digest===payload.action_digest && approval.id===payload.approval_id);
+      if(matchingExecutingApproval && Number(approval.approval_unexpired)===1) {
         await env.DB.prepare(`UPDATE action_outbox SET status='PENDING',last_error='WAITING_APPROVAL_COMMIT',updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='PROCESSING'`).bind(row.id).run();
         processed.push({id:row.id,status:'WAITING_APPROVAL_COMMIT',action_type:row.action_type});
+        continue;
+      }
+      if(matchingExecutingApproval && Number(approval.approval_unexpired)!==1) {
+        // A crashed/abandoned approval must never be promoted to CONSUMED by
+        // the outbox worker. Quarantine its actions for an explicit new review.
+        await env.DB.prepare(`UPDATE action_outbox SET status='WAITING_REVIEW',last_error='APPROVAL_EXPIRED_DURING_INTERRUPTED_EXECUTION_REQUIRES_REAPPROVAL',updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='PROCESSING'`).bind(row.id).run();
+        processed.push({id:row.id,status:'WAITING_REVIEW',action_type:row.action_type});
         continue;
       }
       if(!supraApprovalProofMatches(approval,payload,row.case_id)) {
