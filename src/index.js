@@ -1696,6 +1696,7 @@ async function executeOperationalCase(env, caseId, approverId=null, automatic=fa
   if(c.status==='RESOLVED')return {ok:true,already:true};
   const rec=c.proposed_solution_json?JSON.parse(c.proposed_solution_json):{};
   if(c.requires_manager && !automatic) {
+    if(c.status!=='APPROVAL_IN_PROGRESS') return {ok:false,error:'CASE_NOT_CLAIMED_FOR_APPROVAL'};
     if(!approverId || !approvalId) return {ok:false,error:'PERSISTED_MANAGER_APPROVAL_REQUIRED'};
     const approval=await env.DB.prepare(`SELECT * FROM supra_action_approvals WHERE id=? AND case_id=? AND approver_user_id=? AND status='EXECUTING' AND expires_at>CURRENT_TIMESTAMP LIMIT 1`)
       .bind(approvalId,caseId,approverId).first();
