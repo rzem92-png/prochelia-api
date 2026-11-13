@@ -1436,22 +1436,55 @@ async function copilotRecommend(env, input) {
   return { action, mode: solution.automatic ? 'AUTO' : 'MANAGER_APPROVAL', confidence: simple ? 0.95 : 0.82, solution, context, phase };
 }
 
+function operationalCaseOwnershipAllowed(role, userId, mission) {
+  if (role === 'gerante') return true;
+  if (!mission || !userId) return false;
+  if (role === 'client') return mission.client_user_id === userId;
+  if (role === 'intervenant') return mission.intervenant_user_id === userId;
+  // Company ownership is not inferable from the current mission schema.
+  return false;
+}
+
 async function createOperationalCase(request, env) {
   const gate=await requireAuthRole(request,env,['gerante','client','intervenant','entreprise']); if(gate.error)return gate.error;
   const body=await readJson(request)||{};
   const caseType=clean(body.case_type); if(!caseType)return json({ok:false,error:'CASE_TYPE_REQUIRED',version:VERSION},400);
+  const role=gate.auth.user.role;
+  const isManager=role==='gerante';
+  const requestedMissionId=clean(body.mission_id)||null;
+  let mission=null;
+  if (!isManager && requestedMissionId) {
+    mission=await env.DB.prepare(`SELECT m.id,m.client_id,m.intervenant_id,
+      c.user_id AS client_user_id,i.user_id AS intervenant_user_id
+      FROM missions m
+      LEFT JOIN clients c ON c.id=m.client_id
+      LEFT JOIN intervenants i ON i.id=m.intervenant_id
+      WHERE m.id=? LIMIT 1`).bind(requestedMissionId).first();
+    if (!operationalCaseOwnershipAllowed(role,gate.auth.user.id,mission)) {
+      return json({ok:false,error:'MISSION_NOT_FOUND',version:VERSION},404);
+    }
+  } else if (!isManager && role==='entreprise' && requestedMissionId) {
+    return json({ok:false,error:'MISSION_NOT_FOUND',version:VERSION},404);
+  }
+  // Non-manager supplied identifiers and execution context are untrusted.
+  // Only a verified mission relationship may be attached to the case.
+  const clientId=isManager?(clean(body.client_id)||null):(mission?.client_id||null);
+  const companyId=isManager?(clean(body.company_id)||null):null;
+  const intervenantId=isManager?(clean(body.intervenant_id)||null):(mission?.intervenant_id||null);
+  const missionId=isManager?requestedMissionId:(mission?.id||null);
+  const safeContext=isManager && body.context && typeof body.context==='object' && !Array.isArray(body.context) ? body.context : {};
   const phase=String(await getSetting(env,'project_phase','TEST')).toUpperCase();
   const impact=String(body.impact_level||'LOW').toUpperCase();
   const priority=CASE_PRIORITIES[impact]||10;
-  const rec=await copilotRecommend(env,{caseType,impact,phase,context:body.context||{}});
+  const rec=await copilotRecommend(env,{caseType,impact,phase,context:safeContext});
   const id=crypto.randomUUID();
   const requiresManager=rec.mode==='MANAGER_APPROVAL' ? 1 : 0;
   const status=rec.action==='AUTO_RESOLVE' ? 'AUTO_PENDING' : 'OPEN';
   await env.DB.prepare(`INSERT INTO operational_cases(id,case_type,source,phase,priority,status,auto_mode,client_id,company_id,intervenant_id,mission_id,impact_level,description,context_json,proposed_solution_json,requires_manager) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
-    .bind(id,caseType,'API',phase,priority,status,rec.mode,clean(body.client_id)||null,clean(body.company_id)||null,clean(body.intervenant_id)||null,clean(body.mission_id)||null,impact,clean(body.description)||null,JSON.stringify(body.context||{}),JSON.stringify(rec),requiresManager).run();
+    .bind(id,caseType,'API',phase,priority,status,rec.mode,clientId,companyId,intervenantId,missionId,impact,clean(body.description)||null,JSON.stringify(safeContext),JSON.stringify(rec),requiresManager).run();
   await env.DB.prepare(`INSERT INTO copilot_log(id,case_id,action_type,recommendation,confidence,mode) VALUES(?,?,?,?,?,?)`)
     .bind(crypto.randomUUID(),id,rec.action,JSON.stringify(rec.solution),rec.confidence,rec.mode).run();
-  await journal(env,'copilot',null,'CASE_CREATED','operational_case',id,'OK',{caseType,impact});
+  await journal(env,'copilot',null,'CASE_CREATED','operational_case',id,'OK',{caseType,impact,actorRole:role,missionLinked:!!missionId});
   let autoResult=null;
   if(rec.action==='AUTO_RESOLVE') autoResult=await executeOperationalCase(env,id,null,true);
   const responseStatus=rec.action==='AUTO_RESOLVE'
@@ -1459,7 +1492,6 @@ async function createOperationalCase(request, env) {
     : 'WAITING_MANAGER';
   return json({ok:true,version:VERSION,case_id:id,recommendation:rec,status:responseStatus},201);
 }
-
 
 async function getTableColumns(env, table) {
   if (!env.DB) return [];
