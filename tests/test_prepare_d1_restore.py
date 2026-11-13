@@ -102,7 +102,6 @@ class PrepareD1RestoreTests(unittest.TestCase):
             self.assertIn("foreign-key violation", result.stderr)
             self.assertFalse(output.exists())
 
-
     def test_d1_migrations_autoincrement_is_preserved_without_sqlite_sequence(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
@@ -131,7 +130,7 @@ class PrepareD1RestoreTests(unittest.TestCase):
                 text=True,
             )
             sql = output.read_text(encoding="utf-8")
-            self.assertRegex(sql, r'(?im)^CREATE TABLE d1_migrations\s*\('
+            self.assertRegex(sql, r'(?im)^CREATE TABLE d1_migrations\s*\(')
             self.assertIn('INTEGER PRIMARY KEY AUTOINCREMENT', sql)
             self.assertIn('INSERT INTO "d1_migrations" ("id", "name", "applied_at") VALUES (7,', sql)
 
@@ -144,7 +143,6 @@ class PrepareD1RestoreTests(unittest.TestCase):
             self.assertEqual(restored.execute("PRAGMA integrity_check").fetchone()[0], "ok")
             self.assertEqual(restored.execute("SELECT seq FROM sqlite_sequence WHERE name='d1_migrations'").fetchone()[0], 7)
             restored.close()
-
 
 
 if __name__ == "__main__":
