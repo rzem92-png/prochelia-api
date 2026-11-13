@@ -1561,14 +1561,30 @@ async function getTableColumns(env, table) {
   return (r.results || []).map(x => String(x.name));
 }
 
+export function outboxIdempotencyMatches(existing, caseId, actionType, payloadJson) {
+  return Boolean(existing &&
+    existing.case_id === caseId &&
+    existing.action_type === actionType &&
+    existing.payload_json === payloadJson);
+}
+
 async function enqueueAction(env, caseId, actionType, payload, idempotencyKey) {
   const key = clean(idempotencyKey) || `${caseId}:${actionType}`;
-  const existing = await env.DB.prepare('SELECT * FROM action_outbox WHERE idempotency_key=? LIMIT 1').bind(key).first();
-  if (existing) return { created:false, id:existing.id, status:existing.status };
+  const payloadJson = JSON.stringify(payload || {});
   const id = crypto.randomUUID();
-  await env.DB.prepare(`INSERT INTO action_outbox(id,case_id,action_type,idempotency_key,payload_json,status,attempts) VALUES(?,?,?,?,?,'PENDING',0)`)
-    .bind(id,caseId,actionType,key,JSON.stringify(payload||{})).run();
-  return { created:true, id, status:'PENDING' };
+  const inserted = await env.DB.prepare(`INSERT INTO action_outbox
+    (id,case_id,action_type,idempotency_key,payload_json,status,attempts)
+    VALUES(?,?,?,?,?,'PENDING',0)
+    ON CONFLICT(idempotency_key) DO NOTHING`)
+    .bind(id,caseId,actionType,key,payloadJson).run();
+  if (Number(inserted?.meta?.changes || 0) === 1) {
+    return { created:true, id, status:'PENDING' };
+  }
+  const existing = await env.DB.prepare('SELECT * FROM action_outbox WHERE idempotency_key=? LIMIT 1').bind(key).first();
+  if (!outboxIdempotencyMatches(existing,caseId,actionType,payloadJson)) {
+    throw new Error('OUTBOX_IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_PAYLOAD');
+  }
+  return { created:false, id:existing.id, status:existing.status };
 }
 
 async function executeCaseBusinessAction(env, c, rec, actorId=null, automatic=false, approvalProof=null) {
