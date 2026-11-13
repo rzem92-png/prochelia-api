@@ -3,7 +3,8 @@ import assert from "node:assert/strict";
 import {
   supraApprovalDigestInput,
   supraApprovalProofMatches,
-  supraCaseCreationPolicy
+  supraCaseCreationPolicy,
+  outboxActionDisposition
 } from "../src/index.js";
 
 test("SUPRA case creation is proposal-only and always requires manager approval", () => {
@@ -46,4 +47,13 @@ test("outbox proof requires the exact consumed approval, case and digest", () =>
   assert.equal(supraApprovalProofMatches(approval, payload, "case-2"), false);
   assert.equal(supraApprovalProofMatches(approval, { ...payload, approval_id: "other" }, "case-1"), false);
   assert.equal(supraApprovalProofMatches(null, payload, "case-1"), false);
+});
+
+test("outbox never treats an action without an executor as completed", () => {
+  assert.equal(outboxActionDisposition("PSP_REFUND_REVIEW"), "WAITING_PROVIDER");
+  assert.equal(outboxActionDisposition("NOTIFY_CLIENT"), "WAITING_PROVIDER");
+  assert.equal(outboxActionDisposition("ASSIGN_REPLACEMENT"), "WAITING_PROVIDER");
+  assert.equal(outboxActionDisposition("MISSION_VERIFY_AND_NOTIFY"), "WAITING_REVIEW");
+  assert.equal(outboxActionDisposition("UNKNOWN_ACTION"), "WAITING_REVIEW");
+  assert.equal(outboxActionDisposition(""), "WAITING_REVIEW");
 });
