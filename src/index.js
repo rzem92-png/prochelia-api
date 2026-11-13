@@ -618,7 +618,20 @@ async function securityPrepareMission(request, env) {
   const body = await readJson(request);
   const missionId=clean(body?.mission_id), clientId=clean(body?.client_id), intervenantId=clean(body?.intervenant_id);
   if(!missionId||!clientId||!intervenantId) return json({ok:false,error:'MISSION_SECURITY_FIELDS_REQUIRED',version:VERSION},400);
-  const verified = await requireVerifiedIntervenant(env,intervenantId);
+  const mission=await env.DB.prepare(`
+    SELECT m.id AS mission_id,c.id AS client_id,i.id AS intervenant_profile_id,
+           i.user_id AS intervenant_user_id
+      FROM missions m
+      JOIN clients c ON c.id=m.client_id
+      JOIN intervenants i ON i.id=m.intervenant_id
+     WHERE m.id=?
+     LIMIT 1
+  `).bind(missionId).first();
+  if(!mission || mission.client_id!==clientId || mission.intervenant_profile_id!==intervenantId) {
+    return json({ok:false,error:'MISSION_PARTIES_MISMATCH',version:VERSION},404);
+  }
+  const intervenantUserId=mission.intervenant_user_id;
+  const verified = await requireVerifiedIntervenant(env,intervenantUserId);
   if(!verified) return json({ok:false,error:'INTERVENANT_IDENTITY_NOT_VERIFIED',version:VERSION},409);
   const existing=await env.DB.prepare('SELECT id,status FROM mission_security WHERE mission_id=? LIMIT 1').bind(missionId).first();
   if(existing) return json({ok:false,error:'MISSION_SECURITY_ALREADY_PREPARED',version:VERSION,status:existing.status},409);
@@ -628,7 +641,7 @@ async function securityPrepareMission(request, env) {
   await env.DB.prepare(
     `INSERT INTO mission_security (id,mission_id,client_id,intervenant_id,risk_level,arrival_code_hash,arrival_expires_at,end_code_hash,end_expires_at)
      VALUES (?,?,?,?,?,?,?,?,?)`
-  ).bind(id,missionId,clientId,intervenantId,clean(body?.risk_level)||'standard',await sha256Base64url(arrival),arrivalExpiry,await sha256Base64url(end),endExpiry).run();
+  ).bind(id,missionId,mission.client_id,intervenantUserId,clean(body?.risk_level)||'standard',await sha256Base64url(arrival),arrivalExpiry,await sha256Base64url(end),endExpiry).run();
   await securityAudit(env,'MISSION_SECURITY_PREPARED',missionId,auth.user.id,auth.user.role,'OK',{intervenant_id:intervenantId,risk_level:clean(body?.risk_level)||'standard'});
   const delivery = await deliverSecurityCodes(env, {
     mission_id: missionId,
@@ -904,6 +917,17 @@ async function createMissionPayment(request, env) {
   const missionId=clean(body?.mission_id), clientId=clean(body?.client_id), intervenantId=clean(body?.intervenant_id);
   const gross=moneyCents(body?.gross_eur), commission=moneyCents(body?.commission_eur);
   if(!missionId||!clientId||!intervenantId||gross===null||commission===null||commission>gross) return json({ok:false,error:'INVALID_PAYMENT_AMOUNT_OR_PARTIES',version:VERSION},400);
+  const mission=await env.DB.prepare(`
+    SELECT m.id AS mission_id,c.id AS client_id,i.id AS intervenant_id
+      FROM missions m
+      JOIN clients c ON c.id=m.client_id
+      JOIN intervenants i ON i.id=m.intervenant_id
+     WHERE m.id=?
+     LIMIT 1
+  `).bind(missionId).first();
+  if(!mission || mission.client_id!==clientId || mission.intervenant_id!==intervenantId) {
+    return json({ok:false,error:'MISSION_PARTIES_MISMATCH',version:VERSION},404);
+  }
   const idem=clean(request.headers.get('idempotency-key'))||clean(body?.idempotency_key);
   if(!idem) return json({ok:false,error:'IDEMPOTENCY_KEY_REQUIRED',version:VERSION},400);
   const old=await env.DB.prepare('SELECT * FROM payment_transactions WHERE idempotency_key=? LIMIT 1').bind(idem).first();
@@ -1110,9 +1134,16 @@ async function openPaymentDispute(request, env) {
   if (!missionId || !reason || reason.length > 1000 || amount === null) {
     return json({ok:false,error:'INVALID_DISPUTE',version:VERSION},400);
   }
-  const tx = await env.DB.prepare('SELECT * FROM payment_transactions WHERE mission_id=? ORDER BY created_at DESC LIMIT 1').bind(missionId).first();
+  const tx = await env.DB.prepare(`
+    SELECT pt.*,c.user_id AS client_user_id
+      FROM payment_transactions pt
+      LEFT JOIN clients c ON c.id=pt.client_id
+     WHERE pt.mission_id=?
+     ORDER BY pt.created_at DESC
+     LIMIT 1
+  `).bind(missionId).first();
   if (!tx) return json({ok:false,error:'PAYMENT_NOT_FOUND_FOR_MISSION',version:VERSION},404);
-  if (auth.user.role === 'client' && tx.client_id !== auth.user.id) {
+  if (auth.user.role === 'client' && tx.client_user_id !== auth.user.id) {
     return json({ok:false,error:'PAYMENT_NOT_FOUND_FOR_MISSION',version:VERSION},404);
   }
   if (amount <= 0 || amount > Number(tx.gross_cents || 0)) {
