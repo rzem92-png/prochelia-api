@@ -6,7 +6,13 @@ MIGRATIONS = ROOT / "migrations"
 DB = sqlite3.connect(":memory:")
 DB.execute("PRAGMA foreign_keys = ON")
 
-for path in sorted(MIGRATIONS.glob("*.sql")):
+migration_files = sorted(MIGRATIONS.glob("*.sql"))
+sequence_numbers = [path.name.split("_", 1)[0] for path in migration_files]
+assert len(sequence_numbers) == len(set(sequence_numbers)), (
+    f"Duplicate migration sequence numbers: {sequence_numbers}"
+)
+
+for path in migration_files:
     DB.executescript(path.read_text(encoding="utf-8"))
 
 # Expected payment schema objects exist.
