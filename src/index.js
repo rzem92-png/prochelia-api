@@ -1630,9 +1630,16 @@ export function outboxActionDisposition(actionType) {
 async function processActionOutbox(request, env) {
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
   await ensureOperationalSchema(env);
+  // A previous worker may have stopped after claiming a row. This processor
+  // performs classification only (never external effects), so stale claims
+  // can safely return to PENDING for another pass.
+  await env.DB.prepare(`UPDATE action_outbox SET status='PENDING',last_error='STALE_CLASSIFICATION_CLAIM_RECOVERED',updated_at=CURRENT_TIMESTAMP WHERE status='PROCESSING' AND updated_at < datetime('now','-10 minutes')`).run();
   const rows=await env.DB.prepare(`SELECT * FROM action_outbox WHERE status='PENDING' ORDER BY created_at ASC LIMIT 50`).all();
   const processed=[];
   for(const row of (rows.results||[])) {
+    // Atomic compare-and-set: concurrent processors cannot classify the same row.
+    const claim=await env.DB.prepare(`UPDATE action_outbox SET status='PROCESSING',updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='PENDING'`).bind(row.id).run();
+    if(Number(claim?.meta?.changes||0)!==1) continue;
     const payload=row.payload_json?JSON.parse(row.payload_json):{};
     if(row.case_id) {
       const approval=payload.approval_id
@@ -1641,13 +1648,12 @@ async function processActionOutbox(request, env) {
       if(approval && approval.status==='EXECUTING' &&
          approval.case_id===row.case_id && approval.action_digest===payload.action_digest &&
          approval.id===payload.approval_id) {
-        // Approval is being committed by the request that enqueued this row.
-        // Leave it PENDING; a later pass will process it after CONSUMED is durable.
+        await env.DB.prepare(`UPDATE action_outbox SET status='PENDING',last_error='WAITING_APPROVAL_COMMIT',updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='PROCESSING'`).bind(row.id).run();
         processed.push({id:row.id,status:'WAITING_APPROVAL_COMMIT',action_type:row.action_type});
         continue;
       }
       if(!supraApprovalProofMatches(approval,payload,row.case_id)) {
-        await env.DB.prepare(`UPDATE action_outbox SET status='WAITING_REVIEW',last_error=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='PENDING'`)
+        await env.DB.prepare(`UPDATE action_outbox SET status='WAITING_REVIEW',last_error=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='PROCESSING'`)
           .bind('PERSISTED_CASE_APPROVAL_PROOF_REQUIRED',row.id).run();
         processed.push({id:row.id,status:'WAITING_REVIEW',action_type:row.action_type});
         continue;
@@ -1660,7 +1666,7 @@ async function processActionOutbox(request, env) {
     const reason = disposition === 'WAITING_PROVIDER'
       ? 'External adapter/provider required for final execution.'
       : 'ACTION_EXECUTOR_NOT_CONNECTED_NO_COMPLETION_CLAIM';
-    await env.DB.prepare(`UPDATE action_outbox SET status=?,last_error=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='PENDING'`)
+    await env.DB.prepare(`UPDATE action_outbox SET status=?,last_error=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='PROCESSING'`)
       .bind(disposition,reason,row.id).run();
     processed.push({id:row.id,status:disposition,action_type:row.action_type});
   }
