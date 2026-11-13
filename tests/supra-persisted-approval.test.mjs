@@ -6,7 +6,8 @@ import {
   supraCaseCreationPolicy,
   outboxActionDisposition,
   outboxInterruptedApprovalDisposition,
-  outboxIdempotencyMatches
+  outboxIdempotencyMatches,
+  operationalActionsPending
 } from "../src/index.js";
 
 test("SUPRA case creation is proposal-only and always requires manager approval", () => {
@@ -78,4 +79,18 @@ test("interrupted approvals wait only for a live commit and expire into explicit
   assert.equal(outboxInterruptedApprovalDisposition({ approval_unexpired: 0 }), "WAITING_REVIEW");
   assert.equal(outboxInterruptedApprovalDisposition({ approval_unexpired: null }), "WAITING_REVIEW");
   assert.equal(outboxInterruptedApprovalDisposition(null), "WAITING_REVIEW");
+});
+
+test("SUPRA fails closed when no business action was queued", () => {
+  assert.equal(operationalActionsPending([]), true);
+  assert.equal(operationalActionsPending(null), true);
+  assert.equal(operationalActionsPending(undefined), true);
+});
+
+test("SUPRA keeps review and processing outbox states pending", () => {
+  assert.equal(operationalActionsPending([{ status: "WAITING_REVIEW" }]), true);
+  assert.equal(operationalActionsPending([{ status: "PROCESSING" }]), true);
+  assert.equal(operationalActionsPending([{ status: "WAITING_PROVIDER" }]), true);
+  assert.equal(operationalActionsPending([{ status: "PENDING" }]), true);
+  assert.equal(operationalActionsPending([{ status: "COMPLETED" }]), false);
 });
