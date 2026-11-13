@@ -2522,6 +2522,13 @@ async function queueAction(env, actionType, entityType, entityId, payload, idem)
   return await env.DB.prepare('SELECT * FROM action_outbox WHERE id=?').bind(id).first();
 }
 
+export function queuedActionFinalStatus(result = {}) {
+  if (result.performed === true) return 'DONE';
+  if (result.requires_provider === true) return 'WAITING_PROVIDER';
+  if (result.requires_review === true) return 'WAITING_REVIEW';
+  return 'FAILED';
+}
+
 async function executeQueuedAction(env, action) {
   if (!action) return {ok:false,error:'ACTION_NOT_FOUND'};
   const payload = JSON.parse(action.payload_json||'{}');
@@ -2560,9 +2567,7 @@ async function executeQueuedAction(env, action) {
       result={performed:false,requires_review:true,reason:'BALANCED_LEDGER_JOURNAL_REQUIRED'};
     } else result={performed:false,reason:'ACTION_TYPE_NOT_IMPLEMENTED'};
 
-    const finalStatus = result.performed ? 'DONE'
-      : (result.requires_provider ? 'WAITING_PROVIDER'
-      : (result.requires_review ? 'WAITING_REVIEW' : 'FAILED'));
+    const finalStatus = queuedActionFinalStatus(result);
     await env.DB.prepare(`UPDATE action_outbox SET status=?,result_json=?,attempts=attempts+1,updated_at=CURRENT_TIMESTAMP,executed_at=? WHERE id=?`)
       .bind(finalStatus,JSON.stringify(result),result.performed?now:null,action.id).run();
     return {ok:true,status:finalStatus,result};
