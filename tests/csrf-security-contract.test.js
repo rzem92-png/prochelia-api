@@ -61,7 +61,8 @@ function makeEnv({ sessionId = "session-test-1", sessionRow = USER_ROW } = {}) {
     TEST_MODE: true,
     DB: {
       prepare(sql) {
-        return {
+        const statement = {
+          async run() { return { meta: { changes: 1 } }; },
           bind() {
             return {
               async first() {
@@ -75,6 +76,7 @@ function makeEnv({ sessionId = "session-test-1", sessionRow = USER_ROW } = {}) {
             };
           }
         };
+        return statement;
       }
     }
   };
