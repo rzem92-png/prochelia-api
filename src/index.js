@@ -3218,7 +3218,7 @@ async function handle(request,env){
     if(request.url.startsWith('https://')) headers.set('strict-transport-security','max-age=31536000; includeSubDomains');
     return new Response(response.body,{status:response.status,statusText:response.statusText,headers});
   } catch(error) {
-    if (env?.TEST_MODE === true) return json({ok:false,error:'INTERNAL_ERROR',test_error:String(error?.stack || error)},500);
+    if (env?.TEST_MODE === true) console.error('PROCHELIA_TEST_WORKER_ERROR', error?.stack || error);
     return json({ok:false,error:'INTERNAL_ERROR',version:VERSION},500);
   }
 }
