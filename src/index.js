@@ -1109,6 +1109,13 @@ async function paymentWebhook(request, env) {
   return json({ok:true,version:VERSION,processed:true,event_id:eventId},200);
 }
 
+export function disputeClientOwnsPayment(clientProfile, payment) {
+  return Boolean(clientProfile && payment &&
+    typeof clientProfile.id === 'string' &&
+    typeof payment.client_id === 'string' &&
+    payment.client_id === clientProfile.id);
+}
+
 async function openPaymentDispute(request, env) {
   const auth = await getSessionUser(request, env);
   if (!requireRole(auth, ['client','gerante'])) return json({ok:false,error:auth?.user?'FORBIDDEN':'UNAUTHENTICATED',version:VERSION}, auth?.user ? 403 : 401);
@@ -1117,28 +1124,37 @@ async function openPaymentDispute(request, env) {
   const missionId = clean(body?.mission_id);
   const reason = clean(body?.reason);
   const amount = moneyCents(body?.amount_eur);
-  if (!missionId || !reason || reason.length > 1000 || amount === null) {
+  if (!missionId || !reason || reason.length > 1000 || amount === null || amount <= 0) {
     return json({ok:false,error:'INVALID_DISPUTE',version:VERSION},400);
   }
-  const tx = await env.DB.prepare('SELECT * FROM payment_transactions WHERE mission_id=? ORDER BY created_at DESC LIMIT 1').bind(missionId).first();
-  if (!tx) return json({ok:false,error:'PAYMENT_NOT_FOUND_FOR_MISSION',version:VERSION},404);
-  if (auth.user.role === 'client' && tx.client_id !== auth.user.id) {
+
+  let clientProfile=null;
+  if (auth.user.role === 'client') {
+    clientProfile=await env.DB.prepare('SELECT id,user_id FROM clients WHERE user_id=? LIMIT 1').bind(auth.user.id).first();
+    if (!clientProfile) return json({ok:false,error:'PAYMENT_NOT_FOUND_FOR_MISSION',version:VERSION},404);
+  }
+  const tx = auth.user.role === 'gerante'
+    ? await env.DB.prepare("SELECT * FROM payment_transactions WHERE mission_id=? AND status='paid' ORDER BY created_at DESC LIMIT 1").bind(missionId).first()
+    : await env.DB.prepare("SELECT * FROM payment_transactions WHERE mission_id=? AND client_id=? AND status='paid' ORDER BY created_at DESC LIMIT 1").bind(missionId,clientProfile.id).first();
+  if (!tx || (auth.user.role === 'client' && !disputeClientOwnsPayment(clientProfile,tx))) {
     return json({ok:false,error:'PAYMENT_NOT_FOUND_FOR_MISSION',version:VERSION},404);
   }
-  if (amount <= 0 || amount > Number(tx.gross_cents || 0)) {
+  if (amount > Number(tx.gross_cents || 0)) {
     return json({ok:false,error:'DISPUTE_AMOUNT_OUT_OF_RANGE',version:VERSION},400);
   }
-  if (tx.status !== 'paid') {
-    return json({ok:false,error:'PAYMENT_NOT_DISPUTABLE_IN_CURRENT_STATE',version:VERSION,status:tx.status},409);
-  }
+
   const id = crypto.randomUUID();
   const results = await env.DB.batch([
-    env.DB.prepare("UPDATE payment_transactions SET status='held',updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='paid'").bind(tx.id),
+    env.DB.prepare(`UPDATE payment_transactions
+      SET status='held',updated_at=CURRENT_TIMESTAMP
+      WHERE id=? AND status='paid'
+        AND NOT EXISTS (SELECT 1 FROM payment_disputes WHERE transaction_id=? AND status='open')`).bind(tx.id,tx.id),
     env.DB.prepare(`INSERT INTO payment_disputes
       (id,mission_id,transaction_id,client_id,intervenant_id,status,reason,amount_cents)
       SELECT ?,?,?,?,?,?,?,?
-      WHERE EXISTS (SELECT 1 FROM payment_transactions WHERE id=? AND status='held')`)
-      .bind(id,missionId,tx.id,tx.client_id,tx.intervenant_id,'open',reason,amount,tx.id),
+      WHERE EXISTS (SELECT 1 FROM payment_transactions WHERE id=? AND status='held')
+        AND NOT EXISTS (SELECT 1 FROM payment_disputes WHERE transaction_id=? AND status='open')`)
+      .bind(id,missionId,tx.id,tx.client_id,tx.intervenant_id,'open',reason,amount,tx.id,tx.id),
     env.DB.prepare(`INSERT INTO payment_audit
       (id,event_type,transaction_id,payout_id,mission_id,user_id,result,metadata_json)
       SELECT ?, 'PAYMENT_DISPUTE_OPENED', ?, NULL, ?, ?, 'OK', ?
