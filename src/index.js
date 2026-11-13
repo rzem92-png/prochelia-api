@@ -872,6 +872,22 @@ async function paymentStatus(request, env) {
   return json({ok:true,version:VERSION,provider:paymentProvider(env),payments_configured:paymentsConfigured(env),wallet:{currency:wallet.currency,available_cents:wallet.available_cents,pending_cents:wallet.pending_cents,paid_cents:wallet.paid_cents,reserved_cents:wallet.reserved_cents},payout_account:account?{status:account.status,onboarding_status:account.onboarding_status,payouts_enabled:!!account.payouts_enabled}:null,pending_payouts:Number(pending?.total||0)},200);
 }
 
+export function missionPaymentPartiesMatch(requested, mission) {
+  return Boolean(requested && mission &&
+    typeof requested.missionId === 'string' && requested.missionId === mission.id &&
+    typeof requested.clientId === 'string' && requested.clientId === mission.client_id &&
+    typeof requested.intervenantId === 'string' && requested.intervenantId === mission.intervenant_id);
+}
+
+export function missionPaymentIdempotencyMatches(existing, requested) {
+  return Boolean(existing && requested &&
+    existing.mission_id === requested.missionId &&
+    existing.client_id === requested.clientId &&
+    existing.intervenant_id === requested.intervenantId &&
+    Number(existing.gross_cents) === requested.grossCents &&
+    Number(existing.commission_cents) === requested.commissionCents);
+}
+
 async function createMissionPayment(request, env) {
   const auth=await getSessionUser(request,env);
   if(!requireRole(auth,['gerante'])) return json({ok:false,error:auth?.user?'FORBIDDEN':'UNAUTHENTICATED',version:VERSION},auth?.user?403:401);
@@ -879,16 +895,34 @@ async function createMissionPayment(request, env) {
   const body=await readJson(request);
   const missionId=clean(body?.mission_id), clientId=clean(body?.client_id), intervenantId=clean(body?.intervenant_id);
   const gross=moneyCents(body?.gross_eur), commission=moneyCents(body?.commission_eur);
-  if(!missionId||!clientId||!intervenantId||gross===null||commission===null||commission>gross) return json({ok:false,error:'INVALID_PAYMENT_AMOUNT_OR_PARTIES',version:VERSION},400);
+  if(!missionId||!clientId||!intervenantId||gross===null||commission===null||gross<=0||commission>gross) return json({ok:false,error:'INVALID_PAYMENT_AMOUNT_OR_PARTIES',version:VERSION},400);
   const idem=clean(request.headers.get('idempotency-key'))||clean(body?.idempotency_key);
-  if(!idem) return json({ok:false,error:'IDEMPOTENCY_KEY_REQUIRED',version:VERSION},400);
+  if(!idem || idem.length>200) return json({ok:false,error:'IDEMPOTENCY_KEY_REQUIRED',version:VERSION},400);
+  const requested={missionId,clientId,intervenantId,grossCents:gross,commissionCents:commission};
   const old=await env.DB.prepare('SELECT * FROM payment_transactions WHERE idempotency_key=? LIMIT 1').bind(idem).first();
-  if(old) return json({ok:true,version:VERSION,idempotent_replay:true,transaction:old},200);
+  if(old) {
+    if (!missionPaymentIdempotencyMatches(old,requested)) {
+      return json({ok:false,error:'IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_REQUEST',version:VERSION},409);
+    }
+    return json({ok:true,version:VERSION,idempotent_replay:true,transaction:old},200);
+  }
+  const mission=await env.DB.prepare('SELECT id,client_id,intervenant_id FROM missions WHERE id=? LIMIT 1').bind(missionId).first();
+  if(!missionPaymentPartiesMatch(requested,mission)) {
+    return json({ok:false,error:'MISSION_PAYMENT_PARTIES_MISMATCH',version:VERSION},409);
+  }
   const net=gross-commission;
   const txId=crypto.randomUUID();
-  await env.DB.prepare(`INSERT INTO payment_transactions
-    (id,idempotency_key,mission_id,client_id,intervenant_id,type,status,gross_cents,commission_cents,net_intervenant_cents,currency,provider,reason)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(txId,idem,missionId,clientId,intervenantId,'MISSION_CHARGE','pending',gross,commission,net,'EUR',paymentProvider(env),'MISSION_PAYMENT_CREATED').run();
+  try {
+    await env.DB.prepare(`INSERT INTO payment_transactions
+      (id,idempotency_key,mission_id,client_id,intervenant_id,type,status,gross_cents,commission_cents,net_intervenant_cents,currency,provider,reason)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(txId,idem,missionId,clientId,intervenantId,'MISSION_CHARGE','pending',gross,commission,net,'EUR',paymentProvider(env),'MISSION_PAYMENT_CREATED').run();
+  } catch (_) {
+    const raced=await env.DB.prepare('SELECT * FROM payment_transactions WHERE idempotency_key=? LIMIT 1').bind(idem).first();
+    if (raced && missionPaymentIdempotencyMatches(raced,requested)) {
+      return json({ok:true,version:VERSION,idempotent_replay:true,transaction:raced},200);
+    }
+    return json({ok:false,error:'PAYMENT_IDEMPOTENCY_CONFLICT',version:VERSION},409);
+  }
   await paymentAudit(env,'MISSION_PAYMENT_CREATED',{transaction_id:txId,mission_id:missionId,user_id:auth.user.id,metadata:{gross_cents:gross,commission_cents:commission,net_cents:net}},'OK');
   return json({ok:true,version:VERSION,transaction_id:txId,status:'pending',gross_cents:gross,commission_cents:commission,net_intervenant_cents:net,provider:paymentProvider(env),next:paymentsConfigured(env)?'PSP_CHARGE_REQUIRED':'PAYMENT_PROVIDER_NOT_CONFIGURED'},201);
 }
