@@ -1495,6 +1495,10 @@ export function operationalCaseOwnershipAllowed(role, userId, mission) {
   return false;
 }
 
+export function operationalCaseRequiresManagerApproval(role) {
+  return String(role || '').trim().toLowerCase() !== 'gerante';
+}
+
 async function createOperationalCase(request, env) {
   const gate=await requireAuthRole(request,env,['gerante','client','intervenant','entreprise']); if(gate.error)return gate.error;
   const body=await readJson(request)||{};
@@ -1526,7 +1530,14 @@ async function createOperationalCase(request, env) {
   const phase=String(await getSetting(env,'project_phase','TEST')).toUpperCase();
   const impact=String(body.impact_level||'LOW').toUpperCase();
   const priority=CASE_PRIORITIES[impact]||10;
-  const rec=await copilotRecommend(env,{caseType,impact,phase,context:safeContext});
+  const recommendation=await copilotRecommend(env,{caseType,impact,phase,context:safeContext});
+  // A user-submitted report is evidence for analysis, never an execution command.
+  // Non-managers always receive a proposal that must be explicitly approved by
+  // an authenticated manager through the dedicated approval endpoint.
+  const rec=operationalCaseRequiresManagerApproval(role)
+    ? {...recommendation,action:'ANALYZE_AND_PROPOSE',mode:'MANAGER_APPROVAL',
+       solution:{steps:['review_case','verify_ownership','approve_action','audit'],automatic:false}}
+    : recommendation;
   const id=crypto.randomUUID();
   const requiresManager=rec.mode==='MANAGER_APPROVAL' ? 1 : 0;
   const status=rec.action==='AUTO_RESOLVE' ? 'AUTO_PENDING' : 'OPEN';
@@ -1536,8 +1547,8 @@ async function createOperationalCase(request, env) {
     .bind(crypto.randomUUID(),id,rec.action,JSON.stringify(rec.solution),rec.confidence,rec.mode).run();
   await journal(env,'copilot',null,'CASE_CREATED','operational_case',id,'OK',{caseType,impact,actorRole:role,missionLinked:!!missionId});
   let autoResult=null;
-  if(rec.action==='AUTO_RESOLVE') autoResult=await executeOperationalCase(env,id,null,true);
-  const responseStatus=rec.action==='AUTO_RESOLVE'
+  if(isManager && rec.action==='AUTO_RESOLVE') autoResult=await executeOperationalCase(env,id,null,true);
+  const responseStatus=isManager && rec.action==='AUTO_RESOLVE'
     ? (autoResult?.pending ? 'AUTO_QUEUED' : 'AUTO_EXECUTED')
     : 'WAITING_MANAGER';
   return json({ok:true,version:VERSION,case_id:id,recommendation:rec,status:responseStatus},201);
