@@ -18,6 +18,8 @@ on:
       - "migrations/**"
       - "tests/test_migrations_sqlite.py"
       - ".github/workflows/migration-sql-tests.yml"
+      - ".github/workflows/restore-preview-d1-test-v2.yml"
+      - ".github/workflows/verify-restore-v2-integrity.yml"
 
 permissions:
   contents: read
