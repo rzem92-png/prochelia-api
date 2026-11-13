@@ -1763,10 +1763,15 @@ export function resolvePricingAuthority({role,body={},policy=null,projectPhase='
   const numberOr=(value,fallback)=>Number.isFinite(Number(value))?Number(value):fallback;
   const policyNumber=(key,fallback)=>policy && policy[key]!=null ? numberOr(policy[key],fallback) : fallback;
   const fuelMode=String(body.fuel_mode||'normal').toLowerCase()==='high'?'high':'normal';
+  const rawDistance=body.distance_km==null?0:Number(body.distance_km);
+  const rawDuration=body.duration_minutes==null?60:Number(body.duration_minutes);
+  if (!Number.isFinite(rawDistance) || !Number.isSafeInteger(rawDuration) || rawDuration<1 || rawDuration>1440 || rawDistance<0 || rawDistance>500) {
+    return {error:'QUOTE_INPUT_OUT_OF_RANGE'};
+  }
   const inputs={
     phase,clientType,base,
-    distance:numberOr(body.distance_km,0),
-    duration:numberOr(body.duration_minutes,60),
+    distance:rawDistance,
+    duration:rawDuration,
     fuelMode,
     fuelPriceCentsPerLitre:numberOr(
       settings[fuelMode==='high'?'fuel_reference_price_cents_litre_high':'fuel_reference_price_cents_litre_normal'],
