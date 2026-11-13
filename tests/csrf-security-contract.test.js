@@ -234,3 +234,10 @@ test("runtime: originless browser mutations fail closed", async () => {
   assert.equal((await response.json()).error, "ORIGIN_NOT_ALLOWED");
   assert.equal(getSessionLookups(), 0);
 });
+
+test("runtime: invalid CSRF is rejected before persistent rate limiting", () => {
+  const csrfGate = source.indexOf("if (!constantTimeStringEqual(supplied, expected))");
+  const rateGate = source.indexOf("const rate = await productionRateLimit(request, env);");
+  assert.ok(csrfGate >= 0, "session-bound CSRF validation must exist");
+  assert.ok(rateGate > csrfGate, "persistent rate limiting must run only after CSRF validation");
+});
