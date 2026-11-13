@@ -3181,6 +3181,10 @@ async function handle(request,env){
   try {
     if(isMutatingMethod(request.method) && !securityOriginAllowed(request,env)) return json({ok:false,error:'ORIGIN_NOT_ALLOWED',version:VERSION},403);
     const url=new URL(request.url);
+    // A write cannot be authenticated safely without the persistent session store.
+    if (isMutatingMethod(request.method) && !env?.DB) {
+      return json({ok:false,error:'DATABASE_UNAVAILABLE',database:false,version:VERSION},503);
+    }
     const csrfExemptPaths = new Set(['/api/auth/login', '/api/auth/bootstrap', '/api/payments/webhook']);
     if (isMutatingMethod(request.method) && !csrfExemptPaths.has(url.pathname) && getSessionToken(request)) {
       const auth = await getSessionUser(request, env);
@@ -3191,6 +3195,12 @@ async function handle(request,env){
         return json({ ok: false, error: 'CSRF_TOKEN_INVALID', version: VERSION }, 403);
       }
     }
+    // Apply persistent rate limiting only after Origin and session-bound CSRF
+    // checks. Invalid browser writes must receive a deterministic 403 without
+    // touching the rate-limit tables or masking the security decision as a 500.
+    const rate = await productionRateLimit(request, env);
+    if (!rate.ok) return rate.response;
+
     // Fail closed before any schema helper touches D1: unauthenticated callers
     // must not use mission validation as an existence oracle for private IDs.
     if (url.pathname === '/api/missions/validate') {
@@ -3645,13 +3655,19 @@ async function productionRateLimit(request,env){
   const now=Math.floor(Date.now()/1000);
   const start=new Date(Math.floor(now/windowSeconds)*windowSeconds*1000).toISOString();
   await ensureFinalHardeningSchema(env);
-  const existing=await env.DB.prepare(`SELECT request_count FROM security_rate_limits WHERE bucket=? AND subject_hash=? AND window_start=? LIMIT 1`).bind(bucket,subject,start).first();
-  const count=Number(existing?.request_count||0)+1;
-  if(existing){
-    await env.DB.prepare(`UPDATE security_rate_limits SET request_count=? WHERE bucket=? AND subject_hash=? AND window_start=?`).bind(count,bucket,subject,start).run();
-  }else{
-    await env.DB.prepare(`INSERT INTO security_rate_limits(id,bucket,subject_hash,window_start,request_count) VALUES(?,?,?,?,1)`).bind(crypto.randomUUID(),bucket,subject,start).run();
-  }
+  // Atomic increment: concurrent requests for the same IP/route/window
+  // must not read the same old count and overwrite one another.
+  // The UNIQUE(bucket, subject_hash, window_start) constraint serializes
+  // competing increments in SQLite/D1.
+  const counter=await env.DB.prepare(`
+    INSERT INTO security_rate_limits(id,bucket,subject_hash,window_start,request_count)
+    VALUES(?,?,?,?,1)
+    ON CONFLICT(bucket,subject_hash,window_start)
+    DO UPDATE SET request_count=security_rate_limits.request_count+1
+    RETURNING request_count
+  `).bind(crypto.randomUUID(),bucket,subject,start).first();
+  const count=Number(counter?.request_count);
+  if(!Number.isSafeInteger(count) || count < 1) throw new Error('RATE_LIMIT_COUNTER_INVALID');
   if(count>limit){
     await productionSafetySchema(env);
     await env.DB.prepare(`INSERT INTO production_security_events(id,event_type,route,subject_hash,decision,details_json) VALUES(?,?,?,?,?,?)`)
@@ -3707,13 +3723,6 @@ handle = async function(request,env){
       const response = await __procheliaProductionSafetyHandle(new Request(request.url,{method:'GET',headers:request.headers}),env);
       return new Response(null,{status:response.status,headers:response.headers});
     }
-    // Fail closed with a truthful service-unavailable response when a write
-    // needs the persistent rate limiter but D1 is not bound.
-    if (isMutatingMethod(preflightMethod) && !env?.DB) {
-      return json({ok:false,error:'DATABASE_UNAVAILABLE',database:false,version:VERSION},503);
-    }
-    const rate=await productionRateLimit(request,env);
-    if(!rate.ok) return rate.response;
     const u=new URL(request.url);
     if(u.pathname==='/api/system/final-audit' && request.method==='GET') return strictProductionAudit(request,env);
     if(u.pathname==='/api/system/production-check' && request.method==='GET') return strictProductionAudit(request,env);
