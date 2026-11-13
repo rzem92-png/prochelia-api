@@ -60,6 +60,10 @@ jobs:
               database_name: 'prochelia-preview-db',
               database_id: expectedPreviewId
             }],
+            r2_buckets: [{
+              binding: 'BACKUP_BUCKET',
+              bucket_name: 'prochelia-preview-backups-eu'
+            }],
             observability: { logs: { enabled: true, invocation_logs: true } }
           };
           if (preview.name === production.name || preview.d1_databases.some(db => db.database_id === expectedProductionId)) {
