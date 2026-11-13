@@ -144,11 +144,13 @@ test("runtime: missing and invalid CSRF tokens block cookie-authenticated mutati
       "content-type": "application/json"
     };
     if (csrf !== null) headers["x-csrf-token"] = csrf;
-    const response = await worker.fetch(new Request("https://api.preview.test/api/missions/validate", {
+    const request = new Request("https://api.preview.test/api/finance/entry", {
       method: "POST",
       headers,
-      body: "{}"
-    }), env);
+      body: JSON.stringify({ amount_eur: 1, entry_type: "TEST" })
+    });
+    assert.equal(request.headers.get("cookie"), cookieHeader(token), "test runtime must preserve the session cookie");
+    const response = await worker.fetch(request, env);
     assert.equal(response.status, 403);
     assert.equal((await response.json()).error, "CSRF_TOKEN_INVALID");
   }
@@ -160,7 +162,7 @@ test("runtime: a CSRF token from another session is rejected", async () => {
   const csrfA = await deriveCsrfToken(tokenA, "session-A");
   const { env } = makeEnv({ sessionId: "session-B" });
 
-  const response = await worker.fetch(new Request("https://api.preview.test/api/missions/validate", {
+  const response = await worker.fetch(new Request("https://api.preview.test/api/finance/entry", {
     method: "POST",
     headers: {
       origin: TEST_ORIGIN,
@@ -168,7 +170,7 @@ test("runtime: a CSRF token from another session is rejected", async () => {
       "x-csrf-token": csrfA,
       "content-type": "application/json"
     },
-    body: "{}"
+    body: JSON.stringify({ amount_eur: 1, entry_type: "TEST" })
   }), env);
 
   assert.equal(response.status, 403);
