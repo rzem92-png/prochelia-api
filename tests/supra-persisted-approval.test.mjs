@@ -4,7 +4,8 @@ import {
   supraApprovalDigestInput,
   supraApprovalProofMatches,
   supraCaseCreationPolicy,
-  outboxActionDisposition
+  outboxActionDisposition,
+  outboxIdempotencyMatches
 } from "../src/index.js";
 
 test("SUPRA case creation is proposal-only and always requires manager approval", () => {
@@ -56,4 +57,17 @@ test("outbox never treats an action without an executor as completed", () => {
   assert.equal(outboxActionDisposition("MISSION_VERIFY_AND_NOTIFY"), "WAITING_REVIEW");
   assert.equal(outboxActionDisposition("UNKNOWN_ACTION"), "WAITING_REVIEW");
   assert.equal(outboxActionDisposition(""), "WAITING_REVIEW");
+});
+
+test("outbox idempotency is bound to the same case, action and exact payload", () => {
+  const existing = {
+    case_id: "case-1",
+    action_type: "NOTIFY_CLIENT",
+    payload_json: '{"message":"approved"}'
+  };
+  assert.equal(outboxIdempotencyMatches(existing, "case-1", "NOTIFY_CLIENT", '{"message":"approved"}'), true);
+  assert.equal(outboxIdempotencyMatches(existing, "case-2", "NOTIFY_CLIENT", '{"message":"approved"}'), false);
+  assert.equal(outboxIdempotencyMatches(existing, "case-1", "PSP_REFUND_REVIEW", '{"message":"approved"}'), false);
+  assert.equal(outboxIdempotencyMatches(existing, "case-1", "NOTIFY_CLIENT", '{"message":"changed"}'), false);
+  assert.equal(outboxIdempotencyMatches(null, "case-1", "NOTIFY_CLIENT", '{"message":"approved"}'), false);
 });
