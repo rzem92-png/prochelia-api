@@ -1593,11 +1593,13 @@ async function executeCaseBusinessAction(env, c, rec, actorId=null, automatic=fa
   const context = c.context_json ? JSON.parse(c.context_json) : {};
   const solution = rec?.solution || {};
   const results = [];
-  const withApproval = payload => approvalProof ? {...payload, ...approvalProof} : payload;
+  const withApproval = (outboxActionType,payload) => approvalProof
+    ? {...payload,...approvalProof,approved_outbox_action_type:outboxActionType}
+    : payload;
 
   // Safe, idempotent operational effects that do not require an external PSP/provider.
   if (c.mission_id && (action === 'AUTO_RESOLVE' || action === 'CONTINUITY' || action === 'RESOLVE_CASE')) {
-    const queued = await enqueueAction(env,c.id,'MISSION_VERIFY_AND_NOTIFY',withApproval({mission_id:c.mission_id,case_id:c.id,reason:c.case_type}),`${c.id}:mission-verify-notify`);
+    const queued = await enqueueAction(env,c.id,'MISSION_VERIFY_AND_NOTIFY',withApproval('MISSION_VERIFY_AND_NOTIFY',{mission_id:c.mission_id,case_id:c.id,reason:c.case_type}),`${c.id}:mission-verify-notify`);
     results.push({action:'MISSION_VERIFY_AND_NOTIFY',...queued});
   }
 
@@ -1606,28 +1608,28 @@ async function executeCaseBusinessAction(env, c, rec, actorId=null, automatic=fa
     if (replacementId && c.mission_id) {
       // Never mutate a mission directly from a case payload. A dedicated,
       // ownership-checked and atomic mission executor must process this queue.
-      const queued=await enqueueAction(env,c.id,'ASSIGN_REPLACEMENT',withApproval({mission_id:c.mission_id,intervenant_id:replacementId}),c.id+':replacement:'+replacementId);
+      const queued=await enqueueAction(env,c.id,'ASSIGN_REPLACEMENT',withApproval('ASSIGN_REPLACEMENT',{mission_id:c.mission_id,intervenant_id:replacementId}),c.id+':replacement:'+replacementId);
       results.push({action:'ASSIGN_REPLACEMENT',...queued,reason:'ATOMIC_MISSION_EXECUTOR_REQUIRED'});
     } else {
-      const queued=await enqueueAction(env,c.id,'SEARCH_REPLACEMENT',withApproval({mission_id:c.mission_id||null,criteria:context.replacement_criteria||{},case_type:c.case_type}),c.id+':search-replacement');
+      const queued=await enqueueAction(env,c.id,'SEARCH_REPLACEMENT',withApproval('SEARCH_REPLACEMENT',{mission_id:c.mission_id||null,criteria:context.replacement_criteria||{},case_type:c.case_type}),c.id+':search-replacement');
       results.push({action:'SEARCH_REPLACEMENT',...queued});
     }
   }
 
   if (context.reschedule_start_at && c.mission_id) {
     // Rescheduling is always queued; no direct mission UPDATE is permitted here.
-    const queued=await enqueueAction(env,c.id,'RESCHEDULE_MISSION',withApproval({mission_id:c.mission_id,start_at:context.reschedule_start_at}),c.id+':reschedule:'+context.reschedule_start_at);
+    const queued=await enqueueAction(env,c.id,'RESCHEDULE_MISSION',withApproval('RESCHEDULE_MISSION',{mission_id:c.mission_id,start_at:context.reschedule_start_at}),c.id+':reschedule:'+context.reschedule_start_at);
     results.push({action:'RESCHEDULE_MISSION',...queued,reason:'ATOMIC_MISSION_EXECUTOR_REQUIRED'});
   }
 
   if (context.client_notification || c.client_id || c.company_id) {
-    const queued=await enqueueAction(env,c.id,'NOTIFY_CLIENT',withApproval({client_id:c.client_id||null,company_id:c.company_id||null,mission_id:c.mission_id||null,message:context.client_notification||solution.notification||`Mise à jour de votre dossier PROCHÉLIA : ${c.case_type}.`}),`${c.id}:notify-client`);
+    const queued=await enqueueAction(env,c.id,'NOTIFY_CLIENT',withApproval('NOTIFY_CLIENT',{client_id:c.client_id||null,company_id:c.company_id||null,mission_id:c.mission_id||null,message:context.client_notification||solution.notification||`Mise à jour de votre dossier PROCHÉLIA : ${c.case_type}.`}),`${c.id}:notify-client`);
     results.push({action:'NOTIFY_CLIENT',...queued});
   }
 
   // Financial actions are deliberately queued for the real PSP adapter; no fake money movement.
   if (context.refund_cents || action === 'REFUND_REQUEST') {
-    const queued=await enqueueAction(env,c.id,'PSP_REFUND_REVIEW',withApproval({mission_id:c.mission_id||null,amount_cents:Math.max(0,Number(context.refund_cents||0)),reason:c.description||c.case_type}),`${c.id}:psp-refund`);
+    const queued=await enqueueAction(env,c.id,'PSP_REFUND_REVIEW',withApproval('PSP_REFUND_REVIEW',{mission_id:c.mission_id||null,amount_cents:Math.max(0,Number(context.refund_cents||0)),reason:c.description||c.case_type}),`${c.id}:psp-refund`);
     results.push({action:'PSP_REFUND_REVIEW',...queued});
   }
 
@@ -1675,7 +1677,8 @@ async function processActionOutbox(request, env) {
         approval.action_digest===payload.action_digest && approval.id===payload.approval_id &&
         approval.action_type===payload.action_type && approval.resource_type===payload.resource_type &&
         approval.resource_id===payload.resource_id && approval.approver_user_id===payload.approver_user_id &&
-        approval.approver_role===payload.approver_role);
+        approval.approver_role===payload.approver_role &&
+        payload.approved_outbox_action_type===row.action_type);
       if(matchingExecutingApproval) {
         const interruptedDisposition=outboxInterruptedApprovalDisposition(approval);
         const waitingForCommit=interruptedDisposition==='WAITING_APPROVAL_COMMIT';
