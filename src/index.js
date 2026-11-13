@@ -1690,7 +1690,7 @@ async function processActionOutbox(request, env) {
         processed.push({id:row.id,status:interruptedDisposition,action_type:row.action_type});
         continue;
       }
-      if(!supraApprovalProofMatches(approval,payload,row.case_id)) {
+      if(!supraOutboxActionProofMatches(approval,payload,row.case_id,row.action_type)) {
         await env.DB.prepare(`UPDATE action_outbox SET status='WAITING_REVIEW',last_error=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='PROCESSING'`)
           .bind('PERSISTED_CASE_APPROVAL_PROOF_REQUIRED',row.id).run();
         processed.push({id:row.id,status:'WAITING_REVIEW',action_type:row.action_type});
@@ -1751,6 +1751,11 @@ export function supraApprovalProofMatches(approval, payload, caseId) {
     approval.approver_user_id === payload.approver_user_id &&
     approval.approver_role === 'GERANTE' &&
     payload.approver_role === 'GERANTE');
+}
+
+export function supraOutboxActionProofMatches(approval,payload,caseId,outboxActionType) {
+  return supraApprovalProofMatches(approval,payload,caseId) &&
+    payload.approved_outbox_action_type === outboxActionType;
 }
 
 export function operationalActionsPending(businessResults) {
