@@ -131,7 +131,7 @@ class PrepareD1RestoreTests(unittest.TestCase):
                 text=True,
             )
             sql = output.read_text(encoding="utf-8")
-            self.assertIn('CREATE TABLE "d1_migrations"', sql)
+            self.assertIn("CREATE TABLE d1_migrations", sql)
             self.assertIn('INTEGER PRIMARY KEY AUTOINCREMENT', sql)
             self.assertIn('INSERT INTO "d1_migrations" ("id", "name", "applied_at") VALUES (7,', sql)
 
