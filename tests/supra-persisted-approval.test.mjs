@@ -40,15 +40,32 @@ test("outbox proof requires the exact consumed approval, case and digest", () =>
   const approval = {
     id: "approval-1",
     case_id: "case-1",
+    action_type: "SEARCH_REPLACEMENT",
+    resource_type: "MISSION",
+    resource_id: "mission-1",
+    approver_user_id: "manager-1",
+    approver_role: "GERANTE",
     action_digest: "digest-1",
     status: "CONSUMED"
   };
-  const payload = { approval_id: "approval-1", action_digest: "digest-1" };
+  const payload = {
+    approval_id: "approval-1",
+    action_digest: "digest-1",
+    action_type: "SEARCH_REPLACEMENT",
+    resource_type: "MISSION",
+    resource_id: "mission-1",
+    approver_user_id: "manager-1",
+    approver_role: "GERANTE"
+  };
   assert.equal(supraApprovalProofMatches(approval, payload, "case-1"), true);
   assert.equal(supraApprovalProofMatches({ ...approval, status: "EXECUTING" }, payload, "case-1"), false);
   assert.equal(supraApprovalProofMatches(approval, { ...payload, action_digest: "other" }, "case-1"), false);
   assert.equal(supraApprovalProofMatches(approval, payload, "case-2"), false);
   assert.equal(supraApprovalProofMatches(approval, { ...payload, approval_id: "other" }, "case-1"), false);
+  assert.equal(supraApprovalProofMatches(approval, { ...payload, action_type: "REFUND_REQUEST" }, "case-1"), false);
+  assert.equal(supraApprovalProofMatches(approval, { ...payload, resource_id: "mission-2" }, "case-1"), false);
+  assert.equal(supraApprovalProofMatches(approval, { ...payload, approver_user_id: "attacker" }, "case-1"), false);
+  assert.equal(supraApprovalProofMatches({ ...approval, approver_role: "CLIENT" }, payload, "case-1"), false);
   assert.equal(supraApprovalProofMatches(null, payload, "case-1"), false);
 });
 
