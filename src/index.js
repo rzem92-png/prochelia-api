@@ -1666,13 +1666,16 @@ async function processActionOutbox(request, env) {
     const payload=row.payload_json?JSON.parse(row.payload_json):{};
     if(row.case_id) {
       const approval=payload.approval_id
-        ? await env.DB.prepare(`SELECT id,case_id,action_digest,status,
+        ? await env.DB.prepare(`SELECT id,case_id,action_type,resource_type,resource_id,approver_user_id,approver_role,action_digest,status,
             CASE WHEN expires_at>CURRENT_TIMESTAMP THEN 1 ELSE 0 END AS approval_unexpired
             FROM supra_action_approvals WHERE id=? LIMIT 1`).bind(payload.approval_id).first()
         : null;
       const matchingExecutingApproval = Boolean(approval &&
         approval.status==='EXECUTING' && approval.case_id===row.case_id &&
-        approval.action_digest===payload.action_digest && approval.id===payload.approval_id);
+        approval.action_digest===payload.action_digest && approval.id===payload.approval_id &&
+        approval.action_type===payload.action_type && approval.resource_type===payload.resource_type &&
+        approval.resource_id===payload.resource_id && approval.approver_user_id===payload.approver_user_id &&
+        approval.approver_role===payload.approver_role);
       if(matchingExecutingApproval) {
         const interruptedDisposition=outboxInterruptedApprovalDisposition(approval);
         const waitingForCommit=interruptedDisposition==='WAITING_APPROVAL_COMMIT';
@@ -1738,8 +1741,13 @@ export function supraApprovalProofMatches(approval, payload, caseId) {
     approval.status === 'CONSUMED' &&
     approval.case_id === caseId &&
     approval.action_digest === payload.action_digest &&
-    approval.id === payload.approval_id);
-}
+    approval.id === payload.approval_id &&
+    approval.action_type === payload.action_type &&
+    approval.resource_type === payload.resource_type &&
+    approval.resource_id === payload.resource_id &&
+    approval.approver_user_id === payload.approver_user_id &&
+    approval.approver_role === 'GERANTE' &&
+    payload.approver_role === 'GERANTE');
 
 export function operationalActionsPending(businessResults) {
   // Fail closed: an absent/empty result set is not proof of completion.
@@ -1762,7 +1770,16 @@ async function executeOperationalCase(env, caseId, approverId=null, automatic=fa
   } else if (!automatic && !approverId) {
     return {ok:false,error:'MANAGER_APPROVAL_REQUIRED'};
   }
-  const approvalProof=approvalId?{approval_id:approvalId,action_digest:await sha256Base64url(supraApprovalDigestInput(c)||''),case_id:caseId}:{};
+  const approvalProof=approvalId?{
+    approval_id:approvalId,
+    action_digest:await sha256Base64url(supraApprovalDigestInput(c)||''),
+    case_id:caseId,
+    action_type:String(rec.action||'REVIEW').toUpperCase(),
+    resource_type:c.mission_id?'MISSION':'OPERATIONAL_CASE',
+    resource_id:c.mission_id||caseId,
+    approver_user_id:approverId,
+    approver_role:'GERANTE'
+  }:{};
   const businessResults = await executeCaseBusinessAction(env,c,rec,approverId,automatic,approvalId?approvalProof:null);
   if (!Array.isArray(businessResults) || businessResults.length === 0) {
     return {ok:false,error:'NO_EXECUTABLE_BUSINESS_ACTION'};
