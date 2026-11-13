@@ -1,0 +1,32 @@
+name: SUPRA executive orchestrator tests
+
+on:
+  pull_request:
+    paths:
+      - "src/supra-executive.js"
+      - "tests/supra-executive.test.mjs"
+      - ".github/workflows/supra-executive-tests.yml"
+  push:
+    branches: [main]
+    paths:
+      - "src/supra-executive.js"
+      - "tests/supra-executive.test.mjs"
+      - ".github/workflows/supra-executive-tests.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  executive-planner:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          package-manager-cache: false
+      - name: Syntax check SUPRA executive planner
+        run: node --experimental-default-type=module --check src/supra-executive.js
+      - name: Run SUPRA executive planner tests
+        run: node --experimental-default-type=module --test tests/supra-executive.test.mjs
