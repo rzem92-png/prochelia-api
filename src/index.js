@@ -195,13 +195,6 @@ async function csrfTokenForSession(auth) {
   return base64url(new Uint8Array(signature));
 }
 
-function constantTimeStringEqual(left,right) {
-  if(typeof left!=='string'||typeof right!=='string'||left.length!==right.length) return false;
-  let diff=0;
-  for(let i=0;i<left.length;i++) diff|=left.charCodeAt(i)^right.charCodeAt(i);
-  return diff===0;
-}
-
 async function authCsrf(request,env) {
   const auth=await getSessionUser(request,env);
   if(!auth) return json({ok:false,error:'UNAUTHENTICATED',version:VERSION},401);
