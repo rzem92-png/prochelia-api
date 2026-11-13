@@ -32,6 +32,8 @@ jobs:
           node --experimental-default-type=module --check src/index.js
           node --experimental-default-type=module --check src/v7.js
           node --experimental-default-type=module --check src/v7-routes.js
+      - name: Run backend authentication and CSRF contract tests
+        run: node --test tests/auth-handler-wiring.test.js
       - name: Lint guarded Preview deployment workflow
         run: |
           go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
