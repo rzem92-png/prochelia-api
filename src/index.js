@@ -3674,7 +3674,7 @@ async function interfaceConfigEndpoint(request,env){
   return json({ok:true,version:VERSION,interfaces:PROCHELIA_UI,brand:PROCHELIA_BRAND.visual});
 }
 
-export function supportCaseReferenceAllowed(role,userId,mission,complaint=null){
+export export function supportCaseReferenceAllowed(role,userId,mission,complaint=null){
   const normalized=String(role||'').toUpperCase();
   if(normalized==='GERANTE'||normalized==='ADMIN') return true;
   if(!mission||!userId) return false;
