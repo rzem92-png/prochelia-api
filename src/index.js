@@ -3271,6 +3271,10 @@ async function handle(request,env){
   try {
     if(isMutatingMethod(request.method) && !securityOriginAllowed(request,env)) return json({ok:false,error:'ORIGIN_NOT_ALLOWED',version:VERSION},403);
     const url=new URL(request.url);
+    // A write cannot be authenticated safely without the persistent session store.
+    if (isMutatingMethod(request.method) && !env?.DB) {
+      return json({ok:false,error:'DATABASE_UNAVAILABLE',database:false,version:VERSION},503);
+    }
     const csrfExemptPaths = new Set(['/api/auth/login', '/api/auth/bootstrap', '/api/payments/webhook']);
     if (isMutatingMethod(request.method) && !csrfExemptPaths.has(url.pathname) && getSessionToken(request)) {
       const auth = await getSessionUser(request, env);
@@ -3281,6 +3285,12 @@ async function handle(request,env){
         return json({ ok: false, error: 'CSRF_TOKEN_INVALID', version: VERSION }, 403);
       }
     }
+    // Apply persistent rate limiting only after Origin and session-bound CSRF
+    // checks. Invalid browser writes must receive a deterministic 403 without
+    // touching the rate-limit tables or masking the security decision as a 500.
+    const rate = await productionRateLimit(request, env);
+    if (!rate.ok) return rate.response;
+
     // Fail closed before any schema helper touches D1: unauthenticated callers
     // must not use mission validation as an existence oracle for private IDs.
     if (url.pathname === '/api/missions/validate') {
@@ -3803,13 +3813,6 @@ handle = async function(request,env){
       const response = await __procheliaProductionSafetyHandle(new Request(request.url,{method:'GET',headers:request.headers}),env);
       return new Response(null,{status:response.status,headers:response.headers});
     }
-    // Fail closed with a truthful service-unavailable response when a write
-    // needs the persistent rate limiter but D1 is not bound.
-    if (isMutatingMethod(preflightMethod) && !env?.DB) {
-      return json({ok:false,error:'DATABASE_UNAVAILABLE',database:false,version:VERSION},503);
-    }
-    const rate=await productionRateLimit(request,env);
-    if(!rate.ok) return rate.response;
     const u=new URL(request.url);
     if(u.pathname==='/api/system/final-audit' && request.method==='GET') return strictProductionAudit(request,env);
     if(u.pathname==='/api/system/production-check' && request.method==='GET') return strictProductionAudit(request,env);
