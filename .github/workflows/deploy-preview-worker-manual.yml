@@ -88,7 +88,8 @@ jobs:
             tests/preview-e2e-workflow.test.mjs \
             tests/rate-limit-atomicity.test.mjs \
             tests/quality-event-authorization.test.mjs \
-            tests/operational-case-human-approval.test.mjs
+            tests/operational-case-human-approval.test.mjs \
+            tests/complaint-object-authorization.test.mjs
       - name: Test D1 backup restore preparation logic
         run: python3 -m unittest tests/test_prepare_d1_restore.py
       - name: Validate Wrangler bundle without deployment

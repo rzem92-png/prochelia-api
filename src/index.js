@@ -1854,13 +1854,56 @@ async function financeSummary(request, env) {
 }
 
 async function complaintCreate(request, env) {
-  const gate=await requireAuthRole(request,env,['gerante','client','entreprise']); if(gate.error)return gate.error;
-  const b=await readJson(request)||{};if(!b.category)return json({ok:false,error:'CATEGORY_REQUIRED',version:VERSION},400);
-  const id=crypto.randomUUID();await env.DB.prepare(`INSERT INTO complaints(id,client_type,client_id,company_id,mission_id,category,severity,description) VALUES(?,?,?,?,?,?,?,?)`).bind(id,String(b.client_type||'B2C'),b.client_id||null,b.company_id||null,b.mission_id||null,b.category,String(b.severity||'LOW'),b.description||null).run();
-  const caseType=SIMPLE_CASES.has(b.category)?b.category:'reclamation_client';
-  const fakeReq=new Request(request.url,{method:'POST',headers:request.headers,body:JSON.stringify({case_type:caseType,client_id:b.client_id,company_id:b.company_id,mission_id:b.mission_id,description:b.description,impact_level:b.severity||'LOW',context:{complaint_id:id}})});
-  const caseResponse=await createOperationalCase(fakeReq,env);const caseJson=await caseResponse.json();
-  if(caseJson.case_id)await env.DB.prepare('UPDATE complaints SET resolution_case_id=? WHERE id=?').bind(caseJson.case_id,id).run();
+  const gate=await requireAuthRole(request,env,['gerante','client']);
+  if(gate.error)return gate.error;
+  const b=await readJson(request)||{};
+  const category=typeof b.category==='string'?b.category.trim():'';
+  const description=typeof b.description==='string'?b.description.trim():'';
+  if(!category || category.length>80 || !/^[a-z0-9_-]+$/i.test(category)) return json({ok:false,error:'INVALID_CATEGORY',version:VERSION},400);
+  if(description.length>2000) return json({ok:false,error:'DESCRIPTION_TOO_LONG',version:VERSION},400);
+
+  const missionId=clean(b.mission_id);
+  let clientId=null;
+  if(missionId) {
+    const mission=await env.DB.prepare(`
+      SELECT m.id AS mission_id,c.id AS client_id,c.user_id AS client_user_id
+        FROM missions m
+        JOIN clients c ON c.id=m.client_id
+       WHERE m.id=?
+       LIMIT 1
+    `).bind(missionId).first();
+    if(!mission) return json({ok:false,error:'MISSION_NOT_FOUND',version:VERSION},404);
+    if(gate.auth.user.role==='client' && mission.client_user_id!==gate.auth.user.id) {
+      return json({ok:false,error:'MISSION_NOT_FOUND',version:VERSION},404);
+    }
+    clientId=mission.client_id;
+  } else if(gate.auth.user.role==='client') {
+    const client=await env.DB.prepare('SELECT id FROM clients WHERE user_id=? LIMIT 1').bind(gate.auth.user.id).first();
+    if(!client) return json({ok:false,error:'CLIENT_PROFILE_NOT_FOUND',version:VERSION},404);
+    clientId=client.id;
+  } else if(b.client_id) {
+    const client=await env.DB.prepare('SELECT id FROM clients WHERE id=? LIMIT 1').bind(clean(b.client_id)).first();
+    if(!client) return json({ok:false,error:'CLIENT_NOT_FOUND',version:VERSION},404);
+    clientId=client.id;
+  }
+
+  const allowedSeverities=new Set(['LOW','MEDIUM','HIGH','CRITICAL']);
+  const requestedSeverity=String(b.severity||'LOW').toUpperCase();
+  if(gate.auth.user.role==='gerante' && !allowedSeverities.has(requestedSeverity)) return json({ok:false,error:'INVALID_SEVERITY',version:VERSION},400);
+  const severity=gate.auth.user.role==='gerante'?requestedSeverity:'LOW';
+  const id=crypto.randomUUID();
+  await env.DB.prepare(`INSERT INTO complaints(id,client_type,client_id,company_id,mission_id,category,severity,description)
+    VALUES(?,?,?,?,?,?,?,?)`)
+    .bind(id,'B2C',clientId,null,missionId||null,category,severity,description||null).run();
+
+  const caseType=SIMPLE_CASES.has(category)?category:'reclamation_client';
+  const fakeReq=new Request(request.url,{method:'POST',headers:request.headers,body:JSON.stringify({
+    case_type:caseType,mission_id:missionId||null,description,
+    impact_level:severity,context:{summary:category,details:description}
+  })});
+  const caseResponse=await createOperationalCase(fakeReq,env);
+  const caseJson=await caseResponse.json();
+  if(caseJson.case_id) await env.DB.prepare('UPDATE complaints SET resolution_case_id=? WHERE id=?').bind(caseJson.case_id,id).run();
   return json({ok:true,version:VERSION,complaint_id:id,resolution_case_id:caseJson.case_id||null,copilot:caseJson.recommendation||null},201);
 }
 
