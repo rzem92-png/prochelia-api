@@ -6,6 +6,7 @@
 // =====================================================
 
 import { procheliaV7 } from "./v7.js";
+import { calculateSupraQuote } from "./supra-finance.js";
 
 export async function handleV7Route(
   request,
@@ -18,6 +19,25 @@ export async function handleV7Route(
 
     const method =
       request.method.toUpperCase();
+
+    // SUPRA quote preview: authenticated manager only, read-only, no ledger/payment side effects.
+    if (path === "/api/v7/finance/quote-preview" && method === "POST") {
+      if (!auth?.user) {
+        return Response.json({ ok: false, error: "UNAUTHENTICATED" }, { status: 401 });
+      }
+      if (auth.user.role !== "gerante") {
+        return Response.json({ ok: false, error: "FORBIDDEN" }, { status: 403 });
+      }
+      let body;
+      try { body = await request.json(); }
+      catch { return Response.json({ ok: false, error: "INVALID_JSON" }, { status: 400 }); }
+      try {
+        const quote = calculateSupraQuote(body);
+        return Response.json({ ok: true, version: procheliaV7.version, quote });
+      } catch (error) {
+        return Response.json({ ok: false, error: error?.message || "INVALID_QUOTE_INPUT" }, { status: 400 });
+      }
+    }
 
 
     // =================================================
