@@ -16,6 +16,8 @@ test("Preview deploy pins isolated Worker and Preview D1, never production", () 
   assert.match(workflow, /04f52830-ef5a-4f17-a640-42bbc2381bba/);
   assert.match(workflow, /preview\.name === production\.name/);
   assert.match(workflow, /keep_vars:\s*true/);
+  assert.match(workflow, /binding:\s*'BACKUP_BUCKET'/);
+  assert.match(workflow, /bucket_name:\s*'prochelia-preview-backups-eu'/);
 });
 
 test("Preview deploy runs the complete security suite and dry-run before the only deployment command", () => {
