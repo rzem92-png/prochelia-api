@@ -1743,43 +1743,113 @@ function financeStrategicQuote({basePriceCents=0,phaseFactor=1,urgency='normal',
   };
 }
 
+export function resolvePricingAuthority({role,body={},policy=null,projectPhase='TEST',settings={}}={}) {
+  const isManager=role==='gerante';
+  const clientType=isManager
+    ? String(body.client_type||'B2C').toUpperCase()
+    : (role==='entreprise'?'B2B':'B2C');
+  if (!['B2C','B2B'].includes(clientType)) return {error:'CLIENT_TYPE_INVALID'};
+  const phase=String(projectPhase||'TEST').toUpperCase();
+  const base=Number(body.base_price_cents);
+  if (!Number.isSafeInteger(base) || base<=0) return {error:'BASE_PRICE_INVALID'};
+  if (!isManager) {
+    const min=Number(policy?.market_min_cents);
+    const max=Number(policy?.market_max_cents);
+    if (!policy || !Number.isSafeInteger(min) || !Number.isSafeInteger(max) || min<=0 || max<min) {
+      return {error:'PRICING_POLICY_REQUIRED'};
+    }
+    if (base<min || base>max) return {error:'PRICE_OUTSIDE_POLICY'};
+  }
+  const numberOr=(value,fallback)=>Number.isFinite(Number(value))?Number(value):fallback;
+  const policyNumber=(key,fallback)=>policy && policy[key]!=null ? numberOr(policy[key],fallback) : fallback;
+  const fuelMode=String(body.fuel_mode||'normal').toLowerCase()==='high'?'high':'normal';
+  const rawDistance=body.distance_km==null?0:Number(body.distance_km);
+  const rawDuration=body.duration_minutes==null?60:Number(body.duration_minutes);
+  if (!Number.isFinite(rawDistance) || !Number.isSafeInteger(rawDuration) || rawDuration<1 || rawDuration>1440 || rawDistance<0 || rawDistance>500) {
+    return {error:'QUOTE_INPUT_OUT_OF_RANGE'};
+  }
+  const inputs={
+    phase,clientType,base,
+    distance:rawDistance,
+    duration:rawDuration,
+    fuelMode,
+    fuelPriceCentsPerLitre:numberOr(
+      settings[fuelMode==='high'?'fuel_reference_price_cents_litre_high':'fuel_reference_price_cents_litre_normal'],
+      fuelMode==='high'?200:175
+    ),
+    fuelRateLegacy:numberOr(settings.fuel_cost_per_km_cents,20),
+    software:isManager && body.software_cost_cents!=null
+      ? numberOr(body.software_cost_cents,0)
+      : policyNumber('software_cost_cents',numberOr(settings.software_monthly_cost_cents,0)),
+    pspPercent:isManager && body.psp_percent!=null
+      ? numberOr(body.psp_percent,0)
+      : policyNumber('psp_percent',0),
+    pspFixed:isManager && body.psp_fixed_cents!=null
+      ? numberOr(body.psp_fixed_cents,0)
+      : policyNumber('psp_fixed_cents',0),
+    targetMargin:isManager && body.target_margin_percent!=null
+      ? numberOr(body.target_margin_percent,12)
+      : policyNumber('target_margin_percent',numberOr(settings.default_margin_percent,12)),
+    commissionRate:isManager && body.platform_fee_percent!=null
+      ? numberOr(body.platform_fee_percent,20)/100
+      : policyNumber('platform_fee_percent',20)/100,
+    intervenantFloor:isManager && body.intervenant_floor_cents!=null
+      ? numberOr(body.intervenant_floor_cents,0)
+      : policyNumber('intervenant_floor_cents',Math.round(base*0.70)),
+    regulatedMax:isManager && body.regulated_max_cents!=null
+      ? numberOr(body.regulated_max_cents,0)
+      : (Number(policy?.client_ceiling_cents)>0?Number(policy.client_ceiling_cents):null),
+    discountCents:isManager?numberOr(body.discount_cents,0):0,
+    urgency:body.urgency||'normal',
+    evening:Boolean(body.evening),night:Boolean(body.night),saturday:Boolean(body.saturday),
+    sunday:Boolean(body.sunday),holiday:Boolean(body.holiday),
+    lastMinute:Boolean(body.last_minute||body.lastMinute)
+  };
+  if (inputs.distance<0 || inputs.distance>500 || inputs.duration<1 || inputs.duration>1440) {
+    return {error:'QUOTE_INPUT_OUT_OF_RANGE'};
+  }
+  for (const key of ['software','pspPercent','pspFixed','targetMargin','commissionRate','intervenantFloor','discountCents']) {
+    if (!Number.isFinite(inputs[key]) || inputs[key]<0) return {error:'FINANCIAL_INPUT_INVALID'};
+  }
+  if (inputs.pspPercent>100 || inputs.targetMargin>100 || inputs.commissionRate>1) return {error:'FINANCIAL_INPUT_OUT_OF_RANGE'};
+  return {inputs};
+}
+
 async function pricingQuote(request, env) {
   const gate=await requireAuthRole(request,env,['gerante','client','entreprise','intervenant']); if(gate.error)return gate.error;
   const b=await readJson(request)||{};
-  const phase=String(b.phase||await getSetting(env,'project_phase','TEST')).toUpperCase();
-  const cfg=PROJECT_PHASES[phase]||PROJECT_PHASES.TEST;
-  const distance=Number(b.distance_km||0);const duration=Number(b.duration_minutes||60);
-  const base=Number(b.base_price_cents||0);
-  const clientType=String(b.client_type||'B2C').toUpperCase();
+  const configuredPhase=String(await getSetting(env,'project_phase','TEST')).toUpperCase();
   const serviceCode=clean(b.service_code)||null;
-
   let policy=null;
   try {
     policy=await env.DB.prepare(`SELECT * FROM pricing_policies WHERE active=1 AND phase=? AND client_type=? AND (service_code=? OR service_code IS NULL) ORDER BY CASE WHEN service_code=? THEN 0 ELSE 1 END LIMIT 1`)
-      .bind(phase,clientType,serviceCode,serviceCode).first();
+      .bind(configuredPhase,gate.auth.user.role==='entreprise'?'B2B':String(gate.auth.user.role==='gerante'?b.client_type||'B2C':'B2C').toUpperCase(),serviceCode,serviceCode).first();
   } catch (_) {}
-
-  const fuelMode=String(b.fuel_mode||'normal').toLowerCase()==='high'?'high':'normal';
-  const fuelRateLegacy=Number(b.fuel_cost_per_km_cents??await getSetting(env,'fuel_cost_per_km_cents',20));
-  const fuelPriceCentsPerLitre=Number(b.fuel_price_cents_per_litre??await getSetting(env,fuelMode==='high'?'fuel_reference_price_cents_litre_high':'fuel_reference_price_cents_litre_normal',fuelMode==='high'?200:175));
-  const software=Number(b.software_cost_cents||await getSetting(env,'software_monthly_cost_cents',0));
-  const pspPercent=Number(b.psp_percent||0);const pspFixed=Number(b.psp_fixed_cents||0);
-  const targetMargin=Number(b.target_margin_percent??policy?.target_margin_percent??await getSetting(env,'default_margin_percent',FINANCE_STRATEGIC.marginFloorPercent));
-  const commissionRate=Number(b.platform_fee_percent!=null?b.platform_fee_percent/100:(policy?.platform_fee_percent!=null?policy.platform_fee_percent/100:FINANCE_STRATEGIC.commissionDefaultPercent/100));
-  const intervenantFloor=Math.max(0,Math.round(Number(b.intervenant_floor_cents??policy?.intervenant_floor_cents??(base*0.70))));
-  const regulatedMax=b.regulated_max_cents!=null?Number(b.regulated_max_cents):(policy?.client_ceiling_cents>0?Number(policy.client_ceiling_cents):null);
+  const settings={
+    fuel_cost_per_km_cents:await getSetting(env,'fuel_cost_per_km_cents',20),
+    fuel_reference_price_cents_litre_normal:await getSetting(env,'fuel_reference_price_cents_litre_normal',175),
+    fuel_reference_price_cents_litre_high:await getSetting(env,'fuel_reference_price_cents_litre_high',200),
+    software_monthly_cost_cents:await getSetting(env,'software_monthly_cost_cents',0),
+    default_margin_percent:await getSetting(env,'default_margin_percent',FINANCE_STRATEGIC.marginFloorPercent)
+  };
+  const resolved=resolvePricingAuthority({role:gate.auth.user.role,body:b,policy,projectPhase:configuredPhase,settings});
+  if(resolved.error) {
+    const status=resolved.error==='PRICING_POLICY_REQUIRED'?503:400;
+    return json({ok:false,error:resolved.error,version:VERSION,quote_available:false},status);
+  }
+  const x=resolved.inputs;
+  const cfg=PROJECT_PHASES[x.phase]||PROJECT_PHASES.TEST;
   const strategic=financeStrategicQuote({
-    basePriceCents:base,
-    phaseFactor:cfg.pricingFactor,
-    urgency:b.urgency||'normal',
-    evening:Boolean(b.evening),night:Boolean(b.night),saturday:Boolean(b.saturday),sunday:Boolean(b.sunday),holiday:Boolean(b.holiday),lastMinute:Boolean(b.last_minute||b.lastMinute),
-    distanceKm:distance,fuelMode,fuelPriceCentsPerLitre,commissionRate,discountCents:Number(b.discount_cents||0),regulatedMaxCents:regulatedMax,
-    intervenantFloorCents:intervenantFloor,pspPercent,pspFixedCents:pspFixed,softwareCostCents:software,targetMarginPercent:targetMargin
+    basePriceCents:x.base,phaseFactor:cfg.pricingFactor,urgency:x.urgency,
+    evening:x.evening,night:x.night,saturday:x.saturday,sunday:x.sunday,holiday:x.holiday,lastMinute:x.lastMinute,
+    distanceKm:x.distance,fuelMode:x.fuelMode,fuelPriceCentsPerLitre:x.fuelPriceCentsPerLitre,
+    commissionRate:x.commissionRate,discountCents:x.discountCents,regulatedMaxCents:x.regulatedMax,
+    intervenantFloorCents:x.intervenantFloor,pspPercent:x.pspPercent,pspFixedCents:x.pspFixed,
+    softwareCostCents:x.software,targetMarginPercent:x.targetMargin
   });
-  /* Compatibilité avec l'ancien contrat : fuel_cost_cents reste disponible. */
-  const legacyFuel=Math.max(0,Math.round(distance*fuelRateLegacy));
+  const legacyFuel=Math.max(0,Math.round(x.distance*x.fuelRateLegacy));
   const quote={
-    phase,clientType,distance,duration,
+    phase:x.phase,clientType:x.clientType,distance:x.distance,duration:x.duration,
     client_price_cents:strategic.client_price_cents,
     intervenant_amount_cents:strategic.intervenant_amount_cents,
     platform_commission_cents:strategic.commission_cents,
@@ -1788,10 +1858,10 @@ async function pricingQuote(request, env) {
     fuel_cost_cents:strategic.travel.total_cost_cents,
     estimated_margin_cents:strategic.estimated_margin_cents,
     strategic_finance:strategic,
-    assumptions:{market_position:'strategic',fuel_included:true,fuel_mode:fuelMode,fuel_reference_price_cents_per_litre:fuelPriceCentsPerLitre,legacy_fuel_cost_per_km_cents:legacyFuel,software_included:true,target_margin_percent:targetMargin,commission_rate_percent:commissionRate*100,b2b_rule:'company_pays_intervenant_platform_bills_commission',single_finance_engine:true}
+    assumptions:{market_position:'strategic',fuel_included:true,fuel_mode:x.fuelMode,fuel_reference_price_cents_per_litre:x.fuelPriceCentsPerLitre,legacy_fuel_cost_per_km_cents:legacyFuel,software_included:true,target_margin_percent:x.targetMargin,commission_rate_percent:x.commissionRate*100,b2b_rule:'company_pays_intervenant_platform_bills_commission',single_finance_engine:true,server_authoritative_policy:true}
   };
   await env.DB.prepare(`INSERT INTO pricing_quotes(id,phase,client_type,service_code,distance_km,duration_minutes,client_price_cents,intervenant_amount_cents,platform_commission_cents,psp_cost_cents,software_cost_cents,fuel_cost_cents,estimated_margin_cents,assumptions_json) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
-    .bind(crypto.randomUUID(),phase,clientType,serviceCode,distance,duration,quote.client_price_cents,quote.intervenant_amount_cents,quote.platform_commission_cents,quote.psp_cost_cents,quote.software_cost_cents,quote.fuel_cost_cents,quote.estimated_margin_cents,JSON.stringify(quote.assumptions)).run();
+    .bind(crypto.randomUUID(),x.phase,x.clientType,serviceCode,x.distance,x.duration,quote.client_price_cents,quote.intervenant_amount_cents,quote.platform_commission_cents,quote.psp_cost_cents,quote.software_cost_cents,quote.fuel_cost_cents,quote.estimated_margin_cents,JSON.stringify(quote.assumptions)).run();
   return json({ok:true,version:VERSION,quote},200);
 }
 
