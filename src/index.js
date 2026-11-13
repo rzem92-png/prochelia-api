@@ -3719,6 +3719,7 @@ handle = async function(request,env){
     if(u.pathname==='/api/system/production-check' && request.method==='GET') return strictProductionAudit(request,env);
     return __procheliaProductionSafetyHandle(request,env);
   }catch(e){
+    if(env?.TEST_MODE === true) return json({ok:false,error:'PRODUCTION_SAFETY_ERROR',test_error:String(e?.stack || e)},500);
     return json({ok:false,error:'PRODUCTION_SAFETY_ERROR',version:VERSION},500);
   }
 };
