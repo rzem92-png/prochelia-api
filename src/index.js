@@ -1539,12 +1539,13 @@ async function createOperationalCase(request, env) {
   // SUPRA may recommend an action, but case creation never executes it.
   // Every case enters a proposal state and requires an explicit, persisted manager approval.
   const proposedAction=String(rec.action||'REVIEW').toUpperCase();
+  const casePolicy=supraCaseCreationPolicy();
   rec.requested_recommendation=proposedAction;
-  rec.mode='MANAGER_APPROVAL';
+  rec.mode=casePolicy.mode;
   rec.execution_policy='PERSISTED_ACTION_BOUND_APPROVAL_REQUIRED';
   const id=crypto.randomUUID();
-  const requiresManager=1;
-  const status='OPEN';
+  const requiresManager=casePolicy.requiresManager;
+  const status=casePolicy.status;
   await env.DB.prepare(`INSERT INTO operational_cases(id,case_type,source,phase,priority,status,auto_mode,client_id,company_id,intervenant_id,mission_id,impact_level,description,context_json,proposed_solution_json,requires_manager) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
     .bind(id,caseType,'API',phase,priority,status,rec.mode,clientId,companyId,intervenantId,missionId,impact,clean(body.description)||null,JSON.stringify(safeContext),JSON.stringify(rec),requiresManager).run();
   await env.DB.prepare(`INSERT INTO copilot_log(id,case_id,action_type,recommendation,confidence,mode) VALUES(?,?,?,?,?,?)`)
@@ -1647,6 +1648,15 @@ async function processActionOutbox(request, env) {
   }
   await journal(env,'gerante',gate.auth.user.id,'ACTION_OUTBOX_PROCESSED','system',null,'OK',{count:processed.length});
   return json({ok:true,version:VERSION,processed},200);
+}
+
+export function supraCaseCreationPolicy() {
+  return Object.freeze({
+    mode: 'MANAGER_APPROVAL',
+    requiresManager: 1,
+    status: 'OPEN',
+    executeImmediately: false
+  });
 }
 
 export function supraApprovalDigestInput(caseRow) {
