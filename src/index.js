@@ -1666,7 +1666,13 @@ export function supraApprovalDigestInput(caseRow) {
     version: 'SUPRA_CASE_APPROVAL_V1',
     case_id: caseRow.id,
     case_type: String(caseRow.case_type || ''),
+    client_id: caseRow.client_id || null,
+    company_id: caseRow.company_id || null,
+    intervenant_id: caseRow.intervenant_id || null,
     mission_id: caseRow.mission_id || null,
+    impact_level: String(caseRow.impact_level || ''),
+    description: caseRow.description || null,
+    context_json: caseRow.context_json || '{}',
     proposed_solution_json: caseRow.proposed_solution_json
   });
 }
@@ -1701,7 +1707,7 @@ async function executeOperationalCase(env, caseId, approverId=null, automatic=fa
   const approvalProof=approvalId?{approval_id:approvalId,action_digest:await sha256Base64url(supraApprovalDigestInput(c)||''),case_id:caseId}:{};
   const businessResults = await executeCaseBusinessAction(env,c,rec,approverId,automatic,approvalId?approvalProof:null);
   const pendingActions = operationalActionsPending(businessResults);
-  const resolution={executed:!pendingActions,pending:pendingActions,automatic,action:rec.action||'RESOLVE',steps:rec.solution?.steps||[],business_results:businessResults,executed_at:new Date().toISOString()};
+  const resolution={executed:!pendingActions,pending:pendingActions,automatic,action:rec.action||'RESOLVE',approval_id:approvalProof?.approval_id||null,action_digest:approvalProof?.action_digest||null,steps:rec.solution?.steps||[],business_results:businessResults,executed_at:new Date().toISOString()};
   await env.DB.prepare(`INSERT INTO case_actions(id,case_id,action_code,mode,status,payload_json,result_json,completed_at) VALUES(?,?,?,?,?,?,?,?)`)
     .bind(crypto.randomUUID(),caseId,rec.action||'RESOLVE',automatic?'AUTO':'MANAGER',pendingActions?'PENDING':'COMPLETED',JSON.stringify(rec),JSON.stringify(resolution),pendingActions?null:new Date().toISOString()).run();
   await env.DB.prepare(`UPDATE operational_cases SET status=?,resolution_json=?,requires_manager=0,updated_at=CURRENT_TIMESTAMP,resolved_at=? WHERE id=?`)
@@ -1740,9 +1746,11 @@ async function approveOperationalCase(request, env) {
     await env.DB.prepare(`UPDATE supra_action_approvals SET status=?,consumed_at=CASE WHEN ?='CONSUMED' THEN CURRENT_TIMESTAMP ELSE consumed_at END
       WHERE id=? AND status='EXECUTING'`)
       .bind(result.ok?'CONSUMED':'FAILED',result.ok?'CONSUMED':'FAILED',approvalId).run();
+    if(!result.ok) await env.DB.prepare(`UPDATE operational_cases SET status='APPROVAL_FAILED',requires_manager=1,updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='APPROVAL_IN_PROGRESS'`).bind(caseId).run();
     return json({...result,version:VERSION,approval_id:approvalId,approval_status:result.ok?'CONSUMED':'FAILED'},result.ok?200:409);
   } catch (error) {
     await env.DB.prepare(`UPDATE supra_action_approvals SET status='FAILED' WHERE id=? AND status='EXECUTING'`).bind(approvalId).run().catch(()=>null);
+    await env.DB.prepare(`UPDATE operational_cases SET status='APPROVAL_FAILED',requires_manager=1,updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='APPROVAL_IN_PROGRESS'`).bind(caseId).run().catch(()=>null);
     return json({ok:false,error:'CASE_APPROVAL_EXECUTION_FAILED',version:VERSION},503);
   }
 }
