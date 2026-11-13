@@ -90,7 +90,8 @@ jobs:
             tests/quality-event-authorization.test.mjs \
             tests/operational-case-human-approval.test.mjs \
             tests/complaint-object-authorization.test.mjs \
-            tests/payment-mission-ownership.test.mjs
+            tests/payment-mission-ownership.test.mjs \
+            tests/security-code-owner-and-compare.test.mjs
       - name: Test D1 backup restore preparation logic
         run: python3 -m unittest tests/test_prepare_d1_restore.py
       - name: Validate Wrangler bundle without deployment
