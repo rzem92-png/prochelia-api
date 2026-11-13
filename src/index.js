@@ -138,7 +138,15 @@ function getCookie(request, name) {
     const idx = part.indexOf('=');
     if (idx < 0) continue;
     const key = part.slice(0, idx).trim();
-    if (key === name) return decodeURIComponent(part.slice(idx + 1).trim());
+    if (key === name) {
+      // A malformed percent-encoding must be treated as an absent cookie,
+      // never allowed to throw through the request handler.
+      try {
+        return decodeURIComponent(part.slice(idx + 1).trim());
+      } catch {
+        return null;
+      }
+    }
   }
   return null;
 }
