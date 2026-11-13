@@ -43,7 +43,7 @@ export function calculateSupraQuote({
     throw new TypeError("commissionBps_MUST_BE_INTEGER_BETWEEN_0_AND_10000");
   }
   if (typeof currency !== "string" || !/^[A-Z]{3}$/.test(currency)) {
-    throw new TypeError("currency_MUST_BE_ISO_4217_CODE");
+    throw new TypeError("currency_MUST_BE_THREE_LETTER_UPPERCASE_CODE");
   }
 
   const commission = roundHalfUp(gross * BigInt(commissionBps), 10000n);
