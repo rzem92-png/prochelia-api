@@ -3294,7 +3294,7 @@ handle = async function(request,env){
     }
     if(request.method==='POST'&&url.pathname==='/api/system/backup/run'){
       const auth=await getSessionUser(request,env).catch(()=>null); if(!auth?.user||String(auth.user.role||'').toUpperCase()!=='GERANTE') return json({ok:false,error:'FORBIDDEN'},403);
-      return json(await return json({ok:false,error:'BACKUP_PIPELINE_NOT_RESTORE_CAPABLE',backup_enabled:false},503));
+      return json({ok:false,error:'BACKUP_PIPELINE_NOT_RESTORE_CAPABLE',backup_enabled:false},503);
     }
     return __procheliaNationalHandle(request,env);
   }catch(e){return json({ok:false,error:'NATIONAL_CONTINUITY_ERROR',message:String(e.message||e)},500)}
