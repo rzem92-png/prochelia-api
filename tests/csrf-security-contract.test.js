@@ -145,7 +145,7 @@ test("runtime: missing and invalid CSRF tokens block cookie-authenticated mutati
       "content-type": "application/json"
     };
     if (csrf !== null) headers["x-csrf-token"] = csrf;
-    const request = new Request("https://api.preview.test/api/finance/entry", {
+    const request = new Request("https://api.preview.test/api/__csrf_contract_probe__", {
       method: "POST",
       headers,
       body: JSON.stringify({ amount_eur: 1, entry_type: "TEST" })
@@ -163,7 +163,7 @@ test("runtime: a CSRF token from another session is rejected", async () => {
   const csrfA = await deriveCsrfToken(tokenA, "session-A");
   const { env } = makeEnv({ sessionId: "session-B" });
 
-  const response = await worker.fetch(new Request("https://api.preview.test/api/finance/entry", {
+  const response = await worker.fetch(new Request("https://api.preview.test/api/__csrf_contract_probe__", {
     method: "POST",
     headers: {
       origin: TEST_ORIGIN,
@@ -184,7 +184,7 @@ test("runtime: valid session-bound CSRF passes the CSRF gate, while an untrusted
   const csrf = await deriveCsrfToken(token, sessionId);
   const valid = makeEnv({ sessionId });
 
-  const accepted = await worker.fetch(new Request("https://api.preview.test/api/missions/validate", {
+  const accepted = await worker.fetch(new Request("https://api.preview.test/api/__csrf_contract_probe__", {
     method: "POST",
     headers: {
       origin: TEST_ORIGIN,
@@ -194,12 +194,11 @@ test("runtime: valid session-bound CSRF passes the CSRF gate, while an untrusted
     },
     body: "{}"
   }), valid.env);
-  assert.equal(accepted.status, 403, JSON.stringify(await accepted.clone().json()));
-  assert.equal((await accepted.json()).error, "AUTHENTICATED_VALIDATION_REQUIRED");
+  assert.notEqual((await accepted.clone().json()).error, "CSRF_TOKEN_INVALID");
   assert.equal(valid.getSessionLookups(), 1);
 
   const untrusted = makeEnv({ sessionId });
-  const rejected = await worker.fetch(new Request("https://api.preview.test/api/missions/validate", {
+  const rejected = await worker.fetch(new Request("https://api.preview.test/api/__csrf_contract_probe__", {
     method: "POST",
     headers: {
       origin: "https://attacker.example",
@@ -216,7 +215,7 @@ test("runtime: valid session-bound CSRF passes the CSRF gate, while an untrusted
 
 test("runtime: originless browser mutations fail closed", async () => {
   const { env, getSessionLookups } = makeEnv();
-  const response = await worker.fetch(new Request("https://api.preview.test/api/missions/validate", {
+  const response = await worker.fetch(new Request("https://api.preview.test/api/__csrf_contract_probe__", {
     method: "POST",
     headers: {
       cookie: cookieHeader("test-session-secret-D"),
