@@ -27,7 +27,7 @@ test("GET production audit handlers do not journal or insert check records", () 
   assert.match(body, /GET audit endpoint is intentionally read-only/);
 
   const strictStart = source.indexOf("async function strictProductionAudit");
-  const strictEnd = source.indexOf("\nasync function ", strictStart + 1);
+  const strictEnd = source.indexOf("\nconst __procheliaProductionSafetyHandle", strictStart);
   assert.notEqual(strictStart, -1);
   assert.notEqual(strictEnd, -1);
   const strictBody = source.slice(strictStart, strictEnd);
