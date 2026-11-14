@@ -62,3 +62,8 @@ test("pricing catalog phase constraint matches the server phase model", async ()
   for (const phase of expected) assert.match(migration, new RegExp("'" + phase + "'"));
   assert.doesNotMatch(migration, /'PILOT'|'PRODUCTION'/);
 });
+
+
+test("quotes fail closed when no active server pricing policy exists", () => {
+  assert.match(body, /if \(!policy\) return json\(\{ok:false,error:'PRICING_POLICY_NOT_CONFIGURED'\},503\)/);
+});
