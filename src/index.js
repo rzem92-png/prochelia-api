@@ -2600,7 +2600,22 @@ async function productionConfigCheck(env, { persist = false } = {}) {
     await registerIntegration(env,'MAPS','LOCATION',['MAPS_PROVIDER','MAPS_API_KEY'],['distance','geocoding','routing'],finalSecretConfigured(env,'MAPS_API_KEY')?'CONFIGURED':'NOT_CONFIGURED');
     await registerIntegration(env,'MARKET_DATA','COMMERCIAL',['MARKET_DATA_PROVIDER'],['market_prices','competitor_signals'],finalSecretConfigured(env,'MARKET_DATA_PROVIDER')?'CONFIGURED':'NOT_CONFIGURED');
   }
-  const blocking=checks.filter(x=>['MISSING','INCOMPLETE'].includes(x.status));
+  // Configuration presence is not proof of production readiness. These release
+  // evidence items must be validated independently before real traffic is allowed.
+  // Keep this gate closed until a reviewed release-evidence workflow can attest
+  // each item; environment variables and table existence cannot self-certify it.
+  const requiredReleaseEvidence = [
+    'EXECUTABLE_PSP_ADAPTER_AND_SANDBOX_E2E',
+    'ATOMIC_FINANCIAL_SETTLEMENT_AND_RECONCILIATION',
+    'PREVIEW_R2_BACKUP_AND_ISOLATED_RESTORE_DRILL',
+    'PRODUCTION_D1_SCHEMA_RECONCILIATION',
+    'TENANT_SECURITY_AND_GDPR_ACCEPTANCE',
+    'PRODUCTION_ROLLBACK_AND_HUMAN_RELEASE_APPROVAL'
+  ];
+  for (const code of requiredReleaseEvidence) {
+    checks.push({code:`RELEASE_EVIDENCE:${code}`,status:'NOT_VALIDATED'});
+  }
+  const blocking=checks.filter(x=>['MISSING','INCOMPLETE','NOT_VALIDATED'].includes(x.status));
   const externalNotConfigured=checks.filter(x=>x.status==='NOT_CONFIGURED' && ['SECRET:PAYMENT_PROVIDER','SECRET:PAYMENT_WEBHOOK_SECRET'].includes(x.code));
   const overall=blocking.length===0 && externalNotConfigured.length===0;
   if (persist) for(const c of checks) await env.DB.prepare(`INSERT INTO system_config_checks(id,check_code,status,details_json) VALUES(?,?,?,?)`).bind(crypto.randomUUID(),c.code,c.status,JSON.stringify(c)).run();
