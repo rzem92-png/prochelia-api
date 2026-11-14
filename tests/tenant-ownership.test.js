@@ -133,3 +133,18 @@ test("manager cannot attach an unverified company identifier to an operational c
   assert.equal(result.error,"COMPANY_OWNERSHIP_NOT_CONFIGURED");
   assert.equal(DB.calls.length,0);
 });
+
+test("operational case, Copilot log and audit journal are committed in one D1 batch", async () => {
+  const { readFile } = await import("node:fs/promises");
+  const source = await readFile(new URL("../src/index.js", import.meta.url), "utf8");
+  const start = source.indexOf("async function createOperationalCase");
+  const end = source.indexOf("async function getTableColumns", start);
+  const body = source.slice(start, end);
+  assert.notEqual(start, -1);
+  assert.notEqual(end, -1);
+  assert.match(body, /await env\.DB\.batch\(\[/);
+  assert.match(body, /INSERT INTO operational_cases/);
+  assert.match(body, /INSERT INTO copilot_log/);
+  assert.match(body, /INSERT INTO activity_journal/);
+  assert.doesNotMatch(body, /await journal\(env,'copilot'/);
+});
