@@ -17,7 +17,7 @@ test("SUPRA never directly mutates mission assignment or schedule from case cont
 });
 
 test("cases with pending outbox actions remain pending rather than falsely resolved", () => {
-  assert.match(execute, /const pendingActions = businessResults\\.some/);
+  assert.match(execute, /const pendingActions = businessResults\\.some\\(item => item\\.status !== 'COMPLETED'\\)/);
   assert.match(execute, /pendingActions \\? 'WAITING_PROVIDER' : 'RESOLVED'/);
   assert.match(execute, /pendingActions\\?'PENDING':'COMPLETED'/);
   assert.match(execute, /pendingActions\\?null:new Date\\(\\)\\.toISOString\\(\\)/);
