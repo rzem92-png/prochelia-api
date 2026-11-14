@@ -47,3 +47,22 @@ test("production readiness remains closed until every independent release eviden
   assert.match(body, /NOT_VALIDATED/);
   assert.match(body, /NOT_VALIDATED.*includes|includes.*NOT_VALIDATED/s);
 });
+
+
+test("configuration audit can never authorize real production traffic by itself", () => {
+  const start = source.indexOf("async function finalProductionAudit");
+  const end = source.indexOf("\nasync function copilotNextActions", start);
+  assert.notEqual(start, -1);
+  assert.notEqual(end, -1);
+  const body = source.slice(start, end);
+  assert.match(body, /production_gate:'CLOSED'/);
+  assert.match(body, /ready_for_real_traffic:false/);
+  for (const blocker of [
+    "ISOLATED_RESTORE_DRILL",
+    "PSP_SANDBOX_E2E",
+    "INDEPENDENT_SECURITY_REVIEW",
+    "GDPR_LEGAL_APPROVAL",
+    "LOAD_AND_RECOVERY_TESTS",
+    "HUMAN_RELEASE_APPROVAL"
+  ]) assert.ok(body.includes(blocker), `Missing release blocker: ${blocker}`);
+});
