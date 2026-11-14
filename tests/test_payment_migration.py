@@ -3,7 +3,7 @@ import sqlite3
 import unittest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-MIGRATION = ROOT / "migrations" / "0005_payment_runtime_schema.sql"
+MIGRATION = ROOT / "migrations" / "0005_payment_runtime_schema.sql"\nHARDENING_MIGRATION = ROOT / "migrations" / "0009_final_hardening_schema.sql"
 
 class PaymentMigrationTests(unittest.TestCase):
     def setUp(self):
@@ -44,6 +44,28 @@ class PaymentMigrationTests(unittest.TestCase):
         self.db.execute("INSERT INTO payment_webhook_events(id,provider,event_id,event_type) VALUES('w1','provider','evt1','payment')")
         with self.assertRaises(sqlite3.IntegrityError):
             self.db.execute("INSERT INTO payment_webhook_events(id,provider,event_id,event_type) VALUES('w2','provider','evt1','payment')")
+
+    def test_hardening_migration_runs_and_is_idempotent(self):
+        sql = HARDENING_MIGRATION.read_text(encoding="utf-8")
+        self.db.executescript(sql)
+        self.db.executescript(sql)
+        objects = {row[0] for row in self.db.execute(
+            "SELECT name FROM sqlite_master WHERE type IN ('table','index')"
+        )}
+        expected = {
+            "system_config_checks", "idx_system_config_checks_code",
+            "idempotency_records", "background_jobs", "idx_background_jobs_ready",
+            "security_rate_limits", "integration_registry",
+            "production_security_events", "idx_prod_sec_events_date",
+        }
+        self.assertTrue(expected.issubset(objects))
+
+    def test_hardening_migration_has_no_destructive_sql(self):
+        import re
+        sql = re.sub(r"--[^\\n]*", "", HARDENING_MIGRATION.read_text(encoding="utf-8")).upper()
+        for forbidden in (r"\\bDROP\\s+TABLE\\b", r"\\bDROP\\s+INDEX\\b",
+                          r"\\bDELETE\\s+FROM\\b", r"^\\s*UPDATE\\s+"):
+            self.assertIsNone(re.search(forbidden, sql, flags=re.MULTILINE))
 
 if __name__ == "__main__":
     unittest.main()
