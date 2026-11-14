@@ -839,8 +839,11 @@ function paymentProvider(env) {
   return clean(env.PAYMENT_PROVIDER) || 'psp_adapter';
 }
 
-function paymentsConfigured(env) {
-  return !!env.PAYMENT_WEBHOOK_SECRET && !!env.PAYMENT_PROVIDER;
+export function paymentsConfigured(_env) {
+  // A provider name and webhook secret do not implement charge, refund or payout
+  // operations. Keep the capability disabled until a real adapter is wired
+  // into the transaction and payout flows and covered by end-to-end tests.
+  return false;
 }
 
 async function paymentOnboard(request, env) {
