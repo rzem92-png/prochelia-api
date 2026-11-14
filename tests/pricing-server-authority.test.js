@@ -11,6 +11,7 @@ test("pricing phase and customer segment are server-derived", () => {
   assert.notEqual(start, -1);
   assert.notEqual(end, -1);
   assert.match(body, /getSetting\(env,'project_phase','TEST'\)/);
+  assert.match(body, /if \(!cfg\) return json\(\{ok:false,error:'PRICING_PHASE_NOT_CONFIGURED'\},503\)/);
   assert.match(body, /actorRole==='ENTREPRISE'\?'B2B':'B2C'/);
   assert.doesNotMatch(body, /b\.phase\s*\|\|/);
   assert.match(body, /\['GERANTE','ADMIN','FINANCE'\]\.includes\(actorRole\)/);
