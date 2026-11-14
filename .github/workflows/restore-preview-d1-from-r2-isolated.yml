@@ -18,7 +18,8 @@ concurrency:
 
 jobs:
   restore-isolated:
-    if: ${{ inputs.confirm_restore == 'RESTORE_R2_TO_ISOLATED_D1' }}
+    # Gate the entire job before any runner receives Cloudflare/R2 secrets.
+    if: ${{ inputs.confirm_restore == 'RESTORE_R2_TO_ISOLATED_D1' && github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-latest
     timeout-minutes: 35
     env:
