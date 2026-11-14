@@ -21,6 +21,7 @@ test("cases without a concrete handler or with pending outbox actions are never 
   assert.match(execute, /const pendingActions = noHandler/);
   assert.match(execute, /WAITING_HANDLER/);
   assert.match(execute, /WAITING_PROVIDER/);
+  assert.match(execute, /pendingActions \\? 'CASE_ACTIONS_PENDING'/);
   assert.match(execute, /pendingActions\?'PENDING':'COMPLETED'/);
   assert.match(execute, /pendingActions\?null:new Date\(\)\.toISOString\(\)/);
 });
