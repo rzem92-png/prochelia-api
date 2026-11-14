@@ -32,7 +32,7 @@ test("restore authenticates the pinned backup, checks the empty target before im
   assert.match(workflow, /\[31\]/);
   assert.match(workflow, /\[7\]/);
   const restoreStart = workflow.indexOf("Restaurer exclusivement dans la D1 isolée");
-  const restoreEnd = workflow.indexOf("\\n      - name:", restoreStart + 10);
+  const restoreEnd = workflow.indexOf("\n      - name:", restoreStart + 10);
   const restoreStep = workflow.slice(restoreStart, restoreEnd);
   assert.doesNotMatch(workflow, /wrangler deploy|d1 migrations apply/);
   assert.doesNotMatch(restoreStep, /04f52830-ef5a-4f17-a640-42bbc2381bba/);
