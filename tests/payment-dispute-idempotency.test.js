@@ -4,7 +4,7 @@ import { readFile } from "node:fs/promises";
 
 const source = await readFile(new URL("../src/index.js", import.meta.url), "utf8");
 const start = source.indexOf("async function openPaymentDispute");
-const end = source.indexOf("\\nasync function paymentAdminResolve", start);
+const end = source.indexOf("\nasync function paymentAdminResolve", start);
 const body = source.slice(start, end);
 
 test("dispute creation is guarded against a second open dispute for the same transaction", () => {
