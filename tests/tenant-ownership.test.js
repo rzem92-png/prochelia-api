@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { resolveTenantReferences } from "../src/index.js";
 
-function mockDb({ clientId="client-A", intervenantId="provider-A", missionClient="client-A", missionIntervenant="provider-A" }={}) {
+function mockDb({ clientId="client-A", intervenantId="provider-A", missionClient="client-A", missionIntervenant="provider-A", extraClients=[], extraIntervenants=[] }={}) {
   const calls=[];
   return {
     calls,
@@ -14,8 +14,8 @@ function mockDb({ clientId="client-A", intervenantId="provider-A", missionClient
               calls.push({sql,values});
               if (sql.includes("FROM clients WHERE user_id")) return clientId ? {id:clientId} : null;
               if (sql.includes("FROM intervenants WHERE user_id")) return intervenantId ? {id:intervenantId} : null;
-              if (sql.includes("FROM clients WHERE id=")) return values[0]===clientId ? {id:clientId} : null;
-              if (sql.includes("FROM intervenants WHERE id=")) return values[0]===intervenantId ? {id:intervenantId} : null;
+              if (sql.includes("FROM clients WHERE id=")) return [clientId,...extraClients].includes(values[0]) ? {id:values[0]} : null;
+              if (sql.includes("FROM intervenants WHERE id=")) return [intervenantId,...extraIntervenants].includes(values[0]) ? {id:values[0]} : null;
               if (sql.includes("FROM missions WHERE id=? AND client_id=?")) return values[1]===missionClient ? {id:values[0]} : null;
               if (sql.includes("FROM missions WHERE id=? AND intervenant_id=?")) return values[1]===missionIntervenant ? {id:values[0]} : null;
               if (sql.includes("FROM missions WHERE id=?")) {
@@ -67,12 +67,12 @@ test("intervenant tenant is derived from the authenticated user and mission assi
 
 test("manager cannot pair a mission with a different client or intervenant", async () => {
   const DB=mockDb();
-  const badClient=await resolveTenantReferences({DB},{user:{id:"manager",role:"gerante"}},{mission_id:"mission-A",client_id:"client-B"});
-  assert.equal(badClient.error,"CLIENT_NOT_FOUND");
-  const badProvider=await resolveTenantReferences({DB},{user:{id:"manager",role:"gerante"}},{mission_id:"mission-A",intervenant_id:"provider-B"});
-  assert.equal(badProvider.error,"INTERVENANT_NOT_FOUND");
-  const mismatch=await resolveTenantReferences({DB},{user:{id:"manager",role:"gerante"}},{mission_id:"mission-A",client_id:"client-A",intervenant_id:"provider-A"});
-  assert.deepEqual(mismatch.references,{client_id:"client-A",company_id:null,intervenant_id:"provider-A",mission_id:"mission-A"});
+  const badClient=await resolveTenantReferences({DB:mockDb({extraClients:["client-B"]})},{user:{id:"manager",role:"gerante"}},{mission_id:"mission-A",client_id:"client-B"});
+  assert.equal(badClient.error,"MISSION_CLIENT_MISMATCH");
+  const badProvider=await resolveTenantReferences({DB:mockDb({extraIntervenants:["provider-B"]})},{user:{id:"manager",role:"gerante"}},{mission_id:"mission-A",intervenant_id:"provider-B"});
+  assert.equal(badProvider.error,"MISSION_INTERVENANT_MISMATCH");
+  const valid=await resolveTenantReferences({DB},{user:{id:"manager",role:"gerante"}},{mission_id:"mission-A",client_id:"client-A",intervenant_id:"provider-A"});
+  assert.deepEqual(valid.references,{client_id:"client-A",company_id:null,intervenant_id:"provider-A",mission_id:"mission-A"});
 });
 
 test("enterprise role fails closed until a verified company-user mapping exists", async () => {
