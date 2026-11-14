@@ -4,7 +4,7 @@ import { readFile } from "node:fs/promises";
 
 const source = await readFile(new URL("../src/index.js", import.meta.url), "utf8");
 const start = source.indexOf("async function createOperationalCase");
-const end = source.indexOf("\\n\\nasync function getTableColumns", start);
+const end = source.indexOf("\n\nasync function getTableColumns", start);
 const body = source.slice(start, end);
 
 test("client cases derive client identity from authenticated profile and verify mission ownership", () => {
