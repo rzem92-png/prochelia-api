@@ -864,12 +864,37 @@ async function paymentOnboard(request, env) {
 async function paymentStatus(request, env) {
   const auth=await getSessionUser(request,env);
   if(!auth) return json({ok:false,error:'UNAUTHENTICATED',version:VERSION},401);
-  await ensurePaymentSchema(env);
-  let wallet=await env.DB.prepare('SELECT * FROM wallets WHERE user_id=? LIMIT 1').bind(auth.user.id).first();
-  if(!wallet){ await env.DB.prepare('INSERT INTO wallets (id,user_id) VALUES (?,?)').bind(crypto.randomUUID(),auth.user.id).run(); wallet=await env.DB.prepare('SELECT * FROM wallets WHERE user_id=? LIMIT 1').bind(auth.user.id).first(); }
-  const account=await env.DB.prepare('SELECT * FROM payment_accounts WHERE user_id=? LIMIT 1').bind(auth.user.id).first();
-  const pending=await env.DB.prepare(`SELECT COUNT(*) total FROM payout_requests WHERE user_id=? AND status IN ('requested','processing')`).bind(auth.user.id).first();
-  return json({ok:true,version:VERSION,provider:paymentProvider(env),payments_configured:paymentsConfigured(env),wallet:{currency:wallet.currency,available_cents:wallet.available_cents,pending_cents:wallet.pending_cents,paid_cents:wallet.paid_cents,reserved_cents:wallet.reserved_cents},payout_account:account?{status:account.status,onboarding_status:account.onboarding_status,payouts_enabled:!!account.payouts_enabled}:null,pending_payouts:Number(pending?.total||0)},200);
+
+  // GET status is strictly read-only. In particular, do not create schema or
+  // materialize a wallet just because a user opened the payment screen.
+  const schema = await env.DB.prepare(
+    "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('wallets','payment_accounts','payout_requests')"
+  ).all();
+  const tables = new Set((schema.results || []).map(row => row.name));
+  let wallet = null, account = null, pending = 0;
+  if (tables.has('wallets')) {
+    wallet = await env.DB.prepare('SELECT * FROM wallets WHERE user_id=? LIMIT 1').bind(auth.user.id).first();
+  }
+  if (tables.has('payment_accounts')) {
+    account = await env.DB.prepare('SELECT * FROM payment_accounts WHERE user_id=? LIMIT 1').bind(auth.user.id).first();
+  }
+  if (tables.has('payout_requests')) {
+    const result = await env.DB.prepare("SELECT COUNT(*) total FROM payout_requests WHERE user_id=? AND status IN ('requested','processing')").bind(auth.user.id).first();
+    pending = Number(result?.total || 0);
+  }
+  return json({
+    ok:true,version:VERSION,provider:paymentProvider(env),
+    payments_configured:false,
+    wallet:{
+      currency:wallet?.currency || 'EUR',
+      available_cents:Number(wallet?.available_cents || 0),
+      pending_cents:Number(wallet?.pending_cents || 0),
+      paid_cents:Number(wallet?.paid_cents || 0),
+      reserved_cents:Number(wallet?.reserved_cents || 0)
+    },
+    payout_account:account?{status:account.status,onboarding_status:account.onboarding_status,payouts_enabled:!!account.payouts_enabled}:null,
+    pending_payouts:pending
+  },200);
 }
 
 async function createMissionPayment(request, env) {
