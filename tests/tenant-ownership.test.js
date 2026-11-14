@@ -100,17 +100,22 @@ test("Copilot mission changes are queued for review, never written directly from
   assert.doesNotMatch(body, /UPDATE\\s+missions\\s+SET/i);
 });
 
-test("complaint creation compensates if its operational case cannot be created", async () => {
+test("complaint and operational case are created through one atomic D1 batch", async () => {
   const { readFile } = await import("node:fs/promises");
   const source = await readFile(new URL("../src/index.js", import.meta.url), "utf8");
-  const start = source.indexOf("async function complaintCreate");
-  const end = source.indexOf("async function setPhase", start);
-  const body = source.slice(start, end);
-  assert.notEqual(start, -1);
-  assert.notEqual(end, -1);
-  assert.match(body, /COMPLAINT_CASE_CREATION_FAILED/);
-  assert.ok(body.includes("DELETE FROM complaints WHERE id=?"));
-  assert.ok(body.includes("!caseResponse.ok || !caseJson?.case_id"));
+  const caseStart = source.indexOf("async function createOperationalCase");
+  const caseEnd = source.indexOf("async function getTableColumns", caseStart);
+  const caseBody = source.slice(caseStart, caseEnd);
+  const complaintStart = source.indexOf("async function complaintCreate");
+  const complaintEnd = source.indexOf("async function setPhase", complaintStart);
+  const complaintBody = source.slice(complaintStart, complaintEnd);
+  assert.notEqual(caseStart, -1);
+  assert.notEqual(complaintStart, -1);
+  assert.match(caseBody, /complaintRecord/);
+  assert.match(caseBody, /INSERT INTO complaints/);
+  assert.match(caseBody, /await env\.DB\.batch\(createStatements\)/);
+  assert.match(complaintBody, /createOperationalCase\(fakeReq,env,\{/);
+  assert.doesNotMatch(complaintBody, /INSERT INTO complaints|DELETE FROM complaints/);
 });
 
 test("manager approval does not mark a queued provider action as completed", async () => {
