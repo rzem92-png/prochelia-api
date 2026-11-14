@@ -1734,7 +1734,8 @@ async function pricingQuote(request, env) {
   try {
     tariff=await env.DB.prepare(`SELECT id,service_code,client_type,client_price_cents,intervenant_amount_cents
       FROM pricing_catalog
-      WHERE id=? AND phase=? AND client_type=? AND active=1
+      INNER JOIN prestations ON prestations.id=pricing_catalog.prestation_id AND prestations.active=1
+      WHERE pricing_catalog.id=? AND pricing_catalog.phase=? AND pricing_catalog.client_type=? AND pricing_catalog.active=1
       AND (effective_from IS NULL OR effective_from<=CURRENT_TIMESTAMP)
       AND (effective_to IS NULL OR effective_to>CURRENT_TIMESTAMP)
       LIMIT 1`).bind(b.tariff_id.trim(),phase,clientType).first();
