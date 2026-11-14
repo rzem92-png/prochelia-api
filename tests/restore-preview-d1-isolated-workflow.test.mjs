@@ -31,5 +31,11 @@ test("restore authenticates the pinned backup, checks the empty target before im
   assert.match(workflow, /PRAGMA foreign_key_check/);
   assert.match(workflow, /\[31\]/);
   assert.match(workflow, /\[7\]/);
-  assert.doesNotMatch(workflow, /wrangler deploy|d1 migrations apply|04f52830-ef5a-4f17-a640-42bbc2381bba.*--file/s);
+  const restoreStart = workflow.indexOf("Restaurer exclusivement dans la D1 isolée");
+  const restoreEnd = workflow.indexOf("\\n      - name:", restoreStart + 10);
+  const restoreStep = workflow.slice(restoreStart, restoreEnd);
+  assert.doesNotMatch(workflow, /wrangler deploy|d1 migrations apply/);
+  assert.doesNotMatch(restoreStep, /04f52830-ef5a-4f17-a640-42bbc2381bba/);
+  assert.match(restoreStep, /EXPECTED_DB_NAME/);
+  assert.match(restoreStep, /EXPECTED_DB_ID/);
 });
