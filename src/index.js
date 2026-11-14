@@ -1621,9 +1621,10 @@ async function executeOperationalCase(env, caseId, approverId=null, automatic=fa
   const businessResults = await executeCaseBusinessAction(env,c,rec,approverId,automatic);
   const hasUnfinishedAction = businessResults.some(x => ['PENDING','WAITING_PROVIDER'].includes(String(x.status||'').toUpperCase()));
   const verifiedAction = businessResults.some(x => ['EXECUTED','COMPLETED','VERIFIED'].includes(String(x.status||'').toUpperCase()));
-  // An automatic recommendation is not proof that the requested work happened.
-  // Keep the case open unless a downstream action returned a verifiable success.
-  if (automatic && (!verifiedAction || hasUnfinishedAction)) {
+  // A recommendation or manager approval is not proof that a queued downstream
+  // action happened. Keep the case open until every emitted business action is
+  // confirmed by its provider; manual approval authorizes work, not fake completion.
+  if ((automatic || businessResults.length>0) && (!verifiedAction || hasUnfinishedAction)) {
     const resolution={executed:false,automatic:true,action:rec.action||'RESOLVE',steps:rec.solution?.steps||[],business_results:businessResults,reason:'DOWNSTREAM_ACTION_NOT_VERIFIED',updated_at:new Date().toISOString()};
     await env.DB.prepare(`UPDATE operational_cases SET status='WAITING_ACTION',resolution_json=?,requires_manager=1,updated_at=CURRENT_TIMESTAMP,resolved_at=NULL WHERE id=?`)
       .bind(JSON.stringify(resolution),caseId).run();
