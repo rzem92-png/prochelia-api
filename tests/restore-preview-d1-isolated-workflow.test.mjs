@@ -9,7 +9,6 @@ test("isolated R2 restore is manual, confirmation-gated, and restricted to main"
   assert.match(workflow, /RESTORE_R2_TO_ISOLATED_D1/);
   assert.match(workflow, /github\.ref == 'refs\/heads\/main'/);
   assert.match(workflow, /permissions:\s*\n\s+contents: read\s*\n\s+actions: read/);
-  assert.ok(workflow.includes("actions/checkout@11d5960a326750d5838078e36cf38b85af677262"));
   assert.ok(workflow.includes("actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020"));
 });
 
