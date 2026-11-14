@@ -1556,7 +1556,8 @@ async function executeOperationalCase(env, caseId, approverId=null, automatic=fa
     .bind(crypto.randomUUID(),caseId,rec.action||'UNHANDLED',automatic?'AUTO':'MANAGER',noHandler?'PENDING':(pendingActions?'PENDING':'COMPLETED'),JSON.stringify(rec),JSON.stringify(resolution),pendingActions?null:new Date().toISOString()).run();
   await env.DB.prepare(`UPDATE operational_cases SET status=?,resolution_json=?,requires_manager=0,updated_at=CURRENT_TIMESTAMP,resolved_at=? WHERE id=?`).bind(finalStatus,JSON.stringify(resolution),pendingActions?null:new Date().toISOString(),caseId).run();
   await env.DB.prepare(`UPDATE copilot_log SET approved_by=COALESCE(?,approved_by),result=? WHERE case_id=? AND id=(SELECT id FROM copilot_log WHERE case_id=? ORDER BY created_at DESC LIMIT 1)`).bind(approverId,JSON.stringify(resolution),caseId,caseId).run();
-  await journal(env,automatic?'copilot':'gerante',approverId,automatic?'AUTO_CASE_RESOLVED':'CASE_RESOLVED','operational_case',caseId,'OK',resolution);
+  const journalEvent = pendingActions ? 'CASE_ACTIONS_PENDING' : (automatic ? 'AUTO_CASE_RESOLVED' : 'CASE_RESOLVED');
+  await journal(env,automatic?'copilot':'gerante',approverId,journalEvent,'operational_case',caseId,'OK',resolution);
   return {ok:true,case_id:caseId,resolution};
 }
 
