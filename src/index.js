@@ -2958,20 +2958,17 @@ async function financeRowsForUser(env, user) {
   // relation exists between users and company profiles.
 
   let payments = [];
-  try {
-    const r = await env.DB.prepare(
+  const r = await env.DB.prepare(
       `SELECT id,mission_id,client_id,intervenant_id,type,status,gross_cents,commission_cents,
               provider_fee_cents,refund_cents,net_intervenant_cents,currency,provider,
               provider_payment_id,provider_payout_id,reason,created_at,updated_at
          FROM payment_transactions WHERE ${where}
         ORDER BY created_at DESC LIMIT 5000`
     ).bind(...params).all();
-    payments = r.results || [];
-  }
+  const payments = r.results || [];
 
   let ledger = [];
-  try {
-    if (['GERANTE','ADMIN','FINANCE'].includes(role)) {
+  if (['GERANTE','ADMIN','FINANCE'].includes(role)) {
       const r = await env.DB.prepare(
         `SELECT id,entry_type,direction,amount_cents,currency,label,reference_type,reference_id,status,created_at
            FROM finance_workspace_entries ORDER BY created_at DESC LIMIT 5000`
@@ -2983,16 +2980,12 @@ async function financeRowsForUser(env, user) {
            FROM finance_workspace_entries WHERE user_id=? ORDER BY created_at DESC LIMIT 5000`
       ).bind(uid).all();
       ledger = r.results || [];
-    }
   }
 
-  let payouts=[];
-  try {
-    const q = ['GERANTE','ADMIN','FINANCE'].includes(role)
+  const q = ['GERANTE','ADMIN','FINANCE'].includes(role)
       ? env.DB.prepare(`SELECT id,user_id,amount_cents,currency,mode,status,provider,provider_payout_id,failure_code,requested_at,completed_at FROM payout_requests ORDER BY requested_at DESC LIMIT 5000`)
       : env.DB.prepare(`SELECT id,user_id,amount_cents,currency,mode,status,provider,provider_payout_id,failure_code,requested_at,completed_at FROM payout_requests WHERE user_id=? ORDER BY requested_at DESC LIMIT 5000`).bind(uid);
-    const r=await q.all(); payouts=r.results||[];
-  }
+  const r=await q.all(); const payouts=r.results||[];
   return {payments,ledger,payouts};
 }
 
