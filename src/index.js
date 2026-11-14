@@ -1452,8 +1452,10 @@ async function createOperationalCase(request, env) {
   await env.DB.prepare(`INSERT INTO copilot_log(id,case_id,action_type,recommendation,confidence,mode) VALUES(?,?,?,?,?,?)`)
     .bind(crypto.randomUUID(),id,rec.action,JSON.stringify(rec.solution),rec.confidence,rec.mode).run();
   await journal(env,'copilot',null,'CASE_CREATED','operational_case',id,'OK',{caseType,impact});
-  if(rec.action==='AUTO_RESOLVE') await executeOperationalCase(env,id,null,true);
-  return json({ok:true,version:VERSION,case_id:id,recommendation:rec,status:rec.action==='AUTO_RESOLVE'?'AUTO_EXECUTED':'WAITING_MANAGER'},201);
+  let execution=null;
+  if(rec.action==='AUTO_RESOLVE') execution=await executeOperationalCase(env,id,null,true);
+  const reportedStatus=execution?.status || (rec.action==='AUTO_RESOLVE'?'WAITING_ACTION':'WAITING_MANAGER');
+  return json({ok:true,version:VERSION,case_id:id,recommendation:rec,status:reportedStatus,execution},201);
 }
 
 
