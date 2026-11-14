@@ -153,7 +153,7 @@ jobs:
           }
           EOF
           npx --yes wrangler@4 d1 execute "$EXPECTED_DB_NAME" --remote --config "$RUNNER_TEMP/wrangler-restore.jsonc" --command="SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT GLOB '_cf_*';" --json > "$RUNNER_TEMP/pre-restore.json"
-          jq -e '[.. | objects | select(has("results")) | .results[]?] | flatten | length == 0' "$RUNNER_TEMP/pre-restore.json" >/dev/null || {
+          jq -e '.success == true and ([.. | objects | select(has("results")) | .results[]?] | flatten | length == 0)' "$RUNNER_TEMP/pre-restore.json" >/dev/null || {
             echo "::error::La cible n'est pas vide. Aucune restauration ne sera lancée."
             exit 1
           }
@@ -179,11 +179,11 @@ jobs:
           set -euo pipefail
           cfg="$RUNNER_TEMP/wrangler-restore.jsonc"
           npx --yes wrangler@4 d1 execute "$EXPECTED_DB_NAME" --remote --config "$cfg" --command="PRAGMA quick_check;" --json > "$RUNNER_TEMP/quick.json"
-          jq -e '[.. | objects | select(has("results")) | .results[]? | .quick_check?] | flatten | any(. == "ok")' "$RUNNER_TEMP/quick.json" >/dev/null
+          jq -e '.success == true and ([.. | objects | select(has("results")) | .results[]? | .quick_check?] | flatten == ["ok"])' "$RUNNER_TEMP/quick.json" >/dev/null
           npx --yes wrangler@4 d1 execute "$EXPECTED_DB_NAME" --remote --config "$cfg" --command="PRAGMA foreign_key_check;" --json > "$RUNNER_TEMP/fk.json"
-          jq -e '[.. | objects | select(has("results")) | .results[]?] | flatten | length == 0' "$RUNNER_TEMP/fk.json" >/dev/null
+          jq -e '.success == true and ([.. | objects | select(has("results")) | .results[]?] | flatten | length == 0)' "$RUNNER_TEMP/fk.json" >/dev/null
           npx --yes wrangler@4 d1 execute "$EXPECTED_DB_NAME" --remote --config "$cfg" --command="SELECT COUNT(*) AS table_count FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT GLOB '_cf_*';" --json > "$RUNNER_TEMP/tables.json"
-          jq -e '[.. | objects | select(has("results")) | .results[]? | .table_count?] | flatten | any(. == 31)' "$RUNNER_TEMP/tables.json" >/dev/null
+          jq -e '.success == true and ([.. | objects | select(has("results")) | .results[]? | .table_count?] | flatten == [31])' "$RUNNER_TEMP/tables.json" >/dev/null
           npx --yes wrangler@4 d1 execute "$EXPECTED_DB_NAME" --remote --config "$cfg" --command="SELECT COUNT(*) AS migration_count FROM d1_migrations;" --json > "$RUNNER_TEMP/migrations.json"
-          jq -e '[.. | objects | select(has("results")) | .results[]? | .migration_count?] | flatten | any(. == 7)' "$RUNNER_TEMP/migrations.json" >/dev/null
+          jq -e '.success == true and ([.. | objects | select(has("results")) | .results[]? | .migration_count?] | flatten == [7])' "$RUNNER_TEMP/migrations.json" >/dev/null
           echo "PASS : quick_check=ok ; zéro violation FK ; 31 tables ; 7 migrations."
