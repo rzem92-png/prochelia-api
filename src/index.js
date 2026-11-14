@@ -2948,7 +2948,7 @@ async function financeRowsForUser(env, user) {
     // not users.id. Never fall back to a caller-supplied or guessed ID.
     const profile = await env.DB.prepare(
       'SELECT id FROM clients WHERE user_id=? LIMIT 1'
-    ).bind(uid).first().catch(() => null);
+    ).bind(uid).first();
     if (profile?.id) {
       where = 'client_id=?';
       params.push(profile.id);
@@ -2967,7 +2967,7 @@ async function financeRowsForUser(env, user) {
         ORDER BY created_at DESC LIMIT 5000`
     ).bind(...params).all();
     payments = r.results || [];
-  } catch (_) {}
+  }
 
   let ledger = [];
   try {
@@ -2984,7 +2984,7 @@ async function financeRowsForUser(env, user) {
       ).bind(uid).all();
       ledger = r.results || [];
     }
-  } catch (_) {}
+  }
 
   let payouts=[];
   try {
@@ -2992,7 +2992,7 @@ async function financeRowsForUser(env, user) {
       ? env.DB.prepare(`SELECT id,user_id,amount_cents,currency,mode,status,provider,provider_payout_id,failure_code,requested_at,completed_at FROM payout_requests ORDER BY requested_at DESC LIMIT 5000`)
       : env.DB.prepare(`SELECT id,user_id,amount_cents,currency,mode,status,provider,provider_payout_id,failure_code,requested_at,completed_at FROM payout_requests WHERE user_id=? ORDER BY requested_at DESC LIMIT 5000`).bind(uid);
     const r=await q.all(); payouts=r.results||[];
-  } catch (_) {}
+  }
   return {payments,ledger,payouts};
 }
 
