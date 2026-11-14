@@ -4,7 +4,7 @@ import { readFile } from "node:fs/promises";
 
 const source = await readFile(new URL("../src/index.js", import.meta.url), "utf8");
 const start = source.indexOf("async function payoutRequest");
-const end = source.indexOf("\nasync function", start + 10);
+const end = source.indexOf("\nfunction constantTimeStringEqual", start);
 const body = source.slice(start, end);
 
 test("payout request is rejected before D1 schema access or wallet reservation without a PSP adapter", () => {
