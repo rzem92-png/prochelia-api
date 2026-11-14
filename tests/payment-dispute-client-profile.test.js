@@ -8,7 +8,7 @@ const end = source.indexOf("\nasync function paymentAdminResolve", start);
 const body = source.slice(start, end);
 
 test("client dispute ownership resolves the authenticated user to the client profile ID", () => {
-  assert.match(body, /SELECT id FROM clients WHERE user_id=\\?/);
-  assert.match(body, /tx\\.client_id !== clientProfile\\.id/);
-  assert.doesNotMatch(body, /tx\\.client_id !== auth\\.user\\.id/);
+  assert.match(body, /SELECT id FROM clients WHERE user_id=\?/);
+  assert.match(body, /tx\.client_id !== clientProfile\.id/);
+  assert.doesNotMatch(body, /tx\.client_id !== auth\.user\.id/);
 });
