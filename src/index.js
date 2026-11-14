@@ -1546,11 +1546,14 @@ async function executeOperationalCase(env, caseId, approverId=null, automatic=fa
   const rec=c.proposed_solution_json?JSON.parse(c.proposed_solution_json):{};
   if(c.requires_manager && !automatic && !approverId) return {ok:false,error:'MANAGER_APPROVAL_REQUIRED'};
   const businessResults = await executeCaseBusinessAction(env,c,rec,approverId,automatic);
-  const pendingActions = businessResults.some(item => item.status !== 'COMPLETED');
-  const finalStatus = pendingActions ? 'WAITING_PROVIDER' : 'RESOLVED';
-  const resolution={executed:!pendingActions,automatic,status:finalStatus,action:rec.action||'RESOLVE',steps:rec.solution?.steps||[],business_results:businessResults,executed_at:new Date().toISOString()};
+  // An empty result means no concrete handler executed or queued an action.
+  // Never mark an unrecognized/no-op recommendation as resolved.
+  const noHandler = businessResults.length === 0;
+  const pendingActions = noHandler || businessResults.some(item => item.status !== 'COMPLETED');
+  const finalStatus = noHandler ? 'WAITING_HANDLER' : (pendingActions ? 'WAITING_PROVIDER' : 'RESOLVED');
+  const resolution={executed:!pendingActions,automatic,status:finalStatus,action:rec.action||'UNHANDLED',steps:rec.solution?.steps||[],business_results:businessResults,executed_at:new Date().toISOString()};
   await env.DB.prepare(`INSERT INTO case_actions(id,case_id,action_code,mode,status,payload_json,result_json,completed_at) VALUES(?,?,?,?,?,?,?,?)`)
-    .bind(crypto.randomUUID(),caseId,rec.action||'RESOLVE',automatic?'AUTO':'MANAGER',pendingActions?'PENDING':'COMPLETED',JSON.stringify(rec),JSON.stringify(resolution),pendingActions?null:new Date().toISOString()).run();
+    .bind(crypto.randomUUID(),caseId,rec.action||'UNHANDLED',automatic?'AUTO':'MANAGER',noHandler?'PENDING':(pendingActions?'PENDING':'COMPLETED'),JSON.stringify(rec),JSON.stringify(resolution),pendingActions?null:new Date().toISOString()).run();
   await env.DB.prepare(`UPDATE operational_cases SET status=?,resolution_json=?,requires_manager=0,updated_at=CURRENT_TIMESTAMP,resolved_at=? WHERE id=?`).bind(finalStatus,JSON.stringify(resolution),pendingActions?null:new Date().toISOString(),caseId).run();
   await env.DB.prepare(`UPDATE copilot_log SET approved_by=COALESCE(?,approved_by),result=? WHERE case_id=? AND id=(SELECT id FROM copilot_log WHERE case_id=? ORDER BY created_at DESC LIMIT 1)`).bind(approverId,JSON.stringify(resolution),caseId,caseId).run();
   await journal(env,automatic?'copilot':'gerante',approverId,automatic?'AUTO_CASE_RESOLVED':'CASE_RESOLVED','operational_case',caseId,'OK',resolution);
