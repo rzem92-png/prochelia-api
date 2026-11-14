@@ -14,6 +14,7 @@ on:
       - "src/**"
       - "wrangler.jsonc"
       - ".github/workflows/worker-build-validation.yml"
+      - ".github/workflows/restore-preview-d1-from-r2-isolated.yml"
 
 permissions:
   contents: read
