@@ -2930,14 +2930,32 @@ async function financeRowsForUser(env, user) {
   const role = String(user.role||'').toUpperCase();
   const uid = user.id;
   const params = [];
-  let where = '';
+  let where = '1=0';
   if (['GERANTE','ADMIN','FINANCE'].includes(role)) {
     where = '1=1';
   } else if (role === 'INTERVENANT') {
-    where = 'intervenant_id=?'; params.push(uid);
-  } else {
-    where = 'client_id=?'; params.push(uid);
+    // payment_transactions.intervenant_id stores the intervenants profile ID,
+    // not users.id. Resolve the authenticated user's own profile first.
+    const profile = await env.DB.prepare(
+      'SELECT id FROM intervenants WHERE user_id=? LIMIT 1'
+    ).bind(uid).first().catch(() => null);
+    if (profile?.id) {
+      where = 'intervenant_id=?';
+      params.push(profile.id);
+    }
+  } else if (role === 'CLIENT' || role === 'CLIENT_SOCIAL') {
+    // payment_transactions.client_id stores the clients profile ID,
+    // not users.id. Never fall back to a caller-supplied or guessed ID.
+    const profile = await env.DB.prepare(
+      'SELECT id FROM clients WHERE user_id=? LIMIT 1'
+    ).bind(uid).first().catch(() => null);
+    if (profile?.id) {
+      where = 'client_id=?';
+      params.push(profile.id);
+    }
   }
+  // Company/support roles stay fail-closed until a verified ownership
+  // relation exists between users and company profiles.
 
   let payments = [];
   try {
