@@ -2614,7 +2614,7 @@ async function productionConfigCheck(env, { persist = false } = {}) {
 async function finalProductionAudit(request,env) {
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
   const result=await productionConfigCheck(env);
-  // Configuration checks are not release authorization. Keep real traffic closed
+  // GET production-check is read-only. Configuration checks are not release authorization; keep real traffic closed
   // until each independent blocker has evidence and a separate human approval.
   const releaseBlockers=['ISOLATED_RESTORE_DRILL','PSP_SANDBOX_E2E','INDEPENDENT_SECURITY_REVIEW','GDPR_LEGAL_APPROVAL','LOAD_AND_RECOVERY_TESTS','HUMAN_RELEASE_APPROVAL'];
   return json({ok:true,version:VERSION,configuration_gate:result.overall?'OPEN':'CLOSED',production_gate:'CLOSED',ready_for_real_traffic:false,release_blockers,checks:result.checks,note:'Configuration checks are not production authorization. Real traffic remains blocked until every release blocker is independently evidenced and explicitly approved.'});
