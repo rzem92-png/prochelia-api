@@ -20,3 +20,8 @@ test("idempotency key reuse with a different payment payload is rejected", () =>
   assert.match(body, /Number\(old\.commission_cents\) === commission/);
   assert.match(body, /IDEMPOTENCY_KEY_REUSED/);
 });
+
+test("mission payment creation fails closed before any D1 write without a PSP adapter", () => {
+  assert.match(body, /if \(!paymentsConfigured\(env\)\) return json\(\{ok:false,error:'PAYMENT_PROVIDER_NOT_CONFIGURED',version:VERSION\},503\)/);
+  assert.ok(body.indexOf("PAYMENT_PROVIDER_NOT_CONFIGURED") < body.indexOf("await ensurePaymentSchema(env)"));
+});
