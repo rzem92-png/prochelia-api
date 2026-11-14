@@ -1719,15 +1719,35 @@ async function pricingQuote(request, env) {
   const phase=String(await getSetting(env,'project_phase','TEST')).toUpperCase();
   const cfg=PROJECT_PHASES[phase]||PROJECT_PHASES.TEST;
   const distance=Number(b.distance_km||0);const duration=Number(b.duration_minutes||60);
-  const base=Number(b.base_price_cents||0);
   const clientType=['GERANTE','ADMIN','FINANCE'].includes(actorRole)
     ? String(b.client_type||'B2C').toUpperCase()
     : (actorRole==='ENTREPRISE'?'B2B':'B2C');
-  const serviceCode=clean(b.service_code)||null;
   if (!Number.isFinite(distance)||distance<0||distance>1000||
       !Number.isInteger(duration)||duration<1||duration>10080||
-      !Number.isFinite(base)||base<0||base>100000000) {
+      typeof b.tariff_id!=='string'||!b.tariff_id.trim()||b.tariff_id.length>128) {
     return json({ok:false,error:'INVALID_PRICING_INPUT'},400);
+  }
+
+  // A quote can only use a server-published tariff. Legacy REAL-valued
+  // tarifs are intentionally not converted: their monetary unit is unverified.
+  let tariff=null;
+  try {
+    tariff=await env.DB.prepare(`SELECT id,service_code,client_type,client_price_cents,intervenant_amount_cents
+      FROM pricing_catalog
+      WHERE id=? AND phase=? AND client_type=? AND active=1
+      AND (effective_from IS NULL OR effective_from<=CURRENT_TIMESTAMP)
+      AND (effective_to IS NULL OR effective_to>CURRENT_TIMESTAMP)
+      LIMIT 1`).bind(b.tariff_id.trim(),phase,clientType).first();
+  } catch (_) {
+    return json({ok:false,error:'PRICING_CATALOG_UNAVAILABLE'},503);
+  }
+  if (!tariff) return json({ok:false,error:'APPROVED_TARIFF_NOT_FOUND'},422);
+  const base=Number(tariff.client_price_cents);
+  const serviceCode=String(tariff.service_code);
+  const tariffIntervenantAmount=Number(tariff.intervenant_amount_cents);
+  if (!Number.isSafeInteger(base)||base<0||base>100000000||
+      !Number.isSafeInteger(tariffIntervenantAmount)||tariffIntervenantAmount<0||tariffIntervenantAmount>100000000) {
+    return json({ok:false,error:'INVALID_SERVER_TARIFF'},503);
   }
 
   let policy=null;
@@ -1753,7 +1773,7 @@ async function pricingQuote(request, env) {
   const pspFixed=Number(policy?.psp_fixed_cents??0);
   const targetMargin=Number(policy?.target_margin_percent??await getSetting(env,'default_margin_percent',FINANCE_STRATEGIC.marginFloorPercent));
   const commissionRate=Number(policy?.platform_fee_percent!=null?policy.platform_fee_percent/100:FINANCE_STRATEGIC.commissionDefaultPercent/100);
-  const intervenantFloor=Math.max(0,Math.round(Number(policy?.intervenant_floor_cents??(base*0.70))));
+  const intervenantFloor=Math.max(0,Math.round(Number(policy?.intervenant_floor_cents??tariffIntervenantAmount)));
   const regulatedMax=policy?.client_ceiling_cents>0?Number(policy.client_ceiling_cents):null;
   const discountCents=0; // Discounts require a validated, budgeted promotion record.
   const strategic=financeStrategicQuote({
