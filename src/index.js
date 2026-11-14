@@ -1736,21 +1736,26 @@ async function pricingQuote(request, env) {
       .bind(phase,clientType,serviceCode,serviceCode).first();
   } catch (_) {}
 
-  const fuelMode=String(b.fuel_mode||'normal').toLowerCase()==='high'?'high':'normal';
-  const fuelRateLegacy=Number(b.fuel_cost_per_km_cents??await getSetting(env,'fuel_cost_per_km_cents',20));
-  const fuelPriceCentsPerLitre=Number(b.fuel_price_cents_per_litre??await getSetting(env,fuelMode==='high'?'fuel_reference_price_cents_litre_high':'fuel_reference_price_cents_litre_normal',fuelMode==='high'?200:175));
-  const software=Number(b.software_cost_cents||await getSetting(env,'software_monthly_cost_cents',0));
-  const pspPercent=Number(b.psp_percent||0);const pspFixed=Number(b.psp_fixed_cents||0);
-  const targetMargin=Number(b.target_margin_percent??policy?.target_margin_percent??await getSetting(env,'default_margin_percent',FINANCE_STRATEGIC.marginFloorPercent));
-  const commissionRate=Number(b.platform_fee_percent!=null?b.platform_fee_percent/100:(policy?.platform_fee_percent!=null?policy.platform_fee_percent/100:FINANCE_STRATEGIC.commissionDefaultPercent/100));
-  const intervenantFloor=Math.max(0,Math.round(Number(b.intervenant_floor_cents??policy?.intervenant_floor_cents??(base*0.70))));
-  const regulatedMax=b.regulated_max_cents!=null?Number(b.regulated_max_cents):(policy?.client_ceiling_cents>0?Number(policy.client_ceiling_cents):null);
+  // All financial levers are controlled by server settings / active policy.
+  // Request-body overrides are deliberately ignored for commission, PSP,
+  // margin, fuel, software costs, discounts and client ceiling.
+  const fuelMode=String(await getSetting(env,'fuel_mode','normal')).toLowerCase()==='high'?'high':'normal';
+  const fuelRateLegacy=Number(policy?.fuel_cost_per_km_cents??await getSetting(env,'fuel_cost_per_km_cents',20));
+  const fuelPriceCentsPerLitre=Number(await getSetting(env,fuelMode==='high'?'fuel_reference_price_cents_litre_high':'fuel_reference_price_cents_litre_normal',fuelMode==='high'?200:175));
+  const software=Number(policy?.software_cost_cents??await getSetting(env,'software_monthly_cost_cents',0));
+  const pspPercent=Number(policy?.psp_percent??0);
+  const pspFixed=Number(policy?.psp_fixed_cents??0);
+  const targetMargin=Number(policy?.target_margin_percent??await getSetting(env,'default_margin_percent',FINANCE_STRATEGIC.marginFloorPercent));
+  const commissionRate=Number(policy?.platform_fee_percent!=null?policy.platform_fee_percent/100:FINANCE_STRATEGIC.commissionDefaultPercent/100);
+  const intervenantFloor=Math.max(0,Math.round(Number(policy?.intervenant_floor_cents??(base*0.70))));
+  const regulatedMax=policy?.client_ceiling_cents>0?Number(policy.client_ceiling_cents):null;
+  const discountCents=0; // Discounts require a validated, budgeted promotion record.
   const strategic=financeStrategicQuote({
     basePriceCents:base,
     phaseFactor:cfg.pricingFactor,
     urgency:b.urgency||'normal',
     evening:Boolean(b.evening),night:Boolean(b.night),saturday:Boolean(b.saturday),sunday:Boolean(b.sunday),holiday:Boolean(b.holiday),lastMinute:Boolean(b.last_minute||b.lastMinute),
-    distanceKm:distance,fuelMode,fuelPriceCentsPerLitre,commissionRate,discountCents:Number(b.discount_cents||0),regulatedMaxCents:regulatedMax,
+    distanceKm:distance,fuelMode,fuelPriceCentsPerLitre,commissionRate,discountCents,regulatedMaxCents:regulatedMax,
     intervenantFloorCents:intervenantFloor,pspPercent,pspFixedCents:pspFixed,softwareCostCents:software,targetMarginPercent:targetMargin
   });
   /* Compatibilité avec l'ancien contrat : fuel_cost_cents reste disponible. */
