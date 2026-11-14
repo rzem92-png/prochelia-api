@@ -1441,7 +1441,7 @@ async function copilotRecommend(env, input) {
  * par un utilisateur non-manager. Les entreprises restent bloquées tant qu'un
  * lien entreprise<->utilisateur vérifiable n'existe pas dans le schéma.
  */
-async function resolveTenantReferences(env, auth, body, {allowComplaint=false}={}) {
+export async function resolveTenantReferences(env, auth, body, {allowComplaint=false}={}) {
   const role=String(auth?.user?.role||'').toLowerCase();
   const requested={
     client_id:clean(body.client_id)||null,
