@@ -1450,6 +1450,9 @@ export async function resolveTenantReferences(env, auth, body, {allowComplaint=f
     mission_id:clean(body.mission_id)||null
   };
   if(role==='gerante') {
+    // No verified company-user/company registry is present in the audited schema.
+    // Even managers must not attach an arbitrary company identifier to a case.
+    if(requested.company_id) return {error:'COMPANY_OWNERSHIP_NOT_CONFIGURED'};
     if(requested.client_id && !await env.DB.prepare('SELECT id FROM clients WHERE id=? LIMIT 1').bind(requested.client_id).first()) return {error:'CLIENT_NOT_FOUND'};
     if(requested.intervenant_id && !await env.DB.prepare('SELECT id FROM intervenants WHERE id=? LIMIT 1').bind(requested.intervenant_id).first()) return {error:'INTERVENANT_NOT_FOUND'};
     if(requested.mission_id) {
