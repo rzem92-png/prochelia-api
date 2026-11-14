@@ -39,7 +39,7 @@ test("production readiness cannot open from PSP environment strings without an e
 
 test("configuration audit can never authorize real production traffic by itself", () => {
   const start = source.indexOf("async function finalProductionAudit");
-  const end = source.indexOf("\\nasync function copilotNextActions", start);
+  const end = source.indexOf("\nasync function copilotNextActions", start);
   const body = source.slice(start, end);
   assert.match(body, /production_gate:'CLOSED'/);
   assert.match(body, /ready_for_real_traffic:false/);
