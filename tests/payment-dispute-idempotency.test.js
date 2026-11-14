@@ -10,5 +10,7 @@ const body = source.slice(start, end);
 test("dispute creation is guarded against a second open dispute for the same transaction", () => {
   assert.match(body, /UPDATE payment_transactions SET status='held'.*NOT EXISTS \(SELECT 1 FROM payment_disputes WHERE transaction_id=\? AND status IN \('open','pending'\)\)/);
   assert.match(body, /NOT EXISTS \(SELECT 1 FROM payment_disputes WHERE transaction_id=\? AND status IN \('open','pending'\)\)/);
+  assert.match(body, /WHERE changes\(\)=1/);
+  assert.match(body, /results\?\.\[0\]\?\.meta/);
   assert.match(body, /results\?\.\[1\]\?\.meta/);
 });
