@@ -1436,9 +1436,71 @@ async function copilotRecommend(env, input) {
   return { action, mode: solution.automatic ? 'AUTO' : 'MANAGER_APPROVAL', confidence: simple ? 0.95 : 0.82, solution, context, phase };
 }
 
-async function createOperationalCase(request, env) {
+/**
+ * Résout les rattachements métier depuis la session, jamais depuis les IDs fournis
+ * par un utilisateur non-manager. Les entreprises restent bloquées tant qu'un
+ * lien entreprise<->utilisateur vérifiable n'existe pas dans le schéma.
+ */
+export async function resolveTenantReferences(env, auth, body, {allowComplaint=false}={}) {
+  const role=String(auth?.user?.role||'').toLowerCase();
+  const requested={
+    client_id:clean(body.client_id)||null,
+    company_id:clean(body.company_id)||null,
+    intervenant_id:clean(body.intervenant_id)||null,
+    mission_id:clean(body.mission_id)||null
+  };
+  if(role==='gerante') {
+    // No verified company-user/company registry is present in the audited schema.
+    // Even managers must not attach an arbitrary company identifier to a case.
+    if(requested.company_id) return {error:'COMPANY_OWNERSHIP_NOT_CONFIGURED'};
+    if(requested.client_id && !await env.DB.prepare('SELECT id FROM clients WHERE id=? LIMIT 1').bind(requested.client_id).first()) return {error:'CLIENT_NOT_FOUND'};
+    if(requested.intervenant_id && !await env.DB.prepare('SELECT id FROM intervenants WHERE id=? LIMIT 1').bind(requested.intervenant_id).first()) return {error:'INTERVENANT_NOT_FOUND'};
+    if(requested.mission_id) {
+      const m=await env.DB.prepare('SELECT id,client_id,intervenant_id FROM missions WHERE id=? LIMIT 1').bind(requested.mission_id).first();
+      if(!m) return {error:'MISSION_NOT_FOUND'};
+      if(requested.client_id && requested.client_id!==m.client_id) return {error:'MISSION_CLIENT_MISMATCH'};
+      if(requested.intervenant_id && requested.intervenant_id!==m.intervenant_id) return {error:'MISSION_INTERVENANT_MISMATCH'};
+      requested.client_id=requested.client_id||m.client_id;
+      requested.intervenant_id=requested.intervenant_id||m.intervenant_id||null;
+    }
+    return {references:requested};
+  }
+  if(role==='client') {
+    if(requested.company_id || requested.intervenant_id) return {error:'TENANT_REFERENCE_FORBIDDEN'};
+    const own=await env.DB.prepare('SELECT id FROM clients WHERE user_id=? LIMIT 1').bind(auth.user.id).first();
+    if(!own) return {error:'CLIENT_PROFILE_NOT_FOUND'};
+    if(requested.client_id && requested.client_id!==own.id) return {error:'TENANT_REFERENCE_FORBIDDEN'};
+    requested.client_id=own.id;
+    if(requested.mission_id) {
+      const m=await env.DB.prepare('SELECT id FROM missions WHERE id=? AND client_id=? LIMIT 1').bind(requested.mission_id,own.id).first();
+      if(!m) return {error:'MISSION_NOT_OWNED'};
+    }
+    return {references:requested};
+  }
+  if(role==='intervenant') {
+    if(requested.company_id || requested.client_id) return {error:'TENANT_REFERENCE_FORBIDDEN'};
+    const own=await env.DB.prepare('SELECT id FROM intervenants WHERE user_id=? LIMIT 1').bind(auth.user.id).first();
+    if(!own) return {error:'INTERVENANT_PROFILE_NOT_FOUND'};
+    if(requested.intervenant_id && requested.intervenant_id!==own.id) return {error:'TENANT_REFERENCE_FORBIDDEN'};
+    requested.intervenant_id=own.id;
+    if(requested.mission_id) {
+      const m=await env.DB.prepare('SELECT id FROM missions WHERE id=? AND intervenant_id=? LIMIT 1').bind(requested.mission_id,own.id).first();
+      if(!m) return {error:'MISSION_NOT_ASSIGNED'};
+    }
+    return {references:requested};
+  }
+  // Aucun mapping entreprise->utilisateur vérifiable n'est présent dans le schéma
+  // actuellement audité : refus des associations pour éviter toute usurpation.
+  if(role==='entreprise') return {error:'COMPANY_OWNERSHIP_NOT_CONFIGURED'};
+  return {error:'FORBIDDEN'};
+}
+
+async function createOperationalCase(request, env, { complaintRecord = null } = {}) {
   const gate=await requireAuthRole(request,env,['gerante','client','intervenant','entreprise']); if(gate.error)return gate.error;
   const body=await readJson(request)||{};
+  const tenant=await resolveTenantReferences(env,gate.auth,body);
+  if(tenant.error) return json({ok:false,error:tenant.error,version:VERSION},tenant.error==='FORBIDDEN'?403:tenant.error==='COMPANY_OWNERSHIP_NOT_CONFIGURED'?403:400);
+  const refs=tenant.references;
   const caseType=clean(body.case_type); if(!caseType)return json({ok:false,error:'CASE_TYPE_REQUIRED',version:VERSION},400);
   const phase=String(await getSetting(env,'project_phase','TEST')).toUpperCase();
   const impact=String(body.impact_level||'LOW').toUpperCase();
@@ -1447,13 +1509,25 @@ async function createOperationalCase(request, env) {
   const id=crypto.randomUUID();
   const requiresManager=rec.mode==='MANAGER_APPROVAL' ? 1 : 0;
   const status=rec.action==='AUTO_RESOLVE' ? 'AUTO_PENDING' : 'OPEN';
-  await env.DB.prepare(`INSERT INTO operational_cases(id,case_type,source,phase,priority,status,auto_mode,client_id,company_id,intervenant_id,mission_id,impact_level,description,context_json,proposed_solution_json,requires_manager) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
-    .bind(id,caseType,'API',phase,priority,status,rec.mode,clean(body.client_id)||null,clean(body.company_id)||null,clean(body.intervenant_id)||null,clean(body.mission_id)||null,impact,clean(body.description)||null,JSON.stringify(body.context||{}),JSON.stringify(rec),requiresManager).run();
-  await env.DB.prepare(`INSERT INTO copilot_log(id,case_id,action_type,recommendation,confidence,mode) VALUES(?,?,?,?,?,?)`)
-    .bind(crypto.randomUUID(),id,rec.action,JSON.stringify(rec.solution),rec.confidence,rec.mode).run();
-  await journal(env,'copilot',null,'CASE_CREATED','operational_case',id,'OK',{caseType,impact});
-  if(rec.action==='AUTO_RESOLVE') await executeOperationalCase(env,id,null,true);
-  return json({ok:true,version:VERSION,case_id:id,recommendation:rec,status:rec.action==='AUTO_RESOLVE'?'AUTO_EXECUTED':'WAITING_MANAGER'},201);
+  // D1 batch executes these related records atomically: a failed audit/log write
+  // must not leave an operational case that appears fully created.
+  const createStatements = [
+    env.DB.prepare(`INSERT INTO operational_cases(id,case_type,source,phase,priority,status,auto_mode,client_id,company_id,intervenant_id,mission_id,impact_level,description,context_json,proposed_solution_json,requires_manager) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+      .bind(id,caseType,'API',phase,priority,status,rec.mode,refs.client_id,refs.company_id,refs.intervenant_id,refs.mission_id,impact,clean(body.description)||null,JSON.stringify({}),JSON.stringify(rec),requiresManager),
+    env.DB.prepare(`INSERT INTO copilot_log(id,case_id,action_type,recommendation,confidence,mode) VALUES(?,?,?,?,?,?)`)
+      .bind(crypto.randomUUID(),id,rec.action,JSON.stringify(rec.solution),rec.confidence,rec.mode),
+    env.DB.prepare(`INSERT INTO activity_journal(id,actor_type,actor_id,action,entity_type,entity_id,result,metadata_json) VALUES(?,?,?,?,?,?,?,?)`)
+      .bind(crypto.randomUUID(),'copilot',null,'CASE_CREATED','operational_case',id,'OK',JSON.stringify({caseType,impact}))
+  ];
+  if (complaintRecord) {
+    createStatements.push(env.DB.prepare(`INSERT INTO complaints(id,client_type,client_id,company_id,mission_id,category,severity,description,resolution_case_id) VALUES(?,?,?,?,?,?,?,?,?)`)
+      .bind(complaintRecord.id,refs.company_id?'B2B':'B2C',refs.client_id,refs.company_id,refs.mission_id,complaintRecord.category,complaintRecord.severity,complaintRecord.description,id));
+  }
+  await env.DB.batch(createStatements);
+  let execution=null;
+  if(rec.action==='AUTO_RESOLVE') execution=await executeOperationalCase(env,id,null,true);
+  const reportedStatus=execution?.status || (rec.action==='AUTO_RESOLVE'?'WAITING_ACTION':'WAITING_MANAGER');
+  return json({ok:true,version:VERSION,case_id:id,recommendation:rec,status:reportedStatus,execution},201);
 }
 
 
@@ -1489,30 +1563,30 @@ async function executeCaseBusinessAction(env, c, rec, actorId=null, automatic=fa
   if (action === 'SEARCH_REPLACEMENT' || c.case_type === 'absence_intervenant' || c.case_type === 'retard_intervenant') {
     const replacementId = clean(context.replacement_intervenant_id || context.replacement_id);
     if (replacementId && c.mission_id) {
-      const cols = await getTableColumns(env,'missions');
-      if (cols.includes('intervenant_id')) {
-        await env.DB.prepare('UPDATE missions SET intervenant_id=? WHERE id=?').bind(replacementId,c.mission_id).run();
-        results.push({action:'ASSIGN_REPLACEMENT',mission_id:c.mission_id,intervenant_id:replacementId,status:'EXECUTED'});
-      } else {
-        const queued=await enqueueAction(env,c.id,'ASSIGN_REPLACEMENT',{mission_id:c.mission_id,intervenant_id:replacementId},`${c.id}:replacement:${replacementId}`);
-        results.push({action:'ASSIGN_REPLACEMENT',...queued,reason:'MISSION_SCHEMA_NEEDS_REVIEW'});
-      }
+      // Never change mission assignment from caller-supplied Copilot context.
+      // Eligibility, mission ownership, availability and manager approval must
+      // be checked by a dedicated reviewed workflow before any assignment write.
+      const queued = await enqueueAction(
+        env, c.id, 'ASSIGN_REPLACEMENT',
+        { mission_id: c.mission_id, intervenant_id: replacementId, requires_review: true },
+        `${c.id}:replacement:${replacementId}`
+      );
+      results.push({action:'ASSIGN_REPLACEMENT',...queued,reason:'MANAGER_AND_ELIGIBILITY_REVIEW_REQUIRED'});
     } else {
       const queued=await enqueueAction(env,c.id,'SEARCH_REPLACEMENT',{mission_id:c.mission_id||null,criteria:context.replacement_criteria||{},case_type:c.case_type},`${c.id}:search-replacement`);
-      results.push({action:'SEARCH_REPLACEMENT',...queued});
+      results.push({action:'SEARCH_REPLACEMENT',...queued,reason:'MANAGER_AND_ELIGIBILITY_REVIEW_REQUIRED'});
     }
   }
 
   if (context.reschedule_start_at && c.mission_id) {
-    const cols=await getTableColumns(env,'missions');
-    const target = cols.includes('start_at') ? 'start_at' : (cols.includes('scheduled_at') ? 'scheduled_at' : null);
-    if (target) {
-      await env.DB.prepare(`UPDATE missions SET ${target}=? WHERE id=?`).bind(String(context.reschedule_start_at),c.mission_id).run();
-      results.push({action:'RESCHEDULE_MISSION',mission_id:c.mission_id,field:target,status:'EXECUTED'});
-    } else {
-      const queued=await enqueueAction(env,c.id,'RESCHEDULE_MISSION',{mission_id:c.mission_id,start_at:context.reschedule_start_at},`${c.id}:reschedule:${context.reschedule_start_at}`);
-      results.push({action:'RESCHEDULE_MISSION',...queued,reason:'MISSION_SCHEMA_NEEDS_REVIEW'});
-    }
+    // Rescheduling is a mission mutation: queue it for reviewed processing.
+    // Untrusted case context must never write directly to the missions table.
+    const queued = await enqueueAction(
+      env, c.id, 'RESCHEDULE_MISSION',
+      { mission_id: c.mission_id, start_at: String(context.reschedule_start_at), requires_review: true },
+      `${c.id}:reschedule:${context.reschedule_start_at}`
+    );
+    results.push({action:'RESCHEDULE_MISSION',...queued,reason:'MANAGER_AND_CONFLICT_REVIEW_REQUIRED'});
   }
 
   if (context.client_notification || c.client_id || c.company_id) {
@@ -1558,13 +1632,27 @@ async function executeOperationalCase(env, caseId, approverId=null, automatic=fa
   const rec=c.proposed_solution_json?JSON.parse(c.proposed_solution_json):{};
   if(c.requires_manager && !automatic && !approverId) return {ok:false,error:'MANAGER_APPROVAL_REQUIRED'};
   const businessResults = await executeCaseBusinessAction(env,c,rec,approverId,automatic);
+  const hasUnfinishedAction = businessResults.some(x => ['PENDING','WAITING_PROVIDER'].includes(String(x.status||'').toUpperCase()));
+  const verifiedAction = businessResults.some(x => ['EXECUTED','COMPLETED','VERIFIED'].includes(String(x.status||'').toUpperCase()));
+  // A recommendation or manager approval is not proof that a queued downstream
+  // action happened. Keep the case open until every emitted business action is
+  // confirmed by its provider; manual approval authorizes work, not fake completion.
+  if ((automatic || businessResults.length>0) && (!verifiedAction || hasUnfinishedAction)) {
+    const resolution={executed:false,automatic:true,action:rec.action||'RESOLVE',steps:rec.solution?.steps||[],business_results:businessResults,reason:'DOWNSTREAM_ACTION_NOT_VERIFIED',updated_at:new Date().toISOString()};
+    await env.DB.prepare(`UPDATE operational_cases SET status='WAITING_ACTION',resolution_json=?,requires_manager=1,updated_at=CURRENT_TIMESTAMP,resolved_at=NULL WHERE id=?`)
+      .bind(JSON.stringify(resolution),caseId).run();
+    await env.DB.prepare(`UPDATE copilot_log SET result=? WHERE case_id=? AND id=(SELECT id FROM copilot_log WHERE case_id=? ORDER BY created_at DESC LIMIT 1)`)
+      .bind(JSON.stringify(resolution),caseId,caseId).run();
+    await journal(env,'copilot',null,'AUTO_CASE_WAITING_ACTION','operational_case',caseId,'WAITING_ACTION',resolution);
+    return {ok:true,case_id:caseId,status:'WAITING_ACTION',resolution};
+  }
   const resolution={executed:true,automatic,action:rec.action||'RESOLVE',steps:rec.solution?.steps||[],business_results:businessResults,executed_at:new Date().toISOString()};
   await env.DB.prepare(`INSERT INTO case_actions(id,case_id,action_code,mode,status,payload_json,result_json,completed_at) VALUES(?,?,?,?,?,?,?,CURRENT_TIMESTAMP)`)
     .bind(crypto.randomUUID(),caseId,rec.action||'RESOLVE',automatic?'AUTO':'MANAGER','COMPLETED',JSON.stringify(rec),JSON.stringify(resolution)).run();
   await env.DB.prepare(`UPDATE operational_cases SET status='RESOLVED',resolution_json=?,requires_manager=0,updated_at=CURRENT_TIMESTAMP,resolved_at=CURRENT_TIMESTAMP WHERE id=?`).bind(JSON.stringify(resolution),caseId).run();
   await env.DB.prepare(`UPDATE copilot_log SET approved_by=COALESCE(?,approved_by),result=? WHERE case_id=? AND id=(SELECT id FROM copilot_log WHERE case_id=? ORDER BY created_at DESC LIMIT 1)`).bind(approverId,JSON.stringify(resolution),caseId,caseId).run();
   await journal(env,automatic?'copilot':'gerante',approverId,automatic?'AUTO_CASE_RESOLVED':'CASE_RESOLVED','operational_case',caseId,'OK',resolution);
-  return {ok:true,case_id:caseId,resolution};
+  return {ok:true,case_id:caseId,status:'RESOLVED',resolution};
 }
 
 async function approveOperationalCase(request, env) {
@@ -1777,12 +1865,24 @@ async function financeSummary(request, env) {
 async function complaintCreate(request, env) {
   const gate=await requireAuthRole(request,env,['gerante','client','entreprise']); if(gate.error)return gate.error;
   const b=await readJson(request)||{};if(!b.category)return json({ok:false,error:'CATEGORY_REQUIRED',version:VERSION},400);
-  const id=crypto.randomUUID();await env.DB.prepare(`INSERT INTO complaints(id,client_type,client_id,company_id,mission_id,category,severity,description) VALUES(?,?,?,?,?,?,?,?)`).bind(id,String(b.client_type||'B2C'),b.client_id||null,b.company_id||null,b.mission_id||null,b.category,String(b.severity||'LOW'),b.description||null).run();
+  const tenant=await resolveTenantReferences(env,gate.auth,b);
+  if(tenant.error) return json({ok:false,error:tenant.error,version:VERSION},403);
+  const id=crypto.randomUUID();
   const caseType=SIMPLE_CASES.has(b.category)?b.category:'reclamation_client';
-  const fakeReq=new Request(request.url,{method:'POST',headers:request.headers,body:JSON.stringify({case_type:caseType,client_id:b.client_id,company_id:b.company_id,mission_id:b.mission_id,description:b.description,impact_level:b.severity||'LOW',context:{complaint_id:id}})});
-  const caseResponse=await createOperationalCase(fakeReq,env);const caseJson=await caseResponse.json();
-  if(caseJson.case_id)await env.DB.prepare('UPDATE complaints SET resolution_case_id=? WHERE id=?').bind(caseJson.case_id,id).run();
-  return json({ok:true,version:VERSION,complaint_id:id,resolution_case_id:caseJson.case_id||null,copilot:caseJson.recommendation||null},201);
+  const fakeReq=new Request(request.url,{method:'POST',headers:request.headers,body:JSON.stringify({
+    case_type:caseType,client_id:tenant.references.client_id,company_id:tenant.references.company_id,
+    mission_id:tenant.references.mission_id,description:b.description,impact_level:b.severity||'LOW'
+  })});
+  const caseResponse=await createOperationalCase(fakeReq,env,{
+    complaintRecord:{
+      id,category:b.category,severity:String(b.severity||'LOW'),description:clean(b.description)||null
+    }
+  });
+  const caseJson=await caseResponse.json();
+  if (!caseResponse.ok || !caseJson?.case_id) {
+    return json({ok:false,error:'COMPLAINT_CASE_CREATION_FAILED',version:VERSION},502);
+  }
+  return json({ok:true,version:VERSION,complaint_id:id,resolution_case_id:caseJson.case_id,copilot:caseJson.recommendation||null},201);
 }
 
 async function setPhase(request, env) {
@@ -3463,6 +3563,15 @@ async function supportCreate(request,env){
   const a=await supportAuth(request,env); if(a.response)return a.response;
   await ensureProcheliaMasterComplementSchema(env);
   const b=await readJson(request)||{};
+  const tenant=await resolveTenantReferences(env,a.auth,b);
+  if(tenant.error) return json({ok:false,error:tenant.error,version:VERSION},403);
+  const refs=tenant.references;
+  const complaintId=clean(b.complaint_id)||null;
+  if(complaintId) {
+    if(String(a.auth.user.role||'').toLowerCase()!=='gerante') return json({ok:false,error:'COMPLAINT_REFERENCE_FORBIDDEN',version:VERSION},403);
+    const linkedComplaint=await env.DB.prepare('SELECT id FROM complaints WHERE id=? LIMIT 1').bind(complaintId).first();
+    if(!linkedComplaint) return json({ok:false,error:'COMPLAINT_NOT_FOUND',version:VERSION},400);
+  }
   const category=clean(b.category)||'GENERAL';
   const severity=String(b.severity||'LOW').toUpperCase();
   const scenario=supportScenarioFor(category,severity);
@@ -3472,7 +3581,7 @@ async function supportCreate(request,env){
   const id=crypto.randomUUID();
   const proposed=rule?JSON.parse(rule.steps_json||'[]'):{steps:['collect_evidence','copilot_analysis','notify','audit']};
   await env.DB.prepare(`INSERT INTO support_cases(id,source_role,requester_id,company_id,mission_id,complaint_id,category,severity,status,description,proposed_resolution,requires_manager) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`)
-    .bind(id,a.role,a.auth.user.id,b.company_id||null,b.mission_id||null,b.complaint_id||null,category,severity,auto?'PROCESSING':'OPEN',clean(b.description)||null,JSON.stringify({scenario,steps:proposed.steps||proposed}),requiresManager?1:0).run();
+    .bind(id,a.role,a.auth.user.id,refs.company_id,refs.mission_id,complaintId,category,severity,auto?'PROCESSING':'OPEN',clean(b.description)||null,JSON.stringify({scenario,steps:proposed.steps||proposed}),requiresManager?1:0).run();
   await supportEvent(env,id,a.role,a.auth.user.id,'CREATED',{scenario,auto,requiresManager});
   await journal(env,a.role,a.auth.user.id,'SUPPORT_CASE_CREATE','support_cases',id,'OK',{scenario,severity,auto});
   let autoResult=null;
