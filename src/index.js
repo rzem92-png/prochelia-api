@@ -2957,7 +2957,6 @@ async function financeRowsForUser(env, user) {
   // Company/support roles stay fail-closed until a verified ownership
   // relation exists between users and company profiles.
 
-  let payments = [];
   const r = await env.DB.prepare(
       `SELECT id,mission_id,client_id,intervenant_id,type,status,gross_cents,commission_cents,
               provider_fee_cents,refund_cents,net_intervenant_cents,currency,provider,
@@ -2980,7 +2979,7 @@ async function financeRowsForUser(env, user) {
            FROM finance_workspace_entries WHERE user_id=? ORDER BY created_at DESC LIMIT 5000`
       ).bind(uid).all();
       ledger = r.results || [];
-  }
+    }
 
   const q = ['GERANTE','ADMIN','FINANCE'].includes(role)
       ? env.DB.prepare(`SELECT id,user_id,amount_cents,currency,mode,status,provider,provider_payout_id,failure_code,requested_at,completed_at FROM payout_requests ORDER BY requested_at DESC LIMIT 5000`)
