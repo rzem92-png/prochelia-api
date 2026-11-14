@@ -32,7 +32,7 @@ jobs:
       BACKUP_RUN_ID: "43509759419"
       R2_BUCKET: prochelia-preview-backups-eu
       R2_ENDPOINT: https://f2a79e9fa41566a8ec80fb24c02c60eb.r2.cloudflarestorage.com
-      R2_OBJECT_KEY: preview-d1/prochelia-preview-db/2026/11/13/43509759419-ca1def14725d.sql.gpg
+      R2_OBJECT_KEY: preview-d1/prochelia-preview-db/2026/11/13/43509759419-ca1def14725d6f02f90b3679506b6b93137b6c2d.sql.gpg
       AWS_ACCESS_KEY_ID: ${{ secrets.R2_EU_ACCESS_KEY_ID }}
       AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_EU_SECRET_ACCESS_KEY }}
       AWS_DEFAULT_REGION: auto
