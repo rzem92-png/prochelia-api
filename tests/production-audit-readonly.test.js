@@ -26,3 +26,24 @@ test("GET production audit handlers do not journal or insert check records", () 
   assert.doesNotMatch(body, /INSERT INTO system_config_checks/);
   assert.match(body, /GET production-check is read-only/);
 });
+
+
+test("production readiness remains closed until every independent release evidence item is validated", () => {
+  const start = source.indexOf("async function productionConfigCheck");
+  const end = source.indexOf("\\nasync function finalProductionAudit", start);
+  assert.notEqual(start, -1);
+  assert.notEqual(end, -1);
+  const body = source.slice(start, end);
+  for (const evidence of [
+    "EXECUTABLE_PSP_ADAPTER_AND_SANDBOX_E2E",
+    "ATOMIC_FINANCIAL_SETTLEMENT_AND_RECONCILIATION",
+    "PREVIEW_R2_BACKUP_AND_ISOLATED_RESTORE_DRILL",
+    "PRODUCTION_D1_SCHEMA_RECONCILIATION",
+    "TENANT_SECURITY_AND_GDPR_ACCEPTANCE",
+    "PRODUCTION_ROLLBACK_AND_HUMAN_RELEASE_APPROVAL"
+  ]) {
+    assert.match(body, new RegExp("RELEASE_EVIDENCE:" + evidence));
+  }
+  assert.match(body, /NOT_VALIDATED/);
+  assert.match(body, /NOT_VALIDATED.*includes|includes.*NOT_VALIDATED/s);
+});
