@@ -40,3 +40,15 @@ test("restore authenticates the pinned backup, checks the empty target before im
   assert.match(restoreStep, /EXPECTED_DB_NAME/);
   assert.match(restoreStep, /EXPECTED_DB_ID/);
 });
+
+test("restore preserves the exact Preview pricing snapshot without inventing active policies", () => {
+  assert.match(workflow, /SELECT COUNT\(\*\) FROM pricing_holidays/);
+  assert.match(workflow, /\[\[ "\$holidays" == "55" \]\]/);
+  assert.match(workflow, /SELECT COUNT\(\*\) FROM pricing_policies/);
+  assert.match(workflow, /\[\[ "\$policies" == "0" \]\]/);
+  assert.match(workflow, /SELECT COUNT\(\*\) FROM pricing_route_estimates/);
+  assert.match(workflow, /\[\[ "\$estimates" == "0" \]\]/);
+  assert.match(workflow, /holiday_count/);
+  assert.match(workflow, /policy_count/);
+  assert.match(workflow, /estimate_count/);
+});
