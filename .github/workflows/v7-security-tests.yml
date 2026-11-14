@@ -21,6 +21,7 @@ on:
       - ".github/workflows/v7-security-tests.yml"
       - ".github/workflows/deploy-preview-worker-manual.yml"
       - ".github/workflows/preview-directory-e2e-acceptance.yml"
+      - ".github/workflows/restore-preview-d1-from-r2-isolated.yml"
 
 permissions:
   contents: read
