@@ -53,3 +53,11 @@ test("legacy REAL tariffs are not silently converted", async () => {
 test("pricing catalog rejects tariffs attached to inactive services", () => {
   assert.match(body, /INNER JOIN prestations ON prestations\.id=pricing_catalog\.prestation_id AND prestations\.active=1/);
 });
+
+
+test("pricing catalog phase constraint matches the server phase model", async () => {
+  const migration = await readFile(new URL("../migrations/0008_server_owned_pricing_catalog.sql", import.meta.url), "utf8");
+  const expected = ["TEST", "LANCEMENT", "AVANCE", "EXPERT", "NATIONAL"];
+  for (const phase of expected) assert.match(migration, new RegExp("'" + phase + "'"));
+  assert.doesNotMatch(migration, /'PILOT'|'PRODUCTION'/);
+});
