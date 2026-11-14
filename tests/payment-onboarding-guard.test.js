@@ -14,3 +14,8 @@ test("PSP account identifiers are server-owned, not caller-controlled", () => {
   assert.doesNotMatch(body, /body\?\.provider_account_id/);
   assert.match(body, /const accountId = null/);
 });
+
+test("PSP onboarding is rejected before D1 writes until a real provider flow exists", () => {
+  assert.match(body, /PSP_ONBOARDING_NOT_IMPLEMENTED/);
+  assert.doesNotMatch(body, /ensurePaymentSchema|INSERT INTO payment_accounts|INSERT INTO wallets/);
+});
