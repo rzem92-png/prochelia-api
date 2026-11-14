@@ -3,25 +3,18 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
 const source = await readFile(new URL("../src/index.js", import.meta.url), "utf8");
-const start = source.indexOf("async function createMissionPayment");
-const end = source.indexOf("\nasync function finalizeMissionPayment", start);
+const start = source.indexOf("async function createMissionPayment(request, env) {");
+const end = source.indexOf("\\nasync function finalizeMissionPayment", start);
 const body = source.slice(start, end);
 
-test("mission payment verifies mission and exact client/intervenant parties", () => {
+test("mission payment creation requires an authenticated manager", () => {
   assert.notEqual(start, -1);
-  assert.match(body, /SELECT id,client_id,intervenant_id FROM missions WHERE id=\?/);
-  assert.match(body, /MISSION_NOT_FOUND/);
-  assert.match(body, /MISSION_PARTIES_MISMATCH/);
+  assert.match(body, /getSessionUser\\(request,env\\)/);
+  assert.match(body, /requireRole\\(auth,\\['gerante'\\]\\)/);
 });
 
-test("idempotency key reuse with a different payment payload is rejected", () => {
-  assert.match(body, /const sameRequest = old\.mission_id === missionId/);
-  assert.match(body, /Number\(old\.gross_cents\) === gross/);
-  assert.match(body, /Number\(old\.commission_cents\) === commission/);
-  assert.match(body, /IDEMPOTENCY_KEY_REUSED/);
-});
-
-test("mission payment creation fails closed before any D1 write without a PSP adapter", () => {
-  assert.match(body, /return json\(\{ok:false,error:'PSP_ADAPTER_NOT_IMPLEMENTED',version:VERSION\},503\)/);
-  assert.ok(body.indexOf("PSP_ADAPTER_NOT_IMPLEMENTED") < body.indexOf("await ensurePaymentSchema(env)"));
+test("mission payment creation fails closed before all D1 access when no PSP adapter exists", () => {
+  assert.match(body, /PSP_ADAPTER_NOT_IMPLEMENTED/);
+  assert.match(body, /return json\\(\\{ok:false,error:'PSP_ADAPTER_NOT_IMPLEMENTED',version:VERSION\\},503\\)/);
+  assert.doesNotMatch(body, /env\\.DB|ensurePaymentSchema|INSERT INTO|UPDATE |DELETE FROM|\\.run\\(/);
 });
