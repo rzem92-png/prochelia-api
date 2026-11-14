@@ -34,13 +34,13 @@ test("pricing validates inputs and approved market bounds", () => {
 });
 
 test("quotes require an active server-owned integer-cent tariff", () => {
-  assert.match(body, /typeof b\\.tariff_id!=='string'/);
+  assert.match(body, /typeof b\.tariff_id!=='string'/);
   assert.match(body, /FROM pricing_catalog/);
   assert.match(body, /client_price_cents/);
   assert.match(body, /intervenant_amount_cents/);
   assert.match(body, /APPROVED_TARIFF_NOT_FOUND/);
-  assert.doesNotMatch(body, /b\\.base_price_cents/);
-  assert.doesNotMatch(body, /b\\.service_code/);
+  assert.doesNotMatch(body, /b\.base_price_cents/);
+  assert.doesNotMatch(body, /b\.service_code/);
 });
 
 test("legacy REAL tariffs are not silently converted", async () => {
