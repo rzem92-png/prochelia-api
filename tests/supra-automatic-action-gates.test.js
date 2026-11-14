@@ -22,32 +22,31 @@ test("cases without a concrete handler or with pending outbox actions are never 
   assert.match(execute, /WAITING_HANDLER/);
   assert.match(execute, /WAITING_PROVIDER/);
   assert.match(execute, /pendingActions \\? 'CASE_ACTIONS_PENDING'/);
-  assert.match(execute, /pendingActions\?'PENDING':'COMPLETED'/);
-  assert.match(execute, /pendingActions\?null:new Date\(\)\.toISOString\(\)/);
+  assert.match(execute, /pendingActions\\?'PENDING':'COMPLETED'/);
+  assert.match(execute, /pendingActions\\?null:new Date\\(\\)\\.toISOString\\(\\)/);
 });
 
 test("outbox never marks an action completed without an audited handler", () => {
   const start = source.indexOf("async function processActionOutbox");
   const end = source.indexOf("\nasync function executeOperationalCase", start);
   const outbox = source.slice(start, end);
-  assert.match(outbox, /const waitingStatus = external \? 'WAITING_PROVIDER' : 'WAITING_HANDLER'/);
+  assert.match(outbox, /const waitingStatus = external \\? 'WAITING_PROVIDER' : 'WAITING_HANDLER'/);
   assert.match(outbox, /No audited execution handler is registered/);
   assert.doesNotMatch(outbox, /SET status='COMPLETED'/);
 });
 
-
 test("automatic execution cannot bypass required manager approval", () => {
-  assert.match(execute, /if\\(c\\.requires_manager && !approverId\\) return \\{ok:false,error:'MANAGER_APPROVAL_REQUIRED'\\}/);
+  assert.ok(execute.includes("if(c.requires_manager && !approverId) return {ok:false,error:'MANAGER_APPROVAL_REQUIRED'};"));
   assert.doesNotMatch(execute, /requires_manager && !automatic/);
 });
 
 test("AUTO_EXECUTED is returned only after a verified RESOLVED result", () => {
   const createStart = source.indexOf("async function createOperationalCase");
-  const createEnd = source.indexOf("\\n\\nasync function getTableColumns", createStart);
+  const createEnd = source.indexOf("\n\nasync function getTableColumns", createStart);
   assert.notEqual(createStart, -1);
   assert.notEqual(createEnd, -1);
   const create = source.slice(createStart, createEnd);
-  assert.match(create, /execution=await executeOperationalCase/);
-  assert.match(create, /execution\\?\\.ok===true && execution\\?\\.resolution\\?\\.status==='RESOLVED'/);
-  assert.match(create, /autoExecuted\\?'AUTO_EXECUTED':executionStatus/);
+  assert.ok(create.includes("execution=await executeOperationalCase"));
+  assert.ok(create.includes("execution?.ok===true && execution?.resolution?.status==='RESOLVED'"));
+  assert.ok(create.includes("autoExecuted?'AUTO_EXECUTED':executionStatus"));
 });
