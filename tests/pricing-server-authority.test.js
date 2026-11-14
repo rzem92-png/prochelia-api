@@ -49,3 +49,7 @@ test("legacy REAL tariffs are not silently converted", async () => {
   assert.match(migration, /intervenant_amount_cents INTEGER NOT NULL/);
   assert.match(migration, /currency TEXT NOT NULL DEFAULT 'EUR'/);
 });
+
+test("pricing catalog rejects tariffs attached to inactive services", () => {
+  assert.match(body, /INNER JOIN prestations ON prestations\.id=pricing_catalog\.prestation_id AND prestations\.active=1/);
+});
