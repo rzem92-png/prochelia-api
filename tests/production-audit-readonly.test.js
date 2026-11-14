@@ -30,7 +30,7 @@ test("GET production audit handlers do not journal or insert check records", () 
 
 test("production readiness remains closed until every independent release evidence item is validated", () => {
   const start = source.indexOf("async function productionConfigCheck");
-  const end = source.indexOf("\\nasync function finalProductionAudit", start);
+  const end = source.indexOf("\nasync function finalProductionAudit", start);
   assert.notEqual(start, -1);
   assert.notEqual(end, -1);
   const body = source.slice(start, end);
