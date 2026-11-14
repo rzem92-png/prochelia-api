@@ -13,7 +13,7 @@ test("pricing phase and customer segment are server-derived", () => {
   assert.match(body, /getSetting\(env,'project_phase','TEST'\)/);
   assert.match(body, /actorRole==='ENTREPRISE'\?'B2B':'B2C'/);
   assert.doesNotMatch(body, /b\.phase\s*\|\|/);
-  assert.doesNotMatch(body, /b\.client_type\s*\|\|\s*'B2C'/);
+  assert.match(body, /\['GERANTE','ADMIN','FINANCE'\]\.includes\(actorRole\)/);
 });
 
 test("pricing financial levers ignore caller-provided overrides", () => {
