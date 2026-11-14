@@ -8,7 +8,7 @@ test("isolated R2 restore is manual, confirmation-gated, and restricted to main"
   assert.match(workflow, /workflow_dispatch:/);
   assert.match(workflow, /RESTORE_R2_TO_ISOLATED_D1/);
   assert.match(workflow, /github\.ref == 'refs\/heads\/main'/);
-  assert.match(workflow, /permissions:\s*\n\s+contents: read\s*\n\s+actions: read/);
+  assert.match(workflow, /permissions:\s*\n\s+contents: read\s*\n\s+actions: read/);\n  assert.match(workflow, /actions\\/checkout@[0-9a-f]{40}/);\n  assert.match(workflow, /actions\\/setup-node@[0-9a-f]{40}/);
 });
 
 test("restore pins the exact isolated EU D1 and forbids Preview and Production targets", () => {
