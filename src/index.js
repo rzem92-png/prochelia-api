@@ -2984,7 +2984,7 @@ async function financeRowsForUser(env, user) {
   const q = ['GERANTE','ADMIN','FINANCE'].includes(role)
       ? env.DB.prepare(`SELECT id,user_id,amount_cents,currency,mode,status,provider,provider_payout_id,failure_code,requested_at,completed_at FROM payout_requests ORDER BY requested_at DESC LIMIT 5000`)
       : env.DB.prepare(`SELECT id,user_id,amount_cents,currency,mode,status,provider,provider_payout_id,failure_code,requested_at,completed_at FROM payout_requests WHERE user_id=? ORDER BY requested_at DESC LIMIT 5000`).bind(uid);
-  const r=await q.all(); const payouts=r.results||[];
+  const payoutResult=await q.all(); const payouts=payoutResult.results||[];
   return {payments,ledger,payouts};
 }
 
