@@ -1760,6 +1760,9 @@ async function pricingQuote(request, env) {
   } catch (_) {
     return json({ok:false,error:'PRICING_POLICY_UNAVAILABLE'},503);
   }
+  // A missing policy is not equivalent to a valid zero/default policy.
+  // Refuse the quote until an explicitly approved server policy exists.
+  if (!policy) return json({ok:false,error:'PRICING_POLICY_NOT_CONFIGURED'},503);
   if (policy?.market_min_cents!=null && base<Number(policy.market_min_cents)) {
     return json({ok:false,error:'PRICE_BELOW_APPROVED_MARKET_FLOOR'},400);
   }
