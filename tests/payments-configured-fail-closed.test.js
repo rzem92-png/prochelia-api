@@ -15,5 +15,5 @@ test("mission payment creation fails closed before any D1 access without a PSP a
   const end = source.indexOf("\\nasync function finalizeMissionPayment", start);
   const body = source.slice(start, end);
   assert.match(body, /PSP_ADAPTER_NOT_IMPLEMENTED/);
-  assert.ok(body.indexOf("PSP_ADAPTER_NOT_IMPLEMENTED") < body.indexOf("await ensurePaymentSchema(env)"));
+  assert.doesNotMatch(body, /ensurePaymentSchema|INSERT INTO payment_transactions/);
 });
