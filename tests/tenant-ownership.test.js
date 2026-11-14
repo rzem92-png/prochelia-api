@@ -86,3 +86,29 @@ test("unknown roles fail closed", async () => {
   const result=await resolveTenantReferences({DB:mockDb()},{user:{id:"x",role:"unknown"}},{});
   assert.equal(result.error,"FORBIDDEN");
 });
+
+test("Copilot mission changes are queued for review, never written directly from case context", async () => {
+  const { readFile } = await import("node:fs/promises");
+  const source = await readFile(new URL("../src/index.js", import.meta.url), "utf8");
+  const start = source.indexOf("async function executeCaseBusinessAction");
+  const end = source.indexOf("async function processActionOutbox", start);
+  const body = source.slice(start, end);
+  assert.notEqual(start, -1);
+  assert.notEqual(end, -1);
+  assert.match(body, /MANAGER_AND_ELIGIBILITY_REVIEW_REQUIRED/);
+  assert.match(body, /MANAGER_AND_CONFLICT_REVIEW_REQUIRED/);
+  assert.doesNotMatch(body, /UPDATE\\s+missions\\s+SET/i);
+});
+
+test("complaint creation compensates if its operational case cannot be created", async () => {
+  const { readFile } = await import("node:fs/promises");
+  const source = await readFile(new URL("../src/index.js", import.meta.url), "utf8");
+  const start = source.indexOf("async function complaintCreate");
+  const end = source.indexOf("async function setPhase", start);
+  const body = source.slice(start, end);
+  assert.notEqual(start, -1);
+  assert.notEqual(end, -1);
+  assert.match(body, /COMPLAINT_CASE_CREATION_FAILED/);
+  assert.match(body, /DELETE FROM complaints WHERE id=\\?/);
+  assert.match(body, /!caseResponse\\.ok \\|\\| !caseJson\\?\\.case_id/);
+});
