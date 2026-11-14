@@ -62,3 +62,15 @@ test("rate-limit audit failure never turns a blocked request into an allowed req
   assert.ok(blocked > audit);
   assert.match(body.slice(audit, blocked), /catch/);
 });
+
+test("outer middleware rejects forbidden origins and missing D1 before rate-limit writes", () => {
+  const anchor = source.indexOf("const __procheliaProductionSafetyHandle = handle;");
+  const start = source.indexOf("handle = async function(request,env)", anchor);
+  const end = source.indexOf("\n};", start);
+  assert.ok(anchor >= 0 && start > anchor && end > start);
+  const body = source.slice(start, end);
+  const origin = body.indexOf("!securityOriginAllowed(request,env)");
+  const database = body.indexOf("!env?.DB");
+  const limiter = body.indexOf("const rate=await productionRateLimit(request,env)");
+  assert.ok(origin >= 0 && database > origin && limiter > database);
+});
