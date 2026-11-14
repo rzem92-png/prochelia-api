@@ -1014,7 +1014,7 @@ export async function verifyWebhookSignature(request, env, rawBody) {
 export function requiresAtomicFinancialSettlement(eventType) {
   return new Set([
     'payment_succeeded','charge_succeeded','payment_failed','charge_failed',
-    'payment_refunded','payout_paid','payout_failed','payout_canceled'
+    'payment_refunded','payout_processing','payout_paid','payout_failed','payout_canceled'
   ]).has(String(eventType || '').trim());
 }
 
