@@ -1713,12 +1713,22 @@ function financeStrategicQuote({basePriceCents=0,phaseFactor=1,urgency='normal',
 async function pricingQuote(request, env) {
   const gate=await requireAuthRole(request,env,['gerante','client','entreprise','intervenant']); if(gate.error)return gate.error;
   const b=await readJson(request)||{};
-  const phase=String(b.phase||await getSetting(env,'project_phase','TEST')).toUpperCase();
+  const actorRole=String(gate.auth.user.role||'').toUpperCase();
+  // Pricing phase and customer segment are server-derived; callers cannot
+  // select a cheaper phase or impersonate a B2B pricing segment.
+  const phase=String(await getSetting(env,'project_phase','TEST')).toUpperCase();
   const cfg=PROJECT_PHASES[phase]||PROJECT_PHASES.TEST;
   const distance=Number(b.distance_km||0);const duration=Number(b.duration_minutes||60);
   const base=Number(b.base_price_cents||0);
-  const clientType=String(b.client_type||'B2C').toUpperCase();
+  const clientType=['GERANTE','ADMIN','FINANCE'].includes(actorRole)
+    ? String(b.client_type||'B2C').toUpperCase()
+    : (actorRole==='ENTREPRISE'?'B2B':'B2C');
   const serviceCode=clean(b.service_code)||null;
+  if (!Number.isFinite(distance)||distance<0||distance>1000||
+      !Number.isInteger(duration)||duration<1||duration>10080||
+      !Number.isFinite(base)||base<0||base>100000000) {
+    return json({ok:false,error:'INVALID_PRICING_INPUT'},400);
+  }
 
   let policy=null;
   try {
