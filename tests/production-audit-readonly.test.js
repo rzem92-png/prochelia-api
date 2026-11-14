@@ -18,7 +18,7 @@ test("productionConfigCheck is non-mutating unless persist=true is explicitly re
 
 test("GET production audit handlers do not journal or insert check records", () => {
   const start = source.indexOf("async function finalProductionAudit");
-  const end = source.indexOf("const __procheliaProductionSafetyHandle", start);
+  const end = source.indexOf("\nasync function copilotNextActions", start);
   assert.notEqual(start, -1);
   assert.notEqual(end, -1);
   const body = source.slice(start, end);
@@ -42,7 +42,7 @@ test("production readiness remains closed until every independent release eviden
     "TENANT_SECURITY_AND_GDPR_ACCEPTANCE",
     "PRODUCTION_ROLLBACK_AND_HUMAN_RELEASE_APPROVAL"
   ]) {
-    assert.match(body, new RegExp("RELEASE_EVIDENCE:" + evidence));
+    assert.ok(body.includes(`'${evidence}'`), `Missing release evidence gate: ${evidence}`);
   }
   assert.match(body, /NOT_VALIDATED/);
   assert.match(body, /NOT_VALIDATED.*includes|includes.*NOT_VALIDATED/s);
