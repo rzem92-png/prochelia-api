@@ -32,3 +32,20 @@ test("pricing validates inputs and approved market bounds", () => {
   assert.match(body, /PRICE_BELOW_APPROVED_MARKET_FLOOR/);
   assert.match(body, /PRICE_ABOVE_APPROVED_MARKET_CEILING/);
 });
+
+test("quotes require an active server-owned integer-cent tariff", () => {
+  assert.match(body, /typeof b\\.tariff_id!=='string'/);
+  assert.match(body, /FROM pricing_catalog/);
+  assert.match(body, /client_price_cents/);
+  assert.match(body, /intervenant_amount_cents/);
+  assert.match(body, /APPROVED_TARIFF_NOT_FOUND/);
+  assert.doesNotMatch(body, /b\\.base_price_cents/);
+  assert.doesNotMatch(body, /b\\.service_code/);
+});
+
+test("legacy REAL tariffs are not silently converted", async () => {
+  const migration = await readFile(new URL("../migrations/0008_server_owned_pricing_catalog.sql", import.meta.url), "utf8");
+  assert.match(migration, /client_price_cents INTEGER NOT NULL/);
+  assert.match(migration, /intervenant_amount_cents INTEGER NOT NULL/);
+  assert.match(migration, /currency TEXT NOT NULL DEFAULT 'EUR'/);
+});
