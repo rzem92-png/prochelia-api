@@ -1495,7 +1495,7 @@ export async function resolveTenantReferences(env, auth, body, {allowComplaint=f
   return {error:'FORBIDDEN'};
 }
 
-async function createOperationalCase(request, env) {
+async function createOperationalCase(request, env, { complaintRecord = null } = {}) {
   const gate=await requireAuthRole(request,env,['gerante','client','intervenant','entreprise']); if(gate.error)return gate.error;
   const body=await readJson(request)||{};
   const tenant=await resolveTenantReferences(env,gate.auth,body);
@@ -1511,14 +1511,19 @@ async function createOperationalCase(request, env) {
   const status=rec.action==='AUTO_RESOLVE' ? 'AUTO_PENDING' : 'OPEN';
   // D1 batch executes these related records atomically: a failed audit/log write
   // must not leave an operational case that appears fully created.
-  await env.DB.batch([
+  const createStatements = [
     env.DB.prepare(`INSERT INTO operational_cases(id,case_type,source,phase,priority,status,auto_mode,client_id,company_id,intervenant_id,mission_id,impact_level,description,context_json,proposed_solution_json,requires_manager) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
       .bind(id,caseType,'API',phase,priority,status,rec.mode,refs.client_id,refs.company_id,refs.intervenant_id,refs.mission_id,impact,clean(body.description)||null,JSON.stringify({}),JSON.stringify(rec),requiresManager),
     env.DB.prepare(`INSERT INTO copilot_log(id,case_id,action_type,recommendation,confidence,mode) VALUES(?,?,?,?,?,?)`)
       .bind(crypto.randomUUID(),id,rec.action,JSON.stringify(rec.solution),rec.confidence,rec.mode),
     env.DB.prepare(`INSERT INTO activity_journal(id,actor_type,actor_id,action,entity_type,entity_id,result,metadata_json) VALUES(?,?,?,?,?,?,?,?)`)
       .bind(crypto.randomUUID(),'copilot',null,'CASE_CREATED','operational_case',id,'OK',JSON.stringify({caseType,impact}))
-  ]);
+  ];
+  if (complaintRecord) {
+    createStatements.push(env.DB.prepare(`INSERT INTO complaints(id,client_type,client_id,company_id,mission_id,category,severity,description,resolution_case_id) VALUES(?,?,?,?,?,?,?,?,?)`)
+      .bind(complaintRecord.id,refs.company_id?'B2B':'B2C',refs.client_id,refs.company_id,refs.mission_id,complaintRecord.category,complaintRecord.severity,complaintRecord.description,id));
+  }
+  await env.DB.batch(createStatements);
   let execution=null;
   if(rec.action==='AUTO_RESOLVE') execution=await executeOperationalCase(env,id,null,true);
   const reportedStatus=execution?.status || (rec.action==='AUTO_RESOLVE'?'WAITING_ACTION':'WAITING_MANAGER');
@@ -1862,24 +1867,22 @@ async function complaintCreate(request, env) {
   const b=await readJson(request)||{};if(!b.category)return json({ok:false,error:'CATEGORY_REQUIRED',version:VERSION},400);
   const tenant=await resolveTenantReferences(env,gate.auth,b);
   if(tenant.error) return json({ok:false,error:tenant.error,version:VERSION},403);
-  const refs=tenant.references;
   const id=crypto.randomUUID();
-  await env.DB.prepare(`INSERT INTO complaints(id,client_type,client_id,company_id,mission_id,category,severity,description) VALUES(?,?,?,?,?,?,?,?)`).bind(id,refs.company_id?'B2B':'B2C',refs.client_id,refs.company_id,refs.mission_id,b.category,String(b.severity||'LOW'),clean(b.description)||null).run();
-  try {
-    const caseType=SIMPLE_CASES.has(b.category)?b.category:'reclamation_client';
-    const fakeReq=new Request(request.url,{method:'POST',headers:request.headers,body:JSON.stringify({case_type:caseType,client_id:refs.client_id,company_id:refs.company_id,mission_id:refs.mission_id,description:b.description,impact_level:b.severity||'LOW'})});
-    const caseResponse=await createOperationalCase(fakeReq,env);
-    const caseJson=await caseResponse.json();
-    if (!caseResponse.ok || !caseJson?.case_id) {
-      await env.DB.prepare('DELETE FROM complaints WHERE id=?').bind(id).run();
-      return json({ok:false,error:'COMPLAINT_CASE_CREATION_FAILED',version:VERSION},502);
+  const caseType=SIMPLE_CASES.has(b.category)?b.category:'reclamation_client';
+  const fakeReq=new Request(request.url,{method:'POST',headers:request.headers,body:JSON.stringify({
+    case_type:caseType,client_id:tenant.references.client_id,company_id:tenant.references.company_id,
+    mission_id:tenant.references.mission_id,description:b.description,impact_level:b.severity||'LOW'
+  })});
+  const caseResponse=await createOperationalCase(fakeReq,env,{
+    complaintRecord:{
+      id,category:b.category,severity:String(b.severity||'LOW'),description:clean(b.description)||null
     }
-    await env.DB.prepare('UPDATE complaints SET resolution_case_id=? WHERE id=?').bind(caseJson.case_id,id).run();
-    return json({ok:true,version:VERSION,complaint_id:id,resolution_case_id:caseJson.case_id,copilot:caseJson.recommendation||null},201);
-  } catch (_) {
-    try { await env.DB.prepare('DELETE FROM complaints WHERE id=?').bind(id).run(); } catch (_) {}
+  });
+  const caseJson=await caseResponse.json();
+  if (!caseResponse.ok || !caseJson?.case_id) {
     return json({ok:false,error:'COMPLAINT_CASE_CREATION_FAILED',version:VERSION},502);
   }
+  return json({ok:true,version:VERSION,complaint_id:id,resolution_case_id:caseJson.case_id,copilot:caseJson.recommendation||null},201);
 }
 
 async function setPhase(request, env) {
