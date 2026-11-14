@@ -1509,11 +1509,16 @@ async function createOperationalCase(request, env) {
   const id=crypto.randomUUID();
   const requiresManager=rec.mode==='MANAGER_APPROVAL' ? 1 : 0;
   const status=rec.action==='AUTO_RESOLVE' ? 'AUTO_PENDING' : 'OPEN';
-  await env.DB.prepare(`INSERT INTO operational_cases(id,case_type,source,phase,priority,status,auto_mode,client_id,company_id,intervenant_id,mission_id,impact_level,description,context_json,proposed_solution_json,requires_manager) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
-    .bind(id,caseType,'API',phase,priority,status,rec.mode,refs.client_id,refs.company_id,refs.intervenant_id,refs.mission_id,impact,clean(body.description)||null,JSON.stringify({}),JSON.stringify(rec),requiresManager).run();
-  await env.DB.prepare(`INSERT INTO copilot_log(id,case_id,action_type,recommendation,confidence,mode) VALUES(?,?,?,?,?,?)`)
-    .bind(crypto.randomUUID(),id,rec.action,JSON.stringify(rec.solution),rec.confidence,rec.mode).run();
-  await journal(env,'copilot',null,'CASE_CREATED','operational_case',id,'OK',{caseType,impact});
+  // D1 batch executes these related records atomically: a failed audit/log write
+  // must not leave an operational case that appears fully created.
+  await env.DB.batch([
+    env.DB.prepare(`INSERT INTO operational_cases(id,case_type,source,phase,priority,status,auto_mode,client_id,company_id,intervenant_id,mission_id,impact_level,description,context_json,proposed_solution_json,requires_manager) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+      .bind(id,caseType,'API',phase,priority,status,rec.mode,refs.client_id,refs.company_id,refs.intervenant_id,refs.mission_id,impact,clean(body.description)||null,JSON.stringify({}),JSON.stringify(rec),requiresManager),
+    env.DB.prepare(`INSERT INTO copilot_log(id,case_id,action_type,recommendation,confidence,mode) VALUES(?,?,?,?,?,?)`)
+      .bind(crypto.randomUUID(),id,rec.action,JSON.stringify(rec.solution),rec.confidence,rec.mode),
+    env.DB.prepare(`INSERT INTO activity_journal(id,actor_type,actor_id,action,entity_type,entity_id,result,metadata_json) VALUES(?,?,?,?,?,?,?,?)`)
+      .bind(crypto.randomUUID(),'copilot',null,'CASE_CREATED','operational_case',id,'OK',JSON.stringify({caseType,impact}))
+  ]);
   let execution=null;
   if(rec.action==='AUTO_RESOLVE') execution=await executeOperationalCase(env,id,null,true);
   const reportedStatus=execution?.status || (rec.action==='AUTO_RESOLVE'?'WAITING_ACTION':'WAITING_MANAGER');
