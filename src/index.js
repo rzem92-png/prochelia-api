@@ -3576,9 +3576,10 @@ async function productionSafetySchema(env){
 }
 
 async function productionSubjectHash(request, route){
-  // CF-Connecting-IP is injected by Cloudflare at the edge. Never trust the
-  // client-controlled X-Forwarded-For fallback for abuse-control identity.
-  const ip=clean(request.headers.get('CF-Connecting-IP')) || 'unknown';
+  // Trust only the Cloudflare edge identity. Never fall back to client-controlled
+  // forwarding headers or a shared "unknown" bucket when visitor IP headers are removed.
+  const ip=clean(request.headers.get('CF-Connecting-IP'));
+  if(!ip) return null;
   return sha256Hex(`${ip}|${route}`);
 }
 
@@ -3597,6 +3598,7 @@ async function productionRateLimit(request,env){
   const windowSeconds=60;
   const bucket=`${sensitive?'SENSITIVE':'GENERAL'}:${path}`;
   const subject=await productionSubjectHash(request,path);
+  if(!subject) return {ok:false,response:json({ok:false,error:'RATE_LIMIT_IDENTITY_UNAVAILABLE',version:VERSION},503)};
   const now=Math.floor(Date.now()/1000);
   const start=new Date(Math.floor(now/windowSeconds)*windowSeconds*1000).toISOString();
   await ensureFinalHardeningSchema(env);
