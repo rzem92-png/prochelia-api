@@ -147,7 +147,7 @@ test("operational case, Copilot log and audit journal are committed in one D1 ba
   const body = source.slice(start, end);
   assert.notEqual(start, -1);
   assert.notEqual(end, -1);
-  assert.match(body, /await env\.DB\.batch\(\[/);
+  assert.match(body, /await env\.DB\.batch\(createStatements\)/);
   assert.match(body, /INSERT INTO operational_cases/);
   assert.match(body, /INSERT INTO copilot_log/);
   assert.match(body, /INSERT INTO activity_journal/);
