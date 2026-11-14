@@ -2625,7 +2625,7 @@ async function productionConfigCheck(env, { persist = false } = {}) {
 async function finalProductionAudit(request,env) {
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
   const result=await productionConfigCheck(env);
-  // GET audit endpoint is intentionally read-only; persist audit via explicit mutation endpoint.
+  // GET production-check is read-only; persist audit via an explicit mutation endpoint.
   return json({ok:true,version:VERSION,production_gate:result.overall?'OPEN':'CLOSED',ready_for_real_traffic:result.overall,checks:result.checks,note:result.overall?'Architecture gate passed; external business integrations must still be exercised with sandbox/acceptance tests.':'No real production traffic should be enabled until blocking configuration/schema checks are resolved.'});
 }
 
