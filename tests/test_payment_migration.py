@@ -1,9 +1,12 @@
 import pathlib
+import re
 import sqlite3
 import unittest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-MIGRATION = ROOT / "migrations" / "0005_payment_runtime_schema.sql"\nHARDENING_MIGRATION = ROOT / "migrations" / "0009_final_hardening_schema.sql"
+MIGRATION = ROOT / "migrations" / "0005_payment_runtime_schema.sql"
+HARDENING_MIGRATION = ROOT / "migrations" / "0009_final_hardening_schema.sql"
+
 
 class PaymentMigrationTests(unittest.TestCase):
     def setUp(self):
@@ -28,12 +31,9 @@ class PaymentMigrationTests(unittest.TestCase):
         self.assertTrue(expected.issubset(tables))
 
     def test_migration_has_no_destructive_sql(self):
-        import re
-        sql = MIGRATION.read_text(encoding="utf-8")
-        # Ignore comments; reject destructive SQL statements rather than incidental words.
-        sql = re.sub(r"--[^\\n]*", "", sql).upper()
-        for forbidden in (r"\\bDROP\\s+TABLE\\b", r"\\bDROP\\s+INDEX\\b",
-                          r"\\bDELETE\\s+FROM\\b", r"^\\s*UPDATE\\s+"):
+        sql = re.sub(r"--[^\n]*", "", MIGRATION.read_text(encoding="utf-8")).upper()
+        for forbidden in (r"\bDROP\s+TABLE\b", r"\bDROP\s+INDEX\b",
+                          r"\bDELETE\s+FROM\b", r"^\s*UPDATE\s+"):
             self.assertIsNone(re.search(forbidden, sql, flags=re.MULTILINE))
 
     def test_unique_idempotency_constraints(self):
@@ -61,11 +61,11 @@ class PaymentMigrationTests(unittest.TestCase):
         self.assertTrue(expected.issubset(objects))
 
     def test_hardening_migration_has_no_destructive_sql(self):
-        import re
-        sql = re.sub(r"--[^\\n]*", "", HARDENING_MIGRATION.read_text(encoding="utf-8")).upper()
-        for forbidden in (r"\\bDROP\\s+TABLE\\b", r"\\bDROP\\s+INDEX\\b",
-                          r"\\bDELETE\\s+FROM\\b", r"^\\s*UPDATE\\s+"):
+        sql = re.sub(r"--[^\n]*", "", HARDENING_MIGRATION.read_text(encoding="utf-8")).upper()
+        for forbidden in (r"\bDROP\s+TABLE\b", r"\bDROP\s+INDEX\b",
+                          r"\bDELETE\s+FROM\b", r"^\s*UPDATE\s+"):
             self.assertIsNone(re.search(forbidden, sql, flags=re.MULTILINE))
+
 
 if __name__ == "__main__":
     unittest.main()
