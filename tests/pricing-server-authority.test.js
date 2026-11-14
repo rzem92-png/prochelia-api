@@ -53,3 +53,7 @@ test("legacy REAL tariffs are not silently converted", async () => {
 test("pricing catalog rejects tariffs attached to inactive services", () => {
   assert.match(body, /INNER JOIN prestations ON prestations\.id=pricing_catalog\.prestation_id AND prestations\.active=1/);
 });
+
+test("quotes fail closed when no active server pricing policy exists", () => {
+  assert.match(body, /if \(!policy\) return json\(\{ok:false,error:'PRICING_POLICY_NOT_CONFIGURED'\},503\)/);
+});
