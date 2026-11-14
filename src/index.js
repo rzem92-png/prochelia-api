@@ -1754,7 +1754,9 @@ async function pricingQuote(request, env) {
   try {
     policy=await env.DB.prepare(`SELECT * FROM pricing_policies WHERE active=1 AND phase=? AND client_type=? AND (service_code=? OR service_code IS NULL) ORDER BY CASE WHEN service_code=? THEN 0 ELSE 1 END LIMIT 1`)
       .bind(phase,clientType,serviceCode,serviceCode).first();
-  } catch (_) {}
+  } catch (_) {
+    return json({ok:false,error:'PRICING_POLICY_UNAVAILABLE'},503);
+  }
   if (policy?.market_min_cents!=null && base<Number(policy.market_min_cents)) {
     return json({ok:false,error:'PRICE_BELOW_APPROVED_MARKET_FLOOR'},400);
   }
