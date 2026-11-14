@@ -1,0 +1,189 @@
+name: PROCHÉLIA — restauration R2 EU vers D1 isolée
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_restore:
+        description: "Saisir exactement RESTORE_R2_TO_ISOLATED_D1 pour autoriser la restauration de la sauvegarde 43509759419"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: prochelia-r2-restore-validation-2026-11
+  cancel-in-progress: false
+
+jobs:
+  restore-isolated:
+    # Gate the entire job before any runner receives Cloudflare/R2 secrets.
+    if: ${{ inputs.confirm_restore == 'RESTORE_R2_TO_ISOLATED_D1' && github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      CLOUDFLARE_ACCOUNT_ID: f2a79e9fa41566a8ec80fb24c02c60eb
+      EXPECTED_DB_NAME: prochelia-r2-restore-validation-2026-11
+      EXPECTED_DB_ID: 3caebbc6-982a-4562-96a7-e509185e9e9a
+      SOURCE_DB_NAME: prochelia-preview-db
+      SOURCE_DB_ID: 6adb95e5-e542-4bec-9008-fbea01042305
+      FORBIDDEN_PRODUCTION_DB_ID: 04f52830-ef5a-4f17-a640-42bbc2381bba
+      BACKUP_RUN_ID: "43509759419"
+      R2_BUCKET: prochelia-preview-backups-eu
+      R2_ENDPOINT: https://f2a79e9fa41566a8ec80fb24c02c60eb.r2.cloudflarestorage.com
+      R2_OBJECT_KEY: preview-d1/prochelia-preview-db/2026/11/13/43509759419-ca1def14725d6f02f90b3679506b6b93137b6c2d.sql.gpg
+      AWS_ACCESS_KEY_ID: ${{ secrets.R2_EU_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_EU_SECRET_ACCESS_KEY }}
+      AWS_DEFAULT_REGION: auto
+    steps:
+      - name: Vérifier les secrets et le contexte
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          BACKUP_ENCRYPTION_KEY: ${{ secrets.BACKUP_ENCRYPTION_KEY }}
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REF" == "refs/heads/main" ]]
+          for name in CLOUDFLARE_API_TOKEN BACKUP_ENCRYPTION_KEY AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY; do
+            [[ -n "${!name:-}" ]] || { echo "::error::Secret requis absent: $name"; exit 1; }
+          done
+          [[ "${#AWS_ACCESS_KEY_ID}" -eq 32 ]] || { echo "::error::Identifiant R2 S3 invalide."; exit 1; }
+          [[ "$EXPECTED_DB_ID" != "$SOURCE_DB_ID" && "$EXPECTED_DB_ID" != "$FORBIDDEN_PRODUCTION_DB_ID" ]]
+          echo "Contexte et secrets présents; valeurs secrètes non affichées."
+
+      - name: Vérifier le run de sauvegarde et son identité
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$BACKUP_RUN_ID" > "$RUNNER_TEMP/backup-run.json"
+          jq -e '
+            .id == 43509759419 and
+            .status == "completed" and .conclusion == "success" and
+            .path == ".github/workflows/backup-preview-d1-to-r2-eu.yml" and
+            .head_sha == "ca1def14725d6f02f90b3679506b6b93137b6c2d" and
+            .event == "workflow_dispatch"
+          ' "$RUNNER_TEMP/backup-run.json" >/dev/null
+          echo "Run de sauvegarde source authentifié."
+
+      - name: Vérifier la cible Cloudflare exacte
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          token="${CLOUDFLARE_API_TOKEN#Bearer }"
+          token="${token#bearer }"
+          token="$(printf '%s' "$token" | tr -d '\r\n')"
+          http="$(curl --silent --show-error --output "$RUNNER_TEMP/d1-list.json" --write-out '%{http_code}' \
+            -H "Authorization: Bearer $token" \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/d1/database?name=$EXPECTED_DB_NAME")"
+          [[ "$http" == "200" ]]
+          jq -e --arg n "$EXPECTED_DB_NAME" --arg id "$EXPECTED_DB_ID" \
+            '[.result[]? | select(.name == $n and .uuid == $id and .jurisdiction == "eu")] | length == 1' \
+            "$RUNNER_TEMP/d1-list.json" >/dev/null
+          for forbidden in "$SOURCE_DB_ID" "$FORBIDDEN_PRODUCTION_DB_ID"; do
+            [[ "$EXPECTED_DB_ID" != "$forbidden" ]]
+          done
+          echo "Nom, UUID et juridiction UE de la cible confirmés."
+
+      - name: Télécharger archive R2 et manifeste
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends gnupg sqlite3
+          python3 -m pip install --user --break-system-packages awscli
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          export PATH="$HOME/.local/bin:$PATH"
+          mkdir -p "$RUNNER_TEMP/prochelia-restore"
+          aws s3 cp "s3://$R2_BUCKET/$R2_OBJECT_KEY" "$RUNNER_TEMP/prochelia-restore/backup.sql.gpg" --endpoint-url "$R2_ENDPOINT" --region auto --only-show-errors
+          aws s3 cp "s3://$R2_BUCKET/$R2_OBJECT_KEY.sha256" "$RUNNER_TEMP/prochelia-restore/manifest.sha256" --endpoint-url "$R2_ENDPOINT" --region auto --only-show-errors
+          [[ -s "$RUNNER_TEMP/prochelia-restore/backup.sql.gpg" && -s "$RUNNER_TEMP/prochelia-restore/manifest.sha256" ]]
+          manifest="$(tr -d '[:space:]' < "$RUNNER_TEMP/prochelia-restore/manifest.sha256")"
+          [[ "$manifest" =~ ^[a-fA-F0-9]{64}$ ]] || { echo "::error::Manifeste SHA-256 invalide."; exit 1; }
+          echo "Archive et manifeste téléchargés depuis le bucket privé."
+
+      - name: Déchiffrer et valider le dump SQL localement
+        shell: bash
+        env:
+          BACKUP_ENCRYPTION_KEY: ${{ secrets.BACKUP_ENCRYPTION_KEY }}
+        run: |
+          set -euo pipefail
+          sql="$RUNNER_TEMP/prochelia-restore/backup.sql"
+          printf '%s' "$BACKUP_ENCRYPTION_KEY" | gpg --batch --yes --pinentry-mode loopback --passphrase-fd 0 \
+            --decrypt "$RUNNER_TEMP/prochelia-restore/backup.sql.gpg" > "$sql"
+          [[ -s "$sql" ]]
+          actual="$(sha256sum "$sql" | awk '{print $1}')"
+          expected="$(tr -d '[:space:]' < "$RUNNER_TEMP/prochelia-restore/manifest.sha256")"
+          [[ "$actual" == "$expected" ]] || { echo "::error::Checksum SHA-256 du SQL déchiffré incorrect."; exit 1; }
+          sqlite3 "$RUNNER_TEMP/prochelia-restore/local-check.sqlite" < "$sql"
+          [[ "$(sqlite3 "$RUNNER_TEMP/prochelia-restore/local-check.sqlite" 'PRAGMA integrity_check;')" == "ok" ]]
+          count="$(sqlite3 "$RUNNER_TEMP/prochelia-restore/local-check.sqlite" "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT GLOB '_cf_*';")"
+          [[ "$count" == "31" ]] || { echo "::error::Le dump ne contient pas les 31 tables attendues."; exit 1; }
+          migrations="$(sqlite3 "$RUNNER_TEMP/prochelia-restore/local-check.sqlite" 'SELECT COUNT(*) FROM d1_migrations;')"
+          [[ "$migrations" == "7" ]] || { echo "::error::Nombre de migrations inattendu."; exit 1; }
+          echo "Dump authentifié : intégrité SQLite OK, 31 tables, 7 migrations."
+
+      - name: Installer Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+          package-manager-cache: false
+
+      - name: Créer une configuration Wrangler temporaire et confirmer que la cible est vide
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          cat > "$RUNNER_TEMP/wrangler-restore.jsonc" <<EOF
+          {
+            "name": "prochelia-r2-restore-validation",
+            "account_id": "$CLOUDFLARE_ACCOUNT_ID",
+            "compatibility_date": "2026-09-25",
+            "d1_databases": [{
+              "binding": "DB",
+              "database_name": "$EXPECTED_DB_NAME",
+              "database_id": "$EXPECTED_DB_ID"
+            }]
+          }
+          EOF
+          npx --yes wrangler@4 d1 execute "$EXPECTED_DB_NAME" --remote --config "$RUNNER_TEMP/wrangler-restore.jsonc" --command="SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT GLOB '_cf_*';" --json > "$RUNNER_TEMP/pre-restore.json"
+          jq -e '[.. | objects | select(has("results")) | .results[]?] | flatten | length == 0' "$RUNNER_TEMP/pre-restore.json" >/dev/null || {
+            echo "::error::La cible n'est pas vide. Aucune restauration ne sera lancée."
+            exit 1
+          }
+          echo "Cible isolée vide confirmée."
+
+      - name: Restaurer exclusivement dans la D1 isolée
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          [[ "$EXPECTED_DB_NAME" == "prochelia-r2-restore-validation-2026-11" ]]
+          [[ "$EXPECTED_DB_ID" == "3caebbc6-982a-4562-96a7-e509185e9e9a" ]]
+          [[ "$EXPECTED_DB_ID" != "$SOURCE_DB_ID" && "$EXPECTED_DB_ID" != "$FORBIDDEN_PRODUCTION_DB_ID" ]]
+          npx --yes wrangler@4 d1 execute "$EXPECTED_DB_NAME" --remote --config "$RUNNER_TEMP/wrangler-restore.jsonc" --file="$RUNNER_TEMP/prochelia-restore/backup.sql" --yes
+          echo "Import SQL envoyé uniquement vers la base D1 de validation."
+
+      - name: Contrôles post-restauration
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          cfg="$RUNNER_TEMP/wrangler-restore.jsonc"
+          npx --yes wrangler@4 d1 execute "$EXPECTED_DB_NAME" --remote --config "$cfg" --command="PRAGMA quick_check;" --json > "$RUNNER_TEMP/quick.json"
+          jq -e '[.. | objects | select(has("results")) | .results[]? | .quick_check?] | flatten | any(. == "ok")' "$RUNNER_TEMP/quick.json" >/dev/null
+          npx --yes wrangler@4 d1 execute "$EXPECTED_DB_NAME" --remote --config "$cfg" --command="PRAGMA foreign_key_check;" --json > "$RUNNER_TEMP/fk.json"
+          jq -e '[.. | objects | select(has("results")) | .results[]?] | flatten | length == 0' "$RUNNER_TEMP/fk.json" >/dev/null
+          npx --yes wrangler@4 d1 execute "$EXPECTED_DB_NAME" --remote --config "$cfg" --command="SELECT COUNT(*) AS table_count FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT GLOB '_cf_*';" --json > "$RUNNER_TEMP/tables.json"
+          jq -e '[.. | objects | select(has("results")) | .results[]? | .table_count?] | flatten | any(. == 31)' "$RUNNER_TEMP/tables.json" >/dev/null
+          npx --yes wrangler@4 d1 execute "$EXPECTED_DB_NAME" --remote --config "$cfg" --command="SELECT COUNT(*) AS migration_count FROM d1_migrations;" --json > "$RUNNER_TEMP/migrations.json"
+          jq -e '[.. | objects | select(has("results")) | .results[]? | .migration_count?] | flatten | any(. == 7)' "$RUNNER_TEMP/migrations.json" >/dev/null
+          echo "PASS : quick_check=ok ; zéro violation FK ; 31 tables ; 7 migrations."

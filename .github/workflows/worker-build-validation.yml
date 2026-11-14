@@ -6,6 +6,7 @@ on:
       - "src/**"
       - "wrangler.jsonc"
       - ".github/workflows/deploy-preview-worker-manual.yml"
+      - ".github/workflows/restore-preview-d1-from-r2-isolated.yml"
       - ".github/workflows/worker-build-validation.yml"
   push:
     branches: [main]
@@ -35,6 +36,6 @@ jobs:
       - name: Lint guarded Preview deployment workflow
         run: |
           go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
-          "$HOME/go/bin/actionlint" .github/workflows/deploy-preview-worker-manual.yml
+          "$HOME/go/bin/actionlint" .github/workflows/deploy-preview-worker-manual.yml .github/workflows/restore-preview-d1-from-r2-isolated.yml
       - name: Wrangler bundle validation only (no deploy)
         run: npx --yes wrangler@4 deploy --dry-run --config wrangler.jsonc --outdir "$RUNNER_TEMP/prochelia-worker-dry-run"
