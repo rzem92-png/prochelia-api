@@ -112,3 +112,17 @@ test("complaint creation compensates if its operational case cannot be created",
   assert.ok(body.includes("DELETE FROM complaints WHERE id=?"));
   assert.ok(body.includes("!caseResponse.ok || !caseJson?.case_id"));
 });
+
+test("manager approval does not mark a queued provider action as completed", async () => {
+  const { readFile } = await import("node:fs/promises");
+  const source = await readFile(new URL("../src/index.js", import.meta.url), "utf8");
+  const start = source.indexOf("async function executeOperationalCase");
+  const end = source.indexOf("async function approveOperationalCase", start);
+  const body = source.slice(start, end);
+  assert.notEqual(start, -1);
+  assert.notEqual(end, -1);
+  assert.match(body, /\(automatic \|\| businessResults\.length>0\) && \(!verifiedAction \|\| hasUnfinishedAction\)/);
+  assert.match(body, /status='WAITING_ACTION'/);
+  assert.match(body, /resolved_at=NULL/);
+  assert.match(body, /status='RESOLVED'/);
+});
