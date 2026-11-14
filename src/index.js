@@ -1099,7 +1099,7 @@ async function openPaymentDispute(request, env) {
   }
   const id = crypto.randomUUID();
   const results = await env.DB.batch([
-    env.DB.prepare("UPDATE payment_transactions SET status='held',updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='paid'").bind(tx.id),
+    env.DB.prepare("UPDATE payment_transactions SET status='held',updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='paid' AND NOT EXISTS (SELECT 1 FROM payment_disputes WHERE transaction_id=? AND status IN ('open','pending'))").bind(tx.id,tx.id),
     env.DB.prepare(`INSERT INTO payment_disputes
       (id,mission_id,transaction_id,client_id,intervenant_id,status,reason,amount_cents)
       SELECT ?,?,?,?,?,?,?,?
