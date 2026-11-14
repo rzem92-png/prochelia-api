@@ -1839,12 +1839,23 @@ async function complaintCreate(request, env) {
   const tenant=await resolveTenantReferences(env,gate.auth,b);
   if(tenant.error) return json({ok:false,error:tenant.error,version:VERSION},403);
   const refs=tenant.references;
-  const id=crypto.randomUUID();await env.DB.prepare(`INSERT INTO complaints(id,client_type,client_id,company_id,mission_id,category,severity,description) VALUES(?,?,?,?,?,?,?,?)`).bind(id,refs.company_id?'B2B':'B2C',refs.client_id,refs.company_id,refs.mission_id,b.category,String(b.severity||'LOW'),clean(b.description)||null).run();
-  const caseType=SIMPLE_CASES.has(b.category)?b.category:'reclamation_client';
-  const fakeReq=new Request(request.url,{method:'POST',headers:request.headers,body:JSON.stringify({case_type:caseType,client_id:refs.client_id,company_id:refs.company_id,mission_id:refs.mission_id,description:b.description,impact_level:b.severity||'LOW'})});
-  const caseResponse=await createOperationalCase(fakeReq,env);const caseJson=await caseResponse.json();
-  if(caseJson.case_id)await env.DB.prepare('UPDATE complaints SET resolution_case_id=? WHERE id=?').bind(caseJson.case_id,id).run();
-  return json({ok:true,version:VERSION,complaint_id:id,resolution_case_id:caseJson.case_id||null,copilot:caseJson.recommendation||null},201);
+  const id=crypto.randomUUID();
+  await env.DB.prepare(`INSERT INTO complaints(id,client_type,client_id,company_id,mission_id,category,severity,description) VALUES(?,?,?,?,?,?,?,?)`).bind(id,refs.company_id?'B2B':'B2C',refs.client_id,refs.company_id,refs.mission_id,b.category,String(b.severity||'LOW'),clean(b.description)||null).run();
+  try {
+    const caseType=SIMPLE_CASES.has(b.category)?b.category:'reclamation_client';
+    const fakeReq=new Request(request.url,{method:'POST',headers:request.headers,body:JSON.stringify({case_type:caseType,client_id:refs.client_id,company_id:refs.company_id,mission_id:refs.mission_id,description:b.description,impact_level:b.severity||'LOW'})});
+    const caseResponse=await createOperationalCase(fakeReq,env);
+    const caseJson=await caseResponse.json();
+    if (!caseResponse.ok || !caseJson?.case_id) {
+      await env.DB.prepare('DELETE FROM complaints WHERE id=?').bind(id).run();
+      return json({ok:false,error:'COMPLAINT_CASE_CREATION_FAILED',version:VERSION},502);
+    }
+    await env.DB.prepare('UPDATE complaints SET resolution_case_id=? WHERE id=?').bind(caseJson.case_id,id).run();
+    return json({ok:true,version:VERSION,complaint_id:id,resolution_case_id:caseJson.case_id,copilot:caseJson.recommendation||null},201);
+  } catch (_) {
+    try { await env.DB.prepare('DELETE FROM complaints WHERE id=?').bind(id).run(); } catch (_) {}
+    return json({ok:false,error:'COMPLAINT_CASE_CREATION_FAILED',version:VERSION},502);
+  }
 }
 
 async function setPhase(request, env) {
