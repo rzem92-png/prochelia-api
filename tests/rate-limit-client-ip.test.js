@@ -11,7 +11,12 @@ test("rate-limit identity trusts only the Cloudflare edge client IP header", () 
   assert.notEqual(end, -1);
   const body = source.slice(start, end);
   assert.match(body, /CF-Connecting-IP/);
+  assert.match(body, /if\(!ip\) return null/);
   assert.equal(/headers\s*\.\s*get\s*\(\s*["']X-Forwarded-For/i.test(body), false);
+  const limiterStart = source.indexOf("async function productionRateLimit");
+  const limiterEnd = source.indexOf("\\nasync function strictProductionAudit", limiterStart);
+  const limiter = source.slice(limiterStart, limiterEnd);
+  assert.match(limiter, /RATE_LIMIT_IDENTITY_UNAVAILABLE/);
 });
 
 test("rate-limit counter uses one atomic upsert instead of a racy read-modify-write", () => {
