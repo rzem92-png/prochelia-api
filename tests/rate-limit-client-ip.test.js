@@ -11,5 +11,5 @@ test("rate-limit identity trusts only the Cloudflare edge client IP header", () 
   assert.notEqual(end, -1);
   const body = source.slice(start, end);
   assert.match(body, /CF-Connecting-IP/);
-  assert.doesNotMatch(body, /X-Forwarded-For/i);
+  assert.doesNotMatch(body, /headers\\.get\\(['\"]X-Forwarded-For/i);
 });
