@@ -2616,8 +2616,11 @@ async function productionConfigCheck(env, { persist = false } = {}) {
 async function finalProductionAudit(request,env) {
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
   const result=await productionConfigCheck(env);
-  // GET audit endpoint is intentionally read-only; persist audit via explicit mutation endpoint.
-  return json({ok:true,version:VERSION,production_gate:result.overall?'OPEN':'CLOSED',ready_for_real_traffic:result.overall,checks:result.checks,note:result.overall?'Architecture gate passed; external business integrations must still be exercised with sandbox/acceptance tests.':'No real production traffic should be enabled until blocking configuration/schema checks are resolved.'});
+  // This endpoint reports configuration only. It is not a release authorization:
+  // restore drills, PSP E2E, independent security/GDPR review and explicit human approval
+  // must be recorded before real traffic can ever be enabled.
+  const releaseBlockers=['ISOLATED_RESTORE_DRILL','PSP_SANDBOX_E2E','INDEPENDENT_SECURITY_REVIEW','GDPR_LEGAL_APPROVAL','LOAD_AND_RECOVERY_TESTS','HUMAN_RELEASE_APPROVAL'];
+  return json({ok:true,version:VERSION,configuration_gate:result.overall?'OPEN':'CLOSED',production_gate:'CLOSED',ready_for_real_traffic:false,release_blockers:releaseBlockers,checks:result.checks,note:'Configuration checks are not production authorization. Real traffic remains blocked until every release blocker is independently evidenced and explicitly approved.'});
 }
 
 async function copilotNextActions(request,env) {
