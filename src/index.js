@@ -3528,6 +3528,12 @@ async function supportCreate(request,env){
   const tenant=await resolveTenantReferences(env,a.auth,b);
   if(tenant.error) return json({ok:false,error:tenant.error,version:VERSION},403);
   const refs=tenant.references;
+  const complaintId=clean(b.complaint_id)||null;
+  if(complaintId) {
+    if(String(a.auth.user.role||'').toLowerCase()!=='gerante') return json({ok:false,error:'COMPLAINT_REFERENCE_FORBIDDEN',version:VERSION},403);
+    const linkedComplaint=await env.DB.prepare('SELECT id FROM complaints WHERE id=? LIMIT 1').bind(complaintId).first();
+    if(!linkedComplaint) return json({ok:false,error:'COMPLAINT_NOT_FOUND',version:VERSION},400);
+  }
   const category=clean(b.category)||'GENERAL';
   const severity=String(b.severity||'LOW').toUpperCase();
   const scenario=supportScenarioFor(category,severity);
@@ -3537,7 +3543,7 @@ async function supportCreate(request,env){
   const id=crypto.randomUUID();
   const proposed=rule?JSON.parse(rule.steps_json||'[]'):{steps:['collect_evidence','copilot_analysis','notify','audit']};
   await env.DB.prepare(`INSERT INTO support_cases(id,source_role,requester_id,company_id,mission_id,complaint_id,category,severity,status,description,proposed_resolution,requires_manager) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`)
-    .bind(id,a.role,a.auth.user.id,refs.company_id,refs.mission_id,b.complaint_id||null,category,severity,auto?'PROCESSING':'OPEN',clean(b.description)||null,JSON.stringify({scenario,steps:proposed.steps||proposed}),requiresManager?1:0).run();
+    .bind(id,a.role,a.auth.user.id,refs.company_id,refs.mission_id,complaintId,category,severity,auto?'PROCESSING':'OPEN',clean(b.description)||null,JSON.stringify({scenario,steps:proposed.steps||proposed}),requiresManager?1:0).run();
   await supportEvent(env,id,a.role,a.auth.user.id,'CREATED',{scenario,auto,requiresManager});
   await journal(env,a.role,a.auth.user.id,'SUPPORT_CASE_CREATE','support_cases',id,'OK',{scenario,severity,auto});
   let autoResult=null;
