@@ -1717,7 +1717,8 @@ async function pricingQuote(request, env) {
   // Pricing phase and customer segment are server-derived; callers cannot
   // select a cheaper phase or impersonate a B2B pricing segment.
   const phase=String(await getSetting(env,'project_phase','TEST')).toUpperCase();
-  const cfg=PROJECT_PHASES[phase]||PROJECT_PHASES.TEST;
+  const cfg=PROJECT_PHASES[phase];
+  if (!cfg) return json({ok:false,error:'PRICING_PHASE_NOT_CONFIGURED'},503);
   const distance=Number(b.distance_km||0);const duration=Number(b.duration_minutes||60);
   const clientType=['GERANTE','ADMIN','FINANCE'].includes(actorRole)
     ? String(b.client_type||'B2C').toUpperCase()
