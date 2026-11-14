@@ -26,3 +26,12 @@ test("GET production audit handlers do not journal or insert check records", () 
   assert.doesNotMatch(body, /INSERT INTO system_config_checks/);
   assert.match(body, /GET production-check is read-only/);
 });
+
+
+test("production readiness cannot open from PSP environment strings without an executable adapter", () => {
+  const start = source.indexOf("async function productionConfigCheck");
+  const end = source.indexOf("\\nasync function finalProductionAudit", start);
+  const body = source.slice(start, end);
+  assert.match(body, /code:'PSP_ADAPTER',status:paymentsConfigured\\(env\\)\\?'OK':'NOT_CONFIGURED'/);
+  assert.match(body, /'SECRET:PAYMENT_PROVIDER','SECRET:PAYMENT_WEBHOOK_SECRET','PSP_ADAPTER'/);
+});
