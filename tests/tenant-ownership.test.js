@@ -126,3 +126,10 @@ test("manager approval does not mark a queued provider action as completed", asy
   assert.match(body, /resolved_at=NULL/);
   assert.match(body, /status='RESOLVED'/);
 });
+
+test("manager cannot attach an unverified company identifier to an operational case", async () => {
+  const DB=mockDb();
+  const result=await resolveTenantReferences({DB},{user:{id:"manager",role:"gerante"}},{company_id:"company-forged"});
+  assert.equal(result.error,"COMPANY_OWNERSHIP_NOT_CONFIGURED");
+  assert.equal(DB.calls.length,0);
+});
