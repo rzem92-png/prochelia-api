@@ -1468,7 +1468,12 @@ async function createOperationalCase(request, env) {
       clientId=mission.client_id||null;
     }
   } else if (actor.role === 'entreprise') {
-    const profile=await env.DB.prepare("SELECT id FROM business_profiles WHERE owner_user_id=? AND kind IN ('entreprise','company') AND status='active' LIMIT 1").bind(actor.id).first();
+    let profile=null;
+    try {
+      profile=await env.DB.prepare("SELECT id FROM business_profiles WHERE owner_user_id=? AND kind IN ('entreprise','company') AND status='active' LIMIT 1").bind(actor.id).first();
+    } catch {
+      return json({ok:false,error:'BUSINESS_PROFILE_SCOPE_UNAVAILABLE',version:VERSION},403);
+    }
     if (!profile) return json({ok:false,error:'BUSINESS_PROFILE_NOT_FOUND',version:VERSION},403);
     if (clean(body.mission_id)) return json({ok:false,error:'BUSINESS_MISSION_SCOPE_NOT_CONFIGURED',version:VERSION},403);
     companyId=profile.id;
