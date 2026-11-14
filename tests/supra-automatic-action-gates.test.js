@@ -22,3 +22,12 @@ test("cases with pending outbox actions remain pending rather than falsely resol
   assert.match(execute, /pendingActions\?'PENDING':'COMPLETED'/);
   assert.match(execute, /pendingActions\?null:new Date\(\)\.toISOString\(\)/);
 });
+
+test("outbox never marks an action completed without an audited handler", () => {
+  const start = source.indexOf("async function processActionOutbox");
+  const end = source.indexOf("\\nasync function executeOperationalCase", start);
+  const outbox = source.slice(start, end);
+  assert.match(outbox, /const waitingStatus = external \? 'WAITING_PROVIDER' : 'WAITING_HANDLER'/);
+  assert.match(outbox, /No audited execution handler is registered/);
+  assert.doesNotMatch(outbox, /SET status='COMPLETED'/);
+});
