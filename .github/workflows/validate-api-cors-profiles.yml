@@ -1,0 +1,39 @@
+name: "PROCHÉLIA API — CORS, sessions et profils sans déploiement"
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "src/index.js"
+      - "tests/**"
+      - ".github/workflows/validate-api-cors-profiles.yml"
+  push:
+    branches: ["fix/api-cors-cookie-profiles"]
+    paths:
+      - "src/index.js"
+      - "tests/**"
+      - ".github/workflows/validate-api-cors-profiles.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  api-contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Vérifier la syntaxe Worker
+        run: node --check src/index.js
+      - name: Tester CORS, sessions, RBAC et profils D1
+        run: node --test tests/cors-session.test.mjs tests/profile-read-routes.test.mjs
+      - name: Vérifier le cookie de session sécurisé
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -Fq 'HttpOnly; Secure; SameSite=None' src/index.js
+      - name: Confirmer l'absence de déploiement
+        run: echo "Tests locaux uniquement; aucune migration, aucune écriture D1 distante, aucun déploiement."
