@@ -22,5 +22,6 @@ test("intervenant cases derive profile and verify assigned mission", () => {
 test("company cases derive active company profile and reject unverified mission scope", () => {
   assert.match(body, /business_profiles WHERE owner_user_id=\?/);
   assert.match(body, /BUSINESS_MISSION_SCOPE_NOT_CONFIGURED/);
+  assert.match(body, /BUSINESS_PROFILE_SCOPE_UNAVAILABLE/);
   assert.doesNotMatch(body, /clean\(body\.company_id\)/);
 });
