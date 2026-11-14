@@ -1088,8 +1088,11 @@ async function openPaymentDispute(request, env) {
   }
   const tx = await env.DB.prepare('SELECT * FROM payment_transactions WHERE mission_id=? ORDER BY created_at DESC LIMIT 1').bind(missionId).first();
   if (!tx) return json({ok:false,error:'PAYMENT_NOT_FOUND_FOR_MISSION',version:VERSION},404);
-  if (auth.user.role === 'client' && tx.client_id !== auth.user.id) {
-    return json({ok:false,error:'PAYMENT_NOT_FOUND_FOR_MISSION',version:VERSION},404);
+  if (auth.user.role === 'client') {
+    const clientProfile = await env.DB.prepare('SELECT id FROM clients WHERE user_id=? LIMIT 1').bind(auth.user.id).first();
+    if (!clientProfile || tx.client_id !== clientProfile.id) {
+      return json({ok:false,error:'PAYMENT_NOT_FOUND_FOR_MISSION',version:VERSION},404);
+    }
   }
   if (amount <= 0 || amount > Number(tx.gross_cents || 0)) {
     return json({ok:false,error:'DISPUTE_AMOUNT_OUT_OF_RANGE',version:VERSION},400);
