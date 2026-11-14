@@ -5,7 +5,7 @@ CREATE TABLE IF NOT EXISTS pricing_catalog (
   id TEXT PRIMARY KEY,
   prestation_id TEXT NOT NULL,
   service_code TEXT NOT NULL,
-  phase TEXT NOT NULL CHECK (phase IN ('TEST','PILOT','PRODUCTION')),
+  phase TEXT NOT NULL CHECK (phase IN ('TEST','LANCEMENT','AVANCE','EXPERT','NATIONAL')),
   client_type TEXT NOT NULL CHECK (client_type IN ('B2C','B2B')),
   currency TEXT NOT NULL DEFAULT 'EUR' CHECK (currency = 'EUR'),
   client_price_cents INTEGER NOT NULL CHECK (client_price_cents BETWEEN 0 AND 100000000),
