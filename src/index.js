@@ -3175,8 +3175,22 @@ async function handle(request,env){
   }
 }
 
+function withSecurityHeaders(response, request) {
+  const headers=new Headers(response.headers);
+  headers.set('x-content-type-options','nosniff');
+  headers.set('x-frame-options','DENY');
+  headers.set('referrer-policy','no-referrer');
+  headers.set('permissions-policy','geolocation=(self),camera=(),microphone=()');
+  headers.set('cache-control','no-store');
+  if(new URL(request.url).protocol==='https:') headers.set('strict-transport-security','max-age=31536000; includeSubDomains');
+  return new Response(response.body,{status:response.status,statusText:response.statusText,headers});
+}
+
 export default {
-  fetch(request,env){ return handle(request,env); },
+  async fetch(request,env){
+    const response=await handle(request,env);
+    return withSecurityHeaders(response,request);
+  },
   async scheduled(event,env,ctx){
     if(event?.cron && (event.cron==='0 3 * * *' || event.cron==='0 3 * * 0')){
       ctx.waitUntil(runNationalBackup(env,'AUTOMATIC'));
