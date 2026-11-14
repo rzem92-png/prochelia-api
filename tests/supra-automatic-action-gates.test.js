@@ -16,16 +16,18 @@ test("SUPRA never directly mutates mission assignment or schedule from case cont
   assert.doesNotMatch(body, /UPDATE missions SET (intervenant_id|start_at|scheduled_at)/);
 });
 
-test("cases with pending outbox actions remain pending rather than falsely resolved", () => {
-  assert.match(execute, /const pendingActions = businessResults\.some\(item => item\.status !== 'COMPLETED'\)/);
-  assert.match(execute, /pendingActions \? 'WAITING_PROVIDER' : 'RESOLVED'/);
+test("cases without a concrete handler or with pending outbox actions are never falsely resolved", () => {
+  assert.match(execute, /const noHandler = businessResults.length === 0/);
+  assert.match(execute, /const pendingActions = noHandler/);
+  assert.match(execute, /WAITING_HANDLER/);
+  assert.match(execute, /WAITING_PROVIDER/);
   assert.match(execute, /pendingActions\?'PENDING':'COMPLETED'/);
   assert.match(execute, /pendingActions\?null:new Date\(\)\.toISOString\(\)/);
 });
 
 test("outbox never marks an action completed without an audited handler", () => {
   const start = source.indexOf("async function processActionOutbox");
-  const end = source.indexOf("\\nasync function executeOperationalCase", start);
+  const end = source.indexOf("\nasync function executeOperationalCase", start);
   const outbox = source.slice(start, end);
   assert.match(outbox, /const waitingStatus = external \? 'WAITING_PROVIDER' : 'WAITING_HANDLER'/);
   assert.match(outbox, /No audited execution handler is registered/);
