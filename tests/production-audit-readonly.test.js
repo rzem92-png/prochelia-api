@@ -35,3 +35,15 @@ test("production readiness cannot open from PSP environment strings without an e
   assert.match(body, /code:'PSP_ADAPTER',status:paymentsConfigured\(env\)\?'OK':'NOT_CONFIGURED'/);
   assert.match(body, /'SECRET:PAYMENT_PROVIDER','SECRET:PAYMENT_WEBHOOK_SECRET','PSP_ADAPTER'/);
 });
+
+
+test("configuration audit can never authorize real production traffic by itself", () => {
+  const start = source.indexOf("async function finalProductionAudit");
+  const end = source.indexOf("\\nasync function copilotNextActions", start);
+  const body = source.slice(start, end);
+  assert.match(body, /production_gate:'CLOSED'/);
+  assert.match(body, /ready_for_real_traffic:false/);
+  for (const blocker of ['ISOLATED_RESTORE_DRILL','PSP_SANDBOX_E2E','INDEPENDENT_SECURITY_REVIEW','GDPR_LEGAL_APPROVAL','LOAD_AND_RECOVERY_TESTS','HUMAN_RELEASE_APPROVAL']) {
+    assert.ok(body.includes(blocker), `Missing release blocker: ${blocker}`);
+  }
+});
