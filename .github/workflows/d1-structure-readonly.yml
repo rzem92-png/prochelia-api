@@ -1,0 +1,165 @@
+name: PROCHÉLIA — inventaire structurel D1 strictement en lecture seule
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_read_only:
+        description: "Confirmer l'inventaire en lecture seule des deux bases isolées"
+        required: true
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: prochelia-d1-structure-readonly
+  cancel-in-progress: false
+
+jobs:
+  inventory:
+    if: ${{ inputs.confirm_read_only == true }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      CLOUDFLARE_ACCOUNT_ID: f2a79e9fa41566a8ec80fb24c02c60eb
+      PREVIEW_DB_NAME: prochelia-preview-db
+      PREVIEW_DB_ID: 6adb95e5-e542-4bec-9008-fbea01042305
+      TEST_DB_NAME: prochelia-restore-test-v2
+      TEST_DB_ID: a3526c2a-39cb-49ab-97c4-979138145f33
+    steps:
+      - name: Vérifier le jeton et les identités exactes des bases
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          [[ -n "${CLOUDFLARE_API_TOKEN:-}" ]] || { echo "::error::Secret Cloudflare manquant."; exit 1; }
+          token="${CLOUDFLARE_API_TOKEN#Bearer }"
+          token="${token#bearer }"
+          token="$(printf '%s' "$token" | tr -d '\r\n')"
+          status="$(curl --silent --show-error --output "$RUNNER_TEMP/token.json" --write-out '%{http_code}' -H "Authorization: Bearer $token" "https://api.cloudflare.com/client/v4/user/tokens/verify")"
+          [[ "$status" == "200" ]] && [[ "$(jq -r '.success // false' "$RUNNER_TEMP/token.json")" == "true" ]] && [[ "$(jq -r '.result.status // ""' "$RUNNER_TEMP/token.json")" == "active" ]] || { echo "::error::Jeton Cloudflare invalide ou inactif."; exit 1; }
+          for target in preview test; do
+            if [[ "$target" == "preview" ]]; then name="$PREVIEW_DB_NAME"; id="$PREVIEW_DB_ID"; else name="$TEST_DB_NAME"; id="$TEST_DB_ID"; fi
+            http="$(curl --silent --show-error --output "$RUNNER_TEMP/d1-$target.json" --write-out '%{http_code}' -H "Authorization: Bearer $token" "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/d1/database?name=$name")"
+            [[ "$http" == "200" ]] || { echo "::error::Impossible de vérifier la cible $target."; exit 1; }
+            matches="$(jq --arg n "$name" --arg id "$id" '[.result[]? | select(.name == $n and .uuid == $id)] | length' "$RUNNER_TEMP/d1-$target.json")"
+            [[ "$matches" == "1" ]] || { echo "::error::Nom/UUID inattendu pour $target ; arrêt."; exit 1; }
+          done
+          [[ "$PREVIEW_DB_ID" != "$TEST_DB_ID" ]] || { echo "::error::Les UUID doivent être distincts."; exit 1; }
+          echo "Identités exactes vérifiées. Aucun secret n'est affiché."
+
+      - name: Installer Node.js et Wrangler
+        uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+          package-manager-cache: false
+
+      - name: Préparer Wrangler
+        run: |
+          set -euo pipefail
+          npm install --no-save --no-audit --no-fund wrangler@4
+          ./node_modules/.bin/wrangler --version
+
+      - name: Collecter le schéma complet et les volumes sans données métier
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          export CLOUDFLARE_API_TOKEN
+          out="$RUNNER_TEMP/d1-structure"
+          mkdir -p "$out"
+          for target in preview test; do
+            if [[ "$target" == "preview" ]]; then db="$PREVIEW_DB_NAME"; id="$PREVIEW_DB_ID"; else db="$TEST_DB_NAME"; id="$TEST_DB_ID"; fi
+            cfg="$out/$target-wrangler.json"
+            cat > "$cfg" <<EOF
+          {
+            "name": "prochelia-d1-readonly-$target",
+            "compatibility_date": "2026-09-25",
+            "d1_databases": [{ "binding": "DB", "database_name": "$db", "database_id": "$id" }]
+          }
+          EOF
+            d="$out/$target"
+            mkdir -p "$d"
+            echo "::group::Inventaire $target ($db)"
+            ./node_modules/.bin/wrangler d1 execute "$db" --remote --config "$cfg" --command="SELECT type, name, tbl_name, sql FROM sqlite_master WHERE type IN ('table','view','index','trigger') AND name NOT LIKE 'sqlite_%' AND name NOT GLOB '_cf_*' ORDER BY type, name;" --json > "$d/schema-objects.json"
+            jq -e . "$d/schema-objects.json" >/dev/null
+            jq -r '[.. | objects | select(has("results")) | .results[]? | select(.type == "table") | .name] | unique | .[]' "$d/schema-objects.json" > "$d/tables.txt"
+            [[ -s "$d/tables.txt" ]] || { echo "::error::Aucune table détectée pour $target."; exit 1; }
+            jq -r '[.. | objects | select(has("results")) | .results[]? | select(.type == "view") | [.name,.sql] | @tsv] | .[]' "$d/schema-objects.json" > "$d/views.tsv"
+            jq -r '[.. | objects | select(has("results")) | .results[]? | select(.type == "trigger") | [.name,.tbl_name,.sql] | @tsv] | .[]' "$d/schema-objects.json" > "$d/triggers.tsv"
+            jq -r '[.. | objects | select(has("results")) | .results[]? | select(.type == "index") | [.name,.tbl_name,.sql] | @tsv] | .[]' "$d/schema-objects.json" > "$d/index-definitions.tsv"
+            printf 'table,row_count\n' > "$d/row-counts.csv"
+            while IFS= read -r table; do
+              [[ "$table" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || { echo "::error::Nom de table inattendu."; exit 1; }
+              ./node_modules/.bin/wrangler d1 execute "$db" --remote --config "$cfg" --command="SELECT COUNT(*) AS row_count FROM \"$table\";" --json > "$d/count-$table.json"
+              rows="$(jq -r '[.. | objects | select(has("results")) | .results[]? | .row_count? // empty][0] // empty' "$d/count-$table.json")"
+              [[ "$rows" =~ ^[0-9]+$ ]] || { echo "::error::Comptage invalide pour $table."; exit 1; }
+              printf '"%s",%s\n' "$table" "$rows" >> "$d/row-counts.csv"
+              ./node_modules/.bin/wrangler d1 execute "$db" --remote --config "$cfg" --command="PRAGMA table_xinfo(\"$table\");" --json > "$d/columns-$table.json"
+              ./node_modules/.bin/wrangler d1 execute "$db" --remote --config "$cfg" --command="PRAGMA foreign_key_list(\"$table\");" --json > "$d/foreign-keys-$table.json"
+              ./node_modules/.bin/wrangler d1 execute "$db" --remote --config "$cfg" --command="PRAGMA index_list(\"$table\");" --json > "$d/indexes-$table.json"
+              jq -e . "$d/columns-$table.json" >/dev/null
+              jq -e . "$d/foreign-keys-$table.json" >/dev/null
+              jq -e . "$d/indexes-$table.json" >/dev/null
+            done < "$d/tables.txt"
+            echo "::endgroup::"
+          done
+
+      - name: Vérifier l'intégrité SQLite et les clés étrangères
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          export CLOUDFLARE_API_TOKEN
+          out="$RUNNER_TEMP/d1-structure"
+          for target in preview test; do
+            if [[ "$target" == "preview" ]]; then db="$PREVIEW_DB_NAME"; else db="$TEST_DB_NAME"; fi
+            cfg="$out/$target-wrangler.json"
+            d="$out/$target"
+            ./node_modules/.bin/wrangler d1 execute "$db" --remote --config "$cfg" --command="PRAGMA quick_check;" --json > "$d/quick-check.json"
+            ./node_modules/.bin/wrangler d1 execute "$db" --remote --config "$cfg" --command="PRAGMA foreign_key_check;" --json > "$d/foreign-key-check.json"
+            jq -e '([.. | objects | to_entries[]? | select(.key == "quick_check") | .value]) as $checks | ($checks | length) > 0 and all($checks[]; . == "ok")' "$d/quick-check.json" >/dev/null || { echo "::error::quick_check non conforme sur $target."; exit 1; }
+            jq -e '([.. | objects | select(has("results")) | .results]) as $sets | ($sets | length) > 0 and all($sets[]; type == "array") and ([ $sets[][] ] | length == 0)' "$d/foreign-key-check.json" >/dev/null || { echo "::error::Violations de clés étrangères sur $target."; exit 1; }
+          done
+
+      - name: Comparer les structures et produire le rapport
+        shell: bash
+        run: |
+          set -euo pipefail
+          out="$RUNNER_TEMP/d1-structure"
+          for kind in tables views triggers index-definitions; do
+            case "$kind" in
+              tables) a="$out/preview/tables.txt"; b="$out/test/tables.txt" ;;
+              *) a="$out/preview/$kind.tsv"; b="$out/test/$kind.tsv" ;;
+            esac
+            diff -u "$a" "$b" > "$out/$kind-diff.txt" || true
+          done
+          {
+            echo "## Inventaire D1 — lecture seule"
+            echo ""
+            echo "Cibles vérifiées par nom et UUID. Requêtes SELECT et PRAGMA uniquement."
+            echo ""
+            for target in preview test; do
+              echo "### $target"
+              echo "- Tables : $(wc -l < "$out/$target/tables.txt" | tr -d ' ')"
+              echo "- Vues : $(wc -l < "$out/$target/views.tsv" | tr -d ' ')"
+              echo "- Déclencheurs : $(wc -l < "$out/$target/triggers.tsv" | tr -d ' ')"
+              echo "- Index : $(wc -l < "$out/$target/index-definitions.tsv" | tr -d ' ')"
+              cat "$out/$target/row-counts.csv"
+              echo "- quick_check : OK"
+              echo "- foreign_key_check : aucune violation"
+              echo ""
+            done
+            echo "Les différences détaillées et métadonnées sont jointes à l'artefact."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Publier les preuves structurelles sans données métier
+        uses: actions/upload-artifact@v6
+        with:
+          name: prochelia-d1-structure-readonly-${{ github.run_id }}
+          path: ${{ runner.temp }}/d1-structure/
+          if-no-files-found: error
+          retention-days: 30
