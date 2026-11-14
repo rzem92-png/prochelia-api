@@ -1440,6 +1440,39 @@ async function createOperationalCase(request, env) {
   const gate=await requireAuthRole(request,env,['gerante','client','intervenant','entreprise']); if(gate.error)return gate.error;
   const body=await readJson(request)||{};
   const caseType=clean(body.case_type); if(!caseType)return json({ok:false,error:'CASE_TYPE_REQUIRED',version:VERSION},400);
+  const actor=gate.auth.user;
+  let clientId=null, companyId=null, intervenantId=null, missionId=null;
+  if (actor.role === 'gerante') {
+    clientId=clean(body.client_id)||null;
+    companyId=clean(body.company_id)||null;
+    intervenantId=clean(body.intervenant_id)||null;
+    missionId=clean(body.mission_id)||null;
+  } else if (actor.role === 'client') {
+    const profile=await env.DB.prepare('SELECT id FROM clients WHERE user_id=? LIMIT 1').bind(actor.id).first();
+    if (!profile) return json({ok:false,error:'CLIENT_PROFILE_NOT_FOUND',version:VERSION},403);
+    clientId=profile.id;
+    missionId=clean(body.mission_id)||null;
+    if (missionId) {
+      const mission=await env.DB.prepare('SELECT id,client_id,intervenant_id FROM missions WHERE id=? LIMIT 1').bind(missionId).first();
+      if (!mission || mission.client_id !== clientId) return json({ok:false,error:'MISSION_NOT_FOUND',version:VERSION},404);
+      intervenantId=mission.intervenant_id||null;
+    }
+  } else if (actor.role === 'intervenant') {
+    const profile=await env.DB.prepare('SELECT id FROM intervenants WHERE user_id=? LIMIT 1').bind(actor.id).first();
+    if (!profile) return json({ok:false,error:'INTERVENANT_PROFILE_NOT_FOUND',version:VERSION},403);
+    intervenantId=profile.id;
+    missionId=clean(body.mission_id)||null;
+    if (missionId) {
+      const mission=await env.DB.prepare('SELECT id,client_id,intervenant_id FROM missions WHERE id=? LIMIT 1').bind(missionId).first();
+      if (!mission || mission.intervenant_id !== intervenantId) return json({ok:false,error:'MISSION_NOT_FOUND',version:VERSION},404);
+      clientId=mission.client_id||null;
+    }
+  } else if (actor.role === 'entreprise') {
+    const profile=await env.DB.prepare("SELECT id FROM business_profiles WHERE owner_user_id=? AND kind IN ('entreprise','company') AND status='active' LIMIT 1").bind(actor.id).first();
+    if (!profile) return json({ok:false,error:'BUSINESS_PROFILE_NOT_FOUND',version:VERSION},403);
+    if (clean(body.mission_id)) return json({ok:false,error:'BUSINESS_MISSION_SCOPE_NOT_CONFIGURED',version:VERSION},403);
+    companyId=profile.id;
+  }
   const phase=String(await getSetting(env,'project_phase','TEST')).toUpperCase();
   const impact=String(body.impact_level||'LOW').toUpperCase();
   const priority=CASE_PRIORITIES[impact]||10;
@@ -1448,7 +1481,7 @@ async function createOperationalCase(request, env) {
   const requiresManager=rec.mode==='MANAGER_APPROVAL' ? 1 : 0;
   const status=rec.action==='AUTO_RESOLVE' ? 'AUTO_PENDING' : 'OPEN';
   await env.DB.prepare(`INSERT INTO operational_cases(id,case_type,source,phase,priority,status,auto_mode,client_id,company_id,intervenant_id,mission_id,impact_level,description,context_json,proposed_solution_json,requires_manager) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
-    .bind(id,caseType,'API',phase,priority,status,rec.mode,clean(body.client_id)||null,clean(body.company_id)||null,clean(body.intervenant_id)||null,clean(body.mission_id)||null,impact,clean(body.description)||null,JSON.stringify(body.context||{}),JSON.stringify(rec),requiresManager).run();
+    .bind(id,caseType,'API',phase,priority,status,rec.mode,clientId,companyId,intervenantId,missionId,impact,clean(body.description)||null,JSON.stringify(body.context||{}),JSON.stringify(rec),requiresManager).run();
   await env.DB.prepare(`INSERT INTO copilot_log(id,case_id,action_type,recommendation,confidence,mode) VALUES(?,?,?,?,?,?)`)
     .bind(crypto.randomUUID(),id,rec.action,JSON.stringify(rec.solution),rec.confidence,rec.mode).run();
   await journal(env,'copilot',null,'CASE_CREATED','operational_case',id,'OK',{caseType,impact});
