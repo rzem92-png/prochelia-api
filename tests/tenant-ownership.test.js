@@ -109,6 +109,6 @@ test("complaint creation compensates if its operational case cannot be created",
   assert.notEqual(start, -1);
   assert.notEqual(end, -1);
   assert.match(body, /COMPLAINT_CASE_CREATION_FAILED/);
-  assert.match(body, /DELETE FROM complaints WHERE id=\\?/);
-  assert.match(body, /!caseResponse\\.ok \\|\\| !caseJson\\?\\.case_id/);
+  assert.ok(body.includes("DELETE FROM complaints WHERE id=?"));
+  assert.ok(body.includes("!caseResponse.ok || !caseJson?.case_id"));
 });
