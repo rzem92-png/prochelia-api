@@ -1549,7 +1549,7 @@ async function executeOperationalCase(env, caseId, approverId=null, automatic=fa
   const rec=c.proposed_solution_json?JSON.parse(c.proposed_solution_json):{};
   if(c.requires_manager && !automatic && !approverId) return {ok:false,error:'MANAGER_APPROVAL_REQUIRED'};
   const businessResults = await executeCaseBusinessAction(env,c,rec,approverId,automatic);
-  const pendingActions = businessResults.some(item => ['PENDING','WAITING_PROVIDER'].includes(item.status));
+  const pendingActions = businessResults.some(item => item.status !== 'COMPLETED');
   const finalStatus = pendingActions ? 'WAITING_PROVIDER' : 'RESOLVED';
   const resolution={executed:!pendingActions,automatic,status:finalStatus,action:rec.action||'RESOLVE',steps:rec.solution?.steps||[],business_results:businessResults,executed_at:new Date().toISOString()};
   await env.DB.prepare(`INSERT INTO case_actions(id,case_id,action_code,mode,status,payload_json,result_json,completed_at) VALUES(?,?,?,?,?,?,?,?)`)
