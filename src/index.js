@@ -1103,7 +1103,8 @@ async function openPaymentDispute(request, env) {
     env.DB.prepare(`INSERT INTO payment_disputes
       (id,mission_id,transaction_id,client_id,intervenant_id,status,reason,amount_cents)
       SELECT ?,?,?,?,?,?,?,?
-      WHERE EXISTS (SELECT 1 FROM payment_transactions WHERE id=? AND status='held')
+      WHERE changes()=1
+        AND EXISTS (SELECT 1 FROM payment_transactions WHERE id=? AND status='held')
         AND NOT EXISTS (SELECT 1 FROM payment_disputes WHERE transaction_id=? AND status IN ('open','pending'))`)
       .bind(id,missionId,tx.id,tx.client_id,tx.intervenant_id,'open',reason,amount,tx.id,tx.id),
     env.DB.prepare(`INSERT INTO payment_audit
