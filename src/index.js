@@ -1732,12 +1732,13 @@ async function pricingQuote(request, env) {
   // tarifs are intentionally not converted: their monetary unit is unverified.
   let tariff=null;
   try {
-    tariff=await env.DB.prepare(`SELECT id,service_code,client_type,client_price_cents,intervenant_amount_cents
+    tariff=await env.DB.prepare(`SELECT pricing_catalog.id,pricing_catalog.service_code,pricing_catalog.client_type,
+        pricing_catalog.client_price_cents,pricing_catalog.intervenant_amount_cents
       FROM pricing_catalog
       INNER JOIN prestations ON prestations.id=pricing_catalog.prestation_id AND prestations.active=1
       WHERE pricing_catalog.id=? AND pricing_catalog.phase=? AND pricing_catalog.client_type=? AND pricing_catalog.active=1
-      AND (effective_from IS NULL OR effective_from<=CURRENT_TIMESTAMP)
-      AND (effective_to IS NULL OR effective_to>CURRENT_TIMESTAMP)
+      AND (pricing_catalog.effective_from IS NULL OR pricing_catalog.effective_from<=CURRENT_TIMESTAMP)
+      AND (pricing_catalog.effective_to IS NULL OR pricing_catalog.effective_to>CURRENT_TIMESTAMP)
       LIMIT 1`).bind(b.tariff_id.trim(),phase,clientType).first();
   } catch (_) {
     return json({ok:false,error:'PRICING_CATALOG_UNAVAILABLE'},503);
