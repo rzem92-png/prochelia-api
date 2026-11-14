@@ -1452,8 +1452,11 @@ async function createOperationalCase(request, env) {
   await env.DB.prepare(`INSERT INTO copilot_log(id,case_id,action_type,recommendation,confidence,mode) VALUES(?,?,?,?,?,?)`)
     .bind(crypto.randomUUID(),id,rec.action,JSON.stringify(rec.solution),rec.confidence,rec.mode).run();
   await journal(env,'copilot',null,'CASE_CREATED','operational_case',id,'OK',{caseType,impact});
-  if(rec.action==='AUTO_RESOLVE') await executeOperationalCase(env,id,null,true);
-  return json({ok:true,version:VERSION,case_id:id,recommendation:rec,status:rec.action==='AUTO_RESOLVE'?'AUTO_EXECUTED':'WAITING_MANAGER'},201);
+  let execution=null;
+  if(rec.action==='AUTO_RESOLVE') execution=await executeOperationalCase(env,id,null,true);
+  const executionStatus=execution?.error==='MANAGER_APPROVAL_REQUIRED'?'WAITING_MANAGER':(execution?.resolution?.status || (rec.action==='AUTO_RESOLVE'?'AUTO_PENDING':'WAITING_MANAGER'));
+  const autoExecuted=execution?.ok===true && execution?.resolution?.status==='RESOLVED';
+  return json({ok:true,version:VERSION,case_id:id,recommendation:rec,status:autoExecuted?'AUTO_EXECUTED':executionStatus,execution:execution||null},201);
 }
 
 
@@ -1544,7 +1547,7 @@ async function executeOperationalCase(env, caseId, approverId=null, automatic=fa
   if(!c)return {ok:false,error:'CASE_NOT_FOUND'};
   if(c.status==='RESOLVED')return {ok:true,already:true};
   const rec=c.proposed_solution_json?JSON.parse(c.proposed_solution_json):{};
-  if(c.requires_manager && !automatic && !approverId) return {ok:false,error:'MANAGER_APPROVAL_REQUIRED'};
+  if(c.requires_manager && !approverId) return {ok:false,error:'MANAGER_APPROVAL_REQUIRED'};
   const businessResults = await executeCaseBusinessAction(env,c,rec,approverId,automatic);
   // An empty result means no concrete handler executed or queued an action.
   // Never mark an unrecognized/no-op recommendation as resolved.
