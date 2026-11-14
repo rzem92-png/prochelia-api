@@ -955,57 +955,9 @@ export async function reservePayoutAtomically(env, input) {
 async function payoutRequest(request, env) {
   const auth = await getSessionUser(request, env);
   if (!requireRole(auth, ['intervenant'])) return json({ok:false,error:auth?.user?'FORBIDDEN':'UNAUTHENTICATED',version:VERSION}, auth?.user ? 403 : 401);
-  await ensurePaymentSchema(env);
-  const body = await readJson(request);
-  const amount = moneyCents(body?.amount_eur);
-  const mode = clean(body?.mode) || 'standard';
-  const idem = clean(request.headers.get('idempotency-key')) || clean(body?.idempotency_key);
-  if (amount === null || amount <= 0 || !['standard','express'].includes(mode) || !idem || idem.length > 200) {
-    return json({ok:false,error:'INVALID_PAYOUT_REQUEST',version:VERSION},400);
-  }
-
-  // Idempotency is scoped to the authenticated owner; never return another user's payout.
-  const existing = await env.DB.prepare('SELECT * FROM payout_requests WHERE idempotency_key=? AND user_id=? LIMIT 1').bind(idem,auth.user.id).first();
-  if (existing) {
-    if (Number(existing.amount_cents) !== amount || existing.mode !== mode) {
-      return json({ok:false,error:'IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_REQUEST',version:VERSION},409);
-    }
-    return json({ok:true,version:VERSION,idempotent_replay:true,payout:existing},200);
-  }
-  const account = await env.DB.prepare('SELECT * FROM payment_accounts WHERE user_id=? LIMIT 1').bind(auth.user.id).first();
-  if (!account || Number(account.payouts_enabled) !== 1) {
-    return json({ok:false,error:'PAYOUT_ACCOUNT_NOT_READY',version:VERSION,message:'Le compte de paiement de l’intervenant doit être vérifié et activé par le PSP.'},409);
-  }
-  const wallet = await env.DB.prepare('SELECT * FROM wallets WHERE user_id=? LIMIT 1').bind(auth.user.id).first();
-  if (!wallet) return json({ok:false,error:'WALLET_NOT_FOUND',version:VERSION},409);
-
-  const payoutId = crypto.randomUUID();
-  let reservation;
-  try {
-    reservation = await reservePayoutAtomically(env, {
-      payoutId, idempotencyKey:idem, walletId:wallet.id, userId:auth.user.id,
-      amountCents:amount, mode, provider:paymentProvider(env)
-    });
-  } catch (error) {
-    console.error('PAYOUT_RESERVATION_FAILED', error?.name || 'D1_ERROR');
-    return json({ok:false,error:'PAYOUT_RESERVATION_FAILED',version:VERSION},503);
-  }
-  if (!reservation.ok) {
-    const sameOwner = await env.DB.prepare('SELECT * FROM payout_requests WHERE idempotency_key=? AND user_id=? LIMIT 1').bind(idem,auth.user.id).first();
-    if (sameOwner) {
-      if (Number(sameOwner.amount_cents) !== amount || sameOwner.mode !== mode) {
-        return json({ok:false,error:'IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_REQUEST',version:VERSION},409);
-      }
-      return json({ok:true,version:VERSION,idempotent_replay:true,payout:sameOwner},200);
-    }
-    const collision = await env.DB.prepare('SELECT 1 AS used FROM payout_requests WHERE idempotency_key=? LIMIT 1').bind(idem).first();
-    if (collision) return json({ok:false,error:'IDEMPOTENCY_KEY_CONFLICT',version:VERSION},409);
-    const latestWallet = await env.DB.prepare('SELECT available_cents FROM wallets WHERE id=? AND user_id=? LIMIT 1').bind(wallet.id,auth.user.id).first();
-    return json({ok:false,error:'INSUFFICIENT_AVAILABLE_BALANCE',version:VERSION,available_cents:Number(latestWallet?.available_cents || 0)},409);
-  }
-  return json({ok:true,version:VERSION,payout_id:payoutId,status:'requested',amount_cents:amount,mode,provider:paymentProvider(env),next:paymentsConfigured(env)?'PSP_PAYOUT_REQUIRED':'PAYMENT_PROVIDER_NOT_CONFIGURED'},201);
+  // No executable PSP payout adapter exists; do not reserve wallet funds.
+  return json({ok:false,error:'PSP_PAYOUT_ADAPTER_NOT_IMPLEMENTED',version:VERSION},503);
 }
-
 function constantTimeStringEqual(actual, expected) {
   if (typeof actual !== 'string' || typeof expected !== 'string' || actual.length !== expected.length) return false;
   let difference = 0;
@@ -1027,10 +979,9 @@ export async function verifyWebhookSignature(request, env, rawBody) {
 export function requiresAtomicFinancialSettlement(eventType) {
   return new Set([
     'payment_succeeded','charge_succeeded','payment_failed','charge_failed',
-    'payment_refunded','payout_paid','payout_failed','payout_canceled'
+    'payment_refunded','payout_processing','payout_paid','payout_failed','payout_canceled'
   ]).has(String(eventType || '').trim());
 }
-
 async function paymentWebhook(request, env) {
   // Reject unauthenticated and malformed events before any D1 schema access.
   // This prevents arbitrary callers from triggering CREATE TABLE/INDEX writes.
