@@ -126,7 +126,13 @@ jobs:
           [[ "$count" == "31" ]] || { echo "::error::Le dump ne contient pas les 31 tables attendues."; exit 1; }
           migrations="$(sqlite3 "$RUNNER_TEMP/prochelia-restore/local-check.sqlite" 'SELECT COUNT(*) FROM d1_migrations;')"
           [[ "$migrations" == "7" ]] || { echo "::error::Nombre de migrations inattendu."; exit 1; }
-          echo "Dump authentifié : intégrité SQLite OK, 31 tables, 7 migrations."
+          holidays="$(sqlite3 "$RUNNER_TEMP/prochelia-restore/local-check.sqlite" 'SELECT COUNT(*) FROM pricing_holidays;')"
+          [[ "$holidays" == "55" ]] || { echo "::error::Le dump doit conserver les 55 jours fériés de Preview."; exit 1; }
+          policies="$(sqlite3 "$RUNNER_TEMP/prochelia-restore/local-check.sqlite" 'SELECT COUNT(*) FROM pricing_policies;')"
+          [[ "$policies" == "0" ]] || { echo "::error::Le snapshot Preview attendu ne doit pas inventer de politiques tarifaires."; exit 1; }
+          estimates="$(sqlite3 "$RUNNER_TEMP/prochelia-restore/local-check.sqlite" 'SELECT COUNT(*) FROM pricing_route_estimates;')"
+          [[ "$estimates" == "0" ]] || { echo "::error::Nombre inattendu d'estimations de trajet."; exit 1; }
+          echo "Dump authentifié : intégrité SQLite OK, 31 tables, 7 migrations, 55 jours fériés, aucune politique tarifaire ni estimation inventée."
 
       - name: Installer Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
@@ -186,4 +192,10 @@ jobs:
           jq -e 'type == "array" and length == 1 and all(.[]; .success == true) and ([.[].results[]?.table_count?] == [31])' "$RUNNER_TEMP/tables.json" >/dev/null
           npx --yes wrangler@4 d1 execute "$EXPECTED_DB_NAME" --remote --config "$cfg" --command="SELECT COUNT(*) AS migration_count FROM d1_migrations;" --json > "$RUNNER_TEMP/migrations.json"
           jq -e 'type == "array" and length == 1 and all(.[]; .success == true) and ([.[].results[]?.migration_count?] == [7])' "$RUNNER_TEMP/migrations.json" >/dev/null
-          echo "PASS : quick_check=ok ; zéro violation FK ; 31 tables ; 7 migrations."
+          npx --yes wrangler@4 d1 execute "$EXPECTED_DB_NAME" --remote --config "$cfg" --command="SELECT COUNT(*) AS holiday_count FROM pricing_holidays;" --json > "$RUNNER_TEMP/holidays.json"
+          jq -e 'type == "array" and length == 1 and all(.[]; .success == true) and ([.[].results[]?.holiday_count?] == [55])' "$RUNNER_TEMP/holidays.json" >/dev/null
+          npx --yes wrangler@4 d1 execute "$EXPECTED_DB_NAME" --remote --config "$cfg" --command="SELECT COUNT(*) AS policy_count FROM pricing_policies;" --json > "$RUNNER_TEMP/policies.json"
+          jq -e 'type == "array" and length == 1 and all(.[]; .success == true) and ([.[].results[]?.policy_count?] == [0])' "$RUNNER_TEMP/policies.json" >/dev/null
+          npx --yes wrangler@4 d1 execute "$EXPECTED_DB_NAME" --remote --config "$cfg" --command="SELECT COUNT(*) AS estimate_count FROM pricing_route_estimates;" --json > "$RUNNER_TEMP/estimates.json"
+          jq -e 'type == "array" and length == 1 and all(.[]; .success == true) and ([.[].results[]?.estimate_count?] == [0])' "$RUNNER_TEMP/estimates.json" >/dev/null
+          echo "PASS : quick_check=ok ; zéro violation FK ; 31 tables ; 7 migrations ; 55 jours fériés ; 0 politique tarifaire ; 0 estimation de trajet."
