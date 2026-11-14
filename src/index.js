@@ -2938,7 +2938,7 @@ async function financeRowsForUser(env, user) {
     // not users.id. Resolve the authenticated user's own profile first.
     const profile = await env.DB.prepare(
       'SELECT id FROM intervenants WHERE user_id=? LIMIT 1'
-    ).bind(uid).first().catch(() => null);
+    ).bind(uid).first();
     if (profile?.id) {
       where = 'intervenant_id=?';
       params.push(profile.id);
