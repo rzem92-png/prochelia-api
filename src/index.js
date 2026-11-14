@@ -2575,40 +2575,28 @@ async function handleV139(request, env) {
 // changements métier explicitement décidés, pas des trous structurels.
 // ================================================================
 
-async function ensureFinalHardeningSchema(env) {
-  if (!env.DB) throw new Error('DATABASE_REQUIRED');
-  const statements = [
-    `CREATE TABLE IF NOT EXISTS system_config_checks (
-      id TEXT PRIMARY KEY, check_code TEXT NOT NULL, status TEXT NOT NULL,
-      details_json TEXT NOT NULL DEFAULT '{}', checked_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )`,
-    `CREATE INDEX IF NOT EXISTS idx_system_config_checks_code ON system_config_checks(check_code,checked_at)`,
-    `CREATE TABLE IF NOT EXISTS idempotency_records (
-      id TEXT PRIMARY KEY, scope TEXT NOT NULL, idem_key TEXT NOT NULL,
-      request_hash TEXT, response_json TEXT, status_code INTEGER,
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, UNIQUE(scope,idem_key)
-    )`,
-    `CREATE TABLE IF NOT EXISTS background_jobs (
-      id TEXT PRIMARY KEY, job_type TEXT NOT NULL, payload_json TEXT NOT NULL DEFAULT '{}',
-      status TEXT NOT NULL DEFAULT 'PENDING', attempts INTEGER NOT NULL DEFAULT 0,
-      max_attempts INTEGER NOT NULL DEFAULT 5, run_after TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      locked_at TEXT, last_error TEXT, result_json TEXT,
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      completed_at TEXT
-    )`,
-    `CREATE INDEX IF NOT EXISTS idx_background_jobs_ready ON background_jobs(status,run_after,created_at)`,
-    `CREATE TABLE IF NOT EXISTS security_rate_limits (
-      id TEXT PRIMARY KEY, bucket TEXT NOT NULL, subject_hash TEXT NOT NULL,
-      window_start TEXT NOT NULL, request_count INTEGER NOT NULL DEFAULT 0,
-      UNIQUE(bucket,subject_hash,window_start)
-    )`,
-    `CREATE TABLE IF NOT EXISTS integration_registry (
-      id TEXT PRIMARY KEY, integration_code TEXT NOT NULL UNIQUE, category TEXT NOT NULL,
-      status TEXT NOT NULL DEFAULT 'NOT_CONFIGURED', required_secrets_json TEXT NOT NULL DEFAULT '[]',
-      capabilities_json TEXT NOT NULL DEFAULT '[]', last_checked_at TEXT, details_json TEXT NOT NULL DEFAULT '{}'
-    )`
+async function assertFinalHardeningSchema(env) {
+  if (!env?.DB) throw new Error('DATABASE_REQUIRED');
+  // Runtime requests may verify schema state, but must never provision DDL.
+  const requiredObjects = [
+    'system_config_checks',
+    'idx_system_config_checks_code',
+    'idempotency_records',
+    'background_jobs',
+    'idx_background_jobs_ready',
+    'security_rate_limits',
+    'integration_registry'
   ];
-  for (const sql of statements) await env.DB.prepare(sql).run();
+  const placeholders = requiredObjects.map(() => '?').join(',');
+  const result = await env.DB.prepare(
+    `SELECT name FROM sqlite_master
+      WHERE type IN ('table','index') AND name IN (${placeholders})`
+  ).bind(...requiredObjects).all();
+  const present = new Set((result?.results || []).map(row => String(row.name)));
+  const missing = requiredObjects.filter(name => !present.has(name));
+  if (missing.length) {
+    throw new Error(`FINAL_HARDENING_SCHEMA_NOT_READY:${missing.join(',')}`);
+  }
 }
 
 function finalSecretConfigured(env, key) {
@@ -2629,7 +2617,7 @@ async function productionConfigCheck(env, { persist = false } = {}) {
   if (!env?.DB) throw new Error('DATABASE_REQUIRED');
   // Readiness GETs must inspect current state, not auto-create or mutate schema.
   if (persist) {
-    await ensureConsolidatedSchema(env); await ensurePaymentSchema(env); await ensureOperationalSchema(env); await ensureStrategicSchema(env); await ensureFinalHardeningSchema(env);
+    await ensureConsolidatedSchema(env); await ensurePaymentSchema(env); await ensureOperationalSchema(env); await ensureStrategicSchema(env); await assertFinalHardeningSchema(env);
   }
   const checks=[];
   const requiredTables=['users','sessions','missions','payment_transactions','payment_webhook_events','payment_disputes','operational_cases','action_outbox','notification_outbox','accounting_ledger','promotions','promotion_recommendations','activity_journal','compliance_events'];
@@ -2665,7 +2653,7 @@ async function finalProductionAudit(request,env) {
 
 async function copilotNextActions(request,env) {
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
-  await ensureConsolidatedSchema(env); await ensureOperationalSchema(env); await ensureStrategicSchema(env); await ensureFinalHardeningSchema(env);
+  await ensureConsolidatedSchema(env); await ensureOperationalSchema(env); await ensureStrategicSchema(env); await assertFinalHardeningSchema(env);
   const phase=await getSetting(env,'project_phase','TEST');
   const items=[];
   const cases=await env.DB.prepare(`SELECT id,case_type,priority,status,impact_level,description,proposed_solution_json FROM operational_cases WHERE status NOT IN ('RESOLVED','CLOSED') ORDER BY priority DESC,created_at ASC LIMIT 30`).all();
@@ -2679,7 +2667,7 @@ async function copilotNextActions(request,env) {
 }
 
 async function enqueueBackgroundJob(env, jobType, payload={}, maxAttempts=5) {
-  await ensureFinalHardeningSchema(env);
+  await assertFinalHardeningSchema(env);
   const id=crypto.randomUUID();
   await env.DB.prepare(`INSERT INTO background_jobs(id,job_type,payload_json,max_attempts) VALUES(?,?,?,?)`).bind(id,jobType,JSON.stringify(payload),maxAttempts).run();
   return id;
@@ -2687,7 +2675,7 @@ async function enqueueBackgroundJob(env, jobType, payload={}, maxAttempts=5) {
 
 async function processBackgroundJobs(request,env) {
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
-  await ensureFinalHardeningSchema(env); await ensureOperationalSchema(env);
+  await assertFinalHardeningSchema(env); await ensureOperationalSchema(env);
   const rows=await env.DB.prepare(`SELECT * FROM background_jobs WHERE status='PENDING' AND run_after<=CURRENT_TIMESTAMP ORDER BY created_at LIMIT 25`).all();
   const results=[];
   for(const job of rows.results||[]) {
@@ -3614,23 +3602,17 @@ handle = async function(request,env){
    - traçabilité des blocages de sécurité
    ============================================================================ */
 
-async function productionSafetySchema(env){
-  if(!env.DB) throw new Error('DATABASE_REQUIRED');
-  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS production_security_events (
-    id TEXT PRIMARY KEY, event_type TEXT NOT NULL, route TEXT, subject_hash TEXT,
-    decision TEXT NOT NULL, details_json TEXT NOT NULL DEFAULT '{}',
-    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-  )`).run();
-  await env.DB.prepare(`CREATE INDEX IF NOT EXISTS idx_prod_sec_events_date ON production_security_events(event_type,created_at)`).run();
-}
-
 async function productionSubjectHash(request, route){
-  const ip=clean(request.headers.get('CF-Connecting-IP')) || clean(request.headers.get('X-Forwarded-For')) || 'unknown';
+  // Trust only Cloudflare's edge-provided identity. Never trust client-supplied
+  // forwarding headers and never merge unidentified clients into one shared bucket.
+  const ip=clean(request.headers.get('CF-Connecting-IP'));
+  if(!ip) return null;
   return sha256Hex(`${ip}|${route}`);
 }
 
 async function productionRateLimit(request,env){
   if(!isMutatingMethod(request.method)) return {ok:true};
+  if(!env?.DB) return {ok:false,response:json({ok:false,error:'DATABASE_UNAVAILABLE',version:VERSION},503)};
   const path=new URL(request.url).pathname;
   const sensitive =
     path.startsWith('/api/auth/') ||
@@ -3644,21 +3626,37 @@ async function productionRateLimit(request,env){
   const windowSeconds=60;
   const bucket=`${sensitive?'SENSITIVE':'GENERAL'}:${path}`;
   const subject=await productionSubjectHash(request,path);
+  if(!subject) return {ok:false,response:json({ok:false,error:'RATE_LIMIT_IDENTITY_UNAVAILABLE',version:VERSION},503)};
   const now=Math.floor(Date.now()/1000);
   const start=new Date(Math.floor(now/windowSeconds)*windowSeconds*1000).toISOString();
-  await ensureFinalHardeningSchema(env);
-  const existing=await env.DB.prepare(`SELECT request_count FROM security_rate_limits WHERE bucket=? AND subject_hash=? AND window_start=? LIMIT 1`).bind(bucket,subject,start).first();
-  const count=Number(existing?.request_count||0)+1;
-  if(existing){
-    await env.DB.prepare(`UPDATE security_rate_limits SET request_count=? WHERE bucket=? AND subject_hash=? AND window_start=?`).bind(count,bucket,subject,start).run();
-  }else{
-    await env.DB.prepare(`INSERT INTO security_rate_limits(id,bucket,subject_hash,window_start,request_count) VALUES(?,?,?,?,1)`).bind(crypto.randomUUID(),bucket,subject,start).run();
+  let counter;
+  try {
+    // One atomic SQLite statement prevents lost increments under concurrency.
+    // The table must have been provisioned by a versioned migration beforehand.
+    counter=await env.DB.prepare(`INSERT INTO security_rate_limits(id,bucket,subject_hash,window_start,request_count)
+      VALUES(?,?,?,?,1)
+      ON CONFLICT(bucket,subject_hash,window_start)
+      DO UPDATE SET request_count=security_rate_limits.request_count+1
+      RETURNING request_count`).bind(crypto.randomUUID(),bucket,subject,start).first();
+  } catch {
+    console.error('RATE_LIMIT_SCHEMA_UNAVAILABLE', JSON.stringify({route:path,code:'D1_RATE_LIMIT_WRITE_FAILED'}));
+    return {ok:false,response:json({ok:false,error:'RATE_LIMIT_SCHEMA_UNAVAILABLE',version:VERSION},503)};
+  }
+  const count=Number(counter?.request_count||0);
+  if(!Number.isSafeInteger(count)||count<1) {
+    return {ok:false,response:json({ok:false,error:'RATE_LIMIT_COUNTER_INVALID',version:VERSION},503)};
   }
   if(count>limit){
-    await productionSafetySchema(env);
-    await env.DB.prepare(`INSERT INTO production_security_events(id,event_type,route,subject_hash,decision,details_json) VALUES(?,?,?,?,?,?)`)
-      .bind(crypto.randomUUID(),'RATE_LIMIT',path,subject,'BLOCKED',JSON.stringify({limit,windowSeconds})).run();
-    return {ok:false,response:json({ok:false,error:'RATE_LIMITED',version:VERSION,retry_after_seconds:Math.max(1,windowSeconds-(now%windowSeconds))},429,{'retry-after':String(Math.max(1,windowSeconds-(now%windowSeconds)))})};
+    // Audit persistence is best-effort until the event table migration is applied;
+    // the request remains blocked even if the audit write is unavailable.
+    try {
+      await env.DB.prepare(`INSERT INTO production_security_events(id,event_type,route,subject_hash,decision,details_json) VALUES(?,?,?,?,?,?)`)
+        .bind(crypto.randomUUID(),'RATE_LIMIT',path,subject,'BLOCKED',JSON.stringify({limit,windowSeconds})).run();
+    } catch {
+      console.error('RATE_LIMIT_AUDIT_WRITE_FAILED', JSON.stringify({route:path,code:'D1_AUDIT_TABLE_UNAVAILABLE'}));
+    }
+    const retryAfter=Math.max(1,windowSeconds-(now%windowSeconds));
+    return {ok:false,response:json({ok:false,error:'RATE_LIMITED',version:VERSION,retry_after_seconds:retryAfter},429,{'retry-after':String(retryAfter)})};
   }
   return {ok:true};
 }
