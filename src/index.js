@@ -847,9 +847,10 @@ async function paymentOnboard(request, env) {
   const auth = await getSessionUser(request, env);
   if (!requireRole(auth, ['intervenant'])) return json({ok:false,error:auth?.user?'FORBIDDEN':'UNAUTHENTICATED',version:VERSION},auth?.user?403:401);
   await ensurePaymentSchema(env);
-  const body = await readJson(request);
   const provider = paymentProvider(env);
-  const accountId = clean(body?.provider_account_id) || null;
+  // Provider account IDs must come from an authenticated PSP onboarding
+  // response, never from caller-controlled request JSON.
+  const accountId = null;
   const existing = await env.DB.prepare('SELECT * FROM payment_accounts WHERE user_id=? LIMIT 1').bind(auth.user.id).first();
   if (existing) return json({ok:true,version:VERSION,account:existing,action:'REUSE_EXISTING'},200);
   const id=crypto.randomUUID();
