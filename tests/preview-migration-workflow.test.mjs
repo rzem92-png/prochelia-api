@@ -44,7 +44,8 @@ test("Preview migration workflow encrypts and integrity-checks backup before sch
   const apply = workflow.indexOf("Apply migrations to Preview D1 only");
   assert.ok(backup >= 0 && publish > backup && apply > publish);
   assert.match(workflow, /cipher-algo AES256/);
-  assert.match(workflow, /expected=.*sha256sum/);
+  assert.match(workflow, /sha256sum.*manifest\\.sha256/);
+  assert.match(workflow, /expected=.*cat.*manifest\\.sha256/);
   assert.match(workflow, /actual=.*sha256sum/);
   assert.match(workflow, /test "\$expected" = "\$actual"/);
 });
