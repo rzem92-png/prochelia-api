@@ -24,5 +24,5 @@ test("GET production audit handlers do not journal or insert check records", () 
   const body = source.slice(start, end);
   assert.doesNotMatch(body, /await journal\(/);
   assert.doesNotMatch(body, /INSERT INTO system_config_checks/);
-  assert.match(body, /GET production-check is read-only/);
+  assert.match(body, /GET audit endpoint is intentionally read-only/);
 });
