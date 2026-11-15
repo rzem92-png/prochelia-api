@@ -52,7 +52,8 @@ jobs:
                 'https://staging-prochelia-v14-restor.prochelia.pages.dev',
                 'https://feat-supra-control-center-v1.prochelia.pages.dev',
                 'https://db884f74.prochelia.pages.dev',
-                'https://repair-prochelia-frontend-xs.prochelia.pages.dev'
+                'https://repair-prochelia-frontend-xs.prochelia.pages.dev',
+                'https://fix-same-origin-session-prox.prochelia.pages.dev'
               ].join(',')
             },
             d1_databases: [{
@@ -77,6 +78,9 @@ jobs:
           node --experimental-default-type=module --check src/index.js
           node --experimental-default-type=module --check src/v7.js
           node --experimental-default-type=module --check src/v7-routes.js
+          node --experimental-default-type=module --check src/request-body.js
+          node --experimental-default-type=module --check src/supra-intelligence.js
+          node --experimental-default-type=module --check src/supra-orchestrator.js
       - name: Run backend contract and complete security regression suite
         run: |
           node --test tests/auth-handler-wiring.test.js tests/directory-api.test.js
@@ -89,7 +93,13 @@ jobs:
             tests/payment-settlement-guard.test.js \
             tests/payment-webhook-settlement-gate.test.js \
             tests/bootstrap-atomic.test.js \
-            tests/preview-e2e-workflow.test.mjs
+            tests/preview-e2e-workflow.test.mjs \
+            tests/supra-intelligence.test.mjs \
+            tests/supra-orchestrator.test.mjs \
+            tests/supra-production-gates.test.mjs \
+            tests/supra-security-regression.test.mjs \
+            tests/request-body.test.mjs \
+            tests/supra-route-contract.test.mjs
       - name: Test D1 backup restore preparation logic
         run: python3 -m unittest tests/test_prepare_d1_restore.py
       - name: Validate Wrangler bundle without deployment
