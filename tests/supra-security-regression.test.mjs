@@ -220,3 +220,14 @@ test("decision engine rejects caller-supplied context verification flags", () =>
     assert.equal(decision.rationale, "INVALID_CONTEXT_FIELD_FAIL_CLOSED");
   }
 });
+
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+
+test("production rate-limit identity uses the defined SHA-256 helper", () => {
+  const sourcePath = fileURLToPath(new URL("../src/index.js", import.meta.url));
+  const source = readFileSync(sourcePath, "utf8");
+  assert.match(source, /async function sha256Base64url\s*\(/);
+  assert.match(source, /async function productionSubjectHash\s*\([\s\S]*?return sha256Base64url\(/);
+  assert.doesNotMatch(source, /return sha256Hex\(/);
+});
