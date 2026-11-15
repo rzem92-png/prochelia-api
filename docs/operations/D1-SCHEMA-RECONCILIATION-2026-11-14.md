@@ -113,3 +113,68 @@ A reconciliation migration must be schema-aware and conditional. It must not bli
 4. independent security, privacy, legal, and operational sign-off is recorded.
 
 The previous inventory and this addendum are evidence of a controlled read-only audit, not a production authorization.
+
+
+## Addendum 2 — Preview migration ledger recheck (2026-11-15, later read-only pass)
+
+This later direct Cloudflare D1 read supersedes the earlier seven-row Preview migration-history snapshot above. No D1 writes were performed.
+
+Preview database: `prochelia-preview-db` (`6adb95e5-e542-4bec-9008-fbea01042305`).
+
+- `PRAGMA quick_check`: `ok`.
+- `PRAGMA foreign_key_check`: zero rows.
+- `d1_migrations`: 32 distinct migration names, spanning 19 distinct four-digit numeric prefixes.
+- The rate-limit table `auth_login_rate_limits` is absent.
+- The rate-limit index `idx_auth_login_rate_limits_window` is absent.
+
+The 32 names returned by the live ledger, in lexical order, were:
+
+```text
+0001_core_business_schema.sql
+0002_server_pricing.sql
+0003_route_address_provenance.sql
+0004_atomic_wallet_ledger.sql
+0005_payment_runtime_schema.sql
+0005_security_rate_limits.sql
+0006_copilot_schema.sql
+0006_restore_wallet_balance_guard.sql
+0007_trust_passport_schema.sql
+0007_unique_provider_account.sql
+0008_commercial_recruitment_schema.sql
+0008_server_owned_pricing_catalog.sql
+0009_final_hardening_schema.sql
+0009_finance_workspace_schema.sql
+0010_identity_mission_security_schema.sql
+0010_strategic_schema.sql
+0011_final_hardening_schema.sql
+0011_strategic_commercial_schema.sql
+0012_consolidated_business_schema.sql
+0012_national_continuity_schema.sql
+0013_finance_workspace_schema.sql
+0013_master_complement_schema.sql
+0014_operational_schema.sql
+0015_commercial_recruitment_schema.sql
+0015_production_security_events.sql
+0016_national_continuity_schema.sql
+0016_security_identity_schema.sql
+0017_brand_support_copilot_schema.sql
+0017_document_security_scans.sql
+0018_consolidated_business_schema.sql
+0018_dsa_ai_act_transparency_redress.sql
+0019_backup_verifications.sql
+```
+
+This proves that the earlier statement "Preview records exactly migrations 0001–0019" was inaccurate. Multiple distinct migration filenames share the same numeric prefix. The exact remote ledger cannot be represented by the single 20-file chain currently pinned by the Preview migration workflow.
+
+### Consequence
+
+The workflow's exact-set comparison is an appropriate fail-closed guard and must not be bypassed. Do not trigger it, do not apply migration 0020, and do not alter the remote ledger until each of the 32 recorded migrations has been traced to its source SQL and the resulting live schema has been compared against the repository's intended canonical schema.
+
+Required next work:
+1. Recover and hash the source SQL for all 32 ledger entries from their originating branches/commits or archived build artifacts.
+2. Reconstruct the actual application order and dependency graph, including the same-prefix migrations.
+3. Compare every table, column, constraint, index, trigger and foreign key with live Preview.
+4. Create a reviewed baseline/reconciliation plan and test it on an isolated restored copy.
+5. Only then revise and execute a Preview-only migration workflow with backup, target pinning, post-apply verification and rollback evidence.
+
+No production schema migration, deployment, merge, secret change or payment activation is authorized by this addendum. Production remains NO-GO.
