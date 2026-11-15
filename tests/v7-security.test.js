@@ -384,3 +384,24 @@ test("DSA decision listing fails closed when compliance storage is unavailable",
   assert.equal(response.status, 503);
   assert.equal((await response.json()).error, "COMPLIANCE_STORE_UNAVAILABLE");
 });
+
+
+test("DSA decisions endpoint fails closed with 503 when the decision schema is absent", async () => {
+  const env = { DB: { prepare() { throw new Error("D1_ERROR: no such table: moderation_decisions"); } } };
+  const response = await handleV7Route(
+    new Request("https://example.test/api/compliance/decisions"),
+    env, "/api/compliance/decisions",
+    { user: { id: "affected-user", role: "client" } }
+  );
+  assert.equal(response.status, 503);
+  assert.equal((await response.json()).error, "COMPLIANCE_SCHEMA_UNAVAILABLE");
+});
+
+test("Worker dispatch routes DSA decision reads through the authenticated handler", async () => {
+  const response = await worker.fetch(
+    new Request("https://example.test/api/compliance/decisions"),
+    {}
+  );
+  assert.equal(response.status, 401);
+  assert.equal((await response.json()).error, "UNAUTHENTICATED");
+});
