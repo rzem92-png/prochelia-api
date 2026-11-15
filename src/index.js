@@ -1852,9 +1852,15 @@ async function supraPlan(request, env) {
   const plan=procheliaV7.buildSupraPlan({
     caseType,domain,impact,requestedAction:action,market,context
   });
+  // The V1 governance adapter has a narrower context schema than the orchestrator.
+  // Do not pass the free-text problem statement into its typed evidence context.
+  const governanceContext = {};
+  for (const key of ["mission_id","provider_id","replacement_intervenant_id","client_id","immediateDanger"]) {
+    if (Object.hasOwn(context, key)) governanceContext[key] = context[key];
+  }
   const governance=procheliaV7.assessSupraDecision({
     caseType:plan.caseType,impact:plan.impact,requestedAction:plan.requestedAction,
-    actorRole:gate.auth.user.role,context
+    actorRole:gate.auth.user.role,context:governanceContext
   });
   const missingEvidence=[...new Set([...(plan.missingEvidence||[]),...(governance.missingEvidence||[])])];
   return json({
