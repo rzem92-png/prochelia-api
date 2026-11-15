@@ -10,7 +10,8 @@ test("payment schema helper is read-only and verifies migration-owned objects", 
   const helper = source.slice(start, end);
   assert.match(helper, /SELECT name FROM sqlite_master/);
   assert.match(helper, /PAYMENT_SCHEMA_NOT_READY/);
-  assert.doesNotMatch(helper, /\b(?:CREATE|ALTER|DROP|INSERT|UPDATE|DELETE)\s+(?:TABLE|INDEX|INTO|OR|SET)\b/i);
+  const executable = helper.replace(/\/\/[^\n]*/g, "");
+  assert.doesNotMatch(executable, /\b(?:CREATE|ALTER|DROP|INSERT|UPDATE|DELETE)\s+(?:TABLE|INDEX|INTO|OR|SET)\b/i);
   for (const objectName of [
     "payment_accounts", "wallets", "payment_transactions",
     "idx_payment_tx_mission", "idx_payment_tx_intervenant",
