@@ -788,23 +788,19 @@ export async function handleV7Route(
     return null;
 
   } catch (error) {
-
+    const missingComplianceSchema =
+      typeof path === "string" &&
+      path.startsWith("/api/compliance/") &&
+      /no such table|no such column/i.test(String(error?.message || ""));
     return Response.json(
-
       {
         ok: false,
-
-        version:
-          procheliaV7.version,
-
-        error:
-          error?.message ||
-          "Erreur V7"
+        version: procheliaV7.version,
+        error: missingComplianceSchema
+          ? "COMPLIANCE_SCHEMA_UNAVAILABLE"
+          : (error?.message || "Erreur V7")
       },
-
-      {
-        status: 500
-      }
+      { status: missingComplianceSchema ? 503 : 500 }
     );
   }
 }
