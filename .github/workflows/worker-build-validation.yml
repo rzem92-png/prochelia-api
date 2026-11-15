@@ -36,5 +36,7 @@ jobs:
         run: |
           go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
           "$HOME/go/bin/actionlint" .github/workflows/deploy-preview-worker-manual.yml
+      - name: Verify Preview D1 and R2 resource isolation
+        run: node --test tests/wrangler-preview-config.test.mjs
       - name: Wrangler bundle validation only (no deploy)
         run: npx --yes wrangler@4 deploy --dry-run --config wrangler.jsonc --outdir "$RUNNER_TEMP/prochelia-worker-dry-run"
