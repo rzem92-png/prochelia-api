@@ -1530,8 +1530,8 @@ async function processActionOutbox(request, env) {
   const rows=await env.DB.prepare(`SELECT * FROM action_outbox WHERE status='PENDING' ORDER BY created_at ASC LIMIT 50`).all();
   const processed=[];
   for(const row of (rows.results||[])) {
-    const payload=row.payload_json?JSON.parse(row.payload_json):{};
-    // Provider-dependent actions stay queued until the corresponding adapter/secret is configured.
+    // Payload is intentionally not parsed here: no action handler is registered yet.
+    // Malformed or legacy payloads must not prevent fail-closed queue classification.
     const external = ['PSP_REFUND_REVIEW','NOTIFY_CLIENT','SEARCH_REPLACEMENT','RESCHEDULE_MISSION','ASSIGN_REPLACEMENT','MISSION_VERIFY_AND_NOTIFY'].includes(String(row.action_type));
     const waitingStatus = external ? 'WAITING_PROVIDER' : 'WAITING_HANDLER';
     await env.DB.prepare(`UPDATE action_outbox SET status=?,last_error=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='PENDING'`)
