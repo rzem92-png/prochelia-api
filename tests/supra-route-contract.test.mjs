@@ -16,6 +16,8 @@ test("SUPRA endpoints require an authenticated manager and bounded request input
   assert.match(source, /async function supraDomains\(request, env\)\s*\{\s*const gate=await requireAuthRole\(request,env,\['gerante'\]\)/);
   assert.match(source, /async function supraPlan\(request, env\)\s*\{\s*\/\/[\s\S]*?const gate=await requireAuthRole\(request,env,\['gerante'\]\)/);
   assert.match(source, /readBoundedRequestBody\(request,16384\)/);
+  assert.match(source, /Authenticate before touching D1/);
+  assert.match(source, /async function supraPlan\(request, env\)\s*\{[\s\S]*?requireAuthRole[\s\S]*?ensureConsolidatedSchema/);
   assert.match(source, /CLIENT_SUPPLIED_EVIDENCE_NOT_TRUSTED/);
   assert.match(source, /executionAllowed:false/);
   assert.match(source, /SUPRA_PLAN_GENERATED/);
