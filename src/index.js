@@ -2507,105 +2507,29 @@ function securityOriginAllowed(request,env){
 // autorisées et aux règles RGPD/anti-spam applicables.
 // ================================================================
 
-async function ensureCommercialRecruitmentSchema(env){
-  if(!env.DB) throw new Error('DATABASE_REQUIRED');
-  const sql=[
-    `CREATE TABLE IF NOT EXISTS commercial_prospects (
-      id TEXT PRIMARY KEY, kind TEXT NOT NULL DEFAULT 'B2B', company_name TEXT, contact_name TEXT,
-      email TEXT, phone TEXT, website TEXT, sector TEXT, city TEXT, postal_code TEXT,
-      source TEXT, need TEXT, estimated_potential_cents INTEGER, score INTEGER NOT NULL DEFAULT 0,
-      stage TEXT NOT NULL DEFAULT 'QUALIFICATION', status TEXT NOT NULL DEFAULT 'OPEN',
-      next_action TEXT, notes TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )`,
-    `CREATE INDEX IF NOT EXISTS idx_commercial_prospects_priority ON commercial_prospects(status,score DESC,updated_at)`,
-    `CREATE TABLE IF NOT EXISTS commercial_playbooks (
-      id TEXT PRIMARY KEY, target_type TEXT NOT NULL, stage TEXT NOT NULL,
-      objective TEXT NOT NULL, script TEXT NOT NULL, objections_json TEXT NOT NULL DEFAULT '[]',
-      followup_json TEXT NOT NULL DEFAULT '[]', metadata_json TEXT NOT NULL DEFAULT '{}',
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )`,
-    `CREATE TABLE IF NOT EXISTS recruitment_candidates (
-      id TEXT PRIMARY KEY, full_name TEXT, email TEXT, phone TEXT, metier_code TEXT,
-      city TEXT, radius_km REAL, qualifications_json TEXT NOT NULL DEFAULT '[]',
-      documents_status TEXT NOT NULL DEFAULT 'TO_VERIFY', identity_status TEXT NOT NULL DEFAULT 'TO_VERIFY',
-      score INTEGER NOT NULL DEFAULT 0, stage TEXT NOT NULL DEFAULT 'SOURCING',
-      status TEXT NOT NULL DEFAULT 'OPEN', notes TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )`,
-    `CREATE INDEX IF NOT EXISTS idx_recruitment_candidates ON recruitment_candidates(status,score DESC,updated_at)`,
-    `CREATE TABLE IF NOT EXISTS copilot_growth_actions (
-      id TEXT PRIMARY KEY, category TEXT NOT NULL, target_type TEXT NOT NULL, title TEXT NOT NULL,
-      recommendation TEXT NOT NULL, expected_impact_json TEXT NOT NULL DEFAULT '{}',
-      priority INTEGER NOT NULL DEFAULT 10, status TEXT NOT NULL DEFAULT 'PROPOSED',
-      approved_by TEXT, executed_at TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )`,
-    `CREATE TABLE IF NOT EXISTS sales_results (
-      id TEXT PRIMARY KEY, prospect_id TEXT, stage TEXT NOT NULL, outcome TEXT NOT NULL,
-      amount_cents INTEGER, margin_cents INTEGER, source TEXT, notes TEXT,
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )`
-  ];
-  for(const q of sql) await env.DB.prepare(q).run();
+async function ensureCommercialRecruitmentSchema(env) {
+  if (!env.DB) throw new Error('DATABASE_REQUIRED');
+  // Runtime verification only; provisioning belongs to migration 0015.
+  const requiredObjects = [
+  "commercial_prospects",
+  "idx_commercial_prospects_priority",
+  "commercial_playbooks",
+  "recruitment_candidates",
+  "idx_recruitment_candidates",
+  "copilot_growth_actions",
+  "sales_results"
+];
+  const placeholders = requiredObjects.map(() => '?').join(',');
+  const result = await env.DB.prepare(
+    `SELECT name FROM sqlite_master
+      WHERE type IN ('table','index') AND name IN (${placeholders})`
+  ).bind(...requiredObjects).all();
+  const present = new Set((result?.results || []).map(row => String(row.name)));
+  const missing = requiredObjects.filter(name => !present.has(name));
+  if (missing.length) {
+    throw new Error(`COMMERCIAL_RECRUITMENT_SCHEMA_NOT_READY:${missing.join(',')}`);
+  }
 }
-
-function commercialStageGuide(stage){
-  const s=String(stage||'FIRST_CONTACT').toUpperCase();
-  const map={
-    FIRST_CONTACT:{label:'Premier contact',objective:'Obtenir l’attention et une prise de rendez-vous',length:'COURT'},
-    DISCOVERY:{label:'Découverte',objective:'Comprendre le besoin avant de vendre',length:'QUESTIONS'},
-    PRESENTATION:{label:'Présentation',objective:'Présenter PROCHÉLIA avec les bénéfices adaptés',length:'MOYEN'},
-    ARGUMENTATION:{label:'Argumentation',objective:'Démontrer la valeur et répondre aux objections',length:'COURT'},
-    PROPOSAL:{label:'Proposition',objective:'Transformer l’intérêt en proposition concrète',length:'MOYEN'},
-    FOLLOW_UP:{label:'Relance',objective:'Obtenir une réponse sans pression inutile',length:'COURT'},
-    CLOSING:{label:'Conclusion',objective:'Obtenir l’accord, le rendez-vous ou la première mission',length:'COURT'},
-    RETENTION:{label:'Fidélisation',objective:'Créer de la récurrence et développer le compte',length:'MOYEN'}
-  };
-  return map[s]||map.FIRST_CONTACT;
-}
-
-function commercialBenefits(target,need){
-  const t=String(target||'B2B').toUpperCase(); const n=String(need||'').trim();
-  if(t==='INTERVENANT') return ['accès à des missions adaptées','organisation et suivi des interventions','cadre de fonctionnement clair','suivi administratif et documentaire','visibilité sur les opportunités'];
-  if(t==='B2C') return ['simplicité de réservation','solution adaptée au besoin','suivi de la prestation','sécurité et traçabilité','accompagnement'];
-  return ['solution flexible pour les besoins d’intervention','simplification de l’organisation','traçabilité et suivi des missions','possibilité de gérer des besoins récurrents','interlocuteur et processus structurés'];
-}
-
-function makeObjections(target){
-  const common=[
-    {objection:'« Nous avons déjà un prestataire. »',answer:'« Je comprends. L’objectif n’est pas forcément de remplacer votre solution actuelle, mais de vous proposer une solution complémentaire lorsque vous avez un besoin ponctuel, urgent ou difficile à couvrir. »'},
-    {objection:'« C’est trop cher. »',answer:'« Regardons d’abord le besoin et la valeur attendue. Je peux vous proposer une formule adaptée au volume, aux horaires et à la fréquence plutôt qu’une offre standard. »'},
-    {objection:'« Envoyez-moi simplement vos informations. »',answer:'« Bien sûr. Pour vous envoyer uniquement ce qui vous concerne, puis-je vous poser deux questions rapides sur vos besoins ? »'}
-  ];
-  if(String(target).toUpperCase()==='INTERVENANT') common.push({objection:'« Pourquoi rejoindre PROCHÉLIA ? »',answer:'« L’intérêt est d’avoir un cadre organisé, des opportunités de missions et un suivi clair, avec des règles transparentes sur les documents, les missions et les paiements. »'});
-  return common;
-}
-
-function makeFollowups(stage,target){
-  const t=String(target||'B2B').toUpperCase();
-  return [
-    {delay:'J+2',channel:'email',text:`Bonjour, je reviens vers vous concernant PROCHÉLIA. Je reste disponible pour voir si notre solution peut répondre à vos besoins ${t==='INTERVENANT'?'de missions et d’activité':'d’intervention'}.`},
-    {delay:'J+7',channel:'email',text:'Je me permets une dernière relance afin de savoir si le sujet est toujours d’actualité. Si oui, je peux vous proposer un échange court et ciblé.'},
-    {delay:'J+21',channel:'crm',text:'Requalification du prospect et nouvelle proposition si besoin.'}
-  ];
-}
-
-function makeSalesKit(body){
-  const target=String(body?.target_type||'B2B').toUpperCase();
-  const stage=String(body?.stage||'FIRST_CONTACT').toUpperCase();
-  const g=commercialStageGuide(stage); const name=clean(body?.contact_name)||'Madame, Monsieur';
-  const org=clean(body?.company_name)||'votre structure'; const need=clean(body?.need)||'vos besoins d’intervention';
-  const benefits=commercialBenefits(target,need);
-  let opening;
-  if(stage==='FIRST_CONTACT') opening=`Bonjour ${name}, je vous contacte au nom de PROCHÉLIA. Nous proposons une solution organisée pour ${need}. L’objectif est de vous faire gagner du temps et de disposer d’une solution souple lorsque vous avez besoin d’interventions fiables et structurées. Seriez-vous disponible pour un échange de 10 minutes afin de voir si cela peut être utile à ${org} ?`;
-  else if(stage==='DISCOVERY') opening=`Merci pour votre intérêt. Avant de vous présenter PROCHÉLIA en détail, j’aimerais comprendre ${need}. Quels sont aujourd’hui vos principaux besoins, vos contraintes de délai et votre fréquence d’intervention ?`;
-  else if(stage==='PRESENTATION') opening=`PROCHÉLIA accompagne ${target==='INTERVENANT'?'les intervenants dans le développement et l’organisation de leur activité':target==='B2C'?'les particuliers dans leurs besoins d’intervention':'les entreprises dans l’organisation de leurs besoins d’intervention'}. La plateforme centralise les demandes, la mise en relation, le suivi et la traçabilité afin de simplifier le parcours.`;
-  else if(stage==='FOLLOW_UP') opening=`Bonjour ${name}, je reviens vers vous au sujet de PROCHÉLIA. Je voulais simplement vérifier si ${need} est toujours d’actualité. Si oui, je peux vous proposer une solution adaptée sans vous faire perdre de temps.`;
-  else if(stage==='CLOSING') opening=`Au regard de votre besoin, je vous propose que nous validions la prochaine étape : un premier échange, une première mission ou une proposition adaptée à votre volume. L’objectif est de commencer simplement et de mesurer les résultats.`;
-  else opening=`Pour ${org}, je recommande de mettre en avant ${benefits.slice(0,3).join(', ')}. ${g.objective}.`;
-  return {target_type:target,stage,stage_label:g.label,objective:g.objective,opening,benefits,questions:[`Quel est votre besoin principal aujourd’hui ?`,`À quelle fréquence ce besoin se présente-t-il ?`,`Quelles sont vos principales contraintes (délai, zone, budget, disponibilité) ?`,`Qu’est-ce qui ferait qu’une solution serait réellement utile pour vous ?`],objections:makeObjections(target),followups:makeFollowups(stage,target),closing:'« Si cela vous convient, je vous propose de définir maintenant la prochaine étape la plus simple. »'};
-}
-
 async function commercialProspectCreate(request,env){
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
   await ensureCommercialRecruitmentSchema(env); const b=await readJson(request);
