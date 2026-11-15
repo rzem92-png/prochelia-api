@@ -125,3 +125,62 @@ class IdentityMissionSecurityMigrationTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+STRATEGIC_COMMERCIAL_MIGRATION = ROOT / "migrations" / "0011_strategic_commercial_schema.sql"
+
+
+class StrategicCommercialMigrationTests(unittest.TestCase):
+    def setUp(self):
+        self.db = sqlite3.connect(":memory:")
+        self.db.execute("PRAGMA foreign_keys=ON")
+
+    def tearDown(self):
+        self.db.close()
+
+    def test_migration_runs_idempotently_and_creates_all_objects(self):
+        sql = STRATEGIC_COMMERCIAL_MIGRATION.read_text(encoding="utf-8")
+        self.db.executescript(sql)
+        self.db.executescript(sql)
+        objects = {row[0] for row in self.db.execute(
+            "SELECT name FROM sqlite_master WHERE type IN ('table','index')"
+        )}
+        expected = {
+            "promotions", "idx_promotions_active",
+            "promotion_recommendations", "idx_promotion_reco_status",
+            "commercial_events", "idx_commercial_events",
+            "market_signals", "idx_market_signals",
+            "client_value_scores", "strategic_alerts",
+        }
+        self.assertTrue(expected.issubset(objects))
+
+    def test_migration_preserves_unique_promotion_code_and_client_score(self):
+        self.db.executescript(STRATEGIC_COMMERCIAL_MIGRATION.read_text(encoding="utf-8"))
+        base = ("id", "code", "name", "type", "phase", "starts_at", "ends_at")
+        self.db.execute(
+            "INSERT INTO promotions(id,code,name,type,phase,starts_at,ends_at) VALUES(?,?,?,?,?,?,?)",
+            ("p1", "PROMO", "Promo", "PERCENT", "TEST", "2030-01-01", "2030-02-01"),
+        )
+        with self.assertRaises(sqlite3.IntegrityError):
+            self.db.execute(
+                "INSERT INTO promotions(id,code,name,type,phase,starts_at,ends_at) VALUES(?,?,?,?,?,?,?)",
+                ("p2", "PROMO", "Promo 2", "PERCENT", "TEST", "2030-01-01", "2030-02-01"),
+            )
+        self.db.execute(
+            "INSERT INTO client_value_scores(id,client_id,company_id,segment) VALUES('v1','c1','co1','STANDARD')"
+        )
+        with self.assertRaises(sqlite3.IntegrityError):
+            self.db.execute(
+                "INSERT INTO client_value_scores(id,client_id,company_id,segment) VALUES('v2','c1','co1','STANDARD')"
+            )
+
+    def test_migration_has_no_destructive_sql(self):
+        sql = re.sub(
+            r"--[^\\n]*", "",
+            STRATEGIC_COMMERCIAL_MIGRATION.read_text(encoding="utf-8")
+        ).upper()
+        for forbidden in (
+            r"\\bDROP\\s+TABLE\\b", r"\\bDROP\\s+INDEX\\b",
+            r"\\bDELETE\\s+FROM\\b", r"^\\s*UPDATE\\s+"
+        ):
+            self.assertIsNone(re.search(forbidden, sql, flags=re.MULTILINE))
