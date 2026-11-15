@@ -113,12 +113,12 @@ class IdentityMissionSecurityMigrationTests(unittest.TestCase):
 
     def test_migration_has_no_destructive_sql(self):
         sql = re.sub(
-            r"--[^\\n]*", "",
+            r"--[^\n]*", "",
             IDENTITY_SECURITY_MIGRATION.read_text(encoding="utf-8")
         ).upper()
         for forbidden in (
-            r"\\bDROP\\s+TABLE\\b", r"\\bDROP\\s+INDEX\\b",
-            r"\\bDELETE\\s+FROM\\b", r"^\\s*UPDATE\\s+"
+            r"\bDROP\s+TABLE\b", r"\bDROP\s+INDEX\b",
+            r"\bDELETE\s+FROM\b", r"^\s*UPDATE\s+"
         ):
             self.assertIsNone(re.search(forbidden, sql, flags=re.MULTILINE))
 
