@@ -427,81 +427,6 @@ async function authStatus(request, env) {
    Chaîne : identité vérifiée -> compte -> appareil -> mission ->
    présence -> code client -> journal d'audit.
 =============================================================== */
-async function ensureSecuritySchema(env) {
-  if (!env.DB) throw new Error('DATABASE_REQUIRED');
-  const statements = [
-    `CREATE TABLE IF NOT EXISTS identity_verifications (
-      id TEXT PRIMARY KEY,
-      user_id TEXT NOT NULL,
-      status TEXT NOT NULL DEFAULT 'pending',
-      level TEXT NOT NULL DEFAULT 'standard',
-      provider TEXT,
-      provider_reference TEXT,
-      verified_at TEXT,
-      expires_at TEXT,
-      rejection_reason TEXT,
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )`,
-    `CREATE INDEX IF NOT EXISTS idx_identity_verifications_user ON identity_verifications(user_id, status, updated_at)`,
-    `CREATE TABLE IF NOT EXISTS trusted_devices (
-      id TEXT PRIMARY KEY,
-      user_id TEXT NOT NULL,
-      device_hash TEXT NOT NULL,
-      status TEXT NOT NULL DEFAULT 'active',
-      first_seen_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      last_seen_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      expires_at TEXT NOT NULL,
-      revoked_at TEXT,
-      UNIQUE(user_id, device_hash)
-    )`,
-    `CREATE TABLE IF NOT EXISTS mission_security (
-      id TEXT PRIMARY KEY,
-      mission_id TEXT NOT NULL UNIQUE,
-      client_id TEXT NOT NULL,
-      intervenant_id TEXT NOT NULL,
-      risk_level TEXT NOT NULL DEFAULT 'standard',
-      arrival_code_hash TEXT,
-      arrival_expires_at TEXT,
-      arrival_used_at TEXT,
-      end_code_hash TEXT,
-      end_expires_at TEXT,
-      end_used_at TEXT,
-      status TEXT NOT NULL DEFAULT 'prepared',
-      locked_until TEXT,
-      arrival_started_at TEXT,
-      ended_at TEXT,
-      last_presence_at TEXT,
-      last_device_id TEXT,
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )`,
-    `CREATE INDEX IF NOT EXISTS idx_mission_security_intervenant ON mission_security(intervenant_id, status)`,
-    `CREATE TABLE IF NOT EXISTS mission_security_attempts (
-      id TEXT PRIMARY KEY,
-      security_id TEXT NOT NULL,
-      purpose TEXT NOT NULL,
-      actor_user_id TEXT,
-      device_id TEXT,
-      result TEXT NOT NULL,
-      reason TEXT,
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )`,
-    `CREATE INDEX IF NOT EXISTS idx_security_attempts_security ON mission_security_attempts(security_id, created_at)`,
-    `CREATE TABLE IF NOT EXISTS security_audit (
-      id TEXT PRIMARY KEY,
-      event_type TEXT NOT NULL,
-      mission_id TEXT,
-      user_id TEXT,
-      actor_role TEXT,
-      result TEXT NOT NULL,
-      metadata_json TEXT,
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )`,
-    `CREATE INDEX IF NOT EXISTS idx_security_audit_mission ON security_audit(mission_id, created_at)`
-  ];
-  for (const sql of statements) await env.DB.prepare(sql).run();
-}
 
 function securityCode() {
   const n = new DataView(randomBytes(4).buffer).getUint32(0) % 1000000;
@@ -525,6 +450,16 @@ async function requireVerifiedIntervenant(env, userId) {
   return row || null;
 }
 
+// Mission execution requires BOTH identity and professional-profile approval.
+// The server-side professional document review/storage workflow is not implemented
+// yet, so identity verification alone must never authorize a mission.
+const PROFESSIONAL_PROFILE_REVIEW_READY = false;
+
+async function requireMissionEligibleIntervenant(env, userId) {
+  if (!PROFESSIONAL_PROFILE_REVIEW_READY) return null;
+  return requireVerifiedIntervenant(env, userId);
+}
+
 async function deviceHash(request, userId) {
   const raw = [userId, request.headers.get('user-agent') || '', request.headers.get('sec-ch-ua') || ''].join('|');
   return sha256Base64url(raw);
@@ -533,7 +468,6 @@ async function deviceHash(request, userId) {
 async function securityIdentityStart(request, env) {
   const auth = await getSessionUser(request, env);
   if (!requireRole(auth, ['intervenant'])) return json({ok:false,error:auth?.user?'FORBIDDEN':'UNAUTHENTICATED',version:VERSION}, auth?.user?403:401);
-  await ensureSecuritySchema(env);
   const id = crypto.randomUUID();
   await env.DB.prepare(
     `INSERT INTO identity_verifications (id,user_id,status,level) VALUES (?,?, 'pending','standard')`
@@ -542,10 +476,76 @@ async function securityIdentityStart(request, env) {
   return json({ok:true,version:VERSION,verification_id:id,status:'pending',message:'Vérification d’identité requise avant l’accès aux missions.'},201);
 }
 
+async function securityIdentityStatus(request, env) {
+  const auth = await getSessionUser(request, env);
+  if (!auth?.user) return json({ok:false,error:'UNAUTHENTICATED',version:VERSION},401);
+  // This GET endpoint is strictly read-only. Schema creation belongs to
+  // the reviewed migration pipeline, never to a user request.
+  try {
+  if (auth.user.role === 'intervenant') {
+    const row = await env.DB.prepare(
+      `SELECT id,status,level,provider,verified_at,expires_at,rejection_reason,created_at,updated_at
+         FROM identity_verifications
+        WHERE user_id=?
+        ORDER BY created_at DESC
+        LIMIT 1`
+    ).bind(auth.user.id).first();
+
+    const valid = !!row && row.status === 'verified' &&
+      (!row.expires_at || new Date(row.expires_at).getTime() > Date.now());
+
+    return json({
+      ok:true,
+      version:VERSION,
+      role:'intervenant',
+      verification:row ? {
+        id:row.id,
+        status:row.status,
+        level:row.level,
+        provider:row.provider,
+        verified_at:row.verified_at,
+        expires_at:row.expires_at,
+        rejection_reason:row.rejection_reason,
+        created_at:row.created_at,
+        updated_at:row.updated_at
+      } : null,
+      identity_gate_passed:valid,
+      profile_gate_passed:false,
+      authority:'SERVER_D1'
+    },200);
+  }
+
+  if (auth.user.role === 'gerante') {
+    const result = await env.DB.prepare(
+      `SELECT iv.id,iv.user_id,u.first_name,u.last_name,u.email,
+              iv.status,iv.level,iv.provider,iv.verified_at,iv.expires_at,
+              iv.rejection_reason,iv.created_at,iv.updated_at
+         FROM identity_verifications iv
+         JOIN users u ON u.id=iv.user_id
+        ORDER BY CASE iv.status WHEN 'pending' THEN 0 WHEN 'verified' THEN 1 ELSE 2 END,
+                 iv.created_at DESC
+        LIMIT 100`
+    ).all();
+
+    return json({
+      ok:true,
+      version:VERSION,
+      role:'gerante',
+      authority:'SERVER_D1',
+      total:result.results?.length || 0,
+      verifications:result.results || []
+    },200);
+  }
+
+  return json({ok:false,error:'FORBIDDEN',version:VERSION},403);
+  } catch {
+    return json({ok:false,error:'IDENTITY_SCHEMA_NOT_READY',version:VERSION},503);
+  }
+}
+
 async function securityIdentityApprove(request, env) {
   const auth = await getSessionUser(request, env);
   if (!requireRole(auth, ['gerante'])) return json({ok:false,error:auth?.user?'FORBIDDEN':'UNAUTHENTICATED',version:VERSION}, auth?.user?403:401);
-  await ensureSecuritySchema(env);
   const body = await readJson(request);
   const verificationId = clean(body?.verification_id);
   const status = clean(body?.status);
@@ -592,12 +592,11 @@ async function deliverSecurityCodes(env, payload) {
 async function securityPrepareMission(request, env) {
   const auth = await getSessionUser(request, env);
   if (!requireRole(auth, ['gerante'])) return json({ok:false,error:auth?.user?'FORBIDDEN':'UNAUTHENTICATED',version:VERSION}, auth?.user?403:401);
-  await ensureSecuritySchema(env);
   const body = await readJson(request);
   const missionId=clean(body?.mission_id), clientId=clean(body?.client_id), intervenantId=clean(body?.intervenant_id);
   if(!missionId||!clientId||!intervenantId) return json({ok:false,error:'MISSION_SECURITY_FIELDS_REQUIRED',version:VERSION},400);
-  const verified = await requireVerifiedIntervenant(env,intervenantId);
-  if(!verified) return json({ok:false,error:'INTERVENANT_IDENTITY_NOT_VERIFIED',version:VERSION},409);
+  const verified = await requireMissionEligibleIntervenant(env,intervenantId);
+  if(!verified) return json({ok:false,error:'INTERVENANT_PROFILE_NOT_VERIFIED',version:VERSION},409);
   const existing=await env.DB.prepare('SELECT id,status FROM mission_security WHERE mission_id=? LIMIT 1').bind(missionId).first();
   if(existing) return json({ok:false,error:'MISSION_SECURITY_ALREADY_PREPARED',version:VERSION,status:existing.status},409);
   const arrival=securityCode(), end=securityCode();
@@ -628,9 +627,8 @@ async function securityPrepareMission(request, env) {
 async function securityPresence(request, env) {
   const auth=await getSessionUser(request,env);
   if(!requireRole(auth,['intervenant'])) return json({ok:false,error:auth?.user?'FORBIDDEN':'UNAUTHENTICATED',version:VERSION},auth?.user?403:401);
-  await ensureSecuritySchema(env);
-  const identity = await requireVerifiedIntervenant(env, auth.user.id);
-  if(!identity) return json({ok:false,error:'INTERVENANT_IDENTITY_NOT_VERIFIED',version:VERSION},403);
+  const identity = await requireMissionEligibleIntervenant(env, auth.user.id);
+  if(!identity) return json({ok:false,error:'INTERVENANT_PROFILE_NOT_VERIFIED',version:VERSION},403);
   const body=await readJson(request), missionId=clean(body?.mission_id);
   if(!missionId) return json({ok:false,error:'MISSION_ID_REQUIRED',version:VERSION},400);
   const sec=await env.DB.prepare('SELECT * FROM mission_security WHERE mission_id=? AND intervenant_id=? LIMIT 1').bind(missionId,auth.user.id).first();
@@ -668,7 +666,6 @@ export async function consumeMissionSecurityCode(env, securityId, purpose, expec
 async function securityVerifyCode(request, env) {
   const auth=await getSessionUser(request,env);
   if(!requireRole(auth,['intervenant'])) return json({ok:false,error:auth?.user?'FORBIDDEN':'UNAUTHENTICATED',version:VERSION},auth?.user?403:401);
-  await ensureSecuritySchema(env);
   const body=await readJson(request), missionId=clean(body?.mission_id), purpose=clean(body?.purpose), code=clean(body?.code);
   if(!missionId||!['ARRIVAL','END'].includes(purpose)||!/^[0-9]{6}$/.test(code)) return json({ok:false,error:'INVALID_SECURITY_CODE_REQUEST',version:VERSION},400);
   const sec=await env.DB.prepare('SELECT * FROM mission_security WHERE mission_id=? AND intervenant_id=? LIMIT 1').bind(missionId,auth.user.id).first();
@@ -676,7 +673,7 @@ async function securityVerifyCode(request, env) {
   const identity = await requireVerifiedIntervenant(env, auth.user.id);
   if(!identity) {
     await securityAudit(env,'SECURITY_IDENTITY_RECHECK_FAILED',missionId,auth.user.id,auth.user.role,'DENIED',{});
-    return json({ok:false,error:'INTERVENANT_IDENTITY_NOT_VERIFIED',version:VERSION},403);
+    return json({ok:false,error:'INTERVENANT_PROFILE_NOT_VERIFIED',version:VERSION},403);
   }
   if(!sec.last_presence_at) {
     await securityAudit(env,'SECURITY_PRESENCE_REQUIRED',missionId,auth.user.id,auth.user.role,'DENIED',{purpose});
@@ -723,7 +720,6 @@ async function securityVerifyCode(request, env) {
 async function securityResendCodes(request, env) {
   const auth=await getSessionUser(request,env);
   if(!requireRole(auth,['gerante','client'])) return json({ok:false,error:auth?.user?'FORBIDDEN':'UNAUTHENTICATED',version:VERSION},auth?.user?403:401);
-  await ensureSecuritySchema(env);
   const body=await readJson(request);
   const missionId=clean(body?.mission_id);
   if(!missionId) return json({ok:false,error:'MISSION_ID_REQUIRED',version:VERSION},400);
@@ -743,7 +739,6 @@ async function securityClientCode(request, env) {
 async function securityStatus(request, env) {
   const auth=await getSessionUser(request,env);
   if(!auth) return json({ok:false,error:'UNAUTHENTICATED',version:VERSION},401);
-  await ensureSecuritySchema(env);
   const count=await env.DB.prepare('SELECT COUNT(*) AS total FROM security_audit').first();
   return json({ok:true,version:VERSION,security:{identity:'verified_required',device:'bound',presence:'recorded',arrival_code:'single_use',end_code:'single_use',max_attempts:SECURITY_MAX_ATTEMPTS,code_ttl_seconds:SECURITY_CODE_TTL_SECONDS,audit_events:Number(count?.total||0)},user:auth.user},200);
 }
@@ -1210,6 +1205,10 @@ async function handleBase(request, env) {
   if (url.pathname === '/api/security/identity/approve') {
     if (request.method !== 'POST') return json({ ok:false,error:'METHOD_NOT_ALLOWED',version:VERSION },405);
     return securityIdentityApprove(request, env);
+  }
+  if (url.pathname === '/api/security/identity/status') {
+    if (request.method !== 'GET') return json({ ok:false,error:'METHOD_NOT_ALLOWED',version:VERSION },405);
+    return securityIdentityStatus(request, env);
   }
   if (url.pathname === '/api/security/mission/prepare') {
     if (request.method !== 'POST') return json({ ok:false,error:'METHOD_NOT_ALLOWED',version:VERSION },405);
