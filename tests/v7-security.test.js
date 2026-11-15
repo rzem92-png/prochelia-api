@@ -343,3 +343,44 @@ test("DSA appeal endpoint maps a concurrent unique-index conflict to HTTP 409", 
   assert.equal(response.status, 409);
   assert.equal((await response.json()).error, "APPEAL_ALREADY_PENDING");
 });
+
+
+test("DSA decision listing is authenticated and scoped to the affected session user", async () => {
+  let sql = "";
+  let values = [];
+  const env = { DB: { prepare(query) {
+    sql = query;
+    return {
+      bind(...args) { values = args; return this; },
+      async all() { return { results: [{ id: "decision-own", statement_of_reasons: "Reasoned decision", appeal_status: null }] }; }
+    };
+  } } };
+  const denied = await handleV7Route(
+    new Request("https://example.test/api/compliance/decisions"),
+    env, "/api/compliance/decisions", null
+  );
+  assert.equal(denied.status, 401);
+
+  const allowed = await handleV7Route(
+    new Request("https://example.test/api/compliance/decisions"),
+    env, "/api/compliance/decisions",
+    { user: { id: "affected-user", role: "client" } }
+  );
+  assert.equal(allowed.status, 200);
+  assert.match(sql, /WHERE d\.affected_user_id = \?/);
+  assert.match(sql, /a\.appellant_user_id = \?/);
+  assert.deepEqual(values, ["affected-user", "affected-user"]);
+  assert.deepEqual((await allowed.json()).decisions, [
+    { id: "decision-own", statement_of_reasons: "Reasoned decision", appeal_status: null }
+  ]);
+});
+
+test("DSA decision listing fails closed when compliance storage is unavailable", async () => {
+  const response = await handleV7Route(
+    new Request("https://example.test/api/compliance/decisions"),
+    {}, "/api/compliance/decisions",
+    { user: { id: "affected-user", role: "client" } }
+  );
+  assert.equal(response.status, 503);
+  assert.equal((await response.json()).error, "COMPLIANCE_STORE_UNAVAILABLE");
+});
