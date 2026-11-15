@@ -27,8 +27,8 @@ test("SUPRA plan route does not trigger request-path schema DDL", () => {
   const start = source.indexOf("const consolidatedPath =");
   const end = source.indexOf(";", start);
   assert.ok(start >= 0 && end > start, "consolidated route allowlist must remain explicit");
-  assert.doesNotMatch(source.slice(start, end), /\\/api\\/supra\\/plan/);
-  assert.match(source, /await journal\\(env,'gerante',gate\\.auth\\.user\\.id/);
+  assert.equal(source.slice(start, end).includes("/api/supra/plan"), false);
+  assert.ok(source.includes("await journal(env,'gerante',gate.auth.user.id"));
 });
 
 test("V7 exports only the deterministic SUPRA governance surface", () => {
