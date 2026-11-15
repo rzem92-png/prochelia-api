@@ -2959,6 +2959,19 @@ async function ensureNationalContinuitySchema(env) {
   if (missing.length) {
     throw new Error(`NATIONAL_CONTINUITY_SCHEMA_NOT_READY:${missing.join(',')}`);
   }
+  const requiredDefaults = [
+    'maxPageSize', 'defaultPageSize', 'importBatchSize', 'noArtificialUserCap',
+    'cursorPaginationRecommended', 'documentsStorage', 'backupFrequency', 'backupRetentionDays'
+  ];
+  const placeholdersForDefaults = requiredDefaults.map(() => '?').join(',');
+  const defaultsResult = await env.DB.prepare(
+    `SELECT key FROM platform_scale_config WHERE key IN (${placeholdersForDefaults})`
+  ).bind(...requiredDefaults).all();
+  const presentDefaults = new Set((defaultsResult?.results || []).map(row => String(row.key)));
+  const missingDefaults = requiredDefaults.filter(key => !presentDefaults.has(key));
+  if (missingDefaults.length) {
+    throw new Error(`NATIONAL_SCALE_DEFAULTS_NOT_READY:${missingDefaults.join(',')}`);
+  }
 }
 function b64(u8){let s='';for(let i=0;i<u8.length;i+=0x8000)s+=String.fromCharCode(...u8.subarray(i,i+0x8000));return btoa(s)}
 async function backupEncrypt(text,secret){
