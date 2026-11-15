@@ -37,6 +37,14 @@ test("outbox never marks an action completed without an audited handler", () => 
   assert.ok(!outbox.includes("SET status='COMPLETED'"));
 });
 
+test("malformed outbox payloads cannot block fail-closed queue classification", () => {
+  const start = source.indexOf("async function processActionOutbox");
+  const end = source.indexOf("\\nasync function executeOperationalCase", start);
+  const outbox = source.slice(start, end);
+  assert.ok(outbox.includes("Malformed or legacy payloads must not prevent fail-closed queue classification."));
+  assert.ok(!outbox.includes("JSON.parse(row.payload_json)"));
+});
+
 test("automatic execution cannot bypass required manager approval", () => {
   assert.ok(execute.includes("if(c.requires_manager && !approverId) return {ok:false,error:'MANAGER_APPROVAL_REQUIRED'};"));
   assert.ok(!execute.includes("requires_manager && !automatic"));
