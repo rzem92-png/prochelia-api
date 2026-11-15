@@ -273,3 +273,27 @@ test("DSA appeal endpoint does not expose another user's decision", async () => 
   );
   assert.equal(response.status, 404);
 });
+
+
+test("DSA appeal endpoint rejects a second pending appeal for the same decision", async () => {
+  const env = { DB: { prepare(sql) {
+    return {
+      bind() { return this; },
+      async first() {
+        if (sql.includes("FROM moderation_decisions")) return { id: "decision-1" };
+        if (sql.includes("FROM moderation_appeals")) return { id: "appeal-existing" };
+        return null;
+      },
+      async run() { throw new Error("must not insert a duplicate appeal"); }
+    };
+  } } };
+  const response = await handleV7Route(
+    post("/api/compliance/appeals", {
+      decision_id: "decision-1", grounds: "I request a second review of this decision."
+    }),
+    env, "/api/compliance/appeals",
+    { user: { id: "affected-user", role: "client" } }
+  );
+  assert.equal(response.status, 409);
+  assert.equal((await response.json()).error, "APPEAL_ALREADY_PENDING");
+});
