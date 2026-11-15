@@ -36,3 +36,9 @@ test("presence and mission-code verification recheck the professional profile ga
   assert.match(presence, /INTERVENANT_PROFILE_NOT_VERIFIED/);
   assert.match(verify, /INTERVENANT_PROFILE_NOT_VERIFIED/);
 });
+
+test("security routes never create D1 schema at request time", () => {
+  assert.doesNotMatch(source, /ensureSecuritySchema/);
+  assert.doesNotMatch(source, /CREATE TABLE IF NOT EXISTS identity_verifications/);
+  assert.doesNotMatch(source, /CREATE TABLE IF NOT EXISTS mission_security/);
+});
