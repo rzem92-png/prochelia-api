@@ -31,7 +31,7 @@ jobs:
       - name: Checkout preproduction branch
         uses: actions/checkout@v4
         with:
-          ref: prelaunch/v14.5.7-consolidation-audit
+          ref: 7e71cd09531d50f9a76567e39e8feea95787e388
 
       - name: Verify credentials, exact target and migration files
         shell: bash
@@ -54,10 +54,15 @@ jobs:
             "0002_server_pricing.sql",
             "0003_route_address_provenance.sql",
             "0004_atomic_wallet_ledger.sql",
+            "0019_dsa_pending_appeal_unique_guard.sql",
           ):
             p = Path("migrations") / name
             assert p.is_file() and p.stat().st_size > 0, f"Missing migration: {name}"
-          print("PASS: staging Worker, exact preview D1 and four migration files verified")
+          import hashlib
+          repair = Path("migrations/0019_dsa_pending_appeal_unique_guard.sql").read_bytes()
+          expected_sha256 = "b7016bcddee84c8487c7685cda438ae6ec1c3a1d1c7053b5e69bc2f084598fc0"
+          assert hashlib.sha256(repair).hexdigest() == expected_sha256, "Migration 0019 checksum mismatch"
+          print("PASS: staging Worker, exact preview D1, migration 0019 and pinned checksum verified")
           PY
           test "$EXPECTED_DB_NAME" = "prochelia-preview-db"
           test "$EXPECTED_DB_ID" = "6adb95e5-e542-4bec-9008-fbea01042305"
