@@ -23,6 +23,14 @@ test("SUPRA endpoints require an authenticated manager and bounded request input
   assert.match(source, /\/api\/supra\/plan/);
 });
 
+test("SUPRA plan route does not trigger request-path schema DDL", () => {
+  const start = source.indexOf("const consolidatedPath =");
+  const end = source.indexOf(";", start);
+  assert.ok(start >= 0 && end > start, "consolidated route allowlist must remain explicit");
+  assert.doesNotMatch(source.slice(start, end), /\\/api\\/supra\\/plan/);
+  assert.match(source, /await journal\\(env,'gerante',gate\\.auth\\.user\\.id/);
+});
+
 test("V7 exports only the deterministic SUPRA governance surface", () => {
   for (const name of ["assessSupraDecision","simulateResilience","buildSupraPlan","getSupraDomainRegistry"]) {
     assert.match(v7, new RegExp("\\b" + name + "\\b"));
