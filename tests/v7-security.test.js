@@ -252,11 +252,9 @@ test("DSA appeal endpoint only accepts an affected user's appeal and prevents du
     { user: { id: "affected-user", role: "client" } }
   );
   assert.equal(response.status, 201);
-  assert.deepEqual(statements.map(s => s.trim().split(/\s+/).slice(0,3).join(" ")), [
-    "SELECT id FROM moderation_decisions",
-    "SELECT id FROM moderation_appeals",
-    "INSERT INTO moderation_appeals"
-  ]);
+  assert.match(statements[0], /FROM moderation_decisions WHERE id = \\? AND affected_user_id = \\?/);
+  assert.match(statements[1], /FROM moderation_appeals WHERE decision_id = \\? AND appellant_user_id = \\?/);
+  assert.match(statements[2], /INSERT INTO moderation_appeals/);
   assert.equal((await response.json()).appeal.status, "SUBMITTED");
 });
 
