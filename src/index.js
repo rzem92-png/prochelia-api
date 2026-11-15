@@ -2111,6 +2111,12 @@ async function ensureOperationalSchema(env) {
   if (missing.length) {
     throw new Error(`OPERATIONAL_SCHEMA_NOT_READY:${missing.join(',')}`);
   }
+  const actionInfo = await env.DB.prepare('PRAGMA table_info(action_outbox)').all();
+  const actionColumns = new Set((actionInfo?.results || []).map(row => String(row.name)));
+  const missingColumns = ['case_id', 'processed_at'].filter(name => !actionColumns.has(name));
+  if (missingColumns.length) {
+    throw new Error(`OPERATIONAL_SCHEMA_COLUMNS_NOT_READY:${missingColumns.join(',')}`);
+  }
 }
 async function tableExists(env, table) {
   const r = await env.DB.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name=? LIMIT 1").bind(table).first();
