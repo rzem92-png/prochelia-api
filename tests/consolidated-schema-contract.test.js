@@ -10,6 +10,8 @@ test("consolidated business schema helper is read-only and verifies migration-ow
   const helper = source.slice(start, end);
   assert.match(helper, /SELECT name FROM sqlite_master/);
   assert.match(helper, /CONSOLIDATED_SCHEMA_NOT_READY/);
+  assert.match(helper, /CONSOLIDATED_SETTINGS_NOT_READY/);
+  assert.match(helper, /SELECT key FROM platform_settings/);
   const executable = helper.replace(/\/\/[^\n]*/g, "");
   assert.doesNotMatch(executable, /\b(?:CREATE|ALTER|DROP|INSERT|UPDATE|DELETE)\s+(?:TABLE|INDEX|INTO|OR|SET)\b/i);
   for (const objectName of [
