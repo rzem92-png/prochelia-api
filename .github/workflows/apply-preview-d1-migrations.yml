@@ -24,6 +24,11 @@ jobs:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       BACKUP_ENCRYPTION_KEY: ${{ secrets.BACKUP_ENCRYPTION_KEY }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.R2_EU_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_EU_SECRET_ACCESS_KEY }}
+      AWS_DEFAULT_REGION: auto
+      R2_BUCKET: prochelia-preview-backups-eu
+      R2_ENDPOINT: https://f2a79e9fa41566a8ec80fb24c02c60eb.r2.cloudflarestorage.com
       EXPECTED_DB_NAME: prochelia-preview-db
       EXPECTED_DB_ID: 6adb95e5-e542-4bec-9008-fbea01042305
       EXPECTED_ACCOUNT_ID: f2a79e9fa41566a8ec80fb24c02c60eb
@@ -38,7 +43,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          for name in CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID BACKUP_ENCRYPTION_KEY; do
+          for name in CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID BACKUP_ENCRYPTION_KEY AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY; do
             test -n "${!name:-}" || { echo "::error::Required secret missing: $name"; exit 1; }
           done
           python3 - <<'PY'
@@ -90,6 +95,11 @@ jobs:
           test "$EXPECTED_DB_ID" = "6adb95e5-e542-4bec-9008-fbea01042305"
           test "$EXPECTED_DB_ID" != "$FORBIDDEN_PRODUCTION_DB_ID"
           test "$CLOUDFLARE_ACCOUNT_ID" = "$EXPECTED_ACCOUNT_ID"
+          test "${#AWS_ACCESS_KEY_ID}" -eq 32 || {
+            echo "::error::R2_EU_ACCESS_KEY_ID must be a 32-character R2 S3 Access Key ID."
+            exit 1
+          }
+          test "$R2_BUCKET" = "prochelia-preview-backups-eu"
 
       - name: Install Node.js
         uses: actions/setup-node@v4
@@ -117,8 +127,14 @@ jobs:
           set -euo pipefail
           umask 077
           mkdir -p "$RUNNER_TEMP/prochelia-backup"
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends sqlite3
           npx --yes wrangler@4 d1 export "$EXPECTED_DB_NAME" --remote --config wrangler.jsonc --skip-confirmation --output="$RUNNER_TEMP/prochelia-backup/prochelia-preview.sql"
           test -s "$RUNNER_TEMP/prochelia-backup/prochelia-preview.sql"
+          sha256sum "$RUNNER_TEMP/prochelia-backup/prochelia-preview.sql" | awk '{print $1}' > "$RUNNER_TEMP/prochelia-backup/manifest.sha256"
+          sqlite3 "$RUNNER_TEMP/prochelia-backup/restore-validation.sqlite" < "$RUNNER_TEMP/prochelia-backup/prochelia-preview.sql"
+          integrity="$(sqlite3 "$RUNNER_TEMP/prochelia-backup/restore-validation.sqlite" 'PRAGMA integrity_check;')"
+          test "$integrity" = "ok" || { echo "::error::Local SQLite restore integrity_check failed: $integrity"; exit 1; }
 
       - name: Encrypt and verify fresh backup
         shell: bash
@@ -129,12 +145,45 @@ jobs:
           encrypted="$RUNNER_TEMP/prochelia-backup/prochelia-preview.sql.gpg"
           printf '%s' "$BACKUP_ENCRYPTION_KEY" | gpg --batch --yes --pinentry-mode loopback --passphrase-fd 0 --symmetric --cipher-algo AES256 --output "$encrypted" "$plaintext"
           test -s "$encrypted"
-          expected="$(sha256sum "$plaintext" | cut -d ' ' -f 1)"
+          expected="$(cat "$RUNNER_TEMP/prochelia-backup/manifest.sha256")"
           printf '%s' "$BACKUP_ENCRYPTION_KEY" | gpg --batch --yes --pinentry-mode loopback --passphrase-fd 0 --decrypt "$encrypted" > "$RUNNER_TEMP/prochelia-backup/decrypted-check.sql"
           actual="$(sha256sum "$RUNNER_TEMP/prochelia-backup/decrypted-check.sql" | cut -d ' ' -f 1)"
           test "$expected" = "$actual"
           rm -f "$plaintext" "$RUNNER_TEMP/prochelia-backup/decrypted-check.sql"
-          printf 'database=%s\\ncreated_utc=%s\\nencrypted_file=prochelia-preview.sql.gpg\\n' "$EXPECTED_DB_NAME" "$(date -u +%FT%TZ)" > "$RUNNER_TEMP/prochelia-backup/README.txt"
+          printf 'database=%s\\ncreated_utc=%s\\nencrypted_file=prochelia-preview.sql.gpg\\nbucket=%s\\n' "$EXPECTED_DB_NAME" "$(date -u +%FT%TZ)" "$R2_BUCKET" > "$RUNNER_TEMP/prochelia-backup/README.txt"
+
+      - name: Install AWS CLI for private R2 EU backup
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m pip install --user --break-system-packages awscli
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Upload encrypted backup and manifest to private R2 EU bucket
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PATH="$HOME/.local/bin:$PATH"
+          key="preview-d1/${EXPECTED_DB_NAME}/$(date -u +%Y/%m/%d)/${GITHUB_RUN_ID}-${GITHUB_SHA:0:12}.sql.gpg"
+          echo "R2_OBJECT_KEY=$key" >> "$GITHUB_ENV"
+          aws s3 cp "$RUNNER_TEMP/prochelia-backup/prochelia-preview.sql.gpg" "s3://$R2_BUCKET/$key" --endpoint-url "$R2_ENDPOINT" --region auto --only-show-errors
+          aws s3 cp "$RUNNER_TEMP/prochelia-backup/manifest.sha256" "s3://$R2_BUCKET/$key.sha256" --endpoint-url "$R2_ENDPOINT" --region auto --only-show-errors
+
+      - name: Download R2 backup and verify encrypted round-trip
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PATH="$HOME/.local/bin:$PATH"
+          key="$R2_OBJECT_KEY"
+          aws s3 cp "s3://$R2_BUCKET/$key" "$RUNNER_TEMP/prochelia-backup/roundtrip.sql.gpg" --endpoint-url "$R2_ENDPOINT" --region auto --only-show-errors
+          aws s3 cp "s3://$R2_BUCKET/$key.sha256" "$RUNNER_TEMP/prochelia-backup/roundtrip.manifest.sha256" --endpoint-url "$R2_ENDPOINT" --region auto --only-show-errors
+          cmp "$RUNNER_TEMP/prochelia-backup/manifest.sha256" "$RUNNER_TEMP/prochelia-backup/roundtrip.manifest.sha256"
+          cmp "$RUNNER_TEMP/prochelia-backup/prochelia-preview.sql.gpg" "$RUNNER_TEMP/prochelia-backup/roundtrip.sql.gpg"
+          printf '%s' "$BACKUP_ENCRYPTION_KEY" | gpg --batch --yes --pinentry-mode loopback --passphrase-fd 0 --decrypt "$RUNNER_TEMP/prochelia-backup/roundtrip.sql.gpg" > "$RUNNER_TEMP/prochelia-backup/roundtrip.sql"
+          actual="$(sha256sum "$RUNNER_TEMP/prochelia-backup/roundtrip.sql" | cut -d ' ' -f 1)"
+          expected="$(cat "$RUNNER_TEMP/prochelia-backup/manifest.sha256")"
+          test "$actual" = "$expected" || { echo "::error::R2 round-trip checksum mismatch."; exit 1; }
+          echo "PASS: encrypted Preview backup uploaded to and restored from private R2 EU bucket."
 
       - name: Publish encrypted backup before any schema write
         uses: actions/upload-artifact@v4
