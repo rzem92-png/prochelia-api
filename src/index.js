@@ -293,10 +293,70 @@ async function postMissions(request, env) {
   }, 503);
 }
 
+const LOGIN_RATE_LIMITS = [
+  { bucket: 'login_ip_15m', windowSeconds: 15 * 60, limit: 40, subject: 'ip' },
+  { bucket: 'login_pair_15m', windowSeconds: 15 * 60, limit: 6, subject: 'pair' }
+];
+
+// Uses only Cloudflare's edge-provided client IP. Never trust X-Forwarded-For
+// from the public request and never persist raw IP addresses or email addresses.
+async function hmacSha256Base64url(secret, value) {
+  const key = await crypto.subtle.importKey(
+    'raw',
+    new TextEncoder().encode(secret),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign']
+  );
+  const signature = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(value));
+  return base64url(new Uint8Array(signature));
+}
+
+export async function enforceLoginRateLimit(request, env, email) {
+  if (!env?.DB) throw new Error('DATABASE_REQUIRED');
+  const pepper = clean(env.AUTH_RATE_LIMIT_SECRET);
+  if (!pepper || pepper.length < 32) return { allowed: false, retryAfter: 0, misconfigured: true };
+  const ip = clean(request.headers.get('CF-Connecting-IP')) || 'unknown';
+  const normalizedEmail = normalizeEmail(email) || 'invalid';
+  const now = Math.floor(Date.now() / 1000);
+  let retryAfter = 0;
+
+  for (const rule of LOGIN_RATE_LIMITS) {
+    const windowStart = Math.floor(now / rule.windowSeconds) * rule.windowSeconds;
+    const subject = rule.subject === 'ip' ? ip : `${normalizedEmail}\\n${ip}`;
+    const subjectHash = await hmacSha256Base64url(pepper, `${rule.bucket}\\0${subject}`);
+    const row = await env.DB.prepare(
+      `INSERT INTO auth_login_rate_limits (id,bucket,subject_hash,window_start,attempts)
+       VALUES (?,?,?,?,1)
+       ON CONFLICT(bucket,subject_hash,window_start)
+       DO UPDATE SET attempts=auth_login_rate_limits.attempts+1,updated_at=CURRENT_TIMESTAMP
+       RETURNING attempts`
+    ).bind(crypto.randomUUID(), rule.bucket, subjectHash, windowStart).first();
+
+    const attempts = Number(row?.attempts || 0);
+    if (attempts > rule.limit) {
+      retryAfter = Math.max(retryAfter, windowStart + rule.windowSeconds - now);
+    }
+  }
+
+  return { allowed: retryAfter === 0, retryAfter };
+}
+
 async function login(request, env) {
   if (!env.DB) return json({ ok: false, database: false, version: VERSION }, 503);
   const body = await readJson(request);
   const email = normalizeEmail(body?.email);
+  const limit = await enforceLoginRateLimit(request, env, email);
+  if (limit.misconfigured) {
+    return json({ ok:false, error:'LOGIN_PROTECTION_NOT_CONFIGURED', version:VERSION },503);
+  }
+  if (!limit.allowed) {
+    return json(
+      { ok: false, error: 'LOGIN_RATE_LIMITED', version: VERSION, retry_after_seconds: limit.retryAfter },
+      429,
+      { 'retry-after': String(limit.retryAfter) }
+    );
+  }
   const password = body?.password;
   if (!validEmail(email) || !validPassword(password)) {
     return json({ ok: false, error: 'INVALID_CREDENTIALS', version: VERSION }, 401);
