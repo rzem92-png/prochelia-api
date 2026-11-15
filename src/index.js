@@ -2889,7 +2889,7 @@ async function handle(request,env){
       if (request.method !== 'POST') return json({ ok: false, error: 'METHOD_NOT_ALLOWED', version: VERSION }, 405);
       return json({ ok: false, error: 'AUTHENTICATED_VALIDATION_REQUIRED', version: VERSION, write_enabled: false }, 403);
     }
-    if (url.pathname.startsWith('/api/v7/')) {
+    if (url.pathname.startsWith('/api/v7/') || url.pathname.startsWith('/api/compliance/')) {
       const v7Auth = await getSessionUser(request, env).catch(() => null);
       const v7Response = await handleV7Route(request, env, url.pathname, v7Auth);
       if (v7Response) return v7Response;
