@@ -39,7 +39,7 @@ test("outbox never marks an action completed without an audited handler", () => 
 
 test("malformed outbox payloads cannot block fail-closed queue classification", () => {
   const start = source.indexOf("async function processActionOutbox");
-  const end = source.indexOf("\\nasync function executeOperationalCase", start);
+  const end = source.indexOf("\nasync function executeOperationalCase", start);
   const outbox = source.slice(start, end);
   assert.ok(outbox.includes("Malformed or legacy payloads must not prevent fail-closed queue classification."));
   assert.ok(!outbox.includes("JSON.parse(row.payload_json)"));
