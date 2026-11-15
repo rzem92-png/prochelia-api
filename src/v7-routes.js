@@ -670,6 +670,50 @@ export async function handleV7Route(
 
 
     // =================================================
+    // DSA — SIGNALEMENT DE CONTENU / SERVICE
+    // =================================================
+    if (path === "/api/compliance/notices" && method === "POST") {
+      if (!auth?.user?.id) {
+        return Response.json(
+          { ok: false, error: "UNAUTHENTICATED" },
+          { status: 401 }
+        );
+      }
+
+      const body = await request.json().catch(() => null);
+      const subjectTypes = new Set(["LISTING", "PROFILE", "MESSAGE", "REVIEW", "AD", "SERVICE"]);
+      const noticeTypes = new Set(["ILLEGAL_CONTENT", "ILLEGAL_SERVICE", "FRAUD", "IP_RIGHTS", "SAFETY", "OTHER"]);
+      const subjectId = typeof body?.subject_id === "string" ? body.subject_id.trim() : "";
+      const explanation = typeof body?.explanation === "string" ? body.explanation.trim() : "";
+      const subjectType = typeof body?.subject_type === "string" ? body.subject_type : "";
+      const noticeType = typeof body?.notice_type === "string" ? body.notice_type : "";
+      const legalBasis = typeof body?.legal_basis === "string" ? body.legal_basis.trim().slice(0, 500) : null;
+
+      if (!body || !subjectTypes.has(subjectType) || !noticeTypes.has(noticeType) ||
+          !subjectId || subjectId.length > 200 || explanation.length < 20 || explanation.length > 5000) {
+        return Response.json(
+          { ok: false, error: "INVALID_NOTICE", message: "Type, référence et explication du signalement requis." },
+          { status: 400 }
+        );
+      }
+      if (!env?.DB) {
+        return Response.json({ ok: false, error: "COMPLIANCE_STORE_UNAVAILABLE" }, { status: 503 });
+      }
+
+      const id = crypto.randomUUID();
+      await env.DB.prepare(
+        `INSERT INTO dsa_notices
+          (id, reporter_user_id, subject_type, subject_id, notice_type, legal_basis, explanation, status)
+         VALUES (?, ?, ?, ?, ?, ?, ?, 'RECEIVED')`
+      ).bind(id, auth.user.id, subjectType, subjectId, noticeType, legalBasis, explanation).run();
+
+      return Response.json(
+        { ok: true, notice: { id, status: "RECEIVED", received_at: new Date().toISOString() } },
+        { status: 201, headers: { "cache-control": "no-store" } }
+      );
+    }
+
+    // =================================================
     // AUCUNE ROUTE V7 CORRESPONDANTE
     // =================================================
 
