@@ -18,6 +18,9 @@ test("SUPRA endpoints require an authenticated manager and bounded request input
   assert.match(source, /readBoundedRequestBody\(request,16384\)/);
   assert.match(source, /CLIENT_SUPPLIED_EVIDENCE_NOT_TRUSTED/);
   assert.match(source, /executionAllowed:false/);
+  assert.match(source, /SUPRA_PLAN_GENERATED/);
+  assert.match(source, /await journal\(env,\'gerante\',gate\.auth\.user\.id/);
+  assert.match(source, /\/api\/supra\/plan/);
 });
 
 test("V7 exports only the deterministic SUPRA governance surface", () => {
