@@ -26,8 +26,11 @@ if (typeof csrfToken !== "string" || !/^[A-Za-z0-9_-]{43}$/.test(csrfToken)) {
 }
 const setCookie = csrfResponse.headers.get("set-cookie") || "";
 const csrfCookie = setCookie.split(";")[0];
-if (!csrfCookie.startsWith("prochelia_csrf=")) {
-  throw new Error("CSRF bootstrap did not set the expected HttpOnly cookie");
+if (!csrfCookie.startsWith("prochelia_csrf=") ||
+    !/;\\s*httponly/i.test(setCookie) ||
+    !/;\\s*secure/i.test(setCookie) ||
+    !/;\\s*samesite=strict/i.test(setCookie)) {
+  throw new Error("CSRF bootstrap did not set the expected Secure, HttpOnly, SameSite=Strict cookie");
 }
 
 const checks = [
