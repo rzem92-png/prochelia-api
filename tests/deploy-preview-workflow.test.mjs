@@ -28,6 +28,10 @@ test("Preview deploy runs the complete security suite and dry-run before the onl
   assert.ok(tests >= 0 && dryRun > tests && deploy > dryRun);
   assert.match(workflow, /tests\/directory-api\.test\.js/);
   assert.match(workflow, /tests\/bootstrap-atomic\.test\.js/);
+  assert.match(workflow, /tests\/supra-route-contract\.test\.mjs/);
+  assert.match(workflow, /tests\/request-body\.test\.mjs/);
+  assert.match(workflow, /fix-same-origin-session-prox\.prochelia\.pages\.dev/);
+  assert.match(workflow, /src\/supra-intelligence\.js/);
   assert.match(workflow, /--dry-run/);
   assert.match(workflow, /wrangler@4 deploy --config wrangler\.preview\.generated\.json --keep-vars/);
   assert.doesNotMatch(workflow, /d1 migrations apply/);
