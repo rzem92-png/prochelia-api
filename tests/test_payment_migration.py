@@ -200,7 +200,8 @@ class ConsolidatedBusinessMigrationTests(unittest.TestCase):
         sql = CONSOLIDATED_BUSINESS_MIGRATION.read_text(encoding="utf-8")
         self.db.executescript(sql)
         self.db.execute(
-            "UPDATE platform_settings SET value_json=? WHERE key=?", ('"CUSTOM"', "project_phase")
+            "UPDATE platform_settings SET value_json=? WHERE key=?",
+            ('"CUSTOM"', "project_phase"),
             ('"CUSTOM"', "project_phase"),
         )
         self.db.executescript(sql)
