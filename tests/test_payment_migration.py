@@ -507,3 +507,58 @@ class BrandSupportCopilotMigrationTests(unittest.TestCase):
         sql = re.sub(r"--[^\n]*", "", BRAND_SUPPORT_COPILOT_MIGRATION.read_text(encoding="utf-8")).upper()
         for forbidden in (r"\bDROP\s+TABLE\b", r"\bDROP\s+INDEX\b", r"\bDELETE\s+FROM\b", r"^\s*UPDATE\s+"):
             self.assertIsNone(re.search(forbidden, sql, flags=re.MULTILINE))
+
+
+WALLET_GUARD_RESTORE_MIGRATION = ROOT / "migrations" / "0006_restore_wallet_balance_guard.sql"
+UNIQUE_PROVIDER_ACCOUNT_MIGRATION = ROOT / "migrations" / "0007_unique_provider_account.sql"
+
+
+class PaymentInvariantMigrationsTests(unittest.TestCase):
+    def setUp(self):
+        self.db = sqlite3.connect(":memory:")
+        self.db.executescript((ROOT / "migrations" / "0004_atomic_wallet_ledger.sql").read_text(encoding="utf-8"))
+        self.db.executescript(MIGRATION.read_text(encoding="utf-8"))
+
+    def tearDown(self):
+        self.db.close()
+
+    def test_0006_restores_missing_wallet_guard_trigger(self):
+        self.db.execute("DROP TRIGGER IF EXISTS trg_payment_wallet_ledger_guard_balances")
+        sql = WALLET_GUARD_RESTORE_MIGRATION.read_text(encoding="utf-8")
+        self.db.executescript(sql)
+        self.db.executescript(sql)
+        trigger = self.db.execute(
+            "SELECT name FROM sqlite_master WHERE type='trigger' AND name='trg_payment_wallet_ledger_guard_balances'"
+        ).fetchone()
+        self.assertIsNotNone(trigger)
+        self.db.execute(
+            "INSERT INTO wallets(id,user_id,currency,pending_cents) VALUES('w1','u1','EUR',0)"
+        )
+        with self.assertRaises(sqlite3.IntegrityError):
+            self.db.execute(
+                "INSERT INTO payment_wallet_ledger(id,idempotency_key,user_id,entry_type,pending_delta_cents) VALUES('l1','i1','u1','TEST',-1)"
+            )
+
+    def test_0007_prevents_duplicate_nonempty_provider_account_ids(self):
+        sql = UNIQUE_PROVIDER_ACCOUNT_MIGRATION.read_text(encoding="utf-8")
+        self.db.executescript(sql)
+        self.db.executescript(sql)
+        self.db.execute(
+            "INSERT INTO payment_accounts(id,user_id,provider,provider_account_id) VALUES('a1','u1','psp','acct_same')"
+        )
+        with self.assertRaises(sqlite3.IntegrityError):
+            self.db.execute(
+                "INSERT INTO payment_accounts(id,user_id,provider,provider_account_id) VALUES('a2','u2','psp','acct_same')"
+            )
+        self.db.execute(
+            "INSERT INTO payment_accounts(id,user_id,provider,provider_account_id) VALUES('a3','u3','psp',NULL)"
+        )
+        self.db.execute(
+            "INSERT INTO payment_accounts(id,user_id,provider,provider_account_id) VALUES('a4','u4','psp','')"
+        )
+
+    def test_0006_and_0007_are_non_destructive(self):
+        for path in (WALLET_GUARD_RESTORE_MIGRATION, UNIQUE_PROVIDER_ACCOUNT_MIGRATION):
+            sql = re.sub(r"--[^\n]*", "", path.read_text(encoding="utf-8")).upper()
+            for forbidden in (r"\bDROP\s+TABLE\b", r"\bDROP\s+INDEX\b", r"\bDELETE\s+FROM\b", r"^\s*UPDATE\s+"):
+                self.assertIsNone(re.search(forbidden, sql, flags=re.MULTILINE))
