@@ -117,3 +117,75 @@ test("intervenant directory returns the deterministic final-page contract", asyn
   assert.equal(body.next_offset,null);
   assert.match(query,/FROM intervenants i JOIN users u/);
 });
+
+
+test("DSA notice endpoint rejects anonymous submissions", async () => {
+  const response = await handleV7Route(
+    post("/api/compliance/notices", {
+      subject_type: "LISTING", subject_id: "listing-1",
+      notice_type: "ILLEGAL_CONTENT", explanation: "A sufficiently detailed report."
+    }),
+    { DB: { prepare() { throw new Error("must not query DB"); } } },
+    "/api/compliance/notices",
+    null
+  );
+  assert.equal(response.status, 401);
+  assert.equal((await response.json()).error, "UNAUTHENTICATED");
+});
+
+test("DSA notice endpoint validates required fields and bounded explanation", async () => {
+  const response = await handleV7Route(
+    post("/api/compliance/notices", {
+      subject_type: "LISTING", subject_id: "listing-1",
+      notice_type: "ILLEGAL_CONTENT", explanation: "short"
+    }),
+    { DB: { prepare() { throw new Error("must not query DB"); } } },
+    "/api/compliance/notices",
+    { user: { id: "reporter-1", role: "client" } }
+  );
+  assert.equal(response.status, 400);
+  assert.equal((await response.json()).error, "INVALID_NOTICE");
+});
+
+test("DSA notice endpoint persists authenticated reporter identity, never body identity", async () => {
+  let sql = "";
+  let values = [];
+  const env = { DB: { prepare(query) {
+    sql = query;
+    return { bind(...args) { values = args; return this; }, async run() { return { success: true }; } };
+  } } };
+  const response = await handleV7Route(
+    post("/api/compliance/notices", {
+      reporter_user_id: "forged-user",
+      subject_type: "LISTING", subject_id: "listing-42",
+      notice_type: "ILLEGAL_CONTENT", legal_basis: "Applicable law",
+      explanation: "This listing appears to offer an illegal service."
+    }),
+    env,
+    "/api/compliance/notices",
+    { user: { id: "authenticated-reporter", role: "client" } }
+  );
+  assert.equal(response.status, 201);
+  assert.match(sql, /INSERT INTO dsa_notices/);
+  assert.equal(values[1], "authenticated-reporter");
+  assert.equal(values[0].length > 10, true);
+  assert.equal(values[3], "ILLEGAL_CONTENT");
+  assert.equal(values[6], "This listing appears to offer an illegal service.");
+  const payload = await response.json();
+  assert.equal(payload.notice.status, "RECEIVED");
+  assert.ok(payload.notice.id);
+});
+
+test("DSA notice endpoint fails closed when compliance storage is unavailable", async () => {
+  const response = await handleV7Route(
+    post("/api/compliance/notices", {
+      subject_type: "LISTING", subject_id: "listing-1",
+      notice_type: "ILLEGAL_CONTENT", explanation: "This listing appears to offer an illegal service."
+    }),
+    {},
+    "/api/compliance/notices",
+    { user: { id: "reporter-1", role: "client" } }
+  );
+  assert.equal(response.status, 503);
+  assert.equal((await response.json()).error, "COMPLIANCE_STORE_UNAVAILABLE");
+});
