@@ -1,0 +1,28 @@
+{
+  "name": "prochelia-api-preview",
+  "main": "src/index.js",
+  "compatibility_date": "2026-09-25",
+  "vars": {
+    "APP_ENV": "preview",
+    "CORS_ORIGIN": "https://c3ceec86.prochelia.pages.dev,https://staging-prochelia-v14-restor.prochelia.pages.dev,https://feat-supra-control-center-v1.prochelia.pages.dev,https://db884f74.prochelia.pages.dev,https://repair-prochelia-frontend-xs.prochelia.pages.dev,https://feature-dsa-notice-client-20.prochelia.pages.dev,https://d8b3eab1.prochelia.pages.dev"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "prochelia-preview-db",
+      "database_id": "6adb95e5-e542-4bec-9008-fbea01042305"
+    }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "BACKUP_BUCKET",
+      "bucket_name": "prochelia-preview-backups-eu"
+    }
+  ],
+  "observability": {
+    "logs": {
+      "enabled": true,
+      "invocation_logs": true
+    }
+  }
+}

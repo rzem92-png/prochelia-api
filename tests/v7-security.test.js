@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { handleV7Route } from "../src/v7-routes.js";
 import { directoryList } from "../src/index.js";
+import worker from "../src/index.js";
 
 const post = (path, body) => new Request("https://example.test" + path, {
   method: "POST",
@@ -116,4 +117,291 @@ test("intervenant directory returns the deterministic final-page contract", asyn
   assert.equal(body.has_more,false);
   assert.equal(body.next_offset,null);
   assert.match(query,/FROM intervenants i JOIN users u/);
+});
+
+
+test("DSA notice endpoint rejects anonymous submissions", async () => {
+  const response = await handleV7Route(
+    post("/api/compliance/notices", {
+      subject_type: "LISTING", subject_id: "listing-1",
+      notice_type: "ILLEGAL_CONTENT", explanation: "A sufficiently detailed report."
+    }),
+    { DB: { prepare() { throw new Error("must not query DB"); } } },
+    "/api/compliance/notices",
+    null
+  );
+  assert.equal(response.status, 401);
+  assert.equal((await response.json()).error, "UNAUTHENTICATED");
+});
+
+test("DSA notice endpoint validates required fields and bounded explanation", async () => {
+  const response = await handleV7Route(
+    post("/api/compliance/notices", {
+      subject_type: "LISTING", subject_id: "listing-1",
+      notice_type: "ILLEGAL_CONTENT", explanation: "short"
+    }),
+    { DB: { prepare() { throw new Error("must not query DB"); } } },
+    "/api/compliance/notices",
+    { user: { id: "reporter-1", role: "client" } }
+  );
+  assert.equal(response.status, 400);
+  assert.equal((await response.json()).error, "INVALID_NOTICE");
+});
+
+test("DSA notice endpoint persists authenticated reporter identity, never body identity", async () => {
+  let sql = "";
+  let values = [];
+  const env = { DB: { prepare(query) {
+    sql = query;
+    return { bind(...args) { values = args; return this; }, async run() { return { success: true }; } };
+  } } };
+  const response = await handleV7Route(
+    post("/api/compliance/notices", {
+      reporter_user_id: "forged-user",
+      subject_type: "LISTING", subject_id: "listing-42",
+      notice_type: "ILLEGAL_CONTENT", legal_basis: "Applicable law",
+      explanation: "This listing appears to offer an illegal service."
+    }),
+    env,
+    "/api/compliance/notices",
+    { user: { id: "authenticated-reporter", role: "client" } }
+  );
+  assert.equal(response.status, 201);
+  assert.match(sql, /INSERT INTO dsa_notices/);
+  assert.equal(values[1], "authenticated-reporter");
+  assert.equal(values[0].length > 10, true);
+  assert.equal(values[3], "listing-42");
+  assert.equal(values[4], "ILLEGAL_CONTENT");
+  assert.equal(values[6], "This listing appears to offer an illegal service.");
+  const payload = await response.json();
+  assert.equal(payload.notice.status, "RECEIVED");
+  assert.ok(payload.notice.id);
+});
+
+test("DSA notice endpoint fails closed when compliance storage is unavailable", async () => {
+  const response = await handleV7Route(
+    post("/api/compliance/notices", {
+      subject_type: "LISTING", subject_id: "listing-1",
+      notice_type: "ILLEGAL_CONTENT", explanation: "This listing appears to offer an illegal service."
+    }),
+    {},
+    "/api/compliance/notices",
+    { user: { id: "reporter-1", role: "client" } }
+  );
+  assert.equal(response.status, 503);
+  assert.equal((await response.json()).error, "COMPLIANCE_STORE_UNAVAILABLE");
+});
+
+
+test("DSA notice status listing is authenticated and scoped to the session reporter", async () => {
+  let values = [];
+  let sql = "";
+  const env = { DB: { prepare(query) {
+    sql = query;
+    return { bind(...args) { values = args; return this; }, async all() { return { results: [{ id: "n1", status: "RECEIVED" }] }; } };
+  } } };
+  const denied = await handleV7Route(
+    new Request("https://example.test/api/compliance/notices"),
+    env, "/api/compliance/notices", null
+  );
+  assert.equal(denied.status, 401);
+
+  const allowed = await handleV7Route(
+    new Request("https://example.test/api/compliance/notices"),
+    env, "/api/compliance/notices",
+    { user: { id: "reporter-real", role: "client" } }
+  );
+  assert.equal(allowed.status, 200);
+  assert.match(sql, /WHERE reporter_user_id = \?/);
+  assert.equal(values[0], "reporter-real");
+  assert.deepEqual((await allowed.json()).notices, [{ id: "n1", status: "RECEIVED" }]);
+});
+
+
+test("DSA appeal endpoint rejects anonymous and malformed submissions", async () => {
+  const anonymous = await handleV7Route(
+    post("/api/compliance/appeals", { decision_id: "d1", grounds: "A sufficiently detailed appeal ground." }),
+    {}, "/api/compliance/appeals", null
+  );
+  assert.equal(anonymous.status, 401);
+  const malformed = await handleV7Route(
+    post("/api/compliance/appeals", { decision_id: "d1", grounds: "short" }),
+    { DB: {} }, "/api/compliance/appeals", { user: { id: "affected-1", role: "client" } }
+  );
+  assert.equal(malformed.status, 400);
+});
+
+test("DSA appeal endpoint only accepts an affected user's appeal and prevents duplicate pending appeals", async () => {
+  const statements = [];
+  const env = { DB: { prepare(sql) {
+    statements.push(sql);
+    return {
+      bind(...values) { this.values = values; return this; },
+      async first() {
+        if (sql.includes("FROM moderation_decisions")) return { id: "decision-1" };
+        return null;
+      },
+      async run() { return { success: true }; }
+    };
+  } } };
+  const response = await handleV7Route(
+    post("/api/compliance/appeals", {
+      decision_id: "decision-1", appellant_user_id: "forged-user",
+      grounds: "The moderation decision contains factual errors."
+    }),
+    env, "/api/compliance/appeals",
+    { user: { id: "affected-user", role: "client" } }
+  );
+  assert.equal(response.status, 201);
+  assert.ok(statements[0].includes("FROM moderation_decisions WHERE id = ? AND affected_user_id = ?"));
+  assert.ok(statements[1].includes("FROM moderation_appeals WHERE decision_id = ? AND appellant_user_id = ?"));
+  assert.ok(statements[2].includes("INSERT INTO moderation_appeals"));
+  assert.equal((await response.json()).appeal.status, "SUBMITTED");
+});
+
+test("DSA appeal endpoint does not expose another user's decision", async () => {
+  const env = { DB: { prepare() {
+    return { bind() { return this; }, async first() { return null; } };
+  } } };
+  const response = await handleV7Route(
+    post("/api/compliance/appeals", {
+      decision_id: "decision-other", grounds: "I believe this decision should be reviewed."
+    }),
+    env, "/api/compliance/appeals",
+    { user: { id: "unrelated-user", role: "client" } }
+  );
+  assert.equal(response.status, 404);
+});
+
+
+test("DSA appeal endpoint rejects a second pending appeal for the same decision", async () => {
+  const env = { DB: { prepare(sql) {
+    return {
+      bind() { return this; },
+      async first() {
+        if (sql.includes("FROM moderation_decisions")) return { id: "decision-1" };
+        if (sql.includes("FROM moderation_appeals")) return { id: "appeal-existing" };
+        return null;
+      },
+      async run() { throw new Error("must not insert a duplicate appeal"); }
+    };
+  } } };
+  const response = await handleV7Route(
+    post("/api/compliance/appeals", {
+      decision_id: "decision-1", grounds: "I request a second review of this decision."
+    }),
+    env, "/api/compliance/appeals",
+    { user: { id: "affected-user", role: "client" } }
+  );
+  assert.equal(response.status, 409);
+  assert.equal((await response.json()).error, "APPEAL_ALREADY_PENDING");
+});
+
+
+test("Worker dispatch routes DSA compliance paths through authenticated V7 handler", async () => {
+  const response = await worker.fetch(
+    new Request("https://example.test/api/compliance/notices", { method: "GET" }),
+    {}
+  );
+  assert.equal(response.status, 401);
+  assert.equal((await response.json()).error, "UNAUTHENTICATED");
+});
+
+
+test("DSA endpoints fail closed with 503 when the compliance migration is absent", async () => {
+  const env = { DB: { prepare() { throw new Error("D1_ERROR: no such table: dsa_notices"); } } };
+  const response = await handleV7Route(
+    new Request("https://example.test/api/compliance/notices"),
+    env, "/api/compliance/notices",
+    { user: { id: "reporter-1", role: "client" } }
+  );
+  assert.equal(response.status, 503);
+  assert.equal((await response.json()).error, "COMPLIANCE_SCHEMA_UNAVAILABLE");
+});
+
+
+test("DSA appeal endpoint maps a concurrent unique-index conflict to HTTP 409", async () => {
+  const env = { DB: { prepare(sql) {
+    return {
+      bind() { return this; },
+      async first() {
+        if (sql.includes("FROM moderation_decisions")) return { id: "decision-1" };
+        return null;
+      },
+      async run() {
+        throw new Error("UNIQUE constraint failed: moderation_appeals.decision_id, moderation_appeals.appellant_user_id");
+      }
+    };
+  } } };
+  const response = await handleV7Route(
+    post("/api/compliance/appeals", {
+      decision_id: "decision-1", grounds: "The decision contains inaccurate information."
+    }),
+    env, "/api/compliance/appeals",
+    { user: { id: "affected-user", role: "client" } }
+  );
+  assert.equal(response.status, 409);
+  assert.equal((await response.json()).error, "APPEAL_ALREADY_PENDING");
+});
+
+
+test("DSA decision listing is authenticated and scoped to the affected session user", async () => {
+  let sql = "";
+  let values = [];
+  const env = { DB: { prepare(query) {
+    sql = query;
+    return {
+      bind(...args) { values = args; return this; },
+      async all() { return { results: [{ id: "decision-own", statement_of_reasons: "Reasoned decision", appeal_status: null }] }; }
+    };
+  } } };
+  const denied = await handleV7Route(
+    new Request("https://example.test/api/compliance/decisions"),
+    env, "/api/compliance/decisions", null
+  );
+  assert.equal(denied.status, 401);
+
+  const allowed = await handleV7Route(
+    new Request("https://example.test/api/compliance/decisions"),
+    env, "/api/compliance/decisions",
+    { user: { id: "affected-user", role: "client" } }
+  );
+  assert.equal(allowed.status, 200);
+  assert.match(sql, /WHERE d\.affected_user_id = \?/);
+  assert.match(sql, /a\.appellant_user_id = \?/);
+  assert.deepEqual(values, ["affected-user", "affected-user"]);
+  assert.deepEqual((await allowed.json()).decisions, [
+    { id: "decision-own", statement_of_reasons: "Reasoned decision", appeal_status: null }
+  ]);
+});
+
+test("DSA decision listing fails closed when compliance storage is unavailable", async () => {
+  const response = await handleV7Route(
+    new Request("https://example.test/api/compliance/decisions"),
+    {}, "/api/compliance/decisions",
+    { user: { id: "affected-user", role: "client" } }
+  );
+  assert.equal(response.status, 503);
+  assert.equal((await response.json()).error, "COMPLIANCE_STORE_UNAVAILABLE");
+});
+
+
+test("DSA decisions endpoint fails closed with 503 when the decision schema is absent", async () => {
+  const env = { DB: { prepare() { throw new Error("D1_ERROR: no such table: moderation_decisions"); } } };
+  const response = await handleV7Route(
+    new Request("https://example.test/api/compliance/decisions"),
+    env, "/api/compliance/decisions",
+    { user: { id: "affected-user", role: "client" } }
+  );
+  assert.equal(response.status, 503);
+  assert.equal((await response.json()).error, "COMPLIANCE_SCHEMA_UNAVAILABLE");
+});
+
+test("Worker dispatch routes DSA decision reads through the authenticated handler", async () => {
+  const response = await worker.fetch(
+    new Request("https://example.test/api/compliance/decisions"),
+    {}
+  );
+  assert.equal(response.status, 401);
+  assert.equal((await response.json()).error, "UNAUTHENTICATED");
 });

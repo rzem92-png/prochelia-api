@@ -670,29 +670,162 @@ export async function handleV7Route(
 
 
     // =================================================
+    // DSA — SIGNALEMENT DE CONTENU / SERVICE
+    // =================================================
+    if (path === "/api/compliance/notices" && method === "GET") {
+      if (!auth?.user?.id) {
+        return Response.json({ ok: false, error: "UNAUTHENTICATED" }, { status: 401 });
+      }
+      if (!env?.DB) {
+        return Response.json({ ok: false, error: "COMPLIANCE_STORE_UNAVAILABLE" }, { status: 503 });
+      }
+      const result = await env.DB.prepare(
+        `SELECT id, subject_type, subject_id, notice_type, status, received_at,
+                decided_at, decision_reason, outcome_notified_at
+         FROM dsa_notices WHERE reporter_user_id = ?
+         ORDER BY received_at DESC LIMIT 100`
+      ).bind(auth.user.id).all();
+      return Response.json({ ok: true, notices: result?.results || [] }, {
+        headers: { "cache-control": "no-store" }
+      });
+    }
+
+    if (path === "/api/compliance/notices" && method === "POST") {
+      if (!auth?.user?.id) {
+        return Response.json(
+          { ok: false, error: "UNAUTHENTICATED" },
+          { status: 401 }
+        );
+      }
+
+      const body = await request.json().catch(() => null);
+      const subjectTypes = new Set(["LISTING", "PROFILE", "MESSAGE", "REVIEW", "AD", "SERVICE"]);
+      const noticeTypes = new Set(["ILLEGAL_CONTENT", "ILLEGAL_SERVICE", "FRAUD", "IP_RIGHTS", "SAFETY", "OTHER"]);
+      const subjectId = typeof body?.subject_id === "string" ? body.subject_id.trim() : "";
+      const explanation = typeof body?.explanation === "string" ? body.explanation.trim() : "";
+      const subjectType = typeof body?.subject_type === "string" ? body.subject_type : "";
+      const noticeType = typeof body?.notice_type === "string" ? body.notice_type : "";
+      const legalBasis = typeof body?.legal_basis === "string" ? body.legal_basis.trim().slice(0, 500) : null;
+
+      if (!body || !subjectTypes.has(subjectType) || !noticeTypes.has(noticeType) ||
+          !subjectId || subjectId.length > 200 || explanation.length < 20 || explanation.length > 5000) {
+        return Response.json(
+          { ok: false, error: "INVALID_NOTICE", message: "Type, référence et explication du signalement requis." },
+          { status: 400 }
+        );
+      }
+      if (!env?.DB) {
+        return Response.json({ ok: false, error: "COMPLIANCE_STORE_UNAVAILABLE" }, { status: 503 });
+      }
+
+      const id = crypto.randomUUID();
+      await env.DB.prepare(
+        `INSERT INTO dsa_notices
+          (id, reporter_user_id, subject_type, subject_id, notice_type, legal_basis, explanation, status)
+         VALUES (?, ?, ?, ?, ?, ?, ?, 'RECEIVED')`
+      ).bind(id, auth.user.id, subjectType, subjectId, noticeType, legalBasis, explanation).run();
+
+      return Response.json(
+        { ok: true, notice: { id, status: "RECEIVED", received_at: new Date().toISOString() } },
+        { status: 201, headers: { "cache-control": "no-store" } }
+      );
+    }
+
+
+    // =================================================
+    // DSA — DÉCISIONS DE MODÉRATION AFFECTANT L'UTILISATEUR
+    // =================================================
+    if (path === "/api/compliance/decisions" && method === "GET") {
+      if (!auth?.user?.id) {
+        return Response.json({ ok: false, error: "UNAUTHENTICATED" }, { status: 401 });
+      }
+      if (!env?.DB) {
+        return Response.json({ ok: false, error: "COMPLIANCE_STORE_UNAVAILABLE" }, { status: 503 });
+      }
+      const result = await env.DB.prepare(
+        `SELECT d.id, d.subject_type, d.subject_id, d.action, d.policy_code,
+                d.statement_of_reasons, d.duration_until, d.automation_used, d.created_at,
+                (SELECT a.status FROM moderation_appeals a
+                 WHERE a.decision_id = d.id AND a.appellant_user_id = ?
+                 ORDER BY a.submitted_at DESC LIMIT 1) AS appeal_status
+         FROM moderation_decisions d
+         WHERE d.affected_user_id = ?
+         ORDER BY d.created_at DESC LIMIT 100`
+      ).bind(auth.user.id, auth.user.id).all();
+      return Response.json({ ok: true, decisions: result?.results || [] }, {
+        headers: { "cache-control": "no-store" }
+      });
+    }
+
+    // =================================================
+    // DSA — RECOURS INTERNE CONTRE UNE DÉCISION
+    // =================================================
+    if (path === "/api/compliance/appeals" && method === "POST") {
+      if (!auth?.user?.id) {
+        return Response.json({ ok: false, error: "UNAUTHENTICATED" }, { status: 401 });
+      }
+      const body = await request.json().catch(() => null);
+      const decisionId = typeof body?.decision_id === "string" ? body.decision_id.trim() : "";
+      const grounds = typeof body?.grounds === "string" ? body.grounds.trim() : "";
+      if (!decisionId || decisionId.length > 200 || grounds.length < 20 || grounds.length > 5000) {
+        return Response.json({ ok: false, error: "INVALID_APPEAL" }, { status: 400 });
+      }
+      if (!env?.DB) {
+        return Response.json({ ok: false, error: "COMPLIANCE_STORE_UNAVAILABLE" }, { status: 503 });
+      }
+
+      // Only the person affected by the decision may appeal it.
+      const decision = await env.DB.prepare(
+        "SELECT id FROM moderation_decisions WHERE id = ? AND affected_user_id = ? LIMIT 1"
+      ).bind(decisionId, auth.user.id).first();
+      if (!decision) {
+        return Response.json({ ok: false, error: "DECISION_NOT_APPEALABLE" }, { status: 404 });
+      }
+      const existing = await env.DB.prepare(
+        "SELECT id FROM moderation_appeals WHERE decision_id = ? AND appellant_user_id = ? AND status IN ('SUBMITTED','UNDER_REVIEW') LIMIT 1"
+      ).bind(decisionId, auth.user.id).first();
+      if (existing) {
+        return Response.json({ ok: false, error: "APPEAL_ALREADY_PENDING" }, { status: 409 });
+      }
+
+      const id = crypto.randomUUID();
+      try {
+        await env.DB.prepare(
+          "INSERT INTO moderation_appeals (id, decision_id, appellant_user_id, grounds, status) VALUES (?, ?, ?, ?, 'SUBMITTED')"
+        ).bind(id, decisionId, auth.user.id, grounds).run();
+      } catch (error) {
+        // The partial unique index is the final race-safe guard.
+        if (String(error?.message || "").includes("uq_moderation_appeals_pending") ||
+            String(error?.message || "").includes("moderation_appeals.decision_id, moderation_appeals.appellant_user_id")) {
+          return Response.json({ ok: false, error: "APPEAL_ALREADY_PENDING" }, { status: 409 });
+        }
+        throw error;
+      }
+      return Response.json({ ok: true, appeal: { id, decision_id: decisionId, status: "SUBMITTED" } }, {
+        status: 201, headers: { "cache-control": "no-store" }
+      });
+    }
+
+    // =================================================
     // AUCUNE ROUTE V7 CORRESPONDANTE
     // =================================================
 
     return null;
 
   } catch (error) {
-
+    const missingComplianceSchema =
+      typeof path === "string" &&
+      path.startsWith("/api/compliance/") &&
+      /no such table|no such column/i.test(String(error?.message || ""));
     return Response.json(
-
       {
         ok: false,
-
-        version:
-          procheliaV7.version,
-
-        error:
-          error?.message ||
-          "Erreur V7"
+        version: procheliaV7.version,
+        error: missingComplianceSchema
+          ? "COMPLIANCE_SCHEMA_UNAVAILABLE"
+          : (error?.message || "Erreur V7")
       },
-
-      {
-        status: 500
-      }
+      { status: missingComplianceSchema ? 503 : 500 }
     );
   }
 }
