@@ -55,6 +55,10 @@ CREATE TABLE IF NOT EXISTS moderation_appeals (
 );
 CREATE INDEX IF NOT EXISTS idx_moderation_appeals_status ON moderation_appeals(status,submitted_at);
 CREATE INDEX IF NOT EXISTS idx_moderation_appeals_decision ON moderation_appeals(decision_id);
+-- A user may have only one pending appeal per moderation decision.
+CREATE UNIQUE INDEX IF NOT EXISTS uq_moderation_appeals_pending
+ON moderation_appeals(decision_id, appellant_user_id)
+WHERE status IN ('SUBMITTED','UNDER_REVIEW');
 
 CREATE TABLE IF NOT EXISTS recommender_policy_versions (
   id TEXT PRIMARY KEY,
