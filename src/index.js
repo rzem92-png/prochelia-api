@@ -3175,6 +3175,25 @@ async function ensureProcheliaMasterComplementSchema(env) {
   if (missingScenarios.length) {
     throw new Error(`PROCHELIA_COPILOT_RULES_NOT_READY:${missingScenarios.join(',')}`);
   }
+  const sensitiveRules = [
+    'SIMPLE_REFUND_CHECK', 'DUPLICATE_PAYMENT', 'IDENTITY_SECURITY',
+    'DATA_INCIDENT', 'LEGAL_DISPUTE'
+  ];
+  const sensitivePlaceholders = sensitiveRules.map(() => '?').join(',');
+  const sensitiveResult = await env.DB.prepare(
+    `SELECT scenario_key, auto_allowed, manager_approval_required
+       FROM copilot_resolution_rules
+      WHERE scenario_key IN (${sensitivePlaceholders})`
+  ).bind(...sensitiveRules).all();
+  const unsafeRules = (sensitiveResult?.results || [])
+    .filter(row => Number(row.auto_allowed) !== 0 || Number(row.manager_approval_required) !== 1)
+    .map(row => String(row.scenario_key));
+  const unverifiedRules = sensitiveRules.filter(key =>
+    !(sensitiveResult?.results || []).some(row => String(row.scenario_key) === key)
+  );
+  if (unsafeRules.length || unverifiedRules.length) {
+    throw new Error(`PROCHELIA_COPILOT_HUMAN_APPROVAL_REQUIRED:${[...unsafeRules, ...unverifiedRules].join(',')}`);
+  }
 }
 async function supportAuth(request,env){
   const auth=await getSessionUser(request,env).catch(()=>null);
