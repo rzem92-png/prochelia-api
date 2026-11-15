@@ -1,4 +1,6 @@
 import { handleV7Route } from "./v7-routes.js";
+import { procheliaV7 } from "./v7.js";
+import { readBoundedRequestBody } from "./request-body.js";
 // PROCHÉLIA — INDEX BACKEND CONSOLIDÉ UNIQUE
 // Référence de consolidation : V14.1 Finance + sécurité/RBAC existants.
 // Généré le 19/10/2026. À déployer uniquement après recette avec la vraie base D1.
@@ -1798,6 +1800,93 @@ async function consolidatedInfo(env) {
   return json({ok:true,version:VERSION,architecture:'UNIQUE_TRANSVERSAL_ENGINE',phase,automation:'simple_low_impact_auto_sensitive_manager',mobile_pc:'responsive_web_required',domains:['B2C','B2B','missions','matching','metiers','incidents','remplacement','paiements','finance','comptabilite','reclamations','commercial','recrutement','RGPD','securite','audit','copilote'],b2b_rule:'societe paie intervenant; PROCHÉLIA facture commissions/service',b2c_rule:'client paie la prestation; orchestration du reversement intervenant',note:'Aucune opération financière réelle n’est simulée : les fonds passent par un PSP configuré et vérifié.'});
 }
 
+async function supraDomains(request, env) {
+  const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
+  return json({ok:true,version:VERSION,engine:'PROCHELIA_SUPRA_ORCHESTRATOR_V2',domains:procheliaV7.getSupraDomainRegistry()},200);
+}
+
+function isPlainRecord(value) {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+async function supraPlan(request, env) {
+  // Le plan de pilotage transversal expose des informations stratégiques : Gérante uniquement.
+  const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
+  if(request.method!=='POST') return json({ok:false,error:'METHOD_NOT_ALLOWED',version:VERSION},405,{'allow':'POST'});
+  // Enforce the limit while streaming; reject invalid UTF-8 and cancel oversized bodies.
+  const boundedBody=await readBoundedRequestBody(request,16384);
+  if(!boundedBody.ok) {
+    const tooLarge=boundedBody.reason==='TOO_LARGE';
+    return json({ok:false,error:tooLarge?'REQUEST_TOO_LARGE':'INVALID_REQUEST_BODY',version:VERSION},tooLarge?413:400);
+  }
+  const rawBody=boundedBody.text;
+  let body;
+  try { body=JSON.parse(rawBody); }
+  catch { return json({ok:false,error:'INVALID_JSON'},400); }
+  if(!isPlainRecord(body)) return json({ok:false,error:'INVALID_JSON_OBJECT',version:VERSION},400);
+  const allowedBodyKeys=new Set(['case_type','domain','action','impact','market','context','evidence']);
+  if(Object.keys(body).some(key=>!allowedBodyKeys.has(key))) {
+    return json({ok:false,error:'UNEXPECTED_SUPRA_PLAN_FIELD',version:VERSION},400);
+  }
+  for(const key of ['case_type','domain','action','impact','market']) {
+    if(body[key]!==undefined && typeof body[key]!=='string') {
+      return json({ok:false,error:'INVALID_SUPRA_PLAN_FIELD_TYPE',field:key,version:VERSION},400);
+    }
+  }
+  const caseType=body.case_type===undefined?'analyse_generale':body.case_type.trim();
+  const domain=body.domain===undefined?undefined:body.domain.trim();
+  const action=body.action===undefined?'ANALYZE_AND_PROPOSE':body.action.trim().toUpperCase();
+  const impact=body.impact===undefined?'LOW':body.impact.trim().toUpperCase();
+  const market=body.market===undefined?'fr':body.market.trim().toLowerCase();
+  if(!caseType || caseType.length>100 || !/^[A-Z0-9_]{2,64}$/.test(action) ||
+     !['LOW','MEDIUM','HIGH','CRITICAL'].includes(impact) ||
+     !(market === "other" || /^[a-z]{2}$/.test(market)) ||
+     (domain!==undefined && (!domain || domain.length>60)) ||
+     (body.context!==undefined && !isPlainRecord(body.context))) {
+    return json({ok:false,error:'INVALID_SUPRA_PLAN_INPUT',version:VERSION},400);
+  }
+  if(body.evidence!==undefined) return json({ok:false,error:'CLIENT_SUPPLIED_EVIDENCE_NOT_TRUSTED',version:VERSION},400);
+  const context=body.context||{};
+  // The request body is never a source of trusted evidence. Governance remains fail-closed
+  // until server-side adapters independently verify ownership, eligibility and PSP state.
+  const plan=procheliaV7.buildSupraPlan({
+    caseType,domain,impact,requestedAction:action,market,context
+  });
+  // The V1 governance adapter has a narrower context schema than the orchestrator.
+  // Do not pass the free-text problem statement into its typed evidence context.
+  const governanceContext = {};
+  for (const key of ["mission_id","provider_id","replacement_intervenant_id","client_id","immediateDanger"]) {
+    if (Object.hasOwn(context, key)) governanceContext[key] = context[key];
+  }
+  const governance=procheliaV7.assessSupraDecision({
+    caseType:plan.caseType,impact:plan.impact,requestedAction:plan.requestedAction,
+    actorRole:gate.auth.user.role,context:governanceContext
+  });
+  const missingEvidence=[...new Set([...(plan.missingEvidence||[]),...(governance.missingEvidence||[])])];
+  // Persist a minimal, structured audit event before returning the plan. No free text,
+  // evidence documents, credentials or client-supplied verification flags are recorded.
+  await journal(env,'gerante',gate.auth.user.id,'SUPRA_PLAN_GENERATED','supra_plan',null,'OK',{
+    caseType:plan.caseType,
+    domain:plan.domain,
+    requestedAction:plan.requestedAction,
+    impact:plan.impact,
+    market:plan.marketPack.market,
+    risk:governance.risk,
+    autonomy:governance.autonomy,
+    missingEvidence
+  });
+  return json({
+    ok:true,version:VERSION,plan:{
+      ...plan,
+      missingEvidence,
+      executionAllowed:false,
+      autonomy:{...plan.autonomy,executionAdapterReady:false}
+    },
+    governance
+  },200);
+}
+
+
 async function handleConsolidated(request, env) {
   const url=new URL(request.url);
   const consolidatedPath = ['/api/consolidated/info','/api/ops/dashboard','/api/journal','/api/cases','/api/cases/approve','/api/metiers','/api/metiers/suggest','/api/pricing/quote','/api/finance/summary','/api/complaints','/api/settings/phase'].includes(url.pathname);
@@ -1805,6 +1894,8 @@ async function handleConsolidated(request, env) {
     try { await ensureConsolidatedSchema(env); } catch (e) { return json({ok:false,error:'CONSOLIDATED_SCHEMA_ERROR',version:VERSION,message:e.message},500); }
   }
   if(url.pathname==='/api/consolidated/info' && request.method==='GET') return consolidatedInfo(env);
+  if(url.pathname==='/api/supra/domains' && request.method==='GET') return supraDomains(request,env);
+  if(url.pathname==='/api/supra/plan' && request.method==='POST') return supraPlan(request,env);
   if(url.pathname==='/api/ops/dashboard' && request.method==='GET') return getOperationsDashboard(request,env);
   if(url.pathname==='/api/journal' && request.method==='GET') return getJournal(request,env);
   if(url.pathname==='/api/cases' && request.method==='POST') return createOperationalCase(request,env);
