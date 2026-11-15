@@ -670,7 +670,7 @@ async function securityVerifyCode(request, env) {
   if(!missionId||!['ARRIVAL','END'].includes(purpose)||!/^[0-9]{6}$/.test(code)) return json({ok:false,error:'INVALID_SECURITY_CODE_REQUEST',version:VERSION},400);
   const sec=await env.DB.prepare('SELECT * FROM mission_security WHERE mission_id=? AND intervenant_id=? LIMIT 1').bind(missionId,auth.user.id).first();
   if(!sec) return json({ok:false,error:'MISSION_NOT_ASSIGNED_OR_NOT_PREPARED',version:VERSION},404);
-  const identity = await requireVerifiedIntervenant(env, auth.user.id);
+  const identity = await requireMissionEligibleIntervenant(env, auth.user.id);
   if(!identity) {
     await securityAudit(env,'SECURITY_IDENTITY_RECHECK_FAILED',missionId,auth.user.id,auth.user.role,'DENIED',{});
     return json({ok:false,error:'INTERVENANT_PROFILE_NOT_VERIFIED',version:VERSION},403);
