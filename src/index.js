@@ -708,6 +708,7 @@ async function ensurePaymentSchema(env) {
   // Request handlers may verify it, never create or alter financial tables.
   const requiredObjects = [
     'payment_accounts',
+    'idx_payment_accounts_provider_account',
     'wallets',
     'payment_transactions',
     'idx_payment_tx_mission',
@@ -717,12 +718,20 @@ async function ensurePaymentSchema(env) {
     'payment_webhook_events',
     'payment_disputes',
     'payment_reconciliation',
-    'payment_audit'
+    'payment_audit',
+    'payment_wallet_ledger',
+    'idx_wallet_ledger_user_date',
+    'idx_wallet_ledger_tx',
+    'trg_payment_wallet_ledger_require_wallet',
+    'trg_payment_wallet_ledger_guard_balances',
+    'trg_payment_wallet_ledger_apply',
+    'trg_payment_wallet_ledger_no_update',
+    'trg_payment_wallet_ledger_no_delete'
   ];
   const placeholders = requiredObjects.map(() => '?').join(',');
   const result = await env.DB.prepare(
     `SELECT name FROM sqlite_master
-      WHERE type IN ('table','index') AND name IN (${placeholders})`
+      WHERE type IN ('table','index','trigger') AND name IN (${placeholders})`
   ).bind(...requiredObjects).all();
   const present = new Set((result?.results || []).map(row => String(row.name)));
   const missing = requiredObjects.filter(name => !present.has(name));
