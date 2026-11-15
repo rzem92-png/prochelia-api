@@ -1,3 +1,5 @@
+import { assessSupraDecision, simulateResilience } from "./supra-intelligence.js";
+import { buildSupraPlan, getSupraDomainRegistry } from "./supra-orchestrator.js";
 // =====================================================
 // PROCHÉLIA V7 - MODULE SERVEUR ADDITIF
 // =====================================================
@@ -1527,7 +1529,13 @@ export const procheliaV7 = {
 
   // Statistiques
   strategicIndicators:
-    v7StrategicIndicators
+    v7StrategicIndicators,
+
+  // SUPRA — gouvernance et orchestration transversale
+  assessSupraDecision,
+  simulateResilience,
+  buildSupraPlan,
+  getSupraDomainRegistry
 };
 
 
