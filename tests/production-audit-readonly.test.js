@@ -69,19 +69,19 @@ test("configuration audit can never authorize real production traffic by itself"
 
 test("strict production audit treats a missing executable PSP adapter as a blocker even when secrets are configured", () => {
   const start = source.indexOf("async function strictProductionAudit");
-  const end = source.indexOf("\\nconst __procheliaProductionSafetyHandle", start);
+  const end = source.indexOf("\nconst __procheliaProductionSafetyHandle", start);
   assert.notEqual(start, -1);
   assert.notEqual(end, -1);
   const body = source.slice(start, end);
   assert.match(body, /'PSP_ADAPTER'/);
-  assert.match(body, /result\\.externalNotConfigured/);
-  assert.match(body, /paymentsConfigured\\(env\\)===true/);
+  assert.match(body, /result\.externalNotConfigured/);
+  assert.match(body, /paymentsConfigured\(env\)===true/);
 });
 
 test("actual exported request wrapper routes both production audit endpoints through the strict gate", () => {
   const start = source.indexOf("const __procheliaProductionSafetyHandle = handle");
   assert.notEqual(start, -1);
   const body = source.slice(start);
-  assert.match(body, /u\\.pathname==='\\/api\\/system\\/final-audit'.*strictProductionAudit/s);
-  assert.match(body, /u\\.pathname==='\\/api\\/system\\/production-check'.*strictProductionAudit/s);
+  assert.match(body, /u\.pathname==='\/api\/system\/final-audit'.*strictProductionAudit/s);
+  assert.match(body, /u\.pathname==='\/api\/system\/production-check'.*strictProductionAudit/s);
 });
