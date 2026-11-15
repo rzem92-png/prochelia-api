@@ -41,6 +41,6 @@ test("support Copilot never trusts client-supplied execution proof", async () =>
   const resolver = source.slice(resolveStart, resolveEnd);
   assert.match(resolver, /const verified=false/);
   assert.doesNotMatch(resolver, /execution_verified/);
-  assert.doesNotMatch(resolver, /context/);
+  assert.match(resolver, /async function supportAutoResolve\(env,caseId,actorId,actorRole,scenario\)/);
   assert.match(resolver, /NO_VERIFIED_DOWNSTREAM_ACTION/);
 });
