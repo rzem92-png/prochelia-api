@@ -1787,6 +1787,9 @@ function isPlainRecord(value) {
 async function supraPlan(request, env) {
   // Le plan de pilotage transversal expose des informations stratégiques : Gérante uniquement.
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
+  // Authenticate before touching D1 so unauthenticated callers cannot probe schema state.
+  try { await ensureConsolidatedSchema(env); }
+  catch (e) { return json({ok:false,error:'CONSOLIDATED_SCHEMA_ERROR',version:VERSION},500); }
   if(request.method!=='POST') return json({ok:false,error:'METHOD_NOT_ALLOWED',version:VERSION},405,{'allow':'POST'});
   // Enforce the limit while streaming; reject invalid UTF-8 and cancel oversized bodies.
   const boundedBody=await readBoundedRequestBody(request,16384);
@@ -1863,7 +1866,7 @@ async function supraPlan(request, env) {
 
 async function handleConsolidated(request, env) {
   const url=new URL(request.url);
-  const consolidatedPath = ['/api/consolidated/info','/api/ops/dashboard','/api/journal','/api/cases','/api/cases/approve','/api/metiers','/api/metiers/suggest','/api/pricing/quote','/api/finance/summary','/api/complaints','/api/settings/phase','/api/supra/plan'].includes(url.pathname);
+  const consolidatedPath = ['/api/consolidated/info','/api/ops/dashboard','/api/journal','/api/cases','/api/cases/approve','/api/metiers','/api/metiers/suggest','/api/pricing/quote','/api/finance/summary','/api/complaints','/api/settings/phase'].includes(url.pathname);
   if (consolidatedPath) {
     try { await ensureConsolidatedSchema(env); } catch (e) { return json({ok:false,error:'CONSOLIDATED_SCHEMA_ERROR',version:VERSION,message:e.message},500); }
   }
