@@ -12,20 +12,24 @@ test("Preview E2E is gated by explicit confirmation or a successful isolated Pre
   assert.match(workflow, /github\.ref == 'refs\/heads\/main'/);
 });
 
-test("Preview E2E pins its own D1, Worker and Pages deployment", () => {
+test("Preview E2E pins Preview D1 and resolves the current Pages deployment dynamically", () => {
   assert.match(workflow, /PREVIEW_DB_ID: 6adb95e5-e542-4bec-9008-fbea01042305/);
-  assert.match(workflow, /PAGES_DEPLOYMENT_ID: c3ceec86-8372-462d-b932-cfe18ca55085/);
+  assert.match(workflow, /deployments\?env=preview&per_page=20/);
+  assert.match(workflow, /PAGES_DEPLOYMENT_ID=.*jq -er/);
+  assert.match(workflow, /\.d1_databases\.DB\.id == \$db/);
+  assert.match(workflow, /\.services\.PROCHELIA_API\.service == \$worker/);
   assert.match(workflow, /prochelia-api-preview/);
-  assert.match(workflow, /e69fde70fb28405aa8117eaf041aed618d3da664/);
+  assert.doesNotMatch(workflow, /PAGES_DEPLOYMENT_ID: [0-9a-f-]{36}/);
+  assert.doesNotMatch(workflow, /e69fde70fb28405aa8117eaf041aed618d3da664/);
   assert.doesNotMatch(workflow, /PREVIEW_DB_ID: 04f52830-ef5a-4f17-a640-42bbc2381bba/);
 });
 
-test("Pages binding mismatch diagnostics expose only non-secret deployment metadata", () => {
-  const marker = "Safe metadata diagnostic follows.";
+test("Pages deployment mismatch diagnostics expose only non-secret deployment metadata", () => {
+  const marker = "Selected Pages Preview deployment bindings mismatch. Safe metadata diagnostic follows.";
   const start = workflow.indexOf(marker);
   assert.notEqual(start, -1, "safe mismatch diagnostic must exist");
   const block = workflow.slice(start, workflow.indexOf("exit 1", start));
-  for (const field of ["environment", "uses_functions", "d1_database_id", "worker_service", "commit_hash"]) {
+  for (const field of ["environment", "stage", "d1_database_id", "worker_service", "commit_hash"]) {
     assert.match(block, new RegExp(field));
   }
   assert.doesNotMatch(block, /CLOUDFLARE_API_TOKEN|Authorization|Bearer/);
