@@ -67,5 +67,61 @@ class PaymentMigrationTests(unittest.TestCase):
             self.assertIsNone(re.search(forbidden, sql, flags=re.MULTILINE))
 
 
+IDENTITY_SECURITY_MIGRATION = ROOT / "migrations" / "0010_identity_mission_security_schema.sql"
+
+
+class IdentityMissionSecurityMigrationTests(unittest.TestCase):
+    def setUp(self):
+        self.db = sqlite3.connect(":memory:")
+        self.db.execute("PRAGMA foreign_keys=ON")
+
+    def tearDown(self):
+        self.db.close()
+
+    def test_migration_runs_idempotently_and_creates_all_required_objects(self):
+        sql = IDENTITY_SECURITY_MIGRATION.read_text(encoding="utf-8")
+        self.db.executescript(sql)
+        self.db.executescript(sql)
+        objects = {row[0] for row in self.db.execute(
+            "SELECT name FROM sqlite_master WHERE type IN ('table','index')"
+        )}
+        expected = {
+            "identity_verifications", "idx_identity_verifications_user",
+            "trusted_devices", "mission_security",
+            "idx_mission_security_intervenant", "mission_security_attempts",
+            "idx_security_attempts_security", "security_audit",
+            "idx_security_audit_mission",
+        }
+        self.assertTrue(expected.issubset(objects))
+
+    def test_migration_preserves_unique_device_and_mission_invariants(self):
+        self.db.executescript(IDENTITY_SECURITY_MIGRATION.read_text(encoding="utf-8"))
+        self.db.execute(
+            "INSERT INTO trusted_devices(id,user_id,device_hash,expires_at) VALUES('d1','u1','h1','2030-01-01')"
+        )
+        with self.assertRaises(sqlite3.IntegrityError):
+            self.db.execute(
+                "INSERT INTO trusted_devices(id,user_id,device_hash,expires_at) VALUES('d2','u1','h1','2030-01-01')"
+            )
+        self.db.execute(
+            "INSERT INTO mission_security(id,mission_id,client_id,intervenant_id) VALUES('s1','m1','c1','i1')"
+        )
+        with self.assertRaises(sqlite3.IntegrityError):
+            self.db.execute(
+                "INSERT INTO mission_security(id,mission_id,client_id,intervenant_id) VALUES('s2','m1','c2','i2')"
+            )
+
+    def test_migration_has_no_destructive_sql(self):
+        sql = re.sub(
+            r"--[^\\n]*", "",
+            IDENTITY_SECURITY_MIGRATION.read_text(encoding="utf-8")
+        ).upper()
+        for forbidden in (
+            r"\\bDROP\\s+TABLE\\b", r"\\bDROP\\s+INDEX\\b",
+            r"\\bDELETE\\s+FROM\\b", r"^\\s*UPDATE\\s+"
+        ):
+            self.assertIsNone(re.search(forbidden, sql, flags=re.MULTILINE))
+
+
 if __name__ == "__main__":
     unittest.main()
