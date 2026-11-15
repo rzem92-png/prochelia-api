@@ -27,13 +27,14 @@ jobs:
       EXPECTED_DB_NAME: prochelia-preview-db
       EXPECTED_DB_ID: 6adb95e5-e542-4bec-9008-fbea01042305
       EXPECTED_ACCOUNT_ID: f2a79e9fa41566a8ec80fb24c02c60eb
+      FORBIDDEN_PRODUCTION_DB_ID: 04f52830-ef5a-4f17-a640-42bbc2381bba
     steps:
-      - name: Checkout preproduction branch
+      - name: Checkout pinned canonical preproduction migration chain
         uses: actions/checkout@v4
         with:
-          ref: prelaunch/v14.5.7-consolidation-audit
+          ref: ops/preview-migration-0020-auth-rate-limits-2026-11-15
 
-      - name: Verify credentials, exact target and migration files
+      - name: Verify credentials, exact Preview target and complete migration chain
         shell: bash
         run: |
           set -euo pipefail
@@ -43,25 +44,52 @@ jobs:
           python3 - <<'PY'
           import json
           from pathlib import Path
+
           config = json.loads(Path("wrangler.jsonc").read_text())
-          assert config["name"] == "prochelia-api-staging", "Unexpected Worker name"
-          db = next(x for x in config["d1_databases"] if x["binding"] == "DB")
-          assert db["database_name"] == "prochelia-preview-db", "Unexpected D1 name"
-          assert db["database_id"] == "6adb95e5-e542-4bec-9008-fbea01042305", "Unexpected D1 UUID"
-          assert len(config["d1_databases"]) == 1, "Unexpected additional D1 binding"
-          for name in (
+          assert config["name"] == "prochelia-api-staging", "Unexpected Worker config"
+          dbs = config["d1_databases"]
+          assert len(dbs) == 1, "Unexpected additional D1 binding"
+          db = dbs[0]
+          assert db["binding"] == "DB"
+          assert db["database_name"] == "prochelia-preview-db"
+          assert db["database_id"] == "6adb95e5-e542-4bec-9008-fbea01042305"
+
+          expected = [
             "0001_core_business_schema.sql",
             "0002_server_pricing.sql",
             "0003_route_address_provenance.sql",
             "0004_atomic_wallet_ledger.sql",
-          ):
+            "0005_security_rate_limits.sql",
+            "0006_copilot_schema.sql",
+            "0007_trust_passport_schema.sql",
+            "0008_commercial_recruitment_schema.sql",
+            "0009_finance_workspace_schema.sql",
+            "0010_strategic_schema.sql",
+            "0011_final_hardening_schema.sql",
+            "0012_national_continuity_schema.sql",
+            "0013_master_complement_schema.sql",
+            "0014_operational_schema.sql",
+            "0015_production_security_events.sql",
+            "0016_security_identity_schema.sql",
+            "0017_document_security_scans.sql",
+            "0018_consolidated_business_schema.sql",
+            "0019_backup_verifications.sql",
+            "0020_auth_login_rate_limits.sql",
+          ]
+          actual = sorted(p.name for p in Path("migrations").glob("*.sql"))
+          assert actual == sorted(expected), (
+            f"Migration chain mismatch. Expected {len(expected)} canonical files, "
+            f"found {len(actual)}. No migration will run."
+          )
+          for name in expected:
             p = Path("migrations") / name
             assert p.is_file() and p.stat().st_size > 0, f"Missing migration: {name}"
-          print("PASS: staging Worker, exact preview D1 and four migration files verified")
+          print(f"PASS: exact Preview D1 target and all {len(expected)} canonical migrations verified")
           PY
           test "$EXPECTED_DB_NAME" = "prochelia-preview-db"
           test "$EXPECTED_DB_ID" = "6adb95e5-e542-4bec-9008-fbea01042305"
-          test "$EXPECTED_ACCOUNT_ID" = "f2a79e9fa41566a8ec80fb24c02c60eb"
+          test "$EXPECTED_DB_ID" != "$FORBIDDEN_PRODUCTION_DB_ID"
+          test "$CLOUDFLARE_ACCOUNT_ID" = "$EXPECTED_ACCOUNT_ID"
 
       - name: Install Node.js
         uses: actions/setup-node@v4
@@ -72,30 +100,16 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if [ "$CLOUDFLARE_ACCOUNT_ID" != "$EXPECTED_ACCOUNT_ID" ]; then
-            echo "::error::CLOUDFLARE_ACCOUNT_ID secret does not match the pinned expected account."
+          identity="$(npx --yes wrangler@4 whoami 2>&1)" || {
+            echo "::error::Wrangler authentication failed. Check token validity and permissions."
             exit 1
-          fi
-
-          set +e
-          identity="$(npx --yes wrangler@4 whoami 2>&1)"
-          status=$?
-          set -e
-
+          }
           safe_identity="${identity//"$CLOUDFLARE_API_TOKEN"/[REDACTED]}"
           printf '%s\\n' "$safe_identity"
-
-          if [ "$status" -ne 0 ]; then
-            echo "::error::Wrangler authentication failed. Check token validity and Cloudflare permissions."
+          printf '%s' "$safe_identity" | grep -Fq "$EXPECTED_ACCOUNT_ID" || {
+            echo "::error::Cloudflare account ID mismatch."
             exit 1
-          fi
-
-          if ! printf '%s' "$safe_identity" | grep -Fq "$EXPECTED_ACCOUNT_ID"; then
-            echo "::error::Cloudflare account ID returned by Wrangler does not match the pinned expected account."
-            exit 1
-          fi
-
-          echo "Cloudflare identity verified."
+          }
 
       - name: Export only Preview D1 before migration
         shell: bash
@@ -120,7 +134,7 @@ jobs:
           actual="$(sha256sum "$RUNNER_TEMP/prochelia-backup/decrypted-check.sql" | cut -d ' ' -f 1)"
           test "$expected" = "$actual"
           rm -f "$plaintext" "$RUNNER_TEMP/prochelia-backup/decrypted-check.sql"
-          printf 'database=%s\ncreated_utc=%s\nencrypted_file=prochelia-preview.sql.gpg\n' "$EXPECTED_DB_NAME" "$(date -u +%FT%TZ)" > "$RUNNER_TEMP/prochelia-backup/README.txt"
+          printf 'database=%s\\ncreated_utc=%s\\nencrypted_file=prochelia-preview.sql.gpg\\n' "$EXPECTED_DB_NAME" "$(date -u +%FT%TZ)" > "$RUNNER_TEMP/prochelia-backup/README.txt"
 
       - name: Publish encrypted backup before any schema write
         uses: actions/upload-artifact@v4
@@ -138,15 +152,58 @@ jobs:
           set -euo pipefail
           npx --yes wrangler@4 d1 migrations list "$EXPECTED_DB_NAME" --remote --config wrangler.jsonc
 
+      - name: Refuse divergent migration history before any schema write
+        shell: bash
+        run: |
+          set -euo pipefail
+          request="$RUNNER_TEMP/migration-inventory-request.json"
+          response="$RUNNER_TEMP/migration-inventory-response.json"
+          jq -n '{sql:"SELECT name FROM d1_migrations ORDER BY name",params:[]}' > "$request"
+          status="$(curl --silent --show-error --output "$response" --write-out '%{http_code}' \
+            -X POST \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            -H "Content-Type: application/json" \
+            --data-binary @"$request" \
+            "https://api.cloudflare.com/client/v4/accounts/$EXPECTED_ACCOUNT_ID/d1/database/$EXPECTED_DB_ID/query")"
+          test "$status" = "200" || { echo "::error::Unable to read Preview migration registry (HTTP $status)."; exit 1; }
+          jq -e '.success == true' "$response" >/dev/null
+          python3 - "$response" <<'PY'
+          import json, pathlib, sys
+          payload=json.loads(pathlib.Path(sys.argv[1]).read_text())
+          remote=set(row["name"] for row in payload["result"][0]["results"])
+          local=set(p.name for p in pathlib.Path("migrations").glob("*.sql"))
+          if remote != local:
+              print("::error::Migration history diverges. Automatic apply is blocked.")
+              print("Remote-only migration names:", ", ".join(sorted(remote-local)) or "(none)")
+              print("Repository-only migration names:", ", ".join(sorted(local-remote)) or "(none)")
+              raise SystemExit(1)
+          print(f"PASS: exact migration registry match ({len(remote)} migrations).")
+          PY
+
       - name: Apply migrations to Preview D1 only
         shell: bash
         run: |
           set -euo pipefail
+          test "$EXPECTED_DB_ID" = "6adb95e5-e542-4bec-9008-fbea01042305"
+          test "$EXPECTED_DB_ID" != "$FORBIDDEN_PRODUCTION_DB_ID"
           npx --yes wrangler@4 d1 migrations apply "$EXPECTED_DB_NAME" --remote --config wrangler.jsonc
 
-      - name: Verify migration status after applying
+      - name: Verify migration registry and rate-limit schema
         shell: bash
         run: |
           set -euo pipefail
+          payload="$RUNNER_TEMP/verify-migration.json"
+          response="$RUNNER_TEMP/verify-response.json"
+          jq -n '{
+            sql: "SELECT '"'"'migration'"'"' AS kind, name FROM d1_migrations WHERE name = '"'"'0016_security_identity_schema.sql'"'"' UNION ALL SELECT '"'"'table'"'"' AS kind, name FROM sqlite_master WHERE type = '"'"'table'"'"' AND name IN ('"'"'identity_verifications'"'"','"'"'trusted_devices'"'"','"'"'mission_security'"'"','"'"'mission_security_attempts'"'"','"'"'security_audit'"'"') UNION ALL SELECT '"'"'index'"'"' AS kind, name FROM sqlite_master WHERE type = '"'"'index'"'"' AND name IN ('"'"'idx_identity_verifications_user'"'"','"'"'idx_mission_security_intervenant'"'"','"'"'idx_security_attempts_security'"'"','"'"'idx_security_audit_mission'"'"') UNION ALL SELECT '"'"'migration'"'"' AS kind, name FROM d1_migrations WHERE name = '"'"'0020_auth_login_rate_limits.sql'"'"' UNION ALL SELECT '"'"'table'"'"' AS kind, name FROM sqlite_master WHERE type = '"'"'table'"'"' AND name = '"'"'auth_login_rate_limits'"'"' UNION ALL SELECT '"'"'index'"'"' AS kind, name FROM sqlite_master WHERE type = '"'"'index'"'"' AND name = '"'"'idx_auth_login_rate_limits_window'"'"'",
+            params: []
+          }' > "$payload"
+          status="$(curl --silent --show-error --output "$response" --write-out '%{http_code}'             -X POST             -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN"             -H "Content-Type: application/json"             --data-binary @"$payload"             "https://api.cloudflare.com/client/v4/accounts/$EXPECTED_ACCOUNT_ID/d1/database/$EXPECTED_DB_ID/query")"
+          test "$status" = "200" || { echo "::error::Preview D1 verification request failed (HTTP $status)."; exit 1; }
+          jq -e '.success == true' "$response" >/dev/null
+          jq -e '[.result[0].results[] | .kind] | sort == ["index","index","index","index","index","migration","migration","table","table","table","table","table","table"]' "$response" >/dev/null || {
+            echo "::error::Security identity migration 0016, its five tables/four indexes, or rate-limit migration 0020 schema is missing."
+            exit 1
+          }
           npx --yes wrangler@4 d1 migrations list "$EXPECTED_DB_NAME" --remote --config wrangler.jsonc
-          echo "Migration command completed for the hard-pinned Preview D1 target."
+          echo "PASS: security identity migration 0016 and rate-limit migration 0020 schemas are present on Preview D1."
