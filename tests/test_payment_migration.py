@@ -235,3 +235,60 @@ class ConsolidatedBusinessMigrationTests(unittest.TestCase):
             r"\bDELETE\s+FROM\b", r"^\s*UPDATE\s+"
         ):
             self.assertIsNone(re.search(forbidden, sql, flags=re.MULTILINE))
+
+
+CONSOLIDATED_BUSINESS_MIGRATION = ROOT / "migrations" / "0012_consolidated_business_schema.sql"
+
+
+class ConsolidatedBusinessMigrationTests(unittest.TestCase):
+    def setUp(self):
+        self.db = sqlite3.connect(":memory:")
+        self.db.execute("PRAGMA foreign_keys=ON")
+
+    def tearDown(self):
+        self.db.close()
+
+    def test_migration_runs_idempotently_and_creates_all_required_objects(self):
+        # Pricing tables are provisioned by migration 0002, not duplicated here.
+        self.db.executescript(
+            (ROOT / "migrations" / "0002_server_pricing.sql").read_text(encoding="utf-8")
+        )
+        sql = CONSOLIDATED_BUSINESS_MIGRATION.read_text(encoding="utf-8")
+        self.db.executescript(sql)
+        self.db.executescript(sql)
+        objects = {row[0] for row in self.db.execute(
+            "SELECT name FROM sqlite_master WHERE type IN ('table','index')"
+        )}
+        expected = {
+            "platform_settings", "business_profiles", "métier_catalog",
+            "metier_suggestions", "pricing_policies", "pricing_quotes",
+            "operational_cases", "idx_cases_status", "case_actions",
+            "copilot_log", "activity_journal", "commercial_tasks",
+            "recruitment_tasks", "complaints", "accounting_ledger",
+            "idx_ledger_ref", "business_expenses", "notification_outbox",
+            "compliance_events",
+        }
+        self.assertTrue(expected.issubset(objects))
+
+    def test_seeded_settings_are_insert_only_and_idempotent(self):
+        self.db.executescript(CONSOLIDATED_BUSINESS_MIGRATION.read_text(encoding="utf-8"))
+        self.db.execute(
+            "UPDATE platform_settings SET value_json='\\"CUSTOM\\"' WHERE key='project_phase'"
+        )
+        self.db.executescript(CONSOLIDATED_BUSINESS_MIGRATION.read_text(encoding="utf-8"))
+        value = self.db.execute(
+            "SELECT value_json FROM platform_settings WHERE key='project_phase'"
+        ).fetchone()[0]
+        self.assertEqual(value, '"CUSTOM"')
+
+    def test_migration_does_not_duplicate_pricing_ownership_or_use_destructive_sql(self):
+        sql = re.sub(
+            r"--[^\n]*", "",
+            CONSOLIDATED_BUSINESS_MIGRATION.read_text(encoding="utf-8")
+        ).upper()
+        self.assertNotRegex(sql, r"CREATE\s+TABLE\s+IF\s+NOT\s+EXISTS\s+PRICING_(POLICIES|QUOTES)")
+        for forbidden in (
+            r"\bDROP\s+TABLE\b", r"\bDROP\s+INDEX\b",
+            r"\bDELETE\s+FROM\b", r"^\s*UPDATE\s+"
+        ):
+            self.assertIsNone(re.search(forbidden, sql, flags=re.MULTILINE))
