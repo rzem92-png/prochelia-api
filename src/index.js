@@ -573,6 +573,7 @@ async function securityIdentityStatus(request, env) {
         updated_at:row.updated_at
       } : null,
       identity_gate_passed:valid,
+      profile_gate_passed:false,
       authority:'SERVER_D1'
     },200);
   }
