@@ -169,7 +169,8 @@ test("DSA notice endpoint persists authenticated reporter identity, never body i
   assert.match(sql, /INSERT INTO dsa_notices/);
   assert.equal(values[1], "authenticated-reporter");
   assert.equal(values[0].length > 10, true);
-  assert.equal(values[3], "ILLEGAL_CONTENT");
+  assert.equal(values[3], "listing-42");
+  assert.equal(values[4], "ILLEGAL_CONTENT");
   assert.equal(values[6], "This listing appears to offer an illegal service.");
   const payload = await response.json();
   assert.equal(payload.notice.status, "RECEIVED");
