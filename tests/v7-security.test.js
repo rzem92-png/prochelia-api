@@ -215,3 +215,61 @@ test("DSA notice status listing is authenticated and scoped to the session repor
   assert.equal(values[0], "reporter-real");
   assert.deepEqual((await allowed.json()).notices, [{ id: "n1", status: "RECEIVED" }]);
 });
+
+
+test("DSA appeal endpoint rejects anonymous and malformed submissions", async () => {
+  const anonymous = await handleV7Route(
+    post("/api/compliance/appeals", { decision_id: "d1", grounds: "A sufficiently detailed appeal ground." }),
+    {}, "/api/compliance/appeals", null
+  );
+  assert.equal(anonymous.status, 401);
+  const malformed = await handleV7Route(
+    post("/api/compliance/appeals", { decision_id: "d1", grounds: "short" }),
+    { DB: {} }, "/api/compliance/appeals", { user: { id: "affected-1", role: "client" } }
+  );
+  assert.equal(malformed.status, 400);
+});
+
+test("DSA appeal endpoint only accepts an affected user's appeal and prevents duplicate pending appeals", async () => {
+  const statements = [];
+  const env = { DB: { prepare(sql) {
+    statements.push(sql);
+    return {
+      bind(...values) { this.values = values; return this; },
+      async first() {
+        if (sql.includes("FROM moderation_decisions")) return { id: "decision-1" };
+        return null;
+      },
+      async run() { return { success: true }; }
+    };
+  } } };
+  const response = await handleV7Route(
+    post("/api/compliance/appeals", {
+      decision_id: "decision-1", appellant_user_id: "forged-user",
+      grounds: "The moderation decision contains factual errors."
+    }),
+    env, "/api/compliance/appeals",
+    { user: { id: "affected-user", role: "client" } }
+  );
+  assert.equal(response.status, 201);
+  assert.deepEqual(statements.map(s => s.trim().split(/\\s+/).slice(0,3).join(" ")), [
+    "SELECT id FROM moderation_decisions",
+    "SELECT id FROM moderation_appeals",
+    "INSERT INTO moderation_appeals"
+  ]);
+  assert.equal((await response.json()).appeal.status, "SUBMITTED");
+});
+
+test("DSA appeal endpoint does not expose another user's decision", async () => {
+  const env = { DB: { prepare() {
+    return { bind() { return this; }, async first() { return null; } };
+  } } };
+  const response = await handleV7Route(
+    post("/api/compliance/appeals", {
+      decision_id: "decision-other", grounds: "I believe this decision should be reviewed."
+    }),
+    env, "/api/compliance/appeals",
+    { user: { id: "unrelated-user", role: "client" } }
+  );
+  assert.equal(response.status, 404);
+});
