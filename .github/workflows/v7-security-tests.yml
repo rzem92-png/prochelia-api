@@ -11,7 +11,9 @@ on:
       - ".github/workflows/deploy-preview-worker-manual.yml"
       - ".github/workflows/preview-directory-e2e-acceptance.yml"
   push:
-    branches: [main]
+    branches:
+      - main
+      - security/server-authoritative-identity-status-2026-11-15
     paths:
       - "src/v7.js"
       - "src/v7-routes.js"
