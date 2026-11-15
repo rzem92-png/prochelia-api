@@ -143,6 +143,70 @@ jobs:
           set -euo pipefail
           npx --yes wrangler@4 d1 migrations list "$EXPECTED_DB_NAME" --remote --config wrangler.jsonc
 
+      - name: Assert the only pending migration is the audited DSA repair
+        shell: bash
+        run: |
+          set -euo pipefail
+          state_file="$RUNNER_TEMP/prochelia-preview-migration-state.json"
+          npx --yes wrangler@4 d1 execute "$EXPECTED_DB_NAME" --remote --json --config wrangler.jsonc --command "SELECT name FROM d1_migrations ORDER BY name;" > "$state_file"
+          python3 - "$state_file" <<'PY'
+          import json
+          import sys
+          from pathlib import Path
+
+          payload = json.loads(Path(sys.argv[1]).read_text())
+          applied = set()
+
+          def collect(value):
+              if isinstance(value, dict):
+                  name = value.get("name")
+                  if isinstance(name, str) and name.endswith(".sql"):
+                      applied.add(name)
+                  for child in value.values():
+                      collect(child)
+              elif isinstance(value, list):
+                  for child in value:
+                      collect(child)
+
+          collect(payload)
+          migration_files = sorted(p.name for p in Path("migrations").glob("*.sql"))
+          assert "0018_dsa_ai_act_transparency_redress.sql" in applied, (
+              "DSA schema migration 0018 is not recorded; refusing to apply repair out of sequence"
+          )
+          pending = sorted(name for name in migration_files if name not in applied)
+          expected = ["0019_dsa_pending_appeal_unique_guard.sql"]
+          assert pending == expected, (
+              f"Unexpected pending migration set: {pending!r}; expected exactly {expected!r}"
+          )
+          print("PASS: the sole pending migration is 0019_dsa_pending_appeal_unique_guard.sql")
+          PY
+
+          duplicates_file="$RUNNER_TEMP/prochelia-preview-pending-appeal-duplicates.json"
+          npx --yes wrangler@4 d1 execute "$EXPECTED_DB_NAME" --remote --json --config wrangler.jsonc --command "SELECT decision_id, appellant_user_id, COUNT(*) AS pending_count FROM moderation_appeals WHERE status IN ('SUBMITTED','UNDER_REVIEW') GROUP BY decision_id, appellant_user_id HAVING COUNT(*) > 1;" > "$duplicates_file"
+          python3 - "$duplicates_file" <<'PY'
+          import json
+          import sys
+          from pathlib import Path
+
+          payload = json.loads(Path(sys.argv[1]).read_text())
+          rows = []
+
+          def collect(value):
+              if isinstance(value, dict):
+                  result = value.get("results")
+                  if isinstance(result, list):
+                      rows.extend(row for row in result if isinstance(row, dict) and "pending_count" in row)
+                  for child in value.values():
+                      collect(child)
+              elif isinstance(value, list):
+                  for child in value:
+                      collect(child)
+
+          collect(payload)
+          assert not rows, f"Duplicate pending appeals would block the unique index: {rows!r}"
+          print("PASS: no duplicate pending appeals; unique index can be applied safely")
+          PY
+
       - name: Apply migrations to Preview D1 only
         shell: bash
         run: |
