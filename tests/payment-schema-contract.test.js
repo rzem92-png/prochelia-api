@@ -17,6 +17,12 @@ test("payment schema helper is read-only and verifies migration-owned objects", 
     "payment_accounts", "wallets", "payment_transactions",
     "idx_payment_tx_mission", "idx_payment_tx_intervenant",
     "payout_requests", "idx_payout_user", "payment_webhook_events",
-    "payment_disputes", "payment_reconciliation", "payment_audit",\n    "idx_payment_accounts_provider_account", "payment_wallet_ledger",\n    "idx_wallet_ledger_user_date", "idx_wallet_ledger_tx",\n    "trg_payment_wallet_ledger_require_wallet",\n    "trg_payment_wallet_ledger_guard_balances",\n    "trg_payment_wallet_ledger_apply", "trg_payment_wallet_ledger_no_update",\n    "trg_payment_wallet_ledger_no_delete"
+    "payment_disputes", "payment_reconciliation", "payment_audit",
+    "idx_payment_accounts_provider_account", "payment_wallet_ledger",
+    "idx_wallet_ledger_user_date", "idx_wallet_ledger_tx",
+    "trg_payment_wallet_ledger_require_wallet",
+    "trg_payment_wallet_ledger_guard_balances",
+    "trg_payment_wallet_ledger_apply", "trg_payment_wallet_ledger_no_update",
+    "trg_payment_wallet_ledger_no_delete"
   ]) assert.ok(helper.includes(objectName), `missing payment schema contract: ${objectName}`);
 });
