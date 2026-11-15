@@ -10,6 +10,9 @@ test("brand support Copilot schema helper is read-only and verifies migration-ow
   const helper = source.slice(start, end);
   assert.match(helper, /SELECT name FROM sqlite_master/);
   assert.match(helper, /PROCHELIA_MASTER_SCHEMA_NOT_READY/);
+  assert.match(helper, /PROCHELIA_BRAND_SEED_NOT_READY/);
+  assert.match(helper, /PROCHELIA_INTERFACE_PROFILES_NOT_READY/);
+  assert.match(helper, /PROCHELIA_COPILOT_RULES_NOT_READY/);
   const executable = helper.replace(/\/\/[^\n]*/g, "");
   assert.doesNotMatch(executable, /\b(?:CREATE|ALTER|DROP|INSERT|UPDATE|DELETE)\s+(?:TABLE|INDEX|INTO|OR|SET)\b/i);
   for (const objectName of [
