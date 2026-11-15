@@ -306,3 +306,15 @@ test("Worker dispatch routes DSA compliance paths through authenticated V7 handl
   assert.equal(response.status, 401);
   assert.equal((await response.json()).error, "UNAUTHENTICATED");
 });
+
+
+test("DSA endpoints fail closed with 503 when the compliance migration is absent", async () => {
+  const env = { DB: { prepare() { throw new Error("D1_ERROR: no such table: dsa_notices"); } } };
+  const response = await handleV7Route(
+    new Request("https://example.test/api/compliance/notices"),
+    env, "/api/compliance/notices",
+    { user: { id: "reporter-1", role: "client" } }
+  );
+  assert.equal(response.status, 503);
+  assert.equal((await response.json()).error, "COMPLIANCE_SCHEMA_UNAVAILABLE");
+});
