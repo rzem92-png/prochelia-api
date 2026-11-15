@@ -388,3 +388,55 @@ class OperationalMigrationTests(unittest.TestCase):
             r"\bDELETE\s+FROM\b", r"^\s*UPDATE\s+"
         ):
             self.assertIsNone(re.search(forbidden, sql, flags=re.MULTILINE))
+
+
+NATIONAL_CONTINUITY_MIGRATION = ROOT / "migrations" / "0016_national_continuity_schema.sql"
+
+
+class NationalContinuityMigrationTests(unittest.TestCase):
+    def setUp(self):
+        self.db = sqlite3.connect(":memory:")
+
+    def tearDown(self):
+        self.db.close()
+
+    def test_migration_runs_idempotently_and_creates_all_objects(self):
+        sql = NATIONAL_CONTINUITY_MIGRATION.read_text(encoding="utf-8")
+        self.db.executescript(sql)
+        self.db.executescript(sql)
+        objects = {row[0] for row in self.db.execute(
+            "SELECT name FROM sqlite_master WHERE type IN ('table','index')"
+        )}
+        expected = {
+            "platform_scale_config", "backup_runs", "backup_objects",
+            "idx_backup_runs_date", "idx_backup_objects_run", "idx_scale_key",
+        }
+        self.assertTrue(expected.issubset(objects))
+
+    def test_default_scale_settings_are_preserved_and_idempotent(self):
+        self.db.executescript(NATIONAL_CONTINUITY_MIGRATION.read_text(encoding="utf-8"))
+        self.db.execute(
+            "UPDATE platform_scale_config SET value_json='75' WHERE key='maxPageSize'"
+        )
+        self.db.executescript(NATIONAL_CONTINUITY_MIGRATION.read_text(encoding="utf-8"))
+        self.assertEqual(
+            self.db.execute(
+                "SELECT value_json FROM platform_scale_config WHERE key='maxPageSize'"
+            ).fetchone()[0],
+            "75",
+        )
+        self.assertEqual(
+            self.db.execute("SELECT COUNT(*) FROM platform_scale_config").fetchone()[0],
+            8,
+        )
+
+    def test_migration_has_no_destructive_sql(self):
+        sql = re.sub(
+            r"--[^\n]*", "",
+            NATIONAL_CONTINUITY_MIGRATION.read_text(encoding="utf-8")
+        ).upper()
+        for forbidden in (
+            r"\bDROP\s+TABLE\b", r"\bDROP\s+INDEX\b",
+            r"\bDELETE\s+FROM\b", r"^\s*UPDATE\s+"
+        ):
+            self.assertIsNone(re.search(forbidden, sql, flags=re.MULTILINE))
