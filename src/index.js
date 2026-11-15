@@ -3252,19 +3252,21 @@ async function supportCreate(request,env){
   await journal(env,a.role,a.auth.user.id,'SUPPORT_CASE_CREATE','support_cases',id,'OK',{scenario,severity,auto});
   let autoResult=null;
   if(auto){
-    autoResult=await supportAutoResolve(env,id,a.auth.user.id,a.role,scenario,b);
+    // A request payload is never proof that a downstream action actually ran.
+    autoResult=await supportAutoResolve(env,id,a.auth.user.id,a.role,scenario);
   }
-  return json({ok:true,version:VERSION,case_id:id,scenario,automatic_resolution:!!auto,auto_result:autoResult,manager_approval_required:!auto});
+  const automaticallyResolved = autoResult?.status === 'RESOLVED' && autoResult?.closed === true;
+  return json({ok:true,version:VERSION,case_id:id,scenario,automatic_resolution:automaticallyResolved,auto_result:autoResult,manager_approval_required:requiresManager || (!automaticallyResolved && !auto)});
 }
 
-async function supportAutoResolve(env,caseId,actorId,actorRole,scenario,context={}){
+async function supportAutoResolve(env,caseId,actorId,actorRole,scenario){
   const safeAuto=['DELAY_LIGHT','NOTIFICATION_FAILED','DOCUMENT_REMINDER','SIMPLE_REFUND_CHECK','CLIENT_COMPLAINT'];
   if(!safeAuto.includes(scenario)) return {ok:false,status:'MANAGER_REQUIRED'};
-  // Sécurité de production : le Copilote ne doit jamais déclarer une résolution
-  // simplement parce qu'il a généré une proposition. Une résolution automatique
-  // n'est clôturée que lorsqu'une action downstream vérifiable a confirmé son succès.
-  const verified=String(context?.execution_verified||'').toLowerCase()==='true' || context?.execution_verified===true;
-  const resolution={scenario,actions:['verify_context','apply_only_reversible_or_preapproved_action','notify_requester','journal'],context:context||{}};
+  // No downstream executor currently returns a trusted, server-side execution receipt.
+  // Therefore this function must remain fail-closed: client-supplied flags or context
+  // can never be used to mark a support case as resolved.
+  const verified=false;
+  const resolution={scenario,actions:['verify_context','await_verified_downstream_action','journal']};
   if(!verified){
     await env.DB.prepare(`UPDATE support_cases SET status='WAITING_ACTION',resolution=?,resolved_at=NULL WHERE id=?`).bind(JSON.stringify({...resolution,status:'ACTION_REQUIRED'}),caseId).run();
     await supportEvent(env,caseId,actorRole,actorId,'AUTO_CHECKED_WAITING_ACTION',resolution);
