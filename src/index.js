@@ -3440,7 +3440,7 @@ async function productionSubjectHash(request, route){
   // forwarding headers and never merge unidentified clients into one shared bucket.
   const ip=clean(request.headers.get('CF-Connecting-IP'));
   if(!ip) return null;
-  return sha256Hex(`${ip}|${route}`);
+  return sha256Base64url(`${ip}|${route}`);
 }
 
 async function productionRateLimit(request,env){
