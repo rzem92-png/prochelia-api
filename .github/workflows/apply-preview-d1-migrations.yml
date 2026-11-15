@@ -60,7 +60,7 @@ jobs:
               "binding": "DB",
               "database_name": db["database_name"],
               "database_id": db["database_id"],
-              "migrations_dir": "migrations"
+              "migrations_dir": str(Path("migrations").resolve())
             }]
           }
           Path(__import__("os").environ["RUNNER_TEMP"], "wrangler.preview-migrations.json").write_text(
