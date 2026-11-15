@@ -3179,7 +3179,7 @@ export default {
   fetch(request,env){ return handle(request,env); },
   async scheduled(event,env,ctx){
     if(event?.cron && (event.cron==='0 3 * * *' || event.cron==='0 3 * * 0')){
-      ctx.waitUntil(runNationalBackup(env,'AUTOMATIC'));
+      console.warn('PROCHELIA_BACKUP_DISABLED: Worker row export is not a consistent, schema-complete, restore-validated database backup.');
     }
   }
 };
@@ -3196,7 +3196,7 @@ export default {
 const NATIONAL_SCALE_DEFAULTS = Object.freeze({
   maxPageSize:100, defaultPageSize:50, importBatchSize:500,
   noArtificialUserCap:true, cursorPaginationRecommended:true,
-  documentsStorage:'R2', backupFrequency:'DAILY', backupRetentionDays:90
+  documentsStorage:'R2', backupFrequency:'DISABLED_UNTIL_RESTORE_VALIDATED', backupRetentionDays:0
 });
 
 async function ensureNationalContinuitySchema(env){
@@ -3232,6 +3232,8 @@ async function backupTables(env){
   return (r.results||[]).map(x=>String(x.name));
 }
 async function runNationalBackup(env,trigger='MANUAL'){
+  // Legacy row export omits schema and has no consistent snapshot or tested restore path.
+  throw new Error('BACKUP_PIPELINE_NOT_RESTORE_CAPABLE');
   await ensureNationalContinuitySchema(env);
   if(!env.BACKUP_BUCKET) throw new Error('BACKUP_R2_NOT_CONFIGURED');
   const secret=env.BACKUP_ENCRYPTION_KEY;
@@ -3272,12 +3274,10 @@ async function nationalScaleStatus(env){
   await ensureNationalContinuitySchema(env);
   const c=await env.DB.prepare(`SELECT key,value_json FROM platform_scale_config ORDER BY key`).all();
   const t=await env.DB.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name`).all();
-  return {ok:true,mode:'NATIONAL_SCALE',artificialUserCap:false,unlimitedInBusinessRules:true,database:'D1',documents:'R2_RECOMMENDED',backups:{provider:'R2',automatic:true,encrypted:true},pagination:{cursorRecommended:true,maxPageSize:100},tables:(t.results||[]).map(x=>x.name),config:(c.results||[])};
+  return {ok:true,mode:'NATIONAL_SCALE',artificialUserCap:false,unlimitedInBusinessRules:true,database:'D1',documents:'R2_RECOMMENDED',backups:{provider:'R2',automatic:false,encrypted:false,restorable:false,status:'DISABLED_UNTIL_RESTORE_VALIDATED'},pagination:{cursorRecommended:true,maxPageSize:100},tables:(t.results||[]).map(x=>x.name),config:(c.results||[])};
 }
 async function backupStatus(env){
-  await ensureNationalContinuitySchema(env);
-  const r=await env.DB.prepare(`SELECT * FROM backup_runs ORDER BY started_at DESC LIMIT 20`).all();
-  return {ok:true,configured:!!env.BACKUP_BUCKET&&!!env.BACKUP_ENCRYPTION_KEY,automatic:true,frequency:'DAILY',retentionDays:90,runs:r.results||[]};
+  return {ok:true,configured:false,enabled:false,automatic:false,encrypted:false,restorable:false,frequency:null,retentionDays:0,runs:[],reason:'BACKUP_PIPELINE_NOT_RESTORE_CAPABLE'};
 }
 
 const __procheliaNationalHandle = handle;
@@ -3294,7 +3294,7 @@ handle = async function(request,env){
     }
     if(request.method==='POST'&&url.pathname==='/api/system/backup/run'){
       const auth=await getSessionUser(request,env).catch(()=>null); if(!auth?.user||String(auth.user.role||'').toUpperCase()!=='GERANTE') return json({ok:false,error:'FORBIDDEN'},403);
-      return json(await runNationalBackup(env,'MANUAL'));
+      return json({ok:false,error:'BACKUP_PIPELINE_NOT_RESTORE_CAPABLE',backup_enabled:false},503);
     }
     return __procheliaNationalHandle(request,env);
   }catch(e){return json({ok:false,error:'NATIONAL_CONTINUITY_ERROR',message:String(e.message||e)},500)}
