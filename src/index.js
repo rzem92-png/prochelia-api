@@ -553,8 +553,9 @@ async function securityIdentityStart(request, env) {
 async function securityIdentityStatus(request, env) {
   const auth = await getSessionUser(request, env);
   if (!auth?.user) return json({ok:false,error:'UNAUTHENTICATED',version:VERSION},401);
-  await ensureSecuritySchema(env);
-
+  // This GET endpoint is strictly read-only. Schema creation belongs to
+  // the reviewed migration pipeline, never to a user request.
+  try {
   if (auth.user.role === 'intervenant') {
     const row = await env.DB.prepare(
       `SELECT id,status,level,provider,verified_at,expires_at,rejection_reason,created_at,updated_at
@@ -611,6 +612,9 @@ async function securityIdentityStatus(request, env) {
   }
 
   return json({ok:false,error:'FORBIDDEN',version:VERSION},403);
+  } catch {
+    return json({ok:false,error:'IDENTITY_SCHEMA_NOT_READY',version:VERSION},503);
+  }
 }
 
 async function securityIdentityApprove(request, env) {
