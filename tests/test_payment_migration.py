@@ -440,3 +440,70 @@ class NationalContinuityMigrationTests(unittest.TestCase):
             r"\bDELETE\s+FROM\b", r"^\s*UPDATE\s+"
         ):
             self.assertIsNone(re.search(forbidden, sql, flags=re.MULTILINE))
+
+
+COMMERCIAL_RECRUITMENT_MIGRATION = ROOT / "migrations" / "0015_commercial_recruitment_schema.sql"
+
+
+class CommercialRecruitmentMigrationTests(unittest.TestCase):
+    def setUp(self):
+        self.db = sqlite3.connect(":memory:")
+
+    def tearDown(self):
+        self.db.close()
+
+    def test_migration_runs_idempotently_and_creates_all_objects(self):
+        sql = COMMERCIAL_RECRUITMENT_MIGRATION.read_text(encoding="utf-8")
+        self.db.executescript(sql)
+        self.db.executescript(sql)
+        objects = {row[0] for row in self.db.execute(
+            "SELECT name FROM sqlite_master WHERE type IN ('table','index')"
+        )}
+        expected = {
+            "commercial_prospects", "idx_commercial_prospects_priority",
+            "commercial_playbooks", "recruitment_candidates",
+            "idx_recruitment_candidates", "copilot_growth_actions", "sales_results",
+        }
+        self.assertTrue(expected.issubset(objects))
+
+    def test_migration_has_no_destructive_sql(self):
+        sql = re.sub(r"--[^\n]*", "", COMMERCIAL_RECRUITMENT_MIGRATION.read_text(encoding="utf-8")).upper()
+        for forbidden in (r"\bDROP\s+TABLE\b", r"\bDROP\s+INDEX\b", r"\bDELETE\s+FROM\b"):
+            self.assertIsNone(re.search(forbidden, sql))
+
+
+BRAND_SUPPORT_COPILOT_MIGRATION = ROOT / "migrations" / "0017_brand_support_copilot_schema.sql"
+
+
+class BrandSupportCopilotMigrationTests(unittest.TestCase):
+    def setUp(self):
+        self.db = sqlite3.connect(":memory:")
+
+    def tearDown(self):
+        self.db.close()
+
+    def test_migration_runs_idempotently_and_seeds_required_controlled_defaults(self):
+        sql = BRAND_SUPPORT_COPILOT_MIGRATION.read_text(encoding="utf-8")
+        self.db.executescript(sql)
+        self.db.executescript(sql)
+        objects = {row[0] for row in self.db.execute(
+            "SELECT name FROM sqlite_master WHERE type IN ('table','index')"
+        )}
+        expected = {
+            "brand_identity", "brand_assets", "brand_clearance_log",
+            "interface_profiles", "support_cases", "support_case_events",
+            "copilot_resolution_rules", "idx_support_cases_status",
+            "idx_support_case_events_case", "idx_brand_assets_type", "idx_clearance_term",
+        }
+        self.assertTrue(expected.issubset(objects))
+        self.assertEqual(self.db.execute("SELECT COUNT(*) FROM interface_profiles").fetchone()[0], 4)
+        self.assertEqual(self.db.execute("SELECT COUNT(*) FROM copilot_resolution_rules").fetchone()[0], 10)
+        self.assertEqual(
+            self.db.execute("SELECT manager_approval_required FROM copilot_resolution_rules WHERE scenario_key='IDENTITY_SECURITY'").fetchone()[0],
+            1,
+        )
+
+    def test_migration_has_no_destructive_sql(self):
+        sql = re.sub(r"--[^\n]*", "", BRAND_SUPPORT_COPILOT_MIGRATION.read_text(encoding="utf-8")).upper()
+        for forbidden in (r"\bDROP\s+TABLE\b", r"\bDROP\s+INDEX\b", r"\bDELETE\s+FROM\b", r"^\s*UPDATE\s+"):
+            self.assertIsNone(re.search(forbidden, sql, flags=re.MULTILINE))
