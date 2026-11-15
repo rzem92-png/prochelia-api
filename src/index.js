@@ -523,6 +523,16 @@ async function requireVerifiedIntervenant(env, userId) {
   return row || null;
 }
 
+// Mission execution requires BOTH identity and professional-profile approval.
+// The server-side professional document review/storage workflow is not implemented
+// yet, so identity verification alone must never authorize a mission.
+const PROFESSIONAL_PROFILE_REVIEW_READY = false;
+
+async function requireMissionEligibleIntervenant(env, userId) {
+  if (!PROFESSIONAL_PROFILE_REVIEW_READY) return null;
+  return requireVerifiedIntervenant(env, userId);
+}
+
 async function deviceHash(request, userId) {
   const raw = [userId, request.headers.get('user-agent') || '', request.headers.get('sec-ch-ua') || ''].join('|');
   return sha256Base64url(raw);
@@ -657,8 +667,8 @@ async function securityPrepareMission(request, env) {
   const body = await readJson(request);
   const missionId=clean(body?.mission_id), clientId=clean(body?.client_id), intervenantId=clean(body?.intervenant_id);
   if(!missionId||!clientId||!intervenantId) return json({ok:false,error:'MISSION_SECURITY_FIELDS_REQUIRED',version:VERSION},400);
-  const verified = await requireVerifiedIntervenant(env,intervenantId);
-  if(!verified) return json({ok:false,error:'INTERVENANT_IDENTITY_NOT_VERIFIED',version:VERSION},409);
+  const verified = await requireMissionEligibleIntervenant(env,intervenantId);
+  if(!verified) return json({ok:false,error:'INTERVENANT_PROFILE_NOT_VERIFIED',version:VERSION},409);
   const existing=await env.DB.prepare('SELECT id,status FROM mission_security WHERE mission_id=? LIMIT 1').bind(missionId).first();
   if(existing) return json({ok:false,error:'MISSION_SECURITY_ALREADY_PREPARED',version:VERSION,status:existing.status},409);
   const arrival=securityCode(), end=securityCode();
@@ -690,8 +700,8 @@ async function securityPresence(request, env) {
   const auth=await getSessionUser(request,env);
   if(!requireRole(auth,['intervenant'])) return json({ok:false,error:auth?.user?'FORBIDDEN':'UNAUTHENTICATED',version:VERSION},auth?.user?403:401);
   await ensureSecuritySchema(env);
-  const identity = await requireVerifiedIntervenant(env, auth.user.id);
-  if(!identity) return json({ok:false,error:'INTERVENANT_IDENTITY_NOT_VERIFIED',version:VERSION},403);
+  const identity = await requireMissionEligibleIntervenant(env, auth.user.id);
+  if(!identity) return json({ok:false,error:'INTERVENANT_PROFILE_NOT_VERIFIED',version:VERSION},403);
   const body=await readJson(request), missionId=clean(body?.mission_id);
   if(!missionId) return json({ok:false,error:'MISSION_ID_REQUIRED',version:VERSION},400);
   const sec=await env.DB.prepare('SELECT * FROM mission_security WHERE mission_id=? AND intervenant_id=? LIMIT 1').bind(missionId,auth.user.id).first();
@@ -737,7 +747,7 @@ async function securityVerifyCode(request, env) {
   const identity = await requireVerifiedIntervenant(env, auth.user.id);
   if(!identity) {
     await securityAudit(env,'SECURITY_IDENTITY_RECHECK_FAILED',missionId,auth.user.id,auth.user.role,'DENIED',{});
-    return json({ok:false,error:'INTERVENANT_IDENTITY_NOT_VERIFIED',version:VERSION},403);
+    return json({ok:false,error:'INTERVENANT_PROFILE_NOT_VERIFIED',version:VERSION},403);
   }
   if(!sec.last_presence_at) {
     await securityAudit(env,'SECURITY_PRESENCE_REQUIRED',missionId,auth.user.id,auth.user.role,'DENIED',{purpose});
