@@ -3419,6 +3419,24 @@ async function strictProductionAudit(request,env){
   return json({ok:true,version:VERSION,production_gate:overall?'OPEN':'CLOSED',ready_for_real_traffic:overall,checks,blocking:blocking.map(x=>x.code),note:overall?'Configuration gate passed. A real production launch still requires sandbox/acceptance tests for PSP, notifications, identity/security, backups/restore and critical user journeys.':'Production traffic remains blocked until the listed blocking controls are configured and tested.'});
 }
 
+const PROCHELIA_CSRF_COOKIE = 'prochelia_csrf';
+const PROCHELIA_CSRF_TTL_SECONDS = 600;
+
+function validCsrfToken(value) {
+  return typeof value === 'string' && /^[A-Za-z0-9_-]{43}$/.test(value);
+}
+
+function csrfTokensMatch(cookieToken, headerToken) {
+  if (!validCsrfToken(cookieToken) || !validCsrfToken(headerToken)) return false;
+  let diff = cookieToken.length ^ headerToken.length;
+  for (let i = 0; i < 43; i++) diff |= cookieToken.charCodeAt(i) ^ headerToken.charCodeAt(i);
+  return diff === 0;
+}
+
+function csrfCookie(token) {
+  return `${PROCHELIA_CSRF_COOKIE}=${encodeURIComponent(token)}; Max-Age=${PROCHELIA_CSRF_TTL_SECONDS}; Path=/api; HttpOnly; Secure; SameSite=Strict`;
+}
+
 const __procheliaProductionSafetyHandle = handle;
 handle = async function(request,env){
   try{
@@ -3446,6 +3464,35 @@ handle = async function(request,env){
     if (getOnlyDiagnostics.has(preflightPath) && preflightMethod === 'HEAD') {
       const response = await __procheliaProductionSafetyHandle(new Request(request.url,{method:'GET',headers:request.headers}),env);
       return new Response(null,{status:response.status,headers:response.headers});
+    }
+    // Browser writes require a same-origin double-submit CSRF token.
+    // Pages preserves the browser Origin and forwards this HttpOnly cookie.
+    if (preflightPath === '/api/auth/csrf') {
+      if (preflightMethod !== 'GET') {
+        return json({ok:false,error:'METHOD_NOT_ALLOWED',version:VERSION},405,{'allow':'GET'});
+      }
+      if (request.headers.has('Origin') && !securityOriginAllowed(request,env)) {
+        return json({ok:false,error:'ORIGIN_NOT_ALLOWED',version:VERSION},403);
+      }
+      let token = getCookie(request, PROCHELIA_CSRF_COOKIE);
+      const headers = {};
+      if (!validCsrfToken(token)) {
+        token = base64url(randomBytes(32));
+        headers['set-cookie'] = csrfCookie(token);
+      }
+      return json({ok:true,csrf_token:token,expires_in:PROCHELIA_CSRF_TTL_SECONDS,version:VERSION},200,headers);
+    }
+    if (isMutatingMethod(preflightMethod)) {
+      const csrfExemptPaths = new Set(['/api/auth/login','/api/auth/bootstrap','/api/payments/webhook']);
+      // Browser-facing Pages requests carry Origin; non-browser service calls
+      // remain subject to their own authentication or provider-signature checks.
+      if (request.headers.has('Origin') && !csrfExemptPaths.has(preflightPath)) {
+        const cookieToken = getCookie(request, PROCHELIA_CSRF_COOKIE);
+        const headerToken = request.headers.get('X-CSRF-Token');
+        if (!csrfTokensMatch(cookieToken, headerToken)) {
+          return json({ok:false,error:'CSRF_TOKEN_INVALID',version:VERSION},403);
+        }
+      }
     }
     // Fail closed with a truthful service-unavailable response when a write
     // needs the persistent rate limiter but D1 is not bound.
