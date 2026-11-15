@@ -123,9 +123,6 @@ class IdentityMissionSecurityMigrationTests(unittest.TestCase):
             self.assertIsNone(re.search(forbidden, sql, flags=re.MULTILINE))
 
 
-if __name__ == "__main__":
-    unittest.main()
-
 
 STRATEGIC_COMMERCIAL_MIGRATION = ROOT / "migrations" / "0011_strategic_commercial_schema.sql"
 
@@ -517,3 +514,7 @@ class PaymentInvariantMigrationsTests(unittest.TestCase):
             sql = re.sub(r"--[^\n]*", "", path.read_text(encoding="utf-8")).upper()
             for forbidden in (r"\bDROP\s+TABLE\b", r"\bDROP\s+INDEX\b", r"\bDELETE\s+FROM\b", r"^\s*UPDATE\s+"):
                 self.assertIsNone(re.search(forbidden, sql, flags=re.MULTILINE))
+
+
+if __name__ == "__main__":
+    unittest.main()
