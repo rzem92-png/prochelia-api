@@ -5,6 +5,7 @@ import { enforceLoginRateLimit } from "../src/index.js";
 function mockEnv(countForBucket = () => 1) {
   const calls = [];
   const env = {
+    AUTH_RATE_LIMIT_SECRET: 'test-secret-that-is-at-least-32-characters-long',
     DB: {
       prepare(sql) {
         assert.match(sql, /INSERT INTO auth_login_rate_limits/);
@@ -72,4 +73,29 @@ test("raw email and IP are not persisted in rate-limit keys", async () => {
   const serialized = JSON.stringify(calls.map(x => x.args));
   assert.equal(serialized.includes("private@example.com"), false);
   assert.equal(serialized.includes("203.0.113.10"), false);
+});
+
+test("login limiter fails closed when the HMAC pepper is missing or too short", async () => {
+  const { env, calls } = mockEnv(() => 1);
+  delete env.AUTH_RATE_LIMIT_SECRET;
+  const request = new Request("https://prochelia.example/api/auth/login", {
+    method: "POST",
+    headers: { "CF-Connecting-IP": "203.0.113.10" }
+  });
+  const result = await enforceLoginRateLimit(request, env, "User@Example.com");
+  assert.equal(result.misconfigured, true);
+  assert.equal(calls.length, 0);
+});
+
+test("rate-limit identifiers are keyed and rotate when the server pepper changes", async () => {
+  const a = mockEnv(() => 1);
+  const b = mockEnv(() => 1);
+  b.env.AUTH_RATE_LIMIT_SECRET = "different-server-secret-at-least-32-chars";
+  const request = new Request("https://prochelia.example/api/auth/login", {
+    method: "POST",
+    headers: { "CF-Connecting-IP": "203.0.113.10" }
+  });
+  await enforceLoginRateLimit(request, a.env, "User@Example.com");
+  await enforceLoginRateLimit(request, b.env, "User@Example.com");
+  assert.notEqual(a.calls[0].args[2], b.calls[0].args[2]);
 });
