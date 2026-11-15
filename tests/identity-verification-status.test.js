@@ -29,3 +29,13 @@ test("only the GERANTE role can read the verification review queue", () => {
   assert.match(handler, /LIMIT 100/);
   assert.match(handler, /FORBIDDEN/);
 });
+
+test("identity status GET never performs schema DDL and fails closed if migrations are missing", () => {
+  const start = source.indexOf("async function securityIdentityStatus");
+  const end = source.indexOf("async function securityIdentityApprove", start);
+  assert.ok(start >= 0 && end > start);
+  const handler = source.slice(start, end);
+  assert.doesNotMatch(handler, /ensureSecuritySchema/);
+  assert.match(handler, /IDENTITY_SCHEMA_NOT_READY/);
+  assert.match(handler, /},503\)/);
+});
