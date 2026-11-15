@@ -672,6 +672,24 @@ export async function handleV7Route(
     // =================================================
     // DSA — SIGNALEMENT DE CONTENU / SERVICE
     // =================================================
+    if (path === "/api/compliance/notices" && method === "GET") {
+      if (!auth?.user?.id) {
+        return Response.json({ ok: false, error: "UNAUTHENTICATED" }, { status: 401 });
+      }
+      if (!env?.DB) {
+        return Response.json({ ok: false, error: "COMPLIANCE_STORE_UNAVAILABLE" }, { status: 503 });
+      }
+      const result = await env.DB.prepare(
+        `SELECT id, subject_type, subject_id, notice_type, status, received_at,
+                decided_at, decision_reason, outcome_notified_at
+         FROM dsa_notices WHERE reporter_user_id = ?
+         ORDER BY received_at DESC LIMIT 100`
+      ).bind(auth.user.id).all();
+      return Response.json({ ok: true, notices: result?.results || [] }, {
+        headers: { "cache-control": "no-store" }
+      });
+    }
+
     if (path === "/api/compliance/notices" && method === "POST") {
       if (!auth?.user?.id) {
         return Response.json(
