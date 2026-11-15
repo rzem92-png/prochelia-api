@@ -43,25 +43,3 @@ CREATE TABLE IF NOT EXISTS sales_results (
       amount_cents INTEGER, margin_cents INTEGER, source TEXT, notes TEXT,
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
-
-Bonjour, je reviens vers vous concernant PROCHÉLIA. Je reste disponible pour voir si notre solution peut répondre à vos besoins ${t==='INTERVENANT'?'de missions et d’activité':'d’intervention'}.;
-
-Bonjour ${name}, je vous contacte au nom de PROCHÉLIA. Nous proposons une solution organisée pour ${need}. L’objectif est de vous faire gagner du temps et de disposer d’une solution souple lorsque vous avez besoin d’interventions fiables et structurées. Seriez-vous disponible pour un échange de 10 minutes afin de voir si cela peut être utile à ${org} ?;
-
-Merci pour votre intérêt. Avant de vous présenter PROCHÉLIA en détail, j’aimerais comprendre ${need}. Quels sont aujourd’hui vos principaux besoins, vos contraintes de délai et votre fréquence d’intervention ?;
-
-PROCHÉLIA accompagne ${target==='INTERVENANT'?'les intervenants dans le développement et l’organisation de leur activité':target==='B2C'?'les particuliers dans leurs besoins d’intervention':'les entreprises dans l’organisation de leurs besoins d’intervention'}. La plateforme centralise les demandes, la mise en relation, le suivi et la traçabilité afin de simplifier le parcours.;
-
-Bonjour ${name}, je reviens vers vous au sujet de PROCHÉLIA. Je voulais simplement vérifier si ${need} est toujours d’actualité. Si oui, je peux vous proposer une solution adaptée sans vous faire perdre de temps.;
-
-Au regard de votre besoin, je vous propose que nous validions la prochaine étape : un premier échange, une première mission ou une proposition adaptée à votre volume. L’objectif est de commencer simplement et de mesurer les résultats.;
-
-Pour ${org}, je recommande de mettre en avant ${benefits.slice(0,3).join(', ')}. ${g.objective}.;
-
-Quel est votre besoin principal aujourd’hui ?;
-
-À quelle fréquence ce besoin se présente-t-il ?;
-
-Quelles sont vos principales contraintes (délai, zone, budget, disponibilité) ?;
-
-Qu’est-ce qui ferait qu’une solution serait réellement utile pour vous ?;
