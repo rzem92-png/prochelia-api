@@ -451,6 +451,12 @@ class BrandSupportCopilotMigrationTests(unittest.TestCase):
             self.db.execute("SELECT manager_approval_required FROM copilot_resolution_rules WHERE scenario_key='IDENTITY_SECURITY'").fetchone()[0],
             1,
         )
+        refund_rule = self.db.execute(
+            "SELECT auto_allowed,manager_approval_required,steps_json FROM copilot_resolution_rules WHERE scenario_key='SIMPLE_REFUND_CHECK'"
+        ).fetchone()
+        self.assertEqual(refund_rule[0], 0)
+        self.assertEqual(refund_rule[1], 1)
+        self.assertIn("manager_approval", refund_rule[2])
 
     def test_migration_has_no_destructive_sql(self):
         sql = re.sub(r"--[^\n]*", "", BRAND_SUPPORT_COPILOT_MIGRATION.read_text(encoding="utf-8")).upper()
