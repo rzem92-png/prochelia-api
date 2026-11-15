@@ -26,6 +26,14 @@ if (typeof csrfToken !== "string" || !/^[A-Za-z0-9_-]{43}$/.test(csrfToken)) {
 }
 const setCookie = csrfResponse.headers.get("set-cookie") || "";
 const csrfCookie = setCookie.split(";")[0];
+console.log("CSRF cookie diagnostics", {
+  headerPresent: Boolean(setCookie),
+  cookieNamePresent: csrfCookie.startsWith("prochelia_csrf="),
+  httpOnly: /;\\s*httponly/i.test(setCookie),
+  secure: /;\\s*secure/i.test(setCookie),
+  sameSiteStrict: /;\\s*samesite=strict/i.test(setCookie),
+  headerNames: [...csrfResponse.headers.keys()]
+});
 if (!csrfCookie.startsWith("prochelia_csrf=") ||
     !/;\\s*httponly/i.test(setCookie) ||
     !/;\\s*secure/i.test(setCookie) ||
