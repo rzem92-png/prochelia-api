@@ -190,3 +190,28 @@ test("DSA notice endpoint fails closed when compliance storage is unavailable", 
   assert.equal(response.status, 503);
   assert.equal((await response.json()).error, "COMPLIANCE_STORE_UNAVAILABLE");
 });
+
+
+test("DSA notice status listing is authenticated and scoped to the session reporter", async () => {
+  let values = [];
+  let sql = "";
+  const env = { DB: { prepare(query) {
+    sql = query;
+    return { bind(...args) { values = args; return this; }, async all() { return { results: [{ id: "n1", status: "RECEIVED" }] }; } };
+  } } };
+  const denied = await handleV7Route(
+    new Request("https://example.test/api/compliance/notices"),
+    env, "/api/compliance/notices", null
+  );
+  assert.equal(denied.status, 401);
+
+  const allowed = await handleV7Route(
+    new Request("https://example.test/api/compliance/notices"),
+    env, "/api/compliance/notices",
+    { user: { id: "reporter-real", role: "client" } }
+  );
+  assert.equal(allowed.status, 200);
+  assert.match(sql, /WHERE reporter_user_id = \?/);
+  assert.equal(values[0], "reporter-real");
+  assert.deepEqual((await allowed.json()).notices, [{ id: "n1", status: "RECEIVED" }]);
+});
