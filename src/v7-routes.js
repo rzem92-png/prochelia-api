@@ -764,9 +764,18 @@ export async function handleV7Route(
       }
 
       const id = crypto.randomUUID();
-      await env.DB.prepare(
-        "INSERT INTO moderation_appeals (id, decision_id, appellant_user_id, grounds, status) VALUES (?, ?, ?, ?, 'SUBMITTED')"
-      ).bind(id, decisionId, auth.user.id, grounds).run();
+      try {
+        await env.DB.prepare(
+          "INSERT INTO moderation_appeals (id, decision_id, appellant_user_id, grounds, status) VALUES (?, ?, ?, ?, 'SUBMITTED')"
+        ).bind(id, decisionId, auth.user.id, grounds).run();
+      } catch (error) {
+        // The partial unique index is the final race-safe guard.
+        if (String(error?.message || "").includes("uq_moderation_appeals_pending") ||
+            String(error?.message || "").includes("moderation_appeals.decision_id, moderation_appeals.appellant_user_id")) {
+          return Response.json({ ok: false, error: "APPEAL_ALREADY_PENDING" }, { status: 409 });
+        }
+        throw error;
+      }
       return Response.json({ ok: true, appeal: { id, decision_id: decisionId, status: "SUBMITTED" } }, {
         status: 201, headers: { "cache-control": "no-store" }
       });
