@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { handleV7Route } from "../src/v7-routes.js";
 import { directoryList } from "../src/index.js";
+import worker from "../src/index.js";
 
 const post = (path, body) => new Request("https://example.test" + path, {
   method: "POST",
@@ -294,4 +295,14 @@ test("DSA appeal endpoint rejects a second pending appeal for the same decision"
   );
   assert.equal(response.status, 409);
   assert.equal((await response.json()).error, "APPEAL_ALREADY_PENDING");
+});
+
+
+test("Worker dispatch routes DSA compliance paths through authenticated V7 handler", async () => {
+  const response = await worker.fetch(
+    new Request("https://example.test/api/compliance/notices", { method: "GET" }),
+    {}
+  );
+  assert.equal(response.status, 401);
+  assert.equal((await response.json()).error, "UNAUTHENTICATED");
 });
