@@ -10,7 +10,7 @@ test("mission execution remains fail-closed until professional profile review is
   const end = source.indexOf("\n}", start);
   assert.ok(start >= 0 && end > start, "mission eligibility guard must exist");
   const guard = source.slice(start, end + 2);
-  assert.match(guard, /if\(!PROFESSIONAL_PROFILE_REVIEW_READY\) return null;/);
+  assert.match(guard, /if\s*\(!PROFESSIONAL_PROFILE_REVIEW_READY\) return null;/);
   assert.match(guard, /return requireVerifiedIntervenant\(env, userId\);/);
 });
 
