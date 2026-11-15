@@ -1,4 +1,4 @@
-# PROCHÉLIA — D1 schema reconciliation snapshot (2026-11-14)
+# PROCHÉLIA — D1 schema reconciliation snapshot (2026-11-15)
 
 ## Status
 
@@ -73,3 +73,43 @@ Production has no `d1_migrations` table, so Wrangler's migration history cannot 
 - Do not merge this inventory as evidence that Production is ready.
 
 The current state remains **NO-GO** until a reviewed Production baseline and tested reconciliation plan exist.
+
+
+## Addendum — read-only validation (2026-11-15)
+
+A further read-only pass was performed after the initial snapshot. No D1 writes, migrations, or deployments were made.
+
+### Integrity checks
+
+- Production PRAGMA quick_check: ok.
+- Preview PRAGMA quick_check: ok.
+- Production and Preview PRAGMA foreign_key_check: zero returned rows.
+- users.password_hash IS NULL: zero rows in both environments.
+
+These checks establish SQLite structural/foreign-key consistency for the inspected snapshots; they do not establish schema equivalence, application correctness, tenant isolation, backup restorability, or release readiness.
+
+### Column-level confirmation
+
+The focused column comparison of the 16 shared table names reconfirmed:
+
+- clients, intervenants, and prestations: Production lacks created_at and updated_at, which exist in Preview.
+- users.status: Production default is 'pending'; Preview default is 'active'.
+- users.password_hash: nullable in Production, NOT NULL in Preview; the current row-level null count is zero in both environments.
+
+No other column differences were found in the remaining tables included in that 16-table focused comparison. This is not a claim that all DDL differences have been exhausted: CHECK constraints, generated/hidden columns, indexes, triggers, foreign-key actions, collations, and every table definition still require a complete canonical comparison.
+
+### Migration safety finding
+
+migrations/0001_core_business_schema.sql uses CREATE TABLE IF NOT EXISTS for core tables. On an already-existing Production table, that statement does not add columns that are absent from the existing table. Therefore, replaying this migration cannot repair the missing timestamp columns on clients, intervenants, or prestations.
+
+A reconciliation migration must be schema-aware and conditional. It must not blindly issue ALTER TABLE ... ADD COLUMN because Preview already has those columns. SQLite also imposes restrictions on adding columns with non-constant defaults to populated tables. The exact strategy (including backfill, defaults, triggers, or table rebuild where necessary) must be proven on an isolated restored copy before any environment is changed.
+
+### Updated release decision
+
+**NO-GO remains in force.** Do not apply migrations remotely, fabricate Production migration history, merge the stacked schema PRs, deploy, or activate payments until:
+1. a complete DDL inventory and reviewed Production baseline exist;
+2. a recent encrypted Production backup is restored successfully into the pinned isolated D1 target;
+3. the conditional reconciliation is tested against that restored copy with row-count, data-invariant, FK, index, trigger, and application regression checks;
+4. independent security, privacy, legal, and operational sign-off is recorded.
+
+The previous inventory and this addendum are evidence of a controlled read-only audit, not a production authorization.
