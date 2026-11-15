@@ -136,3 +136,18 @@ for statement, label in [
         pass
 
 print(f"PASS: {len(list(MIGRATIONS.glob('*.sql')))} migrations; payment invariants and DSA/AI Act evidence constraints verified.")
+
+
+# At most one pending appeal per user and decision, enforced against races in the DB.
+DB.execute("""
+    INSERT INTO moderation_appeals(id,decision_id,appellant_user_id,grounds,status)
+    VALUES('appeal-pending-1','decision-unique','user-unique','Initial appeal','SUBMITTED')
+""")
+try:
+    DB.execute("""
+        INSERT INTO moderation_appeals(id,decision_id,appellant_user_id,grounds,status)
+        VALUES('appeal-pending-2','decision-unique','user-unique','Duplicate appeal','UNDER_REVIEW')
+    """)
+    raise AssertionError("duplicate pending appeal unexpectedly accepted")
+except sqlite3.IntegrityError:
+    pass
