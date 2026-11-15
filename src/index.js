@@ -1863,6 +1863,18 @@ async function supraPlan(request, env) {
     actorRole:gate.auth.user.role,context:governanceContext
   });
   const missingEvidence=[...new Set([...(plan.missingEvidence||[]),...(governance.missingEvidence||[])])];
+  // Persist a minimal, structured audit event before returning the plan. No free text,
+  // evidence documents, credentials or client-supplied verification flags are recorded.
+  await journal(env,'gerante',gate.auth.user.id,'SUPRA_PLAN_GENERATED','supra_plan',null,'OK',{
+    caseType:plan.caseType,
+    domain:plan.domain,
+    requestedAction:plan.requestedAction,
+    impact:plan.impact,
+    market:plan.marketPack.market,
+    risk:governance.risk,
+    autonomy:governance.autonomy,
+    missingEvidence
+  });
   return json({
     ok:true,version:VERSION,plan:{
       ...plan,
@@ -1877,7 +1889,7 @@ async function supraPlan(request, env) {
 
 async function handleConsolidated(request, env) {
   const url=new URL(request.url);
-  const consolidatedPath = ['/api/consolidated/info','/api/ops/dashboard','/api/journal','/api/cases','/api/cases/approve','/api/metiers','/api/metiers/suggest','/api/pricing/quote','/api/finance/summary','/api/complaints','/api/settings/phase'].includes(url.pathname);
+  const consolidatedPath = ['/api/consolidated/info','/api/ops/dashboard','/api/journal','/api/cases','/api/cases/approve','/api/metiers','/api/metiers/suggest','/api/pricing/quote','/api/finance/summary','/api/complaints','/api/settings/phase','/api/supra/plan'].includes(url.pathname);
   if (consolidatedPath) {
     try { await ensureConsolidatedSchema(env); } catch (e) { return json({ok:false,error:'CONSOLIDATED_SCHEMA_ERROR',version:VERSION,message:e.message},500); }
   }
