@@ -540,6 +540,68 @@ async function securityIdentityStart(request, env) {
   return json({ok:true,version:VERSION,verification_id:id,status:'pending',message:'Vérification d’identité requise avant l’accès aux missions.'},201);
 }
 
+async function securityIdentityStatus(request, env) {
+  const auth = await getSessionUser(request, env);
+  if (!auth?.user) return json({ok:false,error:'UNAUTHENTICATED',version:VERSION},401);
+  await ensureSecuritySchema(env);
+
+  if (auth.user.role === 'intervenant') {
+    const row = await env.DB.prepare(
+      `SELECT id,status,level,provider,verified_at,expires_at,rejection_reason,created_at,updated_at
+         FROM identity_verifications
+        WHERE user_id=?
+        ORDER BY created_at DESC
+        LIMIT 1`
+    ).bind(auth.user.id).first();
+
+    const valid = !!row && row.status === 'verified' &&
+      (!row.expires_at || new Date(row.expires_at).getTime() > Date.now());
+
+    return json({
+      ok:true,
+      version:VERSION,
+      role:'intervenant',
+      verification:row ? {
+        id:row.id,
+        status:row.status,
+        level:row.level,
+        provider:row.provider,
+        verified_at:row.verified_at,
+        expires_at:row.expires_at,
+        rejection_reason:row.rejection_reason,
+        created_at:row.created_at,
+        updated_at:row.updated_at
+      } : null,
+      identity_gate_passed:valid,
+      authority:'SERVER_D1'
+    },200);
+  }
+
+  if (auth.user.role === 'gerante') {
+    const result = await env.DB.prepare(
+      `SELECT iv.id,iv.user_id,u.first_name,u.last_name,u.email,
+              iv.status,iv.level,iv.provider,iv.verified_at,iv.expires_at,
+              iv.rejection_reason,iv.created_at,iv.updated_at
+         FROM identity_verifications iv
+         JOIN users u ON u.id=iv.user_id
+        ORDER BY CASE iv.status WHEN 'pending' THEN 0 WHEN 'verified' THEN 1 ELSE 2 END,
+                 iv.created_at DESC
+        LIMIT 100`
+    ).all();
+
+    return json({
+      ok:true,
+      version:VERSION,
+      role:'gerante',
+      authority:'SERVER_D1',
+      total:result.results?.length || 0,
+      verifications:result.results || []
+    },200);
+  }
+
+  return json({ok:false,error:'FORBIDDEN',version:VERSION},403);
+}
+
 async function securityIdentityApprove(request, env) {
   const auth = await getSessionUser(request, env);
   if (!requireRole(auth, ['gerante'])) return json({ok:false,error:auth?.user?'FORBIDDEN':'UNAUTHENTICATED',version:VERSION}, auth?.user?403:401);
@@ -1208,6 +1270,10 @@ async function handleBase(request, env) {
   if (url.pathname === '/api/security/identity/approve') {
     if (request.method !== 'POST') return json({ ok:false,error:'METHOD_NOT_ALLOWED',version:VERSION },405);
     return securityIdentityApprove(request, env);
+  }
+  if (url.pathname === '/api/security/identity/status') {
+    if (request.method !== 'GET') return json({ ok:false,error:'METHOD_NOT_ALLOWED',version:VERSION },405);
+    return securityIdentityStatus(request, env);
   }
   if (url.pathname === '/api/security/mission/prepare') {
     if (request.method !== 'POST') return json({ ok:false,error:'METHOD_NOT_ALLOWED',version:VERSION },405);
