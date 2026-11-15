@@ -330,3 +330,61 @@ class FinanceWorkspaceMigrationTests(unittest.TestCase):
             r"\bDELETE\s+FROM\b", r"^\s*UPDATE\s+"
         ):
             self.assertIsNone(re.search(forbidden, sql, flags=re.MULTILINE))
+
+
+OPERATIONAL_MIGRATION = ROOT / "migrations" / "0014_operational_schema.sql"
+
+
+class OperationalMigrationTests(unittest.TestCase):
+    def setUp(self):
+        self.db = sqlite3.connect(":memory:")
+        self.db.execute("PRAGMA foreign_keys=ON")
+
+    def tearDown(self):
+        self.db.close()
+
+    def test_migration_runs_idempotently_and_creates_all_objects(self):
+        sql = OPERATIONAL_MIGRATION.read_text(encoding="utf-8")
+        self.db.executescript(sql)
+        self.db.executescript(sql)
+        objects = {row[0] for row in self.db.execute(
+            "SELECT name FROM sqlite_master WHERE type IN ('table','index')"
+        )}
+        expected = {
+            "action_outbox", "idx_action_outbox_status",
+            "copilot_briefings", "idx_copilot_briefings_open",
+            "loyalty_events", "loyalty_balances", "quality_events",
+            "b2b_leads", "capacity_snapshots", "idx_capacity_date",
+            "finance_forecasts", "system_checks",
+        }
+        self.assertTrue(expected.issubset(objects))
+        columns = {row[1] for row in self.db.execute("PRAGMA table_info(action_outbox)")}
+        self.assertTrue({"case_id", "processed_at"}.issubset(columns))
+
+    def test_migration_preserves_action_idempotency_and_loyalty_uniqueness(self):
+        self.db.executescript(OPERATIONAL_MIGRATION.read_text(encoding="utf-8"))
+        self.db.execute(
+            "INSERT INTO action_outbox(id,action_type,idempotency_key) VALUES('a1','TEST','same')"
+        )
+        with self.assertRaises(sqlite3.IntegrityError):
+            self.db.execute(
+                "INSERT INTO action_outbox(id,action_type,idempotency_key) VALUES('a2','TEST','same')"
+            )
+        self.db.execute(
+            "INSERT INTO loyalty_balances(id,client_id,company_id) VALUES('l1','c1','co1')"
+        )
+        with self.assertRaises(sqlite3.IntegrityError):
+            self.db.execute(
+                "INSERT INTO loyalty_balances(id,client_id,company_id) VALUES('l2','c1','co1')"
+            )
+
+    def test_migration_has_no_destructive_sql(self):
+        sql = re.sub(
+            r"--[^\n]*", "",
+            OPERATIONAL_MIGRATION.read_text(encoding="utf-8")
+        ).upper()
+        for forbidden in (
+            r"\bDROP\s+TABLE\b", r"\bDROP\s+INDEX\b",
+            r"\bDELETE\s+FROM\b", r"^\s*UPDATE\s+"
+        ):
+            self.assertIsNone(re.search(forbidden, sql, flags=re.MULTILINE))
