@@ -3147,6 +3147,34 @@ async function ensureProcheliaMasterComplementSchema(env) {
   if (missing.length) {
     throw new Error(`PROCHELIA_MASTER_SCHEMA_NOT_READY:${missing.join(',')}`);
   }
+  const brand = await env.DB.prepare(
+    "SELECT brand_key FROM brand_identity WHERE brand_key='PROCHELIA' LIMIT 1"
+  ).first();
+  if (!brand) throw new Error('PROCHELIA_BRAND_SEED_NOT_READY');
+  const requiredRoles = ['CLIENT', 'SOCIETE', 'INTERVENANT', 'GERANTE'];
+  const rolePlaceholders = requiredRoles.map(() => '?').join(',');
+  const roleResult = await env.DB.prepare(
+    `SELECT role FROM interface_profiles WHERE role IN (${rolePlaceholders})`
+  ).bind(...requiredRoles).all();
+  const presentRoles = new Set((roleResult?.results || []).map(row => String(row.role)));
+  const missingRoles = requiredRoles.filter(role => !presentRoles.has(role));
+  if (missingRoles.length) {
+    throw new Error(`PROCHELIA_INTERFACE_PROFILES_NOT_READY:${missingRoles.join(',')}`);
+  }
+  const requiredScenarios = [
+    'DELAY_LIGHT', 'NOTIFICATION_FAILED', 'DOCUMENT_REMINDER', 'SIMPLE_REFUND_CHECK',
+    'DUPLICATE_PAYMENT', 'IDENTITY_SECURITY', 'DATA_INCIDENT', 'LEGAL_DISPUTE',
+    'INTERVENANT_ABSENT', 'CLIENT_COMPLAINT'
+  ];
+  const scenarioPlaceholders = requiredScenarios.map(() => '?').join(',');
+  const scenarioResult = await env.DB.prepare(
+    `SELECT scenario_key FROM copilot_resolution_rules WHERE scenario_key IN (${scenarioPlaceholders})`
+  ).bind(...requiredScenarios).all();
+  const presentScenarios = new Set((scenarioResult?.results || []).map(row => String(row.scenario_key)));
+  const missingScenarios = requiredScenarios.filter(key => !presentScenarios.has(key));
+  if (missingScenarios.length) {
+    throw new Error(`PROCHELIA_COPILOT_RULES_NOT_READY:${missingScenarios.join(',')}`);
+  }
 }
 async function supportAuth(request,env){
   const auth=await getSessionUser(request,env).catch(()=>null);
