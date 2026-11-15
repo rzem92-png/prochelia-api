@@ -3080,64 +3080,33 @@ const PROCHELIA_UI = Object.freeze({
   }
 });
 
-async function ensureProcheliaMasterComplementSchema(env){
-  if(!env.DB) throw new Error('DATABASE_REQUIRED');
-  const sqls=[
-    `CREATE TABLE IF NOT EXISTS brand_identity (id TEXT PRIMARY KEY, brand_key TEXT NOT NULL UNIQUE, name TEXT NOT NULL, visual_json TEXT NOT NULL, uniqueness_policy_json TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'ACTIVE', created_at TEXT DEFAULT CURRENT_TIMESTAMP, updated_at TEXT DEFAULT CURRENT_TIMESTAMP)`,
-    `CREATE TABLE IF NOT EXISTS brand_assets (id TEXT PRIMARY KEY, asset_type TEXT NOT NULL, asset_name TEXT NOT NULL, storage_key TEXT, checksum TEXT, version TEXT, status TEXT NOT NULL DEFAULT 'ACTIVE', metadata_json TEXT, created_at TEXT DEFAULT CURRENT_TIMESTAMP)`,
-    `CREATE TABLE IF NOT EXISTS brand_clearance_log (id TEXT PRIMARY KEY, search_type TEXT NOT NULL, term TEXT NOT NULL, source TEXT, result TEXT, evidence_ref TEXT, checked_at TEXT DEFAULT CURRENT_TIMESTAMP, notes TEXT)`,
-    `CREATE TABLE IF NOT EXISTS interface_profiles (id TEXT PRIMARY KEY, role TEXT NOT NULL UNIQUE, config_json TEXT NOT NULL, version TEXT NOT NULL, updated_at TEXT DEFAULT CURRENT_TIMESTAMP)`,
-    `CREATE TABLE IF NOT EXISTS support_cases (id TEXT PRIMARY KEY, source_role TEXT NOT NULL, requester_id TEXT, company_id TEXT, mission_id TEXT, complaint_id TEXT, category TEXT NOT NULL, severity TEXT NOT NULL DEFAULT 'LOW', status TEXT NOT NULL DEFAULT 'OPEN', description TEXT, proposed_resolution TEXT, resolution TEXT, requires_manager INTEGER NOT NULL DEFAULT 0, created_at TEXT DEFAULT CURRENT_TIMESTAMP, resolved_at TEXT)`,
-    `CREATE TABLE IF NOT EXISTS support_case_events (id TEXT PRIMARY KEY, case_id TEXT NOT NULL, actor_role TEXT, actor_id TEXT, event_type TEXT NOT NULL, details_json TEXT, created_at TEXT DEFAULT CURRENT_TIMESTAMP)`,
-    `CREATE TABLE IF NOT EXISTS copilot_resolution_rules (id TEXT PRIMARY KEY, scenario_key TEXT NOT NULL UNIQUE, category TEXT NOT NULL, severity TEXT NOT NULL, auto_allowed INTEGER NOT NULL DEFAULT 0, manager_approval_required INTEGER NOT NULL DEFAULT 1, steps_json TEXT NOT NULL, updated_at TEXT DEFAULT CURRENT_TIMESTAMP)`,
-    `CREATE INDEX IF NOT EXISTS idx_support_cases_status ON support_cases(status,severity,created_at)`,
-    `CREATE INDEX IF NOT EXISTS idx_support_case_events_case ON support_case_events(case_id,created_at)`,
-    `CREATE INDEX IF NOT EXISTS idx_brand_assets_type ON brand_assets(asset_type,status)`,
-    `CREATE INDEX IF NOT EXISTS idx_clearance_term ON brand_clearance_log(term,checked_at)`
-  ];
-  for(const q of sqls) await env.DB.prepare(q).run();
-  await env.DB.prepare(`INSERT OR IGNORE INTO brand_identity(id,brand_key,name,visual_json,uniqueness_policy_json) VALUES(?,?,?,?,?)`)
-    .bind(crypto.randomUUID(),'PROCHELIA',PROCHELIA_BRAND.name,JSON.stringify(PROCHELIA_BRAND.visual),JSON.stringify(PROCHELIA_BRAND.uniqueness_policy)).run();
-  for(const [role,config] of Object.entries(PROCHELIA_UI)){
-    await env.DB.prepare(`INSERT OR IGNORE INTO interface_profiles(id,role,config_json,version) VALUES(?,?,?,?)`)
-      .bind(crypto.randomUUID(),role,JSON.stringify(config),VERSION).run();
-  }
-  const rules={
-    DELAY_LIGHT:{category:'DELAY',severity:'LOW',auto:1,manager:0,steps:['verify_mission','recalculate_eta','notify_client','journal','close_if_resolved']},
-    NOTIFICATION_FAILED:{category:'TECHNICAL',severity:'LOW',auto:1,manager:0,steps:['retry_notification','verify_delivery','fallback_channel','journal','close_if_resolved']},
-    DOCUMENT_REMINDER:{category:'DOCUMENT',severity:'LOW',auto:1,manager:0,steps:['identify_missing_document','notify_owner','create_follow_up','journal']},
-    SIMPLE_REFUND_CHECK:{category:'PAYMENT',severity:'LOW',auto:1,manager:0,steps:['reconcile_transaction','verify_refund_eligibility','prepare_or_execute_allowed_action','notify','journal']},
-    DUPLICATE_PAYMENT:{category:'PAYMENT',severity:'HIGH',auto:0,manager:1,steps:['freeze_duplicate_action','reconcile_psp','calculate_exposure','propose_resolution','manager_approval','notify','journal']},
-    IDENTITY_SECURITY:{category:'SECURITY',severity:'CRITICAL',auto:0,manager:1,steps:['lock_sensitive_action','preserve_evidence','risk_assessment','manager_approval','notify_if_required','journal']},
-    DATA_INCIDENT:{category:'RGPD_SECURITY',severity:'CRITICAL',auto:0,manager:1,steps:['contain','preserve_evidence','classify','compliance_review','manager_approval','journal']},
-    LEGAL_DISPUTE:{category:'LEGAL',severity:'CRITICAL',auto:0,manager:1,steps:['collect_evidence','freeze_irreversible_action','legal_review','manager_approval','notify','journal']},
-    INTERVENANT_ABSENT:{category:'REPLACEMENT',severity:'HIGH',auto:0,manager:1,steps:['verify_absence','check_available_intervenants','propose_replacement','manager_approval','notify','journal']},
-    CLIENT_COMPLAINT:{category:'COMPLAINT',severity:'MEDIUM',auto:1,manager:0,steps:['acknowledge','collect_evidence','reconcile_mission','reconcile_finance','propose_resolution','notify','journal','close_if_resolved']}
-  };
-  for(const [k,v] of Object.entries(rules)){
-    await env.DB.prepare(`INSERT OR IGNORE INTO copilot_resolution_rules(id,scenario_key,category,severity,auto_allowed,manager_approval_required,steps_json) VALUES(?,?,?,?,?,?,?)`)
-      .bind(crypto.randomUUID(),k,v.category,v.severity,v.auto,v.manager,JSON.stringify(v.steps)).run();
+async function ensureProcheliaMasterComplementSchema(env) {
+  if (!env.DB) throw new Error('DATABASE_REQUIRED');
+  // Runtime verification only; schema and seed records belong to migration 0017.
+  const requiredObjects = [
+  "brand_identity",
+  "brand_assets",
+  "brand_clearance_log",
+  "interface_profiles",
+  "support_cases",
+  "support_case_events",
+  "copilot_resolution_rules",
+  "idx_support_cases_status",
+  "idx_support_case_events_case",
+  "idx_brand_assets_type",
+  "idx_clearance_term"
+];
+  const placeholders = requiredObjects.map(() => '?').join(',');
+  const result = await env.DB.prepare(
+    `SELECT name FROM sqlite_master
+      WHERE type IN ('table','index') AND name IN (${placeholders})`
+  ).bind(...requiredObjects).all();
+  const present = new Set((result?.results || []).map(row => String(row.name)));
+  const missing = requiredObjects.filter(name => !present.has(name));
+  if (missing.length) {
+    throw new Error(`PROCHELIA_MASTER_SCHEMA_NOT_READY:${missing.join(',')}`);
   }
 }
-
-function supportRoleAllowed(role){return ['CLIENT','SOCIETE','INTERVENANT','GERANTE','ADMIN'].includes(String(role||'').toUpperCase())}
-function supportRoleNormalize(role){
-  const r=String(role||'').toUpperCase();
-  return r==='COMPANY'||r==='ENTREPRISE'?'SOCIETE':r;
-}
-function supportScenarioFor(category,severity){
-  const c=String(category||'').toUpperCase();
-  if(['IDENTITY','SECURITY','FRAUD','DATA_BREACH','RGPD'].some(x=>c.includes(x))) return 'IDENTITY_SECURITY';
-  if(['LEGAL','LITIGE'].some(x=>c.includes(x))) return 'LEGAL_DISPUTE';
-  if(['ABSENCE','REPLACEMENT'].some(x=>c.includes(x))) return 'INTERVENANT_ABSENT';
-  if(['DUPLICATE','DOUBLE_PAYMENT'].some(x=>c.includes(x))) return 'DUPLICATE_PAYMENT';
-  if(['PAYMENT','REFUND','FACTURE'].some(x=>c.includes(x)) && String(severity).toUpperCase()==='LOW') return 'SIMPLE_REFUND_CHECK';
-  if(['DELAY','RETARD'].some(x=>c.includes(x)) && String(severity).toUpperCase()==='LOW') return 'DELAY_LIGHT';
-  if(['NOTIFICATION','TECHNICAL'].some(x=>c.includes(x)) && String(severity).toUpperCase()==='LOW') return 'NOTIFICATION_FAILED';
-  if(['DOCUMENT'].some(x=>c.includes(x)) && String(severity).toUpperCase()==='LOW') return 'DOCUMENT_REMINDER';
-  return 'CLIENT_COMPLAINT';
-}
-
 async function supportAuth(request,env){
   const auth=await getSessionUser(request,env).catch(()=>null);
   if(!auth?.user?.id) return {response:json({ok:false,error:'UNAUTHORIZED',version:VERSION},401)};
