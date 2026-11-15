@@ -36,6 +36,10 @@ jobs:
       - name: Lint guarded Preview deployment workflows
         run: |
           go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
-          "$HOME/go/bin/actionlint" .github/workflows/deploy-preview-worker-manual.yml .github/workflows/preview-directory-e2e-acceptance.yml
+          "$HOME/go/bin/actionlint" .github/workflows/v7-security-tests.yml .github/workflows/deploy-preview-worker-manual.yml .github/workflows/preview-directory-e2e-acceptance.yml
       - name: Run V7 authorization regression tests
-        run: node --experimental-default-type=module --test tests/v7-security.test.js tests/deploy-preview-workflow.test.mjs tests/preview-e2e-workflow.test.mjs tests/payment-webhook-security.test.js tests/mission-security-atomic.test.js tests/payout-atomicity.test.js tests/payment-settlement-guard.test.js tests/payment-webhook-settlement-gate.test.js tests/bootstrap-atomic.test.js
+        run: node --experimental-default-type=module --test tests/v7-security.test.js tests/deploy-preview-workflow.test.mjs tests/preview-e2e-workflow.test.mjs tests/payment-webhook-security.test.js tests/mission-security-atomic.test.js tests/payout-atomicity.test.js tests/payment-settlement-guard.test.js tests/payment-webhook-settlement-gate.test.js tests/payments-configured-fail-closed.test.js tests/bootstrap-atomic.test.js tests/production-audit-readonly.test.js
+      - name: Run complete Node.js test suite
+        run: node --experimental-default-type=module --test tests/*.test.js tests/*.test.mjs
+      - name: Run complete Python migration and restore test suite
+        run: python3 -m unittest discover -s tests -p 'test_*.py' -v

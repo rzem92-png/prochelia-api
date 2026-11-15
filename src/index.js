@@ -839,8 +839,10 @@ function paymentProvider(env) {
   return clean(env.PAYMENT_PROVIDER) || 'psp_adapter';
 }
 
-function paymentsConfigured(env) {
-  return !!env.PAYMENT_WEBHOOK_SECRET && !!env.PAYMENT_PROVIDER;
+export function paymentsConfigured(_env) {
+  // Provider labels and webhook secrets do not implement financial operations.
+  // Keep execution disabled until a real adapter is wired and E2E-tested.
+  return false;
 }
 
 async function paymentOnboard(request, env) {
@@ -864,33 +866,44 @@ async function paymentOnboard(request, env) {
 async function paymentStatus(request, env) {
   const auth=await getSessionUser(request,env);
   if(!auth) return json({ok:false,error:'UNAUTHENTICATED',version:VERSION},401);
-  await ensurePaymentSchema(env);
-  let wallet=await env.DB.prepare('SELECT * FROM wallets WHERE user_id=? LIMIT 1').bind(auth.user.id).first();
-  if(!wallet){ await env.DB.prepare('INSERT INTO wallets (id,user_id) VALUES (?,?)').bind(crypto.randomUUID(),auth.user.id).run(); wallet=await env.DB.prepare('SELECT * FROM wallets WHERE user_id=? LIMIT 1').bind(auth.user.id).first(); }
-  const account=await env.DB.prepare('SELECT * FROM payment_accounts WHERE user_id=? LIMIT 1').bind(auth.user.id).first();
-  const pending=await env.DB.prepare(`SELECT COUNT(*) total FROM payout_requests WHERE user_id=? AND status IN ('requested','processing')`).bind(auth.user.id).first();
-  return json({ok:true,version:VERSION,provider:paymentProvider(env),payments_configured:paymentsConfigured(env),wallet:{currency:wallet.currency,available_cents:wallet.available_cents,pending_cents:wallet.pending_cents,paid_cents:wallet.paid_cents,reserved_cents:wallet.reserved_cents},payout_account:account?{status:account.status,onboarding_status:account.onboarding_status,payouts_enabled:!!account.payouts_enabled}:null,pending_payouts:Number(pending?.total||0)},200);
+
+  // GET status is strictly read-only. In particular, do not create schema or
+  // materialize a wallet just because a user opened the payment screen.
+  const schema = await env.DB.prepare(
+    "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('wallets','payment_accounts','payout_requests')"
+  ).all();
+  const tables = new Set((schema.results || []).map(row => row.name));
+  let wallet = null, account = null, pending = 0;
+  if (tables.has('wallets')) {
+    wallet = await env.DB.prepare('SELECT * FROM wallets WHERE user_id=? LIMIT 1').bind(auth.user.id).first();
+  }
+  if (tables.has('payment_accounts')) {
+    account = await env.DB.prepare('SELECT * FROM payment_accounts WHERE user_id=? LIMIT 1').bind(auth.user.id).first();
+  }
+  if (tables.has('payout_requests')) {
+    const result = await env.DB.prepare("SELECT COUNT(*) total FROM payout_requests WHERE user_id=? AND status IN ('requested','processing')").bind(auth.user.id).first();
+    pending = Number(result?.total || 0);
+  }
+  return json({
+    ok:true,version:VERSION,provider:paymentProvider(env),
+    payments_configured:false,
+    wallet:{
+      currency:wallet?.currency || 'EUR',
+      available_cents:Number(wallet?.available_cents || 0),
+      pending_cents:Number(wallet?.pending_cents || 0),
+      paid_cents:Number(wallet?.paid_cents || 0),
+      reserved_cents:Number(wallet?.reserved_cents || 0)
+    },
+    payout_account:account?{status:account.status,onboarding_status:account.onboarding_status,payouts_enabled:!!account.payouts_enabled}:null,
+    pending_payouts:pending
+  },200);
 }
 
 async function createMissionPayment(request, env) {
   const auth=await getSessionUser(request,env);
   if(!requireRole(auth,['gerante'])) return json({ok:false,error:auth?.user?'FORBIDDEN':'UNAUTHENTICATED',version:VERSION},auth?.user?403:401);
-  await ensurePaymentSchema(env);
-  const body=await readJson(request);
-  const missionId=clean(body?.mission_id), clientId=clean(body?.client_id), intervenantId=clean(body?.intervenant_id);
-  const gross=moneyCents(body?.gross_eur), commission=moneyCents(body?.commission_eur);
-  if(!missionId||!clientId||!intervenantId||gross===null||commission===null||commission>gross) return json({ok:false,error:'INVALID_PAYMENT_AMOUNT_OR_PARTIES',version:VERSION},400);
-  const idem=clean(request.headers.get('idempotency-key'))||clean(body?.idempotency_key);
-  if(!idem) return json({ok:false,error:'IDEMPOTENCY_KEY_REQUIRED',version:VERSION},400);
-  const old=await env.DB.prepare('SELECT * FROM payment_transactions WHERE idempotency_key=? LIMIT 1').bind(idem).first();
-  if(old) return json({ok:true,version:VERSION,idempotent_replay:true,transaction:old},200);
-  const net=gross-commission;
-  const txId=crypto.randomUUID();
-  await env.DB.prepare(`INSERT INTO payment_transactions
-    (id,idempotency_key,mission_id,client_id,intervenant_id,type,status,gross_cents,commission_cents,net_intervenant_cents,currency,provider,reason)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(txId,idem,missionId,clientId,intervenantId,'MISSION_CHARGE','pending',gross,commission,net,'EUR',paymentProvider(env),'MISSION_PAYMENT_CREATED').run();
-  await paymentAudit(env,'MISSION_PAYMENT_CREATED',{transaction_id:txId,mission_id:missionId,user_id:auth.user.id,metadata:{gross_cents:gross,commission_cents:commission,net_cents:net}},'OK');
-  return json({ok:true,version:VERSION,transaction_id:txId,status:'pending',gross_cents:gross,commission_cents:commission,net_intervenant_cents:net,provider:paymentProvider(env),next:paymentsConfigured(env)?'PSP_CHARGE_REQUIRED':'PAYMENT_PROVIDER_NOT_CONFIGURED'},201);
+  // No executable PSP charge adapter exists; never create a pending pseudo-payment.
+  return json({ok:false,error:'PSP_ADAPTER_NOT_IMPLEMENTED',version:VERSION},503);
 }
 
 async function finalizeMissionPayment(request, env) {
@@ -942,57 +955,9 @@ export async function reservePayoutAtomically(env, input) {
 async function payoutRequest(request, env) {
   const auth = await getSessionUser(request, env);
   if (!requireRole(auth, ['intervenant'])) return json({ok:false,error:auth?.user?'FORBIDDEN':'UNAUTHENTICATED',version:VERSION}, auth?.user ? 403 : 401);
-  await ensurePaymentSchema(env);
-  const body = await readJson(request);
-  const amount = moneyCents(body?.amount_eur);
-  const mode = clean(body?.mode) || 'standard';
-  const idem = clean(request.headers.get('idempotency-key')) || clean(body?.idempotency_key);
-  if (amount === null || amount <= 0 || !['standard','express'].includes(mode) || !idem || idem.length > 200) {
-    return json({ok:false,error:'INVALID_PAYOUT_REQUEST',version:VERSION},400);
-  }
-
-  // Idempotency is scoped to the authenticated owner; never return another user's payout.
-  const existing = await env.DB.prepare('SELECT * FROM payout_requests WHERE idempotency_key=? AND user_id=? LIMIT 1').bind(idem,auth.user.id).first();
-  if (existing) {
-    if (Number(existing.amount_cents) !== amount || existing.mode !== mode) {
-      return json({ok:false,error:'IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_REQUEST',version:VERSION},409);
-    }
-    return json({ok:true,version:VERSION,idempotent_replay:true,payout:existing},200);
-  }
-  const account = await env.DB.prepare('SELECT * FROM payment_accounts WHERE user_id=? LIMIT 1').bind(auth.user.id).first();
-  if (!account || Number(account.payouts_enabled) !== 1) {
-    return json({ok:false,error:'PAYOUT_ACCOUNT_NOT_READY',version:VERSION,message:'Le compte de paiement de l’intervenant doit être vérifié et activé par le PSP.'},409);
-  }
-  const wallet = await env.DB.prepare('SELECT * FROM wallets WHERE user_id=? LIMIT 1').bind(auth.user.id).first();
-  if (!wallet) return json({ok:false,error:'WALLET_NOT_FOUND',version:VERSION},409);
-
-  const payoutId = crypto.randomUUID();
-  let reservation;
-  try {
-    reservation = await reservePayoutAtomically(env, {
-      payoutId, idempotencyKey:idem, walletId:wallet.id, userId:auth.user.id,
-      amountCents:amount, mode, provider:paymentProvider(env)
-    });
-  } catch (error) {
-    console.error('PAYOUT_RESERVATION_FAILED', error?.name || 'D1_ERROR');
-    return json({ok:false,error:'PAYOUT_RESERVATION_FAILED',version:VERSION},503);
-  }
-  if (!reservation.ok) {
-    const sameOwner = await env.DB.prepare('SELECT * FROM payout_requests WHERE idempotency_key=? AND user_id=? LIMIT 1').bind(idem,auth.user.id).first();
-    if (sameOwner) {
-      if (Number(sameOwner.amount_cents) !== amount || sameOwner.mode !== mode) {
-        return json({ok:false,error:'IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_REQUEST',version:VERSION},409);
-      }
-      return json({ok:true,version:VERSION,idempotent_replay:true,payout:sameOwner},200);
-    }
-    const collision = await env.DB.prepare('SELECT 1 AS used FROM payout_requests WHERE idempotency_key=? LIMIT 1').bind(idem).first();
-    if (collision) return json({ok:false,error:'IDEMPOTENCY_KEY_CONFLICT',version:VERSION},409);
-    const latestWallet = await env.DB.prepare('SELECT available_cents FROM wallets WHERE id=? AND user_id=? LIMIT 1').bind(wallet.id,auth.user.id).first();
-    return json({ok:false,error:'INSUFFICIENT_AVAILABLE_BALANCE',version:VERSION,available_cents:Number(latestWallet?.available_cents || 0)},409);
-  }
-  return json({ok:true,version:VERSION,payout_id:payoutId,status:'requested',amount_cents:amount,mode,provider:paymentProvider(env),next:paymentsConfigured(env)?'PSP_PAYOUT_REQUIRED':'PAYMENT_PROVIDER_NOT_CONFIGURED'},201);
+  // No executable PSP payout adapter exists; do not reserve wallet funds.
+  return json({ok:false,error:'PSP_PAYOUT_ADAPTER_NOT_IMPLEMENTED',version:VERSION},503);
 }
-
 function constantTimeStringEqual(actual, expected) {
   if (typeof actual !== 'string' || typeof expected !== 'string' || actual.length !== expected.length) return false;
   let difference = 0;
@@ -1014,10 +979,9 @@ export async function verifyWebhookSignature(request, env, rawBody) {
 export function requiresAtomicFinancialSettlement(eventType) {
   return new Set([
     'payment_succeeded','charge_succeeded','payment_failed','charge_failed',
-    'payment_refunded','payout_paid','payout_failed','payout_canceled'
+    'payment_refunded','payout_processing','payout_paid','payout_failed','payout_canceled'
   ]).has(String(eventType || '').trim());
 }
-
 async function paymentWebhook(request, env) {
   // Reject unauthenticated and malformed events before any D1 schema access.
   // This prevents arbitrary callers from triggering CREATE TABLE/INDEX writes.
@@ -2587,6 +2551,7 @@ async function productionConfigCheck(env, { persist = false } = {}) {
   for(const t of requiredTables) checks.push({code:`TABLE:${t}`,status:await tableExists(env,t)?'OK':'MISSING'});
   const pspRequired=['PAYMENT_PROVIDER','PAYMENT_WEBHOOK_SECRET'];
   for(const k of pspRequired) checks.push({code:`SECRET:${k}`,status:finalSecretConfigured(env,k)?'OK':'NOT_CONFIGURED'});
+  checks.push({code:'PSP_ADAPTER',status:paymentsConfigured(env)?'OK':'NOT_CONFIGURED'});
   checks.push({code:'BOOTSTRAP_TOKEN',status:finalSecretConfigured(env,'BOOTSTRAP_TOKEN')?'OK':'NOT_CONFIGURED'});
   const paymentCols=await tableColumns(env,'payment_transactions');
   const requiredPaymentCols=['id','idempotency_key','mission_id','client_id','intervenant_id','gross_cents','commission_cents','provider_fee_cents','refund_cents','net_intervenant_cents','status','provider_payment_id'];
@@ -2600,8 +2565,23 @@ async function productionConfigCheck(env, { persist = false } = {}) {
     await registerIntegration(env,'MAPS','LOCATION',['MAPS_PROVIDER','MAPS_API_KEY'],['distance','geocoding','routing'],finalSecretConfigured(env,'MAPS_API_KEY')?'CONFIGURED':'NOT_CONFIGURED');
     await registerIntegration(env,'MARKET_DATA','COMMERCIAL',['MARKET_DATA_PROVIDER'],['market_prices','competitor_signals'],finalSecretConfigured(env,'MARKET_DATA_PROVIDER')?'CONFIGURED':'NOT_CONFIGURED');
   }
-  const blocking=checks.filter(x=>['MISSING','INCOMPLETE'].includes(x.status));
-  const externalNotConfigured=checks.filter(x=>x.status==='NOT_CONFIGURED' && ['SECRET:PAYMENT_PROVIDER','SECRET:PAYMENT_WEBHOOK_SECRET'].includes(x.code));
+  // Configuration presence is not proof of production readiness. These release
+  // evidence items must be validated independently before real traffic is allowed.
+  // Keep this gate closed until a reviewed release-evidence workflow can attest
+  // each item; environment variables and table existence cannot self-certify it.
+  const requiredReleaseEvidence = [
+    'EXECUTABLE_PSP_ADAPTER_AND_SANDBOX_E2E',
+    'ATOMIC_FINANCIAL_SETTLEMENT_AND_RECONCILIATION',
+    'PREVIEW_R2_BACKUP_AND_ISOLATED_RESTORE_DRILL',
+    'PRODUCTION_D1_SCHEMA_RECONCILIATION',
+    'TENANT_SECURITY_AND_GDPR_ACCEPTANCE',
+    'PRODUCTION_ROLLBACK_AND_HUMAN_RELEASE_APPROVAL'
+  ];
+  for (const code of requiredReleaseEvidence) {
+    checks.push({code:`RELEASE_EVIDENCE:${code}`,status:'NOT_VALIDATED'});
+  }
+  const blocking=checks.filter(x=>['MISSING','INCOMPLETE','NOT_VALIDATED'].includes(x.status));
+  const externalNotConfigured=checks.filter(x=>x.status==='NOT_CONFIGURED' && ['SECRET:PAYMENT_PROVIDER','SECRET:PAYMENT_WEBHOOK_SECRET','PSP_ADAPTER'].includes(x.code));
   const overall=blocking.length===0 && externalNotConfigured.length===0;
   if (persist) for(const c of checks) await env.DB.prepare(`INSERT INTO system_config_checks(id,check_code,status,details_json) VALUES(?,?,?,?)`).bind(crypto.randomUUID(),c.code,c.status,JSON.stringify(c)).run();
   return {overall,checks,blocking:blocking.length,externalNotConfigured:externalNotConfigured.length};
@@ -2610,8 +2590,10 @@ async function productionConfigCheck(env, { persist = false } = {}) {
 async function finalProductionAudit(request,env) {
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
   const result=await productionConfigCheck(env);
-  // GET audit endpoint is intentionally read-only; persist audit via explicit mutation endpoint.
-  return json({ok:true,version:VERSION,production_gate:result.overall?'OPEN':'CLOSED',ready_for_real_traffic:result.overall,checks:result.checks,note:result.overall?'Architecture gate passed; external business integrations must still be exercised with sandbox/acceptance tests.':'No real production traffic should be enabled until blocking configuration/schema checks are resolved.'});
+  // GET production-check is read-only. Configuration checks are not release authorization; keep real traffic closed
+  // until each independent blocker has evidence and a separate human approval.
+  const releaseBlockers=['ISOLATED_RESTORE_DRILL','PSP_SANDBOX_E2E','INDEPENDENT_SECURITY_REVIEW','GDPR_LEGAL_APPROVAL','LOAD_AND_RECOVERY_TESTS','HUMAN_RELEASE_APPROVAL'];
+  return json({ok:true,version:VERSION,configuration_gate:result.overall?'OPEN':'CLOSED',production_gate:'CLOSED',ready_for_real_traffic:false,release_blockers,checks:result.checks,note:'Configuration checks are not production authorization. Real traffic remains blocked until every release blocker is independently evidenced and explicitly approved.'});
 }
 
 async function copilotNextActions(request,env) {
@@ -3625,9 +3607,13 @@ async function strictProductionAudit(request,env){
     {code:'MAPS_PROVIDER',status:finalSecretConfigured(env,'MAPS_API_KEY')?'OK':'NOT_CONFIGURED'}
   ];
   const checks=[...(result.checks||[]),...extra];
-  const blockingCodes=new Set(['SECRET:PAYMENT_PROVIDER','SECRET:PAYMENT_WEBHOOK_SECRET','SECURITY_CODE_DELIVERY','CORS_ORIGIN','BACKUP_R2']);
+  const blockingCodes=new Set(['SECRET:PAYMENT_PROVIDER','SECRET:PAYMENT_WEBHOOK_SECRET','PSP_ADAPTER','SECURITY_CODE_DELIVERY','CORS_ORIGIN','BACKUP_R2']);
   const blocking=checks.filter(x=>blockingCodes.has(x.code)&&x.status!=='OK');
-  const overall=blocking.length===0 && result.blocking===0;
+  // Never infer a working PSP from configured secrets or a provider label.
+  // The adapter must be executable, and all independently required release
+  // evidence must be present; the current implementation intentionally fails closed.
+  const overall=blocking.length===0 && result.blocking===0 &&
+    Number(result.externalNotConfigured||0)===0 && paymentsConfigured(env)===true;
   // GET production-check is read-only: no config writes or journal side effects.
   return json({ok:true,version:VERSION,production_gate:overall?'OPEN':'CLOSED',ready_for_real_traffic:overall,checks,blocking:blocking.map(x=>x.code),note:overall?'Configuration gate passed. A real production launch still requires sandbox/acceptance tests for PSP, notifications, identity/security, backups/restore and critical user journeys.':'Production traffic remains blocked until the listed blocking controls are configured and tested.'});
 }
