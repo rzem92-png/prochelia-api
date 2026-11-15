@@ -733,6 +733,31 @@ export async function handleV7Route(
 
 
     // =================================================
+    // DSA — DÉCISIONS DE MODÉRATION AFFECTANT L'UTILISATEUR
+    // =================================================
+    if (path === "/api/compliance/decisions" && method === "GET") {
+      if (!auth?.user?.id) {
+        return Response.json({ ok: false, error: "UNAUTHENTICATED" }, { status: 401 });
+      }
+      if (!env?.DB) {
+        return Response.json({ ok: false, error: "COMPLIANCE_STORE_UNAVAILABLE" }, { status: 503 });
+      }
+      const result = await env.DB.prepare(
+        `SELECT d.id, d.subject_type, d.subject_id, d.action, d.policy_code,
+                d.statement_of_reasons, d.duration_until, d.automation_used, d.created_at,
+                (SELECT a.status FROM moderation_appeals a
+                 WHERE a.decision_id = d.id AND a.appellant_user_id = ?
+                 ORDER BY a.submitted_at DESC LIMIT 1) AS appeal_status
+         FROM moderation_decisions d
+         WHERE d.affected_user_id = ?
+         ORDER BY d.created_at DESC LIMIT 100`
+      ).bind(auth.user.id, auth.user.id).all();
+      return Response.json({ ok: true, decisions: result?.results || [] }, {
+        headers: { "cache-control": "no-store" }
+      });
+    }
+
+    // =================================================
     // DSA — RECOURS INTERNE CONTRE UNE DÉCISION
     // =================================================
     if (path === "/api/compliance/appeals" && method === "POST") {
