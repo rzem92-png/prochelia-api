@@ -8,7 +8,7 @@ function mockEnv(countForBucket = () => 1) {
     DB: {
       prepare(sql) {
         assert.match(sql, /INSERT INTO auth_login_rate_limits/);
-        assert.match(sql, /ON CONFLICT\\(bucket,subject_hash,window_start\\)/);
+        assert.match(sql, /ON CONFLICT\(bucket,subject_hash,window_start\)/);
         return {
           bind(...args) {
             calls.push({ sql, args });
