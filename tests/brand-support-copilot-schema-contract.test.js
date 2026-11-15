@@ -24,3 +24,23 @@ test("brand support Copilot schema helper is read-only and verifies migration-ow
     "idx_support_case_events_case", "idx_brand_assets_type", "idx_clearance_term"
   ]) assert.ok(helper.includes(objectName), `missing brand support Copilot schema contract: ${objectName}`);
 });
+
+
+test("support Copilot never trusts client-supplied execution proof", async () => {
+  const source = await readFile(new URL("../src/index.js", import.meta.url), "utf8");
+  const createStart = source.indexOf("async function supportCreate(request,env)");
+  const createEnd = source.indexOf("\nasync function supportAutoResolve", createStart);
+  assert.ok(createStart >= 0 && createEnd > createStart, "supportCreate must exist");
+  const create = source.slice(createStart, createEnd);
+  assert.match(create, /supportAutoResolve\(env,id,a\.auth\.user\.id,a\.role,scenario\)/);
+  assert.doesNotMatch(create, /supportAutoResolve\([^;]*,b\)/);
+
+  const resolveStart = source.indexOf("async function supportAutoResolve(env,caseId,actorId,actorRole,scenario)");
+  const resolveEnd = source.indexOf("\nasync function supportList", resolveStart);
+  assert.ok(resolveStart >= 0 && resolveEnd > resolveStart, "supportAutoResolve must exist");
+  const resolver = source.slice(resolveStart, resolveEnd);
+  assert.match(resolver, /const verified=false/);
+  assert.doesNotMatch(resolver, /execution_verified/);
+  assert.doesNotMatch(resolver, /context/);
+  assert.match(resolver, /NO_VERIFIED_DOWNSTREAM_ACTION/);
+});
