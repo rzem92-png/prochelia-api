@@ -2707,57 +2707,27 @@ async function growthDashboard(request,env){
 /* ==================== V14.0.0 — COMPTABILITÉ MULTI-ESPACE / EXPORTS / RÉSOLUTION ==================== */
 async function ensureFinanceWorkspaceSchema(env) {
   if (!env.DB) throw new Error('DATABASE_REQUIRED');
-  const sql = [
-    `CREATE TABLE IF NOT EXISTS finance_workspace_entries (
-      id TEXT PRIMARY KEY,
-      user_id TEXT NOT NULL,
-      role TEXT NOT NULL,
-      entry_type TEXT NOT NULL,
-      direction TEXT NOT NULL DEFAULT 'IN',
-      amount_cents INTEGER NOT NULL DEFAULT 0,
-      currency TEXT NOT NULL DEFAULT 'EUR',
-      label TEXT,
-      reference_type TEXT,
-      reference_id TEXT,
-      status TEXT NOT NULL DEFAULT 'posted',
-      metadata_json TEXT NOT NULL DEFAULT '{}',
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )`,
-    `CREATE INDEX IF NOT EXISTS idx_finance_workspace_user ON finance_workspace_entries(user_id, created_at DESC)`,
-    `CREATE INDEX IF NOT EXISTS idx_finance_workspace_ref ON finance_workspace_entries(reference_type, reference_id)`,
-    `CREATE TABLE IF NOT EXISTS finance_export_log (
-      id TEXT PRIMARY KEY,
-      user_id TEXT NOT NULL,
-      role TEXT NOT NULL,
-      format TEXT NOT NULL,
-      period_start TEXT,
-      period_end TEXT,
-      row_count INTEGER NOT NULL DEFAULT 0,
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )`,
-    `CREATE INDEX IF NOT EXISTS idx_finance_export_user ON finance_export_log(user_id, created_at DESC)`,
-    `CREATE TABLE IF NOT EXISTS finance_resolution_cases (
-      id TEXT PRIMARY KEY,
-      user_id TEXT NOT NULL,
-      role TEXT NOT NULL,
-      issue_type TEXT NOT NULL,
-      status TEXT NOT NULL DEFAULT 'OPEN',
-      severity TEXT NOT NULL DEFAULT 'LOW',
-      description TEXT,
-      proposed_solution TEXT,
-      resolution TEXT,
-      amount_cents INTEGER,
-      reference_id TEXT,
-      metadata_json TEXT NOT NULL DEFAULT '{}',
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      resolved_at TEXT
-    )`,
-    `CREATE INDEX IF NOT EXISTS idx_finance_resolution_user ON finance_resolution_cases(user_id, status, created_at DESC)`
-  ];
-  for (const q of sql) await env.DB.prepare(q).run();
+  // Runtime verification only; provisioning belongs to migration 0013.
+  const requiredObjects = [
+  "finance_workspace_entries",
+  "idx_finance_workspace_user",
+  "idx_finance_workspace_ref",
+  "finance_export_log",
+  "idx_finance_export_user",
+  "finance_resolution_cases",
+  "idx_finance_resolution_user"
+];
+  const placeholders = requiredObjects.map(() => '?').join(',');
+  const result = await env.DB.prepare(
+    `SELECT name FROM sqlite_master
+      WHERE type IN ('table','index') AND name IN (${placeholders})`
+  ).bind(...requiredObjects).all();
+  const present = new Set((result?.results || []).map(row => String(row.name)));
+  const missing = requiredObjects.filter(name => !present.has(name));
+  if (missing.length) {
+    throw new Error(`FINANCE_WORKSPACE_SCHEMA_NOT_READY:${missing.join(',')}`);
+  }
 }
-
 function financeRoleAllowed(role) {
   return ['CLIENT','CLIENT_SOCIAL','SOCIETE','COMPANY','INTERVENANT','GERANTE','ADMIN','FINANCE','SUPPORT'].includes(String(role||'').toUpperCase());
 }
