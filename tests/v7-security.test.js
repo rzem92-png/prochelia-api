@@ -318,3 +318,28 @@ test("DSA endpoints fail closed with 503 when the compliance migration is absent
   assert.equal(response.status, 503);
   assert.equal((await response.json()).error, "COMPLIANCE_SCHEMA_UNAVAILABLE");
 });
+
+
+test("DSA appeal endpoint maps a concurrent unique-index conflict to HTTP 409", async () => {
+  const env = { DB: { prepare(sql) {
+    return {
+      bind() { return this; },
+      async first() {
+        if (sql.includes("FROM moderation_decisions")) return { id: "decision-1" };
+        return null;
+      },
+      async run() {
+        throw new Error("UNIQUE constraint failed: moderation_appeals.decision_id, moderation_appeals.appellant_user_id");
+      }
+    };
+  } } };
+  const response = await handleV7Route(
+    post("/api/compliance/appeals", {
+      decision_id: "decision-1", grounds: "The decision contains inaccurate information."
+    }),
+    env, "/api/compliance/appeals",
+    { user: { id: "affected-user", role: "client" } }
+  );
+  assert.equal(response.status, 409);
+  assert.equal((await response.json()).error, "APPEAL_ALREADY_PENDING");
+});
