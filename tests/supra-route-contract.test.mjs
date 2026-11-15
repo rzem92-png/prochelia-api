@@ -25,3 +25,9 @@ test("V7 exports only the deterministic SUPRA governance surface", () => {
     assert.match(v7, new RegExp("\\b" + name + "\\b"));
   }
 });
+
+test("free-text problem statement is excluded from the narrower evidence governance context", () => {
+  assert.match(source, /const governanceContext = \{\};/);
+  assert.match(source, /actorRole:gate\.auth\.user\.role,context:governanceContext/);
+  assert.doesNotMatch(source, /actorRole:gate\.auth\.user\.role,context\s*\}/);
+});
