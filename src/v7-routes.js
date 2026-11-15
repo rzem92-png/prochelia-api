@@ -731,6 +731,47 @@ export async function handleV7Route(
       );
     }
 
+
+    // =================================================
+    // DSA — RECOURS INTERNE CONTRE UNE DÉCISION
+    // =================================================
+    if (path === "/api/compliance/appeals" && method === "POST") {
+      if (!auth?.user?.id) {
+        return Response.json({ ok: false, error: "UNAUTHENTICATED" }, { status: 401 });
+      }
+      const body = await request.json().catch(() => null);
+      const decisionId = typeof body?.decision_id === "string" ? body.decision_id.trim() : "";
+      const grounds = typeof body?.grounds === "string" ? body.grounds.trim() : "";
+      if (!decisionId || decisionId.length > 200 || grounds.length < 20 || grounds.length > 5000) {
+        return Response.json({ ok: false, error: "INVALID_APPEAL" }, { status: 400 });
+      }
+      if (!env?.DB) {
+        return Response.json({ ok: false, error: "COMPLIANCE_STORE_UNAVAILABLE" }, { status: 503 });
+      }
+
+      // Only the person affected by the decision may appeal it.
+      const decision = await env.DB.prepare(
+        "SELECT id FROM moderation_decisions WHERE id = ? AND affected_user_id = ? LIMIT 1"
+      ).bind(decisionId, auth.user.id).first();
+      if (!decision) {
+        return Response.json({ ok: false, error: "DECISION_NOT_APPEALABLE" }, { status: 404 });
+      }
+      const existing = await env.DB.prepare(
+        "SELECT id FROM moderation_appeals WHERE decision_id = ? AND appellant_user_id = ? AND status IN ('SUBMITTED','UNDER_REVIEW') LIMIT 1"
+      ).bind(decisionId, auth.user.id).first();
+      if (existing) {
+        return Response.json({ ok: false, error: "APPEAL_ALREADY_PENDING" }, { status: 409 });
+      }
+
+      const id = crypto.randomUUID();
+      await env.DB.prepare(
+        "INSERT INTO moderation_appeals (id, decision_id, appellant_user_id, grounds, status) VALUES (?, ?, ?, ?, 'SUBMITTED')"
+      ).bind(id, decisionId, auth.user.id, grounds).run();
+      return Response.json({ ok: true, appeal: { id, decision_id: decisionId, status: "SUBMITTED" } }, {
+        status: 201, headers: { "cache-control": "no-store" }
+      });
+    }
+
     // =================================================
     // AUCUNE ROUTE V7 CORRESPONDANTE
     // =================================================
