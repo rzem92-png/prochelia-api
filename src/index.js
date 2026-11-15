@@ -1311,6 +1311,19 @@ async function ensureConsolidatedSchema(env) {
   if (missing.length) {
     throw new Error(`CONSOLIDATED_SCHEMA_NOT_READY:${missing.join(',')}`);
   }
+  const requiredSettings = [
+    'project_phase', 'fuel_cost_per_km_cents', 'default_margin_percent',
+    'software_monthly_cost_cents', 'automation_policy', 'b2b_model', 'b2c_model'
+  ];
+  const settingPlaceholders = requiredSettings.map(() => '?').join(',');
+  const settingsResult = await env.DB.prepare(
+    `SELECT key FROM platform_settings WHERE key IN (${settingPlaceholders})`
+  ).bind(...requiredSettings).all();
+  const presentSettings = new Set((settingsResult?.results || []).map(row => String(row.key)));
+  const missingSettings = requiredSettings.filter(key => !presentSettings.has(key));
+  if (missingSettings.length) {
+    throw new Error(`CONSOLIDATED_SETTINGS_NOT_READY:${missingSettings.join(',')}`);
+  }
 }
 async function getSetting(env,key,fallback=null) {
   const r=await env.DB.prepare('SELECT value_json FROM platform_settings WHERE key=? LIMIT 1').bind(key).first();
