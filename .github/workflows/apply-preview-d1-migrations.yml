@@ -64,7 +64,7 @@ jobs:
             }]
           }
           Path(__import__("os").environ["RUNNER_TEMP"], "wrangler.preview-migrations.json").write_text(
-            json.dumps(migration_config, indent=2) + "\\n"
+            json.dumps(migration_config, indent=2) + "\n"
           )
           for name in (
             "0001_core_business_schema.sql",
