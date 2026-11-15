@@ -183,3 +183,54 @@ class StrategicCommercialMigrationTests(unittest.TestCase):
             r"\bDELETE\s+FROM\b", r"^\s*UPDATE\s+"
         ):
             self.assertIsNone(re.search(forbidden, sql, flags=re.MULTILINE))
+
+
+CONSOLIDATED_BUSINESS_MIGRATION = ROOT / "migrations" / "0012_consolidated_business_schema.sql"
+
+
+class ConsolidatedBusinessMigrationTests(unittest.TestCase):
+    def setUp(self):
+        self.db = sqlite3.connect(":memory:")
+        self.db.execute("PRAGMA foreign_keys=ON")
+
+    def tearDown(self):
+        self.db.close()
+
+    def test_migration_runs_idempotently_and_seeds_defaults_once(self):
+        sql = CONSOLIDATED_BUSINESS_MIGRATION.read_text(encoding="utf-8")
+        self.db.executescript(sql)
+        self.db.execute(
+            "UPDATE platform_settings SET value_json='\\"CUSTOM\\"' WHERE key='project_phase'"
+        )
+        self.db.executescript(sql)
+        objects = {row[0] for row in self.db.execute(
+            "SELECT name FROM sqlite_master WHERE type IN ('table','index')"
+        )}
+        expected = {
+            "platform_settings", "business_profiles", "métier_catalog",
+            "metier_suggestions", "pricing_policies", "pricing_quotes",
+            "operational_cases", "idx_cases_status", "case_actions", "copilot_log",
+            "activity_journal", "commercial_tasks", "recruitment_tasks", "complaints",
+            "accounting_ledger", "idx_ledger_ref", "business_expenses",
+            "notification_outbox", "compliance_events",
+        }
+        self.assertTrue(expected.issubset(objects))
+        self.assertEqual(
+            self.db.execute("SELECT value_json FROM platform_settings WHERE key='project_phase'").fetchone()[0],
+            '"CUSTOM"',
+        )
+        self.assertEqual(
+            self.db.execute("SELECT COUNT(*) FROM platform_settings").fetchone()[0],
+            7,
+        )
+
+    def test_migration_has_no_destructive_sql(self):
+        sql = re.sub(
+            r"--[^\n]*", "",
+            CONSOLIDATED_BUSINESS_MIGRATION.read_text(encoding="utf-8")
+        ).upper()
+        for forbidden in (
+            r"\bDROP\s+TABLE\b", r"\bDROP\s+INDEX\b",
+            r"\bDELETE\s+FROM\b", r"^\s*UPDATE\s+"
+        ):
+            self.assertIsNone(re.search(forbidden, sql, flags=re.MULTILINE))
