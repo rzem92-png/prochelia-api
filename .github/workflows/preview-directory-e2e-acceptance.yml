@@ -121,7 +121,7 @@ jobs:
             }' "$RUNNER_TEMP/pages-preview.json"
             exit 1
           fi
-          printf 'PAGES_DEPLOYMENT_ID=%s\\n' "$PAGES_DEPLOYMENT_ID" >> "$GITHUB_ENV"
+          printf 'PAGES_DEPLOYMENT_ID=%s\n' "$PAGES_DEPLOYMENT_ID" >> "$GITHUB_ENV"
           [[ "$PREVIEW_DB_ID" != "04f52830-ef5a-4f17-a640-42bbc2381bba" ]]
           cat > "$RUNNER_TEMP/wrangler.preview.json" <<'JSON'
           {
