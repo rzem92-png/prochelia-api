@@ -156,7 +156,6 @@ class StrategicCommercialMigrationTests(unittest.TestCase):
 
     def test_migration_preserves_unique_promotion_code_and_client_score(self):
         self.db.executescript(STRATEGIC_COMMERCIAL_MIGRATION.read_text(encoding="utf-8"))
-        base = ("id", "code", "name", "type", "phase", "starts_at", "ends_at")
         self.db.execute(
             "INSERT INTO promotions(id,code,name,type,phase,starts_at,ends_at) VALUES(?,?,?,?,?,?,?)",
             ("p1", "PROMO", "Promo", "PERCENT", "TEST", "2030-01-01", "2030-02-01"),
@@ -176,11 +175,11 @@ class StrategicCommercialMigrationTests(unittest.TestCase):
 
     def test_migration_has_no_destructive_sql(self):
         sql = re.sub(
-            r"--[^\\n]*", "",
+            r"--[^\n]*", "",
             STRATEGIC_COMMERCIAL_MIGRATION.read_text(encoding="utf-8")
         ).upper()
         for forbidden in (
-            r"\\bDROP\\s+TABLE\\b", r"\\bDROP\\s+INDEX\\b",
-            r"\\bDELETE\\s+FROM\\b", r"^\\s*UPDATE\\s+"
+            r"\bDROP\s+TABLE\b", r"\bDROP\s+INDEX\b",
+            r"\bDELETE\s+FROM\b", r"^\s*UPDATE\s+"
         ):
             self.assertIsNone(re.search(forbidden, sql, flags=re.MULTILINE))
