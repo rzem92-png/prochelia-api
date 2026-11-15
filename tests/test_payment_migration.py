@@ -292,3 +292,41 @@ class ConsolidatedBusinessMigrationTests(unittest.TestCase):
             r"\bDELETE\s+FROM\b", r"^\s*UPDATE\s+"
         ):
             self.assertIsNone(re.search(forbidden, sql, flags=re.MULTILINE))
+
+
+FINANCE_WORKSPACE_MIGRATION = ROOT / "migrations" / "0013_finance_workspace_schema.sql"
+
+
+class FinanceWorkspaceMigrationTests(unittest.TestCase):
+    def setUp(self):
+        self.db = sqlite3.connect(":memory:")
+        self.db.execute("PRAGMA foreign_keys=ON")
+
+    def tearDown(self):
+        self.db.close()
+
+    def test_migration_runs_idempotently_and_creates_all_objects(self):
+        sql = FINANCE_WORKSPACE_MIGRATION.read_text(encoding="utf-8")
+        self.db.executescript(sql)
+        self.db.executescript(sql)
+        objects = {row[0] for row in self.db.execute(
+            "SELECT name FROM sqlite_master WHERE type IN ('table','index')"
+        )}
+        expected = {
+            "finance_workspace_entries", "idx_finance_workspace_user",
+            "idx_finance_workspace_ref", "finance_export_log",
+            "idx_finance_export_user", "finance_resolution_cases",
+            "idx_finance_resolution_user",
+        }
+        self.assertTrue(expected.issubset(objects))
+
+    def test_migration_has_no_destructive_sql(self):
+        sql = re.sub(
+            r"--[^\n]*", "",
+            FINANCE_WORKSPACE_MIGRATION.read_text(encoding="utf-8")
+        ).upper()
+        for forbidden in (
+            r"\bDROP\s+TABLE\b", r"\bDROP\s+INDEX\b",
+            r"\bDELETE\s+FROM\b", r"^\s*UPDATE\s+"
+        ):
+            self.assertIsNone(re.search(forbidden, sql, flags=re.MULTILINE))
