@@ -38,7 +38,7 @@ jobs:
         run: |
           set -euo pipefail
           case "$GITHUB_REF" in
-            refs/heads/main|refs/heads/prelaunch/r2-eu-backup-workflow) ;;
+            refs/heads/main|refs/heads/prelaunch/r2-eu-backup-workflow|refs/heads/fix/preview-backup-r2-v2-jurisdiction-guard-2026-11-16) ;;
             *) echo "::error::Dispatch only allowed from main or the dedicated preview backup branch."; exit 1 ;;
           esac
           test "$CLOUDFLARE_ACCOUNT_ID" = "$EXPECTED_ACCOUNT_ID"
