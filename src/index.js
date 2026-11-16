@@ -1536,18 +1536,19 @@ async function processActionOutbox(request, env) {
   const rows=await env.DB.prepare(`SELECT * FROM action_outbox WHERE status='PENDING' ORDER BY created_at ASC LIMIT 50`).all();
   const processed=[];
   for(const row of (rows.results||[])) {
-    const payload=row.payload_json?JSON.parse(row.payload_json):{};
-    // Provider-dependent actions stay queued until the corresponding adapter/secret is configured.
-    const external = ['PSP_REFUND_REVIEW','NOTIFY_CLIENT','SEARCH_REPLACEMENT','RESCHEDULE_MISSION','ASSIGN_REPLACEMENT'].includes(String(row.action_type));
+    const external = ['PSP_REFUND_REVIEW','NOTIFY_CLIENT','SEARCH_REPLACEMENT','RESCHEDULE_MISSION','ASSIGN_REPLACEMENT','PAYOUT','REFUND'].includes(String(row.action_type));
     if(external) {
-      await env.DB.prepare(`UPDATE action_outbox SET status='WAITING_PROVIDER',last_error=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind('External adapter/provider required for final execution.',row.id).run();
+      await env.DB.prepare(`UPDATE action_outbox SET status='WAITING_PROVIDER',last_error=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='PENDING'`)
+        .bind('External adapter/provider or separately authorized operational action required for final execution.',row.id).run();
       processed.push({id:row.id,status:'WAITING_PROVIDER',action_type:row.action_type});
       continue;
     }
-    await env.DB.prepare(`UPDATE action_outbox SET status='COMPLETED',processed_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(row.id).run();
-    processed.push({id:row.id,status:'COMPLETED',action_type:row.action_type,payload});
+    // Never mark an action completed merely because it was read from the queue.
+    // The executor must perform a supported operation and persist its real result.
+    const result=await executeQueuedAction(env,row);
+    processed.push({id:row.id,status:result.status||'FAILED',action_type:row.action_type,ok:!!result.ok,result:result.result||null,error:result.error||null});
   }
-  await journal(env,'gerante',gate.auth.user.id,'ACTION_OUTBOX_PROCESSED','system',null,'OK',{count:processed.length});
+  await journal(env,'gerante',gate.auth.user.id,'ACTION_OUTBOX_PROCESSED','system',null,'OK',{count:processed.length,completed:processed.filter(x=>x.status==='DONE').length,waiting:processed.filter(x=>x.status==='WAITING_PROVIDER').length,failed:processed.filter(x=>x.status==='FAILED').length});
   return json({ok:true,version:VERSION,processed},200);
 }
 
