@@ -1718,7 +1718,8 @@ async function pricingQuote(request, env) {
   const gate=await requireAuthRole(request,env,['gerante','client','entreprise']); if(gate.error)return gate.error;
   const b=await readJson(request)||{};
   const phase=String(await getSetting(env,'project_phase','TEST')).toUpperCase();
-  const cfg=PROJECT_PHASES[phase]||PROJECT_PHASES.TEST;
+  const cfg=PROJECT_PHASES[phase];
+  if (!cfg) return json({ok:false,error:'SERVER_PRICING_PHASE_INVALID',version:VERSION},503);
   const distance=Number(b.distance_km ?? 0);
   const duration=Number(b.duration_minutes ?? 60);
   if (!Number.isFinite(distance) || distance < 0 || distance > 5000
@@ -1746,8 +1747,14 @@ async function pricingQuote(request, env) {
     return json({ok:false,error:'SERVER_PRICING_CATALOG_UNAVAILABLE',version:VERSION},503);
   }
   if (!tariff) return json({ok:false,error:'ACTIVE_SERVER_TARIFF_NOT_FOUND',version:VERSION},422);
-  const base=Math.max(0,Math.round(Number(tariff.client_price)*100));
-  const tariffIntervenant=Math.max(0,Math.round(Number(tariff.intervenant_price)*100));
+  const clientTariffEuros=Number(tariff.client_price);
+  const providerTariffEuros=Number(tariff.intervenant_price);
+  if (!Number.isFinite(clientTariffEuros) || clientTariffEuros <= 0
+      || !Number.isFinite(providerTariffEuros) || providerTariffEuros < 0) {
+    return json({ok:false,error:'SERVER_TARIFF_PRICE_INVALID',version:VERSION},503);
+  }
+  const base=Math.round(clientTariffEuros*100);
+  const tariffIntervenant=Math.round(providerTariffEuros*100);
 
   let policy=null;
   try {
