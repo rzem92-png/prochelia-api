@@ -92,8 +92,9 @@ export async function handleSupraApprovalRoute(request, env, auth) {
     if (!requestId || requestId.length > 128 || !reason || reason.length > 1000) return reply({ ok: false, error: "INVALID_REVOCATION" }, 400);
     try {
       const now = new Date().toISOString();
-      const row = await env.DB.prepare("SELECT requester_user_id, status FROM supra_approval_requests WHERE id=? LIMIT 1").bind(requestId).first();
+      const row = await env.DB.prepare("SELECT requester_user_id, tenant_id, status FROM supra_approval_requests WHERE id=? LIMIT 1").bind(requestId).first();
       if (!row) return reply({ ok: false, error: "APPROVAL_NOT_FOUND" }, 404);
+      if (row.tenant_id !== auth.user.tenant_id) return reply({ ok: false, error: "TENANT_SCOPE_NOT_VERIFIED" }, 403);
       if (row.requester_user_id !== auth.user.id) return reply({ ok: false, error: "ONLY_REQUESTER_CAN_REVOKE" }, 403);
       if (!["PENDING", "APPROVED"].includes(row.status)) return reply({ ok: false, error: "APPROVAL_NOT_REVOCABLE" }, 409);
       await env.DB.batch([
@@ -115,6 +116,7 @@ export async function handleSupraApprovalRoute(request, env, auth) {
     try {
       const item = await env.DB.prepare("SELECT id, requester_user_id, tenant_id, action, resource_id, payload_hash, payload_json, amount_cents, currency, reason, risk, required_approvals, status, expires_at, created_at, approved_at, consumed_at, consumed_by FROM supra_approval_requests WHERE id=? LIMIT 1").bind(requestId).first();
       if (!item) return reply({ ok: false, error: "APPROVAL_NOT_FOUND" }, 404);
+      if (item.tenant_id !== auth.user.tenant_id) return reply({ ok: false, error: "TENANT_SCOPE_NOT_VERIFIED" }, 403);
       const votes = await env.DB.prepare("SELECT approver_user_id, approver_role, decision, reason, created_at FROM supra_approval_votes WHERE request_id=? ORDER BY created_at, id").bind(requestId).all();
       let payload;
       try { payload = JSON.parse(item.payload_json); } catch { return reply({ ok: false, error: "APPROVAL_PAYLOAD_CORRUPT" }, 503); }
@@ -130,6 +132,7 @@ export async function handleSupraApprovalRoute(request, env, auth) {
   const body = parsed.value;
 
   if (path.endsWith("/request")) {
+    if (typeof auth.user.tenant_id !== "string" || !auth.user.tenant_id.trim() || body.tenantId !== auth.user.tenant_id) return reply({ ok: false, error: "TENANT_SCOPE_NOT_VERIFIED" }, 403);
     const action = typeof body.action === "string" ? body.action.trim().toUpperCase() : "";
     const risk = ACTION_RISK[action];
     const tenantId = typeof body.tenantId === "string" ? body.tenantId.trim() : "";
@@ -183,12 +186,13 @@ export async function handleSupraApprovalRoute(request, env, auth) {
 
   let approval;
   try {
-    approval = await env.DB.prepare(`SELECT id, requester_user_id, status, expires_at, required_approvals
+    approval = await env.DB.prepare(`SELECT id, requester_user_id, tenant_id, status, expires_at, required_approvals
       FROM supra_approval_requests WHERE id=? LIMIT 1`).bind(requestId).first();
   } catch {
     return reply({ ok: false, error: "APPROVAL_LEDGER_UNAVAILABLE" }, 503);
   }
   if (!approval) return reply({ ok: false, error: "APPROVAL_NOT_FOUND" }, 404);
+  if (approval.tenant_id !== auth.user.tenant_id) return reply({ ok: false, error: "TENANT_SCOPE_NOT_VERIFIED" }, 403);
   if (typeof auth.user.tenant_id !== "string" || approval.tenant_id !== auth.user.tenant_id) {
     return reply({ ok: false, error: "TENANT_SCOPE_NOT_VERIFIED" }, 403);
   }
