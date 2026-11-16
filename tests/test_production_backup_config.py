@@ -26,7 +26,7 @@ assert database.get("database_name") == env_value("EXPECTED_DB_NAME"), "Wrangler
 assert database.get("database_id") == env_value("EXPECTED_DB_ID"), "Wrangler D1 UUID and workflow UUID differ"
 assert env_value("EXPECTED_DB_NAME") == "prochelia-db", "Unexpected production D1 name"
 assert env_value("EXPECTED_DB_ID") == "04f52830-ef5a-4f17-a640-42bbc2381bba", "Unexpected production D1 UUID"
-assert env_value("R2_BUCKET") == "prochelia-production-backups-eu", "Production backup bucket must remain isolated"
+assert env_value("R2_BUCKET") == "prochelia-production-backups-eu-v2", "Production backup bucket must remain isolated in EU jurisdiction"
 
 required_guards = [
     'github.event.inputs.confirm_production_backup == \'BACKUP_PRODUCTION_D1\'',
