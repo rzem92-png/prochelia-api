@@ -35,6 +35,6 @@ test('Production backup provisions EU jurisdiction without a conflicting locatio
 });
 
 test('Production backup job is unavailable to unreviewed feature branches', () => {
-  assert.match(workflow, /if:\\s*\\$\\{\\{\\s*github\\.ref\\s*==\\s*'refs\\/heads\\/main'\\s*&&\\s*inputs\\.confirm_production_backup\\s*==\\s*'BACKUP_PRODUCTION_D1'/);
+  assert.ok(workflow.includes("if: ${{ github.ref == 'refs/heads/main' && inputs.confirm_production_backup == 'BACKUP_PRODUCTION_D1' }}"));
   assert.match(workflow, /Production backup must be dispatched from main/);
 });
