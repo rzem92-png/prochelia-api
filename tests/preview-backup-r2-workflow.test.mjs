@@ -28,3 +28,8 @@ test('Preview backup encrypts and verifies R2 round-trip without deploying or re
   assert.doesNotMatch(workflow, /d1 execute .*--remote.*--file/);
   assert.doesNotMatch(workflow, /wrangler@4 deploy(?! --dry-run)/);
 });
+
+test('Preview backup provisions EU jurisdiction and uses the jurisdiction-specific S3 endpoint', () => {
+  assert.match(workflow, /r2 bucket create "\$R2_BUCKET" --jurisdiction eu --location weur/);
+  assert.match(workflow, /f2a79e9fa41566a8ec80fb24c02c60eb\.eu\.r2\.cloudflarestorage\.com/);
+});
