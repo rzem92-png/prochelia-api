@@ -20,7 +20,7 @@ test("identity status requires an authenticated intervenant session", () => {
   assert.match(handler, /FORBIDDEN/);
 });
 
-test("identity gate is based on the server D1 verification record", () => {
+test("identity gate is based on a verified, non-expired server D1 record", () => {
   const start = source.indexOf("async function securityIdentityStatus(request, env)");
   const end = source.indexOf("async function securityIdentityStart(request, env)", start);
   const handler = source.slice(start, end);
@@ -29,11 +29,15 @@ test("identity gate is based on the server D1 verification record", () => {
   assert.match(handler, /identity_gate_passed:identityPassed/);
 });
 
-test("profile gate fails closed until a real server-side review model exists", () => {
+test("profile gate requires a server-validated intervenant record and verified unexpired documents", () => {
   const start = source.indexOf("async function securityIdentityStatus(request, env)");
   const end = source.indexOf("async function securityIdentityStart(request, env)", start);
   const handler = source.slice(start, end);
-  assert.match(handler, /const profilePassed = false/);
-  assert.match(handler, /PROFILE_REVIEW_NOT_IMPLEMENTED/);
+  assert.match(handler, /FROM intervenants i/);
+  assert.match(handler, /LEFT JOIN documents d ON d\.user_id=i\.user_id/);
+  assert.match(handler, /i\.validation_status/);
+  assert.match(handler, /d\.status='verified'/);
+  assert.match(handler, /d\.expires_at > CURRENT_TIMESTAMP/);
+  assert.match(handler, /Number\(profile\.document_count \|\| 0\) > 0/);
   assert.match(handler, /profile_gate_passed:profilePassed/);
 });
