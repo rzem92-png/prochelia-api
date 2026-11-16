@@ -96,12 +96,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          token="$(printf '%s' "$CLOUDFLARE_API_TOKEN" | sed -E 's/^[[:space:]]*Bearer[[:space:]]+//I; s/^[[:space:]]+//; s/[[:space:]]+$//' | tr -d '\\r\\n')"
+          token="$(printf '%s' "$CLOUDFLARE_API_TOKEN" | sed -E 's/^[[:space:]]*Bearer[[:space:]]+//I; s/^[[:space:]]+//; s/[[:space:]]+$//' | tr -d '\r\n')"
           status="$(curl --silent --show-error --output "$RUNNER_TEMP/production-r2-create-check.json" --write-out '%{http_code}' \\
             "https://api.cloudflare.com/client/v4/accounts/$EXPECTED_ACCOUNT_ID/r2/buckets/$R2_BUCKET" \\
             -H "Authorization: Bearer $token" -H 'cf-r2-jurisdiction: eu')"
           if [[ "$status" == "404" ]]; then
-            npx --yes wrangler@4 r2 bucket create "$R2_BUCKET" --jurisdiction eu --location weur
+            npx --yes wrangler@4 r2 bucket create "$R2_BUCKET" --jurisdiction eu
           elif [[ "$status" != "200" ]]; then
             echo "::error::Cannot inspect EU Production backup bucket (HTTP $status); refusing D1 export."
             exit 1
@@ -111,7 +111,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          token="$(printf '%s' "$CLOUDFLARE_API_TOKEN" | sed -E 's/^[[:space:]]*Bearer[[:space:]]+//I; s/^[[:space:]]+//; s/[[:space:]]+$//' | tr -d '\\r\\n')"
+          token="$(printf '%s' "$CLOUDFLARE_API_TOKEN" | sed -E 's/^[[:space:]]*Bearer[[:space:]]+//I; s/^[[:space:]]+//; s/[[:space:]]+$//' | tr -d '\r\n')"
           test -n "$token"
           test "$CLOUDFLARE_ACCOUNT_ID" = "$EXPECTED_ACCOUNT_ID"
           status="$(curl --silent --show-error --output "$RUNNER_TEMP/production-r2-jurisdiction.json" --write-out '%{http_code}' \\
