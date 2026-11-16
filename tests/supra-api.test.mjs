@@ -14,8 +14,8 @@ function makeDb() {
     }
   };
 }
-const manager = { user: { id: "manager-1", role: "gerante" } };
-const client = { user: { id: "client-1", role: "client" } };
+const manager = { user: { id: "manager-1", role: "GERANTE" } };
+const client = { user: { id: "client-1", role: "CLIENT" } };
 
 test("SUPRA route ignores unrelated paths", async () => {
   assert.equal(await handleSupraRoute(new Request("https://example.test/api/unknown"), { DB: makeDb() }, manager), null);
