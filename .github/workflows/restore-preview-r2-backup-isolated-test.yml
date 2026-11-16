@@ -87,6 +87,12 @@ jobs:
           test "$RESTORE_DB_ID" != "$PREVIEW_DB_ID"
           test "$RESTORE_DB_ID" != "$PRODUCTION_DB_ID"
           token="${CLOUDFLARE_API_TOKEN#Bearer }"
+          status="$(curl --silent --show-error --output "$RUNNER_TEMP/restore-d1-metadata.json" --write-out '%{http_code}' "https://api.cloudflare.com/client/v4/accounts/$EXPECTED_ACCOUNT_ID/d1/database/$RESTORE_DB_ID" -H "Authorization: Bearer $token")"
+          test "$status" = "200" || { echo "::error::Isolated restore D1 metadata lookup failed; refusing restore."; exit 1; }
+          jq -e --arg id "$RESTORE_DB_ID" --arg name "$RESTORE_DB_NAME" '.success == true and .result.uuid == $id and .result.name == $name and .result.jurisdiction == "eu"' "$RUNNER_TEMP/restore-d1-metadata.json" >/dev/null || {
+            echo "::error::Restore target identity or explicit EU jurisdiction is not verified; refusing remote write."
+            exit 1
+          }
           status="$(curl --silent --show-error --output "$RUNNER_TEMP/d1-list.json" --write-out '%{http_code}' "https://api.cloudflare.com/client/v4/accounts/$EXPECTED_ACCOUNT_ID/d1/database?name=$RESTORE_DB_NAME" -H "Authorization: Bearer $token")"
           test "$status" = "200"
           jq -e --arg n "$RESTORE_DB_NAME" --arg id "$RESTORE_DB_ID" '[.result[]? | select(.name == $n and .uuid == $id)] | length == 1' "$RUNNER_TEMP/d1-list.json" >/dev/null
