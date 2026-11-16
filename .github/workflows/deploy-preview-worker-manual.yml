@@ -48,6 +48,7 @@ jobs:
             keep_vars: true,
             vars: {
               CORS_ORIGIN: [
+                'https://83a36d32.prochelia.pages.dev',
                 'https://c3ceec86.prochelia.pages.dev',
                 'https://staging-prochelia-v14-restor.prochelia.pages.dev',
                 'https://feat-supra-control-center-v1.prochelia.pages.dev',
