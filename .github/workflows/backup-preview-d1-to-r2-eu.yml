@@ -103,6 +103,21 @@ jobs:
             exit 1
           fi
 
+      - name: Create the Preview backup bucket in the EU jurisdiction when absent
+        shell: bash
+        run: |
+          set -euo pipefail
+          token="$(printf '%s' "$CLOUDFLARE_API_TOKEN" | sed -E 's/^[[:space:]]*Bearer[[:space:]]+//I; s/^[[:space:]]+//; s/[[:space:]]+$//' | tr -d '\\r\\n')"
+          status="$(curl --silent --show-error --output "$RUNNER_TEMP/preview-r2-create-check.json" --write-out '%{http_code}' \\
+            "https://api.cloudflare.com/client/v4/accounts/$EXPECTED_ACCOUNT_ID/r2/buckets/$R2_BUCKET" \\
+            -H "Authorization: Bearer $token" -H 'cf-r2-jurisdiction: eu')"
+          if [[ "$status" == "404" ]]; then
+            npx --yes wrangler@4 r2 bucket create "$R2_BUCKET" --jurisdiction eu --location weur
+          elif [[ "$status" != "200" ]]; then
+            echo "::error::Cannot inspect EU Preview bucket (HTTP $status); refusing D1 export."
+            exit 1
+          fi
+
       - name: Verify private R2 bucket identity and EU jurisdiction before export
         shell: bash
         run: |
