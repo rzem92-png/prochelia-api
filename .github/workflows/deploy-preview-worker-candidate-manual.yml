@@ -1,0 +1,160 @@
+name: Deploy PROCHÉLIA API candidate to isolated Preview only (manual)
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirmation:
+        description: "Type DEPLOY_PREVIEW_ONLY to deploy this candidate to the isolated Preview Worker"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: prochelia-api-preview-deploy
+  cancel-in-progress: false
+
+jobs:
+  preview-only:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Enforce manual Preview-only authorization
+        env:
+          REQUESTED_REF: ${{ github.ref }}
+          CONFIRMATION: ${{ github.event.inputs.confirmation }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$REQUESTED_REF" = "refs/heads/deploy/preview-worker-candidate-2026-11-16" || {
+            echo "::error::Wrong branch. Select deploy/preview-worker-candidate-2026-11-16."
+            exit 1
+          }
+          test "$CONFIRMATION" = "DEPLOY_PREVIEW_ONLY" || {
+            echo "::error::Missing exact confirmation. Enter DEPLOY_PREVIEW_ONLY."
+            exit 1
+          }
+          echo "Manual authorization accepted for the isolated Preview Worker only."
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+      - name: Verify isolated Preview target and generate deployment config
+        shell: bash
+        run: |
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const production = JSON.parse(fs.readFileSync('wrangler.jsonc', 'utf8'));
+          const expectedPreviewId = '6adb95e5-e542-4bec-9008-fbea01042305';
+          const expectedProductionId = '04f52830-ef5a-4f17-a640-42bbc2381bba';
+          if (production.name !== 'prochelia-api') throw new Error('Unexpected production Worker config');
+          if (!production.d1_databases?.some(db => db.binding === 'DB' && db.database_id === expectedProductionId)) {
+            throw new Error('Production D1 identity mismatch; refusing Preview deployment');
+          }
+          const preview = {
+            name: 'prochelia-api-preview',
+            main: 'src/index.js',
+            compatibility_date: '2026-09-25',
+            workers_dev: true,
+            vars: {
+              APP_ENV: 'preview',
+              CORS_ORIGIN: [
+                'https://83a36d32.prochelia.pages.dev',
+                'https://c3ceec86.prochelia.pages.dev',
+                'https://staging-prochelia-v14-restor.prochelia.pages.dev',
+                'https://feat-supra-control-center-v1.prochelia.pages.dev',
+                'https://db884f74.prochelia.pages.dev',
+                'https://repair-prochelia-frontend-xs.prochelia.pages.dev',
+                'https://feature-dsa-notice-client-20.prochelia.pages.dev',
+                'https://d8b3eab1.prochelia.pages.dev',
+                'https://fix-same-origin-session-prox.prochelia.pages.dev',
+                'https://security-frontend-profile-se.prochelia.pages.dev'
+              ].join(',')
+            },
+            d1_databases: [{
+              binding: 'DB',
+              database_name: 'prochelia-preview-db',
+              database_id: expectedPreviewId
+            }],
+            r2_buckets: [{
+              binding: 'BACKUP_BUCKET',
+              bucket_name: 'prochelia-preview-backups-eu'
+            }],
+            observability: { logs: { enabled: true, invocation_logs: true } }
+          };
+          if (preview.name === production.name || preview.d1_databases.some(db => db.database_id === expectedProductionId)) {
+            throw new Error('Preview target is not isolated');
+          }
+          if (preview.vars.APP_ENV !== 'preview' || !preview.vars.CORS_ORIGIN.split(',').includes('https://83a36d32.prochelia.pages.dev')) {
+            throw new Error('Preview environment or current frontend CORS origin missing');
+          }
+          fs.writeFileSync('wrangler.preview.generated.json', JSON.stringify(preview, null, 2));
+          console.log('Preview Worker, Preview D1, Preview R2, APP_ENV and CORS origins verified.');
+          NODE
+      - name: Check Worker source syntax
+        run: |
+          node --experimental-default-type=module --check src/index.js
+          node --experimental-default-type=module --check src/v7.js
+          node --experimental-default-type=module --check src/v7-routes.js
+          node --experimental-default-type=module --check src/request-body.js
+          node --experimental-default-type=module --check src/supra-intelligence.js
+          node --experimental-default-type=module --check src/supra-orchestrator.js
+      - name: Run backend contract and complete security regression suite
+        run: |
+          node --test tests/auth-handler-wiring.test.js tests/directory-api.test.js
+          node --experimental-default-type=module --test \
+            tests/v7-security.test.js \
+            tests/payment-webhook-security.test.js \
+            tests/mission-security-atomic.test.js \
+            tests/payout-atomicity.test.js \
+            tests/payment-settlement-guard.test.js \
+            tests/payment-webhook-settlement-gate.test.js \
+            tests/bootstrap-atomic.test.js \
+            tests/supra-intelligence.test.mjs \
+            tests/supra-orchestrator.test.mjs \
+            tests/supra-production-gates.test.mjs \
+            tests/supra-security-regression.test.mjs \
+            tests/request-body.test.mjs \
+            tests/supra-route-contract.test.mjs
+      - name: Validate Wrangler bundle without deployment
+        run: npx --yes wrangler@4 deploy --dry-run --config wrangler.preview.generated.json --outdir "$RUNNER_TEMP/prochelia-preview-dry-run"
+      - name: Verify Cloudflare token and Preview Worker access
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test "$CLOUDFLARE_ACCOUNT_ID" = "f2a79e9fa41566a8ec80fb24c02c60eb"
+          token="$(printf '%s' "$CLOUDFLARE_API_TOKEN" | sed -E 's/^[[:space:]]*Bearer[[:space:]]+//I; s/^[[:space:]]+//; s/[[:space:]]+$//' | tr -d '\r\n')"
+          status="$(curl --silent --show-error --output "$RUNNER_TEMP/token.json" --write-out '%{http_code}' https://api.cloudflare.com/client/v4/user/tokens/verify -H "Authorization: Bearer $token")"
+          STATUS="$status" FILE="$RUNNER_TEMP/token.json" node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const http=Number(process.env.STATUS), body=JSON.parse(fs.readFileSync(process.env.FILE,'utf8'));
+          if(http!==200 || !body.success || body.result?.status!=='active') throw new Error('Cloudflare token inactive or invalid');
+          NODE
+          status="$(curl --silent --show-error --output "$RUNNER_TEMP/scripts.json" --write-out '%{http_code}' "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts" -H "Authorization: Bearer $token")"
+          STATUS="$status" FILE="$RUNNER_TEMP/scripts.json" node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const http=Number(process.env.STATUS), body=JSON.parse(fs.readFileSync(process.env.FILE,'utf8'));
+          if(http!==200 || !body.success || !(body.result||[]).some(x=>x.id==='prochelia-api-preview')) throw new Error('Preview Worker access check failed');
+          NODE
+      - name: Deploy ONLY the isolated Preview Worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: npx --yes wrangler@4 deploy --config wrangler.preview.generated.json
+      - name: Record deployment guardrails
+        run: |
+          {
+            echo 'Candidate Preview Worker only: prochelia-api-preview.'
+            echo 'D1 binding pinned to Preview DB 6adb95e5-e542-4bec-9008-fbea01042305.'
+            echo 'R2 binding pinned to prochelia-preview-backups-eu; APP_ENV=preview.'
+            echo "Source commit: ${GITHUB_SHA}."
+            echo 'No migrations, no production Worker, no production D1 changes, no live payment activation.'
+          } >> "$GITHUB_STEP_SUMMARY"
