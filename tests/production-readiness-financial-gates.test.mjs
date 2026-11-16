@@ -4,7 +4,8 @@ import { readFile } from "node:fs/promises";
 
 const source = await readFile(new URL("../src/index.js", import.meta.url), "utf8");
 const start = source.indexOf("async function productionConfigCheck");
-const end = source.indexOf("\nasync function finalProductionAudit", start);
+const end = source.indexOf("
+async function finalProductionAudit", start);
 assert.notEqual(start, -1);
 assert.notEqual(end, -1);
 const gate = source.slice(start, end);
@@ -20,7 +21,10 @@ test("production readiness validates wallet and payout columns, not just table n
     assert.ok(gate.includes(column), column);
   }
   assert.match(gate, /WALLET_COLUMNS/);
-  assert.match(gate, /PAYOUT_COLUMNS/);\n  assert.match(gate, /PAYMENT_ACCOUNT_COLUMNS/);\n  assert.match(gate, /PAYMENT_WALLET_LEDGER_COLUMNS/);\n  assert.match(gate, /PAYMENT_RECONCILIATION_COLUMNS/);
+  assert.match(gate, /PAYOUT_COLUMNS/);
+  assert.match(gate, /PAYMENT_ACCOUNT_COLUMNS/);
+  assert.match(gate, /PAYMENT_WALLET_LEDGER_COLUMNS/);
+  assert.match(gate, /PAYMENT_RECONCILIATION_COLUMNS/);
 });
 
 test("provider secrets cannot falsely certify a live PSP execution adapter", () => {
