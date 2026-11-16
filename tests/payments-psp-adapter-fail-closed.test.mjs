@@ -40,3 +40,26 @@ test("provider onboarding refuses before creating a placeholder payout account",
   assert.ok(gate >= 0);
   assert.ok(gate < body.indexOf("ensurePaymentSchema"));
 });
+
+test("production readiness stays closed until real PSP adapter and release evidence exist", () => {
+  const start = source.indexOf("async function productionConfigCheck");
+  const end = source.indexOf("\\nasync function finalProductionAudit", start);
+  assert.ok(start >= 0 && end > start);
+  const body = source.slice(start, end);
+  assert.match(body, /code:'PSP_ADAPTER',status:paymentsConfigured\\(env\\)\\?'OK':'NOT_CONFIGURED'/);
+  for (const code of ["ISOLATED_RESTORE_DRILL","PSP_SANDBOX_E2E","INDEPENDENT_SECURITY_REVIEW","GDPR_LEGAL_APPROVAL","LOAD_AND_RECOVERY_TESTS","HUMAN_RELEASE_APPROVAL"]) {
+    assert.ok(body.includes(code), `Missing mandatory release evidence: ${code}`);
+  }
+  assert.match(body, /NOT_VALIDATED/);
+  assert.match(body, /const blocking=checks\\.filter/);
+});
+
+test("strict production audit reports PSP and acceptance evidence as blocking", () => {
+  const start = source.indexOf("async function strictProductionAudit");
+  const end = source.indexOf("\\nconst __procheliaProductionSafetyHandle", start);
+  assert.ok(start >= 0 && end > start);
+  const body = source.slice(start, end);
+  for (const code of ["PSP_ADAPTER","ISOLATED_RESTORE_DRILL","PSP_SANDBOX_E2E","INDEPENDENT_SECURITY_REVIEW","GDPR_LEGAL_APPROVAL","LOAD_AND_RECOVERY_TESTS","HUMAN_RELEASE_APPROVAL"]) {
+    assert.ok(body.includes(code), `Strict audit is missing blocker: ${code}`);
+  }
+});
