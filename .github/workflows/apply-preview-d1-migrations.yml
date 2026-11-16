@@ -294,6 +294,7 @@ jobs:
           expected_migrations=sorted([
               "0016_security_identity_schema.sql",
               "0020_auth_login_rate_limits.sql",
+              "0021_supra_audit_events.sql",
           ])
           actual_tables=sorted(row["name"] for row in objects if row["type"] == "table")
           expected_tables=sorted([
