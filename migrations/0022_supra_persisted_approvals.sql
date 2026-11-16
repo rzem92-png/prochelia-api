@@ -94,7 +94,7 @@ CREATE TRIGGER IF NOT EXISTS trg_supra_approval_status_transitions
 BEFORE UPDATE OF status ON supra_approval_requests
 WHEN NOT (
   (OLD.status = 'PENDING' AND NEW.status IN ('APPROVED', 'REJECTED', 'REVOKED', 'EXPIRED')) OR
-  (OLD.status = 'APPROVED' AND NEW.status = 'CONSUMED')
+  (OLD.status = 'APPROVED' AND NEW.status IN ('CONSUMED', 'REVOKED'))
 )
 BEGIN
   SELECT RAISE(ABORT, 'INVALID_APPROVAL_STATUS_TRANSITION');
