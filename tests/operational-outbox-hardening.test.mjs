@@ -35,7 +35,7 @@ test("direct operational execution is limited to server-stored in-app notificati
 });
 
 test("provider-dependent financial actions cannot be reported as executed without a PSP", () => {
-  const handler = section("async function executeQueuedAction(env,", "async function processActionOutbox");
+  const handler = section("async function executeQueuedAction(env,", "async function operationalExecute");
   assert.match(handler, /action\.action_type === 'REFUND'/);
   assert.match(handler, /action\.action_type === 'PAYOUT'/);
   assert.match(handler, /PSP_EXECUTION_REQUIRED/);
