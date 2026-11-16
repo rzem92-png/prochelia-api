@@ -34,7 +34,8 @@ test("Preview migration workflow validates the full canonical migration chain", 
     "0018_consolidated_business_schema.sql",
     "0019_backup_verifications.sql",
     "0020_auth_login_rate_limits.sql",
-    "0021_supra_audit_events.sql"
+    "0021_supra_audit_events.sql",
+    "0022_supra_persisted_approvals.sql"
   ];
   for (const migration of expected) assert.ok(workflow.includes(`"${migration}"`), `missing canonical migration ${migration}`);
 });
@@ -69,11 +70,19 @@ test("Preview post-migration verification checks identity, mission-security and 
     "0021_supra_audit_events.sql",
     "supra_audit_events",
     "idx_supra_audit_events_created_at",
-    "idx_supra_audit_events_actor"
+    "idx_supra_audit_events_actor",
+    "0022_supra_persisted_approvals.sql",
+    "supra_approval_requests", "supra_approval_votes", "supra_approval_events",
+    "idx_supra_approval_requests_status_expiry", "idx_supra_approval_requests_tenant_resource",
+    "idx_supra_approval_votes_request", "idx_supra_approval_events_request",
+    "trg_supra_approval_requests_immutable", "trg_supra_approval_votes_no_update",
+    "trg_supra_approval_votes_no_delete", "trg_supra_approval_events_no_update",
+    "trg_supra_approval_events_no_delete", "trg_supra_approval_status_transitions",
+    "trg_supra_approval_status_evidence"
   ]) assert.ok(workflow.includes(name), `missing post-migration verification for ${name}`);
 });
 
-test("Preview migration workflow accepts only the reviewed pre- and post-0021 registries", () => {
+test("Preview migration workflow accepts only the reviewed pre- and post-0022 registries", () => {
   const legacy = [
     "0005_payment_runtime_schema.sql",
     "0006_restore_wallet_balance_guard.sql",
@@ -90,7 +99,7 @@ test("Preview migration workflow accepts only the reviewed pre- and post-0021 re
     "0018_dsa_ai_act_transparency_redress.sql"
   ];
   for (const name of legacy) assert.ok(workflow.includes(`"${name}"`), `legacy migration not explicitly allowlisted: ${name}`);
-  assert.match(workflow, /pending=\{"0021_supra_audit_events\.sql"\}/);
+  assert.match(workflow, /pending=\{"0021_supra_audit_events\.sql", "0022_supra_persisted_approvals\.sql"\}/);
   assert.match(workflow, /baseline=\(local-pending\)\|legacy/);
   assert.match(workflow, /fully_applied=local\|legacy/);
   assert.match(workflow, /remote == baseline/);
@@ -98,7 +107,7 @@ test("Preview migration workflow accepts only the reviewed pre- and post-0021 re
   assert.match(workflow, /both reviewed safe states/);
 });
 
-test("Preview migration workflow verifies the final registry exactly after applying the pending migration", () => {
+test("Preview migration workflow verifies the final registry exactly after applying the pending migrations", () => {
   assert.match(workflow, /Verify exact reviewed Preview migration registry after apply/);
   assert.match(workflow, /expected=local\|legacy/);
   assert.match(workflow, /remote != expected/);
