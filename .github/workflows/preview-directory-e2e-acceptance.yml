@@ -36,7 +36,7 @@ jobs:
       CLOUDFLARE_ACCOUNT_ID: f2a79e9fa41566a8ec80fb24c02c60eb
       PREVIEW_DB_NAME: prochelia-preview-db
       PREVIEW_DB_ID: 6adb95e5-e542-4bec-9008-fbea01042305
-      PAGES_PREVIEW_URL: https://c3ceec86.prochelia.pages.dev
+      PAGES_PREVIEW_URL: https://83a36d32.prochelia.pages.dev
       PAGES_DEPLOYMENT_ID: 83a36d32-4880-4417-a684-f9247e42debf
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
