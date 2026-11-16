@@ -151,7 +151,7 @@ test("approval ledger schema protects immutable request identity and append-only
   assert.match(sql, /trg_supra_approval_status_transitions/);
   assert.match(sql, /trg_supra_approval_status_evidence/);
   assert.match(sql, /payload_json TEXT NOT NULL/);
-  assert.match(sql, /payload_json, created_at/);
+  assert.match(sql, /created_at, payload_json/);
   assert.match(sql, /UNIQUE \(request_id, approver_user_id\)/);
 });
 
