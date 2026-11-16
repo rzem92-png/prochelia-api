@@ -1,5 +1,6 @@
 import { assessSupraDecision } from "./supra-intelligence.js";
 import { buildSupraPlan, getSupraDomainRegistry } from "./supra-orchestrator.js";
+import { handleSupraApprovalRoute } from "./supra-approvals.js";
 
 const MAX_BODY_BYTES = 16 * 1024;
 
@@ -25,6 +26,8 @@ async function writeAudit(env, auth, event) {
 }
 
 export async function handleSupraRoute(request, env, auth) {
+  const approvalResponse = await handleSupraApprovalRoute(request, env, auth);
+  if (approvalResponse) return approvalResponse;
   const url = new URL(request.url);
   if (!["/api/supra/domains", "/api/supra/plan"].includes(url.pathname)) return null;
 
