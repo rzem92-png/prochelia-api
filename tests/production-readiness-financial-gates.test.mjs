@@ -10,17 +10,17 @@ assert.notEqual(end, -1);
 const gate = source.slice(start, end);
 
 test("production readiness requires the complete financial runtime tables", () => {
-  for (const table of ["wallets", "payment_accounts", "payment_transactions", "payment_webhook_events", "payment_disputes", "payout_requests", "accounting_ledger"]) {
+  for (const table of ["wallets", "payment_accounts", "payment_transactions", "payment_wallet_ledger", "payment_reconciliation", "payment_webhook_events", "payment_disputes", "payout_requests", "accounting_ledger"]) {
     assert.match(gate, new RegExp("\\b" + table + "\\b"), table);
   }
 });
 
 test("production readiness validates wallet and payout columns, not just table names", () => {
-  for (const column of ["available_cents", "reserved_cents", "paid_cents", "wallet_id", "idempotency_key", "provider_payout_id"]) {
+  for (const column of ["available_cents", "pending_cents", "reserved_cents", "paid_cents", "provider_account_id", "payouts_enabled", "wallet_id", "idempotency_key", "provider_payout_id", "available_delta_cents", "internal_transaction_id"]) {
     assert.ok(gate.includes(column), column);
   }
   assert.match(gate, /WALLET_COLUMNS/);
-  assert.match(gate, /PAYOUT_COLUMNS/);
+  assert.match(gate, /PAYOUT_COLUMNS/);\n  assert.match(gate, /PAYMENT_ACCOUNT_COLUMNS/);\n  assert.match(gate, /PAYMENT_WALLET_LEDGER_COLUMNS/);\n  assert.match(gate, /PAYMENT_RECONCILIATION_COLUMNS/);
 });
 
 test("provider secrets cannot falsely certify a live PSP execution adapter", () => {
