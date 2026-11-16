@@ -217,7 +217,7 @@ test("refund and payout approval requests require an integer amount and ISO curr
 
 test("only the requester can revoke an unconsumed approval", async () => {
   const db = fakeDb([
-    { requester_user_id: "manager-a", status: "APPROVED" },
+    { requester_user_id: "manager-a", tenant_id: "tenant-1", status: "APPROVED" },
     { status: "REVOKED" }
   ]);
   const response = await handleSupraApprovalRoute(post("/api/supra/approvals/revoke", {
@@ -229,7 +229,7 @@ test("only the requester can revoke an unconsumed approval", async () => {
 });
 
 test("a different manager cannot revoke another manager's request", async () => {
-  const db = fakeDb([{ requester_user_id: "manager-a", status: "PENDING" }]);
+  const db = fakeDb([{ requester_user_id: "manager-a", tenant_id: "tenant-1", status: "PENDING" }]);
   const response = await handleSupraApprovalRoute(post("/api/supra/approvals/revoke", {
     requestId: "req-revoke", reason: "Not requester"
   }), { DB: db }, managerB);
