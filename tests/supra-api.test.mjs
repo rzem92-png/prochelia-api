@@ -14,7 +14,7 @@ function makeDb() {
     }
   };
 }
-const manager = { user: { id: "manager-1", role: "GERANTE" } };
+const manager = { user: { id: "manager-1", role: "GERANTE", tenant_id: "tenant-preview" } };
 const client = { user: { id: "client-1", role: "CLIENT" } };
 
 test("SUPRA route ignores unrelated paths", async () => {
