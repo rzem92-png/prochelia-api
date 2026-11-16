@@ -320,6 +320,9 @@ jobs:
               "security_audit",
               "auth_login_rate_limits",
               "supra_audit_events",
+              "supra_approval_requests",
+              "supra_approval_votes",
+              "supra_approval_events",
           ])
           actual_indexes=sorted(row["name"] for row in objects if row["type"] == "index")
           expected_triggers=sorted([
