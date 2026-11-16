@@ -4,8 +4,7 @@ import { readFile } from "node:fs/promises";
 
 const source = await readFile(new URL("../src/index.js", import.meta.url), "utf8");
 const start = source.indexOf("async function productionConfigCheck");
-const end = source.indexOf("
-async function finalProductionAudit", start);
+const end = source.indexOf("\nasync function finalProductionAudit", start);
 assert.notEqual(start, -1);
 assert.notEqual(end, -1);
 const gate = source.slice(start, end);
