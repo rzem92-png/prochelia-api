@@ -37,7 +37,7 @@ jobs:
       - name: Checkout pinned canonical preproduction migration chain
         uses: actions/checkout@v4
         with:
-          ref: integration/nexus-supra-core-preview-2026-11-16
+          ref: 01be347463a992040cc8c5ad6ee84c6a2411df1e
 
       - name: Verify credentials, exact Preview target and complete migration chain
         shell: bash
