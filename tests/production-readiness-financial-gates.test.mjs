@@ -39,7 +39,14 @@ test("bootstrap credential and PSP execution readiness both block production", (
   assert.match(gate, /executionNotReady\.length===0/);
 });
 
-test("readiness audit remains read-only", () => {
+test("persisted readiness audit never creates or migrates database schema", () => {
+  for (const schemaWriter of ["ensureConsolidatedSchema", "ensurePaymentSchema", "ensureOperationalSchema", "ensureStrategicSchema", "ensureFinalHardeningSchema"]) {
+    assert.doesNotMatch(gate, new RegExp(schemaWriter));
+  }
+  assert.match(gate, /if \(persist\) for\(const c of checks\) await env\.DB\.prepare/);
+});
+
+test("readiness GET remains read-only and persistence only records audit checks", () => {
   assert.match(gate, /persist = false/);
-  assert.match(gate, /if \(persist\) \{/);
+  assert.match(gate, /if \(persist\) for\(const c of checks\)/);
 });
