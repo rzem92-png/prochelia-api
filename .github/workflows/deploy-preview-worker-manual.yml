@@ -99,7 +99,9 @@ jobs:
             tests/supra-production-gates.test.mjs \
             tests/supra-security-regression.test.mjs \
             tests/request-body.test.mjs \
-            tests/supra-route-contract.test.mjs
+            tests/supra-route-contract.test.mjs \\
+            tests/production-audit-readonly.test.js \\
+            tests/production-readiness-financial-gates.test.mjs
       - name: Test D1 backup restore preparation logic
         run: python3 -m unittest tests/test_prepare_d1_restore.py
       - name: Validate Wrangler bundle without deployment
