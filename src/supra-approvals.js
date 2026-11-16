@@ -13,6 +13,7 @@ const ACTION_RISK = Object.freeze({
   PAYOUT_EXECUTE: "CRITICAL",
   GDPR_ERASURE: "CRITICAL"
 });
+const ACTION_AMOUNT_REQUIRED = new Set(["REFUND_ISSUE", "PAYOUT_EXECUTE"]);
 
 function reply(data, status = 200) {
   return new Response(JSON.stringify(data), {
@@ -78,7 +79,7 @@ async function appendEvent(env, requestId, actor, eventType, details = {}) {
 
 export async function handleSupraApprovalRoute(request, env, auth) {
   const path = new URL(request.url).pathname;
-  if (!["/api/supra/approvals/request", "/api/supra/approvals/decide"].includes(path)) return null;
+  if (!["/api/supra/approvals/request", "/api/supra/approvals/decide", "/api/supra/approvals/detail"].includes(path)) return null;
   if (!manager(auth)) return reply({ ok: false, error: auth?.user ? "FORBIDDEN" : "UNAUTHENTICATED" }, auth?.user ? 403 : 401);
   if (!env?.DB?.prepare) return reply({ ok: false, error: "DATABASE_UNAVAILABLE" }, 503);
   if (request.method !== "POST") return reply({ ok: false, error: "METHOD_NOT_ALLOWED" }, 405);
@@ -101,12 +102,13 @@ export async function handleSupraApprovalRoute(request, env, auth) {
       return reply({ ok: false, error: "TENANT_SCOPE_NOT_VERIFIED" }, 403);
     }
     const hasAmount = body.amountCents !== undefined && body.amountCents !== null;
+    if (ACTION_AMOUNT_REQUIRED.has(action) && !hasAmount) return reply({ ok: false, error: "AMOUNT_REQUIRED_FOR_ACTION" }, 400);
     if (hasAmount && (!Number.isSafeInteger(body.amountCents) || body.amountCents < 0 ||
         typeof body.currency !== "string" || !/^[A-Z]{3}$/.test(body.currency))) {
       return reply({ ok: false, error: "INVALID_AMOUNT_OR_CURRENCY" }, 400);
     }
-    let payloadHash;
-    try { payloadHash = await sha256Hex(canonicalJson(body.payload)); }
+    let payloadHash, payloadJson;
+    try { payloadJson = canonicalJson(body.payload); payloadHash = await sha256Hex(payloadJson); }
     catch { return reply({ ok: false, error: "INVALID_PAYLOAD" }, 400); }
 
     const id = crypto.randomUUID();
@@ -115,10 +117,10 @@ export async function handleSupraApprovalRoute(request, env, auth) {
     try {
       await env.DB.batch([
         env.DB.prepare(`INSERT INTO supra_approval_requests
-          (id, requester_user_id, tenant_id, action, resource_id, payload_hash, amount_cents,
+          (id, requester_user_id, tenant_id, action, resource_id, payload_hash, payload_json, amount_cents,
            currency, reason, risk, required_approvals, status, expires_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'PENDING', ?)`)
-          .bind(id, auth.user.id, tenantId, action, resourceId, payloadHash,
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'PENDING', ?)`)
+          .bind(id, auth.user.id, tenantId, action, resourceId, payloadHash, payloadJson,
             hasAmount ? body.amountCents : null, hasAmount ? body.currency : null,
             reason, risk, requiredApprovals, expiresAt),
         env.DB.prepare(`INSERT INTO supra_approval_events
@@ -227,6 +229,7 @@ export async function consumeSupraApproval(env, input) {
   const now = new Date().toISOString();
   const amount = input.amountCents === undefined || input.amountCents === null ? null : input.amountCents;
   const currency = amount === null ? null : input.currency;
+  if (ACTION_AMOUNT_REQUIRED.has(action) && amount === null) return { ok: false, error: "AMOUNT_REQUIRED_FOR_ACTION" };
   if (amount !== null && (!Number.isSafeInteger(amount) || amount < 0 || typeof currency !== "string" || !/^[A-Z]{3}$/.test(currency))) {
     return { ok: false, error: "INVALID_AMOUNT_OR_CURRENCY" };
   }
