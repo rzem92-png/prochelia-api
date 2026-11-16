@@ -137,3 +137,30 @@ test("Preview migration refuses to export D1 unless R2 bucket jurisdiction is ve
   assert.match(workflow, /cf-r2-jurisdiction: eu/);
   assert.match(workflow, /\.result\.jurisdiction == "eu"/);
 });
+
+
+test("Preview migration workflow pins the Nexus branch containing both additive migrations", () => {
+  assert.match(workflow, /ref: integration\/nexus-supra-core-preview-2026-11-16/);
+  assert.match(workflow, /0021_supra_audit_events\.sql/);
+  assert.match(workflow, /0022_supra_persisted_approvals\.sql/);
+});
+
+test("Preview migration workflow verifies every persisted approval table, index and trigger", () => {
+  for (const name of [
+    "supra_approval_requests",
+    "supra_approval_votes",
+    "supra_approval_events",
+    "idx_supra_approval_requests_status_expiry",
+    "idx_supra_approval_requests_tenant_resource",
+    "idx_supra_approval_votes_request",
+    "idx_supra_approval_events_request",
+    "trg_supra_approval_requests_immutable",
+    "trg_supra_approval_votes_no_update",
+    "trg_supra_approval_votes_no_delete",
+    "trg_supra_approval_events_no_update",
+    "trg_supra_approval_events_no_delete",
+    "trg_supra_approval_status_transitions",
+    "trg_supra_approval_status_evidence"
+  ]) assert.ok(workflow.includes(name), `missing persisted approval schema verification: ${name}`);
+  assert.match(workflow, /actual_triggers != expected_triggers/);
+});
