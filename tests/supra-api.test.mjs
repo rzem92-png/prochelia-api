@@ -49,9 +49,9 @@ test("SUPRA plan is audited and never executes", async () => {
   assert.equal(payload.decision.executionAllowed, false);
   assert.equal(payload.audit.recorded, true);
   assert.ok(payload.plan.missingEvidence.includes("verify_psp_event_and_ledger"));
-  assert.equal(DB.calls.length, 2);
-  assert.match(DB.calls[0].sql, /CREATE TABLE IF NOT EXISTS supra_audit_events/);
-  assert.match(DB.calls[1].sql, /INSERT INTO supra_audit_events/);
+  assert.equal(DB.calls.length, 1);
+  assert.match(DB.calls[0].sql, /INSERT INTO supra_audit_events/);
+  assert.doesNotMatch(DB.calls[0].sql, /CREATE TABLE/);
 });
 
 test("SUPRA route rejects invalid JSON and non-JSON content types", async () => {
