@@ -528,6 +528,68 @@ async function deviceHash(request, userId) {
   return sha256Base64url(raw);
 }
 
+async function securityIdentityStatus(request, env) {
+  const auth = await getSessionUser(request, env);
+  if (!requireRole(auth, ['intervenant'])) {
+    return json({ok:false,error:auth?.user?'FORBIDDEN':'UNAUTHENTICATED',version:VERSION}, auth?.user?403:401);
+  }
+  await ensureSecuritySchema(env);
+  const identity = await requireVerifiedIntervenant(env, auth.user.id);
+  const latest = await env.DB.prepare(
+    `SELECT status,level,verified_at,expires_at,rejection_reason
+       FROM identity_verifications
+      WHERE user_id=?
+      ORDER BY updated_at DESC, created_at DESC
+      LIMIT 1`
+  ).bind(auth.user.id).first();
+  const profile = await env.DB.prepare(
+    `SELECT i.validation_status,
+            COUNT(d.id) AS document_count,
+            COALESCE(SUM(CASE
+              WHEN d.status='verified'
+               AND (d.expires_at IS NULL OR d.expires_at > CURRENT_TIMESTAMP)
+              THEN 1 ELSE 0 END),0) AS valid_document_count
+       FROM intervenants i
+       LEFT JOIN documents d ON d.user_id=i.user_id
+      WHERE i.user_id=?
+      GROUP BY i.id
+      LIMIT 1`
+  ).bind(auth.user.id).first();
+  const identityPassed = !!identity;
+  // The profile gate is based only on the server-side intervenants record
+  // and verified, non-expired documents. An empty document set fails closed.
+  const profilePassed = !!profile
+    && String(profile.validation_status || '').toLowerCase() === 'verified'
+    && Number(profile.document_count || 0) > 0
+    && Number(profile.valid_document_count || 0) === Number(profile.document_count || 0);
+  const blockingReasons = [];
+  if (!identityPassed) blockingReasons.push('IDENTITY_NOT_VERIFIED');
+  if (!profile) blockingReasons.push('PROFILE_NOT_FOUND');
+  else if (String(profile.validation_status || '').toLowerCase() !== 'verified') blockingReasons.push('PROFILE_NOT_VERIFIED');
+  if (profile && Number(profile.document_count || 0) === 0) blockingReasons.push('REQUIRED_DOCUMENTS_NOT_REGISTERED');
+  if (profile && Number(profile.valid_document_count || 0) !== Number(profile.document_count || 0)) blockingReasons.push('DOCUMENTS_NOT_VERIFIED_OR_EXPIRED');
+  return json({
+    ok:true,
+    version:VERSION,
+    authority:'SERVER_D1',
+    identity_gate_passed:identityPassed,
+    profile_gate_passed:profilePassed,
+    identity:latest ? {
+      status:latest.status,
+      level:latest.level,
+      verified_at:latest.verified_at,
+      expires_at:latest.expires_at,
+      rejection_reason:latest.rejection_reason
+    } : null,
+    profile:profile ? {
+      validation_status:profile.validation_status,
+      document_count:Number(profile.document_count || 0),
+      valid_document_count:Number(profile.valid_document_count || 0)
+    } : null,
+    blocking_reasons:blockingReasons
+  },200);
+}
+
 async function securityIdentityStart(request, env) {
   const auth = await getSessionUser(request, env);
   if (!requireRole(auth, ['intervenant'])) return json({ok:false,error:auth?.user?'FORBIDDEN':'UNAUTHENTICATED',version:VERSION}, auth?.user?403:401);
@@ -1201,6 +1263,10 @@ async function handleBase(request, env) {
     return directoryList(request,env,'intervenants');
   }
 
+  if (url.pathname === '/api/security/identity/status') {
+    if (request.method !== 'GET') return json({ok:false,error:'METHOD_NOT_ALLOWED',version:VERSION},405,{'allow':'GET'});
+    return securityIdentityStatus(request, env);
+  }
   if (url.pathname === '/api/security/identity/start') {
     if (request.method !== 'POST') return json({ ok:false,error:'METHOD_NOT_ALLOWED',version:VERSION },405);
     return securityIdentityStart(request, env);
