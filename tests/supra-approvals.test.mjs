@@ -155,6 +155,51 @@ test("approval ledger schema protects immutable request identity and append-only
   assert.match(sql, /UNIQUE \(request_id, approver_user_id\)/);
 });
 
+
+test("all approval endpoints fail closed when the authenticated session has no server-derived tenant", async () => {
+  const managerWithoutTenant = { user: { id: "manager-no-tenant", role: "gerante" } };
+
+  const requestDb = fakeDb();
+  const requestResponse = await handleSupraApprovalRoute(post("/api/supra/approvals/request", {
+    action: "PRODUCTION_RELEASE", tenantId: "tenant-1", resourceId: "release-1",
+    payload: { commit: "abc" }, reason: "Review"
+  }), { DB: requestDb }, managerWithoutTenant);
+  assert.equal(requestResponse.status, 403);
+  assert.equal((await requestResponse.json()).error, "TENANT_SCOPE_NOT_VERIFIED");
+  assert.equal(requestDb.calls.length, 0);
+
+  const decideDb = fakeDb([{
+    id: "req-no-tenant", requester_user_id: "another-manager", tenant_id: "tenant-1",
+    status: "PENDING", expires_at: "2999-01-01T00:00:00.000Z", required_approvals: 1
+  }]);
+  const decideResponse = await handleSupraApprovalRoute(post("/api/supra/approvals/decide", {
+    requestId: "req-no-tenant", decision: "APPROVE", reason: "Review"
+  }), { DB: decideDb }, managerWithoutTenant);
+  assert.equal(decideResponse.status, 403);
+  assert.equal((await decideResponse.json()).error, "TENANT_SCOPE_NOT_VERIFIED");
+  assert.equal(decideDb.calls.filter(x => x.kind === "batch").length, 0);
+
+  const detailDb = fakeDb([{
+    id: "req-no-tenant", requester_user_id: "another-manager", tenant_id: "tenant-1"
+  }]);
+  const detailResponse = await handleSupraApprovalRoute(new Request(
+    "https://app.example/api/supra/approvals/detail?requestId=req-no-tenant"
+  ), { DB: detailDb }, managerWithoutTenant);
+  assert.equal(detailResponse.status, 403);
+  assert.equal((await detailResponse.json()).error, "TENANT_SCOPE_NOT_VERIFIED");
+  assert.equal(detailDb.calls.filter(x => x.kind === "all").length, 0);
+
+  const revokeDb = fakeDb([{
+    requester_user_id: "manager-no-tenant", tenant_id: "tenant-1", status: "PENDING"
+  }]);
+  const revokeResponse = await handleSupraApprovalRoute(post("/api/supra/approvals/revoke", {
+    requestId: "req-no-tenant", reason: "Review"
+  }), { DB: revokeDb }, managerWithoutTenant);
+  assert.equal(revokeResponse.status, 403);
+  assert.equal((await revokeResponse.json()).error, "TENANT_SCOPE_NOT_VERIFIED");
+  assert.equal(revokeDb.calls.filter(x => x.kind === "batch").length, 0);
+});
+
 test("approval requests cannot be created for a tenant outside the authenticated manager session", async () => {
   const db = fakeDb();
   const response = await handleSupraApprovalRoute(post("/api/supra/approvals/request", {
