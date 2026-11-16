@@ -17,7 +17,7 @@ concurrency:
 
 jobs:
   backup-preview:
-    if: ${{ github.event.inputs.confirm_preview_backup == 'BACKUP_PREVIEW_TO_R2_EU' }}
+    if: ${{ github.ref == 'refs/heads/main' && inputs.confirm_preview_backup == 'BACKUP_PREVIEW_TO_R2_EU' }}
     runs-on: ubuntu-latest
     timeout-minutes: 25
     env:
