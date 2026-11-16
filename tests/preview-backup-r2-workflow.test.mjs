@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
 const workflow = readFileSync('.github/workflows/backup-preview-d1-to-r2-eu.yml', 'utf8');
+const legacyWorkflow = readFileSync('.github/workflows/backup-preview-d1.yml', 'utf8');
 
 test('Preview backup is pinned to the dedicated locked EU R2 bucket', () => {
   assert.match(workflow, /R2_BUCKET:\s*prochelia-preview-backups-eu-locked/);
@@ -32,4 +33,10 @@ test('Preview backup encrypts and verifies R2 round-trip without deploying or re
 test('Preview backup provisions EU jurisdiction and uses the jurisdiction-specific S3 endpoint', () => {
   assert.match(workflow, /r2 bucket create "\$R2_BUCKET" --jurisdiction eu --location weur/);
   assert.match(workflow, /f2a79e9fa41566a8ec80fb24c02c60eb\.eu\.r2\.cloudflarestorage\.com/);
+});
+
+test('Scheduled Preview backups use the EU R2 workflow, not GitHub artifact storage', () => {
+  assert.match(workflow, /schedule:/);
+  assert.match(workflow, /github\.event_name == 'schedule'/);
+  assert.doesNotMatch(legacyWorkflow, /schedule:/);
 });
