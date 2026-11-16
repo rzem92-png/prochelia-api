@@ -22,5 +22,12 @@
       "enabled": true,
       "invocation_logs": true
     }
-  }
+  },
+  "r2_buckets": [
+    {
+      "binding": "BACKUP_BUCKET",
+      "bucket_name": "prochelia-production-backups-eu-v2",
+      "jurisdiction": "eu"
+    }
+  ]
 }
