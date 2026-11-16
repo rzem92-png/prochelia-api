@@ -41,3 +41,21 @@ test("provider-dependent financial actions cannot be reported as executed withou
   assert.match(handler, /PSP_EXECUTION_REQUIRED/);
   assert.match(handler, /WAITING_PROVIDER/);
 });
+
+test("case approval queues mission changes instead of mutating missions directly", () => {
+  const handler = section("async function executeCaseBusinessAction", "async function processActionOutbox");
+  assert.match(handler, /enqueueAction\(env,c\.id,'ASSIGN_REPLACEMENT'/);
+  assert.match(handler, /enqueueAction\(env,c\.id,'RESCHEDULE_MISSION'/);
+  assert.doesNotMatch(handler, /UPDATE missions SET/);
+});
+
+test("operational case approval remains IN_PROGRESS until a downstream action is confirmed", () => {
+  const handler = section("async function executeOperationalCase", "async function approveOperationalCase");
+  assert.match(handler, /executed:false/);
+  assert.match(handler, /status:'IN_PROGRESS'/);
+  assert.match(handler, /execution_claim:'QUEUED_NOT_CONFIRMED'/);
+  assert.match(handler, /status='IN_PROGRESS'/);
+  assert.match(handler, /VALUES\(\?\,\?\,\?\,\?\,\?\,\?\,\?\,NULL\)/);
+  assert.doesNotMatch(handler, /status='RESOLVED'/);
+  assert.doesNotMatch(handler, /'COMPLETED'/);
+});
