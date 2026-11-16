@@ -42,3 +42,11 @@ test("checkout and Node setup actions are pinned to immutable SHAs", () => {
   assert.match(workflow, /actions\/checkout@[0-9a-f]{40}/);
   assert.match(workflow, /actions\/setup-node@[0-9a-f]{40}/);
 });
+
+test("Preview deployment refuses D1 databases without explicit EU jurisdiction", () => {
+  const guard = workflow.indexOf("Verify Preview D1 database jurisdiction is EU");
+  const deploy = workflow.indexOf("Deploy ONLY the isolated Preview Worker");
+  assert.ok(guard >= 0 && deploy > guard, "EU D1 guard must precede deployment");
+  assert.match(workflow, /result\.jurisdiction == "eu"/);
+  assert.match(workflow, /Create a new EU-jurisdiction D1/);
+});
