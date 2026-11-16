@@ -33,8 +33,8 @@ jobs:
       AWS_DEFAULT_REGION: auto
       EXPECTED_ACCOUNT_ID: f2a79e9fa41566a8ec80fb24c02c60eb
       SOURCE_DB_NAME: prochelia-preview-db
-      RESTORE_DB_NAME: prochelia-restore-test-v2
-      RESTORE_DB_ID: a3526c2a-39cb-49ab-97c4-979138145f33
+      RESTORE_DB_NAME: prochelia-r2-restore-validation-2026-11
+      RESTORE_DB_ID: 3caebbc6-982a-4562-96a7-e509185e9e9a
       PREVIEW_DB_ID: 6adb95e5-e542-4bec-9008-fbea01042305
       PRODUCTION_DB_ID: 04f52830-ef5a-4f17-a640-42bbc2381bba
       R2_BUCKET: prochelia-preview-backups-eu-v2
@@ -82,8 +82,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$RESTORE_DB_NAME" = "prochelia-restore-test-v2"
-          test "$RESTORE_DB_ID" = "a3526c2a-39cb-49ab-97c4-979138145f33"
+          test "$RESTORE_DB_NAME" = "prochelia-r2-restore-validation-2026-11"
+          test "$RESTORE_DB_ID" = "3caebbc6-982a-4562-96a7-e509185e9e9a"
           test "$RESTORE_DB_ID" != "$PREVIEW_DB_ID"
           test "$RESTORE_DB_ID" != "$PRODUCTION_DB_ID"
           token="${CLOUDFLARE_API_TOKEN#Bearer }"
@@ -97,8 +97,8 @@ jobs:
             compatibility_date: "2026-09-25",
             d1_databases: [{
               binding: "DB",
-              database_name: "prochelia-restore-test-v2",
-              database_id: "a3526c2a-39cb-49ab-97c4-979138145f33"
+              database_name: "prochelia-r2-restore-validation-2026-11",
+              database_id: "3caebbc6-982a-4562-96a7-e509185e9e9a"
             }]
           };
           fs.writeFileSync(process.env.RUNNER_TEMP + "/wrangler.restore.json", JSON.stringify(cfg));
@@ -152,11 +152,11 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         run: |
           set -euo pipefail
-          test "$RESTORE_DB_ID" = "a3526c2a-39cb-49ab-97c4-979138145f33"
+          test "$RESTORE_DB_ID" = "3caebbc6-982a-4562-96a7-e509185e9e9a"
           test "$RESTORE_DB_ID" != "$PREVIEW_DB_ID"
           test "$RESTORE_DB_ID" != "$PRODUCTION_DB_ID"
           npx --yes wrangler@4 d1 execute "$RESTORE_DB_NAME" --remote --config "$RUNNER_TEMP/wrangler.restore.json" --file="$RUNNER_TEMP/prochelia-restore/backup.sql" --yes
-          echo "SQL restored only to prochelia-restore-test-v2."
+          echo "SQL restored only to prochelia-r2-restore-validation-2026-11."
 
       - name: Verify restored D1 integrity, foreign keys, tables and migration inventory
         shell: bash
