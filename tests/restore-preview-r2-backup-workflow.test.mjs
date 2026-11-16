@@ -15,6 +15,7 @@ test("R2 restore is manual, explicit, and only targets the isolated D1 v2 databa
 
 test("R2 restore verifies EU bucket, exact account and object prefix before download", () => {
   assert.match(workflow, /prochelia-preview-backups-eu-v2/);
+  assert.match(workflow, /R2_ENDPOINT: https:\/\/f2a79e9fa41566a8ec80fb24c02c60eb\.eu\.r2\.cloudflarestorage\.com/);
   assert.match(workflow, /cf-r2-jurisdiction: eu/);
   assert.match(workflow, /result\.jurisdiction == "eu"/);
   assert.match(workflow, /preview-d1\/prochelia-preview-db/);
