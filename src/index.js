@@ -2673,7 +2673,7 @@ async function productionConfigCheck(env, { persist = false } = {}) {
     await ensureConsolidatedSchema(env); await ensurePaymentSchema(env); await ensureOperationalSchema(env); await ensureStrategicSchema(env); await ensureFinalHardeningSchema(env);
   }
   const checks=[];
-  const requiredTables=['users','sessions','missions','payment_transactions','payment_webhook_events','payment_disputes','operational_cases','action_outbox','notification_outbox','accounting_ledger','promotions','promotion_recommendations','activity_journal','compliance_events'];
+  const requiredTables=['users','sessions','missions','wallets','payment_accounts','payment_transactions','payment_webhook_events','payment_disputes','payout_requests','operational_cases','action_outbox','notification_outbox','accounting_ledger','promotions','promotion_recommendations','activity_journal','compliance_events'];
   for(const t of requiredTables) checks.push({code:`TABLE:${t}`,status:await tableExists(env,t)?'OK':'MISSING'});
   const pspRequired=['PAYMENT_PROVIDER','PAYMENT_WEBHOOK_SECRET'];
   for(const k of pspRequired) checks.push({code:`SECRET:${k}`,status:finalSecretConfigured(env,k)?'OK':'NOT_CONFIGURED'});
@@ -2681,6 +2681,17 @@ async function productionConfigCheck(env, { persist = false } = {}) {
   const paymentCols=await tableColumns(env,'payment_transactions');
   const requiredPaymentCols=['id','idempotency_key','mission_id','client_id','intervenant_id','gross_cents','commission_cents','provider_fee_cents','refund_cents','net_intervenant_cents','status','provider_payment_id'];
   checks.push({code:'PAYMENT_COLUMNS',status:requiredPaymentCols.every(x=>paymentCols.includes(x))?'OK':'INCOMPLETE',missing:requiredPaymentCols.filter(x=>!paymentCols.includes(x))});
+  const walletCols=await tableColumns(env,'wallets');
+  const requiredWalletCols=['id','user_id','currency','available_cents','reserved_cents','paid_cents'];
+  checks.push({code:'WALLET_COLUMNS',status:requiredWalletCols.every(x=>walletCols.includes(x))?'OK':'INCOMPLETE',missing:requiredWalletCols.filter(x=>!walletCols.includes(x))});
+  const payoutCols=await tableColumns(env,'payout_requests');
+  const requiredPayoutCols=['id','wallet_id','user_id','amount_cents','status','idempotency_key','provider_payout_id'];
+  checks.push({code:'PAYOUT_COLUMNS',status:requiredPayoutCols.every(x=>payoutCols.includes(x))?'OK':'INCOMPLETE',missing:requiredPayoutCols.filter(x=>!payoutCols.includes(x))});
+  // Secrets alone do not implement a PSP. No live charge/payout adapter is wired into the
+  // current request handlers, so the production gate must remain closed until one is built,
+  // sandbox-tested and reconciled against the atomic ledger.
+  const pspAdapterImplemented=false;
+  checks.push({code:'PSP_EXECUTION_ADAPTER',status:pspAdapterImplemented?'OK':'NOT_IMPLEMENTED'});
   const missionCols=await tableColumns(env,'missions');
   const usefulMissionCols=['id','client_id','intervenant_id'];
   checks.push({code:'MISSION_CORE_COLUMNS',status:usefulMissionCols.every(x=>missionCols.includes(x))?'OK':'INCOMPLETE',missing:usefulMissionCols.filter(x=>!missionCols.includes(x))});
@@ -2691,16 +2702,17 @@ async function productionConfigCheck(env, { persist = false } = {}) {
     await registerIntegration(env,'MARKET_DATA','COMMERCIAL',['MARKET_DATA_PROVIDER'],['market_prices','competitor_signals'],finalSecretConfigured(env,'MARKET_DATA_PROVIDER')?'CONFIGURED':'NOT_CONFIGURED');
   }
   const blocking=checks.filter(x=>['MISSING','INCOMPLETE'].includes(x.status));
-  const externalNotConfigured=checks.filter(x=>x.status==='NOT_CONFIGURED' && ['SECRET:PAYMENT_PROVIDER','SECRET:PAYMENT_WEBHOOK_SECRET'].includes(x.code));
-  const overall=blocking.length===0 && externalNotConfigured.length===0;
+  const externalNotConfigured=checks.filter(x=>x.status==='NOT_CONFIGURED' && ['SECRET:PAYMENT_PROVIDER','SECRET:PAYMENT_WEBHOOK_SECRET','BOOTSTRAP_TOKEN'].includes(x.code));
+  const executionNotReady=checks.filter(x=>x.status==='NOT_IMPLEMENTED');
+  const overall=blocking.length===0 && externalNotConfigured.length===0 && executionNotReady.length===0;
   if (persist) for(const c of checks) await env.DB.prepare(`INSERT INTO system_config_checks(id,check_code,status,details_json) VALUES(?,?,?,?)`).bind(crypto.randomUUID(),c.code,c.status,JSON.stringify(c)).run();
-  return {overall,checks,blocking:blocking.length,externalNotConfigured:externalNotConfigured.length};
+  return {overall,checks,blocking:blocking.length,externalNotConfigured:externalNotConfigured.length,executionNotReady:executionNotReady.length};
 }
 
 async function finalProductionAudit(request,env) {
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
   const result=await productionConfigCheck(env);
-  // GET audit endpoint is intentionally read-only; persist audit via explicit mutation endpoint.
+  // GET production-check is read-only; persist audit via explicit mutation endpoint.
   return json({ok:true,version:VERSION,production_gate:result.overall?'OPEN':'CLOSED',ready_for_real_traffic:result.overall,checks:result.checks,note:result.overall?'Architecture gate passed; external business integrations must still be exercised with sandbox/acceptance tests.':'No real production traffic should be enabled until blocking configuration/schema checks are resolved.'});
 }
 
