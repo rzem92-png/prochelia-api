@@ -97,6 +97,20 @@ jobs:
           }
           echo "PASS: encrypted Preview backup destination is the verified EU-jurisdiction v2 bucket."
 
+      - name: Verify Preview D1 EU jurisdiction before any export
+        shell: bash
+        run: |
+          set -euo pipefail
+          token="${CLOUDFLARE_API_TOKEN#Bearer }"
+          test -n "$token"
+          test "$CLOUDFLARE_ACCOUNT_ID" = "$EXPECTED_ACCOUNT_ID"
+          status="$(curl --silent --show-error --output "$RUNNER_TEMP/preview-d1-jurisdiction.json" --write-out '%{http_code}' "https://api.cloudflare.com/client/v4/accounts/$EXPECTED_ACCOUNT_ID/d1/database/$EXPECTED_DB_ID" -H "Authorization: Bearer $token")"
+          test "$status" = "200" || { echo "::error::Preview D1 metadata lookup failed (HTTP $status); refusing export and backup."; exit 1; }
+          jq -e --arg id "$EXPECTED_DB_ID" --arg name "$EXPECTED_DB_NAME" '.success == true and .result.uuid == $id and .result.name == $name and .result.jurisdiction == "eu"' "$RUNNER_TEMP/preview-d1-jurisdiction.json" >/dev/null || {
+            echo "::error::Preview D1 identity or explicit EU jurisdiction verification failed; refusing export and backup. Create a new D1 with jurisdiction=eu, update the pinned ID, then revalidate."; exit 1;
+          }
+          echo "PASS: Preview D1 identity and explicit EU jurisdiction verified before export."
+
       - name: Install local restore-validation tools
         shell: bash
         run: |

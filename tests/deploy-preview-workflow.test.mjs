@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
 const workflow = await readFile(new URL("../.github/workflows/deploy-preview-worker-manual.yml", import.meta.url), "utf8");
+const backupWorkflow = await readFile(new URL("../.github/workflows/backup-preview-d1-to-r2-eu.yml", import.meta.url), "utf8");
 
 test("Preview deploy is manual and requires exact confirmation on main", () => {
   assert.match(workflow, /workflow_dispatch:/);
@@ -40,4 +41,16 @@ test("Preview deploy runs the complete security suite and dry-run before the onl
 test("checkout and Node setup actions are pinned to immutable SHAs", () => {
   assert.match(workflow, /actions\/checkout@[0-9a-f]{40}/);
   assert.match(workflow, /actions\/setup-node@[0-9a-f]{40}/);
+});
+
+
+test("Preview backup verifies the exact D1 identity and explicit EU jurisdiction before exporting", () => {
+  const guard = backupWorkflow.indexOf("Verify Preview D1 EU jurisdiction before any export");
+  const exportStep = backupWorkflow.indexOf("Export preview D1 (read-only)");
+  assert.ok(guard >= 0 && exportStep > guard, "D1 jurisdiction guard must precede export");
+  assert.match(backupWorkflow, /\/d1\/database\/\$EXPECTED_DB_ID/);
+  assert.match(backupWorkflow, /\.result\.uuid == \$id/);
+  assert.match(backupWorkflow, /\.result\.name == \$name/);
+  assert.match(backupWorkflow, /\.result\.jurisdiction == "eu"/);
+  assert.match(backupWorkflow, /refusing export and backup/);
 });
