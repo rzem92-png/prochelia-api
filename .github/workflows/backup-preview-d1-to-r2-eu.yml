@@ -53,12 +53,12 @@ jobs:
           fi
 
       - name: Checkout pinned reviewed Preview branch commit (D1 config)
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           ref: fa99307ba2c0f6dcebd154a462653690af40fb82
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: "22"
 
@@ -117,7 +117,9 @@ jobs:
           sqlite3 "$RUNNER_TEMP/prochelia-r2/restore-validation.sqlite" < "$RUNNER_TEMP/prochelia-r2/preview.sql"
           integrity="$(sqlite3 "$RUNNER_TEMP/prochelia-r2/restore-validation.sqlite" 'PRAGMA integrity_check;')"
           test "$integrity" = "ok" || { echo "::error::Local SQLite restore integrity_check failed: $integrity"; exit 1; }
-          echo "PASS: exported Preview D1 dump restored locally; SQLite integrity_check=ok."
+          foreign_keys="$(sqlite3 "$RUNNER_TEMP/prochelia-r2/restore-validation.sqlite" 'PRAGMA foreign_key_check;')"
+          test -z "$foreign_keys" || { echo "::error::Local SQLite restore foreign_key_check found violations."; printf '%s\\n' "$foreign_keys"; exit 1; }
+          echo "PASS: exported Preview D1 dump restored locally; SQLite integrity_check=ok and foreign_key_check=empty."
 
       - name: Encrypt backup AES-256 and prepare integrity manifest
         shell: bash
@@ -164,4 +166,9 @@ jobs:
             echo "::error::Decrypted SQL checksum does not match the pre-encryption manifest."
             exit 1
           }
-          echo "PASS: private R2 upload/download and encrypted object round-trip verified."
+          sqlite3 "$RUNNER_TEMP/prochelia-r2/roundtrip-validation.sqlite" < "$RUNNER_TEMP/prochelia-r2/roundtrip.sql"
+          roundtrip_integrity="$(sqlite3 "$RUNNER_TEMP/prochelia-r2/roundtrip-validation.sqlite" 'PRAGMA integrity_check;')"
+          test "$roundtrip_integrity" = "ok" || { echo "::error::Downloaded backup restore integrity_check failed: $roundtrip_integrity"; exit 1; }
+          roundtrip_foreign_keys="$(sqlite3 "$RUNNER_TEMP/prochelia-r2/roundtrip-validation.sqlite" 'PRAGMA foreign_key_check;')"
+          test -z "$roundtrip_foreign_keys" || { echo "::error::Downloaded backup restore foreign_key_check found violations."; printf '%s\\n' "$roundtrip_foreign_keys"; exit 1; }
+          echo "PASS: private R2 upload/download, decryption, checksum, integrity_check and foreign_key_check verified."
