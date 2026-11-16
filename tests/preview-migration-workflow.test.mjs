@@ -4,6 +4,11 @@ import { readFile } from "node:fs/promises";
 
 const workflow = await readFile(new URL("../.github/workflows/apply-preview-d1-migrations.yml", import.meta.url), "utf8");
 
+test("Preview migration secrets are available only from the reviewed main workflow dispatch", () => {
+  assert.match(workflow, /if: \$\{\{ github\.ref == 'refs\/heads\/main' && inputs\.confirm_preview == 'APPLY_PREVIEW_ONLY' \}\}/);
+  assert.doesNotMatch(workflow, /if: \$\{\{ github\.event\.inputs\.confirm_preview == 'APPLY_PREVIEW_ONLY' \}\}/);
+});
+
 test("Preview migration workflow pins the dedicated Preview database and forbids production", () => {
   assert.match(workflow, /EXPECTED_DB_NAME:\s*prochelia-preview-db/);
   assert.match(workflow, /EXPECTED_DB_ID:\s*6adb95e5-e542-4bec-9008-fbea01042305/);
