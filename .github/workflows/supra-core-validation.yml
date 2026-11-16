@@ -5,8 +5,10 @@ on:
     paths:
       - "src/supra-intelligence.js"
       - "src/supra-orchestrator.js"
+      - "src/supra-api.js"
       - "tests/supra-intelligence.test.mjs"
       - "tests/supra-orchestrator.test.mjs"
+      - "tests/supra-api.test.mjs"
       - ".github/workflows/supra-core-validation.yml"
 
 permissions:
@@ -26,6 +28,7 @@ jobs:
         run: |
           node --experimental-default-type=module --check src/supra-intelligence.js
           node --experimental-default-type=module --check src/supra-orchestrator.js
+          node --experimental-default-type=module --check src/supra-api.js
       - name: Run focused Supra governance regression tests
         run: |
-          node --experimental-default-type=module --test tests/supra-intelligence.test.mjs tests/supra-orchestrator.test.mjs
+          node --experimental-default-type=module --test tests/supra-intelligence.test.mjs tests/supra-orchestrator.test.mjs tests/supra-api.test.mjs
