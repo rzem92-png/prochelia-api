@@ -17,18 +17,6 @@ function isPlainRecord(value) {
 
 async function writeAudit(env, auth, event) {
   if (!env?.DB?.prepare) throw new Error("SUPRA_AUDIT_DATABASE_REQUIRED");
-  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS supra_audit_events (
-    id TEXT PRIMARY KEY,
-    actor_user_id TEXT NOT NULL,
-    actor_role TEXT NOT NULL,
-    event_type TEXT NOT NULL,
-    domain TEXT NOT NULL,
-    action TEXT NOT NULL,
-    risk TEXT NOT NULL,
-    approval_required INTEGER NOT NULL,
-    execution_allowed INTEGER NOT NULL DEFAULT 0,
-    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-  )`).run();
   await env.DB.prepare(`INSERT INTO supra_audit_events
     (id, actor_user_id, actor_role, event_type, domain, action, risk, approval_required, execution_allowed)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)`)
