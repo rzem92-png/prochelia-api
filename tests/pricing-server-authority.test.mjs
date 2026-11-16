@@ -35,3 +35,13 @@ test("quote rejects out-of-range distance and duration before pricing", () => {
   assert.match(handler, /duration < 5 \|\| duration > 1440/);
   assert.match(handler, /INVALID_QUOTE_PARAMETERS/);
 });
+
+test("regulated ceiling caps the final price including travel", () => {
+  const start = source.indexOf("function financeStrategicQuote(");
+  const end = source.indexOf("\nasync function pricingQuote(", start);
+  assert.ok(start >= 0 && end > start);
+  const core = source.slice(start, end);
+  assert.match(core, /const priceCeiling=regulatedMaxCents==null\?null:/);
+  assert.match(core, /service=Math\.min\(service,Math\.max\(0,priceCeiling-travel\.total_cost_cents\)\)/);
+  assert.match(core, /if\(priceCeiling!=null\) clientPrice=Math\.min\(clientPrice,priceCeiling\)/);
+});
