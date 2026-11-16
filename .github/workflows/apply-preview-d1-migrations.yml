@@ -17,13 +17,18 @@ concurrency:
 
 jobs:
   migrate-preview:
-    if: ${{ github.event.inputs.confirm_preview == 'APPLY_PREVIEW_ONLY' }}
+    if: ${{ github.ref == 'refs/heads/main' && inputs.confirm_preview == 'APPLY_PREVIEW_ONLY' }}
     runs-on: ubuntu-latest
     timeout-minutes: 25
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       BACKUP_ENCRYPTION_KEY: ${{ secrets.BACKUP_ENCRYPTION_KEY }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.R2_EU_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_EU_SECRET_ACCESS_KEY }}
+      AWS_DEFAULT_REGION: auto
+      R2_BUCKET: prochelia-preview-backups-eu-v2
+      R2_ENDPOINT: https://f2a79e9fa41566a8ec80fb24c02c60eb.eu.r2.cloudflarestorage.com
       EXPECTED_DB_NAME: prochelia-preview-db
       EXPECTED_DB_ID: 6adb95e5-e542-4bec-9008-fbea01042305
       EXPECTED_ACCOUNT_ID: f2a79e9fa41566a8ec80fb24c02c60eb
@@ -32,13 +37,13 @@ jobs:
       - name: Checkout pinned canonical preproduction migration chain
         uses: actions/checkout@v4
         with:
-          ref: ops/preview-migration-0020-auth-rate-limits-2026-11-15
+          ref: integration/nexus-supra-core-preview-2026-11-16
 
       - name: Verify credentials, exact Preview target and complete migration chain
         shell: bash
         run: |
           set -euo pipefail
-          for name in CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID BACKUP_ENCRYPTION_KEY; do
+          for name in CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID BACKUP_ENCRYPTION_KEY AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY; do
             test -n "${!name:-}" || { echo "::error::Required secret missing: $name"; exit 1; }
           done
           python3 - <<'PY'
@@ -75,6 +80,8 @@ jobs:
             "0018_consolidated_business_schema.sql",
             "0019_backup_verifications.sql",
             "0020_auth_login_rate_limits.sql",
+            "0021_supra_audit_events.sql",
+            "0022_supra_persisted_approvals.sql",
           ]
           actual = sorted(p.name for p in Path("migrations").glob("*.sql"))
           assert actual == sorted(expected), (
@@ -90,6 +97,11 @@ jobs:
           test "$EXPECTED_DB_ID" = "6adb95e5-e542-4bec-9008-fbea01042305"
           test "$EXPECTED_DB_ID" != "$FORBIDDEN_PRODUCTION_DB_ID"
           test "$CLOUDFLARE_ACCOUNT_ID" = "$EXPECTED_ACCOUNT_ID"
+          test "${#AWS_ACCESS_KEY_ID}" -eq 32 || {
+            echo "::error::R2_EU_ACCESS_KEY_ID must be a 32-character R2 S3 Access Key ID."
+            exit 1
+          }
+          test "$R2_BUCKET" = "prochelia-preview-backups-eu-v2"
 
       - name: Install Node.js
         uses: actions/setup-node@v4
@@ -111,14 +123,34 @@ jobs:
             exit 1
           }
 
+      - name: Verify R2 backup bucket EU jurisdiction before exporting sensitive D1 data
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$CLOUDFLARE_ACCOUNT_ID" = "$EXPECTED_ACCOUNT_ID"
+          token="$(printf '%s' "$CLOUDFLARE_API_TOKEN" | sed -E 's/^[[:space:]]*Bearer[[:space:]]+//I; s/^[[:space:]]+//; s/[[:space:]]+$//' | tr -d '\r\n')"
+          test -n "$token"
+          status="$(curl --silent --show-error --output "$RUNNER_TEMP/preview-r2-jurisdiction.json" --write-out '%{http_code}' "https://api.cloudflare.com/client/v4/accounts/$EXPECTED_ACCOUNT_ID/r2/buckets/$R2_BUCKET" -H "Authorization: Bearer $token" -H 'cf-r2-jurisdiction: eu')"
+          test "$status" = "200" || { echo "::error::R2 EU jurisdiction lookup failed (HTTP $status); refusing D1 export and migration."; exit 1; }
+          jq -e --arg bucket "$R2_BUCKET" '.success == true and .result.name == $bucket and .result.jurisdiction == "eu"' "$RUNNER_TEMP/preview-r2-jurisdiction.json" >/dev/null || {
+            echo "::error::The configured R2 bucket is not confirmed in EU jurisdiction; refusing D1 export and migration."
+            exit 1
+          }
+          echo "PASS: R2 bucket identity and EU jurisdiction confirmed before D1 export."
       - name: Export only Preview D1 before migration
         shell: bash
         run: |
           set -euo pipefail
           umask 077
           mkdir -p "$RUNNER_TEMP/prochelia-backup"
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends sqlite3
           npx --yes wrangler@4 d1 export "$EXPECTED_DB_NAME" --remote --config wrangler.jsonc --skip-confirmation --output="$RUNNER_TEMP/prochelia-backup/prochelia-preview.sql"
           test -s "$RUNNER_TEMP/prochelia-backup/prochelia-preview.sql"
+          sha256sum "$RUNNER_TEMP/prochelia-backup/prochelia-preview.sql" | awk '{print $1}' > "$RUNNER_TEMP/prochelia-backup/manifest.sha256"
+          sqlite3 "$RUNNER_TEMP/prochelia-backup/restore-validation.sqlite" < "$RUNNER_TEMP/prochelia-backup/prochelia-preview.sql"
+          integrity="$(sqlite3 "$RUNNER_TEMP/prochelia-backup/restore-validation.sqlite" 'PRAGMA integrity_check;')"
+          test "$integrity" = "ok" || { echo "::error::Local SQLite restore integrity_check failed: $integrity"; exit 1; }
 
       - name: Encrypt and verify fresh backup
         shell: bash
@@ -129,12 +161,45 @@ jobs:
           encrypted="$RUNNER_TEMP/prochelia-backup/prochelia-preview.sql.gpg"
           printf '%s' "$BACKUP_ENCRYPTION_KEY" | gpg --batch --yes --pinentry-mode loopback --passphrase-fd 0 --symmetric --cipher-algo AES256 --output "$encrypted" "$plaintext"
           test -s "$encrypted"
-          expected="$(sha256sum "$plaintext" | cut -d ' ' -f 1)"
+          expected="$(cat "$RUNNER_TEMP/prochelia-backup/manifest.sha256")"
           printf '%s' "$BACKUP_ENCRYPTION_KEY" | gpg --batch --yes --pinentry-mode loopback --passphrase-fd 0 --decrypt "$encrypted" > "$RUNNER_TEMP/prochelia-backup/decrypted-check.sql"
           actual="$(sha256sum "$RUNNER_TEMP/prochelia-backup/decrypted-check.sql" | cut -d ' ' -f 1)"
           test "$expected" = "$actual"
           rm -f "$plaintext" "$RUNNER_TEMP/prochelia-backup/decrypted-check.sql"
-          printf 'database=%s\\ncreated_utc=%s\\nencrypted_file=prochelia-preview.sql.gpg\\n' "$EXPECTED_DB_NAME" "$(date -u +%FT%TZ)" > "$RUNNER_TEMP/prochelia-backup/README.txt"
+          printf 'database=%s\\ncreated_utc=%s\\nencrypted_file=prochelia-preview.sql.gpg\\nbucket=%s\\n' "$EXPECTED_DB_NAME" "$(date -u +%FT%TZ)" "$R2_BUCKET" > "$RUNNER_TEMP/prochelia-backup/README.txt"
+
+      - name: Install AWS CLI for private R2 EU backup
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m pip install --user --break-system-packages awscli
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Upload encrypted backup and manifest to private R2 EU bucket
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PATH="$HOME/.local/bin:$PATH"
+          key="preview-d1/${EXPECTED_DB_NAME}/$(date -u +%Y/%m/%d)/${GITHUB_RUN_ID}-${GITHUB_SHA:0:12}.sql.gpg"
+          echo "R2_OBJECT_KEY=$key" >> "$GITHUB_ENV"
+          aws s3 cp "$RUNNER_TEMP/prochelia-backup/prochelia-preview.sql.gpg" "s3://$R2_BUCKET/$key" --endpoint-url "$R2_ENDPOINT" --region auto --only-show-errors
+          aws s3 cp "$RUNNER_TEMP/prochelia-backup/manifest.sha256" "s3://$R2_BUCKET/$key.sha256" --endpoint-url "$R2_ENDPOINT" --region auto --only-show-errors
+
+      - name: Download R2 backup and verify encrypted round-trip
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PATH="$HOME/.local/bin:$PATH"
+          key="$R2_OBJECT_KEY"
+          aws s3 cp "s3://$R2_BUCKET/$key" "$RUNNER_TEMP/prochelia-backup/roundtrip.sql.gpg" --endpoint-url "$R2_ENDPOINT" --region auto --only-show-errors
+          aws s3 cp "s3://$R2_BUCKET/$key.sha256" "$RUNNER_TEMP/prochelia-backup/roundtrip.manifest.sha256" --endpoint-url "$R2_ENDPOINT" --region auto --only-show-errors
+          cmp "$RUNNER_TEMP/prochelia-backup/manifest.sha256" "$RUNNER_TEMP/prochelia-backup/roundtrip.manifest.sha256"
+          cmp "$RUNNER_TEMP/prochelia-backup/prochelia-preview.sql.gpg" "$RUNNER_TEMP/prochelia-backup/roundtrip.sql.gpg"
+          printf '%s' "$BACKUP_ENCRYPTION_KEY" | gpg --batch --yes --pinentry-mode loopback --passphrase-fd 0 --decrypt "$RUNNER_TEMP/prochelia-backup/roundtrip.sql.gpg" > "$RUNNER_TEMP/prochelia-backup/roundtrip.sql"
+          actual="$(sha256sum "$RUNNER_TEMP/prochelia-backup/roundtrip.sql" | cut -d ' ' -f 1)"
+          expected="$(cat "$RUNNER_TEMP/prochelia-backup/manifest.sha256")"
+          test "$actual" = "$expected" || { echo "::error::R2 round-trip checksum mismatch."; exit 1; }
+          echo "PASS: encrypted Preview backup uploaded to and restored from private R2 EU bucket."
 
       - name: Publish encrypted backup before any schema write
         uses: actions/upload-artifact@v4
@@ -172,12 +237,34 @@ jobs:
           payload=json.loads(pathlib.Path(sys.argv[1]).read_text())
           remote=set(row["name"] for row in payload["result"][0]["results"])
           local=set(p.name for p in pathlib.Path("migrations").glob("*.sql"))
-          if remote != local:
-              print("::error::Migration history diverges. Automatic apply is blocked.")
-              print("Remote-only migration names:", ", ".join(sorted(remote-local)) or "(none)")
-              print("Repository-only migration names:", ", ".join(sorted(local-remote)) or "(none)")
+          pending={"0021_supra_audit_events.sql", "0022_supra_persisted_approvals.sql"}
+          legacy={
+              "0005_payment_runtime_schema.sql",
+              "0006_restore_wallet_balance_guard.sql",
+              "0007_unique_provider_account.sql",
+              "0008_server_owned_pricing_catalog.sql",
+              "0009_final_hardening_schema.sql",
+              "0010_identity_mission_security_schema.sql",
+              "0011_strategic_commercial_schema.sql",
+              "0012_consolidated_business_schema.sql",
+              "0013_finance_workspace_schema.sql",
+              "0015_commercial_recruitment_schema.sql",
+              "0016_national_continuity_schema.sql",
+              "0017_brand_support_copilot_schema.sql",
+              "0018_dsa_ai_act_transparency_redress.sql",
+          }
+          baseline=(local-pending)|legacy
+          fully_applied=local|legacy
+          if remote == baseline:
+              print("PASS: reviewed Preview baseline verified; migrations 0021 and 0022 are pending.")
+          elif remote == fully_applied:
+              print("PASS: all 22 canonical migrations and 13 reviewed legacy entries are already applied; rerun is idempotent.")
+          else:
+              print("::error::Preview migration registry differs from both reviewed safe states; no migration will run.")
+              print("Unexpected remote names:", ", ".join(sorted(remote-fully_applied)) or "(none)")
+              print("Missing expected names:", ", ".join(sorted(fully_applied-remote)) or "(none)")
               raise SystemExit(1)
-          print(f"PASS: exact migration registry match ({len(remote)} migrations).")
+
           PY
 
       - name: Apply migrations to Preview D1 only
@@ -192,18 +279,125 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          payload="$RUNNER_TEMP/verify-migration.json"
-          response="$RUNNER_TEMP/verify-response.json"
-          jq -n '{
-            sql: "SELECT '"'"'migration'"'"' AS kind, name FROM d1_migrations WHERE name = '"'"'0020_auth_login_rate_limits.sql'"'"' UNION ALL SELECT '"'"'table'"'"' AS kind, name FROM sqlite_master WHERE type = '"'"'table'"'"' AND name = '"'"'auth_login_rate_limits'"'"' UNION ALL SELECT '"'"'index'"'"' AS kind, name FROM sqlite_master WHERE type = '"'"'index'"'"' AND name = '"'"'idx_auth_login_rate_limits_window'"'"'",
-            params: []
-          }' > "$payload"
-          status="$(curl --silent --show-error --output "$response" --write-out '%{http_code}'             -X POST             -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN"             -H "Content-Type: application/json"             --data-binary @"$payload"             "https://api.cloudflare.com/client/v4/accounts/$EXPECTED_ACCOUNT_ID/d1/database/$EXPECTED_DB_ID/query")"
-          test "$status" = "200" || { echo "::error::Preview D1 verification request failed (HTTP $status)."; exit 1; }
-          jq -e '.success == true' "$response" >/dev/null
-          jq -e '[.result[0].results[] | .kind] | sort == ["index","migration","table"]' "$response" >/dev/null || {
-            echo "::error::Migration 0020 or its expected schema objects are missing."
-            exit 1
-          }
+          migrations_response="$RUNNER_TEMP/verify-migrations-response.json"
+          objects_response="$RUNNER_TEMP/verify-objects-response.json"
+          migrations_payload="$RUNNER_TEMP/verify-migrations-request.json"
+          objects_payload="$RUNNER_TEMP/verify-objects-request.json"
+
+          # Keep each SELECT below Cloudflare D1's compound-SELECT term limit.
+          jq -n '{sql:"SELECT name FROM d1_migrations WHERE name IN ('"'"'0016_security_identity_schema.sql'"'"','"'"'0020_auth_login_rate_limits.sql'"'"','"'"'0021_supra_audit_events.sql'"'"','"'"'0022_supra_persisted_approvals.sql'"'"') ORDER BY name",params:[]}' > "$migrations_payload"
+          jq -n '{sql:"SELECT type, name FROM sqlite_master WHERE (type = '"'"'table'"'"' AND name IN ('"'"'identity_verifications'"'"','"'"'trusted_devices'"'"','"'"'mission_security'"'"','"'"'mission_security_attempts'"'"','"'"'security_audit'"'"','"'"'auth_login_rate_limits'"'"','"'"'supra_audit_events'"'"','"'"'supra_approval_requests'"'"','"'"'supra_approval_votes'"'"','"'"'supra_approval_events'"'"')) OR (type = '"'"'index'"'"' AND name IN ('"'"'idx_identity_verifications_user'"'"','"'"'idx_mission_security_intervenant'"'"','"'"'idx_security_attempts_security'"'"','"'"'idx_security_audit_mission'"'"','"'"'idx_auth_login_rate_limits_window'"'"','"'"'idx_supra_audit_events_created_at'"'"','"'"'idx_supra_audit_events_actor'"'"','"'"'idx_supra_approval_requests_status_expiry'"'"','"'"'idx_supra_approval_requests_tenant_resource'"'"','"'"'idx_supra_approval_votes_request'"'"','"'"'idx_supra_approval_events_request'"'"')) OR (type = '"'"'trigger'"'"' AND name IN ('"'"'trg_supra_approval_requests_immutable'"'"','"'"'trg_supra_approval_votes_no_update'"'"','"'"'trg_supra_approval_votes_no_delete'"'"','"'"'trg_supra_approval_events_no_update'"'"','"'"'trg_supra_approval_events_no_delete'"'"','"'"'trg_supra_approval_status_transitions'"'"','"'"'trg_supra_approval_status_evidence'"'"')) ORDER BY type, name",params:[]}' > "$objects_payload"
+
+          for spec in "migrations:$migrations_payload:$migrations_response" "objects:$objects_payload:$objects_response"; do
+            IFS=: read -r label request response <<< "$spec"
+            status="$(curl --silent --show-error --output "$response" --write-out '%{http_code}' \
+              -X POST \
+              -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+              -H "Content-Type: application/json" \
+              --data-binary @"$request" \
+              "https://api.cloudflare.com/client/v4/accounts/$EXPECTED_ACCOUNT_ID/d1/database/$EXPECTED_DB_ID/query")"
+            test "$status" = "200" || { echo "::error::Preview D1 $label verification request failed (HTTP $status)."; exit 1; }
+            jq -e '.success == true' "$response" >/dev/null
+          done
+
+          python3 - "$migrations_response" "$objects_response" <<'PY'
+          import json, pathlib, sys
+          migrations=json.loads(pathlib.Path(sys.argv[1]).read_text())["result"][0]["results"]
+          objects=json.loads(pathlib.Path(sys.argv[2]).read_text())["result"][0]["results"]
+          actual_migrations=sorted(row["name"] for row in migrations)
+          expected_migrations=sorted([
+              "0016_security_identity_schema.sql",
+              "0020_auth_login_rate_limits.sql",
+              "0021_supra_audit_events.sql",
+              "0022_supra_persisted_approvals.sql",
+          ])
+          actual_tables=sorted(row["name"] for row in objects if row["type"] == "table")
+          expected_tables=sorted([
+              "identity_verifications",
+              "trusted_devices",
+              "mission_security",
+              "mission_security_attempts",
+              "security_audit",
+              "auth_login_rate_limits",
+              "supra_audit_events",
+              "supra_approval_requests",
+              "supra_approval_votes",
+              "supra_approval_events",
+          ])
+          actual_indexes=sorted(row["name"] for row in objects if row["type"] == "index")
+          expected_triggers=sorted([
+              "trg_supra_approval_requests_immutable",
+              "trg_supra_approval_votes_no_update",
+              "trg_supra_approval_votes_no_delete",
+              "trg_supra_approval_events_no_update",
+              "trg_supra_approval_events_no_delete",
+              "trg_supra_approval_status_transitions",
+              "trg_supra_approval_status_evidence",
+          ])
+          actual_triggers=sorted(row["name"] for row in objects if row["type"] == "trigger")
+          expected_indexes=sorted([
+              "idx_identity_verifications_user",
+              "idx_mission_security_intervenant",
+              "idx_security_attempts_security",
+              "idx_security_audit_mission",
+              "idx_auth_login_rate_limits_window",
+              "idx_supra_audit_events_created_at",
+              "idx_supra_audit_events_actor",
+              "idx_supra_approval_requests_status_expiry",
+              "idx_supra_approval_requests_tenant_resource",
+              "idx_supra_approval_votes_request",
+              "idx_supra_approval_events_request",
+          ])
+          if (actual_migrations != expected_migrations or
+              actual_tables != expected_tables or
+              actual_indexes != expected_indexes or
+              actual_triggers != expected_triggers):
+              print("::error::Preview D1 migration or schema verification mismatch.")
+              print("Migrations:", actual_migrations)
+              print("Tables:", actual_tables)
+              print("Indexes:", actual_indexes)
+              print("Triggers:", actual_triggers)
+              raise SystemExit(1)
+          print("PASS: four migrations, all ten security tables, all eleven indexes and all seven approval triggers are present on Preview D1.")
+          PY
           npx --yes wrangler@4 d1 migrations list "$EXPECTED_DB_NAME" --remote --config wrangler.jsonc
-          echo "PASS: migration 0020 and both schema objects are present on Preview D1."
+          echo "PASS: identity, rate-limit and Nexus audit/approval migrations 0016/0020/0021/0022 schemas and triggers are present on Preview D1."
+
+      - name: Verify exact reviewed Preview migration registry after apply
+        shell: bash
+        run: |
+          set -euo pipefail
+          request="$RUNNER_TEMP/final-migration-inventory-request.json"
+          response="$RUNNER_TEMP/final-migration-inventory-response.json"
+          jq -n '{sql:"SELECT name FROM d1_migrations ORDER BY name",params:[]}' > "$request"
+          status="$(curl --silent --show-error --output "$response" --write-out '%{http_code}'             -X POST             -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN"             -H "Content-Type: application/json"             --data-binary @"$request"             "https://api.cloudflare.com/client/v4/accounts/$EXPECTED_ACCOUNT_ID/d1/database/$EXPECTED_DB_ID/query")"
+          test "$status" = "200" || { echo "::error::Unable to verify final Preview migration registry (HTTP $status)."; exit 1; }
+          jq -e '.success == true' "$response" >/dev/null
+          python3 - "$response" <<'PY'
+          import json, pathlib, sys
+          payload=json.loads(pathlib.Path(sys.argv[1]).read_text())
+          remote=set(row["name"] for row in payload["result"][0]["results"])
+          local=set(p.name for p in pathlib.Path("migrations").glob("*.sql"))
+          legacy={
+              "0005_payment_runtime_schema.sql",
+              "0006_restore_wallet_balance_guard.sql",
+              "0007_unique_provider_account.sql",
+              "0008_server_owned_pricing_catalog.sql",
+              "0009_final_hardening_schema.sql",
+              "0010_identity_mission_security_schema.sql",
+              "0011_strategic_commercial_schema.sql",
+              "0012_consolidated_business_schema.sql",
+              "0013_finance_workspace_schema.sql",
+              "0015_commercial_recruitment_schema.sql",
+              "0016_national_continuity_schema.sql",
+              "0017_brand_support_copilot_schema.sql",
+              "0018_dsa_ai_act_transparency_redress.sql",
+          }
+          expected=local|legacy
+          if remote != expected:
+              print("::error::Final Preview migration registry does not match the reviewed baseline.")
+              print("Unexpected remote names:", ", ".join(sorted(remote-expected)) or "(none)")
+              print("Missing names:", ", ".join(sorted(expected-remote)) or "(none)")
+              raise SystemExit(1)
+          print(f"PASS: final Preview migration registry exactly matches {len(expected)} reviewed entries.")
+          PY
