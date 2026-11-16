@@ -2,9 +2,6 @@ name: PROCHÉLIA — sauvegarde D1 préproduction chiffrée
 
 on:
   workflow_dispatch:
-  schedule:
-    # UTC; décalé après l'heure pleine pour réduire les retards de planification.
-    - cron: "17 3 * * *"
 
 permissions:
   contents: read
