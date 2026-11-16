@@ -19,7 +19,10 @@ test("Preview deploy pins isolated Worker and Preview D1, never production", () 
   assert.match(workflow, /keep_vars:\s*true/);
   assert.match(workflow, /r2_buckets:\s*\[\{/);
   assert.match(workflow, /binding:\s*'BACKUP_BUCKET'/);
-  assert.match(workflow, /bucket_name:\s*'prochelia-preview-backups-eu'/);
+  assert.match(workflow, /bucket_name:\\s*'prochelia-preview-backups-eu-locked'/);
+  assert.match(workflow, /Verify dedicated Preview R2 bucket has EU jurisdiction/);
+  assert.match(workflow, /cf-r2-jurisdiction: eu/);
+  assert.match(workflow, /\\.result\\.jurisdiction == \\"eu\\"/);
 });
 
 test("Preview deploy runs the complete security suite and dry-run before the only deployment command", () => {
