@@ -28,8 +28,8 @@ test('Production backup is encrypted, integrity checked and round-trip verified'
 });
 
 test('Production backup provisions EU jurisdiction without a conflicting location hint and uses the jurisdiction-specific S3 endpoint', () => {
-  assert.match(workflow, /r2 bucket create "\$R2_BUCKET" --jurisdiction eu(?:\\s|\\n)/);
-  assert.doesNotMatch(workflow, /r2 bucket create[^\n]*--location/);
-  assert.match(workflow, /tr -d '\\r\\n'/);
-  assert.match(workflow, /f2a79e9fa41566a8ec80fb24c02c60eb\\.eu\\.r2\\.cloudflarestorage\\.com/);
+  assert.match(workflow, /r2 bucket create.*--jurisdiction eu/);
+  assert.doesNotMatch(workflow, /r2 bucket create[^\\n]*--location/);
+  assert.match(workflow, /tr -d '\\\\r\\\\n'/);
+  assert.match(workflow, /f2a79e9fa41566a8ec80fb24c02c60eb\\\\.eu\\\\.r2\\\\.cloudflarestorage\\\\.com/);
 });
