@@ -31,7 +31,7 @@ jobs:
       RESTORE_DB_NAME: prochelia-prod-restore-test-2026-11-15-b
       RESTORE_DB_ID: 71526879-34c7-4b47-8195-7b8f82669e31
       BACKUP_RUN_ID: ${{ inputs.backup_run_id }}
-      R2_BUCKET: prochelia-production-backups-eu-v2
+      R2_BUCKET: prochelia-production-backups-eu-v2-v2
       R2_ENDPOINT: https://f2a79e9fa41566a8ec80fb24c02c60eb.eu.r2.cloudflarestorage.com
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
