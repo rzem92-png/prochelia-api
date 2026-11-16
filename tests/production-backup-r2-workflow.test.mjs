@@ -33,3 +33,8 @@ test('Production backup provisions EU jurisdiction without a conflicting locatio
   assert.match(workflow, /tr -d '\\r\\n'/);
   assert.match(workflow, /f2a79e9fa41566a8ec80fb24c02c60eb\.eu\.r2\.cloudflarestorage\.com/);
 });
+
+test('Production backup job is unavailable to unreviewed feature branches', () => {
+  assert.match(workflow, /if:\\s*\\$\\{\\{\\s*github\\.ref\\s*==\\s*'refs\\/heads\\/main'\\s*&&\\s*inputs\\.confirm_production_backup\\s*==\\s*'BACKUP_PRODUCTION_D1'/);
+  assert.match(workflow, /Production backup must be dispatched from main/);
+});
