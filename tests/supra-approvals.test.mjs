@@ -214,3 +214,25 @@ test("refund and payout approval requests require an integer amount and ISO curr
   assert.equal((await response.json()).error, "AMOUNT_REQUIRED_FOR_ACTION");
   assert.equal(db.calls.length, 0);
 });
+
+test("only the requester can revoke an unconsumed approval", async () => {
+  const db = fakeDb([
+    { requester_user_id: "manager-a", status: "APPROVED" },
+    { status: "REVOKED" }
+  ]);
+  const response = await handleSupraApprovalRoute(post("/api/supra/approvals/revoke", {
+    requestId: "req-revoke", reason: "Release window cancelled"
+  }), { DB: db }, managerA);
+  assert.equal(response.status, 200);
+  assert.equal((await response.json()).status, "REVOKED");
+  assert.ok(db.calls.some(x => x.sql.includes("status IN ('PENDING','APPROVED')")));
+});
+
+test("a different manager cannot revoke another manager's request", async () => {
+  const db = fakeDb([{ requester_user_id: "manager-a", status: "PENDING" }]);
+  const response = await handleSupraApprovalRoute(post("/api/supra/approvals/revoke", {
+    requestId: "req-revoke", reason: "Not requester"
+  }), { DB: db }, managerB);
+  assert.equal(response.status, 403);
+  assert.equal((await response.json()).error, "ONLY_REQUESTER_CAN_REVOKE");
+});
