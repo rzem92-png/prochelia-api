@@ -1773,7 +1773,17 @@ async function pricingQuote(request, env) {
   const targetMargin=Math.max(0,Number(policy?.target_margin_percent ?? await getSetting(env,'default_margin_percent',FINANCE_STRATEGIC.marginFloorPercent)));
   const commissionRate=Math.max(0,Number(policy?.platform_fee_percent ?? (FINANCE_STRATEGIC.commissionDefaultPercent))*0.01);
   const intervenantFloor=Math.max(tariffIntervenant,Math.max(0,Math.round(Number(policy?.intervenant_floor_cents || 0))));
-  const regulatedMax=Number(policy?.client_ceiling_cents || 0)>0?Number(policy.client_ceiling_cents):null;
+  const configuredCeiling = Number(policy?.client_ceiling_cents || 0);
+  const marketMin = policy?.market_min_cents == null ? null : Number(policy.market_min_cents);
+  const marketMax = policy?.market_max_cents == null ? null : Number(policy.market_max_cents);
+  if ((policy?.client_ceiling_cents != null && (!Number.isSafeInteger(configuredCeiling) || configuredCeiling < 0))
+      || (marketMin != null && (!Number.isSafeInteger(marketMin) || marketMin < 0))
+      || (marketMax != null && (!Number.isSafeInteger(marketMax) || marketMax < 0))
+      || (marketMin != null && marketMax != null && marketMin > marketMax)) {
+    return json({ok:false,error:'SERVER_PRICING_POLICY_BOUNDS_INVALID',version:VERSION},503);
+  }
+  const effectiveCeilings = [configuredCeiling > 0 ? configuredCeiling : null, marketMax].filter(value => value != null);
+  const regulatedMax = effectiveCeilings.length ? Math.min(...effectiveCeilings) : null;
   const strategic=financeStrategicQuote({
     basePriceCents:base,
     phaseFactor:cfg.pricingFactor,
@@ -1782,6 +1792,18 @@ async function pricingQuote(request, env) {
     distanceKm:distance,fuelMode,fuelPriceCentsPerLitre,commissionRate,discountCents:0,regulatedMaxCents:regulatedMax,
     intervenantFloorCents:intervenantFloor,pspPercent,pspFixedCents:pspFixed,softwareCostCents:software,targetMarginPercent:targetMargin
   });
+  const finalClientPrice = strategic.client_price_cents;
+  if (!Number.isSafeInteger(finalClientPrice) || finalClientPrice <= 0
+      || (marketMin != null && finalClientPrice < marketMin)
+      || (marketMax != null && finalClientPrice > marketMax)
+      || (configuredCeiling > 0 && finalClientPrice > configuredCeiling)) {
+    return json({ok:false,error:'FINAL_PRICE_OUTSIDE_APPROVED_BOUNDS',version:VERSION,
+      bounds:{market_min_cents:marketMin,market_max_cents:marketMax,client_ceiling_cents:configuredCeiling || null}},422);
+  }
+  if (strategic.profitability_gate !== 'ALLOW') {
+    return json({ok:false,error:'QUOTE_NOT_PROFITABLE_AT_APPROVED_PRICE',version:VERSION,
+      profitability_status:strategic.profitability_status,estimated_margin_cents:strategic.estimated_margin_cents},422);
+  }
   const legacyFuel=Math.max(0,Math.round(distance*fuelRateLegacy));
   const quote={
     phase,clientType,distance,duration,serviceCode,
