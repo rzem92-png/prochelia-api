@@ -4,6 +4,11 @@ import { readFile } from "node:fs/promises";
 
 const workflow = await readFile(new URL("../.github/workflows/restore-preview-r2-backup-isolated-test.yml", import.meta.url), "utf8");
 
+test("Preview restore secrets are available only from the reviewed main workflow dispatch", () => {
+  assert.match(workflow, /if: \$\{\{ github\.ref == 'refs\/heads\/main' && inputs\.confirm_restore == 'RESTORE_PREVIEW_R2_TO_ISOLATED_TEST_ONLY' \}\}/);
+  assert.doesNotMatch(workflow, /refs\/heads\/fix\/preview-backup-r2-v2-jurisdiction-guard-2026-11-16/);
+});
+
 test("R2 restore is manual, explicit, and only targets the isolated D1 v2 database", () => {
   assert.match(workflow, /workflow_dispatch:/);
   assert.match(workflow, /RESTORE_PREVIEW_R2_TO_ISOLATED_TEST_ONLY/);
