@@ -3650,6 +3650,27 @@ handle = async function(request,env){
     if (isMutatingMethod(preflightMethod) && !securityOriginAllowed(request,env)) {
       return json({ok:false,error:'ORIGIN_NOT_ALLOWED',version:VERSION},403);
     }
+    // Explicit CORS preflight for the authenticated Nexus browser API.
+    // Only configured origins are reflected; no wildcard is permitted.
+    if (preflightPath.startsWith('/api/supra/') && preflightMethod === 'OPTIONS') {
+      const origin = request.headers.get('origin');
+      if (origin && !securityOriginAllowed(request,env)) {
+        return json({ok:false,error:'ORIGIN_NOT_ALLOWED',version:VERSION},403);
+      }
+      const headers = new Headers({
+        'allow': 'GET, POST, OPTIONS',
+        'access-control-allow-methods': 'GET, POST, OPTIONS',
+        'access-control-allow-headers': 'content-type',
+        'access-control-max-age': '600',
+        'cache-control': 'no-store',
+        'vary': 'Origin'
+      });
+      if (origin) {
+        headers.set('access-control-allow-origin', origin);
+        headers.set('access-control-allow-credentials', 'true');
+      }
+      return new Response(null,{status:204,headers});
+    }
     // Block anonymous mission validation before rate limiting touches D1.
     if (preflightPath === '/api/missions/validate') {
       if (preflightMethod !== 'POST') return json({ok:false,error:'METHOD_NOT_ALLOWED',version:VERSION},405,{'allow':'POST'});
