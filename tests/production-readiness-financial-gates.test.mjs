@@ -34,7 +34,7 @@ test("provider secrets cannot falsely certify a live PSP execution adapter", () 
 });
 
 test("persisted PSP integration status cannot claim CONFIGURED without an implemented adapter", () => {
-  assert.match(gate, /pspAdapterImplemented&&finalSecretConfigured\(env,\x27PAYMENT_PROVIDER\x27\)&&finalSecretConfigured\(env,\x27PAYMENT_WEBHOOK_SECRET\x27\)\x27CONFIGURED\x27:\x27NOT_IMPLEMENTED\x27/);
+  assert.ok(gate.includes("pspAdapterImplemented&&finalSecretConfigured(env,'PAYMENT_PROVIDER')&&finalSecretConfigured(env,'PAYMENT_WEBHOOK_SECRET')?'CONFIGURED':'NOT_IMPLEMENTED'"));
   assert.match(gate, /adapter_implemented:pspAdapterImplemented/);
 });
 
