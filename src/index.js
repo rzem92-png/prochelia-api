@@ -839,13 +839,16 @@ function paymentProvider(env) {
   return clean(env.PAYMENT_PROVIDER) || 'psp_adapter';
 }
 
-function paymentsConfigured(env) {
-  return !!env.PAYMENT_WEBHOOK_SECRET && !!env.PAYMENT_PROVIDER;
+export function paymentsConfigured(_env) {
+  // A provider name and webhook secret do not implement charge, refund or payout operations.
+  // Keep all money movement disabled until a real PSP adapter is wired and E2E-tested.
+  return false;
 }
 
 async function paymentOnboard(request, env) {
   const auth = await getSessionUser(request, env);
   if (!requireRole(auth, ['intervenant'])) return json({ok:false,error:auth?.user?'FORBIDDEN':'UNAUTHENTICATED',version:VERSION},auth?.user?403:401);
+  if (!paymentsConfigured(env)) return json({ok:false,error:'PSP_ADAPTER_NOT_IMPLEMENTED',version:VERSION},503);
   await ensurePaymentSchema(env);
   const body = await readJson(request);
   const provider = paymentProvider(env);
@@ -875,6 +878,8 @@ async function paymentStatus(request, env) {
 async function createMissionPayment(request, env) {
   const auth=await getSessionUser(request,env);
   if(!requireRole(auth,['gerante'])) return json({ok:false,error:auth?.user?'FORBIDDEN':'UNAUTHENTICATED',version:VERSION},auth?.user?403:401);
+  // Never create a pseudo-payment or pending ledger row without an executable PSP adapter.
+  if (!paymentsConfigured(env)) return json({ok:false,error:'PSP_ADAPTER_NOT_IMPLEMENTED',version:VERSION},503);
   await ensurePaymentSchema(env);
   const body=await readJson(request);
   const missionId=clean(body?.mission_id), clientId=clean(body?.client_id), intervenantId=clean(body?.intervenant_id);
@@ -942,6 +947,8 @@ export async function reservePayoutAtomically(env, input) {
 async function payoutRequest(request, env) {
   const auth = await getSessionUser(request, env);
   if (!requireRole(auth, ['intervenant'])) return json({ok:false,error:auth?.user?'FORBIDDEN':'UNAUTHENTICATED',version:VERSION}, auth?.user ? 403 : 401);
+  // Do not reserve or debit wallet funds until a real PSP payout adapter exists.
+  if (!paymentsConfigured(env)) return json({ok:false,error:'PSP_ADAPTER_NOT_IMPLEMENTED',version:VERSION},503);
   await ensurePaymentSchema(env);
   const body = await readJson(request);
   const amount = moneyCents(body?.amount_eur);
