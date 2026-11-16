@@ -33,6 +33,11 @@ test("provider secrets cannot falsely certify a live PSP execution adapter", () 
   assert.match(gate, /executionNotReady\.length===0/);
 });
 
+test("persisted PSP integration status cannot claim CONFIGURED without an implemented adapter", () => {
+  assert.match(gate, /pspAdapterImplemented&&finalSecretConfigured\(env,\x27PAYMENT_PROVIDER\x27\)&&finalSecretConfigured\(env,\x27PAYMENT_WEBHOOK_SECRET\x27\)\x27CONFIGURED\x27:\x27NOT_IMPLEMENTED\x27/);
+  assert.match(gate, /adapter_implemented:pspAdapterImplemented/);
+});
+
 test("bootstrap credential and PSP execution readiness both block production", () => {
   assert.match(gate, /'BOOTSTRAP_TOKEN'/);
   assert.match(gate, /externalNotConfigured\.length===0/);
