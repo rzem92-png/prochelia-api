@@ -10,7 +10,7 @@ test("Production Worker keeps its pinned production D1 and binds the encrypted b
   const backup = config.r2_buckets?.find(x => x.binding === "BACKUP_BUCKET");
   assert.deepEqual(backup, {
     binding: "BACKUP_BUCKET",
-    bucket_name: "prochelia-production-backups-eu",
+    bucket_name: "prochelia-production-backups-eu-v2",
     jurisdiction: "eu"
   });
 });
