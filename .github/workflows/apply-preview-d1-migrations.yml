@@ -237,14 +237,18 @@ jobs:
               "0017_brand_support_copilot_schema.sql",
               "0018_dsa_ai_act_transparency_redress.sql",
           }
-          expected_remote=(local-pending)|legacy
-          if pending != (local-remote) or remote != expected_remote:
-              print("::error::Preview migration registry is not the reviewed legacy baseline; no migration will run.")
-              print("Remote-only names:", ", ".join(sorted(remote-expected_remote)) or "(none)")
-              print("Missing expected applied names:", ", ".join(sorted(expected_remote-remote)) or "(none)")
-              print("Unexpected pending local names:", ", ".join(sorted((local-remote)-pending)) or "(none)")
+          baseline=(local-pending)|legacy
+          fully_applied=local|legacy
+          if remote == baseline:
+              print("PASS: reviewed Preview baseline verified; only migration 0020 is pending.")
+          elif remote == fully_applied:
+              print("PASS: all 20 canonical migrations and 13 reviewed legacy entries are already applied; rerun is idempotent.")
+          else:
+              print("::error::Preview migration registry differs from both reviewed safe states; no migration will run.")
+              print("Unexpected remote names:", ", ".join(sorted(remote-fully_applied)) or "(none)")
+              print("Missing expected names:", ", ".join(sorted(fully_applied-remote)) or "(none)")
               raise SystemExit(1)
-          print("PASS: 19 canonical migrations plus 13 reviewed legacy entries are present; only migration 0020 is pending.")
+
           PY
 
       - name: Apply migrations to Preview D1 only
