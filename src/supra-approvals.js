@@ -82,6 +82,23 @@ export async function handleSupraApprovalRoute(request, env, auth) {
   if (!["/api/supra/approvals/request", "/api/supra/approvals/decide", "/api/supra/approvals/detail"].includes(path)) return null;
   if (!manager(auth)) return reply({ ok: false, error: auth?.user ? "FORBIDDEN" : "UNAUTHENTICATED" }, auth?.user ? 403 : 401);
   if (!env?.DB?.prepare) return reply({ ok: false, error: "DATABASE_UNAVAILABLE" }, 503);
+  if (path.endsWith("/detail")) {
+    if (request.method !== "GET") return reply({ ok: false, error: "METHOD_NOT_ALLOWED" }, 405);
+    const origin = request.headers.get("origin");
+    if (origin && origin !== new URL(request.url).origin) return reply({ ok: false, error: "ORIGIN_CHECK_FAILED" }, 403);
+    const requestId = new URL(request.url).searchParams.get("requestId") || "";
+    if (!requestId || requestId.length > 128) return reply({ ok: false, error: "INVALID_REQUEST_ID" }, 400);
+    try {
+      const item = await env.DB.prepare("SELECT id, requester_user_id, tenant_id, action, resource_id, payload_hash, payload_json, amount_cents, currency, reason, risk, required_approvals, status, expires_at, created_at, approved_at, consumed_at, consumed_by FROM supra_approval_requests WHERE id=? LIMIT 1").bind(requestId).first();
+      if (!item) return reply({ ok: false, error: "APPROVAL_NOT_FOUND" }, 404);
+      const votes = await env.DB.prepare("SELECT approver_user_id, approver_role, decision, reason, created_at FROM supra_approval_votes WHERE request_id=? ORDER BY created_at, id").bind(requestId).all();
+      let payload;
+      try { payload = JSON.parse(item.payload_json); } catch { return reply({ ok: false, error: "APPROVAL_PAYLOAD_CORRUPT" }, 503); }
+      return reply({ ok: true, request: { ...item, payload, votes: votes?.results || [] } });
+    } catch {
+      return reply({ ok: false, error: "APPROVAL_LEDGER_UNAVAILABLE" }, 503);
+    }
+  }
   if (request.method !== "POST") return reply({ ok: false, error: "METHOD_NOT_ALLOWED" }, 405);
   if (!sameOrigin(request)) return reply({ ok: false, error: "ORIGIN_CHECK_FAILED" }, 403);
   const parsed = await readBody(request);
