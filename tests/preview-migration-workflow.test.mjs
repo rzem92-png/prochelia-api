@@ -68,7 +68,7 @@ test("Preview post-migration verification checks identity, mission-security and 
   ]) assert.ok(workflow.includes(name), `missing post-migration verification for ${name}`);
 });
 
-test("Preview migration workflow recognizes only the observed legacy registry and one pending migration", () => {
+test("Preview migration workflow accepts only the reviewed pre- and post-0020 registries", () => {
   const legacy = [
     "0005_payment_runtime_schema.sql",
     "0006_restore_wallet_balance_guard.sql",
@@ -86,9 +86,11 @@ test("Preview migration workflow recognizes only the observed legacy registry an
   ];
   for (const name of legacy) assert.ok(workflow.includes(`"${name}"`), `legacy migration not explicitly allowlisted: ${name}`);
   assert.match(workflow, /pending=\{"0020_auth_login_rate_limits\.sql"\}/);
-  assert.match(workflow, /expected_remote=\(local-pending\)\|legacy/);
-  assert.match(workflow, /remote != expected_remote/);
-  assert.match(workflow, /Unexpected pending local names/);
+  assert.match(workflow, /baseline=\(local-pending\)\|legacy/);
+  assert.match(workflow, /fully_applied=local\|legacy/);
+  assert.match(workflow, /remote == baseline/);
+  assert.match(workflow, /remote == fully_applied/);
+  assert.match(workflow, /both reviewed safe states/);
 });
 
 test("Preview migration workflow verifies the final registry exactly after applying the pending migration", () => {

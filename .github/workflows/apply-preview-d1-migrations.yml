@@ -80,6 +80,7 @@ jobs:
             "0018_consolidated_business_schema.sql",
             "0019_backup_verifications.sql",
             "0020_auth_login_rate_limits.sql",
+            "0021_supra_audit_events.sql",
           ]
           actual = sorted(p.name for p in Path("migrations").glob("*.sql"))
           assert actual == sorted(expected), (
@@ -221,7 +222,7 @@ jobs:
           payload=json.loads(pathlib.Path(sys.argv[1]).read_text())
           remote=set(row["name"] for row in payload["result"][0]["results"])
           local=set(p.name for p in pathlib.Path("migrations").glob("*.sql"))
-          pending={"0020_auth_login_rate_limits.sql"}
+          pending={"0021_supra_audit_events.sql"}
           legacy={
               "0005_payment_runtime_schema.sql",
               "0006_restore_wallet_balance_guard.sql",
@@ -237,14 +238,18 @@ jobs:
               "0017_brand_support_copilot_schema.sql",
               "0018_dsa_ai_act_transparency_redress.sql",
           }
-          expected_remote=(local-pending)|legacy
-          if pending != (local-remote) or remote != expected_remote:
-              print("::error::Preview migration registry is not the reviewed legacy baseline; no migration will run.")
-              print("Remote-only names:", ", ".join(sorted(remote-expected_remote)) or "(none)")
-              print("Missing expected applied names:", ", ".join(sorted(expected_remote-remote)) or "(none)")
-              print("Unexpected pending local names:", ", ".join(sorted((local-remote)-pending)) or "(none)")
+          baseline=(local-pending)|legacy
+          fully_applied=local|legacy
+          if remote == baseline:
+              print("PASS: reviewed Preview baseline verified; only migration 0021 is pending.")
+          elif remote == fully_applied:
+              print("PASS: all 21 canonical migrations and 13 reviewed legacy entries are already applied; rerun is idempotent.")
+          else:
+              print("::error::Preview migration registry differs from both reviewed safe states; no migration will run.")
+              print("Unexpected remote names:", ", ".join(sorted(remote-fully_applied)) or "(none)")
+              print("Missing expected names:", ", ".join(sorted(fully_applied-remote)) or "(none)")
               raise SystemExit(1)
-          print("PASS: 19 canonical migrations plus 13 reviewed legacy entries are present; only migration 0020 is pending.")
+
           PY
 
       - name: Apply migrations to Preview D1 only
@@ -259,21 +264,69 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          payload="$RUNNER_TEMP/verify-migration.json"
-          response="$RUNNER_TEMP/verify-response.json"
-          jq -n '{
-            sql: "SELECT '"'"'migration'"'"' AS kind, name FROM d1_migrations WHERE name = '"'"'0016_security_identity_schema.sql'"'"' UNION ALL SELECT '"'"'table'"'"' AS kind, name FROM sqlite_master WHERE type = '"'"'table'"'"' AND name IN ('"'"'identity_verifications'"'"','"'"'trusted_devices'"'"','"'"'mission_security'"'"','"'"'mission_security_attempts'"'"','"'"'security_audit'"'"') UNION ALL SELECT '"'"'index'"'"' AS kind, name FROM sqlite_master WHERE type = '"'"'index'"'"' AND name IN ('"'"'idx_identity_verifications_user'"'"','"'"'idx_mission_security_intervenant'"'"','"'"'idx_security_attempts_security'"'"','"'"'idx_security_audit_mission'"'"') UNION ALL SELECT '"'"'migration'"'"' AS kind, name FROM d1_migrations WHERE name = '"'"'0020_auth_login_rate_limits.sql'"'"' UNION ALL SELECT '"'"'table'"'"' AS kind, name FROM sqlite_master WHERE type = '"'"'table'"'"' AND name = '"'"'auth_login_rate_limits'"'"' UNION ALL SELECT '"'"'index'"'"' AS kind, name FROM sqlite_master WHERE type = '"'"'index'"'"' AND name = '"'"'idx_auth_login_rate_limits_window'"'"'",
-            params: []
-          }' > "$payload"
-          status="$(curl --silent --show-error --output "$response" --write-out '%{http_code}'             -X POST             -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN"             -H "Content-Type: application/json"             --data-binary @"$payload"             "https://api.cloudflare.com/client/v4/accounts/$EXPECTED_ACCOUNT_ID/d1/database/$EXPECTED_DB_ID/query")"
-          test "$status" = "200" || { echo "::error::Preview D1 verification request failed (HTTP $status)."; exit 1; }
-          jq -e '.success == true' "$response" >/dev/null
-          jq -e '[.result[0].results[] | .kind] | sort == ["index","index","index","index","index","migration","migration","table","table","table","table","table","table"]' "$response" >/dev/null || {
-            echo "::error::Security identity migration 0016, its five tables/four indexes, or rate-limit migration 0020 schema is missing."
-            exit 1
-          }
+          migrations_response="$RUNNER_TEMP/verify-migrations-response.json"
+          objects_response="$RUNNER_TEMP/verify-objects-response.json"
+          migrations_payload="$RUNNER_TEMP/verify-migrations-request.json"
+          objects_payload="$RUNNER_TEMP/verify-objects-request.json"
+
+          # Keep each SELECT below Cloudflare D1's compound-SELECT term limit.
+          jq -n '{sql:"SELECT name FROM d1_migrations WHERE name IN ('"'"'0016_security_identity_schema.sql'"'"','"'"'0020_auth_login_rate_limits.sql'"'"','"'"'0021_supra_audit_events.sql'"'"') ORDER BY name",params:[]}' > "$migrations_payload"
+          jq -n '{sql:"SELECT type, name FROM sqlite_master WHERE (type = '"'"'table'"'"' AND name IN ('"'"'identity_verifications'"'"','"'"'trusted_devices'"'"','"'"'mission_security'"'"','"'"'mission_security_attempts'"'"','"'"'security_audit'"'"','"'"'auth_login_rate_limits'"'"','"'"'supra_audit_events'"'"')) OR (type = '"'"'index'"'"' AND name IN ('"'"'idx_identity_verifications_user'"'"','"'"'idx_mission_security_intervenant'"'"','"'"'idx_security_attempts_security'"'"','"'"'idx_security_audit_mission'"'"','"'"'idx_auth_login_rate_limits_window'"'"','"'"'idx_supra_audit_events_created_at'"'"','"'"'idx_supra_audit_events_actor'"'"')) ORDER BY type, name",params:[]}' > "$objects_payload"
+
+          for spec in "migrations:$migrations_payload:$migrations_response" "objects:$objects_payload:$objects_response"; do
+            IFS=: read -r label request response <<< "$spec"
+            status="$(curl --silent --show-error --output "$response" --write-out '%{http_code}' \
+              -X POST \
+              -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+              -H "Content-Type: application/json" \
+              --data-binary @"$request" \
+              "https://api.cloudflare.com/client/v4/accounts/$EXPECTED_ACCOUNT_ID/d1/database/$EXPECTED_DB_ID/query")"
+            test "$status" = "200" || { echo "::error::Preview D1 $label verification request failed (HTTP $status)."; exit 1; }
+            jq -e '.success == true' "$response" >/dev/null
+          done
+
+          python3 - "$migrations_response" "$objects_response" <<'PY'
+          import json, pathlib, sys
+          migrations=json.loads(pathlib.Path(sys.argv[1]).read_text())["result"][0]["results"]
+          objects=json.loads(pathlib.Path(sys.argv[2]).read_text())["result"][0]["results"]
+          actual_migrations=sorted(row["name"] for row in migrations)
+          expected_migrations=sorted([
+              "0016_security_identity_schema.sql",
+              "0020_auth_login_rate_limits.sql",
+              "0021_supra_audit_events.sql",
+          ])
+          actual_tables=sorted(row["name"] for row in objects if row["type"] == "table")
+          expected_tables=sorted([
+              "identity_verifications",
+              "trusted_devices",
+              "mission_security",
+              "mission_security_attempts",
+              "security_audit",
+              "auth_login_rate_limits",
+              "supra_audit_events",
+          ])
+          actual_indexes=sorted(row["name"] for row in objects if row["type"] == "index")
+          expected_indexes=sorted([
+              "idx_identity_verifications_user",
+              "idx_mission_security_intervenant",
+              "idx_security_attempts_security",
+              "idx_security_audit_mission",
+              "idx_auth_login_rate_limits_window",
+              "idx_supra_audit_events_created_at",
+              "idx_supra_audit_events_actor",
+          ])
+          if (actual_migrations != expected_migrations or
+              actual_tables != expected_tables or
+              actual_indexes != expected_indexes):
+              print("::error::Preview D1 migration or schema verification mismatch.")
+              print("Migrations:", actual_migrations)
+              print("Tables:", actual_tables)
+              print("Indexes:", actual_indexes)
+              raise SystemExit(1)
+          print("PASS: three migrations, all seven security tables and all seven indexes are present on Preview D1.")
+          PY
           npx --yes wrangler@4 d1 migrations list "$EXPECTED_DB_NAME" --remote --config wrangler.jsonc
-          echo "PASS: security identity migration 0016 and rate-limit migration 0020 schemas are present on Preview D1."
+          echo "PASS: security identity, rate-limit and Nexus audit migrations 0016/0020/0021 schemas are present on Preview D1."
 
       - name: Verify exact reviewed Preview migration registry after apply
         shell: bash
