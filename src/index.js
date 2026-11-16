@@ -1676,9 +1676,12 @@ function financeStrategicQuote({basePriceCents=0,phaseFactor=1,urgency='normal',
   service=Math.max(0,service-Math.max(0,Math.round(Number(discountCents)||0)));
   if(regulatedMaxCents!=null)service=Math.min(service,Math.max(0,Math.round(Number(regulatedMaxCents)||0)));
   const travel=financeStrategicTravel({distanceKm,fuelMode});
+  const priceCeiling=regulatedMaxCents==null?null:Math.max(0,Math.round(Number(regulatedMaxCents)||0));
+  if(priceCeiling!=null) service=Math.min(service,Math.max(0,priceCeiling-travel.total_cost_cents));
   const rate=Math.max(0,Number(commissionRate)||0);
   const commission=Math.round(service*rate);
   let clientPrice=service+travel.total_cost_cents;
+  if(priceCeiling!=null) clientPrice=Math.min(clientPrice,priceCeiling);
   const intervenant=Math.max(0,Math.round(Number(intervenantFloorCents)||0));
   const psp=Math.round(clientPrice*(Math.max(0,Number(pspPercent)||0)/100))+Math.max(0,Math.round(Number(pspFixedCents)||0));
   const software=Math.max(0,Math.round(Number(softwareCostCents)||0));
@@ -1706,6 +1709,7 @@ function financeStrategicQuote({basePriceCents=0,phaseFactor=1,urgency='normal',
     estimated_margin_cents:margin,
     target_margin_percent:Number(targetMarginPercent)||0,
     profitability_status:margin<0?'DEFICITAIRE':(margin<finalMinMargin?'MARGE_FAIBLE':'RENTABLE'),
+    regulated_max_cents:priceCeiling,
     profitability_gate:margin>=finalMinMargin?'ALLOW':'ADJUST_OR_ESCALATE'
   };
 }
