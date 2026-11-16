@@ -85,3 +85,34 @@ test("SUPRA route fails closed if audit persistence is unavailable", async () =>
   assert.equal(response.status, 503);
   assert.equal(payload.executionAllowed, false);
 });
+
+test("persisted approval request is reachable through the main Nexus router", async () => {
+  const statements = [];
+  const DB = {
+    prepare(sql) {
+      return {
+        sql, values: [],
+        bind(...values) { this.values = values; return this; }
+      };
+    },
+    async batch(items) {
+      statements.push(...items.map(item => ({ sql: item.sql, values: item.values })));
+      return items.map(() => ({ meta: { changes: 1 } }));
+    }
+  };
+  const response = await handleSupraRoute(new Request("https://example.test/api/supra/approvals/request", {
+    method: "POST",
+    headers: { origin: "https://example.test", "content-type": "application/json" },
+    body: JSON.stringify({
+      action: "PRODUCTION_RELEASE",
+      tenantId: "tenant-preview",
+      resourceId: "release-candidate",
+      payload: { commit: "abc123", target: "preview" },
+      reason: "Independent release gate"
+    })
+  }), { DB }, manager);
+  const body = await response.json();
+  assert.equal(response.status, 201);
+  assert.equal(body.request.requiredApprovals, 2);
+  assert.ok(statements.some(item => item.sql.includes("INSERT INTO supra_approval_requests")));
+});
