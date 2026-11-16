@@ -17,8 +17,8 @@ test("quote requires a service code and an active server-side tariff", () => {
 });
 
 test("base and provider floor are derived from server tariff records", () => {
-  assert.match(handler, /Number\(tariff\.client_price\)\*100/);
-  assert.match(handler, /Number\(tariff\.intervenant_price\)\*100/);
+  assert.match(handler, /Number\\(clientTariffEuros\\*100/);
+  assert.match(handler, /Number\\(providerTariffEuros\\*100/);
   assert.doesNotMatch(handler, /b\.base_price_cents/);
   assert.doesNotMatch(handler, /b\.intervenant_floor_cents/);
 });
