@@ -4,10 +4,12 @@ import { readFile } from "node:fs/promises";
 
 const workflow = await readFile(new URL("../.github/workflows/deploy-preview-worker-manual.yml", import.meta.url), "utf8");
 
-test("Preview deploy is manual and requires exact confirmation on main", () => {
+test("Preview deploy is manual and requires exact confirmation on the candidate branch", () => {
   assert.match(workflow, /workflow_dispatch:/);
   assert.match(workflow, /DEPLOY_PREVIEW_ONLY/);
-  assert.match(workflow, /github\.ref == 'refs\/heads\/main'/);
+  assert.match(workflow, /refs\/heads\/deploy\/preview-worker-candidate-2026-11-16/);
+  assert.match(workflow, /REQUESTED_REF/);
+  assert.match(workflow, /CONFIRMATION/);
 });
 
 test("Preview deploy pins isolated Worker and Preview D1, never production", () => {
@@ -15,10 +17,12 @@ test("Preview deploy pins isolated Worker and Preview D1, never production", () 
   assert.match(workflow, /6adb95e5-e542-4bec-9008-fbea01042305/);
   assert.match(workflow, /04f52830-ef5a-4f17-a640-42bbc2381bba/);
   assert.match(workflow, /preview\.name === production\.name/);
-  assert.match(workflow, /keep_vars:\s*true/);
+  assert.doesNotMatch(workflow, /keep_vars:\s*true/);
   assert.match(workflow, /r2_buckets:\s*\[\{/);
   assert.match(workflow, /binding:\s*'BACKUP_BUCKET'/);
   assert.match(workflow, /bucket_name:\s*'prochelia-preview-backups-eu'/);
+  assert.match(workflow, /APP_ENV:\s*'preview'/);
+  assert.match(workflow, /https:\/\/83a36d32\.prochelia\.pages\.dev/);
 });
 
 test("Preview deploy runs the complete security suite and dry-run before the only deployment command", () => {
@@ -30,10 +34,10 @@ test("Preview deploy runs the complete security suite and dry-run before the onl
   assert.match(workflow, /tests\/bootstrap-atomic\.test\.js/);
   assert.match(workflow, /tests\/supra-route-contract\.test\.mjs/);
   assert.match(workflow, /tests\/request-body\.test\.mjs/);
-  assert.match(workflow, /fix-same-origin-session-prox\.prochelia\.pages\.dev/);
   assert.match(workflow, /src\/supra-intelligence\.js/);
   assert.match(workflow, /--dry-run/);
-  assert.match(workflow, /wrangler@4 deploy --config wrangler\.preview\.generated\.json --keep-vars/);
+  assert.match(workflow, /wrangler@4 deploy --config wrangler\.preview\.generated\.json/);
+  assert.doesNotMatch(workflow, /--keep-vars/);
   assert.doesNotMatch(workflow, /d1 migrations apply/);
 });
 
