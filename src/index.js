@@ -2673,7 +2673,7 @@ async function productionConfigCheck(env, { persist = false } = {}) {
     await ensureConsolidatedSchema(env); await ensurePaymentSchema(env); await ensureOperationalSchema(env); await ensureStrategicSchema(env); await ensureFinalHardeningSchema(env);
   }
   const checks=[];
-  const requiredTables=['users','sessions','missions','wallets','payment_accounts','payment_transactions','payment_webhook_events','payment_disputes','payout_requests','operational_cases','action_outbox','notification_outbox','accounting_ledger','promotions','promotion_recommendations','activity_journal','compliance_events'];
+  const requiredTables=['users','sessions','missions','wallets','payment_accounts','payment_transactions','payment_wallet_ledger','payment_reconciliation','payment_webhook_events','payment_disputes','payout_requests','operational_cases','action_outbox','notification_outbox','accounting_ledger','promotions','promotion_recommendations','activity_journal','compliance_events'];
   for(const t of requiredTables) checks.push({code:`TABLE:${t}`,status:await tableExists(env,t)?'OK':'MISSING'});
   const pspRequired=['PAYMENT_PROVIDER','PAYMENT_WEBHOOK_SECRET'];
   for(const k of pspRequired) checks.push({code:`SECRET:${k}`,status:finalSecretConfigured(env,k)?'OK':'NOT_CONFIGURED'});
@@ -2682,8 +2682,17 @@ async function productionConfigCheck(env, { persist = false } = {}) {
   const requiredPaymentCols=['id','idempotency_key','mission_id','client_id','intervenant_id','gross_cents','commission_cents','provider_fee_cents','refund_cents','net_intervenant_cents','status','provider_payment_id'];
   checks.push({code:'PAYMENT_COLUMNS',status:requiredPaymentCols.every(x=>paymentCols.includes(x))?'OK':'INCOMPLETE',missing:requiredPaymentCols.filter(x=>!paymentCols.includes(x))});
   const walletCols=await tableColumns(env,'wallets');
-  const requiredWalletCols=['id','user_id','currency','available_cents','reserved_cents','paid_cents'];
+  const requiredWalletCols=['id','user_id','currency','available_cents','pending_cents','reserved_cents','paid_cents'];
   checks.push({code:'WALLET_COLUMNS',status:requiredWalletCols.every(x=>walletCols.includes(x))?'OK':'INCOMPLETE',missing:requiredWalletCols.filter(x=>!walletCols.includes(x))});
+  const accountCols=await tableColumns(env,'payment_accounts');
+  const requiredAccountCols=['id','user_id','provider','provider_account_id','status','onboarding_status','payouts_enabled','charges_enabled'];
+  checks.push({code:'PAYMENT_ACCOUNT_COLUMNS',status:requiredAccountCols.every(x=>accountCols.includes(x))?'OK':'INCOMPLETE',missing:requiredAccountCols.filter(x=>!accountCols.includes(x))});
+  const ledgerCols=await tableColumns(env,'payment_wallet_ledger');
+  const requiredLedgerCols=['id','idempotency_key','user_id','entry_type','available_delta_cents','pending_delta_cents','reserved_delta_cents','paid_delta_cents','currency'];
+  checks.push({code:'PAYMENT_WALLET_LEDGER_COLUMNS',status:requiredLedgerCols.every(x=>ledgerCols.includes(x))?'OK':'INCOMPLETE',missing:requiredLedgerCols.filter(x=>!ledgerCols.includes(x))});
+  const reconciliationCols=await tableColumns(env,'payment_reconciliation');
+  const requiredReconciliationCols=['provider','external_id','internal_transaction_id','internal_payout_id','amount_cents','currency','status'];
+  checks.push({code:'PAYMENT_RECONCILIATION_COLUMNS',status:requiredReconciliationCols.every(x=>reconciliationCols.includes(x))?'OK':'INCOMPLETE',missing:requiredReconciliationCols.filter(x=>!reconciliationCols.includes(x))});
   const payoutCols=await tableColumns(env,'payout_requests');
   const requiredPayoutCols=['id','wallet_id','user_id','amount_cents','status','idempotency_key','provider_payout_id'];
   checks.push({code:'PAYOUT_COLUMNS',status:requiredPayoutCols.every(x=>payoutCols.includes(x))?'OK':'INCOMPLETE',missing:requiredPayoutCols.filter(x=>!payoutCols.includes(x))});
