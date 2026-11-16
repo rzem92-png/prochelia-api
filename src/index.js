@@ -2372,16 +2372,25 @@ async function operationalExecute(request, env) {
   if(!b.case_id)return json({ok:false,error:'CASE_ID_REQUIRED',version:VERSION},400);
   const c=await env.DB.prepare('SELECT * FROM operational_cases WHERE id=? LIMIT 1').bind(b.case_id).first();
   if(!c)return json({ok:false,error:'CASE_NOT_FOUND',version:VERSION},404);
-  const solution=JSON.parse(c.proposed_solution_json||'{}');
-  const actions=Array.isArray(b.actions)?b.actions:(Array.isArray(solution.actions)?solution.actions:[]);
-  if(!actions.length)return json({ok:false,error:'NO_ACTIONS_DEFINED',version:VERSION},400);
+  if(['RESOLVED','CLOSED'].includes(String(c.status||'').toUpperCase())) return json({ok:false,error:'CASE_ALREADY_CLOSED',version:VERSION},409);
+  let solution;
+  try { solution=JSON.parse(c.proposed_solution_json||'{}'); }
+  catch { return json({ok:false,error:'SERVER_PROPOSAL_INVALID',version:VERSION},409); }
+  // Browser-supplied action arrays are never executable. Only the stored server proposal is considered.
+  const actions=Array.isArray(solution.actions)?solution.actions:[];
+  if(!actions.length)return json({ok:false,error:'NO_SERVER_APPROVED_ACTIONS',version:VERSION},409);
+  const unsupported=actions.filter(a=>!a || typeof a!=='object' || Array.isArray(a) ||
+    String(a.action_type||a.type||'').toUpperCase()!=='NOTIFY');
+  if(unsupported.length) return json({ok:false,error:'ACTION_REQUIRES_GOVERNED_APPROVAL',version:VERSION,blocked:unsupported.length},409);
   const results=[];
   for(const a of actions){
-    const q=await queueAction(env,a.action_type||a.type,c.mission_id?'MISSION':'CASE',a.entity_id||c.mission_id,{...a},a.idempotency_key);
+    const q=await queueAction(env,'NOTIFY',c.mission_id?'MISSION':'CASE',c.mission_id||c.id,
+      {channel:'IN_APP',recipient_id:c.client_id||null,type:'OPERATIONAL',title:'PROCHÉLIA',message:String(a.message||a.title||'Mise à jour de votre dossier PROCHÉLIA.').slice(0,1000)},
+      a.idempotency_key||`case:${c.id}:notify:${results.length}`);
     results.push(await executeQueuedAction(env,q));
   }
-  const allDone=results.every(x=>x.ok && ['DONE'].includes(x.status));
-  await env.DB.prepare(`UPDATE operational_cases SET status=?,resolution_json=?,updated_at=CURRENT_TIMESTAMP,resolved_at=? WHERE id=?`)
+  const allDone=results.every(x=>x.ok && x.status==='DONE');
+  await env.DB.prepare(`UPDATE operational_cases SET status=?,resolution_json=?,updated_at=CURRENT_TIMESTAMP,resolved_at=? WHERE id=? AND status NOT IN ('RESOLVED','CLOSED')`)
     .bind(allDone?'RESOLVED':'IN_PROGRESS',JSON.stringify({approved_by:gate.auth.user.id,results}),allDone?new Date().toISOString():null,c.id).run();
   await journal(env,'gerante',gate.auth.user.id,'CASE_EXECUTED','operational_case',c.id,allDone?'OK':'PARTIAL',{results});
   return json({ok:true,version:VERSION,case_id:c.id,status:allDone?'RESOLVED':'IN_PROGRESS',results});
