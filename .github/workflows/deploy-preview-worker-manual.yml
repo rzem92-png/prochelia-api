@@ -160,6 +160,22 @@ jobs:
             exit 1
           }
           echo "PASS: dedicated Preview R2 bucket jurisdiction is eu."
+      - name: Verify Preview D1 database jurisdiction is EU
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          token="$(printf '%s' "$CLOUDFLARE_API_TOKEN" | sed -E 's/^[[:space:]]*Bearer[[:space:]]+//I; s/^[[:space:]]+//; s/[[:space:]]+$//')"
+          test -n "$token"
+          status="$(curl --silent --show-error --output "$RUNNER_TEMP/preview-d1-jurisdiction.json" --write-out '%{http_code}' "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/d1/database/6adb95e5-e542-4bec-9008-fbea01042305" -H "Authorization: Bearer $token")"
+          test "$status" = "200" || { echo "::error::Preview D1 metadata lookup failed (HTTP $status)."; exit 1; }
+          jq -e '.success == true and .result.uuid == "6adb95e5-e542-4bec-9008-fbea01042305" and .result.jurisdiction == "eu"' "$RUNNER_TEMP/preview-d1-jurisdiction.json" >/dev/null || {
+            echo "::error::Preview D1 is not explicitly restricted to EU jurisdiction; refusing deployment. Create a new EU-jurisdiction D1 and update the pinned target first."
+            exit 1
+          }
+          echo "PASS: Preview D1 jurisdiction is eu."
       - name: Deploy ONLY the isolated Preview Worker
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
