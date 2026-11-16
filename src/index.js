@@ -2607,8 +2607,13 @@ async function productionConfigCheck(env, { persist = false } = {}) {
     await registerIntegration(env,'MAPS','LOCATION',['MAPS_PROVIDER','MAPS_API_KEY'],['distance','geocoding','routing'],finalSecretConfigured(env,'MAPS_API_KEY')?'CONFIGURED':'NOT_CONFIGURED');
     await registerIntegration(env,'MARKET_DATA','COMMERCIAL',['MARKET_DATA_PROVIDER'],['market_prices','competitor_signals'],finalSecretConfigured(env,'MARKET_DATA_PROVIDER')?'CONFIGURED':'NOT_CONFIGURED');
   }
-  const blocking=checks.filter(x=>['MISSING','INCOMPLETE'].includes(x.status));
-  const externalNotConfigured=checks.filter(x=>x.status==='NOT_CONFIGURED' && ['SECRET:PAYMENT_PROVIDER','SECRET:PAYMENT_WEBHOOK_SECRET'].includes(x.code));
+  // A configured provider string is not proof of a working charge/refund/payout adapter.
+  checks.push({code:'PSP_ADAPTER',status:paymentsConfigured(env)?'OK':'NOT_CONFIGURED'});
+  // These release proofs require independently recorded acceptance evidence; secrets alone cannot satisfy them.
+  const requiredReleaseEvidence=['ISOLATED_RESTORE_DRILL','PSP_SANDBOX_E2E','INDEPENDENT_SECURITY_REVIEW','GDPR_LEGAL_APPROVAL','LOAD_AND_RECOVERY_TESTS','HUMAN_RELEASE_APPROVAL'];
+  for(const code of requiredReleaseEvidence) checks.push({code,status:'NOT_VALIDATED'});
+  const blocking=checks.filter(x=>['MISSING','INCOMPLETE','NOT_CONFIGURED','NOT_VALIDATED'].includes(x.status));
+  const externalNotConfigured=checks.filter(x=>x.status==='NOT_CONFIGURED' && ['SECRET:PAYMENT_PROVIDER','SECRET:PAYMENT_WEBHOOK_SECRET','PSP_ADAPTER'].includes(x.code));
   const overall=blocking.length===0 && externalNotConfigured.length===0;
   if (persist) for(const c of checks) await env.DB.prepare(`INSERT INTO system_config_checks(id,check_code,status,details_json) VALUES(?,?,?,?)`).bind(crypto.randomUUID(),c.code,c.status,JSON.stringify(c)).run();
   return {overall,checks,blocking:blocking.length,externalNotConfigured:externalNotConfigured.length};
@@ -3632,7 +3637,7 @@ async function strictProductionAudit(request,env){
     {code:'MAPS_PROVIDER',status:finalSecretConfigured(env,'MAPS_API_KEY')?'OK':'NOT_CONFIGURED'}
   ];
   const checks=[...(result.checks||[]),...extra];
-  const blockingCodes=new Set(['SECRET:PAYMENT_PROVIDER','SECRET:PAYMENT_WEBHOOK_SECRET','SECURITY_CODE_DELIVERY','CORS_ORIGIN','BACKUP_R2']);
+  const blockingCodes=new Set(['SECRET:PAYMENT_PROVIDER','SECRET:PAYMENT_WEBHOOK_SECRET','PSP_ADAPTER','ISOLATED_RESTORE_DRILL','PSP_SANDBOX_E2E','INDEPENDENT_SECURITY_REVIEW','GDPR_LEGAL_APPROVAL','LOAD_AND_RECOVERY_TESTS','HUMAN_RELEASE_APPROVAL','SECURITY_CODE_DELIVERY','CORS_ORIGIN','BACKUP_R2']);
   const blocking=checks.filter(x=>blockingCodes.has(x.code)&&x.status!=='OK');
   const overall=blocking.length===0 && result.blocking===0;
   // GET production-check is read-only: no config writes or journal side effects.
