@@ -79,8 +79,7 @@ jobs:
             "0017_document_security_scans.sql",
             "0018_consolidated_business_schema.sql",
             "0019_backup_verifications.sql",
-              "0020_auth_login_rate_limits.sql",
-              "0021_supra_audit_events.sql",
+            "0020_auth_login_rate_limits.sql",
             "0021_supra_audit_events.sql",
           ]
           actual = sorted(p.name for p in Path("migrations").glob("*.sql"))
