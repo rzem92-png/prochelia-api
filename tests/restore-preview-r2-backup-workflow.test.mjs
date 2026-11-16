@@ -9,8 +9,8 @@ test("R2 restore is manual, explicit, and only targets the isolated D1 v2 databa
   assert.match(workflow, /RESTORE_PREVIEW_R2_TO_ISOLATED_TEST_ONLY/);
   assert.match(workflow, /RESTORE_DB_NAME: prochelia-r2-restore-validation-2026-11/);
   assert.match(workflow, /RESTORE_DB_ID: 3caebbc6-982a-4562-96a7-e509185e9e9a/);
-  assert.match(workflow, /RESTORE_DB_ID != "\$PRODUCTION_DB_ID"/);
-  assert.match(workflow, /RESTORE_DB_ID != "\$PREVIEW_DB_ID"/);
+  assert.match(workflow, /test "\$RESTORE_DB_ID" != "\$PRODUCTION_DB_ID"/);
+  assert.match(workflow, /test "\$RESTORE_DB_ID" != "\$PREVIEW_DB_ID"/);
 });
 
 test("R2 restore verifies EU bucket, exact account and object prefix before download", () => {
