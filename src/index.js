@@ -2668,10 +2668,8 @@ async function registerIntegration(env, code, category, required, capabilities, 
 
 async function productionConfigCheck(env, { persist = false } = {}) {
   if (!env?.DB) throw new Error('DATABASE_REQUIRED');
-  // Readiness GETs must inspect current state, not auto-create or mutate schema.
-  if (persist) {
-    await ensureConsolidatedSchema(env); await ensurePaymentSchema(env); await ensureOperationalSchema(env); await ensureStrategicSchema(env); await ensureFinalHardeningSchema(env);
-  }
+  // Readiness checks never create or migrate schema. The persist flag records audit
+  // results only; schema changes must use the separately reviewed migration workflow.
   const checks=[];
   const requiredTables=['users','sessions','missions','wallets','payment_accounts','payment_transactions','payment_wallet_ledger','payment_reconciliation','payment_webhook_events','payment_disputes','payout_requests','operational_cases','action_outbox','notification_outbox','accounting_ledger','promotions','promotion_recommendations','activity_journal','compliance_events'];
   for(const t of requiredTables) checks.push({code:`TABLE:${t}`,status:await tableExists(env,t)?'OK':'MISSING'});
