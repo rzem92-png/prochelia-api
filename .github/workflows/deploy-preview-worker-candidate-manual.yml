@@ -17,10 +17,25 @@ concurrency:
 
 jobs:
   preview-only:
-    if: github.ref == 'refs/heads/deploy/preview-worker-candidate-2026-11-16' && inputs.confirmation == 'DEPLOY_PREVIEW_ONLY'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
+      - name: Enforce manual Preview-only authorization
+        env:
+          REQUESTED_REF: ${{ github.ref }}
+          CONFIRMATION: ${{ github.event.inputs.confirmation }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$REQUESTED_REF" = "refs/heads/deploy/preview-worker-candidate-2026-11-16" || {
+            echo "::error::Wrong branch. Select deploy/preview-worker-candidate-2026-11-16."
+            exit 1
+          }
+          test "$CONFIRMATION" = "DEPLOY_PREVIEW_ONLY" || {
+            echo "::error::Missing exact confirmation. Enter DEPLOY_PREVIEW_ONLY."
+            exit 1
+          }
+          echo "Manual authorization accepted for the isolated Preview Worker only."
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           ref: ${{ github.sha }}
