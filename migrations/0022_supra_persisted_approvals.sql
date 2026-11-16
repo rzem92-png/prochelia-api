@@ -88,3 +88,26 @@ BEFORE DELETE ON supra_approval_events
 BEGIN
   SELECT RAISE(ABORT, 'APPROVAL_EVENTS_ARE_APPEND_ONLY');
 END;
+
+CREATE TRIGGER IF NOT EXISTS trg_supra_approval_status_transitions
+BEFORE UPDATE OF status ON supra_approval_requests
+WHEN NOT (
+  (OLD.status = 'PENDING' AND NEW.status IN ('APPROVED', 'REJECTED', 'REVOKED', 'EXPIRED')) OR
+  (OLD.status = 'APPROVED' AND NEW.status = 'CONSUMED')
+)
+BEGIN
+  SELECT RAISE(ABORT, 'INVALID_APPROVAL_STATUS_TRANSITION');
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_supra_approval_status_evidence
+BEFORE UPDATE OF status ON supra_approval_requests
+WHEN
+  (NEW.status IN ('APPROVED', 'CONSUMED') AND
+    (NEW.approved_at IS NULL OR
+     (SELECT COUNT(*) FROM supra_approval_votes
+       WHERE request_id = NEW.id AND decision = 'APPROVE') < NEW.required_approvals))
+  OR
+  (NEW.status = 'CONSUMED' AND (NEW.consumed_at IS NULL OR NEW.consumed_by IS NULL))
+BEGIN
+  SELECT RAISE(ABORT, 'APPROVAL_STATUS_EVIDENCE_MISSING');
+END;
