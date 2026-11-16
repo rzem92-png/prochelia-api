@@ -22,7 +22,7 @@ concurrency:
 
 jobs:
   restore-isolated:
-    if: (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/fix/isolated-restore-fresh-eu-d1-2026-11-15') && inputs.confirmation == 'RESTORE_PRODUCTION_BACKUP_TO_ISOLATED_TEST_D1'
+    if: github.ref == 'refs/heads/main' && inputs.confirmation == 'RESTORE_PRODUCTION_BACKUP_TO_ISOLATED_TEST_D1'
     runs-on: ubuntu-latest
     timeout-minutes: 35
     env:
