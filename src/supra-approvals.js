@@ -79,9 +79,33 @@ async function appendEvent(env, requestId, actor, eventType, details = {}) {
 
 export async function handleSupraApprovalRoute(request, env, auth) {
   const path = new URL(request.url).pathname;
-  if (!["/api/supra/approvals/request", "/api/supra/approvals/decide", "/api/supra/approvals/detail"].includes(path)) return null;
+  if (!["/api/supra/approvals/request", "/api/supra/approvals/decide", "/api/supra/approvals/detail", "/api/supra/approvals/revoke"].includes(path)) return null;
   if (!manager(auth)) return reply({ ok: false, error: auth?.user ? "FORBIDDEN" : "UNAUTHENTICATED" }, auth?.user ? 403 : 401);
   if (!env?.DB?.prepare) return reply({ ok: false, error: "DATABASE_UNAVAILABLE" }, 503);
+  if (path.endsWith("/revoke")) {
+    if (request.method !== "POST") return reply({ ok: false, error: "METHOD_NOT_ALLOWED" }, 405);
+    if (!sameOrigin(request)) return reply({ ok: false, error: "ORIGIN_CHECK_FAILED" }, 403);
+    const parsed = await readBody(request);
+    if (parsed.error) return parsed.error;
+    const requestId = typeof parsed.value.requestId === "string" ? parsed.value.requestId.trim() : "";
+    const reason = typeof parsed.value.reason === "string" ? parsed.value.reason.trim() : "";
+    if (!requestId || requestId.length > 128 || !reason || reason.length > 1000) return reply({ ok: false, error: "INVALID_REVOCATION" }, 400);
+    try {
+      const now = new Date().toISOString();
+      const row = await env.DB.prepare("SELECT requester_user_id, status FROM supra_approval_requests WHERE id=? LIMIT 1").bind(requestId).first();
+      if (!row) return reply({ ok: false, error: "APPROVAL_NOT_FOUND" }, 404);
+      if (row.requester_user_id !== auth.user.id) return reply({ ok: false, error: "ONLY_REQUESTER_CAN_REVOKE" }, 403);
+      if (!["PENDING", "APPROVED"].includes(row.status)) return reply({ ok: false, error: "APPROVAL_NOT_REVOCABLE" }, 409);
+      await env.DB.batch([
+        env.DB.prepare("UPDATE supra_approval_requests SET status='REVOKED' WHERE id=? AND requester_user_id=? AND status IN ('PENDING','APPROVED') AND expires_at>?").bind(requestId, auth.user.id, now),
+        env.DB.prepare("INSERT INTO supra_approval_events (id, request_id, actor_user_id, actor_role, event_type, details_json) SELECT ?, ?, ?, 'GERANTE', 'REVOKED', ? WHERE EXISTS (SELECT 1 FROM supra_approval_requests WHERE id=? AND status='REVOKED')").bind(crypto.randomUUID(), requestId, auth.user.id, JSON.stringify({ reason }), requestId)
+      ]);
+      const current = await env.DB.prepare("SELECT status FROM supra_approval_requests WHERE id=?").bind(requestId).first();
+      return current?.status === "REVOKED" ? reply({ ok: true, requestId, status: "REVOKED" }) : reply({ ok: false, error: "APPROVAL_NOT_REVOCABLE" }, 409);
+    } catch {
+      return reply({ ok: false, error: "APPROVAL_REVOCATION_FAILED" }, 503);
+    }
+  }
   if (path.endsWith("/detail")) {
     if (request.method !== "GET") return reply({ ok: false, error: "METHOD_NOT_ALLOWED" }, 405);
     const origin = request.headers.get("origin");
