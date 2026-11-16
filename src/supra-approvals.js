@@ -142,7 +142,9 @@ export async function handleSupraApprovalRoute(request, env, auth) {
         !reason || reason.length > 1000 || !isPlainRecord(body.payload)) {
       return reply({ ok: false, error: "INVALID_APPROVAL_REQUEST" }, 400);
     }
-    // Tenant and resource are bound into the approval; each future executor must independently verify access to that tenant/resource before calling consumeSupraApproval.
+    if (typeof auth.user.tenant_id !== "string" || !auth.user.tenant_id.trim() || tenantId !== auth.user.tenant_id) {
+      return reply({ ok: false, error: "TENANT_SCOPE_NOT_VERIFIED" }, 403);
+    }
     const hasAmount = body.amountCents !== undefined && body.amountCents !== null;
     if (ACTION_AMOUNT_REQUIRED.has(action) && !hasAmount) return reply({ ok: false, error: "AMOUNT_REQUIRED_FOR_ACTION" }, 400);
     if (hasAmount && (!Number.isSafeInteger(body.amountCents) || body.amountCents < 0 ||
