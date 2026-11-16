@@ -16,6 +16,11 @@ test("R2 restore is manual, explicit, and only targets the isolated D1 v2 databa
   assert.match(workflow, /RESTORE_DB_ID: 3caebbc6-982a-4562-96a7-e509185e9e9a/);
   assert.match(workflow, /test "\$RESTORE_DB_ID" != "\$PRODUCTION_DB_ID"/);
   assert.match(workflow, /test "\$RESTORE_DB_ID" != "\$PREVIEW_DB_ID"/);
+  assert.match(workflow, /restore-d1-metadata\.json/);
+  assert.match(workflow, /result\.uuid == \$id/);
+  assert.match(workflow, /result\.name == \$name/);
+  assert.match(workflow, /result\.jurisdiction == "eu"/);
+  assert.ok(workflow.indexOf("Restore target identity or explicit EU jurisdiction") < workflow.indexOf("Restore only into the isolated D1 database"));
 });
 
 test("R2 restore verifies EU bucket, exact account and object prefix before download", () => {
