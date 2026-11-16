@@ -48,7 +48,7 @@ CREATE TABLE IF NOT EXISTS supra_approval_events (
   request_id TEXT NOT NULL,
   actor_user_id TEXT NOT NULL,
   actor_role TEXT NOT NULL,
-  event_type TEXT NOT NULL CHECK (event_type IN ('REQUESTED', 'APPROVED', 'REJECTED', 'REVOKED', 'EXPIRED', 'CONSUMED', 'CONSUME_DENIED')),
+  event_type TEXT NOT NULL CHECK (event_type IN ('REQUESTED', 'VOTE_RECORDED', 'APPROVED', 'REJECTED', 'REVOKED', 'EXPIRED', 'CONSUMED', 'CONSUME_DENIED')),
   details_json TEXT NOT NULL DEFAULT '{}',
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (request_id) REFERENCES supra_approval_requests(id)
