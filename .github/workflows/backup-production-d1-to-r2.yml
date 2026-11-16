@@ -30,7 +30,7 @@ jobs:
       EXPECTED_ACCOUNT_ID: f2a79e9fa41566a8ec80fb24c02c60eb
       EXPECTED_DB_NAME: prochelia-db
       EXPECTED_DB_ID: 04f52830-ef5a-4f17-a640-42bbc2381bba
-      R2_BUCKET: prochelia-production-backups-eu
+      R2_BUCKET: prochelia-production-backups-eu-v2
       R2_ENDPOINT: https://f2a79e9fa41566a8ec80fb24c02c60eb.eu.r2.cloudflarestorage.com
     steps:
       - name: Restrict to main and validate secrets
