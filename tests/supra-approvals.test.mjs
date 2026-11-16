@@ -95,7 +95,7 @@ test("requester cannot approve their own action", async () => {
 
 test("approval decision records distinct approver votes and only approves at the persisted threshold", async () => {
   const db = fakeDb([
-    { id: "req-2", requester_user_id: "manager-a", status: "PENDING", expires_at: "2999-01-01T00:00:00.000Z", required_approvals: 2 },
+    { id: "req-2", requester_user_id: "manager-a", tenant_id: "tenant-1", status: "PENDING", expires_at: "2999-01-01T00:00:00.000Z", required_approvals: 2 },
     { status: "PENDING", required_approvals: 2 },
     { count: 1 }
   ]);
