@@ -8,6 +8,7 @@ CREATE TABLE IF NOT EXISTS supra_approval_requests (
   action TEXT NOT NULL,
   resource_id TEXT NOT NULL,
   payload_hash TEXT NOT NULL CHECK (length(payload_hash) = 64),
+  payload_json TEXT NOT NULL,
   amount_cents INTEGER CHECK (amount_cents IS NULL OR amount_cents >= 0),
   currency TEXT,
   reason TEXT NOT NULL,
@@ -59,7 +60,7 @@ CREATE INDEX IF NOT EXISTS idx_supra_approval_events_request
 
 CREATE TRIGGER IF NOT EXISTS trg_supra_approval_requests_immutable
 BEFORE UPDATE OF requester_user_id, tenant_id, action, resource_id, payload_hash,
-  amount_cents, currency, reason, risk, required_approvals, expires_at, created_at
+  amount_cents, currency, reason, risk, required_approvals, expires_at, created_at, payload_json
 ON supra_approval_requests
 BEGIN
   SELECT RAISE(ABORT, 'IMMUTABLE_APPROVAL_REQUEST_FIELDS');
