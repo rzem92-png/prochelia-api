@@ -19,6 +19,10 @@ function fakeDb(firstRows = []) {
         async run() {
           calls.push({ kind: "run", sql: this.sql, values: this.values });
           return { meta: { changes: 1 } };
+        },
+        async all() {
+          calls.push({ kind: "all", sql: this.sql, values: this.values });
+          return { results: [{ approver_user_id: "manager-b", decision: "APPROVE" }] };
         }
       };
     },
@@ -146,6 +150,8 @@ test("approval ledger schema protects immutable request identity and append-only
   assert.match(sql, /trg_supra_approval_events_no_delete/);
   assert.match(sql, /trg_supra_approval_status_transitions/);
   assert.match(sql, /trg_supra_approval_status_evidence/);
+  assert.match(sql, /payload_json TEXT NOT NULL/);
+  assert.match(sql, /payload_json, created_at/);
   assert.match(sql, /UNIQUE \(request_id, approver_user_id\)/);
 });
 
@@ -178,4 +184,33 @@ test("approval votes cannot cross authenticated tenant boundaries", async () => 
   assert.equal(response.status, 403);
   assert.equal((await response.json()).error, "TENANT_SCOPE_NOT_VERIFIED");
   assert.equal(db.calls.filter(x => x.kind === "batch").length, 0);
+});
+
+test("approval detail returns the exact persisted payload and recorded votes to managers", async () => {
+  const db = fakeDb([{
+    id: "req-detail", requester_user_id: "manager-a", tenant_id: "tenant-1",
+    action: "PRICE_POLICY_CHANGE", resource_id: "policy-1", payload_hash: "a".repeat(64),
+    payload_json: '{"commission":12}', amount_cents: null, currency: null,
+    reason: "Review policy", risk: "HIGH", required_approvals: 2, status: "PENDING",
+    expires_at: "2999-01-01T00:00:00.000Z", created_at: "2026-11-16T00:00:00.000Z"
+  }]);
+  const response = await handleSupraApprovalRoute(new Request(
+    "https://app.example/api/supra/approvals/detail?requestId=req-detail",
+    { method: "GET" }
+  ), { DB: db }, managerB);
+  assert.equal(response.status, 200);
+  const body = await response.json();
+  assert.deepEqual(body.request.payload, { commission: 12 });
+  assert.equal(body.request.votes[0].approver_user_id, "manager-b");
+});
+
+test("refund and payout approval requests require an integer amount and ISO currency", async () => {
+  const db = fakeDb();
+  const response = await handleSupraApprovalRoute(post("/api/supra/approvals/request", {
+    action: "PAYOUT_EXECUTE", tenantId: "tenant-1", resourceId: "payout-1",
+    payload: { payoutId: "payout-1" }, reason: "Payout review"
+  }), { DB: db }, managerA);
+  assert.equal(response.status, 400);
+  assert.equal((await response.json()).error, "AMOUNT_REQUIRED_FOR_ACTION");
+  assert.equal(db.calls.length, 0);
 });
