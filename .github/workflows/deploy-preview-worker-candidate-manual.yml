@@ -17,7 +17,7 @@ concurrency:
 
 jobs:
   preview-only:
-    if: github.ref == 'refs/heads/fix/prochelia-production-readiness-fail-closed-2026-11-16' && inputs.confirmation == 'DEPLOY_PREVIEW_ONLY'
+    if: github.ref == 'refs/heads/deploy/preview-worker-candidate-2026-11-16' && inputs.confirmation == 'DEPLOY_PREVIEW_ONLY'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
