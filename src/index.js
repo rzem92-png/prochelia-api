@@ -542,13 +542,32 @@ async function securityIdentityStatus(request, env) {
       ORDER BY updated_at DESC, created_at DESC
       LIMIT 1`
   ).bind(auth.user.id).first();
+  const profile = await env.DB.prepare(
+    `SELECT i.validation_status,
+            COUNT(d.id) AS document_count,
+            COALESCE(SUM(CASE
+              WHEN d.status='verified'
+               AND (d.expires_at IS NULL OR d.expires_at > CURRENT_TIMESTAMP)
+              THEN 1 ELSE 0 END),0) AS valid_document_count
+       FROM intervenants i
+       LEFT JOIN documents d ON d.user_id=i.user_id
+      WHERE i.user_id=?
+      GROUP BY i.id
+      LIMIT 1`
+  ).bind(auth.user.id).first();
   const identityPassed = !!identity;
-  // No authoritative provider-profile/document review table exists yet.
-  // Fail closed rather than treating browser localStorage as compliance evidence.
-  const profilePassed = false;
+  // The profile gate is based only on the server-side intervenants record
+  // and verified, non-expired documents. An empty document set fails closed.
+  const profilePassed = !!profile
+    && String(profile.validation_status || '').toLowerCase() === 'verified'
+    && Number(profile.document_count || 0) > 0
+    && Number(profile.valid_document_count || 0) === Number(profile.document_count || 0);
   const blockingReasons = [];
   if (!identityPassed) blockingReasons.push('IDENTITY_NOT_VERIFIED');
-  blockingReasons.push('PROFILE_REVIEW_NOT_IMPLEMENTED');
+  if (!profile) blockingReasons.push('PROFILE_NOT_FOUND');
+  else if (String(profile.validation_status || '').toLowerCase() !== 'verified') blockingReasons.push('PROFILE_NOT_VERIFIED');
+  if (profile && Number(profile.document_count || 0) === 0) blockingReasons.push('REQUIRED_DOCUMENTS_NOT_REGISTERED');
+  if (profile && Number(profile.valid_document_count || 0) !== Number(profile.document_count || 0)) blockingReasons.push('DOCUMENTS_NOT_VERIFIED_OR_EXPIRED');
   return json({
     ok:true,
     version:VERSION,
@@ -562,7 +581,11 @@ async function securityIdentityStatus(request, env) {
       expires_at:latest.expires_at,
       rejection_reason:latest.rejection_reason
     } : null,
-    profile:{status:'NOT_IMPLEMENTED'},
+    profile:profile ? {
+      validation_status:profile.validation_status,
+      document_count:Number(profile.document_count || 0),
+      valid_document_count:Number(profile.valid_document_count || 0)
+    } : null,
     blocking_reasons:blockingReasons
   },200);
 }
