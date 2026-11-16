@@ -79,7 +79,7 @@ export async function handleSupraRoute(request, env, auth) {
 
   const domain = typeof plan.domain === "string" ? plan.domain : "securite";
   const action = typeof plan.requestedAction === "string" ? plan.requestedAction : "UNKNOWN";
-  const risk = typeof plan.impact === "string" ? plan.impact : "CRITICAL";
+  const risk = typeof decision.risk === "string" ? decision.risk : "CRITICAL";
   try {
     await writeAudit(env, auth, {
       eventType: "PLAN_PREPARED",
