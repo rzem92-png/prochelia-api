@@ -40,3 +40,13 @@ test("R2 restore pins checkout and setup-node actions to immutable SHAs", () => 
   assert.match(workflow, /actions\/checkout@[0-9a-f]{40}/);
   assert.match(workflow, /actions\/setup-node@[0-9a-f]{40}/);
 });
+
+test("R2 restore accepts only the generated date/run/commit backup object key format", () => {
+  assert.match(workflow, /\[0-9\]\{4\}\/\[0-9\]\{2\}\/\[0-9\]\{2\}/);
+  assert.match(workflow, /Object key does not match the exact generated Preview backup key format/);
+});
+
+test("R2 restore checks the exact bucket jurisdiction before any object download", () => {
+  assert.ok(workflow.indexOf("Verify Cloudflare token, account and dedicated EU R2 bucket") < workflow.indexOf("Download encrypted backup and checksum from R2 EU"));
+  assert.match(workflow, /result\.name == "prochelia-preview-backups-eu-v2"/);
+});
