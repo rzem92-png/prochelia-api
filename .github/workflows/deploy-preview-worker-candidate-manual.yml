@@ -45,8 +45,8 @@ jobs:
             main: 'src/index.js',
             compatibility_date: '2026-09-25',
             workers_dev: true,
-            keep_vars: true,
             vars: {
+              APP_ENV: 'preview',
               CORS_ORIGIN: [
                 'https://83a36d32.prochelia.pages.dev',
                 'https://c3ceec86.prochelia.pages.dev',
@@ -54,7 +54,10 @@ jobs:
                 'https://feat-supra-control-center-v1.prochelia.pages.dev',
                 'https://db884f74.prochelia.pages.dev',
                 'https://repair-prochelia-frontend-xs.prochelia.pages.dev',
-                'https://fix-same-origin-session-prox.prochelia.pages.dev'
+                'https://feature-dsa-notice-client-20.prochelia.pages.dev',
+                'https://d8b3eab1.prochelia.pages.dev',
+                'https://fix-same-origin-session-prox.prochelia.pages.dev',
+                'https://security-frontend-profile-se.prochelia.pages.dev'
               ].join(',')
             },
             d1_databases: [{
@@ -71,8 +74,11 @@ jobs:
           if (preview.name === production.name || preview.d1_databases.some(db => db.database_id === expectedProductionId)) {
             throw new Error('Preview target is not isolated');
           }
+          if (preview.vars.APP_ENV !== 'preview' || !preview.vars.CORS_ORIGIN.split(',').includes('https://83a36d32.prochelia.pages.dev')) {
+            throw new Error('Preview environment or current frontend CORS origin missing');
+          }
           fs.writeFileSync('wrangler.preview.generated.json', JSON.stringify(preview, null, 2));
-          console.log('Preview Worker and Preview D1 identifiers verified; dashboard variables will be preserved.');
+          console.log('Preview Worker, Preview D1, Preview R2, APP_ENV and CORS origins verified.');
           NODE
       - name: Check Worker source syntax
         run: |
@@ -127,12 +133,13 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-        run: npx --yes wrangler@4 deploy --config wrangler.preview.generated.json --keep-vars
+        run: npx --yes wrangler@4 deploy --config wrangler.preview.generated.json
       - name: Record deployment guardrails
         run: |
           {
             echo 'Candidate Preview Worker only: prochelia-api-preview.'
             echo 'D1 binding pinned to Preview DB 6adb95e5-e542-4bec-9008-fbea01042305.'
+            echo 'R2 binding pinned to prochelia-preview-backups-eu; APP_ENV=preview.'
             echo "Source commit: ${GITHUB_SHA}."
             echo 'No migrations, no production Worker, no production D1 changes, no live payment activation.'
           } >> "$GITHUB_STEP_SUMMARY"
