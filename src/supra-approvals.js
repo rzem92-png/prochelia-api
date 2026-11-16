@@ -97,6 +97,9 @@ export async function handleSupraApprovalRoute(request, env, auth) {
         !reason || reason.length > 1000 || !isPlainRecord(body.payload)) {
       return reply({ ok: false, error: "INVALID_APPROVAL_REQUEST" }, 400);
     }
+    if (typeof auth.user.tenant_id !== "string" || !auth.user.tenant_id.trim() || body.tenantId !== auth.user.tenant_id) {
+      return reply({ ok: false, error: "TENANT_SCOPE_NOT_VERIFIED" }, 403);
+    }
     const hasAmount = body.amountCents !== undefined && body.amountCents !== null;
     if (hasAmount && (!Number.isSafeInteger(body.amountCents) || body.amountCents < 0 ||
         typeof body.currency !== "string" || !/^[A-Z]{3}$/.test(body.currency))) {
@@ -145,6 +148,9 @@ export async function handleSupraApprovalRoute(request, env, auth) {
     return reply({ ok: false, error: "APPROVAL_LEDGER_UNAVAILABLE" }, 503);
   }
   if (!approval) return reply({ ok: false, error: "APPROVAL_NOT_FOUND" }, 404);
+  if (typeof auth.user.tenant_id !== "string" || approval.tenant_id !== auth.user.tenant_id) {
+    return reply({ ok: false, error: "TENANT_SCOPE_NOT_VERIFIED" }, 403);
+  }
   if (approval.requester_user_id === auth.user.id) return reply({ ok: false, error: "SELF_APPROVAL_FORBIDDEN" }, 403);
   if (approval.status !== "PENDING") return reply({ ok: false, error: "APPROVAL_NOT_PENDING" }, 409);
   const now = new Date().toISOString();
