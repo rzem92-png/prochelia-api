@@ -7,8 +7,8 @@ const workflow = await readFile(new URL("../.github/workflows/restore-preview-r2
 test("R2 restore is manual, explicit, and only targets the isolated D1 v2 database", () => {
   assert.match(workflow, /workflow_dispatch:/);
   assert.match(workflow, /RESTORE_PREVIEW_R2_TO_ISOLATED_TEST_ONLY/);
-  assert.match(workflow, /RESTORE_DB_NAME: prochelia-restore-test-v2/);
-  assert.match(workflow, /RESTORE_DB_ID: a3526c2a-39cb-49ab-97c4-979138145f33/);
+  assert.match(workflow, /RESTORE_DB_NAME: prochelia-r2-restore-validation-2026-11/);
+  assert.match(workflow, /RESTORE_DB_ID: 3caebbc6-982a-4562-96a7-e509185e9e9a/);
   assert.match(workflow, /RESTORE_DB_ID != "\$PRODUCTION_DB_ID"/);
   assert.match(workflow, /RESTORE_DB_ID != "\$PREVIEW_DB_ID"/);
 });
