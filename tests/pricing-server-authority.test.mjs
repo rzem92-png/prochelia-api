@@ -45,3 +45,24 @@ test("regulated ceiling caps the final price including travel", () => {
   assert.match(core, /service=Math\.min\(service,Math\.max\(0,priceCeiling-travel\.total_cost_cents\)\)/);
   assert.match(core, /if\(priceCeiling!=null\) clientPrice=Math\.min\(clientPrice,priceCeiling\)/);
 });
+
+test("final quote is checked against both configured market bounds and the client ceiling", () => {
+  assert.match(handler, /market_min_cents/);
+  assert.match(handler, /market_max_cents/);
+  assert.match(handler, /SERVER_PRICING_POLICY_BOUNDS_INVALID/);
+  assert.match(handler, /FINAL_PRICE_OUTSIDE_APPROVED_BOUNDS/);
+  assert.match(handler, /Math\.min\(\.\.\.effectiveCeilings\)/);
+});
+
+test("unprofitable final quote is rejected rather than returned as a successful price", () => {
+  assert.match(handler, /strategic\.profitability_gate !== 'ALLOW'/);
+  assert.match(handler, /QUOTE_NOT_PROFITABLE_AT_APPROVED_PRICE/);
+});
+
+test("market bounds are applied after all multipliers, travel costs and margin calculations", () => {
+  const guard = handler.indexOf("const finalClientPrice = strategic.client_price_cents;");
+  const quote = handler.indexOf("const quote={", guard);
+  assert.ok(guard >= 0 && quote > guard, "final bounds guard must precede quote persistence");
+  assert.match(handler.slice(guard, quote), /finalClientPrice < marketMin/);
+  assert.match(handler.slice(guard, quote), /finalClientPrice > marketMax/);
+});
