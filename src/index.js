@@ -528,6 +528,45 @@ async function deviceHash(request, userId) {
   return sha256Base64url(raw);
 }
 
+async function securityIdentityStatus(request, env) {
+  const auth = await getSessionUser(request, env);
+  if (!requireRole(auth, ['intervenant'])) {
+    return json({ok:false,error:auth?.user?'FORBIDDEN':'UNAUTHENTICATED',version:VERSION}, auth?.user?403:401);
+  }
+  await ensureSecuritySchema(env);
+  const identity = await requireVerifiedIntervenant(env, auth.user.id);
+  const latest = await env.DB.prepare(
+    `SELECT status,level,verified_at,expires_at,rejection_reason
+       FROM identity_verifications
+      WHERE user_id=?
+      ORDER BY updated_at DESC, created_at DESC
+      LIMIT 1`
+  ).bind(auth.user.id).first();
+  const identityPassed = !!identity;
+  // No authoritative provider-profile/document review table exists yet.
+  // Fail closed rather than treating browser localStorage as compliance evidence.
+  const profilePassed = false;
+  const blockingReasons = [];
+  if (!identityPassed) blockingReasons.push('IDENTITY_NOT_VERIFIED');
+  blockingReasons.push('PROFILE_REVIEW_NOT_IMPLEMENTED');
+  return json({
+    ok:true,
+    version:VERSION,
+    authority:'SERVER_D1',
+    identity_gate_passed:identityPassed,
+    profile_gate_passed:profilePassed,
+    identity:latest ? {
+      status:latest.status,
+      level:latest.level,
+      verified_at:latest.verified_at,
+      expires_at:latest.expires_at,
+      rejection_reason:latest.rejection_reason
+    } : null,
+    profile:{status:'NOT_IMPLEMENTED'},
+    blocking_reasons:blockingReasons
+  },200);
+}
+
 async function securityIdentityStart(request, env) {
   const auth = await getSessionUser(request, env);
   if (!requireRole(auth, ['intervenant'])) return json({ok:false,error:auth?.user?'FORBIDDEN':'UNAUTHENTICATED',version:VERSION}, auth?.user?403:401);
@@ -1201,6 +1240,10 @@ async function handleBase(request, env) {
     return directoryList(request,env,'intervenants');
   }
 
+  if (url.pathname === '/api/security/identity/status') {
+    if (request.method !== 'GET') return json({ok:false,error:'METHOD_NOT_ALLOWED',version:VERSION},405,{'allow':'GET'});
+    return securityIdentityStatus(request, env);
+  }
   if (url.pathname === '/api/security/identity/start') {
     if (request.method !== 'POST') return json({ ok:false,error:'METHOD_NOT_ALLOWED',version:VERSION },405);
     return securityIdentityStart(request, env);
