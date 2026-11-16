@@ -6,11 +6,14 @@ on:
       - "src/supra-intelligence.js"
       - "src/supra-orchestrator.js"
       - "src/supra-api.js"
+      - "src/supra-approvals.js"
+      - "migrations/0022_supra_persisted_approvals.sql"
+      - "tests/supra-approvals.test.mjs"
       - "src/index.js"
       - "tests/supra-intelligence.test.mjs"
       - "tests/supra-orchestrator.test.mjs"
       - "tests/supra-api.test.mjs"
-      - "tests/supra-worker-wiring.test.mjs"
+      - "tests/supra-worker-wiring.test.mjs tests/supra-approvals.test.mjs"
       - ".github/workflows/supra-core-validation.yml"
 
 permissions:
@@ -31,6 +34,7 @@ jobs:
           node --experimental-default-type=module --check src/supra-intelligence.js
           node --experimental-default-type=module --check src/supra-orchestrator.js
           node --experimental-default-type=module --check src/supra-api.js
+          node --experimental-default-type=module --check src/supra-approvals.js
           node --experimental-default-type=module --check src/index.js
       - name: Run focused Supra governance regression tests
         run: |
