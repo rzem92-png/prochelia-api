@@ -15,6 +15,7 @@ test("Preview deploy pins isolated Worker and Preview D1, never production", () 
   assert.match(workflow, /6adb95e5-e542-4bec-9008-fbea01042305/);
   assert.match(workflow, /04f52830-ef5a-4f17-a640-42bbc2381bba/);
   assert.match(workflow, /preview\.name === production\.name/);
+  assert.match(workflow, /https:\/\/83a36d32\.prochelia\.pages\.dev/);
   assert.match(workflow, /keep_vars:\s*true/);
   assert.match(workflow, /r2_buckets:\s*\[\{/);
   assert.match(workflow, /binding:\s*'BACKUP_BUCKET'/);
