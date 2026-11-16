@@ -50,13 +50,10 @@ jobs:
             test -n "${!name:-}" || { echo "::error::Required secret missing: $name"; exit 1; }
           done
           test "${#AWS_ACCESS_KEY_ID}" -eq 32 || { echo "::error::R2 S3 Access Key ID must be 32 characters."; exit 1; }
-          case "$BACKUP_OBJECT_KEY" in
-            preview-d1/prochelia-preview-db/*.sql.gpg) ;;
-            *) echo "::error::Object key must belong to the Preview D1 backup prefix and end in .sql.gpg."; exit 1 ;;
-          esac
-          case "$BACKUP_OBJECT_KEY" in
-            *".."*|*"`"*|*"\"*|*" "* ) echo "::error::Unsafe object key."; exit 1 ;;
-          esac
+          if ! [[ "$BACKUP_OBJECT_KEY" =~ ^preview-d1/prochelia-preview-db/[0-9]{4}/[0-9]{2}/[0-9]{2}/[0-9]+-[0-9a-f]{12}\\.sql\\.gpg$ ]]; then
+            echo "::error::Object key does not match the exact generated Preview backup key format."
+            exit 1
+          fi
 
       - name: Checkout pinned tooling context
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
