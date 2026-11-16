@@ -17,7 +17,7 @@ concurrency:
 
 jobs:
   migrate-preview:
-    if: ${{ github.event.inputs.confirm_preview == 'APPLY_PREVIEW_ONLY' }}
+    if: ${{ github.ref == 'refs/heads/main' && inputs.confirm_preview == 'APPLY_PREVIEW_ONLY' }}
     runs-on: ubuntu-latest
     timeout-minutes: 25
     env:
