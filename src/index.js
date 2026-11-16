@@ -2348,14 +2348,28 @@ async function executeQueuedAction(env, action) {
     } else if (action.action_type === 'ACCOUNTING_ENTRY') {
       if (await tableExists(env,'accounting_ledger')) {
         const cols=await tableColumns(env,'accounting_ledger');
-        const values={id:crypto.randomUUID(),entry_type:payload.entry_type||'OPERATIONAL',amount_cents:Number(payload.amount_cents||0),
-          debit_cents:Number(payload.debit_cents||0),credit_cents:Number(payload.credit_cents||0),reference_type:action.entity_type,
-          reference_id:action.entity_id,description:payload.description||'',metadata_json:JSON.stringify(payload)};
-        const usable=Object.entries(values).filter(([k])=>cols.includes(k));
-        if(usable.length){
-          await env.DB.prepare(`INSERT INTO accounting_ledger(${usable.map(x=>x[0]).join(',')}) VALUES(${usable.map(()=>'?').join(',')})`).bind(...usable.map(x=>x[1])).run();
+        const amountCents=Number(payload.amount_cents);
+        const direction=String(payload.direction||'').toUpperCase();
+        const accountCode=String(payload.account_code||'').trim();
+        const referenceType=String(action.entity_type||payload.reference_type||'').trim();
+        const referenceId=String(action.entity_id||payload.reference_id||'').trim();
+        const currency=String(payload.currency||'EUR').toUpperCase();
+        const required=['reference_type','reference_id','account_code','direction','amount_cents','currency','metadata_json'];
+        if(required.some(name=>!cols.includes(name))) {
+          result={performed:false,reason:'ACCOUNTING_SCHEMA_INCOMPATIBLE'};
+        } else if(!Number.isSafeInteger(amountCents) || amountCents<=0 ||
+          !['DEBIT','CREDIT'].includes(direction) || !accountCode || !referenceType || !referenceId ||
+          !/^[A-Z]{3}$/.test(currency)) {
+          result={performed:false,reason:'ACCOUNTING_ENTRY_INVALID'};
+        } else {
+          const values={id:crypto.randomUUID(),reference_type:referenceType,reference_id:referenceId,
+            account_code:accountCode,direction,amount_cents:amountCents,currency,
+            label:String(payload.label||payload.description||'').slice(0,500),metadata_json:JSON.stringify(payload)};
+          const names=Object.keys(values);
+          await env.DB.prepare(`INSERT INTO accounting_ledger(${names.join(',')}) VALUES(${names.map(()=>'?').join(',')})`)
+            .bind(...names.map(name=>values[name])).run();
           result={performed:true,accounting_recorded:true};
-        } else result={performed:false,reason:'ACCOUNTING_SCHEMA_INCOMPATIBLE'};
+        }
       } else result={performed:false,reason:'ACCOUNTING_TABLE_MISSING'};
     } else result={performed:false,reason:'ACTION_TYPE_NOT_IMPLEMENTED'};
 
