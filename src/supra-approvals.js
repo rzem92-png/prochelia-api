@@ -95,6 +95,7 @@ export async function handleSupraApprovalRoute(request, env, auth) {
       const row = await env.DB.prepare("SELECT requester_user_id, tenant_id, status FROM supra_approval_requests WHERE id=? LIMIT 1").bind(requestId).first();
       if (!row) return reply({ ok: false, error: "APPROVAL_NOT_FOUND" }, 404);
       if (row.tenant_id !== auth.user.tenant_id) return reply({ ok: false, error: "TENANT_SCOPE_NOT_VERIFIED" }, 403);
+      if (typeof auth.user.tenant_id !== "string" || row.tenant_id !== auth.user.tenant_id) return reply({ ok: false, error: "TENANT_SCOPE_NOT_VERIFIED" }, 403);
       if (row.requester_user_id !== auth.user.id) return reply({ ok: false, error: "ONLY_REQUESTER_CAN_REVOKE" }, 403);
       if (!["PENDING", "APPROVED"].includes(row.status)) return reply({ ok: false, error: "APPROVAL_NOT_REVOCABLE" }, 409);
       await env.DB.batch([
