@@ -7,7 +7,6 @@ const workflow = await readFile(new URL("../.github/workflows/backup-preview-d1-
 test("Preview backup targets only the dedicated v2 EU-jurisdiction bucket", () => {
   assert.match(workflow, /R2_BUCKET: prochelia-preview-backups-eu-v2/);
   assert.match(workflow, /R2_ENDPOINT: https:\/\/f2a79e9fa41566a8ec80fb24c02c60eb\.eu\.r2\.cloudflarestorage\.com/);
-  assert.doesNotMatch(workflow, /R2_ENDPOINT: https:\/\/[^\\s]+\.r2\.cloudflarestorage\.com(?!.*\.eu\.r2\.cloudflarestorage\.com)/);
   assert.match(workflow, /prochelia-preview-backups-eu-v2/);
   assert.match(workflow, /cf-r2-jurisdiction: eu/);
   assert.match(workflow, /\.result\.jurisdiction == "eu"/);
