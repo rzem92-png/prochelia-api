@@ -26,3 +26,8 @@ test('Production backup is encrypted, integrity checked and round-trip verified'
   assert.match(workflow, /R2 backup checksum mismatch/);
   assert.doesNotMatch(workflow, /wrangler@4 deploy(?! --dry-run)/);
 });
+
+test('Production backup provisions EU jurisdiction and uses the jurisdiction-specific S3 endpoint', () => {
+  assert.match(workflow, /r2 bucket create "\$R2_BUCKET" --jurisdiction eu --location weur/);
+  assert.match(workflow, /f2a79e9fa41566a8ec80fb24c02c60eb\.eu\.r2\.cloudflarestorage\.com/);
+});
