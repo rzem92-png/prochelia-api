@@ -1,0 +1,74 @@
+name: Provision PROCHÉLIA isolated Preview R2 EU bucket
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirmation:
+        description: "Type CREATE_PREVIEW_R2_EU_ONLY to create a new isolated EU-jurisdiction Preview bucket"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: prochelia-preview-r2-eu-provision
+  cancel-in-progress: false
+
+jobs:
+  provision-preview-r2-eu:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Enforce exact branch and Preview-only confirmation
+        env:
+          REQUESTED_REF: ${{ github.ref }}
+          CONFIRMATION: ${{ inputs.confirmation }}
+        run: |
+          set -euo pipefail
+          test "$REQUESTED_REF" = "refs/heads/ops/provision-preview-r2-eu-jurisdiction-2026-11-16"
+          test "$CONFIRMATION" = "CREATE_PREVIEW_R2_EU_ONLY"
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22"
+      - name: Verify Cloudflare token and account
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test "$CLOUDFLARE_ACCOUNT_ID" = "f2a79e9fa41566a8ec80fb24c02c60eb"
+          token="${CLOUDFLARE_API_TOKEN#Bearer }"
+          status="$(curl --silent --show-error --output "$RUNNER_TEMP/token.json" --write-out '%{http_code}' https://api.cloudflare.com/client/v4/user/tokens/verify -H "Authorization: Bearer $token")"
+          test "$status" = "200"
+          jq -e '.success == true and .result.status == "active"' "$RUNNER_TEMP/token.json" >/dev/null
+      - name: Create a new bucket explicitly in EU jurisdiction
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          export CLOUDFLARE_API_TOKEN="${CLOUDFLARE_API_TOKEN#Bearer }"
+          BUCKET="prochelia-preview-backups-eu-locked"
+          # Never reuse or relabel the existing default-jurisdiction bucket.
+          if npx --yes wrangler@4 r2 bucket info "$BUCKET" --jurisdiction eu --json > "$RUNNER_TEMP/existing.json" 2>/dev/null; then
+            echo "The dedicated EU bucket already exists; skip creation and verify it."
+          else
+            npx --yes wrangler@4 r2 bucket create "$BUCKET" --jurisdiction eu --location WEUR
+          fi
+          status="$(curl --silent --show-error --output "$RUNNER_TEMP/bucket.json" --write-out '%{http_code}' \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/r2/buckets/$BUCKET" \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -H "cf-r2-jurisdiction: eu")"
+          test "$status" = "200"
+          jq -e '.success == true and .result.name == "prochelia-preview-backups-eu-locked" and .result.jurisdiction == "eu"' "$RUNNER_TEMP/bucket.json" >/dev/null
+          echo "Verified: new bucket jurisdiction is exactly eu."
+          {
+            echo "Created/verified Preview-only R2 bucket: $BUCKET."
+            echo "Cloudflare API explicitly returned jurisdiction=eu."
+            echo "No existing bucket was renamed, deleted, rebound, or copied."
+            echo "No Worker deployment, D1 migration, Production change, or customer-data transfer occurred."
+          } >> "$GITHUB_STEP_SUMMARY"
