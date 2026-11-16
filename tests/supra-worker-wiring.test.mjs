@@ -22,5 +22,5 @@ test("Nexus CORS preflight only reflects explicitly allowed origins", () => {
   assert.match(block, /securityOriginAllowed\(request,env\)/);
   assert.match(block, /access-control-allow-origin', origin/);
   assert.doesNotMatch(block, /access-control-allow-origin', '\*'/);
-  assert.match(block, /access-control-allow-methods', 'GET, POST, OPTIONS'/);
+  assert.match(block, /'access-control-allow-methods': 'GET, POST, OPTIONS'/);
 });
