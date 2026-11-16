@@ -1,4 +1,6 @@
 import { handleV7Route } from "./v7-routes.js";
+import { procheliaV7 } from "./v7.js";
+import { readBoundedRequestBody } from "./request-body.js";
 // PROCHÉLIA — INDEX BACKEND CONSOLIDÉ UNIQUE
 // Référence de consolidation : V14.1 Finance + sécurité/RBAC existants.
 // Généré le 19/10/2026. À déployer uniquement après recette avec la vraie base D1.
@@ -3632,6 +3634,79 @@ async function strictProductionAudit(request,env){
   return json({ok:true,version:VERSION,production_gate:overall?'OPEN':'CLOSED',ready_for_real_traffic:overall,checks,blocking:blocking.map(x=>x.code),note:overall?'Configuration gate passed. A real production launch still requires sandbox/acceptance tests for PSP, notifications, identity/security, backups/restore and critical user journeys.':'Production traffic remains blocked until the listed blocking controls are configured and tested.'});
 }
 
+async function supraDomains(request, env) {
+  const gate = await requireAuthRole(request, env, ['gerante']);
+  if (gate.error) return gate.error;
+  return json({
+    ok: true,
+    version: VERSION,
+    engine: 'PROCHELIA_SUPRA_ORCHESTRATOR_V2',
+    domains: procheliaV7.getSupraDomainRegistry()
+  }, 200);
+}
+
+function isPlainSupraRecord(value) {
+  return value !== null && typeof value === 'object' && !Array.isArray(value) &&
+    (Object.getPrototypeOf(value) === Object.prototype || Object.getPrototypeOf(value) === null);
+}
+
+async function supraPlan(request, env) {
+  const gate = await requireAuthRole(request, env, ['gerante']);
+  if (gate.error) return gate.error;
+  if (request.method !== 'POST') return json({ok:false,error:'METHOD_NOT_ALLOWED',version:VERSION},405,{'allow':'POST'});
+  const boundedBody = await readBoundedRequestBody(request,16384);
+  if (!boundedBody.ok) {
+    const tooLarge = boundedBody.reason === 'TOO_LARGE';
+    return json({ok:false,error:tooLarge?'REQUEST_TOO_LARGE':'INVALID_REQUEST_BODY',version:VERSION},tooLarge?413:400);
+  }
+  let body;
+  try { body = JSON.parse(boundedBody.text); }
+  catch { return json({ok:false,error:'INVALID_JSON',version:VERSION},400); }
+  if (!isPlainSupraRecord(body)) return json({ok:false,error:'INVALID_JSON_OBJECT',version:VERSION},400);
+  const allowedBodyKeys = new Set(['case_type','domain','action','impact','market','context','evidence']);
+  if (Object.keys(body).some(key => !allowedBodyKeys.has(key))) {
+    return json({ok:false,error:'UNEXPECTED_SUPRA_PLAN_FIELD',version:VERSION},400);
+  }
+  for (const key of ['case_type','domain','action','impact','market']) {
+    if (body[key] !== undefined && typeof body[key] !== 'string') {
+      return json({ok:false,error:'INVALID_SUPRA_PLAN_FIELD_TYPE',field:key,version:VERSION},400);
+    }
+  }
+  const caseType = body.case_type === undefined ? 'analyse_generale' : body.case_type.trim();
+  const domain = body.domain === undefined ? undefined : body.domain.trim();
+  const action = body.action === undefined ? 'ANALYZE_AND_PROPOSE' : body.action.trim().toUpperCase();
+  const impact = body.impact === undefined ? 'LOW' : body.impact.trim().toUpperCase();
+  const market = body.market === undefined ? 'fr' : body.market.trim().toLowerCase();
+  if (!caseType || caseType.length > 100 || !/^[A-Z0-9_]{2,64}$/.test(action) ||
+      !['LOW','MEDIUM','HIGH','CRITICAL'].includes(impact) ||
+      !(market === 'other' || /^[a-z]{2}$/.test(market)) ||
+      (domain !== undefined && (!domain || domain.length > 60)) ||
+      (body.context !== undefined && !isPlainSupraRecord(body.context))) {
+    return json({ok:false,error:'INVALID_SUPRA_PLAN_INPUT',version:VERSION},400);
+  }
+  if (body.evidence !== undefined) return json({ok:false,error:'CLIENT_SUPPLIED_EVIDENCE_NOT_TRUSTED',version:VERSION},400);
+  const context = body.context || {};
+  const plan = procheliaV7.buildSupraPlan({caseType,domain,impact,requestedAction:action,market,context});
+  const governanceContext = {};
+  for (const key of ['mission_id','provider_id','replacement_intervenant_id','client_id','immediateDanger']) {
+    if (Object.hasOwn(context,key)) governanceContext[key] = context[key];
+  }
+  const governance = procheliaV7.assessSupraDecision({
+    caseType:plan.caseType,impact:plan.impact,requestedAction:plan.requestedAction,
+    actorRole:gate.auth.user.role,context:governanceContext
+  });
+  const missingEvidence = [...new Set([...(plan.missingEvidence||[]),...(governance.missingEvidence||[])])];
+  await journal(env,'gerante',gate.auth.user.id,'SUPRA_PLAN_GENERATED','supra_plan',null,'OK',{
+    caseType:plan.caseType,domain:plan.domain,requestedAction:plan.requestedAction,
+    impact:plan.impact,market:plan.marketPack.market,risk:governance.risk,
+    autonomy:governance.autonomy,missingEvidence
+  });
+  return json({ok:true,version:VERSION,plan:{
+    ...plan,missingEvidence,executionAllowed:false,
+    autonomy:{...plan.autonomy,executionAdapterReady:false}
+  },governance},200);
+}
+
 const __procheliaProductionSafetyHandle = handle;
 handle = async function(request,env){
   try{
@@ -3670,6 +3745,14 @@ handle = async function(request,env){
     const u=new URL(request.url);
     if(u.pathname==='/api/system/final-audit' && request.method==='GET') return strictProductionAudit(request,env);
     if(u.pathname==='/api/system/production-check' && request.method==='GET') return strictProductionAudit(request,env);
+    if(u.pathname==='/api/supra/domains') {
+      if(request.method!=='GET') return json({ok:false,error:'METHOD_NOT_ALLOWED',version:VERSION},405,{'allow':'GET'});
+      return supraDomains(request,env);
+    }
+    if(u.pathname==='/api/supra/plan') {
+      if(request.method!=='POST') return json({ok:false,error:'METHOD_NOT_ALLOWED',version:VERSION},405,{'allow':'POST'});
+      return supraPlan(request,env);
+    }
     return __procheliaProductionSafetyHandle(request,env);
   }catch(e){
     return json({ok:false,error:'PRODUCTION_SAFETY_ERROR',version:VERSION},500);
