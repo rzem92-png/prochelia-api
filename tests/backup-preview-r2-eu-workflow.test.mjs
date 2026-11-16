@@ -23,3 +23,15 @@ test("Preview backup remains pinned to Preview D1 and never deploys or migrates 
   assert.doesNotMatch(workflow, /wrangler@4 deploy/);
   assert.doesNotMatch(workflow, /d1 migrations apply/);
 });
+
+test("Backup restore validation checks SQLite integrity and foreign keys before upload and after R2 round-trip", () => {
+  assert.match(workflow, /PRAGMA integrity_check/);
+  assert.match(workflow, /PRAGMA foreign_key_check/);
+  assert.match(workflow, /roundtrip-validation\.sqlite/);
+  assert.match(workflow, /roundtrip_foreign_keys/);
+});
+
+test("Backup workflow pins third-party checkout and Node setup actions to immutable SHAs", () => {
+  assert.match(workflow, /actions\/checkout@[0-9a-f]{40}/);
+  assert.match(workflow, /actions\/setup-node@[0-9a-f]{40}/);
+});
