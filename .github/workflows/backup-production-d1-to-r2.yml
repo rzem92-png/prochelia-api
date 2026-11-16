@@ -17,7 +17,7 @@ concurrency:
 
 jobs:
   backup-production:
-    if: ${{ github.event.inputs.confirm_production_backup == 'BACKUP_PRODUCTION_D1' }}
+    if: ${{ github.ref == 'refs/heads/main' && inputs.confirm_production_backup == 'BACKUP_PRODUCTION_D1' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
