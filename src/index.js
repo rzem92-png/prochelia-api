@@ -2308,9 +2308,17 @@ async function queueAction(env, actionType, entityType, entityId, payload, idem)
 
 async function executeQueuedAction(env, action) {
   if (!action) return {ok:false,error:'ACTION_NOT_FOUND'};
-  const payload = JSON.parse(action.payload_json||'{}');
+  // Atomically claim the row before any side effect. Concurrent workers can
+  // observe PENDING, but only one may transition it to PROCESSING.
+  const claim = await env.DB.prepare(`UPDATE action_outbox
+    SET status='PROCESSING', attempts=attempts+1, updated_at=CURRENT_TIMESTAMP
+    WHERE id=? AND status='PENDING'`).bind(action.id).run();
+  if (Number(claim?.meta?.changes || 0) !== 1) {
+    return {ok:false,status:'SKIPPED',error:'ACTION_ALREADY_CLAIMED'};
+  }
   const now = new Date().toISOString();
   try {
+    const payload = JSON.parse(action.payload_json||'{}');
     let result = {performed:false,action:action.action_type};
     if (action.action_type === 'NOTIFY') {
       const channel = payload.channel || 'IN_APP';
@@ -2352,11 +2360,11 @@ async function executeQueuedAction(env, action) {
     } else result={performed:false,reason:'ACTION_TYPE_NOT_IMPLEMENTED'};
 
     const finalStatus = result.performed ? 'DONE' : (result.requires_provider ? 'WAITING_PROVIDER' : 'FAILED');
-    await env.DB.prepare(`UPDATE action_outbox SET status=?,result_json=?,attempts=attempts+1,updated_at=CURRENT_TIMESTAMP,executed_at=? WHERE id=?`)
+    await env.DB.prepare(`UPDATE action_outbox SET status=?,result_json=?,updated_at=CURRENT_TIMESTAMP,executed_at=? WHERE id=? AND status='PROCESSING'`)
       .bind(finalStatus,JSON.stringify(result),result.performed?now:null,action.id).run();
     return {ok:true,status:finalStatus,result};
   } catch(e) {
-    await env.DB.prepare(`UPDATE action_outbox SET status='FAILED',last_error=?,attempts=attempts+1,updated_at=CURRENT_TIMESTAMP WHERE id=?`)
+    await env.DB.prepare(`UPDATE action_outbox SET status='FAILED',last_error=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='PROCESSING'`)
       .bind(String(e.message||e),action.id).run();
     return {ok:false,error:'ACTION_EXECUTION_FAILED',message:e.message};
   }
