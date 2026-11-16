@@ -21,7 +21,7 @@ concurrency:
 
 jobs:
   restore-isolated:
-    if: ${{ inputs.confirm_restore == 'RESTORE_PREVIEW_R2_TO_ISOLATED_TEST_ONLY' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/fix/preview-backup-r2-v2-jurisdiction-guard-2026-11-16') }}
+    if: ${{ github.ref == 'refs/heads/main' && inputs.confirm_restore == 'RESTORE_PREVIEW_R2_TO_ISOLATED_TEST_ONLY' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
