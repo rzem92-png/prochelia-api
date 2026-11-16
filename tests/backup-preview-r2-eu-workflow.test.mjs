@@ -35,3 +35,7 @@ test("Backup workflow pins third-party checkout and Node setup actions to immuta
   assert.match(workflow, /actions\/checkout@[0-9a-f]{40}/);
   assert.match(workflow, /actions\/setup-node@[0-9a-f]{40}/);
 });
+
+test("Backup workflow permits only main, the existing dedicated backup branch, and this guarded EU v2 review branch", () => {
+  assert.match(workflow, /refs\/heads\/main\|refs\/heads\/prelaunch\/r2-eu-backup-workflow\|refs\/heads\/fix\/preview-backup-r2-v2-jurisdiction-guard-2026-11-16/);
+});
