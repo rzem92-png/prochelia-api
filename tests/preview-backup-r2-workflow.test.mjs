@@ -6,7 +6,7 @@ const workflow = readFileSync('.github/workflows/backup-preview-d1-to-r2-eu.yml'
 const legacyWorkflow = readFileSync('.github/workflows/backup-preview-d1.yml', 'utf8');
 
 test('Preview backup is pinned to the dedicated locked EU R2 bucket', () => {
-  assert.match(workflow, /R2_BUCKET:\s*prochelia-preview-backups-eu-locked/);
+  assert.match(workflow, /R2_BUCKET:\s*prochelia-preview-backups-eu-v2/);
   assert.match(workflow, /EXPECTED_DB_ID:\s*6adb95e5-e542-4bec-9008-fbea01042305/);
   assert.match(workflow, /EXPECTED_DB_NAME:\s*prochelia-preview-db/);
 });
