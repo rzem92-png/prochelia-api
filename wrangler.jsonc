@@ -17,7 +17,7 @@
   "r2_buckets": [
     {
       "binding": "BACKUP_BUCKET",
-      "bucket_name": "prochelia-preview-backups"
+      "bucket_name": "prochelia-preview-backups-eu"
     }
   ],
   "previews": {
