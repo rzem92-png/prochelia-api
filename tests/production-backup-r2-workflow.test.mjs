@@ -6,7 +6,7 @@ const workflow = readFileSync('.github/workflows/backup-production-d1-to-r2.yml'
 
 test('Production backup is pinned to the production D1 and designated R2 bucket', () => {
   assert.match(workflow, /EXPECTED_DB_ID:\s*04f52830-ef5a-4f17-a640-42bbc2381bba/);
-  assert.match(workflow, /R2_BUCKET:\s*prochelia-production-backups-eu/);
+  assert.match(workflow, /R2_BUCKET:\s*prochelia-production-backups-eu-v2/);
 });
 
 test('Production backup confirms exact R2 bucket and EU jurisdiction before export', () => {
