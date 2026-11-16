@@ -59,3 +59,16 @@ test("operational case approval remains IN_PROGRESS until a downstream action is
   assert.doesNotMatch(handler, /status='RESOLVED'/);
   assert.doesNotMatch(handler, /'COMPLETED'/);
 });
+
+test("outbox executor atomically claims a pending row before any side effect", () => {
+  const executor = section("async function executeQueuedAction(env,", "async function operationalExecute(request, env)");
+  const claim = executor.indexOf("SET status='PROCESSING'");
+  const sideEffect = executor.indexOf("if (action.action_type === 'NOTIFY')");
+  assert.ok(claim >= 0 && sideEffect > claim, "claim must precede notification/accounting/mission side effects");
+  assert.match(executor, /WHERE id=\? AND status='PENDING'/);
+  assert.match(executor, /claim\?\.meta\?\.changes/);
+  assert.match(executor, /ACTION_ALREADY_CLAIMED/);
+  assert.match(executor, /WHERE id=\? AND status='PROCESSING'/);
+  assert.doesNotMatch(executor, /attempts=attempts\+1.*attempts=attempts\+1/s);
+});
+
