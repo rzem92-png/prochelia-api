@@ -104,9 +104,7 @@ jobs:
           token="${CLOUDFLARE_API_TOKEN#Bearer }"
           test -n "$token"
           test "$CLOUDFLARE_ACCOUNT_ID" = "$EXPECTED_ACCOUNT_ID"
-          status="$(curl --silent --show-error --output "$RUNNER_TEMP/preview-d1-jurisdiction.json" --write-out '%{http_code}' \\
-            "https://api.cloudflare.com/client/v4/accounts/$EXPECTED_ACCOUNT_ID/d1/database/$EXPECTED_DB_ID" \\
-            -H "Authorization: Bearer $token")"
+          status="$(curl --silent --show-error --output "$RUNNER_TEMP/preview-d1-jurisdiction.json" --write-out '%{http_code}' "https://api.cloudflare.com/client/v4/accounts/$EXPECTED_ACCOUNT_ID/d1/database/$EXPECTED_DB_ID" -H "Authorization: Bearer $token")"
           test "$status" = "200" || { echo "::error::Preview D1 metadata lookup failed (HTTP $status); refusing export and backup."; exit 1; }
           jq -e --arg id "$EXPECTED_DB_ID" --arg name "$EXPECTED_DB_NAME" '.success == true and .result.uuid == $id and .result.name == $name and .result.jurisdiction == "eu"' "$RUNNER_TEMP/preview-d1-jurisdiction.json" >/dev/null || {
             echo "::error::Preview D1 identity or explicit EU jurisdiction verification failed; refusing export and backup. Create a new D1 with jurisdiction=eu, update the pinned ID, then revalidate."; exit 1;
