@@ -1480,53 +1480,38 @@ async function executeCaseBusinessAction(env, c, rec, actorId=null, automatic=fa
   const solution = rec?.solution || {};
   const results = [];
 
-  // Safe, idempotent operational effects that do not require an external PSP/provider.
+  // All mission mutations remain queued until an independently verified provider/action adapter exists.
   if (c.mission_id && (action === 'AUTO_RESOLVE' || action === 'CONTINUITY' || action === 'RESOLVE_CASE')) {
     const queued = await enqueueAction(env,c.id,'MISSION_VERIFY_AND_NOTIFY',{mission_id:c.mission_id,case_id:c.id,reason:c.case_type},`${c.id}:mission-verify-notify`);
-    results.push({action:'MISSION_VERIFY_AND_NOTIFY',...queued});
+    results.push({action:'MISSION_VERIFY_AND_NOTIFY',...queued,execution_confirmed:false});
   }
 
   if (action === 'SEARCH_REPLACEMENT' || c.case_type === 'absence_intervenant' || c.case_type === 'retard_intervenant') {
     const replacementId = clean(context.replacement_intervenant_id || context.replacement_id);
-    if (replacementId && c.mission_id) {
-      const cols = await getTableColumns(env,'missions');
-      if (cols.includes('intervenant_id')) {
-        await env.DB.prepare('UPDATE missions SET intervenant_id=? WHERE id=?').bind(replacementId,c.mission_id).run();
-        results.push({action:'ASSIGN_REPLACEMENT',mission_id:c.mission_id,intervenant_id:replacementId,status:'EXECUTED'});
-      } else {
-        const queued=await enqueueAction(env,c.id,'ASSIGN_REPLACEMENT',{mission_id:c.mission_id,intervenant_id:replacementId},`${c.id}:replacement:${replacementId}`);
-        results.push({action:'ASSIGN_REPLACEMENT',...queued,reason:'MISSION_SCHEMA_NEEDS_REVIEW'});
-      }
-    } else {
-      const queued=await enqueueAction(env,c.id,'SEARCH_REPLACEMENT',{mission_id:c.mission_id||null,criteria:context.replacement_criteria||{},case_type:c.case_type},`${c.id}:search-replacement`);
-      results.push({action:'SEARCH_REPLACEMENT',...queued});
-    }
+    const queued = replacementId && c.mission_id
+      ? await enqueueAction(env,c.id,'ASSIGN_REPLACEMENT',{mission_id:c.mission_id,intervenant_id:replacementId},`${c.id}:replacement:${replacementId}`)
+      : await enqueueAction(env,c.id,'SEARCH_REPLACEMENT',{mission_id:c.mission_id||null,criteria:context.replacement_criteria||{},case_type:c.case_type},`${c.id}:search-replacement`);
+    results.push({action:replacementId?'ASSIGN_REPLACEMENT':'SEARCH_REPLACEMENT',...queued,execution_confirmed:false,reason:'PROVIDER_AND_MISSION_VALIDATION_REQUIRED'});
   }
 
   if (context.reschedule_start_at && c.mission_id) {
-    const cols=await getTableColumns(env,'missions');
-    const target = cols.includes('start_at') ? 'start_at' : (cols.includes('scheduled_at') ? 'scheduled_at' : null);
-    if (target) {
-      await env.DB.prepare(`UPDATE missions SET ${target}=? WHERE id=?`).bind(String(context.reschedule_start_at),c.mission_id).run();
-      results.push({action:'RESCHEDULE_MISSION',mission_id:c.mission_id,field:target,status:'EXECUTED'});
-    } else {
-      const queued=await enqueueAction(env,c.id,'RESCHEDULE_MISSION',{mission_id:c.mission_id,start_at:context.reschedule_start_at},`${c.id}:reschedule:${context.reschedule_start_at}`);
-      results.push({action:'RESCHEDULE_MISSION',...queued,reason:'MISSION_SCHEMA_NEEDS_REVIEW'});
-    }
+    const queued=await enqueueAction(env,c.id,'RESCHEDULE_MISSION',{mission_id:c.mission_id,start_at:context.reschedule_start_at},`${c.id}:reschedule:${context.reschedule_start_at}`);
+    results.push({action:'RESCHEDULE_MISSION',...queued,execution_confirmed:false,reason:'MISSION_RESCHEDULE_VALIDATION_REQUIRED'});
   }
 
   if (context.client_notification || c.client_id || c.company_id) {
     const queued=await enqueueAction(env,c.id,'NOTIFY_CLIENT',{client_id:c.client_id||null,company_id:c.company_id||null,mission_id:c.mission_id||null,message:context.client_notification||solution.notification||`Mise à jour de votre dossier PROCHÉLIA : ${c.case_type}.`},`${c.id}:notify-client`);
-    results.push({action:'NOTIFY_CLIENT',...queued});
+    results.push({action:'NOTIFY_CLIENT',...queued,execution_confirmed:false});
   }
 
-  // Financial actions are deliberately queued for the real PSP adapter; no fake money movement.
+  // Financial actions remain review-only; no fake money movement or automatic refund.
   if (context.refund_cents || action === 'REFUND_REQUEST') {
-    const queued=await enqueueAction(env,c.id,'PSP_REFUND_REVIEW',{mission_id:c.mission_id||null,amount_cents:Math.max(0,Number(context.refund_cents||0)),reason:c.description||c.case_type},`${c.id}:psp-refund`);
-    results.push({action:'PSP_REFUND_REVIEW',...queued});
+    const amount = Number(context.refund_cents || 0);
+    const queued=await enqueueAction(env,c.id,'PSP_REFUND_REVIEW',{mission_id:c.mission_id||null,amount_cents:Number.isSafeInteger(amount)?Math.max(0,amount):0,reason:c.description||c.case_type},`${c.id}:psp-refund`);
+    results.push({action:'PSP_REFUND_REVIEW',...queued,execution_confirmed:false,reason:'PSP_APPROVAL_AND_SETTLEMENT_REQUIRED'});
   }
 
-  await journal(env,automatic?'copilot':'gerante',actorId,'CASE_BUSINESS_ACTIONS_EXECUTED','operational_case',c.id,'OK',{results});
+  await journal(env,automatic?'copilot':'gerante',actorId,'CASE_BUSINESS_ACTIONS_QUEUED','operational_case',c.id,'PENDING',{results});
   return results;
 }
 
@@ -1536,35 +1521,49 @@ async function processActionOutbox(request, env) {
   const rows=await env.DB.prepare(`SELECT * FROM action_outbox WHERE status='PENDING' ORDER BY created_at ASC LIMIT 50`).all();
   const processed=[];
   for(const row of (rows.results||[])) {
-    const payload=row.payload_json?JSON.parse(row.payload_json):{};
-    // Provider-dependent actions stay queued until the corresponding adapter/secret is configured.
-    const external = ['PSP_REFUND_REVIEW','NOTIFY_CLIENT','SEARCH_REPLACEMENT','RESCHEDULE_MISSION','ASSIGN_REPLACEMENT'].includes(String(row.action_type));
+    const external = ['PSP_REFUND_REVIEW','NOTIFY_CLIENT','SEARCH_REPLACEMENT','RESCHEDULE_MISSION','ASSIGN_REPLACEMENT','PAYOUT','REFUND'].includes(String(row.action_type));
     if(external) {
-      await env.DB.prepare(`UPDATE action_outbox SET status='WAITING_PROVIDER',last_error=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind('External adapter/provider required for final execution.',row.id).run();
+      await env.DB.prepare(`UPDATE action_outbox SET status='WAITING_PROVIDER',last_error=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='PENDING'`)
+        .bind('External adapter/provider or separately authorized operational action required for final execution.',row.id).run();
       processed.push({id:row.id,status:'WAITING_PROVIDER',action_type:row.action_type});
       continue;
     }
-    await env.DB.prepare(`UPDATE action_outbox SET status='COMPLETED',processed_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(row.id).run();
-    processed.push({id:row.id,status:'COMPLETED',action_type:row.action_type,payload});
+    // Never mark an action completed merely because it was read from the queue.
+    // The executor must perform a supported operation and persist its real result.
+    const result=await executeQueuedAction(env,row);
+    processed.push({id:row.id,status:result.status||'FAILED',action_type:row.action_type,ok:!!result.ok,result:result.result||null,error:result.error||null});
   }
-  await journal(env,'gerante',gate.auth.user.id,'ACTION_OUTBOX_PROCESSED','system',null,'OK',{count:processed.length});
+  await journal(env,'gerante',gate.auth.user.id,'ACTION_OUTBOX_PROCESSED','system',null,'OK',{count:processed.length,completed:processed.filter(x=>x.status==='DONE').length,waiting:processed.filter(x=>x.status==='WAITING_PROVIDER').length,failed:processed.filter(x=>x.status==='FAILED').length});
   return json({ok:true,version:VERSION,processed},200);
 }
 
 async function executeOperationalCase(env, caseId, approverId=null, automatic=false) {
   const c=await env.DB.prepare('SELECT * FROM operational_cases WHERE id=? LIMIT 1').bind(caseId).first();
   if(!c)return {ok:false,error:'CASE_NOT_FOUND'};
-  if(c.status==='RESOLVED')return {ok:true,already:true};
-  const rec=c.proposed_solution_json?JSON.parse(c.proposed_solution_json):{};
+  if(['RESOLVED','CLOSED'].includes(String(c.status||'').toUpperCase()))return {ok:true,already:true};
+  let rec;
+  try { rec=c.proposed_solution_json?JSON.parse(c.proposed_solution_json):{}; }
+  catch { return {ok:false,error:'SERVER_PROPOSAL_INVALID'}; }
   if(c.requires_manager && !automatic && !approverId) return {ok:false,error:'MANAGER_APPROVAL_REQUIRED'};
   const businessResults = await executeCaseBusinessAction(env,c,rec,approverId,automatic);
-  const resolution={executed:true,automatic,action:rec.action||'RESOLVE',steps:rec.solution?.steps||[],business_results:businessResults,executed_at:new Date().toISOString()};
-  await env.DB.prepare(`INSERT INTO case_actions(id,case_id,action_code,mode,status,payload_json,result_json,completed_at) VALUES(?,?,?,?,?,?,?,CURRENT_TIMESTAMP)`)
-    .bind(crypto.randomUUID(),caseId,rec.action||'RESOLVE',automatic?'AUTO':'MANAGER','COMPLETED',JSON.stringify(rec),JSON.stringify(resolution)).run();
-  await env.DB.prepare(`UPDATE operational_cases SET status='RESOLVED',resolution_json=?,requires_manager=0,updated_at=CURRENT_TIMESTAMP,resolved_at=CURRENT_TIMESTAMP WHERE id=?`).bind(JSON.stringify(resolution),caseId).run();
-  await env.DB.prepare(`UPDATE copilot_log SET approved_by=COALESCE(?,approved_by),result=? WHERE case_id=? AND id=(SELECT id FROM copilot_log WHERE case_id=? ORDER BY created_at DESC LIMIT 1)`).bind(approverId,JSON.stringify(resolution),caseId,caseId).run();
-  await journal(env,automatic?'copilot':'gerante',approverId,automatic?'AUTO_CASE_RESOLVED':'CASE_RESOLVED','operational_case',caseId,'OK',resolution);
-  return {ok:true,case_id:caseId,resolution};
+  const resolution={
+    executed:false,
+    status:'IN_PROGRESS',
+    automatic,
+    action:rec.action||'RESOLVE',
+    steps:rec.solution?.steps||[],
+    business_results:businessResults,
+    execution_claim:'QUEUED_NOT_CONFIRMED',
+    queued_at:new Date().toISOString()
+  };
+  await env.DB.prepare(`INSERT INTO case_actions(id,case_id,action_code,mode,status,payload_json,result_json,completed_at) VALUES(?,?,?,?,?,?,?,NULL)`)
+    .bind(crypto.randomUUID(),caseId,rec.action||'RESOLVE',automatic?'AUTO':'MANAGER','PENDING',JSON.stringify(rec),JSON.stringify(resolution)).run();
+  await env.DB.prepare(`UPDATE operational_cases SET status='IN_PROGRESS',resolution_json=?,requires_manager=0,updated_at=CURRENT_TIMESTAMP,resolved_at=NULL WHERE id=? AND status NOT IN ('RESOLVED','CLOSED')`)
+    .bind(JSON.stringify(resolution),caseId).run();
+  await env.DB.prepare(`UPDATE copilot_log SET approved_by=COALESCE(?,approved_by),result=? WHERE case_id=? AND id=(SELECT id FROM copilot_log WHERE case_id=? ORDER BY created_at DESC LIMIT 1)`)
+    .bind(approverId,JSON.stringify(resolution),caseId,caseId).run();
+  await journal(env,automatic?'copilot':'gerante',approverId,'CASE_ACTIONS_QUEUED','operational_case',caseId,'PENDING',resolution);
+  return {ok:true,case_id:caseId,status:'IN_PROGRESS',resolution};
 }
 
 async function approveOperationalCase(request, env) {
@@ -2371,16 +2370,25 @@ async function operationalExecute(request, env) {
   if(!b.case_id)return json({ok:false,error:'CASE_ID_REQUIRED',version:VERSION},400);
   const c=await env.DB.prepare('SELECT * FROM operational_cases WHERE id=? LIMIT 1').bind(b.case_id).first();
   if(!c)return json({ok:false,error:'CASE_NOT_FOUND',version:VERSION},404);
-  const solution=JSON.parse(c.proposed_solution_json||'{}');
-  const actions=Array.isArray(b.actions)?b.actions:(Array.isArray(solution.actions)?solution.actions:[]);
-  if(!actions.length)return json({ok:false,error:'NO_ACTIONS_DEFINED',version:VERSION},400);
+  if(['RESOLVED','CLOSED'].includes(String(c.status||'').toUpperCase())) return json({ok:false,error:'CASE_ALREADY_CLOSED',version:VERSION},409);
+  let solution;
+  try { solution=JSON.parse(c.proposed_solution_json||'{}'); }
+  catch { return json({ok:false,error:'SERVER_PROPOSAL_INVALID',version:VERSION},409); }
+  // Browser-supplied action arrays are never executable. Only the stored server proposal is considered.
+  const actions=Array.isArray(solution.actions)?solution.actions:[];
+  if(!actions.length)return json({ok:false,error:'NO_SERVER_APPROVED_ACTIONS',version:VERSION},409);
+  const unsupported=actions.filter(a=>!a || typeof a!=='object' || Array.isArray(a) ||
+    String(a.action_type||a.type||'').toUpperCase()!=='NOTIFY');
+  if(unsupported.length) return json({ok:false,error:'ACTION_REQUIRES_GOVERNED_APPROVAL',version:VERSION,blocked:unsupported.length},409);
   const results=[];
   for(const a of actions){
-    const q=await queueAction(env,a.action_type||a.type,c.mission_id?'MISSION':'CASE',a.entity_id||c.mission_id,{...a},a.idempotency_key);
+    const q=await queueAction(env,'NOTIFY',c.mission_id?'MISSION':'CASE',c.mission_id||c.id,
+      {channel:'IN_APP',recipient_id:c.client_id||null,type:'OPERATIONAL',title:'PROCHÉLIA',message:String(a.message||a.title||'Mise à jour de votre dossier PROCHÉLIA.').slice(0,1000)},
+      a.idempotency_key||`case:${c.id}:notify:${results.length}`);
     results.push(await executeQueuedAction(env,q));
   }
-  const allDone=results.every(x=>x.ok && ['DONE'].includes(x.status));
-  await env.DB.prepare(`UPDATE operational_cases SET status=?,resolution_json=?,updated_at=CURRENT_TIMESTAMP,resolved_at=? WHERE id=?`)
+  const allDone=results.every(x=>x.ok && x.status==='DONE');
+  await env.DB.prepare(`UPDATE operational_cases SET status=?,resolution_json=?,updated_at=CURRENT_TIMESTAMP,resolved_at=? WHERE id=? AND status NOT IN ('RESOLVED','CLOSED')`)
     .bind(allDone?'RESOLVED':'IN_PROGRESS',JSON.stringify({approved_by:gate.auth.user.id,results}),allDone?new Date().toISOString():null,c.id).run();
   await journal(env,'gerante',gate.auth.user.id,'CASE_EXECUTED','operational_case',c.id,allDone?'OK':'PARTIAL',{results});
   return json({ok:true,version:VERSION,case_id:c.id,status:allDone?'RESOLVED':'IN_PROGRESS',results});
