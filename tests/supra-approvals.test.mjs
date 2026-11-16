@@ -148,3 +148,34 @@ test("approval ledger schema protects immutable request identity and append-only
   assert.match(sql, /trg_supra_approval_status_evidence/);
   assert.match(sql, /UNIQUE \(request_id, approver_user_id\)/);
 });
+
+test("approval requests cannot be created for a tenant outside the authenticated manager session", async () => {
+  const db = fakeDb();
+  const response = await handleSupraApprovalRoute(post("/api/supra/approvals/request", {
+    action: "PRODUCTION_RELEASE",
+    tenantId: "another-tenant",
+    resourceId: "release-1",
+    payload: { commit: "abc" },
+    reason: "Release review"
+  }), { DB: db }, managerA);
+  assert.equal(response.status, 403);
+  assert.equal((await response.json()).error, "TENANT_SCOPE_NOT_VERIFIED");
+  assert.equal(db.calls.length, 0);
+});
+
+test("approval votes cannot cross authenticated tenant boundaries", async () => {
+  const db = fakeDb([{
+    id: "req-other-tenant",
+    requester_user_id: "manager-x",
+    tenant_id: "another-tenant",
+    status: "PENDING",
+    expires_at: "2999-01-01T00:00:00.000Z",
+    required_approvals: 2
+  }]);
+  const response = await handleSupraApprovalRoute(post("/api/supra/approvals/decide", {
+    requestId: "req-other-tenant", decision: "APPROVE", reason: "Review"
+  }), { DB: db }, managerA);
+  assert.equal(response.status, 403);
+  assert.equal((await response.json()).error, "TENANT_SCOPE_NOT_VERIFIED");
+  assert.equal(db.calls.filter(x => x.kind === "batch").length, 0);
+});
