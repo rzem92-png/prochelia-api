@@ -58,7 +58,7 @@ jobs:
           if npx --yes wrangler@4 r2 bucket info "$BUCKET" --jurisdiction eu --json > "$RUNNER_TEMP/existing.json" 2>/dev/null; then
             echo "The dedicated EU bucket already exists; skip creation and verify it."
           else
-            npx --yes wrangler@4 r2 bucket create "$BUCKET" --jurisdiction eu --location WEUR
+            npx --yes wrangler@4 r2 bucket create "$BUCKET" --jurisdiction eu --location weur
           fi
           status="$(curl --silent --show-error --output "$RUNNER_TEMP/bucket.json" --write-out '%{http_code}' \
             "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/r2/buckets/$BUCKET" \
