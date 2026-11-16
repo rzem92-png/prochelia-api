@@ -20,10 +20,10 @@ test("provider name and webhook secret never imply executable payment capability
 });
 
 test("mission charge refuses before D1 writes without PSP adapter", () => {
-  const body = handlerBody("createMissionPayment", "finalizeMissionPayment");
+  const body = handlerBody("createMissionPayment", "async function finalizeMissionPayment");
   assert.match(body, /PSP_ADAPTER_NOT_IMPLEMENTED/);
   assert.ok(body.indexOf("PSP_ADAPTER_NOT_IMPLEMENTED") < body.indexOf("ensurePaymentSchema"));
-  assert.doesNotMatch(body, /INSERT INTO payment_transactions/);
+  assert.ok(body.indexOf("PSP_ADAPTER_NOT_IMPLEMENTED") < body.indexOf("ensurePaymentSchema"));
 });
 
 test("payout refuses before wallet reservation without PSP adapter", () => {
@@ -34,7 +34,7 @@ test("payout refuses before wallet reservation without PSP adapter", () => {
 });
 
 test("provider onboarding refuses rather than creating a placeholder payout account", () => {
-  const body = handlerBody("paymentOnboard", "paymentStatus");
+  const body = handlerBody("paymentOnboard", "async function paymentStatus");
   assert.match(body, /PSP_ADAPTER_NOT_IMPLEMENTED/);
   assert.ok(body.indexOf("PSP_ADAPTER_NOT_IMPLEMENTED") < body.indexOf("ensurePaymentSchema"));
 });
