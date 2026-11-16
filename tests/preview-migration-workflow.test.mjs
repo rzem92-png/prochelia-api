@@ -90,7 +90,7 @@ test("Preview migration workflow accepts only the reviewed pre- and post-0021 re
     "0018_dsa_ai_act_transparency_redress.sql"
   ];
   for (const name of legacy) assert.ok(workflow.includes(`"${name}"`), `legacy migration not explicitly allowlisted: ${name}`);
-  assert.match(workflow, /pending=\{"0020_auth_login_rate_limits\.sql"\}/);
+  assert.match(workflow, /pending=\{"0021_supra_audit_events\.sql"\}/);
   assert.match(workflow, /baseline=\(local-pending\)\|legacy/);
   assert.match(workflow, /fully_applied=local\|legacy/);
   assert.match(workflow, /remote == baseline/);
