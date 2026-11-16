@@ -144,5 +144,7 @@ test("approval ledger schema protects immutable request identity and append-only
   assert.match(sql, /trg_supra_approval_votes_no_delete/);
   assert.match(sql, /trg_supra_approval_events_no_update/);
   assert.match(sql, /trg_supra_approval_events_no_delete/);
+  assert.match(sql, /trg_supra_approval_status_transitions/);
+  assert.match(sql, /trg_supra_approval_status_evidence/);
   assert.match(sql, /UNIQUE \(request_id, approver_user_id\)/);
 });
