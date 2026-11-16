@@ -111,6 +111,20 @@ jobs:
             exit 1
           }
 
+      - name: Verify R2 backup bucket EU jurisdiction before exporting sensitive D1 data
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$CLOUDFLARE_ACCOUNT_ID" = "$EXPECTED_ACCOUNT_ID"
+          token="$(printf '%s' "$CLOUDFLARE_API_TOKEN" | sed -E 's/^[[:space:]]*Bearer[[:space:]]+//I; s/^[[:space:]]+//; s/[[:space:]]+$//' | tr -d '\r\n')"
+          test -n "$token"
+          status="$(curl --silent --show-error --output "$RUNNER_TEMP/preview-r2-jurisdiction.json" --write-out '%{http_code}' "https://api.cloudflare.com/client/v4/accounts/$EXPECTED_ACCOUNT_ID/r2/buckets/$R2_BUCKET" -H "Authorization: Bearer $token" -H 'cf-r2-jurisdiction: eu')"
+          test "$status" = "200" || { echo "::error::R2 EU jurisdiction lookup failed (HTTP $status); refusing D1 export and migration."; exit 1; }
+          jq -e --arg bucket "$R2_BUCKET" '.success == true and .result.name == $bucket and .result.jurisdiction == "eu"' "$RUNNER_TEMP/preview-r2-jurisdiction.json" >/dev/null || {
+            echo "::error::The configured R2 bucket is not confirmed in EU jurisdiction; refusing D1 export and migration."
+            exit 1
+          }
+          echo "PASS: R2 bucket identity and EU jurisdiction confirmed before D1 export."
       - name: Export only Preview D1 before migration
         shell: bash
         run: |
