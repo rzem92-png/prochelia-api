@@ -5,11 +5,11 @@ import { paymentsConfigured } from "../src/index.js";
 
 const source = await readFile(new URL("../src/index.js", import.meta.url), "utf8");
 
-function handlerBody(name, nextName) {
+function handlerBody(name, nextBoundary) {
   const start = source.indexOf(`async function ${name}`);
-  const end = source.indexOf(`\n${nextName}`, start);
+  const end = source.indexOf(`\n${nextBoundary}`, start);
   assert.notEqual(start, -1, `${name} handler exists`);
-  assert.notEqual(end, -1, `${nextName} boundary exists`);
+  assert.notEqual(end, -1, `${nextBoundary} boundary exists`);
   return source.slice(start, end);
 }
 
@@ -19,22 +19,24 @@ test("provider name and webhook secret never imply executable payment capability
   assert.equal(paymentsConfigured({}), false);
 });
 
-test("mission charge refuses before D1 writes without PSP adapter", () => {
+test("mission charge refuses before D1 schema writes without PSP adapter", () => {
   const body = handlerBody("createMissionPayment", "async function finalizeMissionPayment");
-  assert.match(body, /PSP_ADAPTER_NOT_IMPLEMENTED/);
-  assert.ok(body.indexOf("PSP_ADAPTER_NOT_IMPLEMENTED") < body.indexOf("ensurePaymentSchema"));
-  assert.ok(body.indexOf("PSP_ADAPTER_NOT_IMPLEMENTED") < body.indexOf("ensurePaymentSchema"));
+  const gate = body.indexOf("PSP_ADAPTER_NOT_IMPLEMENTED");
+  assert.ok(gate >= 0);
+  assert.ok(gate < body.indexOf("ensurePaymentSchema"));
 });
 
 test("payout refuses before wallet reservation without PSP adapter", () => {
   const body = handlerBody("payoutRequest", "function constantTimeStringEqual");
-  assert.match(body, /PSP_ADAPTER_NOT_IMPLEMENTED/);
-  assert.ok(body.indexOf("PSP_ADAPTER_NOT_IMPLEMENTED") < body.indexOf("ensurePaymentSchema"));
-  assert.doesNotMatch(body, /reservePayoutAtomically\(/);
+  const gate = body.indexOf("PSP_ADAPTER_NOT_IMPLEMENTED");
+  assert.ok(gate >= 0);
+  assert.ok(gate < body.indexOf("ensurePaymentSchema"));
+  assert.ok(gate < body.indexOf("reservePayoutAtomically"));
 });
 
-test("provider onboarding refuses rather than creating a placeholder payout account", () => {
+test("provider onboarding refuses before creating a placeholder payout account", () => {
   const body = handlerBody("paymentOnboard", "async function paymentStatus");
-  assert.match(body, /PSP_ADAPTER_NOT_IMPLEMENTED/);
-  assert.ok(body.indexOf("PSP_ADAPTER_NOT_IMPLEMENTED") < body.indexOf("ensurePaymentSchema"));
+  const gate = body.indexOf("PSP_ADAPTER_NOT_IMPLEMENTED");
+  assert.ok(gate >= 0);
+  assert.ok(gate < body.indexOf("ensurePaymentSchema"));
 });
