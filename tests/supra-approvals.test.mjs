@@ -38,8 +38,8 @@ function post(path, body, origin = "https://app.example") {
   });
 }
 
-const managerA = { user: { id: "manager-a", role: "gerante" } };
-const managerB = { user: { id: "manager-b", role: "gerante" } };
+const managerA = { user: { id: "manager-a", role: "gerante", tenant_id: "tenant-1" } };
+const managerB = { user: { id: "manager-b", role: "gerante", tenant_id: "tenant-1" } };
 
 test("approval routes reject anonymous and non-manager callers", async () => {
   const env = { DB: fakeDb() };
@@ -80,7 +80,7 @@ test("high-risk requests bind an immutable payload hash and require two distinct
 });
 
 test("requester cannot approve their own action", async () => {
-  const db = fakeDb([{ id: "req-1", requester_user_id: "manager-a", status: "PENDING", expires_at: "2999-01-01T00:00:00.000Z", required_approvals: 2 }]);
+  const db = fakeDb([{ id: "req-1", requester_user_id: "manager-a", tenant_id: "tenant-1", status: "PENDING", expires_at: "2999-01-01T00:00:00.000Z", required_approvals: 2 }]);
   const response = await handleSupraApprovalRoute(post("/api/supra/approvals/decide", {
     requestId: "req-1", decision: "APPROVE", reason: "I approve"
   }), { DB: db }, managerA);
