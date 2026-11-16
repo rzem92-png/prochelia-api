@@ -7,6 +7,8 @@ on:
         description: "Saisir exactement BACKUP_PREVIEW_TO_R2_EU pour lancer une sauvegarde de la D1 preview"
         required: true
         type: string
+  schedule:
+    - cron: "17 3 * * *"
 
 permissions:
   contents: read
@@ -17,7 +19,7 @@ concurrency:
 
 jobs:
   backup-preview:
-    if: ${{ github.event.inputs.confirm_preview_backup == 'BACKUP_PREVIEW_TO_R2_EU' }}
+    if: ${{ github.event_name == 'schedule' || github.event.inputs.confirm_preview_backup == 'BACKUP_PREVIEW_TO_R2_EU' }}
     runs-on: ubuntu-latest
     timeout-minutes: 25
     env:
