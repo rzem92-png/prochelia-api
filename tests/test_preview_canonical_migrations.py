@@ -4,6 +4,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 MIGRATIONS = ROOT / "migrations-preview-canonical"
 EXPECTED = [
+    "0000_auth_foundation.sql",
     "0001_core_business_schema.sql",
     "0002_server_pricing.sql",
     "0003_route_address_provenance.sql",
@@ -36,21 +37,7 @@ assert actual == sorted(EXPECTED), (
 
 db = sqlite3.connect(":memory:")
 db.execute("PRAGMA foreign_keys = ON")
-# Match the existing authentication foundation: canonical business migrations
-# explicitly require users and sessions to pre-exist.
-db.executescript("""
-CREATE TABLE users (
-    id TEXT PRIMARY KEY, role TEXT NOT NULL, email TEXT NOT NULL UNIQUE,
-    first_name TEXT NOT NULL, last_name TEXT NOT NULL, phone TEXT,
-    password_hash TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'active',
-    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-CREATE TABLE sessions (
-    id TEXT PRIMARY KEY, user_id TEXT NOT NULL, token_hash TEXT NOT NULL UNIQUE,
-    expires_at TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-""")
+# Start from a truly empty D1 database, matching the newly created EU Preview target.
 for name in EXPECTED:
     db.executescript((MIGRATIONS / name).read_text(encoding="utf-8"))
 
@@ -65,4 +52,4 @@ required = {
 }
 assert required <= tables, f"Canonical migration chain missing tables: {sorted(required-tables)}"
 
-print(f"PASS: all {len(EXPECTED)} canonical Preview migrations apply over the existing users/sessions auth foundation; foreign_key_check=0.")
+print(f"PASS: all {len(EXPECTED)} canonical Preview migrations apply from an empty D1 database, creating users/sessions first; foreign_key_check=0.")
