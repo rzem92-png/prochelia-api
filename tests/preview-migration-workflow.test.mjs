@@ -170,3 +170,30 @@ test("Preview migration workflow verifies every persisted approval table, index 
   ]) assert.ok(workflow.includes(name), `missing persisted approval schema verification: ${name}`);
   assert.match(workflow, /actual_triggers != expected_triggers/);
 });
+
+test("Preview migration commands use only the dedicated migration-only D1 config", () => {
+  assert.match(workflow, /Path\("wrangler\.preview-migrations\.jsonc"\)/);
+  assert.match(workflow, /binding\] == "PREVIEW_DB"/);
+  assert.match(workflow, /--config wrangler\.preview-migrations\.jsonc/);
+  assert.doesNotMatch(workflow, /--config wrangler\.jsonc/);
+  assert.doesNotMatch(workflow, /Path\("wrangler\.jsonc"\)/);
+});
+
+test("all canonical migrations required by the remote apply gate physically exist in the checked-out source", async () => {
+  const expected = [
+    "0001_core_business_schema.sql", "0002_server_pricing.sql",
+    "0003_route_address_provenance.sql", "0004_atomic_wallet_ledger.sql",
+    "0005_security_rate_limits.sql", "0006_copilot_schema.sql",
+    "0007_trust_passport_schema.sql", "0008_commercial_recruitment_schema.sql",
+    "0009_finance_workspace_schema.sql", "0010_strategic_schema.sql",
+    "0011_final_hardening_schema.sql", "0012_national_continuity_schema.sql",
+    "0013_master_complement_schema.sql", "0014_operational_schema.sql",
+    "0015_production_security_events.sql", "0016_security_identity_schema.sql",
+    "0017_document_security_scans.sql", "0018_consolidated_business_schema.sql",
+    "0019_backup_verifications.sql", "0020_auth_login_rate_limits.sql",
+    "0021_supra_audit_events.sql", "0022_supra_persisted_approvals.sql"
+  ];
+  const actual = new Set(await readdir(new URL("../migrations/", import.meta.url)));
+  const missing = expected.filter(name => !actual.has(name));
+  assert.deepEqual(missing, [], "migration apply must not proceed with missing canonical source files");
+});
