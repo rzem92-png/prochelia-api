@@ -1,6 +1,9 @@
 name: Provision PROCHÉLIA isolated Preview R2 EU bucket
 
 on:
+  push:
+    branches:
+      - ops/provision-preview-r2-eu-v2-2026-11-17
   workflow_dispatch:
     inputs:
       confirmation:
@@ -12,7 +15,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: prochelia-preview-r2-eu-provision
+  group: prochelia-preview-r2-eu-v2-provision
   cancel-in-progress: false
 
 jobs:
@@ -23,11 +26,17 @@ jobs:
       - name: Enforce exact branch and Preview-only confirmation
         env:
           REQUESTED_REF: ${{ github.ref }}
+          EVENT_NAME: ${{ github.event_name }}
           CONFIRMATION: ${{ inputs.confirmation }}
         run: |
           set -euo pipefail
-          test "$REQUESTED_REF" = "refs/heads/ops/provision-preview-r2-eu-jurisdiction-2026-11-16"
-          test "$CONFIRMATION" = "CREATE_PREVIEW_R2_EU_ONLY"
+          test "$REQUESTED_REF" = "refs/heads/ops/provision-preview-r2-eu-v2-2026-11-17"
+          if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
+            test "$CONFIRMATION" = "CREATE_PREVIEW_R2_EU_ONLY"
+          elif [[ "$EVENT_NAME" != "push" ]]; then
+            echo "::error::Only the dedicated branch push or explicitly confirmed manual dispatch is allowed."
+            exit 1
+          fi
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
