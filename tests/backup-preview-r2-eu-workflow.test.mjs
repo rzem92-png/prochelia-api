@@ -53,7 +53,7 @@ test("Preview backup is encrypted, round-trip verified and cannot mutate D1 or P
 });
 
 test("Preview backup token assignments close the command substitution and quoted value", () => {
-  const lines = workflow.split("\\n").filter(line => line.includes("token=\"$(printf"));
+  const lines = workflow.split("\n").filter(line => line.includes("token=" + String.fromCharCode(34) + "$(printf"));
   assert.equal(lines.length, 2);
   for (const line of lines) assert.ok(line.endsWith(")\""), line);
 });
