@@ -5,12 +5,11 @@ import { readFile, readdir } from "node:fs/promises";
 const workflow = await readFile(new URL("../.github/workflows/apply-preview-d1-migrations.yml", import.meta.url), "utf8");
 
 test("Preview migration is manually gated on main or the reviewed EU Preview branch", () => {
-  assert.match(workflow, /github\\.ref == 'refs\\/heads\\/main'/);
-  assert.match(workflow, /github\\.ref == 'refs\\/heads\\/fix\\/switch-preview-to-eu-d1-2026-11-17'/);
-  assert.match(workflow, /inputs\\.confirm_preview == 'APPLY_PREVIEW_ONLY'/);
-  assert.match(workflow, /EXPECTED_DB_ID:\\s*e3cf167c-37e1-4d72-9ac6-b3e27c14b97f/);
+  assert.match(workflow, /github\.ref == 'refs\/heads\/main'/);
+  assert.match(workflow, /github\.ref == 'refs\/heads\/fix\/switch-preview-to-eu-d1-2026-11-17'/);
+  assert.match(workflow, /inputs\.confirm_preview == 'APPLY_PREVIEW_ONLY'/);
+  assert.match(workflow, /EXPECTED_DB_ID:\s*e3cf167c-37e1-4d72-9ac6-b3e27c14b97f/);
 });
-
 test("Preview migration workflow pins the dedicated Preview database and forbids production", () => {
   assert.match(workflow, /EXPECTED_DB_NAME:\s*prochelia-preview-eu-2026-11-17/);
   assert.match(workflow, /EXPECTED_DB_ID:\s*e3cf167c-37e1-4d72-9ac6-b3e27c14b97f/);
