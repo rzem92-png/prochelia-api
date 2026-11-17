@@ -100,7 +100,7 @@ test("Preview migration workflow accepts only an empty EU D1 or the exact 22-ent
 
 test("Preview migration workflow verifies the final registry exactly after applying the pending migrations", () => {
   assert.match(workflow, /Verify exact reviewed Preview migration registry after apply/);
-  assert.match(workflow, /expected=local\|legacy/);
+  assert.match(workflow, /expected=local/);
   assert.match(workflow, /remote != expected/);
   assert.doesNotMatch(workflow, /legacy=/);
   assert.match(workflow, /final Preview migration registry exactly matches/);
