@@ -155,11 +155,15 @@ jobs:
             exit 1
           fi
           pages_url="$(jq -r '.result.url' "$RUNNER_TEMP/pages-preview.json")"
+          pages_alias="$(jq -r '.result.aliases[]? | select(test("^https://[a-z0-9-]+\\.prochelia\\.pages\\.dev$"))' "$RUNNER_TEMP/pages-preview.json" | head -n 1)"
           pages_commit="$(jq -r '.result.deployment_trigger.metadata.commit_hash' "$RUNNER_TEMP/pages-preview.json")"
           [[ "$pages_url" =~ ^https://[a-z0-9-]+\.prochelia\.pages\.dev$ ]] || {
             echo "::error::Pages Preview URL is not a verified project deployment URL."
             exit 1
           }
+          if [[ -n "$pages_alias" ]]; then
+            [[ "$pages_alias" =~ ^https://[a-z0-9-]+\.prochelia\.pages\.dev$ ]] || { echo "::error::Pages Preview alias is not a verified project origin."; exit 1; }
+          fi
           cf_request "Preview Worker settings" \
             "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/prochelia-api-preview/settings" "$RUNNER_TEMP/preview-worker-settings.json"
           cors_origin="$(jq -r '.result.bindings[] | select(.name == "CORS_ORIGIN" and .type == "plain_text") | .text' "$RUNNER_TEMP/preview-worker-settings.json")"
@@ -167,19 +171,25 @@ jobs:
             echo "::error::Preview Worker CORS_ORIGIN binding is missing."
             exit 1
           }
-          allowed_origin_found=false
           IFS=',' read -r -a allowed_origins <<< "$cors_origin"
-          for allowed_origin in "${allowed_origins[@]}"; do
-            if [[ "$(printf '%s' "$allowed_origin" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')" == "$pages_url" ]]; then
-              allowed_origin_found=true
+          expected_origins=("$pages_url")
+          if [[ -n "$pages_alias" ]]; then
+            expected_origins+=("$pages_alias")
+          fi
+          for expected_origin in "\${expected_origins[@]}"; do
+            allowed_origin_found=false
+            for allowed_origin in "\${allowed_origins[@]}"; do
+              if [[ "$(printf '%s' "$allowed_origin" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')" == "$expected_origin" ]]; then
+                allowed_origin_found=true
+              fi
+            done
+            if [[ "$allowed_origin_found" != "true" ]]; then
+              echo "::error::Preview Worker CORS_ORIGIN does not allow a current Pages Preview origin."
+              echo "::error::Add this exact origin to the PREVIEW Worker only: $expected_origin"
+              echo "::error::Do not change the Production Worker or remove the existing allowlist entries."
+              exit 1
             fi
           done
-          if [[ "$allowed_origin_found" != "true" ]]; then
-            echo "::error::Preview Worker CORS_ORIGIN does not allow the latest Pages Preview origin."
-            echo "::error::Add this exact origin to the PREVIEW Worker only: $pages_url"
-            echo "::error::Do not change the Production Worker or remove the existing allowlist entries."
-            exit 1
-          fi
           cat > "$RUNNER_TEMP/wrangler.preview.json" <<'JSON'
           {
             "name": "prochelia-preview-e2e",
@@ -191,14 +201,15 @@ jobs:
             }]
           }
           JSON
-          printf 'CLOUDFLARE_API_TOKEN=%s\nPAGES_PREVIEW_URL=%s\nPAGES_DEPLOYMENT_ID=%s\nPAGES_COMMIT_SHA=%s\n' \
-            "$token" "$pages_url" "$deployment_id" "$pages_commit" >> "$GITHUB_ENV"
+          printf 'CLOUDFLARE_API_TOKEN=%s\nPAGES_PREVIEW_URL=%s\nPAGES_PREVIEW_ALIAS=%s\nPAGES_DEPLOYMENT_ID=%s\nPAGES_COMMIT_SHA=%s\n' \
+            "$token" "$pages_url" "$pages_alias" "$deployment_id" "$pages_commit" >> "$GITHUB_ENV"
           {
             echo "Verified Pages Preview: $pages_url"
             echo "Deployment: $deployment_id"
             echo "Frontend branch: $PAGES_PREVIEW_BRANCH"
             echo "Frontend commit: $pages_commit"
-            echo "Preview D1 and service binding match the isolated Preview environment."
+            [[ -z "$pages_alias" ]] || echo "Pages Preview branch alias: $pages_alias"
+            echo "Preview D1, service binding, origin and alias match the isolated Preview environment."
           } >> "$GITHUB_STEP_SUMMARY"
           echo "Exact isolated Preview D1 and current Pages deployment verified."
 
