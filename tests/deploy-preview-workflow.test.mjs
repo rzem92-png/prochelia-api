@@ -12,7 +12,7 @@ test("Preview deploy is manual and requires exact confirmation on main", () => {
 
 test("Preview deploy pins isolated Worker and Preview D1, never production", () => {
   assert.match(workflow, /name:\s*'prochelia-api-preview'/);
-  assert.match(workflow, /6adb95e5-e542-4bec-9008-fbea01042305/);
+  assert.match(workflow, /e3cf167c-37e1-4d72-9ac6-b3e27c14b97f/);
   assert.match(workflow, /04f52830-ef5a-4f17-a640-42bbc2381bba/);
   assert.match(workflow, /preview\.name === production\.name/);
   assert.match(workflow, /keep_vars:\s*true/);
