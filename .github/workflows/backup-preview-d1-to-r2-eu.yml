@@ -85,6 +85,21 @@ jobs:
           printf '%s\\n' "$identity"
           printf '%s' "$identity" | grep -Fq "$EXPECTED_ACCOUNT_ID"
 
+      - name: Verify exact EU R2 bucket and Preview D1 jurisdiction before export
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$CLOUDFLARE_ACCOUNT_ID" = "$EXPECTED_ACCOUNT_ID"
+          token="$(printf '%s' "$CLOUDFLARE_API_TOKEN" | sed -E 's/^[[:space:]]*Bearer[[:space:]]+//I; s/^[[:space:]]+//; s/[[:space:]]+$//' | tr -d '\r\n')"
+          test -n "$token"
+          status="$(curl --silent --show-error --output "$RUNNER_TEMP/preview-r2-eu.json" --write-out '%{http_code}' "https://api.cloudflare.com/client/v4/accounts/$EXPECTED_ACCOUNT_ID/r2/buckets/$R2_BUCKET" -H "Authorization: Bearer $token" -H 'cf-r2-jurisdiction: eu')"
+          test "$status" = "200" || { echo "::error::EU R2 bucket lookup failed (HTTP $status); no export performed."; exit 1; }
+          jq -e --arg bucket "$R2_BUCKET" '.success == true and .result.name == $bucket and .result.jurisdiction == "eu"' "$RUNNER_TEMP/preview-r2-eu.json" >/dev/null || { echo "::error::R2 bucket jurisdiction is not explicitly EU."; exit 1; }
+          status="$(curl --silent --show-error --output "$RUNNER_TEMP/preview-d1-eu.json" --write-out '%{http_code}' "https://api.cloudflare.com/client/v4/accounts/$EXPECTED_ACCOUNT_ID/d1/database/$EXPECTED_DB_ID" -H "Authorization: Bearer $token")"
+          test "$status" = "200" || { echo "::error::Preview D1 metadata lookup failed (HTTP $status); no export performed."; exit 1; }
+          jq -e --arg id "$EXPECTED_DB_ID" --arg name "$EXPECTED_DB_NAME" '.success == true and .result.uuid == $id and .result.name == $name and .result.jurisdiction == "eu"' "$RUNNER_TEMP/preview-d1-eu.json" >/dev/null || { echo "::error::Preview D1 is not the exact EU database."; exit 1; }
+          echo "PASS: exact D1 and R2 resources confirmed in EU before backup."
+
       - name: Install local restore-validation tools
         shell: bash
         run: |
@@ -104,7 +119,9 @@ jobs:
           sqlite3 "$RUNNER_TEMP/prochelia-r2/restore-validation.sqlite" < "$RUNNER_TEMP/prochelia-r2/preview.sql"
           integrity="$(sqlite3 "$RUNNER_TEMP/prochelia-r2/restore-validation.sqlite" 'PRAGMA integrity_check;')"
           test "$integrity" = "ok" || { echo "::error::Local SQLite restore integrity_check failed: $integrity"; exit 1; }
-          echo "PASS: exported Preview D1 dump restored locally; SQLite integrity_check=ok."
+          foreign_keys="$(sqlite3 "$RUNNER_TEMP/prochelia-r2/restore-validation.sqlite" 'PRAGMA foreign_key_check;')"
+          test -z "$foreign_keys" || { echo "::error::Local SQLite restore foreign_key_check found violations."; printf '%s\\n' "$foreign_keys"; exit 1; }
+          echo "PASS: exported Preview D1 dump restored locally; SQLite integrity_check=ok and foreign_key_check=empty."
 
       - name: Encrypt backup AES-256 and prepare integrity manifest
         shell: bash
@@ -151,4 +168,9 @@ jobs:
             echo "::error::Decrypted SQL checksum does not match the pre-encryption manifest."
             exit 1
           }
-          echo "PASS: private R2 upload/download and encrypted object round-trip verified."
+          sqlite3 "$RUNNER_TEMP/prochelia-r2/roundtrip-validation.sqlite" < "$RUNNER_TEMP/prochelia-r2/roundtrip.sql"
+          roundtrip_integrity="$(sqlite3 "$RUNNER_TEMP/prochelia-r2/roundtrip-validation.sqlite" 'PRAGMA integrity_check;')"
+          test "$roundtrip_integrity" = "ok" || { echo "::error::Downloaded backup restore integrity_check failed: $roundtrip_integrity"; exit 1; }
+          roundtrip_foreign_keys="$(sqlite3 "$RUNNER_TEMP/prochelia-r2/roundtrip-validation.sqlite" 'PRAGMA foreign_key_check;')"
+          test -z "$roundtrip_foreign_keys" || { echo "::error::Downloaded backup restore foreign_key_check found violations."; printf '%s\\n' "$roundtrip_foreign_keys"; exit 1; }
+          echo "PASS: private R2 upload/download, decryption, checksum, integrity_check and foreign_key_check verified."
