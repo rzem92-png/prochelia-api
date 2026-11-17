@@ -28,8 +28,8 @@ jobs:
     env:
       CLOUDFLARE_ACCOUNT_ID: f2a79e9fa41566a8ec80fb24c02c60eb
       EXPECTED_PRODUCTION_D1_ID: 04f52830-ef5a-4f17-a640-42bbc2381bba
-      RESTORE_DB_NAME: prochelia-prod-restore-test-2026-11-12
-      RESTORE_DB_ID: 9db489a0-4f96-4e93-b1f4-8a8e755871a7
+      RESTORE_DB_NAME: prochelia-r2-restore-validation-2026-11
+      RESTORE_DB_ID: 3caebbc6-982a-4562-96a7-e509185e9e9a
       BACKUP_RUN_ID: ${{ inputs.backup_run_id }}
       R2_BUCKET: prochelia-production-backups-eu-v2
       R2_ENDPOINT: https://f2a79e9fa41566a8ec80fb24c02c60eb.eu.r2.cloudflarestorage.com
@@ -48,11 +48,13 @@ jobs:
         run: |
           set -euo pipefail
           [[ "$BACKUP_RUN_ID" =~ ^[0-9]+$ ]] || { echo "::error::Invalid backup run ID."; exit 1; }
-          [[ "$RESTORE_DB_NAME" == "prochelia-prod-restore-test-2026-11-12" ]]
-          [[ "$RESTORE_DB_ID" == "9db489a0-4f96-4e93-b1f4-8a8e755871a7" ]]
+          [[ "$RESTORE_DB_NAME" == "prochelia-r2-restore-validation-2026-11" ]]
+          [[ "$RESTORE_DB_ID" == "3caebbc6-982a-4562-96a7-e509185e9e9a" ]]
           [[ "$RESTORE_DB_ID" != "$EXPECTED_PRODUCTION_D1_ID" ]]
           [[ "$RESTORE_DB_ID" != "6adb95e5-e542-4bec-9008-fbea01042305" ]]
           [[ "$RESTORE_DB_ID" != "a3526c2a-39cb-49ab-97c4-979138145f33" ]]
+          [[ "$RESTORE_DB_ID" != "9db489a0-4f96-4e93-b1f4-8a8e755871a7" ]]
+          [[ "$RESTORE_DB_ID" != "71526879-34c7-4b47-8195-7b8f82669e31" ]]
           [[ -n "${CLOUDFLARE_API_TOKEN:-}" && -n "${BACKUP_ENCRYPTION_KEY:-}" && -n "${AWS_ACCESS_KEY_ID:-}" && -n "${AWS_SECRET_ACCESS_KEY:-}" ]]
           [[ "${#AWS_ACCESS_KEY_ID}" -eq 32 ]] || { echo "::error::R2 access key shape invalid."; exit 1; }
           token="${CLOUDFLARE_API_TOKEN#Bearer }"
@@ -71,8 +73,8 @@ jobs:
             "compatibility_date": "2026-09-25",
             "d1_databases": [{
               "binding": "DB",
-              "database_name": "prochelia-prod-restore-test-2026-11-12",
-              "database_id": "9db489a0-4f96-4e93-b1f4-8a8e755871a7"
+              "database_name": "prochelia-r2-restore-validation-2026-11",
+              "database_id": "3caebbc6-982a-4562-96a7-e509185e9e9a"
             }]
           }
           JSON
@@ -203,7 +205,7 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         run: |
           set -euo pipefail
-          [[ "$RESTORE_DB_ID" == "9db489a0-4f96-4e93-b1f4-8a8e755871a7" ]]
+          [[ "$RESTORE_DB_ID" == "3caebbc6-982a-4562-96a7-e509185e9e9a" ]]
           [[ "$RESTORE_DB_ID" != "$EXPECTED_PRODUCTION_D1_ID" ]]
           npx --yes wrangler@4 d1 execute "$RESTORE_DB_NAME" --remote --config "$RUNNER_TEMP/wrangler.restore.json" --file="$RUNNER_TEMP/prochelia-prod-restore/production.d1-compatible.sql" --yes
           echo "Encrypted production backup imported into the isolated restore-test D1."
