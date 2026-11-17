@@ -280,7 +280,7 @@ jobs:
           if not remote and not non_internal:
               print("PASS: new EU Preview D1 has no application schema or applied migrations; all 23 canonical migrations are pending.")
           elif registry_present and remote == local:
-              print("PASS: exact 22-entry canonical migration registry is already applied; rerun is idempotent.")
+              print("PASS: exact 23-entry canonical migration registry is already applied; rerun is idempotent.")
           else:
               print("::error::Preview migration registry differs from both reviewed safe states; no migration will run.")
               print("Unexpected remote names:", ", ".join(sorted(remote-local)) or "(none)")
