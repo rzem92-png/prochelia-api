@@ -72,3 +72,12 @@ test("outbox executor atomically claims a pending row before any side effect", (
   assert.doesNotMatch(executor, /attempts=attempts\+1.*attempts=attempts\+1/s);
 });
 
+test("stale PROCESSING actions are quarantined for reconciliation and never auto-replayed", () => {
+  const handler = section("async function processActionOutbox(request, env)", "async function executeOperationalCase");
+  assert.match(handler, /SET status='RECONCILIATION_REQUIRED'/);
+  assert.match(handler, /updated_at < datetime\('now','-15 minutes'\)/);
+  assert.match(handler, /inspect downstream effects before any manual retry/);
+  assert.match(handler, /reconciliation_required:reconciliationRequired/);
+  assert.match(handler, /WHERE status='PENDING'/);
+  assert.doesNotMatch(handler, /SET status='PENDING'.*RECONCILIATION_REQUIRED/s);
+});
