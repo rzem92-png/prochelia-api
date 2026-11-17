@@ -342,6 +342,16 @@ jobs:
           if (originProbe.status !== 403 || originProbeBody.error !== 'AUTHENTICATED_VALIDATION_REQUIRED') {
             throw new Error('Pages Preview origin was not accepted by the Preview Worker, or the safe closed mission-validation guard changed');
           }
+          const rejectedOriginProbe = await fetch(base + '/api/missions/validate', {
+            method: 'POST',
+            headers: { accept: 'application/json', 'content-type': 'application/json', origin: 'https://untrusted.example' },
+            body: '{}',
+            redirect: 'manual'
+          });
+          const rejectedOriginBody = await rejectedOriginProbe.json();
+          if (rejectedOriginProbe.status !== 403 || rejectedOriginBody.error !== 'ORIGIN_NOT_ALLOWED') {
+            throw new Error('Preview Worker did not reject an untrusted browser origin before mission validation');
+          }
           await expectStatus('/api/clients', null, 401);
           await expectStatus('/api/intervenants', null, 401);
           await expectStatus('/api/clients', client, 403);
