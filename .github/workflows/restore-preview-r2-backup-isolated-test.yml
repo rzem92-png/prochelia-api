@@ -90,6 +90,13 @@ jobs:
           status="$(curl --silent --show-error --output "$RUNNER_TEMP/d1-list.json" --write-out '%{http_code}' "https://api.cloudflare.com/client/v4/accounts/$EXPECTED_ACCOUNT_ID/d1/database?name=$RESTORE_DB_NAME" -H "Authorization: Bearer $token")"
           test "$status" = "200"
           jq -e --arg n "$RESTORE_DB_NAME" --arg id "$RESTORE_DB_ID" '[.result[]? | select(.name == $n and .uuid == $id)] | length == 1' "$RUNNER_TEMP/d1-list.json" >/dev/null
+          status="$(curl --silent --show-error --output "$RUNNER_TEMP/restore-d1-metadata.json" --write-out '%{http_code}' "https://api.cloudflare.com/client/v4/accounts/$EXPECTED_ACCOUNT_ID/d1/database/$RESTORE_DB_ID" -H "Authorization: Bearer $token")"
+          test "$status" = "200" || { echo "::error::Restore D1 metadata lookup failed (HTTP $status); refusing remote restore."; exit 1; }
+          jq -e --arg n "$RESTORE_DB_NAME" --arg id "$RESTORE_DB_ID" '.success == true and .result.name == $n and .result.uuid == $id and .result.jurisdiction == "eu"' "$RUNNER_TEMP/restore-d1-metadata.json" >/dev/null || {
+            echo "::error::Restore D1 identity or explicit EU jurisdiction verification failed; refusing remote restore."
+            exit 1
+          }
+          echo "PASS: exact isolated restore D1 identity and EU jurisdiction verified."
           node --input-type=module <<'NODE'
           import fs from 'node:fs';
           const cfg = {
