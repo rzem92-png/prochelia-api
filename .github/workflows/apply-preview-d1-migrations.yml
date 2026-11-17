@@ -50,14 +50,16 @@ jobs:
           import json
           from pathlib import Path
 
-          config = json.loads(Path("wrangler.jsonc").read_text())
-          assert config["name"] == "prochelia-api-staging", "Unexpected Worker config"
+          raw = Path("wrangler.preview-migrations.jsonc").read_text()
+          clean = "\\n".join(line for line in raw.splitlines() if not line.lstrip().startswith("//"))
+          config = json.loads(clean)
           dbs = config["d1_databases"]
           assert len(dbs) == 1, "Unexpected additional D1 binding"
           db = dbs[0]
-          assert db["binding"] == "DB"
+          assert db["binding"] == "PREVIEW_DB"
           assert db["database_name"] == "prochelia-preview-db"
           assert db["database_id"] == "6adb95e5-e542-4bec-9008-fbea01042305"
+          assert db["migrations_dir"] == "migrations"
 
           expected = [
             "0001_core_business_schema.sql",
@@ -145,7 +147,7 @@ jobs:
           mkdir -p "$RUNNER_TEMP/prochelia-backup"
           sudo apt-get update
           sudo apt-get install --yes --no-install-recommends sqlite3
-          npx --yes wrangler@4 d1 export "$EXPECTED_DB_NAME" --remote --config wrangler.jsonc --skip-confirmation --output="$RUNNER_TEMP/prochelia-backup/prochelia-preview.sql"
+          npx --yes wrangler@4 d1 export "$EXPECTED_DB_NAME" --remote --config wrangler.preview-migrations.jsonc --skip-confirmation --output="$RUNNER_TEMP/prochelia-backup/prochelia-preview.sql"
           test -s "$RUNNER_TEMP/prochelia-backup/prochelia-preview.sql"
           sha256sum "$RUNNER_TEMP/prochelia-backup/prochelia-preview.sql" | awk '{print $1}' > "$RUNNER_TEMP/prochelia-backup/manifest.sha256"
           sqlite3 "$RUNNER_TEMP/prochelia-backup/restore-validation.sqlite" < "$RUNNER_TEMP/prochelia-backup/prochelia-preview.sql"
@@ -215,7 +217,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          npx --yes wrangler@4 d1 migrations list "$EXPECTED_DB_NAME" --remote --config wrangler.jsonc
+          npx --yes wrangler@4 d1 migrations list "$EXPECTED_DB_NAME" --remote --config wrangler.preview-migrations.jsonc
 
       - name: Refuse divergent migration history before any schema write
         shell: bash
@@ -273,7 +275,7 @@ jobs:
           set -euo pipefail
           test "$EXPECTED_DB_ID" = "6adb95e5-e542-4bec-9008-fbea01042305"
           test "$EXPECTED_DB_ID" != "$FORBIDDEN_PRODUCTION_DB_ID"
-          npx --yes wrangler@4 d1 migrations apply "$EXPECTED_DB_NAME" --remote --config wrangler.jsonc
+          npx --yes wrangler@4 d1 migrations apply "$EXPECTED_DB_NAME" --remote --config wrangler.preview-migrations.jsonc
 
       - name: Verify migration registry and rate-limit schema
         shell: bash
@@ -360,7 +362,7 @@ jobs:
               raise SystemExit(1)
           print("PASS: four migrations, all ten security tables, all eleven indexes and all seven approval triggers are present on Preview D1.")
           PY
-          npx --yes wrangler@4 d1 migrations list "$EXPECTED_DB_NAME" --remote --config wrangler.jsonc
+          npx --yes wrangler@4 d1 migrations list "$EXPECTED_DB_NAME" --remote --config wrangler.preview-migrations.jsonc
           echo "PASS: identity, rate-limit and Nexus audit/approval migrations 0016/0020/0021/0022 schemas and triggers are present on Preview D1."
 
       - name: Verify exact reviewed Preview migration registry after apply
