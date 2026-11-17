@@ -55,7 +55,7 @@ jobs:
       - name: Checkout pinned reviewed Preview branch commit (D1 config)
         uses: actions/checkout@v4
         with:
-          ref: fa99307ba2c0f6dcebd154a462653690af40fb82
+          ref: cf7961db717fc5cb56719c52909ff03acb29bf84
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
