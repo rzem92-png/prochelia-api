@@ -27,6 +27,7 @@ test("Preview deployment resolves the latest successful Pages Preview before gen
   assert.match(workflow, /deployment_configs\.preview\.services\.PROCHELIA_API\.service/);
   assert.match(workflow, /\.result\.latest_stage\.status == "success"/);
   assert.match(workflow, /\.result\.uses_functions == true/);
+  assert.match(workflow, /\.result\.deployment_trigger\.metadata\.commit_hash == "579679da7ca3a68b91448a85e7151bda5794a155"/);
   assert.match(workflow, /PAGES_PREVIEW_ORIGIN=/);
 });
 
