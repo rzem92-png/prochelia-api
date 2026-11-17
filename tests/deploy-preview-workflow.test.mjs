@@ -25,6 +25,7 @@ test("Preview deploy pins isolated Worker and Preview D1, never production", () 
   assert.match(generator, /r2_buckets:\s*\[\{/);
   assert.match(generator, /binding:\s*"BACKUP_BUCKET"/);
   assert.match(generator, /https:\/\/83a36d32\.prochelia\.pages\.dev/);
+  assert.match(generator, /https:\/\/fix-frontend-cookie-session-7y26\.prochelia\.pages\.dev/);
   assert.match(generator, /bucket_name:\s*"prochelia-preview-backups-eu-v2"/);
   assert.match(generator, /jurisdiction:\s*"eu"/);
   assert.match(workflow, /Verify dedicated Preview R2 bucket has EU jurisdiction/);
