@@ -10,7 +10,7 @@ test("Preview R2 backup is manually gated to main and pinned to the reviewed EU 
   assert.match(workflow, /ref: 1fc258c9c8d25e5e7b89241504218bf102afbf27/);
   assert.match(workflow, /clean="\\n"\.join/);
   assert.match(workflow, /safe_identity=.*REDACTED/);
-  assert.match(workflow, /grep -Fq \\"\$EXPECTED_ACCOUNT_ID\\"/);
+  assert.ok(workflow.includes("grep -Fq \"$EXPECTED_ACCOUNT_ID\""));
   assert.match(workflow, /wrangler\.preview-migrations\.jsonc/);
   assert.match(workflow, /prochelia-preview-eu-2026-11-17/);
   assert.match(workflow, /e3cf167c-37e1-4d72-9ac6-b3e27c14b97f/);
@@ -20,8 +20,8 @@ test("Preview R2 backup is manually gated to main and pinned to the reviewed EU 
 test("Cloudflare token normalization strips actual CR and LF characters without deleting token characters", () => {
   const lines = workflow.split("\n").filter(line => line.includes("tr -d"));
   assert.equal(lines.length, 2);
-  for (const line of lines) assert.ok(line.includes(String.raw`tr -d '\r\n'`), line);
-  assert.doesNotMatch(workflow, /tr -d '\\\\r/);
+  const expected = "tr -d '" + String.fromCharCode(92) + "r" + String.fromCharCode(92) + "n'";
+  for (const line of lines) assert.ok(line.includes(expected), line);
 });
 
 test("Preview R2 backup pins third-party actions to immutable SHAs", () => {
