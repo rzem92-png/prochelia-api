@@ -30,6 +30,7 @@ jobs:
       EXPECTED_ACCOUNT_ID: f2a79e9fa41566a8ec80fb24c02c60eb
       EXPECTED_DB_NAME: prochelia-preview-eu-2026-11-17
       EXPECTED_DB_ID: e3cf167c-37e1-4d72-9ac6-b3e27c14b97f
+      FORBIDDEN_PRODUCTION_DB_ID: 04f52830-ef5a-4f17-a640-42bbc2381bba
       R2_BUCKET: prochelia-preview-backups-eu-v2
       R2_ENDPOINT: https://f2a79e9fa41566a8ec80fb24c02c60eb.eu.r2.cloudflarestorage.com
     steps:
@@ -42,6 +43,7 @@ jobs:
             *) echo "::error::Dispatch only allowed from main or the dedicated preview backup branch."; exit 1 ;;
           esac
           test "$CLOUDFLARE_ACCOUNT_ID" = "$EXPECTED_ACCOUNT_ID"
+          test "$EXPECTED_DB_ID" != "$FORBIDDEN_PRODUCTION_DB_ID"
           for name in CLOUDFLARE_API_TOKEN BACKUP_ENCRYPTION_KEY AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY; do
             test -n "${!name:-}" || { echo "::error::Required secret missing: $name"; exit 1; }
           done
