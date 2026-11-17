@@ -79,6 +79,7 @@ jobs:
             .result.d1_databases.DB.id == "e3cf167c-37e1-4d72-9ac6-b3e27c14b97f" and
             .result.services.PROCHELIA_API.service == "prochelia-api-preview" and
             .result.deployment_trigger.metadata.branch == "fix/frontend-cookie-session-auth-2026-11-17" and
+            .result.deployment_trigger.metadata.commit_hash == "579679da7ca3a68b91448a85e7151bda5794a155" and
             (.result.deployment_trigger.metadata.commit_hash | type == "string" and test("^[0-9a-f]{40}$"))
           ' "$RUNNER_TEMP/pages-preview.json" >/dev/null || {
             echo "::error::Latest Pages Preview deployment is failed, skipped, misbound or from an unexpected branch."
