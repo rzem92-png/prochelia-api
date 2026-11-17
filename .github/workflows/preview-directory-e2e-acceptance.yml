@@ -53,7 +53,7 @@ jobs:
       PREVIEW_DB_NAME: prochelia-preview-eu-2026-11-17
       PREVIEW_DB_ID: e3cf167c-37e1-4d72-9ac6-b3e27c14b97f
       PAGES_PREVIEW_BRANCH: ${{ inputs.pages_branch || 'fix/frontend-cookie-session-auth-2026-11-17' }}
-      PAGES_EXPECTED_COMMIT: ${{ inputs.pages_commit_sha || '579679da7ca3a68b91448a85e7151bda5794a155' }}
+      PAGES_EXPECTED_COMMIT: ${{ inputs.pages_commit_sha || '' }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
