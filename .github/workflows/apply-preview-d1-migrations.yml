@@ -51,7 +51,7 @@ jobs:
           from pathlib import Path
 
           raw = Path("wrangler.preview-migrations.jsonc").read_text()
-          clean = "\\n".join(line for line in raw.splitlines() if not line.lstrip().startswith("//"))
+          clean = "\n".join(line for line in raw.splitlines() if not line.lstrip().startswith("//"))
           config = json.loads(clean)
           dbs = config["d1_databases"]
           assert len(dbs) == 1, "Unexpected additional D1 binding"
