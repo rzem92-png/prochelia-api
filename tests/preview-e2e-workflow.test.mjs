@@ -48,7 +48,8 @@ test("Pages Preview configuration and deployment are checked independently from 
 test("Preview Worker CORS allowlist must contain the exact current Pages Preview origin", () => {
   assert.ok(workflow.includes("workers/scripts/prochelia-api-preview/settings"));
   assert.ok(workflow.includes("CORS_ORIGIN"));
-  assert.ok(workflow.includes('grep -Fxq "$pages_url"'));
+  assert.ok(workflow.includes('IFS=\',\' read -r -a allowed_origins <<< "$cors_origin"'));
+  assert.ok(workflow.includes('== "$pages_url"'));
   assert.ok(workflow.includes("Do not change the Production Worker"));
 });
 
