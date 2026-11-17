@@ -170,7 +170,7 @@ test("Preview migration commands use only the dedicated migration-only D1 config
 
 test("all canonical migrations required by the remote apply gate physically exist in the checked-out source", async () => {
   const expected = [
-    "0001_core_business_schema.sql", "0002_server_pricing.sql",
+    "0000_auth_foundation.sql", "0001_core_business_schema.sql", "0002_server_pricing.sql",
     "0003_route_address_provenance.sql", "0004_atomic_wallet_ledger.sql",
     "0005_security_rate_limits.sql", "0006_copilot_schema.sql",
     "0007_trust_passport_schema.sql", "0008_commercial_recruitment_schema.sql",
