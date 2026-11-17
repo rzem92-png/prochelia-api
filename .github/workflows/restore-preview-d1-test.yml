@@ -62,7 +62,7 @@ jobs:
             exit 1
           fi
           # Refuser explicitement les bases preview/production et valider nom + UUID côté API.
-          [[ "$RESTORE_DB_NAME" != "prochelia-preview-db" ]] || { echo "::error::La base de préproduction est interdite comme cible de restauration."; exit 1; }
+          [[ "$RESTORE_DB_NAME" != "prochelia-preview-db" && "$RESTORE_DB_NAME" != "prochelia-preview-eu-2026-11-17" ]] || { echo "::error::La base de préproduction est interdite comme cible de restauration."; exit 1; }
           http="$(curl --silent --show-error --output "$RUNNER_TEMP/d1-list.json" --write-out '%{http_code}' -H "Authorization: Bearer $token" "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/d1/database?name=$RESTORE_DB_NAME")"
           [[ "$http" == "200" ]] || { echo "::error::Impossible de vérifier la base de test dans Cloudflare (HTTP $http)."; exit 1; }
           count="$(jq --arg n "$RESTORE_DB_NAME" --arg id "$RESTORE_DB_ID" '[.result[]? | select(.name == $n and .uuid == $id)] | length' "$RUNNER_TEMP/d1-list.json")"
@@ -79,7 +79,7 @@ jobs:
           gh run download "$BACKUP_RUN_ID" --repo "$GITHUB_REPOSITORY" --name "prochelia-preview-d1-encrypted-$BACKUP_RUN_ID" --dir "$RUNNER_TEMP/prochelia-restore"
           test -s "$RUNNER_TEMP/prochelia-restore/prochelia-preview.sql.gpg"
           test -s "$RUNNER_TEMP/prochelia-restore/README.txt"
-          grep -Fx 'database=prochelia-preview-db' "$RUNNER_TEMP/prochelia-restore/README.txt"
+          grep -Fx 'database=prochelia-preview-eu-2026-11-17' "$RUNNER_TEMP/prochelia-restore/README.txt"
           echo "Archive trouvée ; export SQL en clair non téléchargé."
 
       - name: Déchiffrer et vérifier le fichier SQL
@@ -132,7 +132,7 @@ jobs:
         run: |
           set -euo pipefail
           [[ "$RESTORE_DB_NAME" == "prochelia-restore-test-db" ]] || exit 1
-          [[ "$RESTORE_DB_ID" != "6adb95e5-e542-4bec-9008-fbea01042305" ]] || { echo "::error::La cible est la base de préproduction ; refus de continuer."; exit 1; }
+          [[ "$RESTORE_DB_ID" != "6adb95e5-e542-4bec-9008-fbea01042305" && "$RESTORE_DB_ID" != "e3cf167c-37e1-4d72-9ac6-b3e27c14b97f" ]] || { echo "::error::La cible est la base de préproduction ; refus de continuer."; exit 1; }
           npx --yes wrangler@4 d1 execute "$RESTORE_DB_NAME" --remote --file="$RUNNER_TEMP/prochelia-restore/prochelia-preview.sql" --yes
           echo "Commande de restauration exécutée sur la base de test isolée."
 

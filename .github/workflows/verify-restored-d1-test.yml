@@ -53,7 +53,7 @@ jobs:
           [[ "$http" == "200" ]] || { echo "::error::Impossible de lister les bases D1 (HTTP $http)."; exit 1; }
           matches="$(jq --arg n "$RESTORE_DB_NAME" --arg id "$RESTORE_DB_ID" '[.result[]? | select(.name == $n and .uuid == $id)] | length' "$RUNNER_TEMP/d1-list.json")"
           [[ "$matches" == "1" ]] || { echo "::error::Nom et UUID ne correspondent pas à la base de test attendue ; arrêt."; exit 1; }
-          [[ "$RESTORE_DB_ID" != "6adb95e5-e542-4bec-9008-fbea01042305" ]] || { echo "::error::La base de préproduction est interdite pour ce contrôle."; exit 1; }
+          [[ "$RESTORE_DB_ID" != "6adb95e5-e542-4bec-9008-fbea01042305" && "$RESTORE_DB_ID" != "e3cf167c-37e1-4d72-9ac6-b3e27c14b97f" ]] || { echo "::error::La base de préproduction est interdite pour ce contrôle."; exit 1; }
           echo "Cible confirmée : base de test dédiée. Les prochaines requêtes sont en lecture seule."
 
       - name: Installer Node.js
