@@ -72,7 +72,7 @@ jobs:
           import json
           from pathlib import Path
           raw=Path("wrangler.preview-migrations.jsonc").read_text()
-          clean="\\n".join(line for line in raw.splitlines() if not line.lstrip().startswith("//"))
+          clean="\n".join(line for line in raw.splitlines() if not line.lstrip().startswith("//"))
           c=json.loads(clean)
           dbs=c["d1_databases"]
           assert len(dbs)==1
@@ -83,9 +83,16 @@ jobs:
           assert d["migrations_dir"]=="migrations-preview-canonical"
           print("Preview migration-only D1 target verified.")
           PY
-          identity="$(npx --yes wrangler@4 whoami 2>&1)"
-          printf '%s\\n' "$identity"
-          printf '%s' "$identity" | grep -Fq "$EXPECTED_ACCOUNT_ID"
+          token="$(printf '%s' "$CLOUDFLARE_API_TOKEN" | sed -E 's/^[[:space:]]*Bearer[[:space:]]+//I; s/^[[:space:]]+//; s/[[:space:]]+$//' | tr -d '\\r\\n')"
+          test -n "$token"
+          export CLOUDFLARE_API_TOKEN="$token"
+          identity="$(npx --yes wrangler@4 whoami 2>&1)" || {
+            echo "::error::Wrangler authentication failed. Check token validity and permissions."
+            exit 1
+          }
+          safe_identity="${identity//"$CLOUDFLARE_API_TOKEN"/[REDACTED]}"
+          printf '%s\\n' "$safe_identity"
+          printf '%s' "$safe_identity" | grep -Fq "$EXPECTED_ACCOUNT_ID"
 
       - name: Verify exact EU R2 bucket and Preview D1 jurisdiction before export
         shell: bash
