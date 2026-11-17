@@ -2310,8 +2310,15 @@ async function queueAction(env, actionType, entityType, entityId, payload, idem)
   const existing = await env.DB.prepare('SELECT * FROM action_outbox WHERE idempotency_key=? LIMIT 1').bind(key).first();
   if (existing) return existing;
   const id = crypto.randomUUID();
-  await env.DB.prepare(`INSERT INTO action_outbox(id,action_type,entity_type,entity_id,idempotency_key,payload_json) VALUES(?,?,?,?,?,?)`)
-    .bind(id,actionType,entityType||null,entityId||null,key,JSON.stringify(payload||{})).run();
+  try {
+    await env.DB.prepare(`INSERT INTO action_outbox(id,action_type,entity_type,entity_id,idempotency_key,payload_json) VALUES(?,?,?,?,?,?)`)
+      .bind(id,actionType,entityType||null,entityId||null,key,JSON.stringify(payload||{})).run();
+  } catch (error) {
+    // A concurrent request may win the UNIQUE(idempotency_key) insert after our SELECT.
+    const raced = await env.DB.prepare('SELECT * FROM action_outbox WHERE idempotency_key=? LIMIT 1').bind(key).first();
+    if (raced) return raced;
+    throw error;
+  }
   return await env.DB.prepare('SELECT * FROM action_outbox WHERE id=?').bind(id).first();
 }
 
@@ -2383,13 +2390,19 @@ async function executeQueuedAction(env, action) {
     } else result={performed:false,reason:'ACTION_TYPE_NOT_IMPLEMENTED'};
 
     const finalStatus = result.performed ? 'DONE' : (result.requires_provider ? 'WAITING_PROVIDER' : 'FAILED');
-    await env.DB.prepare(`UPDATE action_outbox SET status=?,result_json=?,updated_at=CURRENT_TIMESTAMP,executed_at=? WHERE id=? AND status='PROCESSING'`)
+    const finalized = await env.DB.prepare(`UPDATE action_outbox SET status=?,result_json=?,updated_at=CURRENT_TIMESTAMP,executed_at=? WHERE id=? AND status='PROCESSING'`)
       .bind(finalStatus,JSON.stringify(result),result.performed?now:null,action.id).run();
+    if (Number(finalized?.meta?.changes || 0) !== 1) {
+      return {ok:false,status:'RECONCILIATION_REQUIRED',error:'ACTION_FINALIZATION_NOT_OWNED',result};
+    }
     return {ok:true,status:finalStatus,result};
   } catch(e) {
-    await env.DB.prepare(`UPDATE action_outbox SET status='FAILED',last_error=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='PROCESSING'`)
+    const failed = await env.DB.prepare(`UPDATE action_outbox SET status='FAILED',last_error=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='PROCESSING'`)
       .bind(String(e.message||e),action.id).run();
-    return {ok:false,error:'ACTION_EXECUTION_FAILED',message:e.message};
+    if (Number(failed?.meta?.changes || 0) !== 1) {
+      return {ok:false,status:'RECONCILIATION_REQUIRED',error:'ACTION_FAILURE_NOT_OWNED',message:e.message};
+    }
+    return {ok:false,status:'FAILED',error:'ACTION_EXECUTION_FAILED',message:e.message};
   }
 }
 
