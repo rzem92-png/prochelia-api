@@ -167,7 +167,14 @@ jobs:
             echo "::error::Preview Worker CORS_ORIGIN binding is missing."
             exit 1
           }
-          if ! printf '%s' "$cors_origin" | tr ',' '\\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | grep -Fxq "$pages_url"; then
+          allowed_origin_found=false
+          IFS=',' read -r -a allowed_origins <<< "$cors_origin"
+          for allowed_origin in "${allowed_origins[@]}"; do
+            if [[ "$(printf '%s' "$allowed_origin" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')" == "$pages_url" ]]; then
+              allowed_origin_found=true
+            fi
+          done
+          if [[ "$allowed_origin_found" != "true" ]]; then
             echo "::error::Preview Worker CORS_ORIGIN does not allow the latest Pages Preview origin."
             echo "::error::Add this exact origin to the PREVIEW Worker only: $pages_url"
             echo "::error::Do not change the Production Worker or remove the existing allowlist entries."
