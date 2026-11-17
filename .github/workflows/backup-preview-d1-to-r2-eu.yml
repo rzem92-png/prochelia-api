@@ -92,7 +92,7 @@ jobs:
           }
           safe_identity="${identity//"$CLOUDFLARE_API_TOKEN"/[REDACTED]}"
           printf '%s\n' "$safe_identity"
-          printf '%s\n' "$safe_identity"
+          printf '%s' "$safe_identity" | grep -Fq "$EXPECTED_ACCOUNT_ID"
 
       - name: Verify exact EU R2 bucket and Preview D1 jurisdiction before export
         shell: bash
