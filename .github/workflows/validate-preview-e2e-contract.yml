@@ -1,0 +1,37 @@
+name: Validate PROCHÉLIA Preview E2E workflow contract
+
+on:
+  push:
+    branches:
+      - fix/preview-e2e-dynamic-pages-pin-2026-11-17
+    paths:
+      - .github/workflows/preview-directory-e2e-acceptance.yml
+      - .github/workflows/validate-preview-e2e-contract.yml
+      - tests/preview-e2e-workflow.test.mjs
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/preview-directory-e2e-acceptance.yml
+      - .github/workflows/validate-preview-e2e-contract.yml
+      - tests/preview-e2e-workflow.test.mjs
+
+permissions:
+  contents: read
+
+concurrency:
+  group: preview-e2e-contract-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22"
+      - name: Validate dynamic Preview deployment and fixture safety contract
+        run: node --experimental-default-type=module --test tests/preview-e2e-workflow.test.mjs
