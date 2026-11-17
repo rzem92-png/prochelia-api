@@ -83,7 +83,7 @@ jobs:
           assert d["migrations_dir"]=="migrations-preview-canonical"
           print("Preview migration-only D1 target verified.")
           PY
-          token=$(printf '%s' "$CLOUDFLARE_API_TOKEN" | sed -E 's/^[[:space:]]*Bearer[[:space:]]+//I; s/^[[:space:]]+//; s/[[:space:]]+$//' | tr -d '\r\n')
+          token="$(printf '%s' "$CLOUDFLARE_API_TOKEN" | sed -E 's/^[[:space:]]*Bearer[[:space:]]+//I; s/^[[:space:]]+//; s/[[:space:]]+$//' | tr -d '\r\n')
           test -n "$token"
           export CLOUDFLARE_API_TOKEN="$token"
           identity="$(npx --yes wrangler@4 whoami 2>&1)" || {
@@ -98,7 +98,7 @@ jobs:
         run: |
           set -euo pipefail
           test "$CLOUDFLARE_ACCOUNT_ID" = "$EXPECTED_ACCOUNT_ID"
-          token=$(printf '%s' "$CLOUDFLARE_API_TOKEN" | sed -E 's/^[[:space:]]*Bearer[[:space:]]+//I; s/^[[:space:]]+//; s/[[:space:]]+$//' | tr -d '\r\n')
+          token="$(printf '%s' "$CLOUDFLARE_API_TOKEN" | sed -E 's/^[[:space:]]*Bearer[[:space:]]+//I; s/^[[:space:]]+//; s/[[:space:]]+$//' | tr -d '\r\n')
           test -n "$token"
           status="$(curl --silent --show-error --output "$RUNNER_TEMP/preview-r2-eu.json" --write-out '%{http_code}' "https://api.cloudflare.com/client/v4/accounts/$EXPECTED_ACCOUNT_ID/r2/buckets/$R2_BUCKET" -H "Authorization: Bearer $token" -H 'cf-r2-jurisdiction: eu')"
           test "$status" = "200" || { echo "::error::EU R2 bucket lookup failed (HTTP $status); no export performed."; exit 1; }
