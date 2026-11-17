@@ -3630,11 +3630,25 @@ async function strictProductionAudit(request,env){
     {code:'MAPS_PROVIDER',status:finalSecretConfigured(env,'MAPS_API_KEY')?'OK':'NOT_CONFIGURED'}
   ];
   const checks=[...(result.checks||[]),...extra];
-  const blockingCodes=new Set(['SECRET:PAYMENT_PROVIDER','SECRET:PAYMENT_WEBHOOK_SECRET','SECURITY_CODE_DELIVERY','CORS_ORIGIN','BACKUP_R2']);
+  // Configuration is only one layer of readiness. Do not represent secrets or
+  // schema presence as proof that money movement, recovery, isolation, or legal
+  // controls have passed independent end-to-end acceptance.
+  const releaseEvidence=[
+    {code:'PSP_ADAPTER',status:paymentsConfigured(env)?'OK':'NOT_IMPLEMENTED'},
+    {code:'PSP_SANDBOX_E2E',status:'NOT_VERIFIED'},
+    {code:'BACKUP_RESTORE_E2E',status:'NOT_VERIFIED'},
+    {code:'TENANT_ISOLATION',status:'NOT_VERIFIED'},
+    {code:'SECURITY_LEGAL_REVIEW',status:'NOT_VERIFIED'},
+    {code:'LOAD_RECOVERY',status:'NOT_VERIFIED'},
+    {code:'HUMAN_RELEASE_APPROVAL',status:'NOT_GRANTED'}
+  ];
+  checks.push(...releaseEvidence);
+  const blockingCodes=new Set(['SECRET:PAYMENT_PROVIDER','SECRET:PAYMENT_WEBHOOK_SECRET','SECURITY_CODE_DELIVERY','CORS_ORIGIN','BACKUP_R2','PSP_ADAPTER','PSP_SANDBOX_E2E','BACKUP_RESTORE_E2E','TENANT_ISOLATION','SECURITY_LEGAL_REVIEW','LOAD_RECOVERY','HUMAN_RELEASE_APPROVAL']);
   const blocking=checks.filter(x=>blockingCodes.has(x.code)&&x.status!=='OK');
-  const overall=blocking.length===0 && result.blocking===0;
+  const configurationReady=result.blocking===0 && checks.filter(x=>['SECRET:PAYMENT_PROVIDER','SECRET:PAYMENT_WEBHOOK_SECRET','SECURITY_CODE_DELIVERY','CORS_ORIGIN','BACKUP_R2'].includes(x.code)).every(x=>x.status==='OK');
+  const overall=configurationReady && releaseEvidence.every(x=>x.status==='OK');
   // GET production-check is read-only: no config writes or journal side effects.
-  return json({ok:true,version:VERSION,production_gate:overall?'OPEN':'CLOSED',ready_for_real_traffic:overall,checks,blocking:blocking.map(x=>x.code),note:overall?'Configuration gate passed. A real production launch still requires sandbox/acceptance tests for PSP, notifications, identity/security, backups/restore and critical user journeys.':'Production traffic remains blocked until the listed blocking controls are configured and tested.'});
+  return json({ok:true,version:VERSION,configuration_gate:configurationReady?'PASS':'BLOCKED',production_gate:overall?'OPEN':'CLOSED',ready_for_real_traffic:overall,checks,blocking:blocking.map(x=>x.code),note:overall?'All configuration and independently verified release-evidence gates passed.':'Production traffic remains blocked: configuration, independent acceptance evidence, and explicit human release approval are all required.'});
 }
 
 const __procheliaProductionSafetyHandle = handle;
