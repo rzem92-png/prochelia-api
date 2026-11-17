@@ -114,6 +114,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          token="$(printf '%s' "$CLOUDFLARE_API_TOKEN" | sed -E 's/^[[:space:]]*Bearer[[:space:]]+//I; s/^[[:space:]]+//; s/[[:space:]]+$//' | tr -d '\\r\\n')"
+          test -n "$token"
+          CLOUDFLARE_API_TOKEN="$token"
+          echo "CLOUDFLARE_API_TOKEN=$token" >> "$GITHUB_ENV"
           identity="$(npx --yes wrangler@4 whoami 2>&1)" || {
             echo "::error::Wrangler authentication failed. Check token validity and permissions."
             exit 1
