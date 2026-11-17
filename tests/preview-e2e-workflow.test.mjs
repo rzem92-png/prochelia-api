@@ -21,7 +21,9 @@ test("synthetic Preview E2E can be manually dispatched from its dedicated PR bra
 test("Preview E2E resolves the latest Pages Preview deployment instead of stale hardcoded IDs", () => {
   assert.match(workflow, /PREVIEW_DB_ID: e3cf167c-37e1-4d72-9ac6-b3e27c14b97f/);
   assert.match(workflow, /PAGES_PREVIEW_BRANCH:/);
-  assert.match(workflow, /PAGES_EXPECTED_COMMIT:.*579679da7ca3a68b91448a85e7151bda5794a155/);
+  assert.match(workflow, /PAGES_EXPECTED_COMMIT: \\$\{\\{ inputs\\.pages_commit_sha \\|\\| '' \\}\\}/);
+  assert.match(workflow, /\(\$expected == "" or \.result\.deployment_trigger\.metadata\.commit_hash == \$expected\)/);
+  assert.doesNotMatch(workflow, /579679da7ca3a68b91448a85e7151bda5794a155/);
   assert.match(workflow, /pages\/projects\/prochelia\/deployments\?env=preview&per_page=1&page=1/);
   assert.match(workflow, /\.result\[0\]\.id/);
   assert.match(workflow, /\.result\.latest_stage\.status == "success"/);
@@ -35,6 +37,12 @@ test("Preview E2E resolves the latest Pages Preview deployment instead of stale 
   assert.doesNotMatch(workflow, /3846562300e97a1816b2aa7e317448449270c2bc/);
   assert.doesNotMatch(workflow, /e69fde70fb28405aa8117eaf041aed618d3da664/);
   assert.doesNotMatch(workflow, /PREVIEW_DB_ID: 04f52830-ef5a-4f17-a640-42bbc2381bba/);
+});
+
+test("Pages commit is resolved dynamically unless an exact optional SHA is supplied", () => {
+  assert.match(workflow, /pages_commit_sha:/);
+  assert.match(workflow, /pages_commit_sha must be an exact 40-character lowercase Git SHA/);
+  assert.match(workflow, /\(\$expected == "" or \.result\.deployment_trigger\.metadata\.commit_hash == \$expected\)/);
 });
 
 test("Pages Preview configuration and deployment are checked independently from Production", () => {
