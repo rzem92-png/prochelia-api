@@ -37,7 +37,7 @@ jobs:
       - name: Checkout pinned canonical preproduction migration chain
         uses: actions/checkout@v4
         with:
-          ref: cf7961db717fc5cb56719c52909ff03acb29bf84
+          ref: cbfb215e8e617a03f395f17fec51dd33fb1023b9
 
       - name: Verify credentials, exact Preview target and complete migration chain
         shell: bash
