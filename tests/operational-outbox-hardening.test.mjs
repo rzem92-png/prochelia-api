@@ -107,8 +107,9 @@ test("outbox leases are persisted, expiring, and required to finalize a claimed 
   const handler = section("async function processActionOutbox(request, env)", "async function executeOperationalCase");
   assert.match(schema, /lease_token TEXT/);
   assert.match(schema, /lease_expires_at TEXT/);
-  assert.match(schema, /ALTER TABLE action_outbox ADD COLUMN lease_token TEXT/);
-  assert.match(schema, /ALTER TABLE action_outbox ADD COLUMN lease_expires_at TEXT/);
+  assert.match(schema, /ensureActionColumn/);
+  assert.match(schema, /\[\x27case_id\x27,\x27processed_at\x27,\x27lease_token\x27,\x27lease_expires_at\x27\]/);
+  assert.match(schema, /Another request may have completed the same additive schema change/);
   assert.match(executor, /lease_expires_at=datetime\('now','\+15 minutes'\)/);
   assert.match(executor, /WHERE id=\? AND status='PROCESSING' AND lease_token=\?/);
   assert.match(executor, /WHERE EXISTS \(SELECT 1 FROM action_outbox WHERE id=\? AND status='PROCESSING' AND lease_token=\?\)/);
