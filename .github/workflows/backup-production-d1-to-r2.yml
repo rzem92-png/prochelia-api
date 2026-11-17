@@ -117,9 +117,7 @@ jobs:
           token="$(printf '%s' "$CLOUDFLARE_API_TOKEN" | sed -E 's/^[[:space:]]*Bearer[[:space:]]+//I; s/^[[:space:]]+//; s/[[:space:]]+$//' | tr -d '\r\n')"
           test -n "$token"
           test "$CLOUDFLARE_ACCOUNT_ID" = "$EXPECTED_ACCOUNT_ID"
-          status="$(curl --silent --show-error --output "$RUNNER_TEMP/production-r2-jurisdiction.json" --write-out '%{http_code}' \\
-            "https://api.cloudflare.com/client/v4/accounts/$EXPECTED_ACCOUNT_ID/r2/buckets/$R2_BUCKET" \\
-            -H "Authorization: Bearer $token" -H 'cf-r2-jurisdiction: eu')"
+          status="$(curl --silent --show-error --output "$RUNNER_TEMP/production-r2-jurisdiction.json" --write-out '%{http_code}' "https://api.cloudflare.com/client/v4/accounts/$EXPECTED_ACCOUNT_ID/r2/buckets/$R2_BUCKET" -H "Authorization: Bearer $token" -H 'cf-r2-jurisdiction: eu')"
           test "$status" = "200" || { echo "::error::Production backup R2 bucket lookup failed (HTTP $status); refusing production export."; exit 1; }
           jq -e --arg bucket "$R2_BUCKET" '.success == true and .result.name == $bucket and .result.jurisdiction == "eu"' "$RUNNER_TEMP/production-r2-jurisdiction.json" >/dev/null || {
             echo "::error::Production backup bucket is not confirmed in EU jurisdiction; refusing production export."
