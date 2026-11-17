@@ -28,8 +28,8 @@ jobs:
       AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_EU_SECRET_ACCESS_KEY }}
       AWS_DEFAULT_REGION: auto
       EXPECTED_ACCOUNT_ID: f2a79e9fa41566a8ec80fb24c02c60eb
-      EXPECTED_DB_NAME: prochelia-preview-db
-      EXPECTED_DB_ID: 6adb95e5-e542-4bec-9008-fbea01042305
+      EXPECTED_DB_NAME: prochelia-preview-eu-2026-11-17
+      EXPECTED_DB_ID: e3cf167c-37e1-4d72-9ac6-b3e27c14b97f
       R2_BUCKET: prochelia-preview-backups-eu
       R2_ENDPOINT: https://f2a79e9fa41566a8ec80fb24c02c60eb.r2.cloudflarestorage.com
     steps:
@@ -72,8 +72,8 @@ jobs:
           c=json.loads(Path("wrangler.jsonc").read_text())
           assert c["name"] == "prochelia-api-preview"
           d=next(x for x in c["d1_databases"] if x["binding"]=="DB")
-          assert d["database_name"] == "prochelia-preview-db"
-          assert d["database_id"] == "6adb95e5-e542-4bec-9008-fbea01042305"
+          assert d["database_name"] == "prochelia-preview-eu-2026-11-17"
+          assert d["database_id"] == "e3cf167c-37e1-4d72-9ac6-b3e27c14b97f"
           assert len(c["d1_databases"]) == 1
           print("Preview Worker/D1 target verified.")
           PY
