@@ -12,6 +12,12 @@ test("Preview E2E is gated by explicit confirmation or a successful isolated Pre
   assert.match(workflow, /github\.ref == 'refs\/heads\/main'/);
 });
 
+test("synthetic Preview E2E can be manually dispatched from its dedicated PR branch without merging", () => {
+  assert.match(workflow, /github\\.ref == 'refs\\/heads\\/fix\\/preview-e2e-dynamic-pages-pin-2026-11-17'/);
+  assert.match(workflow, /github\\.event_name == 'workflow_dispatch'/);
+  assert.match(workflow, /inputs\\.confirmation == 'RUN_PREVIEW_DIRECTORY_E2E'/);
+});
+
 test("Preview E2E resolves the latest Pages Preview deployment instead of stale hardcoded IDs", () => {
   assert.match(workflow, /PREVIEW_DB_ID: e3cf167c-37e1-4d72-9ac6-b3e27c14b97f/);
   assert.match(workflow, /PAGES_PREVIEW_BRANCH:/);
