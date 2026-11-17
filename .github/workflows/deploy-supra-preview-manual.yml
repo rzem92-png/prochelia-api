@@ -44,7 +44,8 @@ jobs:
           if (production.name === preview.name || production.d1_databases?.some(db => db.database_id === expected)) throw Error('Production and preview resources are not isolated');
           console.log('Isolated preview Worker and D1 identifiers verified.');
           NODE
-      - run: npm install --no-audit --no-fund
+      - name: Install exact locked dependencies
+        run: npm ci --ignore-scripts --no-audit --no-fund
       - run: npm run build
       - run: npm run check:worker:preview
       - run: npm test
