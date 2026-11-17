@@ -5,8 +5,8 @@ import { readFile, readdir } from "node:fs/promises";
 const workflow = await readFile(new URL("../.github/workflows/apply-preview-d1-migrations.yml", import.meta.url), "utf8");
 
 test("Preview migration secrets are available only from the reviewed main workflow dispatch", () => {
-  assert.match(workflow, /if: \$\{\{ github\.ref == 'refs\/heads\/main' && inputs\.confirm_preview == 'APPLY_PREVIEW_ONLY' \}\}/);
-  assert.doesNotMatch(workflow, /if: \$\{\{ github\.event\.inputs\.confirm_preview == 'APPLY_PREVIEW_ONLY' \}\}/);
+test("Preview migration secrets are available only from main or the exact reviewed EU Preview branch dispatch", () => {
+  assert.match(workflow, /if: \\$\\{\\{ \\(github\\.ref == 'refs\\/heads\\/main' \\|\\| github\\.ref == 'refs\\/heads\\/fix\\/switch-preview-to-eu-d1-2026-11-17'\\) && inputs\\.confirm_preview == 'APPLY_PREVIEW_ONLY' \\}\\}/);
 });
 
 test("Preview migration workflow pins the dedicated Preview database and forbids production", () => {
