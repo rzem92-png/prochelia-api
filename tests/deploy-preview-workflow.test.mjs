@@ -7,6 +7,7 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 const workflow = await readFile(new URL("../.github/workflows/deploy-preview-worker-manual.yml", import.meta.url), "utf8");
+const generator = await readFile(new URL("../scripts/generate-preview-wrangler-config.mjs", import.meta.url), "utf8");
 
 test("Preview deploy is manual and requires exact confirmation on main", () => {
   assert.match(workflow, /workflow_dispatch:/);
@@ -15,17 +16,17 @@ test("Preview deploy is manual and requires exact confirmation on main", () => {
 });
 
 test("Preview deploy pins isolated Worker and Preview D1, never production", () => {
-  assert.match(workflow, /name:\s*'prochelia-api-preview'/);
-  assert.match(workflow, /e3cf167c-37e1-4d72-9ac6-b3e27c14b97f/);
-  assert.match(workflow, /04f52830-ef5a-4f17-a640-42bbc2381bba/);
-  assert.match(workflow, /preview\.name === production\.name/);
-  assert.match(workflow, /APP_ENV:\s*'preview'/);
+  assert.match(generator, /name:\s*"prochelia-api-preview"/);
+  assert.match(generator, /e3cf167c-37e1-4d72-9ac6-b3e27c14b97f/);
+  assert.match(generator, /04f52830-ef5a-4f17-a640-42bbc2381bba/);
+  assert.match(generator, /preview\.name === production\.name/);
+  assert.match(generator, /APP_ENV:\s*"preview"/);
   assert.doesNotMatch(workflow, /keep_vars|--keep-vars/);
-  assert.match(workflow, /r2_buckets:\s*\[\{/);
-  assert.match(workflow, /binding:\s*'BACKUP_BUCKET'/);
+  assert.match(generator, /r2_buckets:\s*\[\{/);
+  assert.match(generator, /binding:\s*"BACKUP_BUCKET"/);
   assert.match(workflow, /https:\/\/83a36d32\.prochelia\.pages\.dev/);
-  assert.match(workflow, /bucket_name:\s*'prochelia-preview-backups-eu-v2'/);
-  assert.match(workflow, /jurisdiction:\s*'eu'/);
+  assert.match(generator, /bucket_name:\s*"prochelia-preview-backups-eu-v2"/);
+  assert.match(generator, /jurisdiction:\s*"eu"/);
   assert.match(workflow, /Verify dedicated Preview R2 bucket has EU jurisdiction/);
   assert.match(workflow, /cf-r2-jurisdiction: eu/);
   assert.match(workflow, /jurisdiction == "eu"/);
@@ -40,6 +41,7 @@ test("Preview deploy runs the complete security suite and dry-run before the onl
   assert.match(workflow, /tests\/bootstrap-atomic\.test\.js/);
   assert.match(workflow, /--dry-run/);
   assert.match(workflow, /wrangler@4 deploy --config wrangler\.preview\.generated\.json/);
+  assert.match(workflow, /node scripts\/generate-preview-wrangler-config\.mjs/);
   assert.doesNotMatch(workflow, /d1 migrations apply/);
 });
 
