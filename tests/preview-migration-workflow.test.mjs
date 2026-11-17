@@ -197,6 +197,10 @@ test("all canonical migrations required by the remote apply gate physically exis
   const actual = new Set(await readdir(new URL("../migrations-preview-canonical/", import.meta.url)));
   const missing = expected.filter(name => !actual.has(name));
   assert.deepEqual(missing, [], "migration apply must not proceed with missing canonical source files");
+
+  assert.match(workflow, /canonical_dir = Path\("migrations-preview-canonical"\)/);
+  assert.match(workflow, /Missing canonical migration/);
+  assert.doesNotMatch(workflow, /p = Path\("migrations"\) \/ name/);
 });
 
 test("Preview migration refuses export unless the exact D1 database has explicit EU jurisdiction", () => {
