@@ -2278,12 +2278,22 @@ async function ensureOperationalSchema(env) {
     )`
   ];
   for (const sql of statements) await env.DB.prepare(sql).run();
-  const actionInfo = await env.DB.prepare('PRAGMA table_info(action_outbox)').all();
-  const actionColumns = (actionInfo.results || []).map(x => String(x.name));
-  if (!actionColumns.includes('case_id')) await env.DB.prepare('ALTER TABLE action_outbox ADD COLUMN case_id TEXT').run();
-  if (!actionColumns.includes('processed_at')) await env.DB.prepare('ALTER TABLE action_outbox ADD COLUMN processed_at TEXT').run();
-  if (!actionColumns.includes('lease_token')) await env.DB.prepare('ALTER TABLE action_outbox ADD COLUMN lease_token TEXT').run();
-  if (!actionColumns.includes('lease_expires_at')) await env.DB.prepare('ALTER TABLE action_outbox ADD COLUMN lease_expires_at TEXT').run();
+  const ensureActionColumn = async (column) => {
+    const info = await env.DB.prepare('PRAGMA table_info(action_outbox)').all();
+    const columns = (info.results || []).map(x => String(x.name));
+    if (columns.includes(column)) return;
+    try {
+      await env.DB.prepare(`ALTER TABLE action_outbox ADD COLUMN ${column} TEXT`).run();
+    } catch (error) {
+      // Another request may have completed the same additive schema change.
+      const refreshed = await env.DB.prepare('PRAGMA table_info(action_outbox)').all();
+      const after = (refreshed.results || []).map(x => String(x.name));
+      if (!after.includes(column)) throw error;
+    }
+  };
+  for (const column of ['case_id','processed_at','lease_token','lease_expires_at']) {
+    await ensureActionColumn(column);
+  }
 }
 
 async function tableExists(env, table) {
