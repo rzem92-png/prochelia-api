@@ -10,6 +10,7 @@ test("Preview R2 backup is manually gated to main and pinned to the reviewed EU 
   assert.match(workflow, /ref: 1fc258c9c8d25e5e7b89241504218bf102afbf27/);
   assert.match(workflow, /clean="\\n"\.join/);
   assert.match(workflow, /safe_identity=.*REDACTED/);
+  assert.match(workflow, /grep -Fq \\"\$EXPECTED_ACCOUNT_ID\\"/);
   assert.match(workflow, /wrangler\.preview-migrations\.jsonc/);
   assert.match(workflow, /prochelia-preview-eu-2026-11-17/);
   assert.match(workflow, /e3cf167c-37e1-4d72-9ac6-b3e27c14b97f/);
