@@ -6,6 +6,7 @@ on:
       - "src/**"
       - "wrangler.jsonc"
       - ".github/workflows/deploy-preview-worker-manual.yml"
+      - "scripts/generate-preview-wrangler-config.mjs"
       - ".github/workflows/worker-build-validation.yml"
   push:
     branches: [main]
@@ -22,8 +23,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
           package-manager-cache: false
@@ -36,5 +37,9 @@ jobs:
         run: |
           go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
           "$HOME/go/bin/actionlint" .github/workflows/deploy-preview-worker-manual.yml
+      - name: Generate isolated Preview deployment config
+        run: node scripts/generate-preview-wrangler-config.mjs
       - name: Wrangler bundle validation only (no deploy)
-        run: npx --yes wrangler@4 deploy --dry-run --config wrangler.jsonc --outdir "$RUNNER_TEMP/prochelia-worker-dry-run"
+        run: |
+          npx --yes wrangler@4 deploy --dry-run --config wrangler.jsonc --outdir "$RUNNER_TEMP/prochelia-worker-dry-run"
+          npx --yes wrangler@4 deploy --dry-run --config wrangler.preview.generated.json --outdir "$RUNNER_TEMP/prochelia-preview-worker-dry-run"
