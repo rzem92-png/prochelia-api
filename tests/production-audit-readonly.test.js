@@ -18,7 +18,7 @@ test("productionConfigCheck is non-mutating unless persist=true is explicitly re
 
 test("GET production audit handlers do not journal or insert check records", () => {
   const start = source.indexOf("async function finalProductionAudit");
-  const end = source.indexOf("const __procheliaProductionSafetyHandle", start);
+  const end = source.indexOf("\nconst __procheliaProductionSafetyHandle", start);
   assert.notEqual(start, -1);
   assert.notEqual(end, -1);
   const body = source.slice(start, end);
