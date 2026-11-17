@@ -84,7 +84,7 @@ test("stale PROCESSING actions are quarantined for reconciliation and never auto
 
 test("idempotency insert races re-read and return the winning outbox row", () => {
   const handler = section("async function queueAction", "async function executeQueuedAction");
-  assert.match(handler, /UNIQUE\(idempotency_key\)/);
+  assert.match(source, /idempotency_key TEXT NOT NULL UNIQUE/);
   assert.match(handler, /catch\s*\(error\)/);
   assert.match(handler, /SELECT \* FROM action_outbox WHERE idempotency_key=\? LIMIT 1/);
   assert.match(handler, /if \(raced\) return raced/);
