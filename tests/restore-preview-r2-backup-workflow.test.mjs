@@ -56,3 +56,16 @@ test("R2 restore checks the exact bucket jurisdiction before any object download
   assert.ok(workflow.indexOf("Verify Cloudflare token, account and dedicated EU R2 bucket") < workflow.indexOf("Download encrypted backup and checksum from R2 EU"));
   assert.match(workflow, /result\.name == "prochelia-preview-backups-eu-v2"/);
 });
+
+
+test("R2 restore refuses remote writes unless the exact isolated D1 target is explicitly EU", () => {
+  const target = workflow.indexOf("Verify exact isolated D1 restore target and generate Wrangler config");
+  const metadata = workflow.indexOf("restore-d1-metadata.json");
+  const restore = workflow.indexOf("Restore only into the isolated D1 database");
+  assert.ok(target >= 0 && metadata > target && restore > metadata);
+  assert.match(workflow, /d1\/database\/\$RESTORE_DB_ID/);
+  assert.match(workflow, /\.result\.uuid == \$id/);
+  assert.match(workflow, /\.result\.name == \$n/);
+  assert.match(workflow, /\.result\.jurisdiction == "eu"/);
+  assert.match(workflow, /refusing remote restore/);
+});
