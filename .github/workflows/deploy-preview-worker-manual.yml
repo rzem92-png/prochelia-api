@@ -17,7 +17,12 @@ concurrency:
 
 jobs:
   preview-only:
-    if: github.ref == 'refs/heads/main' && inputs.confirmation == 'DEPLOY_PREVIEW_ONLY'
+    if: >-
+      (
+        github.ref == 'refs/heads/main' ||
+        github.ref == 'refs/heads/fix/preview-e2e-dynamic-pages-pin-2026-11-17'
+      ) &&
+      inputs.confirmation == 'DEPLOY_PREVIEW_ONLY'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -28,6 +33,72 @@ jobs:
       - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
           node-version: '22'
+      - name: Resolve and verify latest Pages Preview origin before generating Worker config
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$CLOUDFLARE_ACCOUNT_ID" == "f2a79e9fa41566a8ec80fb24c02c60eb" ]] || {
+            echo "::error::Unexpected Cloudflare account; refusing Preview configuration."
+            exit 1
+          }
+          token="$(printf '%s' "$CLOUDFLARE_API_TOKEN" | sed -E 's/^[[:space:]]*Bearer[[:space:]]+//I; s/^[[:space:]]+//; s/[[:space:]]+$//')"
+          [[ -n "$token" ]] || { echo "::error::Cloudflare API token is missing."; exit 1; }
+          cf_get() {
+            local label="$1" url="$2" output="$3" status
+            status="$(curl --silent --show-error --output "$output" --write-out '%{http_code}' \
+              -H "Authorization: Bearer $token" "$url")"
+            if [[ "$status" != "200" ]] || ! jq -e '.success == true' "$output" >/dev/null; then
+              echo "::error::$label failed (HTTP $status)."
+              jq -c '{errors, messages}' "$output" 2>/dev/null || true
+              return 1
+            fi
+          }
+          cf_get "Pages project Preview configuration" \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/pages/projects/prochelia" "$RUNNER_TEMP/pages-project.json"
+          jq -e '
+            .result.deployment_configs.preview.d1_databases.DB.id == "e3cf167c-37e1-4d72-9ac6-b3e27c14b97f" and
+            .result.deployment_configs.preview.services.PROCHELIA_API.service == "prochelia-api-preview"
+          ' "$RUNNER_TEMP/pages-project.json" >/dev/null || {
+            echo "::error::Pages Preview project is not bound to the isolated Preview D1 and Worker."
+            exit 1
+          }
+          cf_get "Latest Pages Preview deployment list" \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/pages/projects/prochelia/deployments?env=preview&per_page=1&page=1" "$RUNNER_TEMP/pages-deployments.json"
+          deployment_id="$(jq -r '.result[0].id // empty' "$RUNNER_TEMP/pages-deployments.json")"
+          [[ -n "$deployment_id" ]] || { echo "::error::No Pages Preview deployment exists."; exit 1; }
+          cf_get "Latest Pages Preview deployment details" \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/pages/projects/prochelia/deployments/$deployment_id" "$RUNNER_TEMP/pages-preview.json"
+          jq -e '
+            .result.environment == "preview" and
+            .result.is_skipped == false and
+            .result.latest_stage.status == "success" and
+            .result.uses_functions == true and
+            .result.d1_databases.DB.id == "e3cf167c-37e1-4d72-9ac6-b3e27c14b97f" and
+            .result.services.PROCHELIA_API.service == "prochelia-api-preview" and
+            .result.deployment_trigger.metadata.branch == "fix/frontend-cookie-session-auth-2026-11-17" and
+            (.result.deployment_trigger.metadata.commit_hash | type == "string" and test("^[0-9a-f]{40}$"))
+          ' "$RUNNER_TEMP/pages-preview.json" >/dev/null || {
+            echo "::error::Latest Pages Preview deployment is failed, skipped, misbound or from an unexpected branch."
+            jq -c '{id: .result.id, stage: .result.latest_stage, branch: .result.deployment_trigger.metadata.branch, commit: .result.deployment_trigger.metadata.commit_hash, d1: .result.d1_databases.DB.id, service: .result.services.PROCHELIA_API.service, uses_functions: .result.uses_functions}' "$RUNNER_TEMP/pages-preview.json"
+            exit 1
+          }
+          pages_origin="$(jq -r '.result.url' "$RUNNER_TEMP/pages-preview.json")"
+          pages_commit="$(jq -r '.result.deployment_trigger.metadata.commit_hash' "$RUNNER_TEMP/pages-preview.json")"
+          [[ "$pages_origin" =~ ^https://[a-z0-9-]+\.prochelia\.pages\.dev$ ]] || {
+            echo "::error::Cloudflare returned an unexpected Pages Preview origin."
+            exit 1
+          }
+          printf 'PAGES_PREVIEW_ORIGIN=%s\nPAGES_PREVIEW_DEPLOYMENT_ID=%s\nPAGES_PREVIEW_COMMIT=%s\n' \
+            "$pages_origin" "$deployment_id" "$pages_commit" >> "$GITHUB_ENV"
+          {
+            echo "Verified Pages Preview origin: $pages_origin"
+            echo "Pages Preview deployment: $deployment_id"
+            echo "Pages Preview commit: $pages_commit"
+            echo "This exact origin will be added to the Preview Worker CORS allowlist."
+          } >> "$GITHUB_STEP_SUMMARY"
       - name: Generate isolated Preview deployment config
         run: node scripts/generate-preview-wrangler-config.mjs
       - name: Check Worker source syntax
