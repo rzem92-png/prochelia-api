@@ -7,6 +7,7 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 const workflow = await readFile(new URL("../.github/workflows/deploy-preview-worker-manual.yml", import.meta.url), "utf8");
+const workerBuild = await readFile(new URL("../.github/workflows/worker-build-validation.yml", import.meta.url), "utf8");
 const generator = await readFile(new URL("../scripts/generate-preview-wrangler-config.mjs", import.meta.url), "utf8");
 
 test("Preview deploy is manual and requires exact confirmation on main or its dedicated PR branch", () => {
@@ -45,6 +46,12 @@ test("Preview deploy pins isolated Worker and Preview D1, never Production", () 
   assert.match(workflow, /Verify dedicated Preview R2 bucket has EU jurisdiction/);
   assert.match(workflow, /cf-r2-jurisdiction: eu/);
   assert.match(workflow, /jurisdiction == "eu"/);
+});
+
+test("Worker build CI uses a non-deploying origin sentinel and never publishes the generated Preview config", () => {
+  assert.match(workerBuild, /PAGES_PREVIEW_ORIGIN: https:\/\/dry-run-validation\.prochelia\.pages\.dev/);
+  assert.match(workerBuild, /wrangler@4 deploy --dry-run --config wrangler\.preview\.generated\.json/);
+  assert.doesNotMatch(workerBuild, /wrangler@4 deploy --config wrangler\.preview\.generated\.json/);
 });
 
 test("Preview deploy runs the complete security suite and dry-run before the only deployment command", () => {
