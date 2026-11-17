@@ -28,11 +28,11 @@ jobs:
     env:
       CLOUDFLARE_ACCOUNT_ID: f2a79e9fa41566a8ec80fb24c02c60eb
       EXPECTED_PRODUCTION_D1_ID: 04f52830-ef5a-4f17-a640-42bbc2381bba
-      RESTORE_DB_NAME: prochelia-prod-restore-test-2026-11-12
-      RESTORE_DB_ID: 9db489a0-4f96-4e93-b1f4-8a8e755871a7
+      RESTORE_DB_NAME: prochelia-r2-restore-validation-2026-11
+      RESTORE_DB_ID: 3caebbc6-982a-4562-96a7-e509185e9e9a
       BACKUP_RUN_ID: ${{ inputs.backup_run_id }}
-      R2_BUCKET: prochelia-production-backups-eu
-      R2_ENDPOINT: https://f2a79e9fa41566a8ec80fb24c02c60eb.r2.cloudflarestorage.com
+      R2_BUCKET: prochelia-production-backups-eu-v2
+      R2_ENDPOINT: https://f2a79e9fa41566a8ec80fb24c02c60eb.eu.r2.cloudflarestorage.com
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -48,11 +48,13 @@ jobs:
         run: |
           set -euo pipefail
           [[ "$BACKUP_RUN_ID" =~ ^[0-9]+$ ]] || { echo "::error::Invalid backup run ID."; exit 1; }
-          [[ "$RESTORE_DB_NAME" == "prochelia-prod-restore-test-2026-11-12" ]]
-          [[ "$RESTORE_DB_ID" == "9db489a0-4f96-4e93-b1f4-8a8e755871a7" ]]
+          [[ "$RESTORE_DB_NAME" == "prochelia-r2-restore-validation-2026-11" ]]
+          [[ "$RESTORE_DB_ID" == "3caebbc6-982a-4562-96a7-e509185e9e9a" ]]
           [[ "$RESTORE_DB_ID" != "$EXPECTED_PRODUCTION_D1_ID" ]]
           [[ "$RESTORE_DB_ID" != "6adb95e5-e542-4bec-9008-fbea01042305" ]]
           [[ "$RESTORE_DB_ID" != "a3526c2a-39cb-49ab-97c4-979138145f33" ]]
+          [[ "$RESTORE_DB_ID" != "9db489a0-4f96-4e93-b1f4-8a8e755871a7" ]]
+          [[ "$RESTORE_DB_ID" != "71526879-34c7-4b47-8195-7b8f82669e31" ]]
           [[ -n "${CLOUDFLARE_API_TOKEN:-}" && -n "${BACKUP_ENCRYPTION_KEY:-}" && -n "${AWS_ACCESS_KEY_ID:-}" && -n "${AWS_SECRET_ACCESS_KEY:-}" ]]
           [[ "${#AWS_ACCESS_KEY_ID}" -eq 32 ]] || { echo "::error::R2 access key shape invalid."; exit 1; }
           token="${CLOUDFLARE_API_TOKEN#Bearer }"
@@ -62,7 +64,7 @@ jobs:
           jq -e '.success == true and .result.status == "active"' "$RUNNER_TEMP/token.json" >/dev/null
           status="$(curl --silent --show-error --output "$RUNNER_TEMP/d1.json" --write-out '%{http_code}' -H "Authorization: Bearer $token" "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/d1/database?name=$RESTORE_DB_NAME")"
           [[ "$status" == "200" ]]
-          count="$(jq --arg n "$RESTORE_DB_NAME" --arg id "$RESTORE_DB_ID" '[.result[]? | select(.name == $n and .uuid == $id)] | length' "$RUNNER_TEMP/d1.json")"
+          count="$(jq --arg n "$RESTORE_DB_NAME" --arg id "$RESTORE_DB_ID" '[.result[]? | select(.name == $n and .uuid == $id and .jurisdiction == "eu")] | length' "$RUNNER_TEMP/d1.json")"
           [[ "$count" == "1" ]] || { echo "::error::Isolated restore database identity mismatch; no write performed."; exit 1; }
           printf 'CLOUDFLARE_API_TOKEN=%s\n' "$token" >> "$GITHUB_ENV"
           cat > "$RUNNER_TEMP/wrangler.restore.json" <<'JSON'
@@ -71,8 +73,8 @@ jobs:
             "compatibility_date": "2026-09-25",
             "d1_databases": [{
               "binding": "DB",
-              "database_name": "prochelia-prod-restore-test-2026-11-12",
-              "database_id": "9db489a0-4f96-4e93-b1f4-8a8e755871a7"
+              "database_name": "prochelia-r2-restore-validation-2026-11",
+              "database_id": "3caebbc6-982a-4562-96a7-e509185e9e9a"
             }]
           }
           JSON
@@ -99,7 +101,7 @@ jobs:
           [[ "$backup_sha" =~ ^[0-9a-f]{40}$ ]]
           gh run view "$BACKUP_RUN_ID" --repo "$GITHUB_REPOSITORY" --log > "$RUNNER_TEMP/backup-run.log"
           grep -Fq "PASS: encrypted production backup uploaded, downloaded, decrypted and checksum-verified." "$RUNNER_TEMP/backup-run.log"
-          grep -Fq "PASS: live D1 identity verified: prochelia-db (04f52830-ef5a-4f17-a640-42bbc2381bba)." "$RUNNER_TEMP/backup-run.log"
+          grep -Fq "PASS: live production D1 identity and EU jurisdiction verified: prochelia-db (04f52830-ef5a-4f17-a640-42bbc2381bba)." "$RUNNER_TEMP/backup-run.log"
           key="$(grep -oE "production-d1/prochelia-db/[0-9]{4}/[0-9]{2}/[0-9]{2}/${BACKUP_RUN_ID}-${backup_sha:0:12}\.sql\.gpg" "$RUNNER_TEMP/backup-run.log" | tail -n 1)"
           [[ -n "$key" ]] || { echo "::error::Could not recover the exact encrypted R2 object key from the successful run logs."; exit 1; }
           echo "R2_OBJECT_KEY=$key" >> "$GITHUB_ENV"
@@ -203,7 +205,7 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         run: |
           set -euo pipefail
-          [[ "$RESTORE_DB_ID" == "9db489a0-4f96-4e93-b1f4-8a8e755871a7" ]]
+          [[ "$RESTORE_DB_ID" == "3caebbc6-982a-4562-96a7-e509185e9e9a" ]]
           [[ "$RESTORE_DB_ID" != "$EXPECTED_PRODUCTION_D1_ID" ]]
           npx --yes wrangler@4 d1 execute "$RESTORE_DB_NAME" --remote --config "$RUNNER_TEMP/wrangler.restore.json" --file="$RUNNER_TEMP/prochelia-prod-restore/production.d1-compatible.sql" --yes
           echo "Encrypted production backup imported into the isolated restore-test D1."
