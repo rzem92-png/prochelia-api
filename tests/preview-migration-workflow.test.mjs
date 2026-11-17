@@ -87,35 +87,21 @@ test("Preview post-migration verification checks identity, mission-security and 
   ]) assert.ok(workflow.includes(name), `missing post-migration verification for ${name}`);
 });
 
-test("Preview migration workflow accepts only the reviewed pre- and post-0022 registries", () => {
-  const legacy = [
-    "0005_payment_runtime_schema.sql",
-    "0006_restore_wallet_balance_guard.sql",
-    "0007_unique_provider_account.sql",
-    "0008_server_owned_pricing_catalog.sql",
-    "0009_final_hardening_schema.sql",
-    "0010_identity_mission_security_schema.sql",
-    "0011_strategic_commercial_schema.sql",
-    "0012_consolidated_business_schema.sql",
-    "0013_finance_workspace_schema.sql",
-    "0015_commercial_recruitment_schema.sql",
-    "0016_national_continuity_schema.sql",
-    "0017_brand_support_copilot_schema.sql",
-    "0018_dsa_ai_act_transparency_redress.sql"
-  ];
-  for (const name of legacy) assert.ok(workflow.includes(`"${name}"`), `legacy migration not explicitly allowlisted: ${name}`);
-  assert.match(workflow, /pending=\{"0021_supra_audit_events\.sql", "0022_supra_persisted_approvals\.sql"\}/);
-  assert.match(workflow, /baseline=\(local-pending\)\|legacy/);
-  assert.match(workflow, /fully_applied=local\|legacy/);
-  assert.match(workflow, /remote == baseline/);
-  assert.match(workflow, /remote == fully_applied/);
-  assert.match(workflow, /both reviewed safe states/);
+test("Preview migration workflow accepts only an empty EU D1 or the exact 22-entry canonical registry", () => {
+  assert.match(workflow, /SELECT type, name FROM sqlite_master ORDER BY type, name/);
+  assert.match(workflow, /registry_present/);
+  assert.match(workflow, /non_internal/);
+  assert.match(workflow, /len\(local\) != 22/);
+  assert.match(workflow, /remote == local/);
+  assert.match(workflow, /remote differs from both reviewed safe states|differs from both reviewed safe states/);
+  assert.doesNotMatch(workflow, /legacy=/);
+  assert.doesNotMatch(workflow, /baseline=\(local-pending\)\|legacy/);
 });
 
 test("Preview migration workflow verifies the final registry exactly after applying the pending migrations", () => {
   assert.match(workflow, /Verify exact reviewed Preview migration registry after apply/);
   assert.match(workflow, /expected=local\|legacy/);
-  assert.match(workflow, /remote != expected/);
+  assert.match(workflow, /remote != expected/);\n  assert.doesNotMatch(workflow, /legacy=/);
   assert.match(workflow, /final Preview migration registry exactly matches/);
 });
 
