@@ -55,6 +55,7 @@ test("Preview deploy pins isolated Worker and Preview D1, never Production", () 
   assert.match(generator, /PAGES_PREVIEW_ALIAS/);
   assert.match(generator, /pagesPreviewAlias/);
   assert.match(generator, /https:\/\/83a36d32\.prochelia\.pages\.dev/);
+  assert.match(generator, /https:\/\/6c01ea4a\.prochelia\.pages\.dev/);
   assert.match(generator, /bucket_name:\s*"prochelia-preview-backups-eu-v2"/);
   assert.match(generator, /jurisdiction:\s*"eu"/);
   assert.match(workflow, /Verify dedicated Preview R2 bucket has EU jurisdiction/);
