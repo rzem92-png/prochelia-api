@@ -176,9 +176,9 @@ jobs:
           if [[ -n "$pages_alias" ]]; then
             expected_origins+=("$pages_alias")
           fi
-          for expected_origin in "${dollar}{expected_origins[@]}"; do
+          for expected_origin in "${expected_origins[@]}"; do
             allowed_origin_found=false
-            for allowed_origin in "${dollar}{allowed_origins[@]}"; do
+            for allowed_origin in "${allowed_origins[@]}"; do
               if [[ "$(printf '%s' "$allowed_origin" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')" == "$expected_origin" ]]; then
                 allowed_origin_found=true
               fi
