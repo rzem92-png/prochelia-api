@@ -4,17 +4,28 @@ import { readFile } from "node:fs/promises";
 
 const workflow = await readFile(new URL("../.github/workflows/backup-preview-d1-to-r2-eu.yml", import.meta.url), "utf8");
 
-test("Preview R2 backup is manually gated and pinned to the reviewed EU Preview D1 config", () => {
-  assert.match(workflow, /confirm_preview_backup/);
-  assert.match(workflow, /BACKUP_PREVIEW_TO_R2_EU/);
+test("Preview R2 backup is manually gated to main and pinned to the reviewed EU Preview D1 config", () => {
+  assert.match(workflow, /github\.ref == 'refs\/heads\/main'/);
+  assert.match(workflow, /inputs\.confirm_preview_backup == 'BACKUP_PREVIEW_TO_R2_EU'/);
   assert.match(workflow, /ref: 1fc258c9c8d25e5e7b89241504218bf102afbf27/);
   assert.match(workflow, /clean="\\n"\.join/);
-  assert.match(workflow, /tr -d '\\\\r\\\\n'/);
   assert.match(workflow, /safe_identity=.*REDACTED/);
   assert.match(workflow, /wrangler\.preview-migrations\.jsonc/);
   assert.match(workflow, /prochelia-preview-eu-2026-11-17/);
   assert.match(workflow, /e3cf167c-37e1-4d72-9ac6-b3e27c14b97f/);
   assert.match(workflow, /04f52830-ef5a-4f17-a640-42bbc2381bba/);
+});
+
+test("Cloudflare token normalization strips actual CR and LF characters without deleting token characters", () => {
+  const lines = workflow.split("\n").filter(line => line.includes("tr -d"));
+  assert.equal(lines.length, 2);
+  for (const line of lines) assert.ok(line.includes(String.raw`tr -d '\r\n'`), line);
+  assert.doesNotMatch(workflow, /tr -d '\\\\r/);
+});
+
+test("Preview R2 backup pins third-party actions to immutable SHAs", () => {
+  assert.match(workflow, /actions\/checkout@[0-9a-f]{40}/);
+  assert.match(workflow, /actions\/setup-node@[0-9a-f]{40}/);
 });
 
 test("Preview R2 backup verifies both exact resources are EU before export", () => {
