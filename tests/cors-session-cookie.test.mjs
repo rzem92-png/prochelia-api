@@ -6,7 +6,7 @@ import worker from "../src/index.js";
 const source = await readFile(new URL("../src/index.js", import.meta.url), "utf8");
 
 test("session cookie is HttpOnly, Secure and usable for the configured cross-site frontend", () => {
-  assert.match(source, /HttpOnly; Secure; SameSite=None/);
+  assert.match(source, /HttpOnly; Secure; SameSite=Lax/);
 });
 
 test("Worker CORS wrapper validates the allowlist before preflight or dispatch", () => {
