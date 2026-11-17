@@ -35,9 +35,9 @@ test("Preview deployment resolves the latest successful Pages Preview before gen
 
 test("Preview deployment resolves the current Pages commit by default and accepts an optional exact SHA", () => {
   assert.match(workflow, /pages_commit_sha:/);
-  assert.match(workflow, /PAGES_EXPECTED_COMMIT: \\$\{\\{ inputs\\.pages_commit_sha \\|\\| '' \\}\\}/);
+  assert.match(workflow, /PAGES_EXPECTED_COMMIT: \$\{\{ inputs\.pages_commit_sha \|\| '' \}\}/);
   assert.match(workflow, /pages_commit_sha must be an exact 40-character lowercase Git SHA/);
-  assert.match(workflow, /test\("\^\[0-9a-f\]\{40\}\$"\)/);
+  assert.ok(workflow.includes('[[ -n "$PAGES_EXPECTED_COMMIT" && ! "$PAGES_EXPECTED_COMMIT" =~ ^[0-9a-f]{40}$ ]]'));
 });
 
 test("Preview deploy pins isolated Worker and Preview D1, never Production", () => {
