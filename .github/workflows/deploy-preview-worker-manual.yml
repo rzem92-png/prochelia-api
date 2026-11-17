@@ -103,8 +103,8 @@ jobs:
             echo "::error::Cloudflare returned an unexpected Pages Preview origin."
             exit 1
           }
-          printf 'PAGES_PREVIEW_ORIGIN=%s\nPAGES_PREVIEW_DEPLOYMENT_ID=%s\nPAGES_PREVIEW_COMMIT=%s\n' \
-            "$pages_origin" "$deployment_id" "$pages_commit" >> "$GITHUB_ENV"
+          printf 'PAGES_PREVIEW_ORIGIN=%s\nPAGES_PREVIEW_ALIAS=%s\nPAGES_PREVIEW_DEPLOYMENT_ID=%s\nPAGES_PREVIEW_COMMIT=%s\n' \
+            "$pages_origin" "$pages_alias" "$deployment_id" "$pages_commit" >> "$GITHUB_ENV"
           {
             echo "Verified Pages Preview origin: $pages_origin"
             echo "Pages Preview deployment: $deployment_id"
@@ -211,6 +211,6 @@ jobs:
           {
             echo 'Preview Worker only: prochelia-api-preview.'
             echo 'D1 binding is pinned to Preview DB e3cf167c-37e1-4d72-9ac6-b3e27c14b97f.'
-            echo "Backend source deployed from commit ${GITHUB_SHA}. Preview CORS allowlist includes the exact Pages Preview origin."
+            echo "Preview CORS allowlist includes the exact Pages Preview origin and validated branch alias when present."
             echo 'Preview APP_ENV and explicit CORS configuration are applied; no dashboard variables are implicitly preserved. No migrations, no production Worker, and no production D1 changes.'
           } >> "$GITHUB_STEP_SUMMARY"
