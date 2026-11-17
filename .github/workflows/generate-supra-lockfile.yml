@@ -31,6 +31,7 @@ jobs:
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           ref: feat/supra-intelligence-governance-v1
+          persist-credentials: false
       - name: Setup Node
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
@@ -40,15 +41,18 @@ jobs:
         run: |
           test "$GITHUB_REF" = "refs/heads/feat/supra-intelligence-governance-v1"
           node -e "const p=require('./package.json'); if(p.devDependencies?.wrangler!=='4.156.0') process.exit(1)"
-          test ! -e package-lock.json
-      - name: Generate lockfile without lifecycle scripts
+      - name: Generate lockfile only when absent
+        if: hashFiles('package-lock.json') == ''
         run: npm install --package-lock-only --ignore-scripts --no-audit --no-fund
       - name: Verify clean reproducible installation
         run: npm ci --ignore-scripts --no-audit --no-fund
       - name: Run build and complete regression suite
         run: npm run build && npm run check:worker && npm run check:worker:preview && npm test
       - name: Commit lockfile to feature branch only
+        if: hashFiles('package-lock.json') != ''
         shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -58,4 +62,5 @@ jobs:
             exit 0
           fi
           git commit -m "build: pin npm dependency graph for SUPRA branch"
+          gh auth setup-git
           git push origin HEAD:feat/supra-intelligence-governance-v1
