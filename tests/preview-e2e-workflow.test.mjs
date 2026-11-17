@@ -45,6 +45,20 @@ test("Pages Preview configuration and deployment are checked independently from 
   assert.match(workflow, /\.result\.is_skipped == false/);
 });
 
+test("Preview Worker CORS allowlist must contain the exact current Pages Preview origin", () => {
+  assert.match(workflow, /workers\\/scripts\\/prochelia-api-preview\\/settings/);
+  assert.match(workflow, /CORS_ORIGIN/);
+  assert.match(workflow, /grep -Fxq "\\$pages_url"/);
+  assert.match(workflow, /Do not change the Production Worker/);
+});
+
+test("Pages same-origin proxy probes the Worker Origin guard without creating business data", () => {
+  assert.match(workflow, /originProbe/);
+  assert.match(workflow, /api\\/missions\\/validate/);
+  assert.match(workflow, /originProbeBody\\.error !== 'AUTHENTICATED_VALIDATION_REQUIRED'/);
+  assert.match(workflow, /origin: base/);
+});
+
 test("Pages binding mismatch diagnostics expose only non-secret deployment metadata", () => {
   const marker = "Latest Pages Preview deployment is stale, skipped, failed, misbound, or built from an unexpected branch/commit.";
   const start = workflow.indexOf(marker);
