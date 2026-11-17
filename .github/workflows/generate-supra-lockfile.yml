@@ -1,0 +1,55 @@
+name: Generate and verify SUPRA branch lockfile
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirmation:
+        description: "Type GENERATE_PREVIEW_LOCKFILE to update only the SUPRA feature branch"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: supra-feature-lockfile
+  cancel-in-progress: false
+
+jobs:
+  lockfile:
+    if: github.ref == 'refs/heads/feat/supra-intelligence-governance-v1' && inputs.confirmation == 'GENERATE_PREVIEW_LOCKFILE'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout feature branch
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: feat/supra-intelligence-governance-v1
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22"
+      - name: Enforce branch and package-manager guard
+        shell: bash
+        run: |
+          test "$GITHUB_REF" = "refs/heads/feat/supra-intelligence-governance-v1"
+          node -e "const p=require('./package.json'); if(p.devDependencies?.wrangler!=='4.156.0') process.exit(1)"
+          test ! -e package-lock.json
+      - name: Generate lockfile without lifecycle scripts
+        run: npm install --package-lock-only --ignore-scripts --no-audit --no-fund
+      - name: Verify clean reproducible installation
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Run build and complete regression suite
+        run: npm run build && npm run check:worker && npm run check:worker:preview && npm test
+      - name: Commit lockfile to feature branch only
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add package-lock.json
+          if git diff --cached --quiet; then
+            echo "Lockfile unchanged; no commit required."
+            exit 0
+          fi
+          git commit -m "build: pin npm dependency graph for SUPRA branch"
+          git push origin HEAD:feat/supra-intelligence-governance-v1
