@@ -70,3 +70,9 @@ except sqlite3.IntegrityError:
     pass
 
 print(f"PASS: {len(list(MIGRATIONS.glob('*.sql')))} migrations; payment schema, atomic ledger, immutability and idempotency verified.")
+
+# Production-data workflows must only execute from the reviewed default branch.
+restore_workflow = (ROOT / ".github" / "workflows" / "restore-production-backup-isolated-test.yml").read_text(encoding="utf-8")
+required_gate = "if: github.ref == 'refs/heads/main' && inputs.confirmation == 'RESTORE_PRODUCTION_BACKUP_TO_ISOLATED_TEST_D1'"
+assert required_gate in restore_workflow, "production restore workflow must be restricted to main and require exact confirmation"
+assert "refs/heads/fix/isolated-restore-fresh-eu-d1-2026-11-15" not in restore_workflow, "feature branches must not receive production backup secrets"
