@@ -10,8 +10,8 @@ test("Preview migration secrets are available only from the reviewed main workfl
 });
 
 test("Preview migration workflow pins the dedicated Preview database and forbids production", () => {
-  assert.match(workflow, /EXPECTED_DB_NAME:\s*prochelia-preview-db/);
-  assert.match(workflow, /EXPECTED_DB_ID:\s*6adb95e5-e542-4bec-9008-fbea01042305/);
+  assert.match(workflow, /EXPECTED_DB_NAME:\s*prochelia-preview-eu-2026-11-17/);
+  assert.match(workflow, /EXPECTED_DB_ID:\s*e3cf167c-37e1-4d72-9ac6-b3e27c14b97f/);
   assert.match(workflow, /FORBIDDEN_PRODUCTION_DB_ID:/);
   assert.match(workflow, /test "\$EXPECTED_DB_ID" != "\$FORBIDDEN_PRODUCTION_DB_ID"/);
   assert.match(workflow, /confirm_preview == 'APPLY_PREVIEW_ONLY'/);
