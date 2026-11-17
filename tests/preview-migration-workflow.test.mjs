@@ -19,6 +19,7 @@ test("Preview migration workflow pins the dedicated Preview database and forbids
 
 test("Preview migration workflow validates the full canonical migration chain", () => {
   const expected = [
+    "0000_auth_foundation.sql",
     "0001_core_business_schema.sql",
     "0002_server_pricing.sql",
     "0003_route_address_provenance.sql",
@@ -87,11 +88,11 @@ test("Preview post-migration verification checks identity, mission-security and 
   ]) assert.ok(workflow.includes(name), `missing post-migration verification for ${name}`);
 });
 
-test("Preview migration workflow accepts only an empty EU D1 or the exact 22-entry canonical registry", () => {
+test("Preview migration workflow accepts only an empty EU D1 or the exact 23-entry canonical registry", () => {
   assert.match(workflow, /SELECT type, name FROM sqlite_master ORDER BY type, name/);
   assert.match(workflow, /registry_present/);
   assert.match(workflow, /non_internal/);
-  assert.match(workflow, /len\(local\) != 22/);
+  assert.match(workflow, /len\(local\) != 23/);
   assert.match(workflow, /remote == local/);
   assert.match(workflow, /remote differs from both reviewed safe states|differs from both reviewed safe states/);
   assert.doesNotMatch(workflow, /legacy=/);
@@ -132,7 +133,7 @@ test("Preview migration refuses to export D1 unless R2 bucket jurisdiction is ve
 
 
 test("Preview migration workflow pins the exact CI-validated Nexus source commit", () => {
-  assert.match(workflow, /ref: cbfb215e8e617a03f395f17fec51dd33fb1023b9/);
+  assert.match(workflow, /ref: 1fc258c9c8d25e5e7b89241504218bf102afbf27/);
   assert.doesNotMatch(workflow, /ref: integration\/nexus-supra-core-preview-2026-11-16/);
   assert.match(workflow, /0021_supra_audit_events\.sql/);
   assert.match(workflow, /0022_supra_persisted_approvals\.sql/);
