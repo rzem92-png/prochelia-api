@@ -24,7 +24,8 @@ const preview = {
       "https://staging-prochelia-v14-restor.prochelia.pages.dev",
       "https://feat-supra-control-center-v1.prochelia.pages.dev",
       "https://db884f74.prochelia.pages.dev",
-      "https://repair-prochelia-frontend-xs.prochelia.pages.dev"
+      "https://repair-prochelia-frontend-xs.prochelia.pages.dev",
+      "https://fix-frontend-cookie-session-7y26.prochelia.pages.dev"
     ].join(",")
   },
   d1_databases: [{
