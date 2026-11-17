@@ -1,6 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { readFile, mkdtemp, writeFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 
 const workflow = await readFile(new URL("../.github/workflows/deploy-preview-worker-manual.yml", import.meta.url), "utf8");
 
@@ -44,9 +48,23 @@ test("checkout and Node setup actions are pinned to immutable SHAs", () => {
   assert.match(workflow, /actions\/setup-node@[0-9a-f]{40}/);
 });
 
-test("Preview deployment generator JavaScript is syntactically valid", () => {
-  const match = workflow.match(/node --input-type=module <<'NODE'\n([\s\S]*?)\n\s+NODE/);
-  assert.ok(match, "Preview deployment generator heredoc must exist");
-  const script = match[1].replace(/^\s*import fs from 'node:fs';\s*$/m, "");
-  assert.doesNotThrow(() => new Function(script));
+test("Preview deployment config generator emits only isolated EU Preview bindings", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "prochelia-preview-config-"));
+  try {
+    await writeFile(join(directory, "wrangler.jsonc"), JSON.stringify({
+      name: "prochelia-api",
+      d1_databases: [{ binding: "DB", database_id: "04f52830-ef5a-4f17-a640-42bbc2381bba" }]
+    }));
+    const script = fileURLToPath(new URL("../scripts/generate-preview-wrangler-config.mjs", import.meta.url));
+    const result = spawnSync(process.execPath, [script], { cwd: directory, encoding: "utf8" });
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    const generated = JSON.parse(await readFile(join(directory, "wrangler.preview.generated.json"), "utf8"));
+    assert.equal(generated.name, "prochelia-api-preview");
+    assert.equal(generated.vars.APP_ENV, "preview");
+    assert.equal(generated.d1_databases[0].database_id, "e3cf167c-37e1-4d72-9ac6-b3e27c14b97f");
+    assert.equal(generated.r2_buckets[0].jurisdiction, "eu");
+    assert.notEqual(generated.d1_databases[0].database_id, "04f52830-ef5a-4f17-a640-42bbc2381bba");
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
 });
