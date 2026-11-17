@@ -1518,6 +1518,16 @@ async function executeCaseBusinessAction(env, c, rec, actorId=null, automatic=fa
 async function processActionOutbox(request, env) {
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
   await ensureOperationalSchema(env);
+  // A stale PROCESSING row may already have performed its side effect before a
+  // worker crash. Quarantine it for reconciliation; never replay it automatically.
+  const stale = await env.DB.prepare(`UPDATE action_outbox
+    SET status='RECONCILIATION_REQUIRED', lease_token=NULL, lease_expires_at=NULL,
+        last_error='Processing lease expired; inspect downstream effects before any manual retry.',
+        updated_at=CURRENT_TIMESTAMP
+    WHERE status='PROCESSING'
+      AND ((lease_expires_at IS NOT NULL AND lease_expires_at < CURRENT_TIMESTAMP)
+        OR (lease_expires_at IS NULL AND updated_at < datetime('now','-15 minutes')))`).run();
+  const reconciliationRequired = Number(stale?.meta?.changes || 0);
   const rows=await env.DB.prepare(`SELECT * FROM action_outbox WHERE status='PENDING' ORDER BY created_at ASC LIMIT 50`).all();
   const processed=[];
   for(const row of (rows.results||[])) {
@@ -1533,8 +1543,8 @@ async function processActionOutbox(request, env) {
     const result=await executeQueuedAction(env,row);
     processed.push({id:row.id,status:result.status||'FAILED',action_type:row.action_type,ok:!!result.ok,result:result.result||null,error:result.error||null});
   }
-  await journal(env,'gerante',gate.auth.user.id,'ACTION_OUTBOX_PROCESSED','system',null,'OK',{count:processed.length,completed:processed.filter(x=>x.status==='DONE').length,waiting:processed.filter(x=>x.status==='WAITING_PROVIDER').length,failed:processed.filter(x=>x.status==='FAILED').length});
-  return json({ok:true,version:VERSION,processed},200);
+  await journal(env,'gerante',gate.auth.user.id,'ACTION_OUTBOX_PROCESSED','system',null,'OK',{count:processed.length,reconciliation_required:reconciliationRequired,completed:processed.filter(x=>x.status==='DONE').length,waiting:processed.filter(x=>x.status==='WAITING_PROVIDER').length,failed:processed.filter(x=>x.status==='FAILED').length});
+  return json({ok:true,version:VERSION,processed,reconciliation_required:reconciliationRequired},200);
 }
 
 async function executeOperationalCase(env, caseId, approverId=null, automatic=false) {
@@ -2215,7 +2225,8 @@ async function ensureOperationalSchema(env) {
       entity_id TEXT, idempotency_key TEXT NOT NULL UNIQUE, status TEXT NOT NULL DEFAULT 'PENDING',
       payload_json TEXT NOT NULL DEFAULT '{}', result_json TEXT, attempts INTEGER NOT NULL DEFAULT 0,
       last_error TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, executed_at TEXT, processed_at TEXT
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, executed_at TEXT, processed_at TEXT,
+      lease_token TEXT, lease_expires_at TEXT
     )`,
     `CREATE INDEX IF NOT EXISTS idx_action_outbox_status ON action_outbox(status,created_at)`,
     `CREATE TABLE IF NOT EXISTS copilot_briefings (
@@ -2267,10 +2278,23 @@ async function ensureOperationalSchema(env) {
     )`
   ];
   for (const sql of statements) await env.DB.prepare(sql).run();
-  const actionInfo = await env.DB.prepare('PRAGMA table_info(action_outbox)').all();
-  const actionColumns = (actionInfo.results || []).map(x => String(x.name));
-  if (!actionColumns.includes('case_id')) await env.DB.prepare('ALTER TABLE action_outbox ADD COLUMN case_id TEXT').run();
-  if (!actionColumns.includes('processed_at')) await env.DB.prepare('ALTER TABLE action_outbox ADD COLUMN processed_at TEXT').run();
+  const initialActionInfo = await env.DB.prepare('PRAGMA table_info(action_outbox)').all();
+  let actionColumns = new Set((initialActionInfo.results || []).map(x => String(x.name)));
+  const ensureActionColumn = async (column) => {
+    if (actionColumns.has(column)) return;
+    try {
+      await env.DB.prepare(`ALTER TABLE action_outbox ADD COLUMN ${column} TEXT`).run();
+      actionColumns.add(column);
+    } catch (error) {
+      // Another request may have completed the same additive schema change.
+      const refreshed = await env.DB.prepare('PRAGMA table_info(action_outbox)').all();
+      actionColumns = new Set((refreshed.results || []).map(x => String(x.name)));
+      if (!actionColumns.has(column)) throw error;
+    }
+  };
+  for (const column of ['case_id','processed_at','lease_token','lease_expires_at']) {
+    await ensureActionColumn(column);
+  }
 }
 
 async function tableExists(env, table) {
@@ -2296,21 +2320,39 @@ async function dynamicUpdate(env, table, id, updates) {
   return {ok:true,updated:usable.map(([k])=>k)};
 }
 
+// The UNIQUE idempotency key plus read-after-conflict makes concurrent enqueue requests converge on one row.
 async function queueAction(env, actionType, entityType, entityId, payload, idem) {
   const key = idem || crypto.randomUUID();
   const existing = await env.DB.prepare('SELECT * FROM action_outbox WHERE idempotency_key=? LIMIT 1').bind(key).first();
   if (existing) return existing;
   const id = crypto.randomUUID();
-  await env.DB.prepare(`INSERT INTO action_outbox(id,action_type,entity_type,entity_id,idempotency_key,payload_json) VALUES(?,?,?,?,?,?)`)
-    .bind(id,actionType,entityType||null,entityId||null,key,JSON.stringify(payload||{})).run();
+  try {
+    await env.DB.prepare(`INSERT INTO action_outbox(id,action_type,entity_type,entity_id,idempotency_key,payload_json) VALUES(?,?,?,?,?,?)`)
+      .bind(id,actionType,entityType||null,entityId||null,key,JSON.stringify(payload||{})).run();
+  } catch (error) {
+    // A concurrent request may win the UNIQUE(idempotency_key) insert after our SELECT.
+    const raced = await env.DB.prepare('SELECT * FROM action_outbox WHERE idempotency_key=? LIMIT 1').bind(key).first();
+    if (raced) return raced;
+    throw error;
+  }
   return await env.DB.prepare('SELECT * FROM action_outbox WHERE id=?').bind(id).first();
 }
 
 async function executeQueuedAction(env, action) {
   if (!action) return {ok:false,error:'ACTION_NOT_FOUND'};
-  const payload = JSON.parse(action.payload_json||'{}');
+  // Atomically claim the row before any side effect. Concurrent workers can
+  // observe PENDING, but only one may transition it to PROCESSING.
+  const leaseToken = crypto.randomUUID();
+  const claim = await env.DB.prepare(`UPDATE action_outbox
+    SET status='PROCESSING', lease_token=?, lease_expires_at=datetime('now','+15 minutes'),
+        attempts=attempts+1, updated_at=CURRENT_TIMESTAMP
+    WHERE id=? AND status='PENDING'`).bind(leaseToken,action.id).run();
+  if (Number(claim?.meta?.changes || 0) !== 1) {
+    return {ok:false,status:'SKIPPED',error:'ACTION_ALREADY_CLAIMED'};
+  }
   const now = new Date().toISOString();
   try {
+    const payload = JSON.parse(action.payload_json||'{}');
     let result = {performed:false,action:action.action_type};
     if (action.action_type === 'NOTIFY') {
       const channel = payload.channel || 'IN_APP';
@@ -2322,8 +2364,13 @@ async function executeQueuedAction(env, action) {
           title:payload.title||'PROCHÉLIA',message:payload.message||'',payload_json:JSON.stringify(payload)};
         const usable = Object.entries(values).filter(([k])=>cols.includes(k));
         if (usable.length) {
-          const sql=`INSERT INTO notification_outbox(${usable.map(x=>x[0]).join(',')}) VALUES(${usable.map(()=>'?').join(',')})`;
-          await env.DB.prepare(sql).bind(...usable.map(x=>x[1])).run();
+          const sql=`INSERT INTO notification_outbox(${usable.map(x=>x[0]).join(',')})
+            SELECT ${usable.map(()=>'?').join(',')}
+            WHERE EXISTS (SELECT 1 FROM action_outbox WHERE id=? AND status='PROCESSING' AND lease_token=?)`;
+          const inserted = await env.DB.prepare(sql).bind(...usable.map(x=>x[1]),action.id,leaseToken).run();
+          if (Number(inserted?.meta?.changes || 0) !== 1) {
+            return {ok:false,status:'RECONCILIATION_REQUIRED',error:'OUTBOX_LEASE_LOST_BEFORE_NOTIFICATION'};
+          }
           result={performed:true,channel,notification_queued:true};
         } else result={performed:false,reason:'NOTIFICATION_SCHEMA_INCOMPATIBLE'};
       } else result={performed:false,reason:'NOTIFICATION_TABLE_MISSING'};
@@ -2340,25 +2387,50 @@ async function executeQueuedAction(env, action) {
     } else if (action.action_type === 'ACCOUNTING_ENTRY') {
       if (await tableExists(env,'accounting_ledger')) {
         const cols=await tableColumns(env,'accounting_ledger');
-        const values={id:crypto.randomUUID(),entry_type:payload.entry_type||'OPERATIONAL',amount_cents:Number(payload.amount_cents||0),
-          debit_cents:Number(payload.debit_cents||0),credit_cents:Number(payload.credit_cents||0),reference_type:action.entity_type,
-          reference_id:action.entity_id,description:payload.description||'',metadata_json:JSON.stringify(payload)};
-        const usable=Object.entries(values).filter(([k])=>cols.includes(k));
-        if(usable.length){
-          await env.DB.prepare(`INSERT INTO accounting_ledger(${usable.map(x=>x[0]).join(',')}) VALUES(${usable.map(()=>'?').join(',')})`).bind(...usable.map(x=>x[1])).run();
+        const amountCents=Number(payload.amount_cents);
+        const direction=String(payload.direction||'').toUpperCase();
+        const accountCode=String(payload.account_code||'').trim();
+        const referenceType=String(action.entity_type||payload.reference_type||'').trim();
+        const referenceId=String(action.entity_id||payload.reference_id||'').trim();
+        const currency=String(payload.currency||'EUR').toUpperCase();
+        const required=['reference_type','reference_id','account_code','direction','amount_cents','currency','metadata_json'];
+        if(required.some(name=>!cols.includes(name))) {
+          result={performed:false,reason:'ACCOUNTING_SCHEMA_INCOMPATIBLE'};
+        } else if(!Number.isSafeInteger(amountCents) || amountCents<=0 ||
+          !['DEBIT','CREDIT'].includes(direction) || !accountCode || !referenceType || !referenceId ||
+          !/^[A-Z]{3}$/.test(currency)) {
+          result={performed:false,reason:'ACCOUNTING_ENTRY_INVALID'};
+        } else {
+          const values={id:crypto.randomUUID(),reference_type:referenceType,reference_id:referenceId,
+            account_code:accountCode,direction,amount_cents:amountCents,currency,
+            label:String(payload.label||payload.description||'').slice(0,500),metadata_json:JSON.stringify(payload)};
+          const names=Object.keys(values);
+          const inserted = await env.DB.prepare(`INSERT INTO accounting_ledger(${names.join(',')})
+            SELECT ${names.map(()=>'?').join(',')}
+            WHERE EXISTS (SELECT 1 FROM action_outbox WHERE id=? AND status='PROCESSING' AND lease_token=?)`)
+            .bind(...names.map(name=>values[name]),action.id,leaseToken).run();
+          if (Number(inserted?.meta?.changes || 0) !== 1) {
+            return {ok:false,status:'RECONCILIATION_REQUIRED',error:'OUTBOX_LEASE_LOST_BEFORE_ACCOUNTING_WRITE'};
+          }
           result={performed:true,accounting_recorded:true};
-        } else result={performed:false,reason:'ACCOUNTING_SCHEMA_INCOMPATIBLE'};
+        }
       } else result={performed:false,reason:'ACCOUNTING_TABLE_MISSING'};
     } else result={performed:false,reason:'ACTION_TYPE_NOT_IMPLEMENTED'};
 
     const finalStatus = result.performed ? 'DONE' : (result.requires_provider ? 'WAITING_PROVIDER' : 'FAILED');
-    await env.DB.prepare(`UPDATE action_outbox SET status=?,result_json=?,attempts=attempts+1,updated_at=CURRENT_TIMESTAMP,executed_at=? WHERE id=?`)
-      .bind(finalStatus,JSON.stringify(result),result.performed?now:null,action.id).run();
+    const finalized = await env.DB.prepare(`UPDATE action_outbox SET status=?,result_json=?,updated_at=CURRENT_TIMESTAMP,executed_at=?,lease_token=NULL,lease_expires_at=NULL WHERE id=? AND status='PROCESSING' AND lease_token=?`)
+      .bind(finalStatus,JSON.stringify(result),result.performed?now:null,action.id,leaseToken).run();
+    if (Number(finalized?.meta?.changes || 0) !== 1) {
+      return {ok:false,status:'RECONCILIATION_REQUIRED',error:'ACTION_FINALIZATION_NOT_OWNED',result};
+    }
     return {ok:true,status:finalStatus,result};
   } catch(e) {
-    await env.DB.prepare(`UPDATE action_outbox SET status='FAILED',last_error=?,attempts=attempts+1,updated_at=CURRENT_TIMESTAMP WHERE id=?`)
-      .bind(String(e.message||e),action.id).run();
-    return {ok:false,error:'ACTION_EXECUTION_FAILED',message:e.message};
+    const failed = await env.DB.prepare(`UPDATE action_outbox SET status='FAILED',last_error=?,updated_at=CURRENT_TIMESTAMP,lease_token=NULL,lease_expires_at=NULL WHERE id=? AND status='PROCESSING' AND lease_token=?`)
+      .bind(String(e.message||e),action.id,leaseToken).run();
+    if (Number(failed?.meta?.changes || 0) !== 1) {
+      return {ok:false,status:'RECONCILIATION_REQUIRED',error:'ACTION_FAILURE_NOT_OWNED',message:e.message};
+    }
+    return {ok:false,status:'FAILED',error:'ACTION_EXECUTION_FAILED',message:e.message};
   }
 }
 

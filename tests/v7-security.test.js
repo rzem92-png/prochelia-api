@@ -1,3 +1,4 @@
+import "./operational-outbox-hardening.test.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { handleV7Route } from "../src/v7-routes.js";
