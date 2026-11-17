@@ -31,13 +31,20 @@ concurrency:
 jobs:
   preview-directory-e2e:
     if: >-
-      github.ref == 'refs/heads/main' &&
       (
-        (github.event_name == 'workflow_dispatch' && inputs.confirmation == 'RUN_PREVIEW_DIRECTORY_E2E') ||
-        (github.event_name == 'workflow_run' &&
-         github.event.workflow_run.event == 'workflow_dispatch' &&
-         github.event.workflow_run.conclusion == 'success' &&
-         github.event.workflow_run.head_branch == 'main')
+        github.ref == 'refs/heads/main' &&
+        (
+          (github.event_name == 'workflow_dispatch' && inputs.confirmation == 'RUN_PREVIEW_DIRECTORY_E2E') ||
+          (github.event_name == 'workflow_run' &&
+           github.event.workflow_run.event == 'workflow_dispatch' &&
+           github.event.workflow_run.conclusion == 'success' &&
+           github.event.workflow_run.head_branch == 'main')
+        )
+      ) ||
+      (
+        github.ref == 'refs/heads/fix/preview-e2e-dynamic-pages-pin-2026-11-17' &&
+        github.event_name == 'workflow_dispatch' &&
+        inputs.confirmation == 'RUN_PREVIEW_DIRECTORY_E2E'
       )
     runs-on: ubuntu-latest
     timeout-minutes: 20
