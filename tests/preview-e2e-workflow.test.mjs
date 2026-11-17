@@ -12,24 +12,21 @@ test("Preview E2E is gated by explicit confirmation or a successful isolated Pre
   assert.match(workflow, /github\.ref == 'refs\/heads\/main'/);
 });
 
-test("Preview E2E pins Preview D1 and resolves the current Pages deployment dynamically", () => {
-  assert.match(workflow, /PREVIEW_DB_ID: 6adb95e5-e542-4bec-9008-fbea01042305/);
-  assert.match(workflow, /deployments\?env=preview&per_page=20/);
-  assert.match(workflow, /PAGES_DEPLOYMENT_ID=.*jq -er/);
-  assert.match(workflow, /\.d1_databases\.DB\.id == \$db/);
-  assert.match(workflow, /\.services\.PROCHELIA_API\.service == \$worker/);
+test("Preview E2E pins its own D1, Worker and Pages deployment", () => {
+  assert.match(workflow, /PREVIEW_DB_ID: e3cf167c-37e1-4d72-9ac6-b3e27c14b97f/);
+  assert.match(workflow, /PAGES_DEPLOYMENT_ID: 83a36d32-4880-4417-a684-f9247e42debf/);
+  assert.match(workflow, /PAGES_PREVIEW_URL: https:\/\/83a36d32\.prochelia\.pages\.dev/);
   assert.match(workflow, /prochelia-api-preview/);
-  assert.doesNotMatch(workflow, /PAGES_DEPLOYMENT_ID: [0-9a-f-]{36}/);
-  assert.doesNotMatch(workflow, /e69fde70fb28405aa8117eaf041aed618d3da664/);
+  assert.match(workflow, /3846562300e97a1816b2aa7e317448449270c2bc/);
   assert.doesNotMatch(workflow, /PREVIEW_DB_ID: 04f52830-ef5a-4f17-a640-42bbc2381bba/);
 });
 
-test("Pages deployment mismatch diagnostics expose only non-secret deployment metadata", () => {
-  const marker = "Selected Pages Preview deployment bindings mismatch. Safe metadata diagnostic follows.";
+test("Pages binding mismatch diagnostics expose only non-secret deployment metadata", () => {
+  const marker = "Safe metadata diagnostic follows.";
   const start = workflow.indexOf(marker);
   assert.notEqual(start, -1, "safe mismatch diagnostic must exist");
   const block = workflow.slice(start, workflow.indexOf("exit 1", start));
-  for (const field of ["environment", "stage", "d1_database_id", "worker_service", "commit_hash"]) {
+  for (const field of ["environment", "uses_functions", "d1_database_id", "worker_service", "commit_hash"]) {
     assert.match(block, new RegExp(field));
   }
   assert.doesNotMatch(block, /CLOUDFLARE_API_TOKEN|Authorization|Bearer/);
