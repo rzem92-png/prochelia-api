@@ -30,8 +30,8 @@ jobs:
       EXPECTED_ACCOUNT_ID: f2a79e9fa41566a8ec80fb24c02c60eb
       EXPECTED_DB_NAME: prochelia-preview-eu-2026-11-17
       EXPECTED_DB_ID: e3cf167c-37e1-4d72-9ac6-b3e27c14b97f
-      R2_BUCKET: prochelia-preview-backups-eu
-      R2_ENDPOINT: https://f2a79e9fa41566a8ec80fb24c02c60eb.r2.cloudflarestorage.com
+      R2_BUCKET: prochelia-preview-backups-eu-locked
+      R2_ENDPOINT: https://f2a79e9fa41566a8ec80fb24c02c60eb.eu.r2.cloudflarestorage.com
     steps:
       - name: Enforce preview-only branch and exact workflow commit
         shell: bash
@@ -81,6 +81,19 @@ jobs:
           printf '%s\n' "$identity"
           printf '%s' "$identity" | grep -Fq "$EXPECTED_ACCOUNT_ID"
 
+      - name: Verify exact EU R2 bucket and Preview D1 jurisdiction before export
+        shell: bash
+        run: |
+          set -euo pipefail
+          token="$(printf '%s' "$CLOUDFLARE_API_TOKEN" | sed -E 's/^[[:space:]]*Bearer[[:space:]]+//I; s/^[[:space:]]+//; s/[[:space:]]+$//' | tr -d '\r\n')"
+          test -n "$token"
+          status="$(curl --silent --show-error --output "$RUNNER_TEMP/preview-r2-eu.json" --write-out '%{http_code}' "https://api.cloudflare.com/client/v4/accounts/$EXPECTED_ACCOUNT_ID/r2/buckets/$R2_BUCKET" -H "Authorization: Bearer $token" -H 'cf-r2-jurisdiction: eu')"
+          test "$status" = "200" || { echo "::error::EU R2 bucket lookup failed (HTTP $status); no export performed."; exit 1; }
+          jq -e --arg bucket "$R2_BUCKET" '.success == true and .result.name == $bucket and .result.jurisdiction == "eu"' "$RUNNER_TEMP/preview-r2-eu.json" >/dev/null || { echo "::error::R2 bucket jurisdiction is not explicitly EU."; exit 1; }
+          status="$(curl --silent --show-error --output "$RUNNER_TEMP/preview-d1-eu.json" --write-out '%{http_code}' "https://api.cloudflare.com/client/v4/accounts/$EXPECTED_ACCOUNT_ID/d1/database/$EXPECTED_DB_ID" -H "Authorization: Bearer $token")"
+          test "$status" = "200" || { echo "::error::Preview D1 metadata lookup failed (HTTP $status); no export performed."; exit 1; }
+          jq -e --arg id "$EXPECTED_DB_ID" --arg name "$EXPECTED_DB_NAME" '.success == true and .result.uuid == $id and .result.name == $name and .result.jurisdiction == "eu"' "$RUNNER_TEMP/preview-d1-eu.json" >/dev/null || { echo "::error::Preview D1 is not the exact EU database."; exit 1; }
+          echo "PASS: exact D1 and R2 resources confirmed in EU before backup."
       - name: Install local restore-validation tools
         shell: bash
         run: |
