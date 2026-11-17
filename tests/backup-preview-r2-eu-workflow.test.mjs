@@ -28,6 +28,9 @@ test("Preview R2 backup verifies both exact resources are EU before export", () 
 test("Preview backup is encrypted, round-trip verified and cannot mutate D1 or Production", () => {
   assert.match(workflow, /cipher-algo AES256/);
   assert.match(workflow, /sqlite3 .*PRAGMA integrity_check/);
+  assert.match(workflow, /PRAGMA foreign_key_check/);
+  assert.match(workflow, /roundtrip-validation\\.sqlite/);
+  assert.match(workflow, /roundtrip_foreign_keys/);
   assert.match(workflow, /sha256/);
   assert.match(workflow, /Download backup and verify encryption\/checksum/);
   assert.doesNotMatch(workflow, /d1 migrations apply/);
