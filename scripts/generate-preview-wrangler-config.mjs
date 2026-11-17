@@ -4,6 +4,7 @@ const production = JSON.parse(fs.readFileSync("wrangler.jsonc", "utf8"));
 const expectedPreviewId = "e3cf167c-37e1-4d72-9ac6-b3e27c14b97f";
 const expectedProductionId = "04f52830-ef5a-4f17-a640-42bbc2381bba";
 const pagesPreviewOrigin = process.env.PAGES_PREVIEW_ORIGIN || "";
+const pagesPreviewAlias = process.env.PAGES_PREVIEW_ALIAS || "";
 
 if (production.name !== "prochelia-api") {
   throw new Error("Unexpected Production Worker config");
@@ -14,6 +15,9 @@ if (!production.d1_databases?.some((db) => db.binding === "DB" && db.database_id
 if (!/^https:\/\/[a-z0-9-]+\.prochelia\.pages\.dev$/.test(pagesPreviewOrigin)) {
   throw new Error("PAGES_PREVIEW_ORIGIN must be the exact verified HTTPS Pages Preview deployment origin");
 }
+if (pagesPreviewAlias && !/^https:\/\/[a-z0-9-]+\.prochelia\.pages\.dev$/.test(pagesPreviewAlias)) {
+  throw new Error("PAGES_PREVIEW_ALIAS must be a verified HTTPS Pages Preview alias");
+}
 
 const allowedOrigins = [
   "https://83a36d32.prochelia.pages.dev",
@@ -22,7 +26,8 @@ const allowedOrigins = [
   "https://feat-supra-control-center-v1.prochelia.pages.dev",
   "https://db884f74.prochelia.pages.dev",
   "https://repair-prochelia-frontend-xs.prochelia.pages.dev",
-  pagesPreviewOrigin
+  pagesPreviewOrigin,
+  ...(pagesPreviewAlias ? [pagesPreviewAlias] : [])
 ];
 const corsOrigins = [...new Set(allowedOrigins)];
 
@@ -52,9 +57,10 @@ if (preview.name === production.name ||
     preview.d1_databases.some((db) => db.database_id === expectedProductionId) ||
     preview.d1_databases[0].database_id !== expectedPreviewId ||
     preview.r2_buckets[0].jurisdiction !== "eu" ||
-    !preview.vars.CORS_ORIGIN.split(",").includes(pagesPreviewOrigin)) {
+    !preview.vars.CORS_ORIGIN.split(",").includes(pagesPreviewOrigin) ||
+    (pagesPreviewAlias && !preview.vars.CORS_ORIGIN.split(",").includes(pagesPreviewAlias))) {
   throw new Error("Preview resources are not isolated and explicitly EU-scoped");
 }
 
 fs.writeFileSync("wrangler.preview.generated.json", JSON.stringify(preview, null, 2));
-console.log("Verified isolated Preview Worker, EU D1, EU R2 and exact Pages Preview origin.");
+console.log("Verified isolated Preview Worker, EU D1, EU R2 and Pages Preview origin/alias.");
