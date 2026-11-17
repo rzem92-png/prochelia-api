@@ -160,6 +160,19 @@ jobs:
             echo "::error::Pages Preview URL is not a verified project deployment URL."
             exit 1
           }
+          cf_request "Preview Worker settings" \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/prochelia-api-preview/settings" "$RUNNER_TEMP/preview-worker-settings.json"
+          cors_origin="$(jq -r '.result.bindings[] | select(.name == "CORS_ORIGIN" and .type == "plain_text") | .text' "$RUNNER_TEMP/preview-worker-settings.json")"
+          [[ -n "$cors_origin" && "$cors_origin" != "null" ]] || {
+            echo "::error::Preview Worker CORS_ORIGIN binding is missing."
+            exit 1
+          }
+          if ! printf '%s' "$cors_origin" | tr ',' '\\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | grep -Fxq "$pages_url"; then
+            echo "::error::Preview Worker CORS_ORIGIN does not allow the latest Pages Preview origin."
+            echo "::error::Add this exact origin to the PREVIEW Worker only: $pages_url"
+            echo "::error::Do not change the Production Worker or remove the existing allowlist entries."
+            exit 1
+          fi
           cat > "$RUNNER_TEMP/wrangler.preview.json" <<'JSON'
           {
             "name": "prochelia-preview-e2e",
