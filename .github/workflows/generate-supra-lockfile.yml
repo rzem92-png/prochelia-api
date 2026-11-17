@@ -1,6 +1,12 @@
 name: Generate and verify SUPRA branch lockfile
 
 on:
+  push:
+    branches:
+      - feat/supra-intelligence-governance-v1
+    paths:
+      - .github/workflows/generate-supra-lockfile.yml
+      - package.json
   workflow_dispatch:
     inputs:
       confirmation:
@@ -17,7 +23,7 @@ concurrency:
 
 jobs:
   lockfile:
-    if: github.ref == 'refs/heads/feat/supra-intelligence-governance-v1' && inputs.confirmation == 'GENERATE_PREVIEW_LOCKFILE'
+    if: github.ref == 'refs/heads/feat/supra-intelligence-governance-v1' && (github.event_name == 'push' || inputs.confirmation == 'GENERATE_PREVIEW_LOCKFILE')
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
