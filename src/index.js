@@ -1769,6 +1769,14 @@ async function pricingQuote(request, env) {
 
 async function financeSummary(request, env) {
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
+  // Fail closed: current aggregates are global and are not scoped to a verified
+  // tenant, accounting period or currency. Do not expose them as company finance.
+  return json({
+    ok:false,
+    error:'TENANT_SCOPED_FINANCE_NOT_READY',
+    message:'Financial reporting is unavailable until tenant-scoped, currency-aware and reconciled accounting queries are implemented.',
+    version:VERSION
+  },503);
   const tx=await env.DB.prepare(`SELECT COALESCE(SUM(gross_cents),0) gross,COALESCE(SUM(commission_cents),0) commission,COALESCE(SUM(provider_fee_cents),0) provider_fee,COALESCE(SUM(refund_cents),0) refunds,COALESCE(SUM(net_intervenant_cents),0) intervenant FROM payment_transactions`).first();
   const ledger=await env.DB.prepare(`SELECT COALESCE(SUM(CASE WHEN direction='CREDIT' THEN amount_cents ELSE -amount_cents END),0) balance FROM accounting_ledger`).first();
   const expenses=await env.DB.prepare(`SELECT COALESCE(SUM(amount_cents),0) total FROM business_expenses`).first();
