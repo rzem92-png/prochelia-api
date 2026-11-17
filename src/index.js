@@ -1543,6 +1543,9 @@ async function processActionOutbox(request, env) {
 }
 
 async function executeOperationalCase(env, caseId, approverId=null, automatic=false) {
+  // Central kill switch: no caller may execute operational mutations until
+  // tenant/workspace context and resource-level authorization are implemented.
+  return {ok:false,error:'TENANT_SCOPED_EXECUTION_NOT_IMPLEMENTED'};
   const c=await env.DB.prepare('SELECT * FROM operational_cases WHERE id=? LIMIT 1').bind(caseId).first();
   if(!c)return {ok:false,error:'CASE_NOT_FOUND'};
   if(c.status==='RESOLVED')return {ok:true,already:true};
