@@ -16,7 +16,10 @@ on:
     paths:
       - .github/workflows/preview-directory-e2e-acceptance.yml
       - .github/workflows/validate-preview-e2e-contract.yml
+      - .github/workflows/deploy-preview-worker-manual.yml
+      - scripts/generate-preview-wrangler-config.mjs
       - tests/preview-e2e-workflow.test.mjs
+      - tests/deploy-preview-workflow.test.mjs
 
 permissions:
   contents: read
