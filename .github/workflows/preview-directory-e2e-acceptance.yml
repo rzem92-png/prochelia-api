@@ -34,8 +34,8 @@ jobs:
     timeout-minutes: 20
     env:
       CLOUDFLARE_ACCOUNT_ID: f2a79e9fa41566a8ec80fb24c02c60eb
-      PREVIEW_DB_NAME: prochelia-preview-db
-      PREVIEW_DB_ID: 6adb95e5-e542-4bec-9008-fbea01042305
+      PREVIEW_DB_NAME: prochelia-preview-eu-2026-11-17
+      PREVIEW_DB_ID: e3cf167c-37e1-4d72-9ac6-b3e27c14b97f
       PAGES_PREVIEW_URL: https://83a36d32.prochelia.pages.dev
       PAGES_DEPLOYMENT_ID: 83a36d32-4880-4417-a684-f9247e42debf
     steps:
@@ -116,8 +116,8 @@ jobs:
             "compatibility_date": "2026-09-25",
             "d1_databases": [{
               "binding": "DB",
-              "database_name": "prochelia-preview-db",
-              "database_id": "6adb95e5-e542-4bec-9008-fbea01042305"
+              "database_name": "prochelia-preview-eu-2026-11-17",
+              "database_id": "e3cf167c-37e1-4d72-9ac6-b3e27c14b97f"
             }]
           }
           JSON
@@ -213,7 +213,7 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         run: |
           set -euo pipefail
-          [[ "$PREVIEW_DB_ID" == "6adb95e5-e542-4bec-9008-fbea01042305" ]]
+          [[ "$PREVIEW_DB_ID" == "e3cf167c-37e1-4d72-9ac6-b3e27c14b97f" ]]
           [[ "$PREVIEW_DB_ID" != "04f52830-ef5a-4f17-a640-42bbc2381bba" ]]
           npx --yes wrangler@4 d1 execute "$PREVIEW_DB_NAME" --remote --config "$RUNNER_TEMP/wrangler.preview.json" --file="$RUNNER_TEMP/preview-e2e-seed.sql" --yes
           echo "Synthetic fixtures inserted into Preview D1 only."
@@ -279,7 +279,7 @@ jobs:
             echo "No synthetic Preview fixtures were created; cleanup not required."
             exit 0
           fi
-          [[ "$PREVIEW_DB_ID" == "6adb95e5-e542-4bec-9008-fbea01042305" ]]
+          [[ "$PREVIEW_DB_ID" == "e3cf167c-37e1-4d72-9ac6-b3e27c14b97f" ]]
           npx --yes wrangler@4 d1 execute "$PREVIEW_DB_NAME" --remote --config "$RUNNER_TEMP/wrangler.preview.json" --file="$RUNNER_TEMP/preview-e2e-cleanup.sql" --yes
           payload="{\"sql\":\"SELECT (SELECT COUNT(*) FROM users WHERE id LIKE 'e2e-$GITHUB_RUN_ID-%') AS users, (SELECT COUNT(*) FROM sessions WHERE id LIKE 'e2e-$GITHUB_RUN_ID-%') AS sessions, (SELECT COUNT(*) FROM clients WHERE id LIKE 'e2e-$GITHUB_RUN_ID-%') AS clients, (SELECT COUNT(*) FROM intervenants WHERE id LIKE 'e2e-$GITHUB_RUN_ID-%') AS intervenants\"}"
           status="$(curl --silent --show-error --output "$RUNNER_TEMP/cleanup-check.json" --write-out '%{http_code}' \
