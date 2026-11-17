@@ -90,9 +90,8 @@ jobs:
             echo "::error::Wrangler authentication failed. Check token validity and permissions."
             exit 1
           }
-          safe_identity="${identity//"$CLOUDFLARE_API_TOKEN"/[REDACTED]}"
-          printf '%s\n' "$safe_identity"
-          printf '%s' "$safe_identity" | grep -Fq "$EXPECTED_ACCOUNT_ID"
+          printf '%s' "$identity" | grep -Fq "$EXPECTED_ACCOUNT_ID"
+          echo "PASS: Wrangler authenticated to the expected Cloudflare account."
 
       - name: Verify exact EU R2 bucket and Preview D1 jurisdiction before export
         shell: bash
