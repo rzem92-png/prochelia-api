@@ -81,3 +81,22 @@ test("stale PROCESSING actions are quarantined for reconciliation and never auto
   assert.match(handler, /WHERE status='PENDING'/);
   assert.doesNotMatch(handler, /SET status='PENDING'.*RECONCILIATION_REQUIRED/s);
 });
+
+test("idempotency insert races re-read and return the winning outbox row", () => {
+  const handler = section("async function queueAction", "async function executeQueuedAction");
+  assert.match(handler, /UNIQUE\(idempotency_key\)/);
+  assert.match(handler, /catch\s*\(error\)/);
+  assert.match(handler, /SELECT \* FROM action_outbox WHERE idempotency_key=\? LIMIT 1/);
+  assert.match(handler, /if \(raced\) return raced/);
+});
+
+test("executor reports reconciliation instead of false success when its claim was lost", () => {
+  const executor = section("async function executeQueuedAction(env,", "async function operationalExecute(request, env)");
+  assert.match(executor, /const finalized = await env\.DB\.prepare/);
+  assert.match(executor, /finalized\?\.meta\?\.changes/);
+  assert.match(executor, /ACTION_FINALIZATION_NOT_OWNED/);
+  assert.match(executor, /const failed = await env\.DB\.prepare/);
+  assert.match(executor, /failed\?\.meta\?\.changes/);
+  assert.match(executor, /ACTION_FAILURE_NOT_OWNED/);
+  assert.match(executor, /status:'RECONCILIATION_REQUIRED'/);
+});
