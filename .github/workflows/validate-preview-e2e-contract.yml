@@ -8,6 +8,7 @@ on:
       - .github/workflows/preview-directory-e2e-acceptance.yml
       - .github/workflows/validate-preview-e2e-contract.yml
       - .github/workflows/deploy-preview-worker-manual.yml
+      - .github/workflows/worker-build-validation.yml
       - scripts/generate-preview-wrangler-config.mjs
       - tests/preview-e2e-workflow.test.mjs
       - tests/deploy-preview-workflow.test.mjs
@@ -17,6 +18,7 @@ on:
       - .github/workflows/preview-directory-e2e-acceptance.yml
       - .github/workflows/validate-preview-e2e-contract.yml
       - .github/workflows/deploy-preview-worker-manual.yml
+      - .github/workflows/worker-build-validation.yml
       - scripts/generate-preview-wrangler-config.mjs
       - tests/preview-e2e-workflow.test.mjs
       - tests/deploy-preview-workflow.test.mjs
@@ -43,5 +45,6 @@ jobs:
         run: |
           ruby -e 'require "yaml"; YAML.load_file(".github/workflows/preview-directory-e2e-acceptance.yml")'
           ruby -e 'require "yaml"; YAML.load_file(".github/workflows/deploy-preview-worker-manual.yml")'
+          ruby -e 'require "yaml"; YAML.load_file(".github/workflows/worker-build-validation.yml")'
       - name: Validate dynamic Preview deployment, CORS and fixture safety contracts
         run: node --experimental-default-type=module --test tests/preview-e2e-workflow.test.mjs tests/deploy-preview-workflow.test.mjs
