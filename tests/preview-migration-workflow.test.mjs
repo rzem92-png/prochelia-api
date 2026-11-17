@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { readFile, readdir } from "node:fs/promises";
 
 const workflow = await readFile(new URL("../.github/workflows/apply-preview-d1-migrations.yml", import.meta.url), "utf8");
 
@@ -173,7 +173,7 @@ test("Preview migration workflow verifies every persisted approval table, index 
 
 test("Preview migration commands use only the dedicated migration-only D1 config", () => {
   assert.match(workflow, /Path\("wrangler\.preview-migrations\.jsonc"\)/);
-  assert.match(workflow, /binding\] == "PREVIEW_DB"/);
+  assert.match(workflow, /db\["binding"\] == "PREVIEW_DB"/);
   assert.match(workflow, /--config wrangler\.preview-migrations\.jsonc/);
   assert.doesNotMatch(workflow, /--config wrangler\.jsonc/);
   assert.doesNotMatch(workflow, /Path\("wrangler\.jsonc"\)/);
