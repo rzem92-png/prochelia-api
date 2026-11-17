@@ -9,6 +9,7 @@ on:
       - "tests/**"
       - ".github/workflows/v7-security-tests.yml"
       - ".github/workflows/backup-production-d1-to-r2.yml"
+      - ".github/workflows/restore-production-backup-isolated-test.yml"
       - ".github/workflows/deploy-preview-worker-manual.yml"
       - ".github/workflows/preview-directory-e2e-acceptance.yml"
       - ".github/workflows/provision-preview-r2-eu.yml"
@@ -38,7 +39,7 @@ jobs:
       - name: Lint guarded Preview deployment workflows
         run: |
           go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
-          "$HOME/go/bin/actionlint" .github/workflows/backup-production-d1-to-r2.yml .github/workflows/deploy-preview-worker-manual.yml .github/workflows/preview-directory-e2e-acceptance.yml .github/workflows/provision-preview-r2-eu.yml
+          "$HOME/go/bin/actionlint" .github/workflows/backup-production-d1-to-r2.yml .github/workflows/restore-production-backup-isolated-test.yml .github/workflows/deploy-preview-worker-manual.yml .github/workflows/preview-directory-e2e-acceptance.yml .github/workflows/provision-preview-r2-eu.yml
       - name: Run production backup workflow regression tests
         run: node --experimental-default-type=module --test tests/production-backup-r2-workflow.test.mjs
       - name: Run V7 authorization regression tests
