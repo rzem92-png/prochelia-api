@@ -60,20 +60,20 @@ jobs:
             exit 1
           fi
 
-      - name: Independently verify jurisdiction and location
+      - name: Independently verify EU jurisdiction (location hint is best-effort)
         shell: bash
         run: |
           set -euo pipefail
           token="${CLOUDFLARE_API_TOKEN#Bearer }"
           status="$(curl --silent --show-error --output "$RUNNER_TEMP/r2-final.json" --write-out '%{http_code}' "https://api.cloudflare.com/client/v4/accounts/$EXPECTED_ACCOUNT_ID/r2/buckets/$BUCKET" -H "Authorization: Bearer $token" -H 'cf-r2-jurisdiction: eu')"
           test "$status" = "200"
-          jq -e --arg bucket "$BUCKET" '.success == true and .result.name == $bucket and .result.jurisdiction == "eu" and .result.location == "EEUR"' "$RUNNER_TEMP/r2-final.json" >/dev/null || {
-            echo "::error::Final bucket verification did not confirm jurisdiction=eu and location=EEUR."
+          jq -e --arg bucket "$BUCKET" '.success == true and .result.name == $bucket and .result.jurisdiction == "eu" and (.result.location | type == "string" and length > 0)' "$RUNNER_TEMP/r2-final.json" >/dev/null || {
+            echo "::error::Final bucket verification did not confirm the exact bucket and EU jurisdiction."
             exit 1
           }
           {
             echo "Verified Preview-only R2 bucket: $BUCKET."
-            echo "Cloudflare metadata confirms jurisdiction=eu and location=EEUR."
+            jq -r '"Cloudflare metadata confirms jurisdiction=eu; actual location=" + .result.location + "."' "$RUNNER_TEMP/r2-final.json"
             echo "No existing bucket was renamed, deleted, rebound, or copied."
             echo "No Worker deployment, D1 migration, Production change, or customer-data transfer occurred."
           } >> "$GITHUB_STEP_SUMMARY"
