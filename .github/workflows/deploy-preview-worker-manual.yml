@@ -7,6 +7,10 @@ on:
         description: "Type DEPLOY_PREVIEW_ONLY to deploy the isolated Preview Worker"
         required: true
         type: string
+      pages_commit_sha:
+        description: "Optional exact 40-character frontend Pages Preview commit to require"
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -25,6 +29,8 @@ jobs:
       inputs.confirmation == 'DEPLOY_PREVIEW_ONLY'
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    env:
+      PAGES_EXPECTED_COMMIT: ${{ inputs.pages_commit_sha || '' }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
@@ -44,6 +50,10 @@ jobs:
             echo "::error::Unexpected Cloudflare account; refusing Preview configuration."
             exit 1
           }
+          if [[ -n "$PAGES_EXPECTED_COMMIT" && ! "$PAGES_EXPECTED_COMMIT" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::pages_commit_sha must be an exact 40-character lowercase Git SHA."
+            exit 1
+          fi
           token="$(printf '%s' "$CLOUDFLARE_API_TOKEN" | sed -E 's/^[[:space:]]*Bearer[[:space:]]+//I; s/^[[:space:]]+//; s/[[:space:]]+$//')"
           [[ -n "$token" ]] || { echo "::error::Cloudflare API token is missing."; exit 1; }
           cf_get() {
@@ -71,7 +81,7 @@ jobs:
           [[ -n "$deployment_id" ]] || { echo "::error::No Pages Preview deployment exists."; exit 1; }
           cf_get "Latest Pages Preview deployment details" \
             "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/pages/projects/prochelia/deployments/$deployment_id" "$RUNNER_TEMP/pages-preview.json"
-          jq -e '
+          jq -e --arg expected "$PAGES_EXPECTED_COMMIT" '
             .result.environment == "preview" and
             .result.is_skipped == false and
             .result.latest_stage.status == "success" and
@@ -79,8 +89,8 @@ jobs:
             .result.d1_databases.DB.id == "e3cf167c-37e1-4d72-9ac6-b3e27c14b97f" and
             .result.services.PROCHELIA_API.service == "prochelia-api-preview" and
             .result.deployment_trigger.metadata.branch == "fix/frontend-cookie-session-auth-2026-11-17" and
-            .result.deployment_trigger.metadata.commit_hash == "579679da7ca3a68b91448a85e7151bda5794a155" and
-            (.result.deployment_trigger.metadata.commit_hash | type == "string" and test("^[0-9a-f]{40}$"))
+            (.result.deployment_trigger.metadata.commit_hash | type == "string" and test("^[0-9a-f]{40}$")) and
+            ($expected == "" or .result.deployment_trigger.metadata.commit_hash == $expected)
           ' "$RUNNER_TEMP/pages-preview.json" >/dev/null || {
             echo "::error::Latest Pages Preview deployment is failed, skipped, misbound or from an unexpected branch."
             jq -c '{id: .result.id, stage: .result.latest_stage, branch: .result.deployment_trigger.metadata.branch, commit: .result.deployment_trigger.metadata.commit_hash, d1: .result.d1_databases.DB.id, service: .result.services.PROCHELIA_API.service, uses_functions: .result.uses_functions}' "$RUNNER_TEMP/pages-preview.json"
