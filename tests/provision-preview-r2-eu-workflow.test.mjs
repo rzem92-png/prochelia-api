@@ -34,5 +34,5 @@ test("R2 provisioning never deploys, migrates, or changes Production", () => {
 });
 
 test("R2 provisioning uses no floating third-party GitHub actions", () => {
-  assert.doesNotMatch(workflow, /^\\s+uses:/m);
+  assert.ok(!workflow.includes("uses:"));
 });
