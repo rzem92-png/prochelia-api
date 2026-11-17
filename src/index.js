@@ -1421,24 +1421,18 @@ async function journal(env, actorType, actorId, action, entityType=null, entityI
 
 async function copilotRecommend(env, input) {
   const { caseType, impact='LOW', phase='TEST', context={} } = input;
+  // Fail closed: recommendations are proposals only until tenant-scoped authorization,
+  // resource validation and an audited approval/execution path are available.
   const sensitive = SENSITIVE_CASES.has(caseType) || impact === 'CRITICAL' || impact === 'HIGH';
-  const simple = SIMPLE_CASES.has(caseType) && !sensitive;
-  let action = 'ANALYZE_AND_PROPOSE';
-  let solution = { steps:['qualify','simulate','notify','audit'], automatic:false };
-  if (simple) {
-    action='AUTO_RESOLVE';
-    solution={steps:['detect','validate_rules','execute','verify','notify','audit','close'],automatic:true};
-  } else if (caseType==='retard_intervenant' || caseType==='absence_intervenant' || caseType==='aucun_profil_disponible') {
-    action='SEARCH_REPLACEMENT';
-    solution={steps:['recalculate_delay','search_qualified_available_profiles','score_distance_reliability','propose_replacement','notify','audit'],automatic:false};
-  } else if (caseType==='panne_application' || caseType==='incident_technique') {
-    action='CONTINUITY';
-    solution={steps:['isolate_failure','protect_client_flow','retry_safe_operation','fallback_channel','verify','audit'],automatic:!sensitive};
-  } else if (caseType==='reclamation_client' || caseType==='litige') {
-    action='RESOLVE_CASE';
-    solution={steps:['collect_evidence','reconcile_mission','reconcile_finance','calculate_impact','propose_resolution','notify','audit'],automatic:false};
-  }
-  return { action, mode: solution.automatic ? 'AUTO' : 'MANAGER_APPROVAL', confidence: simple ? 0.95 : 0.82, solution, context, phase };
+  const solution = { steps:['qualify','simulate','prepare_proposal','audit'], automatic:false };
+  return {
+    action:'ANALYZE_AND_PROPOSE',
+    mode:'MANAGER_APPROVAL',
+    confidence: sensitive ? 0.70 : 0.80,
+    solution,
+    context,
+    phase
+  };
 }
 
 async function createOperationalCase(request, env) {
@@ -1450,15 +1444,16 @@ async function createOperationalCase(request, env) {
   const priority=CASE_PRIORITIES[impact]||10;
   const rec=await copilotRecommend(env,{caseType,impact,phase,context:body.context||{}});
   const id=crypto.randomUUID();
-  const requiresManager=rec.mode==='MANAGER_APPROVAL' ? 1 : 0;
-  const status=rec.action==='AUTO_RESOLVE' ? 'AUTO_PENDING' : 'OPEN';
+  const requiresManager=1;
+  const status='OPEN';
   await env.DB.prepare(`INSERT INTO operational_cases(id,case_type,source,phase,priority,status,auto_mode,client_id,company_id,intervenant_id,mission_id,impact_level,description,context_json,proposed_solution_json,requires_manager) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
     .bind(id,caseType,'API',phase,priority,status,rec.mode,clean(body.client_id)||null,clean(body.company_id)||null,clean(body.intervenant_id)||null,clean(body.mission_id)||null,impact,clean(body.description)||null,JSON.stringify(body.context||{}),JSON.stringify(rec),requiresManager).run();
   await env.DB.prepare(`INSERT INTO copilot_log(id,case_id,action_type,recommendation,confidence,mode) VALUES(?,?,?,?,?,?)`)
     .bind(crypto.randomUUID(),id,rec.action,JSON.stringify(rec.solution),rec.confidence,rec.mode).run();
   await journal(env,'copilot',null,'CASE_CREATED','operational_case',id,'OK',{caseType,impact});
-  if(rec.action==='AUTO_RESOLVE') await executeOperationalCase(env,id,null,true);
-  return json({ok:true,version:VERSION,case_id:id,recommendation:rec,status:rec.action==='AUTO_RESOLVE'?'AUTO_EXECUTED':'WAITING_MANAGER'},201);
+  // No execution from case creation. Tenant-scoped approval and resource checks
+  // must be implemented before any operational mutation is enabled.
+  return json({ok:true,version:VERSION,case_id:id,recommendation:rec,status:'WAITING_SECURITY_REVIEW'},201);
 }
 
 
@@ -1574,9 +1569,14 @@ async function executeOperationalCase(env, caseId, approverId=null, automatic=fa
 
 async function approveOperationalCase(request, env) {
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
-  const body=await readJson(request)||{}; if(!body.case_id)return json({ok:false,error:'CASE_ID_REQUIRED',version:VERSION},400);
-  const result=await executeOperationalCase(env,body.case_id,gate.auth.user.id,false);
-  return json({...result,version:VERSION},result.ok?200:409);
+  // Fail closed: the current session does not yet prove tenant/workspace membership
+  // and the case/resource ownership checks are not implemented end-to-end.
+  return json({
+    ok:false,
+    error:'TENANT_SCOPED_APPROVAL_NOT_IMPLEMENTED',
+    message:'Operational execution remains disabled until verified tenant context and resource-level authorization are available.',
+    version:VERSION
+  },503);
 }
 
 async function getOperationsDashboard(request, env) {
