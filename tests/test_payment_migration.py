@@ -1,4 +1,5 @@
 import pathlib
+import re
 import sqlite3
 import unittest
 
@@ -27,14 +28,40 @@ class PaymentMigrationTests(unittest.TestCase):
         }
         self.assertTrue(expected.issubset(tables))
 
+    @staticmethod
+    def _assert_no_destructive_sql(sql):
+        # Strip full-line and trailing SQL comments before checking statements.
+        sql = re.sub(r"--[^\n]*", "", sql).upper()
+        forbidden = (
+            r"\bDROP\s+TABLE\b",
+            r"\bDROP\s+INDEX\b",
+            r"\bDELETE\s+FROM\b",
+            r"^\s*UPDATE\s+",
+        )
+        for pattern in forbidden:
+            if re.search(pattern, sql, flags=re.MULTILINE):
+                raise AssertionError(f"Destructive SQL detected: {pattern}")
+
     def test_migration_has_no_destructive_sql(self):
-        import re
         sql = MIGRATION.read_text(encoding="utf-8")
-        # Ignore comments; reject destructive SQL statements rather than incidental words.
-        sql = re.sub(r"--[^\\n]*", "", sql).upper()
-        for forbidden in (r"\\bDROP\\s+TABLE\\b", r"\\bDROP\\s+INDEX\\b",
-                          r"\\bDELETE\\s+FROM\\b", r"^\\s*UPDATE\\s+"):
-            self.assertIsNone(re.search(forbidden, sql, flags=re.MULTILINE))
+        self._assert_no_destructive_sql(sql)
+
+    def test_destructive_sql_guard_detects_real_statements(self):
+        statements = (
+            "DROP TABLE users;",
+            "DROP INDEX idx_users;",
+            "DELETE FROM users;",
+            "UPDATE users SET active = 0;",
+        )
+        for statement in statements:
+            with self.subTest(statement=statement):
+                with self.assertRaises(AssertionError):
+                    self._assert_no_destructive_sql(statement)
+
+    def test_destructive_sql_guard_ignores_comment_text(self):
+        self._assert_no_destructive_sql(
+            "-- DROP TABLE users;\nCREATE TABLE safe_table (id INTEGER);"
+        )
 
     def test_unique_idempotency_constraints(self):
         self.db.executescript(MIGRATION.read_text(encoding="utf-8"))
