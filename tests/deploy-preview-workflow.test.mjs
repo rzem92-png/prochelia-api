@@ -15,11 +15,12 @@ test("Preview deploy pins isolated Worker and Preview D1, never production", () 
   assert.match(workflow, /e3cf167c-37e1-4d72-9ac6-b3e27c14b97f/);
   assert.match(workflow, /04f52830-ef5a-4f17-a640-42bbc2381bba/);
   assert.match(workflow, /preview\.name === production\.name/);
-  assert.match(workflow, /keep_vars:\s*true/);
+  assert.match(workflow, /APP_ENV:\s*'preview'/);
+  assert.doesNotMatch(workflow, /keep_vars|--keep-vars/);
   assert.match(workflow, /r2_buckets:\s*\[\{/);
   assert.match(workflow, /binding:\s*'BACKUP_BUCKET'/);
   assert.match(workflow, /https:\/\/83a36d32\.prochelia\.pages\.dev/);
-  assert.match(workflow, /bucket_name:\s*'prochelia-preview-backups-eu-locked'/);
+  assert.match(workflow, /bucket_name:\s*'prochelia-preview-backups-eu-v2'/);
   assert.match(workflow, /Verify dedicated Preview R2 bucket has EU jurisdiction/);
   assert.match(workflow, /cf-r2-jurisdiction: eu/);
   assert.match(workflow, /jurisdiction == "eu"/);
@@ -33,7 +34,7 @@ test("Preview deploy runs the complete security suite and dry-run before the onl
   assert.match(workflow, /tests\/directory-api\.test\.js/);
   assert.match(workflow, /tests\/bootstrap-atomic\.test\.js/);
   assert.match(workflow, /--dry-run/);
-  assert.match(workflow, /wrangler@4 deploy --config wrangler\.preview\.generated\.json --keep-vars/);
+  assert.match(workflow, /wrangler@4 deploy --config wrangler\.preview\.generated\.json/);
   assert.doesNotMatch(workflow, /d1 migrations apply/);
 });
 
