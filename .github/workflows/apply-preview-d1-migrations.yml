@@ -37,7 +37,7 @@ jobs:
       - name: Checkout pinned canonical preproduction migration chain
         uses: actions/checkout@v4
         with:
-          ref: integration/nexus-supra-core-preview-2026-11-16
+          ref: cbfb215e8e617a03f395f17fec51dd33fb1023b9
 
       - name: Verify credentials, exact Preview target and complete migration chain
         shell: bash
@@ -50,14 +50,16 @@ jobs:
           import json
           from pathlib import Path
 
-          config = json.loads(Path("wrangler.jsonc").read_text())
-          assert config["name"] == "prochelia-api-staging", "Unexpected Worker config"
+          raw = Path("wrangler.preview-migrations.jsonc").read_text()
+          clean = "\n".join(line for line in raw.splitlines() if not line.lstrip().startswith("//"))
+          config = json.loads(clean)
           dbs = config["d1_databases"]
           assert len(dbs) == 1, "Unexpected additional D1 binding"
           db = dbs[0]
-          assert db["binding"] == "DB"
+          assert db["binding"] == "PREVIEW_DB"
           assert db["database_name"] == "prochelia-preview-db"
           assert db["database_id"] == "6adb95e5-e542-4bec-9008-fbea01042305"
+          assert db["migrations_dir"] == "migrations-preview-canonical"
 
           expected = [
             "0001_core_business_schema.sql",
@@ -83,14 +85,15 @@ jobs:
             "0021_supra_audit_events.sql",
             "0022_supra_persisted_approvals.sql",
           ]
-          actual = sorted(p.name for p in Path("migrations").glob("*.sql"))
+          actual = sorted(p.name for p in Path("migrations-preview-canonical").glob("*.sql"))
           assert actual == sorted(expected), (
             f"Migration chain mismatch. Expected {len(expected)} canonical files, "
             f"found {len(actual)}. No migration will run."
           )
+          canonical_dir = Path("migrations-preview-canonical")
           for name in expected:
-            p = Path("migrations") / name
-            assert p.is_file() and p.stat().st_size > 0, f"Missing migration: {name}"
+            p = canonical_dir / name
+            assert p.is_file() and p.stat().st_size > 0, f"Missing canonical migration: {name}"
           print(f"PASS: exact Preview D1 target and all {len(expected)} canonical migrations verified")
           PY
           test "$EXPECTED_DB_NAME" = "prochelia-preview-db"
@@ -112,6 +115,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          token="$(printf '%s' "$CLOUDFLARE_API_TOKEN" | sed -E 's/^[[:space:]]*Bearer[[:space:]]+//I; s/^[[:space:]]+//; s/[[:space:]]+$//' | tr -d '\\r\\n')"
+          test -n "$token"
+          CLOUDFLARE_API_TOKEN="$token"
+          echo "CLOUDFLARE_API_TOKEN=$token" >> "$GITHUB_ENV"
           identity="$(npx --yes wrangler@4 whoami 2>&1)" || {
             echo "::error::Wrangler authentication failed. Check token validity and permissions."
             exit 1
@@ -137,6 +144,20 @@ jobs:
             exit 1
           }
           echo "PASS: R2 bucket identity and EU jurisdiction confirmed before D1 export."
+      - name: Verify Preview D1 identity and EU jurisdiction before export
+        shell: bash
+        run: |
+          set -euo pipefail
+          token="$(printf '%s' "$CLOUDFLARE_API_TOKEN" | sed -E 's/^[[:space:]]*Bearer[[:space:]]+//I; s/^[[:space:]]+//; s/[[:space:]]+$//' | tr -d '\\r\\n')"
+          test -n "$token"
+          status="$(curl --silent --show-error --output "$RUNNER_TEMP/preview-d1-jurisdiction.json" --write-out '%{http_code}' "https://api.cloudflare.com/client/v4/accounts/$EXPECTED_ACCOUNT_ID/d1/database/$EXPECTED_DB_ID" -H "Authorization: Bearer $token")"
+          test "$status" = "200" || { echo "::error::Preview D1 metadata lookup failed (HTTP $status); refusing export and migration."; exit 1; }
+          jq -e --arg id "$EXPECTED_DB_ID" --arg name "$EXPECTED_DB_NAME" '.success == true and .result.uuid == $id and .result.name == $name and .result.jurisdiction == "eu"' "$RUNNER_TEMP/preview-d1-jurisdiction.json" >/dev/null || {
+            echo "::error::Preview D1 identity or explicit EU jurisdiction verification failed; refusing export and migration."
+            exit 1
+          }
+          echo "PASS: Preview D1 identity and EU jurisdiction confirmed before export."
+
       - name: Export only Preview D1 before migration
         shell: bash
         run: |
@@ -145,7 +166,7 @@ jobs:
           mkdir -p "$RUNNER_TEMP/prochelia-backup"
           sudo apt-get update
           sudo apt-get install --yes --no-install-recommends sqlite3
-          npx --yes wrangler@4 d1 export "$EXPECTED_DB_NAME" --remote --config wrangler.jsonc --skip-confirmation --output="$RUNNER_TEMP/prochelia-backup/prochelia-preview.sql"
+          npx --yes wrangler@4 d1 export "$EXPECTED_DB_NAME" --remote --config wrangler.preview-migrations.jsonc --skip-confirmation --output="$RUNNER_TEMP/prochelia-backup/prochelia-preview.sql"
           test -s "$RUNNER_TEMP/prochelia-backup/prochelia-preview.sql"
           sha256sum "$RUNNER_TEMP/prochelia-backup/prochelia-preview.sql" | awk '{print $1}' > "$RUNNER_TEMP/prochelia-backup/manifest.sha256"
           sqlite3 "$RUNNER_TEMP/prochelia-backup/restore-validation.sqlite" < "$RUNNER_TEMP/prochelia-backup/prochelia-preview.sql"
@@ -215,7 +236,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          npx --yes wrangler@4 d1 migrations list "$EXPECTED_DB_NAME" --remote --config wrangler.jsonc
+          npx --yes wrangler@4 d1 migrations list "$EXPECTED_DB_NAME" --remote --config wrangler.preview-migrations.jsonc
 
       - name: Refuse divergent migration history before any schema write
         shell: bash
@@ -236,7 +257,7 @@ jobs:
           import json, pathlib, sys
           payload=json.loads(pathlib.Path(sys.argv[1]).read_text())
           remote=set(row["name"] for row in payload["result"][0]["results"])
-          local=set(p.name for p in pathlib.Path("migrations").glob("*.sql"))
+          local=set(p.name for p in pathlib.Path("migrations-preview-canonical").glob("*.sql"))
           pending={"0021_supra_audit_events.sql", "0022_supra_persisted_approvals.sql"}
           legacy={
               "0005_payment_runtime_schema.sql",
@@ -273,7 +294,7 @@ jobs:
           set -euo pipefail
           test "$EXPECTED_DB_ID" = "6adb95e5-e542-4bec-9008-fbea01042305"
           test "$EXPECTED_DB_ID" != "$FORBIDDEN_PRODUCTION_DB_ID"
-          npx --yes wrangler@4 d1 migrations apply "$EXPECTED_DB_NAME" --remote --config wrangler.jsonc
+          npx --yes wrangler@4 d1 migrations apply "$EXPECTED_DB_NAME" --remote --config wrangler.preview-migrations.jsonc
 
       - name: Verify migration registry and rate-limit schema
         shell: bash
@@ -360,7 +381,7 @@ jobs:
               raise SystemExit(1)
           print("PASS: four migrations, all ten security tables, all eleven indexes and all seven approval triggers are present on Preview D1.")
           PY
-          npx --yes wrangler@4 d1 migrations list "$EXPECTED_DB_NAME" --remote --config wrangler.jsonc
+          npx --yes wrangler@4 d1 migrations list "$EXPECTED_DB_NAME" --remote --config wrangler.preview-migrations.jsonc
           echo "PASS: identity, rate-limit and Nexus audit/approval migrations 0016/0020/0021/0022 schemas and triggers are present on Preview D1."
 
       - name: Verify exact reviewed Preview migration registry after apply
@@ -377,7 +398,7 @@ jobs:
           import json, pathlib, sys
           payload=json.loads(pathlib.Path(sys.argv[1]).read_text())
           remote=set(row["name"] for row in payload["result"][0]["results"])
-          local=set(p.name for p in pathlib.Path("migrations").glob("*.sql"))
+          local=set(p.name for p in pathlib.Path("migrations-preview-canonical").glob("*.sql"))
           legacy={
               "0005_payment_runtime_schema.sql",
               "0006_restore_wallet_balance_guard.sql",

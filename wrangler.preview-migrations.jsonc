@@ -6,7 +6,7 @@
       "binding": "PREVIEW_DB",
       "database_name": "prochelia-preview-db",
       "database_id": "6adb95e5-e542-4bec-9008-fbea01042305",
-      "migrations_dir": "migrations"
+      "migrations_dir": "migrations-preview-canonical"
     }
   ]
 }

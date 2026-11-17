@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { readFile, readdir } from "node:fs/promises";
 
 const workflow = await readFile(new URL("../.github/workflows/apply-preview-d1-migrations.yml", import.meta.url), "utf8");
 
@@ -144,8 +144,9 @@ test("Preview migration refuses to export D1 unless R2 bucket jurisdiction is ve
 });
 
 
-test("Preview migration workflow pins the Nexus branch containing both additive migrations", () => {
-  assert.match(workflow, /ref: integration\/nexus-supra-core-preview-2026-11-16/);
+test("Preview migration workflow pins the exact CI-validated Nexus source commit", () => {
+  assert.match(workflow, /ref: cbfb215e8e617a03f395f17fec51dd33fb1023b9/);
+  assert.doesNotMatch(workflow, /ref: integration\/nexus-supra-core-preview-2026-11-16/);
   assert.match(workflow, /0021_supra_audit_events\.sql/);
   assert.match(workflow, /0022_supra_persisted_approvals\.sql/);
 });
@@ -168,4 +169,47 @@ test("Preview migration workflow verifies every persisted approval table, index 
     "trg_supra_approval_status_evidence"
   ]) assert.ok(workflow.includes(name), `missing persisted approval schema verification: ${name}`);
   assert.match(workflow, /actual_triggers != expected_triggers/);
+});
+
+test("Preview migration commands use only the dedicated migration-only D1 config", () => {
+  assert.match(workflow, /Path\("wrangler\.preview-migrations\.jsonc"\)/);
+  assert.match(workflow, /db\["binding"\] == "PREVIEW_DB"/);
+  assert.match(workflow, /db\["migrations_dir"\] == "migrations-preview-canonical"/);
+  assert.match(workflow, /--config wrangler\.preview-migrations\.jsonc/);
+  assert.doesNotMatch(workflow, /--config wrangler\.jsonc/);
+  assert.doesNotMatch(workflow, /Path\("wrangler\.jsonc"\)/);
+});
+
+test("all canonical migrations required by the remote apply gate physically exist in the checked-out source", async () => {
+  const expected = [
+    "0001_core_business_schema.sql", "0002_server_pricing.sql",
+    "0003_route_address_provenance.sql", "0004_atomic_wallet_ledger.sql",
+    "0005_security_rate_limits.sql", "0006_copilot_schema.sql",
+    "0007_trust_passport_schema.sql", "0008_commercial_recruitment_schema.sql",
+    "0009_finance_workspace_schema.sql", "0010_strategic_schema.sql",
+    "0011_final_hardening_schema.sql", "0012_national_continuity_schema.sql",
+    "0013_master_complement_schema.sql", "0014_operational_schema.sql",
+    "0015_production_security_events.sql", "0016_security_identity_schema.sql",
+    "0017_document_security_scans.sql", "0018_consolidated_business_schema.sql",
+    "0019_backup_verifications.sql", "0020_auth_login_rate_limits.sql",
+    "0021_supra_audit_events.sql", "0022_supra_persisted_approvals.sql"
+  ];
+  const actual = new Set(await readdir(new URL("../migrations-preview-canonical/", import.meta.url)));
+  const missing = expected.filter(name => !actual.has(name));
+  assert.deepEqual(missing, [], "migration apply must not proceed with missing canonical source files");
+
+  assert.match(workflow, /canonical_dir = Path\("migrations-preview-canonical"\)/);
+  assert.match(workflow, /Missing canonical migration/);
+  assert.doesNotMatch(workflow, /p = Path\("migrations"\) \/ name/);
+});
+
+test("Preview migration refuses export unless the exact D1 database has explicit EU jurisdiction", () => {
+  const gate = workflow.indexOf("Verify Preview D1 identity and EU jurisdiction before export");
+  const exportStep = workflow.indexOf("Export only Preview D1 before migration");
+  assert.ok(gate >= 0 && exportStep > gate, "D1 jurisdiction gate must precede export");
+  assert.match(workflow, /database\/\$EXPECTED_DB_ID/);
+  assert.match(workflow, /\.result\.uuid == \$id/);
+  assert.match(workflow, /\.result\.name == \$name/);
+  assert.match(workflow, /\.result\.jurisdiction == "eu"/);
+  assert.match(workflow, /refusing export and migration/);
 });
