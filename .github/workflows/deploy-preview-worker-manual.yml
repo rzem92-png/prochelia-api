@@ -45,8 +45,8 @@ jobs:
             main: 'src/index.js',
             compatibility_date: '2026-09-25',
             workers_dev: true,
-            keep_vars: true,
             vars: {
+              APP_ENV: 'preview',
               CORS_ORIGIN: [
                 'https://83a36d32.prochelia.pages.dev',
                 'https://c3ceec86.prochelia.pages.dev',
@@ -63,7 +63,7 @@ jobs:
             }],
             r2_buckets: [{
               binding: 'BACKUP_BUCKET',
-              bucket_name: 'prochelia-preview-backups-eu-locked'
+              bucket_name: 'prochelia-preview-backups-eu-v2'
             }],
             observability: { logs: { enabled: true, invocation_logs: true } }
           };
@@ -71,7 +71,7 @@ jobs:
             throw new Error('Preview target is not isolated');
           }
           fs.writeFileSync('wrangler.preview.generated.json', JSON.stringify(preview, null, 2));
-          console.log('Preview Worker and Preview D1 identifiers verified; dashboard variables will be preserved.');
+          console.log('Preview Worker, Preview D1, APP_ENV and EU R2 bucket identifiers verified.');
           NODE
       - name: Check Worker source syntax
         run: |
@@ -164,12 +164,12 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-        run: npx --yes wrangler@4 deploy --config wrangler.preview.generated.json --keep-vars
+        run: npx --yes wrangler@4 deploy --config wrangler.preview.generated.json
       - name: Record deployment guardrails
         run: |
           {
             echo 'Preview Worker only: prochelia-api-preview.'
             echo 'D1 binding is pinned to Preview DB e3cf167c-37e1-4d72-9ac6-b3e27c14b97f.'
             echo "Backend source deployed from commit ${GITHUB_SHA}. Preview CORS allowlist includes the exact Pages Preview origin."
-            echo 'Dashboard vars and existing secrets are preserved. No migrations, no production Worker, and no production D1 changes.'
+            echo 'Preview APP_ENV and explicit CORS configuration are applied; no dashboard variables are implicitly preserved. No migrations, no production Worker, and no production D1 changes.'
           } >> "$GITHUB_STEP_SUMMARY"
