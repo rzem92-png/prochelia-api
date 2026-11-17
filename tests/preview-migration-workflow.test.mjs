@@ -145,7 +145,7 @@ test("Preview migration refuses to export D1 unless R2 bucket jurisdiction is ve
 
 
 test("Preview migration workflow pins the exact CI-validated Nexus source commit", () => {
-  assert.match(workflow, /ref: 01be347463a992040cc8c5ad6ee84c6a2411df1e/);
+  assert.match(workflow, /ref: cbfb215e8e617a03f395f17fec51dd33fb1023b9/);
   assert.doesNotMatch(workflow, /ref: integration\/nexus-supra-core-preview-2026-11-16/);
   assert.match(workflow, /0021_supra_audit_events\.sql/);
   assert.match(workflow, /0022_supra_persisted_approvals\.sql/);
@@ -174,6 +174,7 @@ test("Preview migration workflow verifies every persisted approval table, index 
 test("Preview migration commands use only the dedicated migration-only D1 config", () => {
   assert.match(workflow, /Path\("wrangler\.preview-migrations\.jsonc"\)/);
   assert.match(workflow, /db\["binding"\] == "PREVIEW_DB"/);
+  assert.match(workflow, /db\["migrations_dir"\] == "migrations-preview-canonical"/);
   assert.match(workflow, /--config wrangler\.preview-migrations\.jsonc/);
   assert.doesNotMatch(workflow, /--config wrangler\.jsonc/);
   assert.doesNotMatch(workflow, /Path\("wrangler\.jsonc"\)/);
@@ -193,7 +194,7 @@ test("all canonical migrations required by the remote apply gate physically exis
     "0019_backup_verifications.sql", "0020_auth_login_rate_limits.sql",
     "0021_supra_audit_events.sql", "0022_supra_persisted_approvals.sql"
   ];
-  const actual = new Set(await readdir(new URL("../migrations/", import.meta.url)));
+  const actual = new Set(await readdir(new URL("../migrations-preview-canonical/", import.meta.url)));
   const missing = expected.filter(name => !actual.has(name));
   assert.deepEqual(missing, [], "migration apply must not proceed with missing canonical source files");
 });
