@@ -59,7 +59,7 @@ jobs:
           assert db["binding"] == "PREVIEW_DB"
           assert db["database_name"] == "prochelia-preview-db"
           assert db["database_id"] == "6adb95e5-e542-4bec-9008-fbea01042305"
-          assert db["migrations_dir"] == "migrations"
+          assert db["migrations_dir"] == "migrations-preview-canonical"
 
           expected = [
             "0001_core_business_schema.sql",
@@ -85,7 +85,7 @@ jobs:
             "0021_supra_audit_events.sql",
             "0022_supra_persisted_approvals.sql",
           ]
-          actual = sorted(p.name for p in Path("migrations").glob("*.sql"))
+          actual = sorted(p.name for p in Path("migrations-preview-canonical").glob("*.sql"))
           assert actual == sorted(expected), (
             f"Migration chain mismatch. Expected {len(expected)} canonical files, "
             f"found {len(actual)}. No migration will run."
@@ -238,7 +238,7 @@ jobs:
           import json, pathlib, sys
           payload=json.loads(pathlib.Path(sys.argv[1]).read_text())
           remote=set(row["name"] for row in payload["result"][0]["results"])
-          local=set(p.name for p in pathlib.Path("migrations").glob("*.sql"))
+          local=set(p.name for p in pathlib.Path("migrations-preview-canonical").glob("*.sql"))
           pending={"0021_supra_audit_events.sql", "0022_supra_persisted_approvals.sql"}
           legacy={
               "0005_payment_runtime_schema.sql",
@@ -379,7 +379,7 @@ jobs:
           import json, pathlib, sys
           payload=json.loads(pathlib.Path(sys.argv[1]).read_text())
           remote=set(row["name"] for row in payload["result"][0]["results"])
-          local=set(p.name for p in pathlib.Path("migrations").glob("*.sql"))
+          local=set(p.name for p in pathlib.Path("migrations-preview-canonical").glob("*.sql"))
           legacy={
               "0005_payment_runtime_schema.sql",
               "0006_restore_wallet_balance_guard.sql",
