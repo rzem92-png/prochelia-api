@@ -1437,23 +1437,14 @@ async function copilotRecommend(env, input) {
 
 async function createOperationalCase(request, env) {
   const gate=await requireAuthRole(request,env,['gerante','client','intervenant','entreprise']); if(gate.error)return gate.error;
-  const body=await readJson(request)||{};
-  const caseType=clean(body.case_type); if(!caseType)return json({ok:false,error:'CASE_TYPE_REQUIRED',version:VERSION},400);
-  const phase=String(await getSetting(env,'project_phase','TEST')).toUpperCase();
-  const impact=String(body.impact_level||'LOW').toUpperCase();
-  const priority=CASE_PRIORITIES[impact]||10;
-  const rec=await copilotRecommend(env,{caseType,impact,phase,context:body.context||{}});
-  const id=crypto.randomUUID();
-  const requiresManager=1;
-  const status='OPEN';
-  await env.DB.prepare(`INSERT INTO operational_cases(id,case_type,source,phase,priority,status,auto_mode,client_id,company_id,intervenant_id,mission_id,impact_level,description,context_json,proposed_solution_json,requires_manager) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
-    .bind(id,caseType,'API',phase,priority,status,rec.mode,clean(body.client_id)||null,clean(body.company_id)||null,clean(body.intervenant_id)||null,clean(body.mission_id)||null,impact,clean(body.description)||null,JSON.stringify(body.context||{}),JSON.stringify(rec),requiresManager).run();
-  await env.DB.prepare(`INSERT INTO copilot_log(id,case_id,action_type,recommendation,confidence,mode) VALUES(?,?,?,?,?,?)`)
-    .bind(crypto.randomUUID(),id,rec.action,JSON.stringify(rec.solution),rec.confidence,rec.mode).run();
-  await journal(env,'copilot',null,'CASE_CREATED','operational_case',id,'OK',{caseType,impact});
-  // No execution from case creation. Tenant-scoped approval and resource checks
-  // must be implemented before any operational mutation is enabled.
-  return json({ok:true,version:VERSION,case_id:id,recommendation:rec,status:'WAITING_SECURITY_REVIEW'},201);
+  // Do not persist client-supplied tenant/resource identifiers. The authenticated
+  // session currently has no verified workspace membership context; fail closed.
+  return json({
+    ok:false,
+    error:'TENANT_SCOPED_CASE_CREATION_NOT_IMPLEMENTED',
+    message:'Operational cases remain disabled until tenant membership and resource ownership are resolved server-side.',
+    version:VERSION
+  },503);
 }
 
 
