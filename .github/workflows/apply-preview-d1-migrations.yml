@@ -90,9 +90,10 @@ jobs:
             f"Migration chain mismatch. Expected {len(expected)} canonical files, "
             f"found {len(actual)}. No migration will run."
           )
+          canonical_dir = Path("migrations-preview-canonical")
           for name in expected:
-            p = Path("migrations") / name
-            assert p.is_file() and p.stat().st_size > 0, f"Missing migration: {name}"
+            p = canonical_dir / name
+            assert p.is_file() and p.stat().st_size > 0, f"Missing canonical migration: {name}"
           print(f"PASS: exact Preview D1 target and all {len(expected)} canonical migrations verified")
           PY
           test "$EXPECTED_DB_NAME" = "prochelia-preview-db"
