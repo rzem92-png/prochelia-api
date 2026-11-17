@@ -139,6 +139,20 @@ jobs:
             exit 1
           }
           echo "PASS: R2 bucket identity and EU jurisdiction confirmed before D1 export."
+      - name: Verify Preview D1 identity and EU jurisdiction before export
+        shell: bash
+        run: |
+          set -euo pipefail
+          token="$(printf '%s' "$CLOUDFLARE_API_TOKEN" | sed -E 's/^[[:space:]]*Bearer[[:space:]]+//I; s/^[[:space:]]+//; s/[[:space:]]+$//' | tr -d '\\r\\n')"
+          test -n "$token"
+          status="$(curl --silent --show-error --output "$RUNNER_TEMP/preview-d1-jurisdiction.json" --write-out '%{http_code}' "https://api.cloudflare.com/client/v4/accounts/$EXPECTED_ACCOUNT_ID/d1/database/$EXPECTED_DB_ID" -H "Authorization: Bearer $token")"
+          test "$status" = "200" || { echo "::error::Preview D1 metadata lookup failed (HTTP $status); refusing export and migration."; exit 1; }
+          jq -e --arg id "$EXPECTED_DB_ID" --arg name "$EXPECTED_DB_NAME" '.success == true and .result.uuid == $id and .result.name == $name and .result.jurisdiction == "eu"' "$RUNNER_TEMP/preview-d1-jurisdiction.json" >/dev/null || {
+            echo "::error::Preview D1 identity or explicit EU jurisdiction verification failed; refusing export and migration."
+            exit 1
+          }
+          echo "PASS: Preview D1 identity and EU jurisdiction confirmed before export."
+
       - name: Export only Preview D1 before migration
         shell: bash
         run: |
