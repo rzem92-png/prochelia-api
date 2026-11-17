@@ -65,6 +65,9 @@ test("Pages same-origin proxy probes the Worker Origin guard without creating bu
   assert.ok(workflow.includes("originProbe"));
   assert.ok(workflow.includes("/api/missions/validate"));
   assert.ok(workflow.includes("originProbeBody.error !== 'AUTHENTICATED_VALIDATION_REQUIRED'"));
+  assert.ok(workflow.includes("rejectedOriginProbe"));
+  assert.ok(workflow.includes("rejectedOriginBody.error !== 'ORIGIN_NOT_ALLOWED'"));
+  assert.ok(workflow.includes("https://untrusted.example"));
   assert.ok(workflow.includes("origin: base"));
 });
 
