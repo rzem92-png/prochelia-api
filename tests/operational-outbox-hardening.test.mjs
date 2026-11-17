@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
+import { spawnSync } from "node:child_process";
 
 const source = await readFile(new URL("../src/index.js", import.meta.url), "utf8");
 
@@ -115,4 +116,59 @@ test("outbox leases are persisted, expiring, and required to finalize a claimed 
   assert.match(executor, /WHERE EXISTS \(SELECT 1 FROM action_outbox WHERE id=\? AND status='PROCESSING' AND lease_token=\?\)/);
   assert.match(handler, /lease_token=NULL, lease_expires_at=NULL/);
   assert.match(handler, /lease_expires_at < CURRENT_TIMESTAMP/);
+});
+
+test("SQLite lease simulation prevents stale workers from writing or finalizing", () => {
+  const python = String.raw`
+import sqlite3
+db = sqlite3.connect(":memory:")
+db.executescript("""
+CREATE TABLE action_outbox (
+  id TEXT PRIMARY KEY, idempotency_key TEXT NOT NULL UNIQUE,
+  status TEXT NOT NULL DEFAULT 'PENDING', attempts INTEGER NOT NULL DEFAULT 0,
+  lease_token TEXT, lease_expires_at TEXT, result_json TEXT
+);
+CREATE TABLE notification_outbox (id TEXT PRIMARY KEY, message TEXT NOT NULL);
+INSERT INTO action_outbox(id,idempotency_key) VALUES('a1','idem-1');
+""")
+claim = db.execute("""
+UPDATE action_outbox SET status='PROCESSING', lease_token=?,
+ lease_expires_at=datetime('now','+15 minutes'), attempts=attempts+1
+WHERE id=? AND status='PENDING'
+""", ('lease-A','a1'))
+assert claim.rowcount == 1
+racing_claim = db.execute("""
+UPDATE action_outbox SET status='PROCESSING', lease_token=?
+WHERE id=? AND status='PENDING'
+""", ('lease-B','a1'))
+assert racing_claim.rowcount == 0
+db.execute("UPDATE action_outbox SET lease_expires_at=datetime('now','-1 minute') WHERE id='a1'")
+db.execute("""
+UPDATE action_outbox SET status='RECONCILIATION_REQUIRED',
+ lease_token=NULL, lease_expires_at=NULL
+WHERE status='PROCESSING' AND lease_expires_at < CURRENT_TIMESTAMP
+""")
+stale_write = db.execute("""
+INSERT INTO notification_outbox(id,message)
+SELECT ?,? WHERE EXISTS (
+ SELECT 1 FROM action_outbox WHERE id=? AND status='PROCESSING' AND lease_token=?
+)
+""", ('n1','must not be written','a1','lease-A'))
+assert stale_write.rowcount == 0
+stale_finalize = db.execute("""
+UPDATE action_outbox SET status='DONE', result_json='{}'
+WHERE id=? AND status='PROCESSING' AND lease_token=?
+""", ('a1','lease-A'))
+assert stale_finalize.rowcount == 0
+row = db.execute("SELECT status,lease_token FROM action_outbox WHERE id='a1'").fetchone()
+assert row == ('RECONCILIATION_REQUIRED', None), row
+try:
+    db.execute("INSERT INTO action_outbox(id,idempotency_key) VALUES('a2','idem-1')")
+    raise AssertionError("duplicate idempotency key unexpectedly inserted")
+except sqlite3.IntegrityError:
+    existing = db.execute("SELECT id FROM action_outbox WHERE idempotency_key='idem-1'").fetchone()
+    assert existing == ('a1',), existing
+`;
+  const result = spawnSync("python3", ["-c", python], { encoding: "utf8" });
+  assert.equal(result.status, 0, result.stderr || result.stdout);
 });
