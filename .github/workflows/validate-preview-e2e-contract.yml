@@ -33,5 +33,7 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: "22"
+      - name: Parse the Preview E2E workflow YAML
+        run: ruby -e 'require "yaml"; YAML.load_file(".github/workflows/preview-directory-e2e-acceptance.yml")'
       - name: Validate dynamic Preview deployment and fixture safety contract
         run: node --experimental-default-type=module --test tests/preview-e2e-workflow.test.mjs
