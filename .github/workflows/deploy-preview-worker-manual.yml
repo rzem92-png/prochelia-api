@@ -98,6 +98,7 @@ jobs:
           }
           pages_origin="$(jq -r '.result.url' "$RUNNER_TEMP/pages-preview.json")"
           pages_commit="$(jq -r '.result.deployment_trigger.metadata.commit_hash' "$RUNNER_TEMP/pages-preview.json")"
+          pages_alias="$(jq -r '.result.aliases[]? | select(test("^https://[a-z0-9-]+\\.prochelia\\.pages\\.dev$"))' "$RUNNER_TEMP/pages-preview.json" | head -n 1)"
           [[ "$pages_origin" =~ ^https://[a-z0-9-]+\.prochelia\.pages\.dev$ ]] || {
             echo "::error::Cloudflare returned an unexpected Pages Preview origin."
             exit 1
@@ -108,7 +109,8 @@ jobs:
             echo "Verified Pages Preview origin: $pages_origin"
             echo "Pages Preview deployment: $deployment_id"
             echo "Pages Preview commit: $pages_commit"
-            echo "This exact origin will be added to the Preview Worker CORS allowlist."
+            [[ -z "$pages_alias" ]] || echo "Pages Preview branch alias: $pages_alias"
+            echo "The verified origin and branch alias (when present) will be added to the Preview Worker CORS allowlist."
           } >> "$GITHUB_STEP_SUMMARY"
       - name: Generate isolated Preview deployment config
         run: node scripts/generate-preview-wrangler-config.mjs
