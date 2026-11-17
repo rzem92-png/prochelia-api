@@ -104,7 +104,7 @@ jobs:
             echo "::error::R2_EU_ACCESS_KEY_ID must be a 32-character R2 S3 Access Key ID."
             exit 1
           }
-          test "$R2_BUCKET" = "prochelia-preview-backups-eu-locked"
+          test "$R2_BUCKET" = "prochelia-preview-backups-eu-v2"
 
       - name: Install Node.js
         uses: actions/setup-node@v4
