@@ -36,6 +36,21 @@ assert actual == sorted(EXPECTED), (
 
 db = sqlite3.connect(":memory:")
 db.execute("PRAGMA foreign_keys = ON")
+# Match the existing authentication foundation: canonical business migrations
+# explicitly require users and sessions to pre-exist.
+db.executescript("""
+CREATE TABLE users (
+    id TEXT PRIMARY KEY, role TEXT NOT NULL, email TEXT NOT NULL UNIQUE,
+    first_name TEXT NOT NULL, last_name TEXT NOT NULL, phone TEXT,
+    password_hash TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'active',
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE sessions (
+    id TEXT PRIMARY KEY, user_id TEXT NOT NULL, token_hash TEXT NOT NULL UNIQUE,
+    expires_at TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+""")
 for name in EXPECTED:
     db.executescript((MIGRATIONS / name).read_text(encoding="utf-8"))
 
