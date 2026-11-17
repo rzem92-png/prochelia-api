@@ -223,4 +223,5 @@ test("Preview D1 metadata guard strips only CR/LF from the Cloudflare API token"
   assert.match(gate, /tr -d '\\r\\n'/);
   assert.doesNotMatch(gate, /tr -d '\\\\r\\\\n'/);
   assert.match(gate, /Authorization: Bearer \$token/);
+  assert.doesNotMatch(workflow, /tr -d '\\\\r\\\\n'/, "no workflow step may use the over-escaped token sanitizer");
 });
