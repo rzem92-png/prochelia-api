@@ -20,7 +20,7 @@ test("Both source and isolated restore D1 identities and EU jurisdictions are ch
   assert.match(workflow, /source-d1\.json/);
   assert.match(workflow, /restore-d1\.json/);
   assert.match(workflow, /result\.jurisdiction == "eu"/);
-  assert.match(workflow, /RESTORE_DB_ID: 3caebbc6-982a-4562-96a7-e509185e9e9a/);
+  assert.match(workflow, /RESTORE_DB_ID: 6b9a2659-53b7-499a-a53c-eeae64166508/);
   assert.match(workflow, /RESTORE_DB_ID.*!=.*PRODUCTION_DB_ID/);
   assert.match(workflow, /RESTORE_DB_ID.*!=.*PREVIEW_DB_ID/);
 });
@@ -44,4 +44,13 @@ test("Restore workflow pins third-party actions and restricts the generated obje
   assert.match(workflow, /actions\/checkout@[0-9a-f]{40}/);
   assert.match(workflow, /actions\/setup-node@[0-9a-f]{40}/);
   assert.match(workflow, /\[0-9\]\{4\}\/\[0-9\]\{2\}\/\[0-9\]\{2\}/);
+});
+
+test("Restore target is the newly provisioned empty EU-only validation database", () => {
+  assert.match(workflow, /RESTORE_DB_NAME: prochelia-r2-restore-validation-2026-11-18/);
+  assert.match(workflow, /RESTORE_DB_ID: 6b9a2659-53b7-499a-a53c-eeae64166508/);
+  assert.doesNotMatch(workflow, /3caebbc6-982a-4562-96a7-e509185e9e9a/);
+  assert.match(workflow, /RESTORE_DB_ID.*!=.*PREVIEW_DB_ID/);
+  assert.match(workflow, /RESTORE_DB_ID.*!=.*PRODUCTION_DB_ID/);
+  assert.match(workflow, /Confirm isolated restore database is empty before any remote write/);
 });
