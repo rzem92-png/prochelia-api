@@ -35,7 +35,7 @@ jobs:
       FORBIDDEN_PRODUCTION_DB_ID: 04f52830-ef5a-4f17-a640-42bbc2381bba
     steps:
       - name: Checkout pinned canonical preproduction migration chain
-        uses: actions/checkout@v4
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           ref: 1fc258c9c8d25e5e7b89241504218bf102afbf27
 
@@ -108,7 +108,7 @@ jobs:
           test "$R2_BUCKET" = "prochelia-preview-backups-eu-v2"
 
       - name: Install Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
           node-version: "22"
 
