@@ -427,80 +427,29 @@ async function authStatus(request, env) {
 =============================================================== */
 async function ensureSecuritySchema(env) {
   if (!env.DB) throw new Error('DATABASE_REQUIRED');
-  const statements = [
-    `CREATE TABLE IF NOT EXISTS identity_verifications (
-      id TEXT PRIMARY KEY,
-      user_id TEXT NOT NULL,
-      status TEXT NOT NULL DEFAULT 'pending',
-      level TEXT NOT NULL DEFAULT 'standard',
-      provider TEXT,
-      provider_reference TEXT,
-      verified_at TEXT,
-      expires_at TEXT,
-      rejection_reason TEXT,
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )`,
-    `CREATE INDEX IF NOT EXISTS idx_identity_verifications_user ON identity_verifications(user_id, status, updated_at)`,
-    `CREATE TABLE IF NOT EXISTS trusted_devices (
-      id TEXT PRIMARY KEY,
-      user_id TEXT NOT NULL,
-      device_hash TEXT NOT NULL,
-      status TEXT NOT NULL DEFAULT 'active',
-      first_seen_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      last_seen_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      expires_at TEXT NOT NULL,
-      revoked_at TEXT,
-      UNIQUE(user_id, device_hash)
-    )`,
-    `CREATE TABLE IF NOT EXISTS mission_security (
-      id TEXT PRIMARY KEY,
-      mission_id TEXT NOT NULL UNIQUE,
-      client_id TEXT NOT NULL,
-      intervenant_id TEXT NOT NULL,
-      risk_level TEXT NOT NULL DEFAULT 'standard',
-      arrival_code_hash TEXT,
-      arrival_expires_at TEXT,
-      arrival_used_at TEXT,
-      end_code_hash TEXT,
-      end_expires_at TEXT,
-      end_used_at TEXT,
-      status TEXT NOT NULL DEFAULT 'prepared',
-      locked_until TEXT,
-      arrival_started_at TEXT,
-      ended_at TEXT,
-      last_presence_at TEXT,
-      last_device_id TEXT,
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )`,
-    `CREATE INDEX IF NOT EXISTS idx_mission_security_intervenant ON mission_security(intervenant_id, status)`,
-    `CREATE TABLE IF NOT EXISTS mission_security_attempts (
-      id TEXT PRIMARY KEY,
-      security_id TEXT NOT NULL,
-      purpose TEXT NOT NULL,
-      actor_user_id TEXT,
-      device_id TEXT,
-      result TEXT NOT NULL,
-      reason TEXT,
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )`,
-    `CREATE INDEX IF NOT EXISTS idx_security_attempts_security ON mission_security_attempts(security_id, created_at)`,
-    `CREATE TABLE IF NOT EXISTS security_audit (
-      id TEXT PRIMARY KEY,
-      event_type TEXT NOT NULL,
-      mission_id TEXT,
-      user_id TEXT,
-      actor_role TEXT,
-      result TEXT NOT NULL,
-      metadata_json TEXT,
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )`,
-    `CREATE INDEX IF NOT EXISTS idx_security_audit_mission ON security_audit(mission_id, created_at)`
+  // Runtime requests verify schema only; provisioning belongs to migration 0010.
+  const requiredObjects = [
+    'identity_verifications',
+    'idx_identity_verifications_user',
+    'trusted_devices',
+    'mission_security',
+    'idx_mission_security_intervenant',
+    'mission_security_attempts',
+    'idx_security_attempts_security',
+    'security_audit',
+    'idx_security_audit_mission'
   ];
-  for (const sql of statements) await env.DB.prepare(sql).run();
+  const placeholders = requiredObjects.map(() => '?').join(',');
+  const result = await env.DB.prepare(
+    `SELECT name FROM sqlite_master
+      WHERE type IN ('table','index') AND name IN (${placeholders})`
+  ).bind(...requiredObjects).all();
+  const present = new Set((result?.results || []).map(row => String(row.name)));
+  const missing = requiredObjects.filter(name => !present.has(name));
+  if (missing.length) {
+    throw new Error(`IDENTITY_SECURITY_SCHEMA_NOT_READY:${missing.join(',')}`);
+  }
 }
-
 function securityCode() {
   const n = new DataView(randomBytes(4).buffer).getUint32(0) % 1000000;
   return String(n).padStart(6, '0');
@@ -755,71 +704,41 @@ async function securityStatus(request, env) {
 =============================================================== */
 async function ensurePaymentSchema(env) {
   if (!env.DB) throw new Error('DATABASE_REQUIRED');
-  const statements = [
-    `CREATE TABLE IF NOT EXISTS payment_accounts (
-      id TEXT PRIMARY KEY, user_id TEXT NOT NULL UNIQUE, provider TEXT NOT NULL,
-      provider_account_id TEXT, status TEXT NOT NULL DEFAULT 'pending',
-      onboarding_status TEXT NOT NULL DEFAULT 'required',
-      payouts_enabled INTEGER NOT NULL DEFAULT 0,
-      charges_enabled INTEGER NOT NULL DEFAULT 0,
-      currency TEXT NOT NULL DEFAULT 'EUR',
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )`,
-    `CREATE TABLE IF NOT EXISTS wallets (
-      id TEXT PRIMARY KEY, user_id TEXT NOT NULL UNIQUE, currency TEXT NOT NULL DEFAULT 'EUR',
-      available_cents INTEGER NOT NULL DEFAULT 0, pending_cents INTEGER NOT NULL DEFAULT 0,
-      paid_cents INTEGER NOT NULL DEFAULT 0, reserved_cents INTEGER NOT NULL DEFAULT 0,
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )`,
-    `CREATE TABLE IF NOT EXISTS payment_transactions (
-      id TEXT PRIMARY KEY, idempotency_key TEXT NOT NULL UNIQUE, mission_id TEXT,
-      client_id TEXT, intervenant_id TEXT, type TEXT NOT NULL, status TEXT NOT NULL,
-      gross_cents INTEGER NOT NULL DEFAULT 0, commission_cents INTEGER NOT NULL DEFAULT 0,
-      provider_fee_cents INTEGER NOT NULL DEFAULT 0, refund_cents INTEGER NOT NULL DEFAULT 0,
-      net_intervenant_cents INTEGER NOT NULL DEFAULT 0, currency TEXT NOT NULL DEFAULT 'EUR',
-      provider TEXT, provider_payment_id TEXT, provider_payout_id TEXT,
-      reason TEXT, metadata_json TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )`,
-    `CREATE INDEX IF NOT EXISTS idx_payment_tx_mission ON payment_transactions(mission_id, created_at)`,
-    `CREATE INDEX IF NOT EXISTS idx_payment_tx_intervenant ON payment_transactions(intervenant_id, status, created_at)`,
-    `CREATE TABLE IF NOT EXISTS payout_requests (
-      id TEXT PRIMARY KEY, idempotency_key TEXT NOT NULL UNIQUE, wallet_id TEXT NOT NULL,
-      user_id TEXT NOT NULL, amount_cents INTEGER NOT NULL, currency TEXT NOT NULL DEFAULT 'EUR',
-      mode TEXT NOT NULL DEFAULT 'standard', status TEXT NOT NULL DEFAULT 'requested',
-      provider TEXT, provider_payout_id TEXT, failure_code TEXT, failure_message TEXT,
-      requested_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, completed_at TEXT,
-      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )`,
-    `CREATE INDEX IF NOT EXISTS idx_payout_user ON payout_requests(user_id, status, requested_at)`,
-    `CREATE TABLE IF NOT EXISTS payment_webhook_events (
-      id TEXT PRIMARY KEY, provider TEXT NOT NULL, event_id TEXT NOT NULL,
-      event_type TEXT NOT NULL, signature_valid INTEGER NOT NULL DEFAULT 0,
-      processed INTEGER NOT NULL DEFAULT 0, payload_hash TEXT, received_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      processed_at TEXT, UNIQUE(provider, event_id)
-    )`,
-    `CREATE TABLE IF NOT EXISTS payment_disputes (
-      id TEXT PRIMARY KEY, mission_id TEXT, transaction_id TEXT, client_id TEXT, intervenant_id TEXT,
-      status TEXT NOT NULL DEFAULT 'open', reason TEXT, amount_cents INTEGER NOT NULL DEFAULT 0,
-      resolution TEXT, resolved_at TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )`,
-    `CREATE TABLE IF NOT EXISTS payment_reconciliation (
-      id TEXT PRIMARY KEY, provider TEXT NOT NULL, external_id TEXT NOT NULL,
-      internal_transaction_id TEXT, internal_payout_id TEXT, amount_cents INTEGER,
-      currency TEXT, status TEXT NOT NULL DEFAULT 'unmatched', checked_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      UNIQUE(provider, external_id)
-    )`,
-    `CREATE TABLE IF NOT EXISTS payment_audit (
-      id TEXT PRIMARY KEY, event_type TEXT NOT NULL, transaction_id TEXT, payout_id TEXT,
-      mission_id TEXT, user_id TEXT, result TEXT NOT NULL, metadata_json TEXT,
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )`
+  // Payment schema is provisioned only by reviewed migration 0005.
+  // Request handlers may verify it, never create or alter financial tables.
+  const requiredObjects = [
+    'payment_accounts',
+    'idx_payment_accounts_provider_account',
+    'wallets',
+    'payment_transactions',
+    'idx_payment_tx_mission',
+    'idx_payment_tx_intervenant',
+    'payout_requests',
+    'idx_payout_user',
+    'payment_webhook_events',
+    'payment_disputes',
+    'payment_reconciliation',
+    'payment_audit',
+    'payment_wallet_ledger',
+    'idx_wallet_ledger_user_date',
+    'idx_wallet_ledger_tx',
+    'trg_payment_wallet_ledger_require_wallet',
+    'trg_payment_wallet_ledger_guard_balances',
+    'trg_payment_wallet_ledger_apply',
+    'trg_payment_wallet_ledger_no_update',
+    'trg_payment_wallet_ledger_no_delete'
   ];
-  for (const sql of statements) await env.DB.prepare(sql).run();
+  const placeholders = requiredObjects.map(() => '?').join(',');
+  const result = await env.DB.prepare(
+    `SELECT name FROM sqlite_master
+      WHERE type IN ('table','index','trigger') AND name IN (${placeholders})`
+  ).bind(...requiredObjects).all();
+  const present = new Set((result?.results || []).map(row => String(row.name)));
+  const missing = requiredObjects.filter(name => !present.has(name));
+  if (missing.length) {
+    throw new Error(`PAYMENT_SCHEMA_NOT_READY:${missing.join(',')}`);
+  }
 }
-
 function moneyCents(value) {
   const n = Number(value);
   if (!Number.isFinite(n) || n < 0) return null;
@@ -1360,42 +1279,52 @@ const SENSITIVE_CASES = new Set([
 
 async function ensureConsolidatedSchema(env) {
   if (!env.DB) throw new Error('DATABASE_REQUIRED');
-  const statements = [
-    `CREATE TABLE IF NOT EXISTS platform_settings (key TEXT PRIMARY KEY, value_json TEXT NOT NULL, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`,
-    `CREATE TABLE IF NOT EXISTS business_profiles (id TEXT PRIMARY KEY, kind TEXT NOT NULL, display_name TEXT, owner_user_id TEXT, status TEXT NOT NULL DEFAULT 'active', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`,
-    `CREATE TABLE IF NOT EXISTS métier_catalog (id TEXT PRIMARY KEY, code TEXT NOT NULL UNIQUE, label TEXT NOT NULL, category TEXT, active INTEGER NOT NULL DEFAULT 1, rules_json TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`,
-    `CREATE TABLE IF NOT EXISTS metier_suggestions (id TEXT PRIMARY KEY, label TEXT NOT NULL, reason TEXT, source TEXT NOT NULL DEFAULT 'copilot', status TEXT NOT NULL DEFAULT 'proposed', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, decided_at TEXT)`,
-    `CREATE TABLE IF NOT EXISTS pricing_policies (id TEXT PRIMARY KEY, phase TEXT NOT NULL, service_code TEXT, client_type TEXT NOT NULL, intervenant_floor_cents INTEGER NOT NULL DEFAULT 0, client_ceiling_cents INTEGER NOT NULL DEFAULT 0, platform_fee_fixed_cents INTEGER NOT NULL DEFAULT 0, platform_fee_percent REAL NOT NULL DEFAULT 0, psp_percent REAL NOT NULL DEFAULT 0, psp_fixed_cents INTEGER NOT NULL DEFAULT 0, software_cost_cents INTEGER NOT NULL DEFAULT 0, fuel_cost_per_km_cents INTEGER NOT NULL DEFAULT 0, target_margin_percent REAL NOT NULL DEFAULT 0, market_min_cents INTEGER, market_max_cents INTEGER, active INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`,
-    `CREATE TABLE IF NOT EXISTS pricing_quotes (id TEXT PRIMARY KEY, phase TEXT NOT NULL, client_type TEXT NOT NULL, service_code TEXT, distance_km REAL NOT NULL DEFAULT 0, duration_minutes INTEGER NOT NULL DEFAULT 0, client_price_cents INTEGER NOT NULL DEFAULT 0, intervenant_amount_cents INTEGER NOT NULL DEFAULT 0, platform_commission_cents INTEGER NOT NULL DEFAULT 0, psp_cost_cents INTEGER NOT NULL DEFAULT 0, software_cost_cents INTEGER NOT NULL DEFAULT 0, fuel_cost_cents INTEGER NOT NULL DEFAULT 0, estimated_margin_cents INTEGER NOT NULL DEFAULT 0, assumptions_json TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`,
-    `CREATE TABLE IF NOT EXISTS operational_cases (id TEXT PRIMARY KEY, case_type TEXT NOT NULL, source TEXT NOT NULL, phase TEXT NOT NULL, priority INTEGER NOT NULL DEFAULT 10, status TEXT NOT NULL DEFAULT 'OPEN', auto_mode TEXT NOT NULL DEFAULT 'PROPOSE', client_id TEXT, company_id TEXT, intervenant_id TEXT, mission_id TEXT, impact_level TEXT NOT NULL DEFAULT 'LOW', description TEXT, context_json TEXT NOT NULL DEFAULT '{}', proposed_solution_json TEXT, resolution_json TEXT, requires_manager INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, resolved_at TEXT)`,
-    `CREATE INDEX IF NOT EXISTS idx_cases_status ON operational_cases(status, priority, created_at)`,
-    `CREATE TABLE IF NOT EXISTS case_actions (id TEXT PRIMARY KEY, case_id TEXT NOT NULL, action_code TEXT NOT NULL, mode TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'PROPOSED', payload_json TEXT NOT NULL DEFAULT '{}', result_json TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, completed_at TEXT)`,
-    `CREATE TABLE IF NOT EXISTS copilot_log (id TEXT PRIMARY KEY, case_id TEXT, action_type TEXT NOT NULL, recommendation TEXT NOT NULL, confidence REAL NOT NULL DEFAULT 0, mode TEXT NOT NULL, approved_by TEXT, result TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`,
-    `CREATE TABLE IF NOT EXISTS activity_journal (id TEXT PRIMARY KEY, actor_type TEXT NOT NULL, actor_id TEXT, action TEXT NOT NULL, entity_type TEXT, entity_id TEXT, result TEXT, metadata_json TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`,
-    `CREATE TABLE IF NOT EXISTS commercial_tasks (id TEXT PRIMARY KEY, company_id TEXT, client_id TEXT, type TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'OPEN', due_at TEXT, priority INTEGER NOT NULL DEFAULT 10, notes TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, completed_at TEXT)`,
-    `CREATE TABLE IF NOT EXISTS recruitment_tasks (id TEXT PRIMARY KEY, candidate_id TEXT, metier_code TEXT, status TEXT NOT NULL DEFAULT 'OPEN', step TEXT NOT NULL DEFAULT 'SCREENING', priority INTEGER NOT NULL DEFAULT 10, notes TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, completed_at TEXT)`,
-    `CREATE TABLE IF NOT EXISTS complaints (id TEXT PRIMARY KEY, client_type TEXT NOT NULL, client_id TEXT, company_id TEXT, mission_id TEXT, category TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'OPEN', severity TEXT NOT NULL DEFAULT 'LOW', description TEXT, resolution_case_id TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, resolved_at TEXT)`,
-    `CREATE TABLE IF NOT EXISTS accounting_ledger (id TEXT PRIMARY KEY, reference_type TEXT NOT NULL, reference_id TEXT NOT NULL, account_code TEXT NOT NULL, direction TEXT NOT NULL, amount_cents INTEGER NOT NULL, currency TEXT NOT NULL DEFAULT 'EUR', label TEXT, metadata_json TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`,
-    `CREATE INDEX IF NOT EXISTS idx_ledger_ref ON accounting_ledger(reference_type, reference_id, created_at)`,
-    `CREATE TABLE IF NOT EXISTS business_expenses (id TEXT PRIMARY KEY, category TEXT NOT NULL, supplier TEXT, amount_cents INTEGER NOT NULL, recurring INTEGER NOT NULL DEFAULT 0, period TEXT, metadata_json TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`,
-    `CREATE TABLE IF NOT EXISTS notification_outbox (id TEXT PRIMARY KEY, channel TEXT NOT NULL, recipient_ref TEXT NOT NULL, template TEXT NOT NULL, payload_json TEXT NOT NULL DEFAULT '{}', status TEXT NOT NULL DEFAULT 'PENDING', attempts INTEGER NOT NULL DEFAULT 0, last_error TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, sent_at TEXT)`,
-    `CREATE TABLE IF NOT EXISTS compliance_events (id TEXT PRIMARY KEY, type TEXT NOT NULL, severity TEXT NOT NULL, entity_type TEXT, entity_id TEXT, status TEXT NOT NULL DEFAULT 'OPEN', details_json TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, closed_at TEXT)`
+  // Runtime verification only; schema and initial settings belong to migration 0012.
+  const requiredObjects = [
+  "platform_settings",
+  "business_profiles",
+  "métier_catalog",
+  "metier_suggestions",
+  "pricing_policies",
+  "pricing_quotes",
+  "operational_cases",
+  "idx_cases_status",
+  "case_actions",
+  "copilot_log",
+  "activity_journal",
+  "commercial_tasks",
+  "recruitment_tasks",
+  "complaints",
+  "accounting_ledger",
+  "idx_ledger_ref",
+  "business_expenses",
+  "notification_outbox",
+  "compliance_events"
+];
+  const placeholders = requiredObjects.map(() => '?').join(',');
+  const result = await env.DB.prepare(
+    `SELECT name FROM sqlite_master
+      WHERE type IN ('table','index') AND name IN (${placeholders})`
+  ).bind(...requiredObjects).all();
+  const present = new Set((result?.results || []).map(row => String(row.name)));
+  const missing = requiredObjects.filter(name => !present.has(name));
+  if (missing.length) {
+    throw new Error(`CONSOLIDATED_SCHEMA_NOT_READY:${missing.join(',')}`);
+  }
+  const requiredSettings = [
+    'project_phase', 'fuel_cost_per_km_cents', 'default_margin_percent',
+    'software_monthly_cost_cents', 'automation_policy', 'b2b_model', 'b2c_model'
   ];
-  for (const sql of statements) await env.DB.prepare(sql).run();
-  const defaults = {
-    project_phase:'TEST',
-    fuel_cost_per_km_cents:'20',
-    default_margin_percent:'15',
-    software_monthly_cost_cents:'0',
-    automation_policy:'simple_low_impact_auto_sensitive_manager',
-    b2b_model:'company_pays_intervenant_platform_bills_commission',
-    b2c_model:'client_pays_platform_platform_pays_intervenant'
-  };
-  for (const [key,value] of Object.entries(defaults)) {
-    await env.DB.prepare(`INSERT OR IGNORE INTO platform_settings(key,value_json) VALUES(?,?)`).bind(key, JSON.stringify(value)).run();
+  const settingPlaceholders = requiredSettings.map(() => '?').join(',');
+  const settingsResult = await env.DB.prepare(
+    `SELECT key FROM platform_settings WHERE key IN (${settingPlaceholders})`
+  ).bind(...requiredSettings).all();
+  const presentSettings = new Set((settingsResult?.results || []).map(row => String(row.key)));
+  const missingSettings = requiredSettings.filter(key => !presentSettings.has(key));
+  if (missingSettings.length) {
+    throw new Error(`CONSOLIDATED_SETTINGS_NOT_READY:${missingSettings.join(',')}`);
   }
 }
-
 async function getSetting(env,key,fallback=null) {
   const r=await env.DB.prepare('SELECT value_json FROM platform_settings WHERE key=? LIMIT 1').bind(key).first();
   if (!r) return fallback;
@@ -1879,117 +1808,30 @@ const PROMOTION_TYPES = new Set([
 
 async function ensureStrategicSchema(env) {
   if (!env.DB) throw new Error('DATABASE_REQUIRED');
-  const statements = [
-    `CREATE TABLE IF NOT EXISTS promotions (
-      id TEXT PRIMARY KEY,
-      code TEXT NOT NULL UNIQUE,
-      name TEXT NOT NULL,
-      type TEXT NOT NULL,
-      phase TEXT NOT NULL,
-      client_type TEXT NOT NULL DEFAULT 'ALL',
-      service_code TEXT,
-      zone_code TEXT,
-      discount_type TEXT NOT NULL DEFAULT 'PERCENT',
-      discount_value REAL NOT NULL DEFAULT 0,
-      min_amount_cents INTEGER NOT NULL DEFAULT 0,
-      max_discount_cents INTEGER,
-      budget_cents INTEGER,
-      used_cents INTEGER NOT NULL DEFAULT 0,
-      target_margin_percent REAL NOT NULL DEFAULT 0,
-      intervenant_protection_cents INTEGER NOT NULL DEFAULT 0,
-      starts_at TEXT NOT NULL,
-      ends_at TEXT NOT NULL,
-      status TEXT NOT NULL DEFAULT 'DRAFT',
-      auto_apply INTEGER NOT NULL DEFAULT 0,
-      requires_manager INTEGER NOT NULL DEFAULT 1,
-      rationale TEXT,
-      rules_json TEXT NOT NULL DEFAULT '{}',
-      created_by TEXT,
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )`,
-    `CREATE INDEX IF NOT EXISTS idx_promotions_active
-      ON promotions(status, phase, client_type, starts_at, ends_at)`,
-    `CREATE TABLE IF NOT EXISTS promotion_recommendations (
-      id TEXT PRIMARY KEY,
-      promotion_id TEXT,
-      phase TEXT NOT NULL,
-      service_code TEXT,
-      client_type TEXT NOT NULL,
-      zone_code TEXT,
-      recommendation_type TEXT NOT NULL,
-      suggested_discount_type TEXT NOT NULL,
-      suggested_discount_value REAL NOT NULL,
-      expected_conversion REAL,
-      expected_revenue_cents INTEGER,
-      expected_margin_cents INTEGER,
-      risk_level TEXT NOT NULL DEFAULT 'LOW',
-      rationale TEXT NOT NULL,
-      status TEXT NOT NULL DEFAULT 'PROPOSED',
-      approved_by TEXT,
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      decided_at TEXT
-    )`,
-    `CREATE INDEX IF NOT EXISTS idx_promotion_reco_status
-      ON promotion_recommendations(status, created_at)`,
-    `CREATE TABLE IF NOT EXISTS commercial_events (
-      id TEXT PRIMARY KEY,
-      event_type TEXT NOT NULL,
-      client_id TEXT,
-      company_id TEXT,
-      promotion_id TEXT,
-      service_code TEXT,
-      zone_code TEXT,
-      amount_cents INTEGER,
-      metadata_json TEXT NOT NULL DEFAULT '{}',
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )`,
-    `CREATE INDEX IF NOT EXISTS idx_commercial_events
-      ON commercial_events(event_type, created_at)`,
-    `CREATE TABLE IF NOT EXISTS market_signals (
-      id TEXT PRIMARY KEY,
-      source TEXT NOT NULL,
-      signal_type TEXT NOT NULL,
-      service_code TEXT,
-      zone_code TEXT,
-      observed_value REAL,
-      unit TEXT,
-      confidence REAL NOT NULL DEFAULT 0,
-      observed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      expires_at TEXT,
-      metadata_json TEXT NOT NULL DEFAULT '{}'
-    )`,
-    `CREATE INDEX IF NOT EXISTS idx_market_signals
-      ON market_signals(signal_type, service_code, zone_code, observed_at)`,
-    `CREATE TABLE IF NOT EXISTS client_value_scores (
-      id TEXT PRIMARY KEY,
-      client_id TEXT,
-      company_id TEXT,
-      segment TEXT NOT NULL,
-      score REAL NOT NULL DEFAULT 0,
-      churn_risk REAL NOT NULL DEFAULT 0,
-      lifetime_value_cents INTEGER NOT NULL DEFAULT 0,
-      last_activity_at TEXT,
-      next_best_action TEXT,
-      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      UNIQUE(client_id, company_id)
-    )`,
-    `CREATE TABLE IF NOT EXISTS strategic_alerts (
-      id TEXT PRIMARY KEY,
-      alert_type TEXT NOT NULL,
-      severity TEXT NOT NULL DEFAULT 'MEDIUM',
-      entity_type TEXT,
-      entity_id TEXT,
-      recommendation TEXT NOT NULL,
-      status TEXT NOT NULL DEFAULT 'OPEN',
-      metadata_json TEXT NOT NULL DEFAULT '{}',
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      closed_at TEXT
-    )`
-  ];
-  for (const sql of statements) await env.DB.prepare(sql).run();
+  // Runtime verification only; provisioning belongs to migration 0011.
+  const requiredObjects = [
+  "promotions",
+  "idx_promotions_active",
+  "promotion_recommendations",
+  "idx_promotion_reco_status",
+  "commercial_events",
+  "idx_commercial_events",
+  "market_signals",
+  "idx_market_signals",
+  "client_value_scores",
+  "strategic_alerts"
+];
+  const placeholders = requiredObjects.map(() => '?').join(',');
+  const result = await env.DB.prepare(
+    `SELECT name FROM sqlite_master
+      WHERE type IN ('table','index') AND name IN (${placeholders})`
+  ).bind(...requiredObjects).all();
+  const present = new Set((result?.results || []).map(row => String(row.name)));
+  const missing = requiredObjects.filter(name => !present.has(name));
+  if (missing.length) {
+    throw new Error(`STRATEGIC_SCHEMA_NOT_READY:${missing.join(',')}`);
+  }
 }
-
 function promotionCandidate(input) {
   const phase = String(input.phase || 'TEST').toUpperCase();
   const cfg = PROJECT_PHASES[phase] || PROJECT_PHASES.TEST;
@@ -2256,70 +2098,39 @@ async function handleStrategic(request, env) {
 // ================================================================
 
 async function ensureOperationalSchema(env) {
-  const statements = [
-    `CREATE TABLE IF NOT EXISTS action_outbox (
-      id TEXT PRIMARY KEY, case_id TEXT, action_type TEXT NOT NULL, entity_type TEXT,
-      entity_id TEXT, idempotency_key TEXT NOT NULL UNIQUE, status TEXT NOT NULL DEFAULT 'PENDING',
-      payload_json TEXT NOT NULL DEFAULT '{}', result_json TEXT, attempts INTEGER NOT NULL DEFAULT 0,
-      last_error TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, executed_at TEXT, processed_at TEXT
-    )`,
-    `CREATE INDEX IF NOT EXISTS idx_action_outbox_status ON action_outbox(status,created_at)`,
-    `CREATE TABLE IF NOT EXISTS copilot_briefings (
-      id TEXT PRIMARY KEY, phase TEXT NOT NULL, priority INTEGER NOT NULL DEFAULT 10,
-      category TEXT NOT NULL, title TEXT NOT NULL, recommendation TEXT NOT NULL,
-      action_type TEXT, entity_type TEXT, entity_id TEXT, impact_json TEXT NOT NULL DEFAULT '{}',
-      status TEXT NOT NULL DEFAULT 'OPEN', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      closed_at TEXT
-    )`,
-    `CREATE INDEX IF NOT EXISTS idx_copilot_briefings_open ON copilot_briefings(status,priority,created_at)`,
-    `CREATE TABLE IF NOT EXISTS loyalty_events (
-      id TEXT PRIMARY KEY, client_id TEXT, company_id TEXT, event_type TEXT NOT NULL,
-      points INTEGER NOT NULL DEFAULT 0, amount_cents INTEGER NOT NULL DEFAULT 0,
-      metadata_json TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )`,
-    `CREATE TABLE IF NOT EXISTS loyalty_balances (
-      id TEXT PRIMARY KEY, client_id TEXT, company_id TEXT, points INTEGER NOT NULL DEFAULT 0,
-      tier TEXT NOT NULL DEFAULT 'STANDARD', updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      UNIQUE(client_id,company_id)
-    )`,
-    `CREATE TABLE IF NOT EXISTS quality_events (
-      id TEXT PRIMARY KEY, mission_id TEXT, client_id TEXT, company_id TEXT, intervenant_id TEXT,
-      rating REAL, category TEXT, comment TEXT, severity TEXT NOT NULL DEFAULT 'LOW',
-      metadata_json TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )`,
-    `CREATE TABLE IF NOT EXISTS b2b_leads (
-      id TEXT PRIMARY KEY, company_name TEXT NOT NULL, contact_name TEXT, email TEXT,
-      phone TEXT, source TEXT, status TEXT NOT NULL DEFAULT 'NEW', estimated_value_cents INTEGER DEFAULT 0,
-      next_action TEXT, metadata_json TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )`,
-    `CREATE TABLE IF NOT EXISTS capacity_snapshots (
-      id TEXT PRIMARY KEY, zone_code TEXT, service_code TEXT, snapshot_date TEXT NOT NULL,
-      demand_count INTEGER NOT NULL DEFAULT 0, supply_count INTEGER NOT NULL DEFAULT 0,
-      fill_rate REAL NOT NULL DEFAULT 0, unused_capacity INTEGER NOT NULL DEFAULT 0,
-      recommendation TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )`,
-    `CREATE INDEX IF NOT EXISTS idx_capacity_date ON capacity_snapshots(snapshot_date,zone_code,service_code)`,
-    `CREATE TABLE IF NOT EXISTS finance_forecasts (
-      id TEXT PRIMARY KEY, period TEXT NOT NULL, scenario TEXT NOT NULL,
-      revenue_cents INTEGER NOT NULL DEFAULT 0, commission_cents INTEGER NOT NULL DEFAULT 0,
-      payout_cents INTEGER NOT NULL DEFAULT 0, provider_fee_cents INTEGER NOT NULL DEFAULT 0,
-      refund_cents INTEGER NOT NULL DEFAULT 0, estimated_margin_cents INTEGER NOT NULL DEFAULT 0,
-      confidence REAL NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )`,
-    `CREATE TABLE IF NOT EXISTS system_checks (
-      id TEXT PRIMARY KEY, check_type TEXT NOT NULL, status TEXT NOT NULL,
-      details_json TEXT NOT NULL DEFAULT '{}', checked_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )`
-  ];
-  for (const sql of statements) await env.DB.prepare(sql).run();
+  if (!env.DB) throw new Error('DATABASE_REQUIRED');
+  // Runtime verification only; provisioning belongs to migration 0014.
+  const requiredObjects = [
+  "action_outbox",
+  "idx_action_outbox_status",
+  "copilot_briefings",
+  "idx_copilot_briefings_open",
+  "loyalty_events",
+  "loyalty_balances",
+  "quality_events",
+  "b2b_leads",
+  "capacity_snapshots",
+  "idx_capacity_date",
+  "finance_forecasts",
+  "system_checks"
+];
+  const placeholders = requiredObjects.map(() => '?').join(',');
+  const result = await env.DB.prepare(
+    `SELECT name FROM sqlite_master
+      WHERE type IN ('table','index') AND name IN (${placeholders})`
+  ).bind(...requiredObjects).all();
+  const present = new Set((result?.results || []).map(row => String(row.name)));
+  const missing = requiredObjects.filter(name => !present.has(name));
+  if (missing.length) {
+    throw new Error(`OPERATIONAL_SCHEMA_NOT_READY:${missing.join(',')}`);
+  }
   const actionInfo = await env.DB.prepare('PRAGMA table_info(action_outbox)').all();
-  const actionColumns = (actionInfo.results || []).map(x => String(x.name));
-  if (!actionColumns.includes('case_id')) await env.DB.prepare('ALTER TABLE action_outbox ADD COLUMN case_id TEXT').run();
-  if (!actionColumns.includes('processed_at')) await env.DB.prepare('ALTER TABLE action_outbox ADD COLUMN processed_at TEXT').run();
+  const actionColumns = new Set((actionInfo?.results || []).map(row => String(row.name)));
+  const missingColumns = ['case_id', 'processed_at'].filter(name => !actionColumns.has(name));
+  if (missingColumns.length) {
+    throw new Error(`OPERATIONAL_SCHEMA_COLUMNS_NOT_READY:${missingColumns.join(',')}`);
+  }
 }
-
 async function tableExists(env, table) {
   const r = await env.DB.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name=? LIMIT 1").bind(table).first();
   return !!r;
@@ -2724,105 +2535,29 @@ function securityOriginAllowed(request,env){
 // autorisées et aux règles RGPD/anti-spam applicables.
 // ================================================================
 
-async function ensureCommercialRecruitmentSchema(env){
-  if(!env.DB) throw new Error('DATABASE_REQUIRED');
-  const sql=[
-    `CREATE TABLE IF NOT EXISTS commercial_prospects (
-      id TEXT PRIMARY KEY, kind TEXT NOT NULL DEFAULT 'B2B', company_name TEXT, contact_name TEXT,
-      email TEXT, phone TEXT, website TEXT, sector TEXT, city TEXT, postal_code TEXT,
-      source TEXT, need TEXT, estimated_potential_cents INTEGER, score INTEGER NOT NULL DEFAULT 0,
-      stage TEXT NOT NULL DEFAULT 'QUALIFICATION', status TEXT NOT NULL DEFAULT 'OPEN',
-      next_action TEXT, notes TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )`,
-    `CREATE INDEX IF NOT EXISTS idx_commercial_prospects_priority ON commercial_prospects(status,score DESC,updated_at)`,
-    `CREATE TABLE IF NOT EXISTS commercial_playbooks (
-      id TEXT PRIMARY KEY, target_type TEXT NOT NULL, stage TEXT NOT NULL,
-      objective TEXT NOT NULL, script TEXT NOT NULL, objections_json TEXT NOT NULL DEFAULT '[]',
-      followup_json TEXT NOT NULL DEFAULT '[]', metadata_json TEXT NOT NULL DEFAULT '{}',
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )`,
-    `CREATE TABLE IF NOT EXISTS recruitment_candidates (
-      id TEXT PRIMARY KEY, full_name TEXT, email TEXT, phone TEXT, metier_code TEXT,
-      city TEXT, radius_km REAL, qualifications_json TEXT NOT NULL DEFAULT '[]',
-      documents_status TEXT NOT NULL DEFAULT 'TO_VERIFY', identity_status TEXT NOT NULL DEFAULT 'TO_VERIFY',
-      score INTEGER NOT NULL DEFAULT 0, stage TEXT NOT NULL DEFAULT 'SOURCING',
-      status TEXT NOT NULL DEFAULT 'OPEN', notes TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )`,
-    `CREATE INDEX IF NOT EXISTS idx_recruitment_candidates ON recruitment_candidates(status,score DESC,updated_at)`,
-    `CREATE TABLE IF NOT EXISTS copilot_growth_actions (
-      id TEXT PRIMARY KEY, category TEXT NOT NULL, target_type TEXT NOT NULL, title TEXT NOT NULL,
-      recommendation TEXT NOT NULL, expected_impact_json TEXT NOT NULL DEFAULT '{}',
-      priority INTEGER NOT NULL DEFAULT 10, status TEXT NOT NULL DEFAULT 'PROPOSED',
-      approved_by TEXT, executed_at TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )`,
-    `CREATE TABLE IF NOT EXISTS sales_results (
-      id TEXT PRIMARY KEY, prospect_id TEXT, stage TEXT NOT NULL, outcome TEXT NOT NULL,
-      amount_cents INTEGER, margin_cents INTEGER, source TEXT, notes TEXT,
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )`
-  ];
-  for(const q of sql) await env.DB.prepare(q).run();
+async function ensureCommercialRecruitmentSchema(env) {
+  if (!env.DB) throw new Error('DATABASE_REQUIRED');
+  // Runtime verification only; provisioning belongs to migration 0015.
+  const requiredObjects = [
+  "commercial_prospects",
+  "idx_commercial_prospects_priority",
+  "commercial_playbooks",
+  "recruitment_candidates",
+  "idx_recruitment_candidates",
+  "copilot_growth_actions",
+  "sales_results"
+];
+  const placeholders = requiredObjects.map(() => '?').join(',');
+  const result = await env.DB.prepare(
+    `SELECT name FROM sqlite_master
+      WHERE type IN ('table','index') AND name IN (${placeholders})`
+  ).bind(...requiredObjects).all();
+  const present = new Set((result?.results || []).map(row => String(row.name)));
+  const missing = requiredObjects.filter(name => !present.has(name));
+  if (missing.length) {
+    throw new Error(`COMMERCIAL_RECRUITMENT_SCHEMA_NOT_READY:${missing.join(',')}`);
+  }
 }
-
-function commercialStageGuide(stage){
-  const s=String(stage||'FIRST_CONTACT').toUpperCase();
-  const map={
-    FIRST_CONTACT:{label:'Premier contact',objective:'Obtenir l’attention et une prise de rendez-vous',length:'COURT'},
-    DISCOVERY:{label:'Découverte',objective:'Comprendre le besoin avant de vendre',length:'QUESTIONS'},
-    PRESENTATION:{label:'Présentation',objective:'Présenter PROCHÉLIA avec les bénéfices adaptés',length:'MOYEN'},
-    ARGUMENTATION:{label:'Argumentation',objective:'Démontrer la valeur et répondre aux objections',length:'COURT'},
-    PROPOSAL:{label:'Proposition',objective:'Transformer l’intérêt en proposition concrète',length:'MOYEN'},
-    FOLLOW_UP:{label:'Relance',objective:'Obtenir une réponse sans pression inutile',length:'COURT'},
-    CLOSING:{label:'Conclusion',objective:'Obtenir l’accord, le rendez-vous ou la première mission',length:'COURT'},
-    RETENTION:{label:'Fidélisation',objective:'Créer de la récurrence et développer le compte',length:'MOYEN'}
-  };
-  return map[s]||map.FIRST_CONTACT;
-}
-
-function commercialBenefits(target,need){
-  const t=String(target||'B2B').toUpperCase(); const n=String(need||'').trim();
-  if(t==='INTERVENANT') return ['accès à des missions adaptées','organisation et suivi des interventions','cadre de fonctionnement clair','suivi administratif et documentaire','visibilité sur les opportunités'];
-  if(t==='B2C') return ['simplicité de réservation','solution adaptée au besoin','suivi de la prestation','sécurité et traçabilité','accompagnement'];
-  return ['solution flexible pour les besoins d’intervention','simplification de l’organisation','traçabilité et suivi des missions','possibilité de gérer des besoins récurrents','interlocuteur et processus structurés'];
-}
-
-function makeObjections(target){
-  const common=[
-    {objection:'« Nous avons déjà un prestataire. »',answer:'« Je comprends. L’objectif n’est pas forcément de remplacer votre solution actuelle, mais de vous proposer une solution complémentaire lorsque vous avez un besoin ponctuel, urgent ou difficile à couvrir. »'},
-    {objection:'« C’est trop cher. »',answer:'« Regardons d’abord le besoin et la valeur attendue. Je peux vous proposer une formule adaptée au volume, aux horaires et à la fréquence plutôt qu’une offre standard. »'},
-    {objection:'« Envoyez-moi simplement vos informations. »',answer:'« Bien sûr. Pour vous envoyer uniquement ce qui vous concerne, puis-je vous poser deux questions rapides sur vos besoins ? »'}
-  ];
-  if(String(target).toUpperCase()==='INTERVENANT') common.push({objection:'« Pourquoi rejoindre PROCHÉLIA ? »',answer:'« L’intérêt est d’avoir un cadre organisé, des opportunités de missions et un suivi clair, avec des règles transparentes sur les documents, les missions et les paiements. »'});
-  return common;
-}
-
-function makeFollowups(stage,target){
-  const t=String(target||'B2B').toUpperCase();
-  return [
-    {delay:'J+2',channel:'email',text:`Bonjour, je reviens vers vous concernant PROCHÉLIA. Je reste disponible pour voir si notre solution peut répondre à vos besoins ${t==='INTERVENANT'?'de missions et d’activité':'d’intervention'}.`},
-    {delay:'J+7',channel:'email',text:'Je me permets une dernière relance afin de savoir si le sujet est toujours d’actualité. Si oui, je peux vous proposer un échange court et ciblé.'},
-    {delay:'J+21',channel:'crm',text:'Requalification du prospect et nouvelle proposition si besoin.'}
-  ];
-}
-
-function makeSalesKit(body){
-  const target=String(body?.target_type||'B2B').toUpperCase();
-  const stage=String(body?.stage||'FIRST_CONTACT').toUpperCase();
-  const g=commercialStageGuide(stage); const name=clean(body?.contact_name)||'Madame, Monsieur';
-  const org=clean(body?.company_name)||'votre structure'; const need=clean(body?.need)||'vos besoins d’intervention';
-  const benefits=commercialBenefits(target,need);
-  let opening;
-  if(stage==='FIRST_CONTACT') opening=`Bonjour ${name}, je vous contacte au nom de PROCHÉLIA. Nous proposons une solution organisée pour ${need}. L’objectif est de vous faire gagner du temps et de disposer d’une solution souple lorsque vous avez besoin d’interventions fiables et structurées. Seriez-vous disponible pour un échange de 10 minutes afin de voir si cela peut être utile à ${org} ?`;
-  else if(stage==='DISCOVERY') opening=`Merci pour votre intérêt. Avant de vous présenter PROCHÉLIA en détail, j’aimerais comprendre ${need}. Quels sont aujourd’hui vos principaux besoins, vos contraintes de délai et votre fréquence d’intervention ?`;
-  else if(stage==='PRESENTATION') opening=`PROCHÉLIA accompagne ${target==='INTERVENANT'?'les intervenants dans le développement et l’organisation de leur activité':target==='B2C'?'les particuliers dans leurs besoins d’intervention':'les entreprises dans l’organisation de leurs besoins d’intervention'}. La plateforme centralise les demandes, la mise en relation, le suivi et la traçabilité afin de simplifier le parcours.`;
-  else if(stage==='FOLLOW_UP') opening=`Bonjour ${name}, je reviens vers vous au sujet de PROCHÉLIA. Je voulais simplement vérifier si ${need} est toujours d’actualité. Si oui, je peux vous proposer une solution adaptée sans vous faire perdre de temps.`;
-  else if(stage==='CLOSING') opening=`Au regard de votre besoin, je vous propose que nous validions la prochaine étape : un premier échange, une première mission ou une proposition adaptée à votre volume. L’objectif est de commencer simplement et de mesurer les résultats.`;
-  else opening=`Pour ${org}, je recommande de mettre en avant ${benefits.slice(0,3).join(', ')}. ${g.objective}.`;
-  return {target_type:target,stage,stage_label:g.label,objective:g.objective,opening,benefits,questions:[`Quel est votre besoin principal aujourd’hui ?`,`À quelle fréquence ce besoin se présente-t-il ?`,`Quelles sont vos principales contraintes (délai, zone, budget, disponibilité) ?`,`Qu’est-ce qui ferait qu’une solution serait réellement utile pour vous ?`],objections:makeObjections(target),followups:makeFollowups(stage,target),closing:'« Si cela vous convient, je vous propose de définir maintenant la prochaine étape la plus simple. »'};
-}
-
 async function commercialProspectCreate(request,env){
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
   await ensureCommercialRecruitmentSchema(env); const b=await readJson(request);
@@ -2887,57 +2622,27 @@ async function growthDashboard(request,env){
 /* ==================== V14.0.0 — COMPTABILITÉ MULTI-ESPACE / EXPORTS / RÉSOLUTION ==================== */
 async function ensureFinanceWorkspaceSchema(env) {
   if (!env.DB) throw new Error('DATABASE_REQUIRED');
-  const sql = [
-    `CREATE TABLE IF NOT EXISTS finance_workspace_entries (
-      id TEXT PRIMARY KEY,
-      user_id TEXT NOT NULL,
-      role TEXT NOT NULL,
-      entry_type TEXT NOT NULL,
-      direction TEXT NOT NULL DEFAULT 'IN',
-      amount_cents INTEGER NOT NULL DEFAULT 0,
-      currency TEXT NOT NULL DEFAULT 'EUR',
-      label TEXT,
-      reference_type TEXT,
-      reference_id TEXT,
-      status TEXT NOT NULL DEFAULT 'posted',
-      metadata_json TEXT NOT NULL DEFAULT '{}',
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )`,
-    `CREATE INDEX IF NOT EXISTS idx_finance_workspace_user ON finance_workspace_entries(user_id, created_at DESC)`,
-    `CREATE INDEX IF NOT EXISTS idx_finance_workspace_ref ON finance_workspace_entries(reference_type, reference_id)`,
-    `CREATE TABLE IF NOT EXISTS finance_export_log (
-      id TEXT PRIMARY KEY,
-      user_id TEXT NOT NULL,
-      role TEXT NOT NULL,
-      format TEXT NOT NULL,
-      period_start TEXT,
-      period_end TEXT,
-      row_count INTEGER NOT NULL DEFAULT 0,
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )`,
-    `CREATE INDEX IF NOT EXISTS idx_finance_export_user ON finance_export_log(user_id, created_at DESC)`,
-    `CREATE TABLE IF NOT EXISTS finance_resolution_cases (
-      id TEXT PRIMARY KEY,
-      user_id TEXT NOT NULL,
-      role TEXT NOT NULL,
-      issue_type TEXT NOT NULL,
-      status TEXT NOT NULL DEFAULT 'OPEN',
-      severity TEXT NOT NULL DEFAULT 'LOW',
-      description TEXT,
-      proposed_solution TEXT,
-      resolution TEXT,
-      amount_cents INTEGER,
-      reference_id TEXT,
-      metadata_json TEXT NOT NULL DEFAULT '{}',
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      resolved_at TEXT
-    )`,
-    `CREATE INDEX IF NOT EXISTS idx_finance_resolution_user ON finance_resolution_cases(user_id, status, created_at DESC)`
-  ];
-  for (const q of sql) await env.DB.prepare(q).run();
+  // Runtime verification only; provisioning belongs to migration 0013.
+  const requiredObjects = [
+  "finance_workspace_entries",
+  "idx_finance_workspace_user",
+  "idx_finance_workspace_ref",
+  "finance_export_log",
+  "idx_finance_export_user",
+  "finance_resolution_cases",
+  "idx_finance_resolution_user"
+];
+  const placeholders = requiredObjects.map(() => '?').join(',');
+  const result = await env.DB.prepare(
+    `SELECT name FROM sqlite_master
+      WHERE type IN ('table','index') AND name IN (${placeholders})`
+  ).bind(...requiredObjects).all();
+  const present = new Set((result?.results || []).map(row => String(row.name)));
+  const missing = requiredObjects.filter(name => !present.has(name));
+  if (missing.length) {
+    throw new Error(`FINANCE_WORKSPACE_SCHEMA_NOT_READY:${missing.join(',')}`);
+  }
 }
-
 function financeRoleAllowed(role) {
   return ['CLIENT','CLIENT_SOCIAL','SOCIETE','COMPANY','INTERVENANT','GERANTE','ADMIN','FINANCE','SUPPORT'].includes(String(role||'').toUpperCase());
 }
@@ -3233,21 +2938,41 @@ const NATIONAL_SCALE_DEFAULTS = Object.freeze({
   documentsStorage:'R2', backupFrequency:'DAILY', backupRetentionDays:90
 });
 
-async function ensureNationalContinuitySchema(env){
-  if(!env.DB) throw new Error('DATABASE_REQUIRED');
-  const sqls=[
-    `CREATE TABLE IF NOT EXISTS platform_scale_config(id TEXT PRIMARY KEY,key TEXT NOT NULL UNIQUE,value_json TEXT NOT NULL,updated_at TEXT DEFAULT CURRENT_TIMESTAMP)`,
-    `CREATE TABLE IF NOT EXISTS backup_runs(id TEXT PRIMARY KEY,status TEXT NOT NULL,trigger_type TEXT NOT NULL,storage_provider TEXT,started_at TEXT DEFAULT CURRENT_TIMESTAMP,completed_at TEXT,object_count INTEGER DEFAULT 0,row_count INTEGER DEFAULT 0,error_message TEXT,metadata_json TEXT)`,
-    `CREATE TABLE IF NOT EXISTS backup_objects(id TEXT PRIMARY KEY,backup_run_id TEXT NOT NULL,object_key TEXT NOT NULL,table_name TEXT,row_count INTEGER DEFAULT 0,byte_size INTEGER DEFAULT 0,checksum TEXT,encrypted INTEGER DEFAULT 0,created_at TEXT DEFAULT CURRENT_TIMESTAMP)`,
-    `CREATE INDEX IF NOT EXISTS idx_backup_runs_date ON backup_runs(status,started_at)`,
-    `CREATE INDEX IF NOT EXISTS idx_backup_objects_run ON backup_objects(backup_run_id)`,
-    `CREATE INDEX IF NOT EXISTS idx_scale_key ON platform_scale_config(key)`
+async function ensureNationalContinuitySchema(env) {
+  if (!env.DB) throw new Error('DATABASE_REQUIRED');
+  // Runtime verification only; schema and defaults belong to migration 0016.
+  const requiredObjects = [
+  "platform_scale_config",
+  "idx_scale_key",
+  "backup_runs",
+  "idx_backup_runs_date",
+  "backup_objects",
+  "idx_backup_objects_run"
+];
+  const placeholders = requiredObjects.map(() => '?').join(',');
+  const result = await env.DB.prepare(
+    `SELECT name FROM sqlite_master
+      WHERE type IN ('table','index') AND name IN (${placeholders})`
+  ).bind(...requiredObjects).all();
+  const present = new Set((result?.results || []).map(row => String(row.name)));
+  const missing = requiredObjects.filter(name => !present.has(name));
+  if (missing.length) {
+    throw new Error(`NATIONAL_CONTINUITY_SCHEMA_NOT_READY:${missing.join(',')}`);
+  }
+  const requiredDefaults = [
+    'maxPageSize', 'defaultPageSize', 'importBatchSize', 'noArtificialUserCap',
+    'cursorPaginationRecommended', 'documentsStorage', 'backupFrequency', 'backupRetentionDays'
   ];
-  for(const q of sqls) await env.DB.prepare(q).run();
-  for(const [k,v] of Object.entries(NATIONAL_SCALE_DEFAULTS))
-    await env.DB.prepare(`INSERT OR IGNORE INTO platform_scale_config(id,key,value_json) VALUES(?,?,?)`).bind(crypto.randomUUID(),k,JSON.stringify(v)).run();
+  const placeholdersForDefaults = requiredDefaults.map(() => '?').join(',');
+  const defaultsResult = await env.DB.prepare(
+    `SELECT key FROM platform_scale_config WHERE key IN (${placeholdersForDefaults})`
+  ).bind(...requiredDefaults).all();
+  const presentDefaults = new Set((defaultsResult?.results || []).map(row => String(row.key)));
+  const missingDefaults = requiredDefaults.filter(key => !presentDefaults.has(key));
+  if (missingDefaults.length) {
+    throw new Error(`NATIONAL_SCALE_DEFAULTS_NOT_READY:${missingDefaults.join(',')}`);
+  }
 }
-
 function b64(u8){let s='';for(let i=0;i<u8.length;i+=0x8000)s+=String.fromCharCode(...u8.subarray(i,i+0x8000));return btoa(s)}
 async function backupEncrypt(text,secret){
   if(!secret) throw new Error('BACKUP_ENCRYPTION_KEY_REQUIRED');
@@ -3396,64 +3121,80 @@ const PROCHELIA_UI = Object.freeze({
   }
 });
 
-async function ensureProcheliaMasterComplementSchema(env){
-  if(!env.DB) throw new Error('DATABASE_REQUIRED');
-  const sqls=[
-    `CREATE TABLE IF NOT EXISTS brand_identity (id TEXT PRIMARY KEY, brand_key TEXT NOT NULL UNIQUE, name TEXT NOT NULL, visual_json TEXT NOT NULL, uniqueness_policy_json TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'ACTIVE', created_at TEXT DEFAULT CURRENT_TIMESTAMP, updated_at TEXT DEFAULT CURRENT_TIMESTAMP)`,
-    `CREATE TABLE IF NOT EXISTS brand_assets (id TEXT PRIMARY KEY, asset_type TEXT NOT NULL, asset_name TEXT NOT NULL, storage_key TEXT, checksum TEXT, version TEXT, status TEXT NOT NULL DEFAULT 'ACTIVE', metadata_json TEXT, created_at TEXT DEFAULT CURRENT_TIMESTAMP)`,
-    `CREATE TABLE IF NOT EXISTS brand_clearance_log (id TEXT PRIMARY KEY, search_type TEXT NOT NULL, term TEXT NOT NULL, source TEXT, result TEXT, evidence_ref TEXT, checked_at TEXT DEFAULT CURRENT_TIMESTAMP, notes TEXT)`,
-    `CREATE TABLE IF NOT EXISTS interface_profiles (id TEXT PRIMARY KEY, role TEXT NOT NULL UNIQUE, config_json TEXT NOT NULL, version TEXT NOT NULL, updated_at TEXT DEFAULT CURRENT_TIMESTAMP)`,
-    `CREATE TABLE IF NOT EXISTS support_cases (id TEXT PRIMARY KEY, source_role TEXT NOT NULL, requester_id TEXT, company_id TEXT, mission_id TEXT, complaint_id TEXT, category TEXT NOT NULL, severity TEXT NOT NULL DEFAULT 'LOW', status TEXT NOT NULL DEFAULT 'OPEN', description TEXT, proposed_resolution TEXT, resolution TEXT, requires_manager INTEGER NOT NULL DEFAULT 0, created_at TEXT DEFAULT CURRENT_TIMESTAMP, resolved_at TEXT)`,
-    `CREATE TABLE IF NOT EXISTS support_case_events (id TEXT PRIMARY KEY, case_id TEXT NOT NULL, actor_role TEXT, actor_id TEXT, event_type TEXT NOT NULL, details_json TEXT, created_at TEXT DEFAULT CURRENT_TIMESTAMP)`,
-    `CREATE TABLE IF NOT EXISTS copilot_resolution_rules (id TEXT PRIMARY KEY, scenario_key TEXT NOT NULL UNIQUE, category TEXT NOT NULL, severity TEXT NOT NULL, auto_allowed INTEGER NOT NULL DEFAULT 0, manager_approval_required INTEGER NOT NULL DEFAULT 1, steps_json TEXT NOT NULL, updated_at TEXT DEFAULT CURRENT_TIMESTAMP)`,
-    `CREATE INDEX IF NOT EXISTS idx_support_cases_status ON support_cases(status,severity,created_at)`,
-    `CREATE INDEX IF NOT EXISTS idx_support_case_events_case ON support_case_events(case_id,created_at)`,
-    `CREATE INDEX IF NOT EXISTS idx_brand_assets_type ON brand_assets(asset_type,status)`,
-    `CREATE INDEX IF NOT EXISTS idx_clearance_term ON brand_clearance_log(term,checked_at)`
+async function ensureProcheliaMasterComplementSchema(env) {
+  if (!env.DB) throw new Error('DATABASE_REQUIRED');
+  // Runtime verification only; schema and seed records belong to migration 0017.
+  const requiredObjects = [
+  "brand_identity",
+  "brand_assets",
+  "brand_clearance_log",
+  "interface_profiles",
+  "support_cases",
+  "support_case_events",
+  "copilot_resolution_rules",
+  "idx_support_cases_status",
+  "idx_support_case_events_case",
+  "idx_brand_assets_type",
+  "idx_clearance_term"
+];
+  const placeholders = requiredObjects.map(() => '?').join(',');
+  const result = await env.DB.prepare(
+    `SELECT name FROM sqlite_master
+      WHERE type IN ('table','index') AND name IN (${placeholders})`
+  ).bind(...requiredObjects).all();
+  const present = new Set((result?.results || []).map(row => String(row.name)));
+  const missing = requiredObjects.filter(name => !present.has(name));
+  if (missing.length) {
+    throw new Error(`PROCHELIA_MASTER_SCHEMA_NOT_READY:${missing.join(',')}`);
+  }
+  const brand = await env.DB.prepare(
+    "SELECT brand_key FROM brand_identity WHERE brand_key='PROCHELIA' LIMIT 1"
+  ).first();
+  if (!brand) throw new Error('PROCHELIA_BRAND_SEED_NOT_READY');
+  const requiredRoles = ['CLIENT', 'SOCIETE', 'INTERVENANT', 'GERANTE'];
+  const rolePlaceholders = requiredRoles.map(() => '?').join(',');
+  const roleResult = await env.DB.prepare(
+    `SELECT role FROM interface_profiles WHERE role IN (${rolePlaceholders})`
+  ).bind(...requiredRoles).all();
+  const presentRoles = new Set((roleResult?.results || []).map(row => String(row.role)));
+  const missingRoles = requiredRoles.filter(role => !presentRoles.has(role));
+  if (missingRoles.length) {
+    throw new Error(`PROCHELIA_INTERFACE_PROFILES_NOT_READY:${missingRoles.join(',')}`);
+  }
+  const requiredScenarios = [
+    'DELAY_LIGHT', 'NOTIFICATION_FAILED', 'DOCUMENT_REMINDER', 'SIMPLE_REFUND_CHECK',
+    'DUPLICATE_PAYMENT', 'IDENTITY_SECURITY', 'DATA_INCIDENT', 'LEGAL_DISPUTE',
+    'INTERVENANT_ABSENT', 'CLIENT_COMPLAINT'
   ];
-  for(const q of sqls) await env.DB.prepare(q).run();
-  await env.DB.prepare(`INSERT OR IGNORE INTO brand_identity(id,brand_key,name,visual_json,uniqueness_policy_json) VALUES(?,?,?,?,?)`)
-    .bind(crypto.randomUUID(),'PROCHELIA',PROCHELIA_BRAND.name,JSON.stringify(PROCHELIA_BRAND.visual),JSON.stringify(PROCHELIA_BRAND.uniqueness_policy)).run();
-  for(const [role,config] of Object.entries(PROCHELIA_UI)){
-    await env.DB.prepare(`INSERT OR IGNORE INTO interface_profiles(id,role,config_json,version) VALUES(?,?,?,?)`)
-      .bind(crypto.randomUUID(),role,JSON.stringify(config),VERSION).run();
+  const scenarioPlaceholders = requiredScenarios.map(() => '?').join(',');
+  const scenarioResult = await env.DB.prepare(
+    `SELECT scenario_key FROM copilot_resolution_rules WHERE scenario_key IN (${scenarioPlaceholders})`
+  ).bind(...requiredScenarios).all();
+  const presentScenarios = new Set((scenarioResult?.results || []).map(row => String(row.scenario_key)));
+  const missingScenarios = requiredScenarios.filter(key => !presentScenarios.has(key));
+  if (missingScenarios.length) {
+    throw new Error(`PROCHELIA_COPILOT_RULES_NOT_READY:${missingScenarios.join(',')}`);
   }
-  const rules={
-    DELAY_LIGHT:{category:'DELAY',severity:'LOW',auto:1,manager:0,steps:['verify_mission','recalculate_eta','notify_client','journal','close_if_resolved']},
-    NOTIFICATION_FAILED:{category:'TECHNICAL',severity:'LOW',auto:1,manager:0,steps:['retry_notification','verify_delivery','fallback_channel','journal','close_if_resolved']},
-    DOCUMENT_REMINDER:{category:'DOCUMENT',severity:'LOW',auto:1,manager:0,steps:['identify_missing_document','notify_owner','create_follow_up','journal']},
-    SIMPLE_REFUND_CHECK:{category:'PAYMENT',severity:'LOW',auto:1,manager:0,steps:['reconcile_transaction','verify_refund_eligibility','prepare_or_execute_allowed_action','notify','journal']},
-    DUPLICATE_PAYMENT:{category:'PAYMENT',severity:'HIGH',auto:0,manager:1,steps:['freeze_duplicate_action','reconcile_psp','calculate_exposure','propose_resolution','manager_approval','notify','journal']},
-    IDENTITY_SECURITY:{category:'SECURITY',severity:'CRITICAL',auto:0,manager:1,steps:['lock_sensitive_action','preserve_evidence','risk_assessment','manager_approval','notify_if_required','journal']},
-    DATA_INCIDENT:{category:'RGPD_SECURITY',severity:'CRITICAL',auto:0,manager:1,steps:['contain','preserve_evidence','classify','compliance_review','manager_approval','journal']},
-    LEGAL_DISPUTE:{category:'LEGAL',severity:'CRITICAL',auto:0,manager:1,steps:['collect_evidence','freeze_irreversible_action','legal_review','manager_approval','notify','journal']},
-    INTERVENANT_ABSENT:{category:'REPLACEMENT',severity:'HIGH',auto:0,manager:1,steps:['verify_absence','check_available_intervenants','propose_replacement','manager_approval','notify','journal']},
-    CLIENT_COMPLAINT:{category:'COMPLAINT',severity:'MEDIUM',auto:1,manager:0,steps:['acknowledge','collect_evidence','reconcile_mission','reconcile_finance','propose_resolution','notify','journal','close_if_resolved']}
-  };
-  for(const [k,v] of Object.entries(rules)){
-    await env.DB.prepare(`INSERT OR IGNORE INTO copilot_resolution_rules(id,scenario_key,category,severity,auto_allowed,manager_approval_required,steps_json) VALUES(?,?,?,?,?,?,?)`)
-      .bind(crypto.randomUUID(),k,v.category,v.severity,v.auto,v.manager,JSON.stringify(v.steps)).run();
+  const sensitiveRules = [
+    'SIMPLE_REFUND_CHECK', 'DUPLICATE_PAYMENT', 'IDENTITY_SECURITY',
+    'DATA_INCIDENT', 'LEGAL_DISPUTE'
+  ];
+  const sensitivePlaceholders = sensitiveRules.map(() => '?').join(',');
+  const sensitiveResult = await env.DB.prepare(
+    `SELECT scenario_key, auto_allowed, manager_approval_required
+       FROM copilot_resolution_rules
+      WHERE scenario_key IN (${sensitivePlaceholders})`
+  ).bind(...sensitiveRules).all();
+  const unsafeRules = (sensitiveResult?.results || [])
+    .filter(row => Number(row.auto_allowed) !== 0 || Number(row.manager_approval_required) !== 1)
+    .map(row => String(row.scenario_key));
+  const unverifiedRules = sensitiveRules.filter(key =>
+    !(sensitiveResult?.results || []).some(row => String(row.scenario_key) === key)
+  );
+  if (unsafeRules.length || unverifiedRules.length) {
+    throw new Error(`PROCHELIA_COPILOT_HUMAN_APPROVAL_REQUIRED:${[...unsafeRules, ...unverifiedRules].join(',')}`);
   }
 }
-
-function supportRoleAllowed(role){return ['CLIENT','SOCIETE','INTERVENANT','GERANTE','ADMIN'].includes(String(role||'').toUpperCase())}
-function supportRoleNormalize(role){
-  const r=String(role||'').toUpperCase();
-  return r==='COMPANY'||r==='ENTREPRISE'?'SOCIETE':r;
-}
-function supportScenarioFor(category,severity){
-  const c=String(category||'').toUpperCase();
-  if(['IDENTITY','SECURITY','FRAUD','DATA_BREACH','RGPD'].some(x=>c.includes(x))) return 'IDENTITY_SECURITY';
-  if(['LEGAL','LITIGE'].some(x=>c.includes(x))) return 'LEGAL_DISPUTE';
-  if(['ABSENCE','REPLACEMENT'].some(x=>c.includes(x))) return 'INTERVENANT_ABSENT';
-  if(['DUPLICATE','DOUBLE_PAYMENT'].some(x=>c.includes(x))) return 'DUPLICATE_PAYMENT';
-  if(['PAYMENT','REFUND','FACTURE'].some(x=>c.includes(x)) && String(severity).toUpperCase()==='LOW') return 'SIMPLE_REFUND_CHECK';
-  if(['DELAY','RETARD'].some(x=>c.includes(x)) && String(severity).toUpperCase()==='LOW') return 'DELAY_LIGHT';
-  if(['NOTIFICATION','TECHNICAL'].some(x=>c.includes(x)) && String(severity).toUpperCase()==='LOW') return 'NOTIFICATION_FAILED';
-  if(['DOCUMENT'].some(x=>c.includes(x)) && String(severity).toUpperCase()==='LOW') return 'DOCUMENT_REMINDER';
-  return 'CLIENT_COMPLAINT';
-}
-
 async function supportAuth(request,env){
   const auth=await getSessionUser(request,env).catch(()=>null);
   if(!auth?.user?.id) return {response:json({ok:false,error:'UNAUTHORIZED',version:VERSION},401)};
@@ -3511,19 +3252,21 @@ async function supportCreate(request,env){
   await journal(env,a.role,a.auth.user.id,'SUPPORT_CASE_CREATE','support_cases',id,'OK',{scenario,severity,auto});
   let autoResult=null;
   if(auto){
-    autoResult=await supportAutoResolve(env,id,a.auth.user.id,a.role,scenario,b);
+    // A request payload is never proof that a downstream action actually ran.
+    autoResult=await supportAutoResolve(env,id,a.auth.user.id,a.role,scenario);
   }
-  return json({ok:true,version:VERSION,case_id:id,scenario,automatic_resolution:!!auto,auto_result:autoResult,manager_approval_required:!auto});
+  const automaticallyResolved = autoResult?.status === 'RESOLVED' && autoResult?.closed === true;
+  return json({ok:true,version:VERSION,case_id:id,scenario,automatic_resolution:automaticallyResolved,auto_result:autoResult,manager_approval_required:requiresManager || (!automaticallyResolved && !auto)});
 }
 
-async function supportAutoResolve(env,caseId,actorId,actorRole,scenario,context={}){
+async function supportAutoResolve(env,caseId,actorId,actorRole,scenario){
   const safeAuto=['DELAY_LIGHT','NOTIFICATION_FAILED','DOCUMENT_REMINDER','SIMPLE_REFUND_CHECK','CLIENT_COMPLAINT'];
   if(!safeAuto.includes(scenario)) return {ok:false,status:'MANAGER_REQUIRED'};
-  // Sécurité de production : le Copilote ne doit jamais déclarer une résolution
-  // simplement parce qu'il a généré une proposition. Une résolution automatique
-  // n'est clôturée que lorsqu'une action downstream vérifiable a confirmé son succès.
-  const verified=String(context?.execution_verified||'').toLowerCase()==='true' || context?.execution_verified===true;
-  const resolution={scenario,actions:['verify_context','apply_only_reversible_or_preapproved_action','notify_requester','journal'],context:context||{}};
+  // No downstream executor currently returns a trusted, server-side execution receipt.
+  // Therefore this function must remain fail-closed: client-supplied flags or context
+  // can never be used to mark a support case as resolved.
+  const verified=false;
+  const resolution={scenario,actions:['verify_context','await_verified_downstream_action','journal']};
   if(!verified){
     await env.DB.prepare(`UPDATE support_cases SET status='WAITING_ACTION',resolution=?,resolved_at=NULL WHERE id=?`).bind(JSON.stringify({...resolution,status:'ACTION_REQUIRED'}),caseId).run();
     await supportEvent(env,caseId,actorRole,actorId,'AUTO_CHECKED_WAITING_ACTION',resolution);

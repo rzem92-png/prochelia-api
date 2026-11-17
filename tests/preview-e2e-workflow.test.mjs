@@ -13,10 +13,11 @@ test("Preview E2E is gated by explicit confirmation or a successful isolated Pre
 });
 
 test("Preview E2E pins its own D1, Worker and Pages deployment", () => {
-  assert.match(workflow, /PREVIEW_DB_ID: 6adb95e5-e542-4bec-9008-fbea01042305/);
-  assert.match(workflow, /PAGES_DEPLOYMENT_ID: c3ceec86-8372-462d-b932-cfe18ca55085/);
+  assert.match(workflow, /PREVIEW_DB_ID: e3cf167c-37e1-4d72-9ac6-b3e27c14b97f/);
+  assert.match(workflow, /PAGES_DEPLOYMENT_ID: 83a36d32-4880-4417-a684-f9247e42debf/);
+  assert.match(workflow, /PAGES_PREVIEW_URL: https:\/\/83a36d32\.prochelia\.pages\.dev/);
   assert.match(workflow, /prochelia-api-preview/);
-  assert.match(workflow, /e69fde70fb28405aa8117eaf041aed618d3da664/);
+  assert.match(workflow, /3846562300e97a1816b2aa7e317448449270c2bc/);
   assert.doesNotMatch(workflow, /PREVIEW_DB_ID: 04f52830-ef5a-4f17-a640-42bbc2381bba/);
 });
 
