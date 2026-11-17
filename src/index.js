@@ -1518,6 +1518,15 @@ async function executeCaseBusinessAction(env, c, rec, actorId=null, automatic=fa
 async function processActionOutbox(request, env) {
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
   await ensureOperationalSchema(env);
+  // A stale PROCESSING row may already have performed its side effect before a
+  // worker crash. Quarantine it for reconciliation; never replay it automatically.
+  const stale = await env.DB.prepare(`UPDATE action_outbox
+    SET status='RECONCILIATION_REQUIRED',
+        last_error='Processing lease expired; inspect downstream effects before any manual retry.',
+        updated_at=CURRENT_TIMESTAMP
+    WHERE status='PROCESSING'
+      AND updated_at < datetime('now','-15 minutes')`).run();
+  const reconciliationRequired = Number(stale?.meta?.changes || 0);
   const rows=await env.DB.prepare(`SELECT * FROM action_outbox WHERE status='PENDING' ORDER BY created_at ASC LIMIT 50`).all();
   const processed=[];
   for(const row of (rows.results||[])) {
@@ -1533,8 +1542,8 @@ async function processActionOutbox(request, env) {
     const result=await executeQueuedAction(env,row);
     processed.push({id:row.id,status:result.status||'FAILED',action_type:row.action_type,ok:!!result.ok,result:result.result||null,error:result.error||null});
   }
-  await journal(env,'gerante',gate.auth.user.id,'ACTION_OUTBOX_PROCESSED','system',null,'OK',{count:processed.length,completed:processed.filter(x=>x.status==='DONE').length,waiting:processed.filter(x=>x.status==='WAITING_PROVIDER').length,failed:processed.filter(x=>x.status==='FAILED').length});
-  return json({ok:true,version:VERSION,processed},200);
+  await journal(env,'gerante',gate.auth.user.id,'ACTION_OUTBOX_PROCESSED','system',null,'OK',{count:processed.length,reconciliation_required:reconciliationRequired,completed:processed.filter(x=>x.status==='DONE').length,waiting:processed.filter(x=>x.status==='WAITING_PROVIDER').length,failed:processed.filter(x=>x.status==='FAILED').length});
+  return json({ok:true,version:VERSION,processed,reconciliation_required:reconciliationRequired},200);
 }
 
 async function executeOperationalCase(env, caseId, approverId=null, automatic=false) {
