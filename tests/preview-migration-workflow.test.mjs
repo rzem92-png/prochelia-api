@@ -213,3 +213,15 @@ test("Preview migration refuses export unless the exact D1 database has explicit
   assert.match(workflow, /\.result\.jurisdiction == "eu"/);
   assert.match(workflow, /refusing export and migration/);
 });
+
+
+test("Preview D1 metadata guard strips only CR/LF from the Cloudflare API token", () => {
+  const gate = workflow.slice(
+    workflow.indexOf("Verify Preview D1 identity and EU jurisdiction before export"),
+    workflow.indexOf("Export only Preview D1 before migration")
+  );
+  assert.match(gate, /tr -d '\\r\\n'/);
+  assert.doesNotMatch(gate, /tr -d '\\\\r\\\\n'/);
+  assert.match(gate, /Authorization: Bearer \$token/);
+  assert.doesNotMatch(workflow, /tr -d '\\\\r\\\\n'/, "no workflow step may use the over-escaped token sanitizer");
+});
