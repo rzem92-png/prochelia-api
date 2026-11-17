@@ -65,4 +65,4 @@ required = {
 }
 assert required <= tables, f"Canonical migration chain missing tables: {sorted(required-tables)}"
 
-print(f"PASS: all {len(EXPECTED)} canonical Preview migrations apply to an empty SQLite database; foreign_key_check=0.")
+print(f"PASS: all {len(EXPECTED)} canonical Preview migrations apply over the existing users/sessions auth foundation; foreign_key_check=0.")
