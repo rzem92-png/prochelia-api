@@ -1717,6 +1717,15 @@ function financeStrategicQuote({basePriceCents=0,phaseFactor=1,urgency='normal',
 
 async function pricingQuote(request, env) {
   const gate=await requireAuthRole(request,env,['gerante','client','entreprise','intervenant']); if(gate.error)return gate.error;
+  // Fail closed: browser-supplied financial inputs are not an authoritative pricing policy.
+  // Re-enable only after verified tenant context, server-owned policy versioning and
+  // deterministic bounds/integration tests are implemented.
+  return json({
+    ok:false,
+    error:'SERVER_PRICING_POLICY_NOT_READY',
+    message:'Quote generation is temporarily unavailable until tenant-scoped server pricing policies are validated.',
+    version:VERSION
+  },503);
   const b=await readJson(request)||{};
   const phase=String(b.phase||await getSetting(env,'project_phase','TEST')).toUpperCase();
   const cfg=PROJECT_PHASES[phase]||PROJECT_PHASES.TEST;
