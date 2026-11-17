@@ -29,7 +29,7 @@ test("GET production audit handlers do not journal or insert check records", () 
 
 test("production traffic gate requires independent release evidence and a real PSP adapter", () => {
   const start = source.indexOf("async function strictProductionAudit");
-  const end = source.indexOf("\\nconst __procheliaProductionSafetyHandle", start);
+  const end = source.indexOf("\nconst __procheliaProductionSafetyHandle", start);
   assert.notEqual(start, -1);
   assert.notEqual(end, -1);
   const body = source.slice(start, end);
@@ -42,7 +42,7 @@ test("production traffic gate requires independent release evidence and a real P
     "LOAD_RECOVERY",
     "HUMAN_RELEASE_APPROVAL"
   ]) assert.ok(body.includes(code), `missing production blocker: ${code}`);
-  assert.match(body, /paymentsConfigured\\(env\\)/);
-  assert.match(body, /releaseEvidence\\.every\\(x=>x\\.status==='OK'\\)/);
+  assert.match(body, /paymentsConfigured\(env\)/);
+  assert.match(body, /releaseEvidence\.every\(x=>x\.status==='OK'\)/);
   assert.match(body, /ready_for_real_traffic:overall/);
 });
