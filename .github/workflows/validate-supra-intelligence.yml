@@ -19,6 +19,10 @@ on:
       - "wrangler.jsonc"
       - "wrangler.preview.jsonc"
       - ".github/workflows/validate-supra-intelligence.yml"
+      - ".github/workflows/deploy-supra-preview-manual.yml"
+      - "docs/SUPRA-*.md"
+      - "docs/NEXUS-SUPRA-*.md"
+      - "tests/supra-preview-config.test.mjs"
   workflow_dispatch:
 
 permissions:
