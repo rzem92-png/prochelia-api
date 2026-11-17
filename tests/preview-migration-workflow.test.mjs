@@ -198,3 +198,14 @@ test("all canonical migrations required by the remote apply gate physically exis
   const missing = expected.filter(name => !actual.has(name));
   assert.deepEqual(missing, [], "migration apply must not proceed with missing canonical source files");
 });
+
+test("Preview migration refuses export unless the exact D1 database has explicit EU jurisdiction", () => {
+  const gate = workflow.indexOf("Verify Preview D1 identity and EU jurisdiction before export");
+  const exportStep = workflow.indexOf("Export only Preview D1 before migration");
+  assert.ok(gate >= 0 && exportStep > gate, "D1 jurisdiction gate must precede export");
+  assert.match(workflow, /database\/\$EXPECTED_DB_ID/);
+  assert.match(workflow, /\.result\.uuid == \$id/);
+  assert.match(workflow, /\.result\.name == \$name/);
+  assert.match(workflow, /\.result\.jurisdiction == "eu"/);
+  assert.match(workflow, /refusing export and migration/);
+});
