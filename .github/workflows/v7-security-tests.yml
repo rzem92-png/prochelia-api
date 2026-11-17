@@ -8,6 +8,7 @@ on:
       - "src/index.js"
       - "tests/**"
       - ".github/workflows/v7-security-tests.yml"
+      - ".github/workflows/backup-production-d1-to-r2.yml"
       - ".github/workflows/deploy-preview-worker-manual.yml"
       - ".github/workflows/preview-directory-e2e-acceptance.yml"
       - ".github/workflows/provision-preview-r2-eu.yml"
