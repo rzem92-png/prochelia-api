@@ -37,7 +37,7 @@ jobs:
       - name: Checkout pinned canonical preproduction migration chain
         uses: actions/checkout@v4
         with:
-          ref: cbfb215e8e617a03f395f17fec51dd33fb1023b9
+          ref: 1fc258c9c8d25e5e7b89241504218bf102afbf27
 
       - name: Verify credentials, exact Preview target and complete migration chain
         shell: bash
@@ -62,6 +62,7 @@ jobs:
           assert db["migrations_dir"] == "migrations-preview-canonical"
 
           expected = [
+            "0000_auth_foundation.sql",
             "0001_core_business_schema.sql",
             "0002_server_pricing.sql",
             "0003_route_address_provenance.sql",
@@ -272,12 +273,12 @@ jobs:
           registry_present=any(row["type"]=="table" and row["name"]=="d1_migrations" for row in objects)
           remote=set(row["name"] for row in registry)
           local=set(p.name for p in pathlib.Path("migrations-preview-canonical").glob("*.sql"))
-          if len(local) != 22:
-              print(f"::error::Expected exactly 22 canonical migrations; found {len(local)}.")
+          if len(local) != 23:
+              print(f"::error::Expected exactly 23 canonical migrations; found {len(local)}.")
               raise SystemExit(1)
           non_internal=[row for row in objects if row["name"] not in {"_cf_KV","d1_migrations"} and not row["name"].startswith("sqlite_")]
           if not remote and not non_internal:
-              print("PASS: new EU Preview D1 has no application schema or applied migrations; all 22 canonical migrations are pending.")
+              print("PASS: new EU Preview D1 has no application schema or applied migrations; all 23 canonical migrations are pending.")
           elif registry_present and remote == local:
               print("PASS: exact 22-entry canonical migration registry is already applied; rerun is idempotent.")
           else:
