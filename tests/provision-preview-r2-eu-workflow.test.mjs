@@ -12,15 +12,15 @@ test("R2 provisioning is manually gated to its dedicated branch and exact Previe
 });
 
 test("R2 provisioning targets only the expected bucket and explicitly requests EU jurisdiction", () => {
-  assert.match(workflow, /prochelia-preview-backups-eu-v2/);
-  assert.match(workflow, /cf-r2-jurisdiction: eu/);
-  assert.match(workflow, /locationHint\\":\\"eeur/);
-  assert.match(workflow, /\.result\.jurisdiction == \\"eu\\"/);
+  assert.ok(workflow.includes("prochelia-preview-backups-eu-v2"));
+  assert.ok(workflow.includes("cf-r2-jurisdiction: eu"));
+  assert.ok(workflow.includes('"locationHint":"eeur"'));
+  assert.ok(workflow.includes('.result.jurisdiction == "eu"'));
   assert.match(workflow, /location hint is best-effort/);
 });
 
 test("R2 provisioning creates only after an explicit 404 and fails closed on other lookup errors", () => {
-  assert.match(workflow, /\[\\"404\\"\]/);
+  assert.ok(workflow.includes('if [ "$status" = "404" ]'));
   assert.match(workflow, /EU bucket lookup failed/);
   assert.match(workflow, /no create attempted/);
   assert.match(workflow, /Existing bucket metadata is not explicitly EU/);
