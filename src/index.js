@@ -1521,11 +1521,12 @@ async function processActionOutbox(request, env) {
   // A stale PROCESSING row may already have performed its side effect before a
   // worker crash. Quarantine it for reconciliation; never replay it automatically.
   const stale = await env.DB.prepare(`UPDATE action_outbox
-    SET status='RECONCILIATION_REQUIRED',
+    SET status='RECONCILIATION_REQUIRED', lease_token=NULL, lease_expires_at=NULL,
         last_error='Processing lease expired; inspect downstream effects before any manual retry.',
         updated_at=CURRENT_TIMESTAMP
     WHERE status='PROCESSING'
-      AND updated_at < datetime('now','-15 minutes')`).run();
+      AND ((lease_expires_at IS NOT NULL AND lease_expires_at < CURRENT_TIMESTAMP)
+        OR (lease_expires_at IS NULL AND updated_at < datetime('now','-15 minutes')))`).run();
   const reconciliationRequired = Number(stale?.meta?.changes || 0);
   const rows=await env.DB.prepare(`SELECT * FROM action_outbox WHERE status='PENDING' ORDER BY created_at ASC LIMIT 50`).all();
   const processed=[];
