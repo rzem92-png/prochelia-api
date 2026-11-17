@@ -1781,6 +1781,14 @@ async function financeSummary(request, env) {
 
 async function complaintCreate(request, env) {
   const gate=await requireAuthRole(request,env,['gerante','client','entreprise']); if(gate.error)return gate.error;
+  // Fail closed: complaint ownership cannot be established from the current session.
+  // Never persist client-supplied client/company/mission identifiers without tenant checks.
+  return json({
+    ok:false,
+    error:'TENANT_SCOPED_COMPLAINTS_NOT_READY',
+    message:'Complaint submission is temporarily unavailable until ownership and tenant membership are verified server-side.',
+    version:VERSION
+  },503);
   const b=await readJson(request)||{};if(!b.category)return json({ok:false,error:'CATEGORY_REQUIRED',version:VERSION},400);
   const id=crypto.randomUUID();await env.DB.prepare(`INSERT INTO complaints(id,client_type,client_id,company_id,mission_id,category,severity,description) VALUES(?,?,?,?,?,?,?,?)`).bind(id,String(b.client_type||'B2C'),b.client_id||null,b.company_id||null,b.mission_id||null,b.category,String(b.severity||'LOW'),b.description||null).run();
   const caseType=SIMPLE_CASES.has(b.category)?b.category:'reclamation_client';
