@@ -36,5 +36,33 @@ jobs:
         run: |
           go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
           "$HOME/go/bin/actionlint" .github/workflows/deploy-preview-worker-manual.yml
-      - name: Wrangler bundle validation only (no deploy)
-        run: npx --yes wrangler@4 deploy --dry-run --config wrangler.jsonc --outdir "$RUNNER_TEMP/prochelia-worker-dry-run"
+      - name: Generate isolated Preview config for bundle validation
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const production = JSON.parse(fs.readFileSync('wrangler.jsonc', 'utf8'));
+          const productionId = '04f52830-ef5a-4f17-a640-42bbc2381bba';
+          const previewId = '6adb95e5-e542-4bec-9008-fbea01042305';
+          if (production.name !== 'prochelia-api' ||
+              !production.d1_databases?.some(db => db.binding === 'DB' && db.database_id === productionId)) {
+            throw new Error('Production D1 identity mismatch; refusing build validation');
+          }
+          const preview = {
+            name: 'prochelia-api-preview',
+            main: production.main,
+            compatibility_date: production.compatibility_date,
+            workers_dev: true,
+            d1_databases: [{ binding: 'DB', database_name: 'prochelia-preview-db', database_id: previewId }],
+            r2_buckets: [{ binding: 'BACKUP_BUCKET', bucket_name: 'prochelia-preview-backups-eu' }],
+            observability: production.observability
+          };
+          if (preview.d1_databases.some(db => db.database_id === productionId)) {
+            throw new Error('Preview bundle validation must never bind Production D1');
+          }
+          fs.writeFileSync('wrangler.preview.generated.json', JSON.stringify(preview, null, 2));
+          console.log('Preview Worker and Preview D1 pinned; Production D1 excluded.');
+          NODE
+      - name: Wrangler Preview bundle validation only (no deploy)
+        run: npx --yes wrangler@4 deploy --dry-run --config wrangler.preview.generated.json --outdir "$RUNNER_TEMP/prochelia-worker-dry-run"
