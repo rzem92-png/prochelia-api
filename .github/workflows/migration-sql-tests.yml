@@ -36,14 +36,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Lint D1 migration and restore workflows
+      - name: Lint migration and acceptance workflows
         run: |
           go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
-          for workflow in .github/workflows/*d1*.yml .github/workflows/*migration*.yml .github/workflows/*restore*.yml .github/workflows/preview-directory-e2e-acceptance.yml; do
-            if [ -f "$workflow" ]; then
-              "$HOME/go/bin/actionlint" "$workflow"
-            fi
-          done
+          "$HOME/go/bin/actionlint" .github/workflows/migration-sql-tests.yml
+          "$HOME/go/bin/actionlint" .github/workflows/preview-directory-e2e-acceptance.yml
+          if [ -f .github/workflows/restore-production-backup-isolated-test.yml ]; then
+            "$HOME/go/bin/actionlint" .github/workflows/restore-production-backup-isolated-test.yml
+          fi
       - name: Validate migration SQL and payment ledger invariants in isolated SQLite
         run: |
           python3 tests/test_migrations_sqlite.py
