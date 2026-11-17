@@ -46,17 +46,17 @@ test("Pages Preview configuration and deployment are checked independently from 
 });
 
 test("Preview Worker CORS allowlist must contain the exact current Pages Preview origin", () => {
-  assert.match(workflow, /workers\\/scripts\\/prochelia-api-preview\\/settings/);
-  assert.match(workflow, /CORS_ORIGIN/);
-  assert.match(workflow, /grep -Fxq "\\$pages_url"/);
-  assert.match(workflow, /Do not change the Production Worker/);
+  assert.ok(workflow.includes("workers/scripts/prochelia-api-preview/settings"));
+  assert.ok(workflow.includes("CORS_ORIGIN"));
+  assert.ok(workflow.includes('grep -Fxq "$pages_url"'));
+  assert.ok(workflow.includes("Do not change the Production Worker"));
 });
 
 test("Pages same-origin proxy probes the Worker Origin guard without creating business data", () => {
-  assert.match(workflow, /originProbe/);
-  assert.match(workflow, /api\\/missions\\/validate/);
-  assert.match(workflow, /originProbeBody\\.error !== 'AUTHENTICATED_VALIDATION_REQUIRED'/);
-  assert.match(workflow, /origin: base/);
+  assert.ok(workflow.includes("originProbe"));
+  assert.ok(workflow.includes("/api/missions/validate"));
+  assert.ok(workflow.includes("originProbeBody.error !== 'AUTHENTICATED_VALIDATION_REQUIRED'"));
+  assert.ok(workflow.includes("origin: base"));
 });
 
 test("Pages binding mismatch diagnostics expose only non-secret deployment metadata", () => {
