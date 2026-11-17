@@ -45,8 +45,8 @@ test("checkout and Node setup actions are pinned to immutable SHAs", () => {
 });
 
 test("Preview deployment generator JavaScript is syntactically valid", () => {
-  const match = workflow.match(/node --input-type=module <<'NODE'\\n([\\s\\S]*?)\\n\\s+NODE/);
+  const match = workflow.match(/node --input-type=module <<'NODE'\n([\s\S]*?)\n\s+NODE/);
   assert.ok(match, "Preview deployment generator heredoc must exist");
-  const script = match[1].replace(/^\\s*import fs from 'node:fs';\\s*$/m, "");
+  const script = match[1].replace(/^\s*import fs from 'node:fs';\s*$/m, "");
   assert.doesNotThrow(() => new Function(script));
 });
