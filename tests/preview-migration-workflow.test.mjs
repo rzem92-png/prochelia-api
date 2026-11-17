@@ -132,7 +132,7 @@ test("Preview migration refuses to export D1 unless R2 bucket jurisdiction is ve
 
 
 test("Preview migration workflow pins the exact CI-validated Nexus source commit", () => {
-  assert.match(workflow, /ref: cf7961db717fc5cb56719c52909ff03acb29bf84/);
+  assert.match(workflow, /ref: cbfb215e8e617a03f395f17fec51dd33fb1023b9/);
   assert.doesNotMatch(workflow, /ref: integration\/nexus-supra-core-preview-2026-11-16/);
   assert.match(workflow, /0021_supra_audit_events\.sql/);
   assert.match(workflow, /0022_supra_persisted_approvals\.sql/);
