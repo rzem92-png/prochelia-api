@@ -17,7 +17,7 @@ concurrency:
 
 jobs:
   backup-preview:
-    if: ${{ github.event.inputs.confirm_preview_backup == 'BACKUP_PREVIEW_TO_R2_EU' }}
+    if: ${{ github.ref == 'refs/heads/main' && inputs.confirm_preview_backup == 'BACKUP_PREVIEW_TO_R2_EU' }}
     runs-on: ubuntu-latest
     timeout-minutes: 25
     env:
@@ -39,8 +39,8 @@ jobs:
         run: |
           set -euo pipefail
           case "$GITHUB_REF" in
-            refs/heads/main|refs/heads/prelaunch/r2-eu-backup-workflow|refs/heads/fix/switch-preview-to-eu-d1-2026-11-17) ;;
-            *) echo "::error::Dispatch only allowed from main or the dedicated preview backup branch."; exit 1 ;;
+            refs/heads/main) ;;
+            *) echo "::error::Preview backup dispatch is restricted to the reviewed main workflow."; exit 1 ;;
           esac
           test "$CLOUDFLARE_ACCOUNT_ID" = "$EXPECTED_ACCOUNT_ID"
           test "$EXPECTED_DB_ID" != "$FORBIDDEN_PRODUCTION_DB_ID"
@@ -55,12 +55,12 @@ jobs:
           fi
 
       - name: Checkout pinned reviewed Preview branch commit (D1 config)
-        uses: actions/checkout@v4
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           ref: 1fc258c9c8d25e5e7b89241504218bf102afbf27
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
           node-version: "22"
 
@@ -83,7 +83,7 @@ jobs:
           assert d["migrations_dir"]=="migrations-preview-canonical"
           print("Preview migration-only D1 target verified.")
           PY
-          token="$(printf '%s' "$CLOUDFLARE_API_TOKEN" | sed -E 's/^[[:space:]]*Bearer[[:space:]]+//I; s/^[[:space:]]+//; s/[[:space:]]+$//' | tr -d '\\r\\n')"
+          token="$(printf '%s' "$CLOUDFLARE_API_TOKEN" | sed -E 's/^[[:space:]]*Bearer[[:space:]]+//I; s/^[[:space:]]+//; s/[[:space:]]+$//' | tr -d '\r\n')
           test -n "$token"
           export CLOUDFLARE_API_TOKEN="$token"
           identity="$(npx --yes wrangler@4 whoami 2>&1)" || {
@@ -91,15 +91,15 @@ jobs:
             exit 1
           }
           safe_identity="${identity//"$CLOUDFLARE_API_TOKEN"/[REDACTED]}"
-          printf '%s\\n' "$safe_identity"
-          printf '%s' "$safe_identity" | grep -Fq "$EXPECTED_ACCOUNT_ID"
+          printf '%s\n' "$safe_identity"
+          printf '%s\n' "$safe_identity"
 
       - name: Verify exact EU R2 bucket and Preview D1 jurisdiction before export
         shell: bash
         run: |
           set -euo pipefail
           test "$CLOUDFLARE_ACCOUNT_ID" = "$EXPECTED_ACCOUNT_ID"
-          token="$(printf '%s' "$CLOUDFLARE_API_TOKEN" | sed -E 's/^[[:space:]]*Bearer[[:space:]]+//I; s/^[[:space:]]+//; s/[[:space:]]+$//' | tr -d '\r\n')"
+          token="$(printf '%s' "$CLOUDFLARE_API_TOKEN" | sed -E 's/^[[:space:]]*Bearer[[:space:]]+//I; s/^[[:space:]]+//; s/[[:space:]]+$//' | tr -d '\r\n')
           test -n "$token"
           status="$(curl --silent --show-error --output "$RUNNER_TEMP/preview-r2-eu.json" --write-out '%{http_code}' "https://api.cloudflare.com/client/v4/accounts/$EXPECTED_ACCOUNT_ID/r2/buckets/$R2_BUCKET" -H "Authorization: Bearer $token" -H 'cf-r2-jurisdiction: eu')"
           test "$status" = "200" || { echo "::error::EU R2 bucket lookup failed (HTTP $status); no export performed."; exit 1; }
