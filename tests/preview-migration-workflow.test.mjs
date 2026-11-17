@@ -213,3 +213,20 @@ test("Preview D1 metadata guard strips only CR/LF from the Cloudflare API token"
   assert.match(gate, /Authorization: Bearer \$token/);
   assert.doesNotMatch(workflow, /tr -d '\\\\r\\\\n'/, "no workflow step may use the over-escaped token sanitizer");
 });
+
+test("restore workflows recognize the new EU Preview backup and never target Preview for restore", async () => {
+  const [restore, restoreV2, verify, verifyV2, productionRestore] = await Promise.all([
+    readFile(new URL("../.github/workflows/restore-preview-d1-test.yml", import.meta.url), "utf8"),
+    readFile(new URL("../.github/workflows/restore-preview-d1-test-v2.yml", import.meta.url), "utf8"),
+    readFile(new URL("../.github/workflows/verify-restored-d1-test.yml", import.meta.url), "utf8"),
+    readFile(new URL("../.github/workflows/verify-restore-v2-integrity.yml", import.meta.url), "utf8"),
+    readFile(new URL("../.github/workflows/restore-production-backup-isolated-test.yml", import.meta.url), "utf8")
+  ]);
+  const previewName = "prochelia-preview-eu-2026-11-17";
+  const previewId = "e3cf167c-37e1-4d72-9ac6-b3e27c14b97f";
+  assert.ok(restore.includes(`database=${previewName}`));
+  assert.ok(restoreV2.includes(`database=${previewName}`));
+  for (const workflow of [restore, restoreV2, verify, verifyV2, productionRestore]) {
+    assert.ok(workflow.includes(previewId), "restore/verification target guard must forbid EU Preview D1");
+  }
+});
