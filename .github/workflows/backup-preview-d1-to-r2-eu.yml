@@ -39,7 +39,7 @@ jobs:
         run: |
           set -euo pipefail
           case "$GITHUB_REF" in
-            refs/heads/main|refs/heads/prelaunch/r2-eu-backup-workflow) ;;
+            refs/heads/main|refs/heads/prelaunch/r2-eu-backup-workflow|refs/heads/fix/switch-preview-to-eu-d1-2026-11-17) ;;
             *) echo "::error::Dispatch only allowed from main or the dedicated preview backup branch."; exit 1 ;;
           esac
           test "$CLOUDFLARE_ACCOUNT_ID" = "$EXPECTED_ACCOUNT_ID"
@@ -57,7 +57,7 @@ jobs:
       - name: Checkout pinned reviewed Preview branch commit (D1 config)
         uses: actions/checkout@v4
         with:
-          ref: cf7961db717fc5cb56719c52909ff03acb29bf84
+          ref: 1fc258c9c8d25e5e7b89241504218bf102afbf27
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
