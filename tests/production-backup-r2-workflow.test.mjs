@@ -43,14 +43,13 @@ test('Production backup job is unavailable to unreviewed feature branches', () =
 });
 
 test('Isolated production restore consumes the EU v2 bucket and requires an EU empty target', () => {
-  assert.match(restoreWorkflow, /R2_BUCKET:\\s*prochelia-production-backups-eu-v2/);
-  assert.match(restoreWorkflow, /RESTORE_DB_NAME:\\s*prochelia-r2-restore-validation-2026-11/);
-  assert.match(restoreWorkflow, /RESTORE_DB_ID:\\s*3caebbc6-982a-4562-96a7-e509185e9e9a/);
-  assert.match(restoreWorkflow, /\\.jurisdiction == \"eu\"/);
+  assert.match(restoreWorkflow, /R2_BUCKET:\s*prochelia-production-backups-eu-v2/);
+  assert.match(restoreWorkflow, /RESTORE_DB_NAME:\s*prochelia-r2-restore-validation-2026-11/);
+  assert.match(restoreWorkflow, /RESTORE_DB_ID:\s*3caebbc6-982a-4562-96a7-e509185e9e9a/);
+  assert.match(restoreWorkflow, /\.jurisdiction == "eu"/);
   assert.match(restoreWorkflow, /Restore target is not empty/);
-  assert.match(restoreWorkflow, /f2a79e9fa41566a8ec80fb24c02c60eb\\.eu\\.r2\\.cloudflarestorage\\.com/);
-  assert.match(restoreWorkflow, /\\.jurisdiction == "eu"/);
+  assert.match(restoreWorkflow, /f2a79e9fa41566a8ec80fb24c02c60eb\.eu\.r2\.cloudflarestorage\.com/);
   assert.match(restoreWorkflow, /Isolated restore target is empty/);
   assert.match(restoreWorkflow, /PASS: live production D1 identity and EU jurisdiction verified/);
-  assert.doesNotMatch(restoreWorkflow, /R2_BUCKET:\\s*prochelia-production-backups-eu\\s*$/m);
+  assert.doesNotMatch(restoreWorkflow, /R2_BUCKET:\s*prochelia-production-backups-eu\s*$/m);
 });
