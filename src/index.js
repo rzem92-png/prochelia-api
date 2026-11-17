@@ -2224,7 +2224,8 @@ async function ensureOperationalSchema(env) {
       entity_id TEXT, idempotency_key TEXT NOT NULL UNIQUE, status TEXT NOT NULL DEFAULT 'PENDING',
       payload_json TEXT NOT NULL DEFAULT '{}', result_json TEXT, attempts INTEGER NOT NULL DEFAULT 0,
       last_error TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, executed_at TEXT, processed_at TEXT
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, executed_at TEXT, processed_at TEXT,
+      lease_token TEXT, lease_expires_at TEXT
     )`,
     `CREATE INDEX IF NOT EXISTS idx_action_outbox_status ON action_outbox(status,created_at)`,
     `CREATE TABLE IF NOT EXISTS copilot_briefings (
@@ -2280,6 +2281,8 @@ async function ensureOperationalSchema(env) {
   const actionColumns = (actionInfo.results || []).map(x => String(x.name));
   if (!actionColumns.includes('case_id')) await env.DB.prepare('ALTER TABLE action_outbox ADD COLUMN case_id TEXT').run();
   if (!actionColumns.includes('processed_at')) await env.DB.prepare('ALTER TABLE action_outbox ADD COLUMN processed_at TEXT').run();
+  if (!actionColumns.includes('lease_token')) await env.DB.prepare('ALTER TABLE action_outbox ADD COLUMN lease_token TEXT').run();
+  if (!actionColumns.includes('lease_expires_at')) await env.DB.prepare('ALTER TABLE action_outbox ADD COLUMN lease_expires_at TEXT').run();
 }
 
 async function tableExists(env, table) {
@@ -2326,9 +2329,11 @@ async function executeQueuedAction(env, action) {
   if (!action) return {ok:false,error:'ACTION_NOT_FOUND'};
   // Atomically claim the row before any side effect. Concurrent workers can
   // observe PENDING, but only one may transition it to PROCESSING.
+  const leaseToken = crypto.randomUUID();
   const claim = await env.DB.prepare(`UPDATE action_outbox
-    SET status='PROCESSING', attempts=attempts+1, updated_at=CURRENT_TIMESTAMP
-    WHERE id=? AND status='PENDING'`).bind(action.id).run();
+    SET status='PROCESSING', lease_token=?, lease_expires_at=datetime('now','+15 minutes'),
+        attempts=attempts+1, updated_at=CURRENT_TIMESTAMP
+    WHERE id=? AND status='PENDING'`).bind(leaseToken,action.id).run();
   if (Number(claim?.meta?.changes || 0) !== 1) {
     return {ok:false,status:'SKIPPED',error:'ACTION_ALREADY_CLAIMED'};
   }
@@ -2346,8 +2351,13 @@ async function executeQueuedAction(env, action) {
           title:payload.title||'PROCHÉLIA',message:payload.message||'',payload_json:JSON.stringify(payload)};
         const usable = Object.entries(values).filter(([k])=>cols.includes(k));
         if (usable.length) {
-          const sql=`INSERT INTO notification_outbox(${usable.map(x=>x[0]).join(',')}) VALUES(${usable.map(()=>'?').join(',')})`;
-          await env.DB.prepare(sql).bind(...usable.map(x=>x[1])).run();
+          const sql=`INSERT INTO notification_outbox(${usable.map(x=>x[0]).join(',')})
+            SELECT ${usable.map(()=>'?').join(',')}
+            WHERE EXISTS (SELECT 1 FROM action_outbox WHERE id=? AND status='PROCESSING' AND lease_token=?)`;
+          const inserted = await env.DB.prepare(sql).bind(...usable.map(x=>x[1]),action.id,leaseToken).run();
+          if (Number(inserted?.meta?.changes || 0) !== 1) {
+            return {ok:false,status:'RECONCILIATION_REQUIRED',error:'OUTBOX_LEASE_LOST_BEFORE_NOTIFICATION'};
+          }
           result={performed:true,channel,notification_queued:true};
         } else result={performed:false,reason:'NOTIFICATION_SCHEMA_INCOMPATIBLE'};
       } else result={performed:false,reason:'NOTIFICATION_TABLE_MISSING'};
@@ -2382,23 +2392,28 @@ async function executeQueuedAction(env, action) {
             account_code:accountCode,direction,amount_cents:amountCents,currency,
             label:String(payload.label||payload.description||'').slice(0,500),metadata_json:JSON.stringify(payload)};
           const names=Object.keys(values);
-          await env.DB.prepare(`INSERT INTO accounting_ledger(${names.join(',')}) VALUES(${names.map(()=>'?').join(',')})`)
-            .bind(...names.map(name=>values[name])).run();
+          const inserted = await env.DB.prepare(`INSERT INTO accounting_ledger(${names.join(',')})
+            SELECT ${names.map(()=>'?').join(',')}
+            WHERE EXISTS (SELECT 1 FROM action_outbox WHERE id=? AND status='PROCESSING' AND lease_token=?)`)
+            .bind(...names.map(name=>values[name]),action.id,leaseToken).run();
+          if (Number(inserted?.meta?.changes || 0) !== 1) {
+            return {ok:false,status:'RECONCILIATION_REQUIRED',error:'OUTBOX_LEASE_LOST_BEFORE_ACCOUNTING_WRITE'};
+          }
           result={performed:true,accounting_recorded:true};
         }
       } else result={performed:false,reason:'ACCOUNTING_TABLE_MISSING'};
     } else result={performed:false,reason:'ACTION_TYPE_NOT_IMPLEMENTED'};
 
     const finalStatus = result.performed ? 'DONE' : (result.requires_provider ? 'WAITING_PROVIDER' : 'FAILED');
-    const finalized = await env.DB.prepare(`UPDATE action_outbox SET status=?,result_json=?,updated_at=CURRENT_TIMESTAMP,executed_at=? WHERE id=? AND status='PROCESSING'`)
-      .bind(finalStatus,JSON.stringify(result),result.performed?now:null,action.id).run();
+    const finalized = await env.DB.prepare(`UPDATE action_outbox SET status=?,result_json=?,updated_at=CURRENT_TIMESTAMP,executed_at=?,lease_token=NULL,lease_expires_at=NULL WHERE id=? AND status='PROCESSING' AND lease_token=?`)
+      .bind(finalStatus,JSON.stringify(result),result.performed?now:null,action.id,leaseToken).run();
     if (Number(finalized?.meta?.changes || 0) !== 1) {
       return {ok:false,status:'RECONCILIATION_REQUIRED',error:'ACTION_FINALIZATION_NOT_OWNED',result};
     }
     return {ok:true,status:finalStatus,result};
   } catch(e) {
-    const failed = await env.DB.prepare(`UPDATE action_outbox SET status='FAILED',last_error=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='PROCESSING'`)
-      .bind(String(e.message||e),action.id).run();
+    const failed = await env.DB.prepare(`UPDATE action_outbox SET status='FAILED',last_error=?,updated_at=CURRENT_TIMESTAMP,lease_token=NULL,lease_expires_at=NULL WHERE id=? AND status='PROCESSING' AND lease_token=?`)
+      .bind(String(e.message||e),action.id,leaseToken).run();
     if (Number(failed?.meta?.changes || 0) !== 1) {
       return {ok:false,status:'RECONCILIATION_REQUIRED',error:'ACTION_FAILURE_NOT_OWNED',message:e.message};
     }
