@@ -232,12 +232,6 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-      - name: Show pending migrations
-        shell: bash
-        run: |
-          set -euo pipefail
-          npx --yes wrangler@4 d1 migrations list "$EXPECTED_DB_NAME" --remote --config wrangler.preview-migrations.jsonc
-
       - name: Refuse non-empty or divergent migration history before any schema write
         shell: bash
         run: |
@@ -282,13 +276,9 @@ jobs:
               print(f"::error::Expected exactly 22 canonical migrations; found {len(local)}.")
               raise SystemExit(1)
           non_internal=[row for row in objects if row["name"] not in {"_cf_KV","d1_migrations"} and not row["name"].startswith("sqlite_")]
-          if not registry_present:
-              if non_internal:
-                  print("::error::D1 migration registry is absent but application schema objects already exist; refusing to guess a baseline.")
-                  print("Unexpected objects:", ", ".join(sorted(row["name"] for row in non_internal)))
-                  raise SystemExit(1)
-              print("PASS: new EU Preview D1 is genuinely empty; all 22 canonical migrations are pending.")
-          elif remote == local:
+          if not remote and not non_internal:
+              print("PASS: new EU Preview D1 has no application schema or applied migrations; all 22 canonical migrations are pending.")
+          elif registry_present and remote == local:
               print("PASS: exact 22-entry canonical migration registry is already applied; rerun is idempotent.")
           else:
               print("::error::Preview migration registry differs from both reviewed safe states; no migration will run.")
