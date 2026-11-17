@@ -74,7 +74,7 @@ jobs:
           gh run download "$BACKUP_RUN_ID" --repo "$GITHUB_REPOSITORY" --name "prochelia-preview-d1-encrypted-$BACKUP_RUN_ID" --dir "$RUNNER_TEMP/prochelia-restore"
           test -s "$RUNNER_TEMP/prochelia-restore/prochelia-preview.sql.gpg"
           test -s "$RUNNER_TEMP/prochelia-restore/README.txt"
-          grep -Fx 'database=prochelia-preview-db' "$RUNNER_TEMP/prochelia-restore/README.txt"
+          grep -Fx 'database=prochelia-preview-eu-2026-11-17' "$RUNNER_TEMP/prochelia-restore/README.txt"
           created="$(sed -n 's/^created_utc=//p' "$RUNNER_TEMP/prochelia-restore/README.txt")"
           [[ -n "$created" ]]
           archive_epoch="$(date -u -d "$created" +%s)"
@@ -130,7 +130,7 @@ jobs:
           set -euo pipefail
           [[ "$RESTORE_DB_NAME" == "prochelia-restore-test-v2" ]]
           [[ "$RESTORE_DB_ID" == "a3526c2a-39cb-49ab-97c4-979138145f33" ]]
-          [[ "$RESTORE_DB_ID" != "6adb95e5-e542-4bec-9008-fbea01042305" ]]
+          [[ "$RESTORE_DB_ID" != "6adb95e5-e542-4bec-9008-fbea01042305" && "$RESTORE_DB_ID" != "e3cf167c-37e1-4d72-9ac6-b3e27c14b97f" ]]
           [[ "$RESTORE_DB_ID" != "04f52830-ef5a-4f17-a640-42bbc2381bba" ]]
           npx --yes wrangler@4 d1 execute "$RESTORE_DB_NAME" --remote --file="$RUNNER_TEMP/prochelia-restore/prochelia-preview.sql" --yes
           echo "Import terminé sur la base de restauration v2."

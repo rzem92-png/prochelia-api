@@ -4,9 +4,9 @@
   "d1_databases": [
     {
       "binding": "PREVIEW_DB",
-      "database_name": "prochelia-preview-db",
-      "database_id": "6adb95e5-e542-4bec-9008-fbea01042305",
-      "migrations_dir": "migrations"
+      "database_name": "prochelia-preview-eu-2026-11-17",
+      "database_id": "e3cf167c-37e1-4d72-9ac6-b3e27c14b97f",
+      "migrations_dir": "migrations-preview-canonical"
     }
   ]
 }
