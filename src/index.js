@@ -2319,6 +2319,7 @@ async function dynamicUpdate(env, table, id, updates) {
   return {ok:true,updated:usable.map(([k])=>k)};
 }
 
+// The UNIQUE idempotency key plus read-after-conflict makes concurrent enqueue requests converge on one row.
 async function queueAction(env, actionType, entityType, entityId, payload, idem) {
   const key = idem || crypto.randomUUID();
   const existing = await env.DB.prepare('SELECT * FROM action_outbox WHERE idempotency_key=? LIMIT 1').bind(key).first();
