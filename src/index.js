@@ -1477,24 +1477,62 @@ async function copilotRecommend(env, input) {
   return { action, mode: solution.automatic ? 'AUTO' : 'MANAGER_APPROVAL', confidence: simple ? 0.95 : 0.82, solution, context, phase };
 }
 
+async function resolveOperationalCaseScope(env, auth, body) {
+  const role=auth?.user?.role;
+  if(role==='gerante') return {
+    client_id:clean(body.client_id)||null,
+    company_id:clean(body.company_id)||null,
+    intervenant_id:clean(body.intervenant_id)||null,
+    mission_id:clean(body.mission_id)||null
+  };
+  if(role==='client') {
+    const owner=await env.DB.prepare('SELECT id FROM clients WHERE user_id=? LIMIT 1').bind(auth.user.id).first();
+    if(!owner) return {error:'CLIENT_PROFILE_NOT_FOUND'};
+    const missionId=clean(body.mission_id)||null;
+    if(missionId) {
+      const mission=await env.DB.prepare('SELECT id FROM missions WHERE id=? AND client_id=? LIMIT 1').bind(missionId,owner.id).first();
+      if(!mission) return {error:'MISSION_FORBIDDEN'};
+    }
+    return {client_id:owner.id,company_id:null,intervenant_id:null,mission_id:missionId};
+  }
+  if(role==='intervenant') {
+    const owner=await env.DB.prepare('SELECT id FROM intervenants WHERE user_id=? LIMIT 1').bind(auth.user.id).first();
+    if(!owner) return {error:'INTERVENANT_PROFILE_NOT_FOUND'};
+    const missionId=clean(body.mission_id)||null;
+    if(missionId) {
+      const mission=await env.DB.prepare('SELECT id FROM missions WHERE id=? AND intervenant_id=? LIMIT 1').bind(missionId,owner.id).first();
+      if(!mission) return {error:'MISSION_FORBIDDEN'};
+    }
+    return {client_id:null,company_id:null,intervenant_id:owner.id,mission_id:missionId};
+  }
+  // Company ownership is not yet represented by a verified, enforced account-to-company
+  // relationship in the canonical business schema. Fail closed until that mapping exists.
+  return {error:'COMPANY_OWNERSHIP_NOT_VERIFIED'};
+}
+
 async function createOperationalCase(request, env) {
   const gate=await requireAuthRole(request,env,['gerante','client','intervenant','entreprise']); if(gate.error)return gate.error;
   const body=await readJson(request)||{};
   const caseType=clean(body.case_type); if(!caseType)return json({ok:false,error:'CASE_TYPE_REQUIRED',version:VERSION},400);
+  const scope=await resolveOperationalCaseScope(env,gate.auth,body);
+  if(scope.error) return json({ok:false,error:scope.error,version:VERSION},403);
+  const manager=gate.auth.user.role==='gerante';
   const phase=String(await getSetting(env,'project_phase','TEST')).toUpperCase();
   const impact=String(body.impact_level||'LOW').toUpperCase();
   const priority=CASE_PRIORITIES[impact]||10;
-  const rec=await copilotRecommend(env,{caseType,impact,phase,context:body.context||{}});
+  // Non-manager submissions are proposals only: never execute Copilot actions automatically.
+  const safeContext=manager && body.context && typeof body.context==='object' ? body.context : {};
+  let rec=await copilotRecommend(env,{caseType,impact,phase,context:safeContext});
+  if(!manager) rec={...rec,action:'PROPOSE',mode:'MANAGER_APPROVAL'};
   const id=crypto.randomUUID();
-  const requiresManager=rec.mode==='MANAGER_APPROVAL' ? 1 : 0;
-  const status=rec.action==='AUTO_RESOLVE' ? 'AUTO_PENDING' : 'OPEN';
+  const requiresManager=manager && rec.mode==='MANAGER_APPROVAL' ? 1 : (manager ? 0 : 1);
+  const status='OPEN';
   await env.DB.prepare(`INSERT INTO operational_cases(id,case_type,source,phase,priority,status,auto_mode,client_id,company_id,intervenant_id,mission_id,impact_level,description,context_json,proposed_solution_json,requires_manager) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
-    .bind(id,caseType,'API',phase,priority,status,rec.mode,clean(body.client_id)||null,clean(body.company_id)||null,clean(body.intervenant_id)||null,clean(body.mission_id)||null,impact,clean(body.description)||null,JSON.stringify(body.context||{}),JSON.stringify(rec),requiresManager).run();
+    .bind(id,caseType,'API',phase,priority,status,rec.mode,scope.client_id,scope.company_id,scope.intervenant_id,scope.mission_id,impact,clean(body.description)||null,JSON.stringify(safeContext),JSON.stringify(rec),requiresManager).run();
   await env.DB.prepare(`INSERT INTO copilot_log(id,case_id,action_type,recommendation,confidence,mode) VALUES(?,?,?,?,?,?)`)
     .bind(crypto.randomUUID(),id,rec.action,JSON.stringify(rec.solution),rec.confidence,rec.mode).run();
-  await journal(env,'copilot',null,'CASE_CREATED','operational_case',id,'OK',{caseType,impact});
-  if(rec.action==='AUTO_RESOLVE') await executeOperationalCase(env,id,null,true);
-  return json({ok:true,version:VERSION,case_id:id,recommendation:rec,status:rec.action==='AUTO_RESOLVE'?'AUTO_EXECUTED':'WAITING_MANAGER'},201);
+  await journal(env,'copilot',null,'CASE_CREATED','operational_case',id,'OK',{caseType,impact,submittedByRole:gate.auth.user.role});
+  return json({ok:true,version:VERSION,case_id:id,recommendation:rec,status:'WAITING_MANAGER'},201);
 }
 
 
@@ -1818,11 +1856,16 @@ async function financeSummary(request, env) {
 async function complaintCreate(request, env) {
   const gate=await requireAuthRole(request,env,['gerante','client','entreprise']); if(gate.error)return gate.error;
   const b=await readJson(request)||{};if(!b.category)return json({ok:false,error:'CATEGORY_REQUIRED',version:VERSION},400);
-  const id=crypto.randomUUID();await env.DB.prepare(`INSERT INTO complaints(id,client_type,client_id,company_id,mission_id,category,severity,description) VALUES(?,?,?,?,?,?,?,?)`).bind(id,String(b.client_type||'B2C'),b.client_id||null,b.company_id||null,b.mission_id||null,b.category,String(b.severity||'LOW'),b.description||null).run();
+  const scope=await resolveOperationalCaseScope(env,gate.auth,b);
+  if(scope.error) return json({ok:false,error:scope.error,version:VERSION},403);
+  const id=crypto.randomUUID();
   const caseType=SIMPLE_CASES.has(b.category)?b.category:'reclamation_client';
-  const fakeReq=new Request(request.url,{method:'POST',headers:request.headers,body:JSON.stringify({case_type:caseType,client_id:b.client_id,company_id:b.company_id,mission_id:b.mission_id,description:b.description,impact_level:b.severity||'LOW',context:{complaint_id:id}})});
-  const caseResponse=await createOperationalCase(fakeReq,env);const caseJson=await caseResponse.json();
-  if(caseJson.case_id)await env.DB.prepare('UPDATE complaints SET resolution_case_id=? WHERE id=?').bind(caseJson.case_id,id).run();
+  const fakeReq=new Request(request.url,{method:'POST',headers:request.headers,body:JSON.stringify({case_type:caseType,client_id:scope.client_id,company_id:scope.company_id,intervenant_id:scope.intervenant_id,mission_id:scope.mission_id,description:b.description,impact_level:b.severity||'LOW',context:{complaint_id:id}})});
+  const caseResponse=await createOperationalCase(fakeReq,env);
+  const caseJson=await caseResponse.json();
+  if(!caseResponse.ok) return json({ok:false,error:caseJson.error||'CASE_CREATION_FAILED',version:VERSION},caseResponse.status);
+  await env.DB.prepare(`INSERT INTO complaints(id,client_type,client_id,company_id,mission_id,category,severity,description,resolution_case_id) VALUES(?,?,?,?,?,?,?,?,?)`)
+    .bind(id,String(b.client_type|| (gate.auth.user.role==='client'?'B2C':'B2B')),scope.client_id,scope.company_id,scope.mission_id,b.category,String(b.severity||'LOW'),b.description||null,caseJson.case_id||null).run();
   return json({ok:true,version:VERSION,complaint_id:id,resolution_case_id:caseJson.case_id||null,copilot:caseJson.recommendation||null},201);
 }
 
