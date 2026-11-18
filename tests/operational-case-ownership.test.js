@@ -171,3 +171,11 @@ test("finance roles without a verified payment tenant never fall back to the use
   assert.match(paymentQuery.sql,/WHERE 1=0/);
   assert.deepEqual(paymentQuery.values,[]);
 });
+
+test("finance client without a verified profile receives no payment rows", async () => {
+  const DB = financeDb();
+  await financeRowsForUser({DB},{id:"user-without-client-profile",role:"client"});
+  const paymentQuery = DB.calls.find(x=>x.sql.includes("FROM payment_transactions"));
+  assert.match(paymentQuery.sql,/WHERE 1=0/);
+  assert.deepEqual(paymentQuery.values,[]);
+});
