@@ -21,7 +21,6 @@ CREATE TABLE IF NOT EXISTS tenant_memberships (
   revoked_at TEXT,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   UNIQUE (id, tenant_id),
-  UNIQUE (tenant_id, user_id),
   FOREIGN KEY (tenant_id) REFERENCES tenants(id),
   FOREIGN KEY (user_id) REFERENCES users(id),
   FOREIGN KEY (invited_by_user_id) REFERENCES users(id),
@@ -32,6 +31,13 @@ CREATE TABLE IF NOT EXISTS tenant_memberships (
     (status = 'REVOKED' AND revoked_at IS NOT NULL)
   )
 );
+CREATE UNIQUE INDEX IF NOT EXISTS idx_tenant_membership_one_nonrevoked_per_user
+  ON tenant_memberships(tenant_id, user_id)
+  WHERE status <> 'REVOKED';
+CREATE UNIQUE INDEX IF NOT EXISTS idx_tenant_membership_one_owner
+  ON tenant_memberships(tenant_id)
+  WHERE role = 'OWNER' AND status <> 'REVOKED';
+
 CREATE INDEX IF NOT EXISTS idx_tenant_memberships_user_status
   ON tenant_memberships(user_id, status, tenant_id);
 CREATE INDEX IF NOT EXISTS idx_tenant_memberships_tenant_role_status
