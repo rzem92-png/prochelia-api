@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createHmac } from "node:crypto";
 import { handleV7Route } from "../src/v7-routes.js";
-import { directoryList, resolveMissionSecurityAssignment, findAssignedMissionSecurity, isMissionPresenceFresh, isTrustedDeviceActive, hmacSha256Base64url } from "../src/index.js";
+import { directoryList, resolveMissionSecurityAssignment, findAssignedMissionSecurity, isMissionPresenceFresh, isTrustedDeviceActive, hmacSha256Base64url, isSameMissionPaymentRequest } from "../src/index.js";
 
 const post = (path, body) => new Request("https://example.test" + path, {
   method: "POST",
@@ -220,4 +220,17 @@ test("revoked or expired devices cannot pass mission trust checks", () => {
   assert.equal(isTrustedDeviceActive({status:"active",revoked_at:"2026-11-18 11:59:00",expires_at:"2026-11-18 12:05:00"},now),false);
   assert.equal(isTrustedDeviceActive({status:"active",revoked_at:null,expires_at:"2026-11-18 11:59:59"},now),false);
   assert.equal(isTrustedDeviceActive(null,now),false);
+});
+
+
+test("mission payment idempotency keys are bound to the full payment request", () => {
+  const existing = {mission_id:"m-1",client_id:"c-1",intervenant_id:"i-1",gross_cents:12500,commission_cents:1500};
+  const same = {missionId:"m-1",clientId:"c-1",intervenantId:"i-1",grossCents:12500,commissionCents:1500};
+  assert.equal(isSameMissionPaymentRequest(existing,same),true);
+  assert.equal(isSameMissionPaymentRequest(existing,{...same,grossCents:12501}),false);
+  assert.equal(isSameMissionPaymentRequest(existing,{...same,commissionCents:1499}),false);
+  assert.equal(isSameMissionPaymentRequest(existing,{...same,missionId:"m-2"}),false);
+  assert.equal(isSameMissionPaymentRequest(existing,{...same,clientId:"c-2"}),false);
+  assert.equal(isSameMissionPaymentRequest(existing,{...same,intervenantId:"i-2"}),false);
+  assert.equal(isSameMissionPaymentRequest(null,same),false);
 });
