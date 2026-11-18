@@ -16,6 +16,7 @@ test("Preview deploy is manual and requires exact confirmation on main or its de
   assert.match(workflow, /DEPLOY_PREVIEW_ONLY/);
   assert.match(workflow, /github\.ref == 'refs\/heads\/main'/);
   assert.match(workflow, /github\.ref == 'refs\/heads\/fix\/preview-e2e-dynamic-pages-pin-2026-11-17'/);
+  assert.match(workflow, /github\\.ref == 'refs\\/heads\\/fix\\/preview-critical-tenant-guards-2026-11-18'/);
 });
 
 test("Preview deployment resolves the latest successful Pages Preview before generating Worker config", () => {
