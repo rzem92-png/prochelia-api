@@ -99,12 +99,27 @@ jobs:
           pages_origin="$(jq -r '.result.url' "$RUNNER_TEMP/pages-preview.json")"
           pages_commit="$(jq -r '.result.deployment_trigger.metadata.commit_hash' "$RUNNER_TEMP/pages-preview.json")"
           pages_alias="$(jq -r '.result.aliases[]? | select(test("^https://[a-z0-9-]+\\.prochelia\\.pages\\.dev$"))' "$RUNNER_TEMP/pages-preview.json" | head -n 1)"
+          cf_get "Preview Worker settings for existing CORS allowlist" \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/prochelia-api-preview/settings" "$RUNNER_TEMP/preview-worker-settings-before.json"
+          cors_origin="$(jq -r '.result.bindings[] | select(.name == "CORS_ORIGIN" and .type == "plain_text") | .text' "$RUNNER_TEMP/preview-worker-settings-before.json")"
+          [[ -n "$cors_origin" && "$cors_origin" != "null" ]] || {
+            echo "::error::Preview Worker CORS_ORIGIN is missing; refusing to replace an unknown allowlist."
+            exit 1
+          }
+          IFS=',' read -r -a existing_origins <<< "$cors_origin"
+          for allowed_origin in "${existing_origins[@]}"; do
+            allowed_origin="$(printf '%s' "$allowed_origin" | sed -E 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+            [[ "$allowed_origin" =~ ^https://[a-z0-9-]+\.prochelia\.pages\.dev$ ]] || {
+              echo "::error::Existing Preview CORS allowlist contains an origin outside the verified Pages project namespace."
+              exit 1
+            }
+          done
           [[ "$pages_origin" =~ ^https://[a-z0-9-]+\.prochelia\.pages\.dev$ ]] || {
             echo "::error::Cloudflare returned an unexpected Pages Preview origin."
             exit 1
           }
-          printf 'PAGES_PREVIEW_ORIGIN=%s\nPAGES_PREVIEW_ALIAS=%s\nPAGES_PREVIEW_DEPLOYMENT_ID=%s\nPAGES_PREVIEW_COMMIT=%s\n' \
-            "$pages_origin" "$pages_alias" "$deployment_id" "$pages_commit" >> "$GITHUB_ENV"
+          printf 'PAGES_PREVIEW_ORIGIN=%s\nPAGES_PREVIEW_ALIAS=%s\nPAGES_PREVIEW_DEPLOYMENT_ID=%s\nPAGES_PREVIEW_COMMIT=%s\nPAGES_EXISTING_CORS_ORIGINS=%s\n' \
+            "$pages_origin" "$pages_alias" "$deployment_id" "$pages_commit" "$cors_origin" >> "$GITHUB_ENV"
           {
             echo "Verified Pages Preview origin: $pages_origin"
             echo "Pages Preview deployment: $deployment_id"
