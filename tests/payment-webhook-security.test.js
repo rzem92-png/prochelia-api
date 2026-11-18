@@ -36,3 +36,13 @@ test("webhook signature accepts the sha256= prefix and rejects a changed payload
   assert.equal(await verifyWebhookSignature(request, { PAYMENT_WEBHOOK_SECRET: secret }, payload), true);
   assert.equal(await verifyWebhookSignature(request, { PAYMENT_WEBHOOK_SECRET: secret }, payload + " "), false);
 });
+
+test("Stripe native timestamped signatures are rejected until a Stripe-specific adapter is implemented", async () => {
+  const timestamp = "1794992400";
+  const stripeDigest = createHmac("sha256", secret).update(timestamp + "." + payload).digest("hex");
+  const request = new Request("https://example.test/api/payments/webhook", {
+    method: "POST",
+    headers: { "stripe-signature": `t=${timestamp},v1=${stripeDigest}` }
+  });
+  assert.equal(await verifyWebhookSignature(request, { PAYMENT_WEBHOOK_SECRET: secret }, payload), false);
+});
