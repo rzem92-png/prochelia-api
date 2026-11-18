@@ -38,6 +38,7 @@ test("Preview R2 backup verifies both exact resources are EU before export", () 
   assert.match(workflow, /\.result\.jurisdiction == "eu"/);
   assert.match(workflow, /\.result\.uuid == \$id and \.result\.name == \$name and \.result\.jurisdiction == "eu"/);
   assert.match(workflow, /prochelia-preview-backups-eu-v2/);
+  assert.match(workflow, /\.provenance\.ref == "refs\\/heads\\/main" or \.provenance\.ref == "refs\\/heads\\/fix\\/r2-preview-backup-signed-attestation-2026-11-18"/);
   assert.match(workflow, /f2a79e9fa41566a8ec80fb24c02c60eb\.eu\.r2\.cloudflarestorage\.com/);
 });
 
