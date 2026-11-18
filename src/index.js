@@ -3004,93 +3004,38 @@ function financeProblemSolution(issueType) {
   return map[k]||map.UNKNOWN;
 }
 
-async function financeDashboard(request,env) {
-  const a=await financeAuth(request,env); if(a.response)return a.response;
-  const {auth}=a, rows=await financeRowsForUser(env,auth.user), summary=financeSummaryFromRows(rows,auth.user);
-  return json({ok:true,version:VERSION,workspace:{
-    owner:{id:auth.user.id,role:auth.user.role,email:auth.user.email},
-    summary,
-    payments:rows.payments,
-    payouts:rows.payouts||[],
-    ledger:rows.ledger,
-    exports:['CSV','JSON','HTML/PDF'],
-    support_resolution:{automatic_for_low_impact:true,human_validation_for_sensitive:true}
-  }});
+async function financeWorkspaceFailClosed(request, env) {
+  const auth = await getSessionUser(request, env);
+  if (!auth) return json({ ok: false, error: 'UNAUTHENTICATED', version: VERSION }, 401);
+  if (!financeRoleAllowed(auth.user.role)) return json({ ok: false, error: 'FORBIDDEN', version: VERSION }, 403);
+  // The current workspace is user-scoped, not legal-entity/tenant scoped, and is not a statutory ledger.
+  // Do not create schemas, read global payment rows, export balances, or accept manual entries.
+  return json({
+    ok: false,
+    error: 'TENANT_SCOPED_FINANCE_NOT_READY',
+    message: 'Finance workspace is unavailable until legal-entity scope, double-entry journals, source evidence and reconciliations are implemented.',
+    version: VERSION
+  }, 503);
 }
 
-async function financeExport(request,env) {
-  const a=await financeAuth(request,env); if(a.response)return a.response;
-  const {auth}=a, url=new URL(request.url);
-  const format=String(url.searchParams.get('format')||'csv').toLowerCase();
-  const start=url.searchParams.get('from'), end=url.searchParams.get('to');
-  const rows=await financeRowsForUser(env,auth.user);
-  let payments=rows.payments.filter(x=>(!start||String(x.created_at)>=start)&&(!end||String(x.created_at)<=end));
-  const data=payments.map(x=>({
-    id:x.id, mission_id:x.mission_id, type:x.type, status:x.status, date:x.created_at,
-    montant_brut_eur:financeMoney(x.gross_cents), remboursement_eur:financeMoney(x.refund_cents),
-    commission_eur:financeMoney(x.commission_cents), frais_psp_eur:financeMoney(x.provider_fee_cents),
-    remuneration_intervenant_eur:financeMoney(x.net_intervenant_cents), devise:x.currency||'EUR',
-    motif:x.reason||''
-  }));
-  const summary=financeSummaryFromRows({payments,ledger:rows.ledger},auth.user);
-  const id=crypto.randomUUID();
-  await env.DB.prepare(`INSERT INTO finance_export_log(id,user_id,role,format,period_start,period_end,row_count) VALUES(?,?,?,?,?,?,?)`)
-    .bind(id,auth.user.id,auth.user.role,format,start,end,data.length).run();
-  await journal(env,auth.user.role,auth.user.id,'FINANCE_EXPORT','finance_export',id,'OK',{format,row_count:data.length,from:start,to:end});
-
-  if(format==='json') return json({ok:true,version:VERSION,summary,rows:data,export_id:id});
-  if(format==='html' || format==='pdf') {
-    const escHtml=v=>String(v??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
-    const body=data.map(r=>`<tr><td>${escHtml(r.date)}</td><td>${escHtml(r.type)}</td><td>${escHtml(r.status)}</td><td>${r.montant_brut_eur.toFixed(2)}</td><td>${r.remboursement_eur.toFixed(2)}</td><td>${r.commission_eur.toFixed(2)}</td><td>${r.frais_psp_eur.toFixed(2)}</td><td>${r.remuneration_intervenant_eur.toFixed(2)}</td></tr>`).join('');
-    const html=`<!doctype html><html lang="fr"><head><meta charset="utf-8"><title>PROCHÉLIA — Export financier</title><style>body{font-family:Arial,sans-serif;margin:30px;color:#172a2a}h1{font-size:22px}table{border-collapse:collapse;width:100%;font-size:11px}th,td{border:1px solid #ddd;padding:6px}th{background:#eee}.tot{margin:14px 0}</style></head><body><h1>PROCHÉLIA — Export financier</h1><div class="tot">Période : ${escHtml(start||'Toutes')} → ${escHtml(end||'Toutes')} · Transactions : ${summary.transactions} · Brut : ${summary.gross_eur.toFixed(2)} € · Remboursements : ${summary.refunds_eur.toFixed(2)} €</div><table><thead><tr><th>Date</th><th>Type</th><th>Statut</th><th>Brut €</th><th>Remb. €</th><th>Commission €</th><th>PSP €</th><th>Intervenant €</th></tr></thead><tbody>${body}</tbody></table><script>window.onload=()=>window.print()</script></body></html>`;
-    return new Response(html,{status:200,headers:{'content-type':'text/html; charset=UTF-8','content-disposition':`inline; filename="prochelia-finance-${id}.html"`,'cache-control':'no-store'}});
-  }
-  const header=['date','type','status','mission_id','montant_brut_eur','remboursement_eur','commission_eur','frais_psp_eur','remuneration_intervenant_eur','devise','motif'];
-  const csv=[header,...data.map(r=>header.map(k=>String(r[k]??'').replace(/"/g,'""')))].map(row=>row.map(v=>`"${v}"`).join(';')).join('\r\n');
-  return new Response('\ufeff'+csv,{status:200,headers:{'content-type':'text/csv; charset=UTF-8','content-disposition':`attachment; filename="prochelia-finance-${id}.csv"`,'cache-control':'no-store'}});
+export async function financeDashboard(request, env) {
+  return financeWorkspaceFailClosed(request, env);
 }
 
-async function financeEntryCreate(request,env) {
-  const a=await financeAuth(request,env); if(a.response)return a.response;
-  const {auth}=a, b=await readJson(request)||{};
-  const amount=Math.round(Number(b.amount_eur)*100);
-  if(!Number.isFinite(amount)||amount<=0||!b.entry_type) return json({ok:false,error:'INVALID_FINANCE_ENTRY',version:VERSION},400);
-  const id=crypto.randomUUID();
-  await env.DB.prepare(`INSERT INTO finance_workspace_entries(id,user_id,role,entry_type,direction,amount_cents,currency,label,reference_type,reference_id,metadata_json) VALUES(?,?,?,?,?,?,?,?,?,?,?)`)
-    .bind(id,auth.user.id,auth.user.role,String(b.entry_type),String(b.direction||'IN').toUpperCase()==='OUT'?'OUT':'IN',amount,b.currency||'EUR',clean(b.label)||null,clean(b.reference_type)||null,clean(b.reference_id)||null,JSON.stringify(b.metadata||{})).run();
-  await journal(env,auth.user.role,auth.user.id,'FINANCE_ENTRY_CREATE','finance_workspace_entries',id,'OK',{entry_type:b.entry_type});
-  return json({ok:true,version:VERSION,id});
+export async function financeExport(request, env) {
+  return financeWorkspaceFailClosed(request, env);
 }
 
-async function financeProblemCreate(request,env) {
-  const a=await financeAuth(request,env); if(a.response)return a.response;
-  const {auth}=a,b=await readJson(request)||{}, [issueType,solution]=financeProblemSolution(b.issue_type);
-  const severity=['CRITICAL','HIGH','MEDIUM','LOW'].includes(String(b.severity||'').toUpperCase())?String(b.severity).toUpperCase():'LOW';
-  const auto=['LOW','MEDIUM'].includes(severity) && ['PAYMENT_FAILED','EXPORT_FAILED','INVOICE_MISSING','UNKNOWN'].includes(issueType);
-  const status=auto?'AUTO_RESOLUTION_PROPOSED':'OPEN';
-  const id=crypto.randomUUID();
-  await env.DB.prepare(`INSERT INTO finance_resolution_cases(id,user_id,role,issue_type,status,severity,description,proposed_solution,amount_cents,reference_id,metadata_json) VALUES(?,?,?,?,?,?,?,?,?,?,?)`)
-    .bind(id,auth.user.id,auth.user.role,issueType,status,severity,clean(b.description)||null,solution,Number.isFinite(Number(b.amount_cents))?Number(b.amount_cents):null,clean(b.reference_id)||null,JSON.stringify(b.metadata||{})).run();
-  await journal(env,auth.user.role,auth.user.id,'FINANCE_PROBLEM_CREATE','finance_resolution_cases',id,status,{issue_type:issueType,auto});
-  return json({ok:true,version:VERSION,case:{id,issue_type:issueType,status,severity,automatic_resolution_possible:auto,proposed_solution:solution,requires_human_validation:!auto}});
+export async function financeEntryCreate(request, env) {
+  return financeWorkspaceFailClosed(request, env);
 }
 
-async function financeProblemResolve(request,env) {
-  const a=await financeAuth(request,env); if(a.response)return a.response;
-  const {auth}=a,b=await readJson(request)||{},id=clean(b.case_id);
-  if(!id)return json({ok:false,error:'CASE_ID_REQUIRED',version:VERSION},400);
-  const row=await env.DB.prepare('SELECT * FROM finance_resolution_cases WHERE id=? LIMIT 1').bind(id).first();
-  if(!row)return json({ok:false,error:'CASE_NOT_FOUND',version:VERSION},404);
-  const role=String(auth.user.role||'').toUpperCase();
-  const owner=String(row.user_id)===String(auth.user.id);
-  const manager=['GERANTE','ADMIN','FINANCE'].includes(role);
-  if(!owner&&!manager)return json({ok:false,error:'FORBIDDEN',version:VERSION},403);
-  const approved=Boolean(b.approve);
-  const resolution=clean(b.resolution)||row.proposed_solution||'Résolution contrôlée par le Copilote.';
-  const status=approved?'RESOLVED':'ESCALATED';
-  await env.DB.prepare(`UPDATE finance_resolution_cases SET status=?,resolution=?,resolved_at=CURRENT_TIMESTAMP WHERE id=?`).bind(status,resolution,id).run();
-  await journal(env,auth.user.role,auth.user.id,'FINANCE_PROBLEM_RESOLVE','finance_resolution_cases',id,status,{approved});
-  return json({ok:true,version:VERSION,case_id:id,status,resolution});
+export async function financeProblemCreate(request, env) {
+  return financeWorkspaceFailClosed(request, env);
+}
+
+export async function financeProblemResolve(request, env) {
+  return financeWorkspaceFailClosed(request, env);
 }
 
 async function handleFinanceWorkspace(request,env) {
