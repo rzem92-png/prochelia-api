@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
-import { resolveOperationalCaseScope } from "../src/index.js";
+import { resolveOperationalCaseScope, financeRowsForUser } from "../src/index.js";
 
 const source = await readFile(new URL("../src/index.js", import.meta.url), "utf8");
 
@@ -117,4 +117,57 @@ test("consolidated routes authorize before schema helpers can issue DDL", () => 
   const body = source.slice(start, end);
   assert.ok(body.indexOf("requireAuthRole(request,env,requiredRoles)") < body.indexOf("ensureConsolidatedSchema(env)"));
   assert.doesNotMatch(body, /const consolidatedPath = .*ensureConsolidatedSchema/);
+});
+
+function financeDb(profileRows = {}) {
+  const calls = [];
+  return {
+    calls,
+    prepare(sql) {
+      return {
+        bind(...values) {
+          return {
+            async first() {
+              calls.push({method:"first",sql,values});
+              if (sql.includes("FROM clients WHERE user_id")) return profileRows.client || null;
+              if (sql.includes("FROM intervenants WHERE user_id")) return profileRows.intervenant || null;
+              return null;
+            },
+            async all() {
+              calls.push({method:"all",sql,values});
+              if (sql.includes("FROM payment_transactions")) return {results:[{id:"payment-fixture"}]};
+              return {results:[]};
+            }
+          };
+        },
+        async all() {
+          calls.push({method:"all",sql,values:[]});
+          if (sql.includes("FROM payment_transactions")) return {results:[{id:"payment-fixture"}]};
+          return {results:[]};
+        }
+      };
+    }
+  };
+}
+
+test("finance client rows use the verified client profile ID, not the session user ID", async () => {
+  const DB = financeDb({client:{id:"client-profile-A"}});
+  await financeRowsForUser({DB},{id:"user-A",role:"client"});
+  const paymentQuery = DB.calls.find(x=>x.sql.includes("FROM payment_transactions"));
+  assert.deepEqual(paymentQuery.values,["client-profile-A"]);
+});
+
+test("finance intervenant rows use the verified intervenant profile ID", async () => {
+  const DB = financeDb({intervenant:{id:"intervenant-profile-A"}});
+  await financeRowsForUser({DB},{id:"user-A",role:"intervenant"});
+  const paymentQuery = DB.calls.find(x=>x.sql.includes("FROM payment_transactions"));
+  assert.deepEqual(paymentQuery.values,["intervenant-profile-A"]);
+});
+
+test("finance roles without a verified payment tenant never fall back to the user ID", async () => {
+  const DB = financeDb();
+  await financeRowsForUser({DB},{id:"company-user-A",role:"company"});
+  const paymentQuery = DB.calls.find(x=>x.sql.includes("FROM payment_transactions"));
+  assert.match(paymentQuery.sql,/WHERE 1=0/);
+  assert.deepEqual(paymentQuery.values,[]);
 });
