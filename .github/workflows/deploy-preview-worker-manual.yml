@@ -99,6 +99,26 @@ jobs:
           pages_origin="$(jq -r '.result.url' "$RUNNER_TEMP/pages-preview.json")"
           pages_commit="$(jq -r '.result.deployment_trigger.metadata.commit_hash' "$RUNNER_TEMP/pages-preview.json")"
           pages_alias="$(jq -r '.result.aliases[]? | select(test("^https://[a-z0-9-]+\\.prochelia\\.pages\\.dev$"))' "$RUNNER_TEMP/pages-preview.json" | head -n 1)"
+          pages_branch="fix/frontend-cookie-session-auth-2026-11-17"
+          github_status="$(curl --silent --show-error --get --output "$RUNNER_TEMP/frontend-branch-commits.json" --write-out '%{http_code}' \
+            --data-urlencode "sha=$pages_branch" --data-urlencode "per_page=1" \
+            -H "Accept: application/vnd.github+json" -H "User-Agent: prochelia-preview-guard" \
+            "https://api.github.com/repos/rzem92-png/-prochelia/commits")"
+          [[ "$github_status" == "200" ]] || {
+            echo "::error::Could not resolve the current frontend branch tip from GitHub (HTTP $github_status)."
+            exit 1
+          }
+          frontend_head="$(jq -r '.[0].sha // empty' "$RUNNER_TEMP/frontend-branch-commits.json")"
+          [[ "$frontend_head" =~ ^[0-9a-f]{40}$ && "$frontend_head" == "$pages_commit" ]] || {
+            echo "::error::Latest Pages Preview deployment commit does not match the current frontend branch tip."
+            echo "::error::Pages deployment commit: $pages_commit"
+            echo "::error::GitHub frontend branch tip: ${frontend_head:-missing}"
+            exit 1
+          }
+          if [[ -n "$PAGES_EXPECTED_COMMIT" && "$pages_commit" != "$PAGES_EXPECTED_COMMIT" ]]; then
+            echo "::error::Pages deployment commit does not match the explicitly requested frontend commit."
+            exit 1
+          fi
           cf_get "Preview Worker settings for existing CORS allowlist" \
             "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/prochelia-api-preview/settings" "$RUNNER_TEMP/preview-worker-settings-before.json"
           cors_origin="$(jq -r '.result.bindings[] | select(.name == "CORS_ORIGIN" and .type == "plain_text") | .text' "$RUNNER_TEMP/preview-worker-settings-before.json")"
