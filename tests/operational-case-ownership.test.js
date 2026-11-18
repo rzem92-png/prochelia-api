@@ -36,3 +36,12 @@ test("complaint creation verifies ownership before inserting complaint records",
   const body = source.slice(start, end);
   assert.ok(body.indexOf("resolveOperationalCaseScope") < body.indexOf("INSERT INTO complaints"));
 });
+
+test("persisted pricing quotes are manager-only until server-owned policy is authoritative", () => {
+  const start = source.indexOf("async function pricingQuote");
+  const end = source.indexOf("\\nasync function financeSummary", start);
+  assert.notEqual(start, -1);
+  assert.notEqual(end, -1);
+  const body = source.slice(start, end);
+  assert.match(body, /requireAuthRole\\(request,env,\\['gerante'\\]\\)/);
+});
