@@ -38,6 +38,7 @@ jobs:
       EXPECTED_DB_ID: e3cf167c-37e1-4d72-9ac6-b3e27c14b97f
       FORBIDDEN_PRODUCTION_DB_ID: 04f52830-ef5a-4f17-a640-42bbc2381bba
       R2_BUCKET: prochelia-preview-backups-eu-v2
+      R2_EXPECTED_RETENTION_SECONDS: ${{ vars.R2_EXPECTED_RETENTION_SECONDS }}
       R2_ENDPOINT: https://f2a79e9fa41566a8ec80fb24c02c60eb.eu.r2.cloudflarestorage.com
     steps:
       - name: Enforce preview-only branch and exact workflow commit
@@ -125,6 +126,28 @@ jobs:
           status="$(curl --silent --show-error --output "$RUNNER_TEMP/preview-r2-eu.json" --write-out '%{http_code}' "https://api.cloudflare.com/client/v4/accounts/$EXPECTED_ACCOUNT_ID/r2/buckets/$R2_BUCKET" -H "Authorization: Bearer $token" -H 'cf-r2-jurisdiction: eu')"
           test "$status" = "200" || { echo "::error::EU R2 bucket lookup failed (HTTP $status); no export performed."; exit 1; }
           jq -e --arg bucket "$R2_BUCKET" '.success == true and .result.name == $bucket and .result.jurisdiction == "eu"' "$RUNNER_TEMP/preview-r2-eu.json" >/dev/null || { echo "::error::R2 bucket jurisdiction is not explicitly EU."; exit 1; }
+          expected_retention="${R2_EXPECTED_RETENTION_SECONDS:-}"
+          if ! [[ "$expected_retention" =~ ^[1-9][0-9]*$ ]]; then
+            echo "::error::Set repository variable R2_EXPECTED_RETENTION_SECONDS to the retention duration approved by the data-retention owner; refusing backup upload."
+            exit 1
+          fi
+          status="$(curl --silent --show-error --output "$RUNNER_TEMP/r2-lock-rules.json" --write-out '%{http_code}' "https://api.cloudflare.com/client/v4/accounts/$EXPECTED_ACCOUNT_ID/r2/buckets/$R2_BUCKET/lock" -H "Authorization: Bearer $token" -H 'cf-r2-jurisdiction: eu')"
+          test "$status" = "200" || { echo "::error::EU R2 bucket lock rules lookup failed (HTTP $status); refusing backup upload."; exit 1; }
+          jq -e --arg prefix "preview-d1/${EXPECTED_DB_NAME}/" --argjson retention "$expected_retention" '
+            .success == true and
+            (.result.rules | type == "array") and
+            any(.result.rules[]?;
+              .enabled == true and
+              .prefix == $prefix and
+              .condition.type == "Age" and
+              (.condition.maxAgeSeconds | type == "number") and
+              (.condition.maxAgeSeconds >= $retention)
+            )
+          ' "$RUNNER_TEMP/r2-lock-rules.json" >/dev/null || {
+            echo "::error::No enabled EU R2 lock rule matches the exact Preview backup prefix and approved retention duration."
+            exit 1
+          }
+          echo "PASS: exact Preview backup prefix has an enabled R2 retention rule meeting the approved duration."
           status="$(curl --silent --show-error --output "$RUNNER_TEMP/preview-d1-eu.json" --write-out '%{http_code}' "https://api.cloudflare.com/client/v4/accounts/$EXPECTED_ACCOUNT_ID/d1/database/$EXPECTED_DB_ID" -H "Authorization: Bearer $token")"
           test "$status" = "200" || { echo "::error::Preview D1 metadata lookup failed (HTTP $status); no export performed."; exit 1; }
           jq -e --arg id "$EXPECTED_DB_ID" --arg name "$EXPECTED_DB_NAME" '.success == true and .result.uuid == $id and .result.name == $name and .result.jurisdiction == "eu"' "$RUNNER_TEMP/preview-d1-eu.json" >/dev/null || { echo "::error::Preview D1 is not the exact EU database."; exit 1; }
