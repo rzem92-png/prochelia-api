@@ -9,7 +9,9 @@ on:
       - "scripts/generate-preview-wrangler-config.mjs"
       - ".github/workflows/worker-build-validation.yml"
   push:
-    branches: [main]
+    branches:
+      - main
+      - feat/stripe-native-webhook-signature-preview-2026-11-18
     paths:
       - "src/**"
       - "wrangler.jsonc"

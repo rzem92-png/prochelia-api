@@ -1080,10 +1080,12 @@ export async function verifyWebhookSignature(request, env, rawBody) {
 }
 
 export function webhookProviderForRequest(request, event, env) {
-  // A successfully verified Stripe-Signature header is the provider identity;
-  // never let an untrusted JSON field relabel a Stripe-signed event.
+  // Provider identity is server-owned. A JSON payload cannot select a PSP.
+  // Stripe must use its native timestamped Stripe-Signature header.
   if (request.headers.get('stripe-signature') !== null) return 'stripe';
-  return clean(event?.provider) || paymentProvider(env);
+  const configuredProvider = paymentProvider(env);
+  if (String(configuredProvider).toLowerCase() === 'stripe') return null;
+  return configuredProvider;
 }
 
 export function webhookEventInsertDecision(result) {
@@ -1118,6 +1120,9 @@ export async function paymentWebhook(request, env) {
   const eventId = clean(event?.id), type = clean(event?.type);
   if (!eventId || !type || typeof event !== 'object' || Array.isArray(event)) {
     return json({ok:false,error:'INVALID_WEBHOOK_EVENT',version:VERSION},400);
+  }
+  if (!provider) {
+    return json({ok:false,error:'PROVIDER_SIGNATURE_REQUIRED',version:VERSION},401);
   }
   if (!paymentsConfigured(env)) {
     return json({ok:false,error:'PAYMENT_PROVIDER_NOT_CONFIGURED',version:VERSION,write_enabled:false},503);

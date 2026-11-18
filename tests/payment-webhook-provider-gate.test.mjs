@@ -1,13 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createHmac, webcrypto } from "node:crypto";
-import { paymentWebhook } from "../src/index.js";
+import { paymentWebhook, webhookProviderForRequest } from "../src/index.js";
 
 globalThis.crypto ??= webcrypto;
 
-test("signed non-settlement webhook is rejected before schema creation without a PSP adapter", async () => {
+test("generic HMAC cannot authenticate a Stripe provider without Stripe's native signature", async () => {
   const secret = "synthetic-webhook-secret-not-production";
-  const payload = JSON.stringify({ id: "evt_synthetic_1", type: "customer.updated", data: {} });
+  const payload = JSON.stringify({ id: "evt_synthetic_1", type: "customer.updated", provider: "stripe", data: {} });
   const signature = createHmac("sha256", secret).update(payload).digest("base64url");
   let databaseCalls = 0;
   const env = {
@@ -26,11 +26,22 @@ test("signed non-settlement webhook is rejected before schema creation without a
     body: payload
   });
   const response = await paymentWebhook(request, env);
-  assert.equal(response.status, 503);
-  assert.equal((await response.json()).error, "PAYMENT_PROVIDER_NOT_CONFIGURED");
+  assert.equal(response.status, 401);
+  assert.equal((await response.json()).error, "PROVIDER_SIGNATURE_REQUIRED");
   assert.equal(databaseCalls, 0);
 });
 
+
+test("untrusted webhook JSON cannot choose the PSP provider", () => {
+  const request = new Request("https://api.example.test/api/payments/webhook", {
+    method: "POST",
+    headers: { "x-prochelia-signature": "0".repeat(43) }
+  });
+  assert.equal(
+    webhookProviderForRequest(request, { provider: "stripe" }, { PAYMENT_PROVIDER: "psp_adapter" }),
+    "psp_adapter"
+  );
+});
 
 test("valid Stripe-native webhook remains blocked before D1 until the PSP adapter is implemented", async () => {
   const secret = "synthetic-stripe-secret-not-production";
