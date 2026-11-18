@@ -1059,13 +1059,12 @@ function constantTimeStringEqual(actual, expected) {
 }
 
 export async function verifyWebhookSignature(request, env, rawBody) {
-  const secret = env?.PAYMENT_WEBHOOK_SECRET;
-  if (typeof secret !== 'string' || !secret) return false;
-
-  // Stripe signs the exact raw request body with a timestamped v1 HMAC.
-  // If the native header is present, never fall back to the generic header.
+  // Stripe has its own signing secret and format; never reuse the generic
+  // internal webhook secret across providers.
   const stripeHeader = request.headers.get('stripe-signature');
   if (stripeHeader !== null) {
+    const secret = env?.STRIPE_WEBHOOK_SECRET;
+    if (typeof secret !== 'string' || !secret) return false;
     const fields = stripeHeader.split(',').map(part => part.trim().split('=', 2));
     const timestamps = fields.filter(([name]) => name === 't').map(([, value]) => value);
     const signatures = fields.filter(([name]) => name === 'v1').map(([, value]) => value);
@@ -1084,6 +1083,8 @@ export async function verifyWebhookSignature(request, env, rawBody) {
     return signatures.some(signature => constantTimeStringEqual(signature.toLowerCase(), expected));
   }
 
+  const secret = env?.PAYMENT_WEBHOOK_SECRET;
+  if (typeof secret !== 'string' || !secret) return false;
   const signature = request.headers.get('x-prochelia-signature') || request.headers.get('x-webhook-signature') || '';
   const supplied = signature.startsWith('sha256=') ? signature.slice(7) : signature;
   if (!/^[A-Za-z0-9_-]{43}$/.test(supplied)) return false;
