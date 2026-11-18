@@ -1065,7 +1065,11 @@ export async function verifyWebhookSignature(request, env, rawBody) {
   if (stripeHeader !== null) {
     const secret = env?.STRIPE_WEBHOOK_SECRET;
     if (typeof secret !== 'string' || !secret) return false;
-    const fields = stripeHeader.split(',').map(part => part.trim().split('=', 2));
+    const fields = stripeHeader.split(',').map(part => {
+      const item = part.trim();
+      const separator = item.indexOf('=');
+      return separator > 0 ? [item.slice(0, separator), item.slice(separator + 1)] : [item, ''];
+    });
     const timestamps = fields.filter(([name]) => name === 't').map(([, value]) => value);
     const signatures = fields.filter(([name]) => name === 'v1').map(([, value]) => value);
     if (timestamps.length !== 1 || !/^\d{1,12}$/.test(timestamps[0] || '') ||
@@ -1080,7 +1084,11 @@ export async function verifyWebhookSignature(request, env, rawBody) {
     const signedPayload = new TextEncoder().encode(timestamps[0] + '.' + rawBody);
     const mac = new Uint8Array(await crypto.subtle.sign('HMAC', key, signedPayload));
     const expected = Array.from(mac, byte => byte.toString(16).padStart(2, '0')).join('');
-    return signatures.some(signature => constantTimeStringEqual(signature.toLowerCase(), expected));
+    let matched = 0;
+    for (const signature of signatures) {
+      matched |= Number(constantTimeStringEqual(signature.toLowerCase(), expected));
+    }
+    return matched === 1;
   }
 
   const secret = env?.PAYMENT_WEBHOOK_SECRET;
