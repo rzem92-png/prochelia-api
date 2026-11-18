@@ -44,7 +44,7 @@ test("R2 backup attestation uses deterministic canonical JSON", () => {
   const a = manifest();
   const b = {
     validation: { foreign_key_check: "empty", sqlite_integrity_check: "ok", encryption: "OpenPGP-AES256" },
-    provenance: { ref: a.provenance.ref, commit_sha: a.provenance.commit_sha, run_id: a.provenance.run_id, workflow: a.provenance.workflow, repository: a.provenance.repository },
+    provenance: { migration_source_sha: a.provenance.migration_source_sha, ref: a.provenance.ref, commit_sha: a.provenance.commit_sha, run_id: a.provenance.run_id, workflow: a.provenance.workflow, repository: a.provenance.repository },
     object: { ciphertext_sha256: a.object.ciphertext_sha256, plaintext_sha256: a.object.plaintext_sha256, sha256_manifest_key: a.object.sha256_manifest_key, key: a.object.key, bucket: a.object.bucket },
     source: { jurisdiction: a.source.jurisdiction, database_name: a.source.database_name, database_id: a.source.database_id, account_id: a.source.account_id },
     created_at: a.created_at,
