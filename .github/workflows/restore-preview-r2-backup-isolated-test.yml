@@ -162,6 +162,9 @@ jobs:
             .object.bucket == $bucket and
             .object.key == $key and
             .object.sha256_manifest_key == ($key + ".sha256") and
+            .provenance.repository == "rzem92-png/prochelia-api" and
+            .provenance.ref == "refs/heads/main" and
+            (.provenance.migration_source_sha | test("^[0-9a-f]{40}$")) and
             .validation.sqlite_integrity_check == "ok" and
             .validation.foreign_key_check == "empty" and
             .validation.encryption == "OpenPGP-AES256" and
