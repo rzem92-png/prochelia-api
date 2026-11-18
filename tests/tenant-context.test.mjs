@@ -7,7 +7,7 @@ globalThis.crypto ??= webcrypto;
 import { resolveTenantContext, tenantRoleAllowed } from "../src/tenant-context.js";
 
 function request(tenantId) {
-  const headers = tenantId ? { "x-prochelia-tenant-id": tenantId } : {};
+  const headers = {};
   return new Request("https://api.example.test/api/tenant/context", { headers });
 }
 const auth = { user: { id: "user-verified-by-session" } };
@@ -22,11 +22,11 @@ test("requested tenant header is accepted only with a matching active server-sid
         membership_id: "membership-a", membership_role: "FINANCE" };
     }}; }};
   }}};
-  const context = await resolveTenantContext(request("tenant-a"), env, auth);
+  const context = await resolveTenantContext(request(), env, auth);
   assert.equal(context.ok, true);
   assert.equal(context.tenant.id, "tenant-a");
   assert.equal(context.tenant.role, "FINANCE");
-  assert.deepEqual(values, ["user-verified-by-session", "tenant-a"]);
+  assert.deepEqual(values, ["session-a", "user-verified-by-session"]);
   assert.match(sql, /m\.status = 'ACTIVE'/);
   assert.match(sql, /t\.status = 'ACTIVE'/);
   assert.match(sql, /m\.user_id = \?/);
@@ -36,7 +36,7 @@ test("requested tenant header is accepted only with a matching active server-sid
 
 test("caller-supplied tenant without membership is denied", async () => {
   const env = { DB: { prepare() { return { bind() { return { async first() { return null; } }; } }; } } };
-  const context = await resolveTenantContext(request("tenant-owned-by-another-user"), env, auth);
+  const context = await resolveTenantContext(request(), env, auth);
   assert.deepEqual(context, { ok: false, status: 403, error: "TENANT_MEMBERSHIP_REQUIRED" });
 });
 
@@ -80,7 +80,7 @@ function routeEnv({ authenticated = true, membership = true } = {}) {
             return authenticated ? {
               id: "user-verified-by-session", role: "client", email: "u@example.test",
               first_name: "Test", last_name: "User", phone: null, status: "active",
-              created_at: "2026-11-18", updated_at: "2026-11-18", session_id: "session-a"
+              created_at: "2026-11-18", updated_at: "2026-11-18", session_id: "session-a", session_active_tenant_id: "tenant-a"
             } : null;
           }};
         }
@@ -101,7 +101,7 @@ function routeEnv({ authenticated = true, membership = true } = {}) {
 test("authenticated tenant context route returns only server-resolved active membership", async () => {
   const { env, statements } = routeEnv();
   const req = new Request("https://api.example.test/api/tenant/context", {
-    headers: { cookie: "prochelia_session=synthetic-session-token", "x-prochelia-tenant-id": "tenant-a" }
+    headers: { cookie: "prochelia_session=synthetic-session-token" }
   });
   const response = await tenantContextRoute(req, env);
   assert.equal(response.status, 200);
