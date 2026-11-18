@@ -46,11 +46,15 @@ test("Preview deployment preserves and validates the current Worker CORS allowli
   assert.match(generator, /process\.env\.PAGES_EXISTING_CORS_ORIGINS/);
 });
 
-test("Preview deployment resolves the current Pages commit by default and accepts an optional exact SHA", () => {
+test("Preview deployment requires the Pages deployment SHA to equal the current GitHub frontend branch tip", () => {
   assert.match(workflow, /pages_commit_sha:/);
-  assert.match(workflow, /PAGES_EXPECTED_COMMIT: \$\{\{ inputs\.pages_commit_sha \|\| '' \}\}/);
+  assert.match(workflow, /PAGES_EXPECTED_COMMIT: \\$\\{\\{ inputs\\.pages_commit_sha \\|\\| '' \\}\\}/);
   assert.match(workflow, /pages_commit_sha must be an exact 40-character lowercase Git SHA/);
   assert.ok(workflow.includes('[[ -n "$PAGES_EXPECTED_COMMIT" && ! "$PAGES_EXPECTED_COMMIT" =~ ^[0-9a-f]{40}$ ]]'));
+  assert.match(workflow, /api\\.github\\.com\\/repos\\/rzem92-png\\/-prochelia\\/commits/);
+  assert.match(workflow, /--data-urlencode "sha=\\$pages_branch"/);
+  assert.match(workflow, /frontend_head/);
+  assert.match(workflow, /"\\$frontend_head" == "\\$pages_commit"/);
 });
 
 test("Preview deploy pins isolated Worker and Preview D1, never Production", () => {
