@@ -47,7 +47,7 @@ test("Preview backup is encrypted, round-trip verified and cannot mutate D1 or P
   assert.ok(workflow.includes("roundtrip-validation.sqlite"));
   assert.match(workflow, /roundtrip_foreign_keys/);
   assert.match(workflow, /sha256/);
-  assert.match(workflow, /Download backup and verify encryption\/checksum/);
+  assert.match(workflow, /Download backup and verify HMAC attestation/);
   assert.doesNotMatch(workflow, /d1 migrations apply/);
   assert.doesNotMatch(workflow, /wrangler@4 deploy/);
 });
