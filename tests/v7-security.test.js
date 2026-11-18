@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { handleV7Route } from "../src/v7-routes.js";
-import { directoryList } from "../src/index.js";
+import { directoryList, resolveMissionSecurityAssignment } from "../src/index.js";
 
 const post = (path, body) => new Request("https://example.test" + path, {
   method: "POST",
@@ -116,4 +116,51 @@ test("intervenant directory returns the deterministic final-page contract", asyn
   assert.equal(body.has_more,false);
   assert.equal(body.next_offset,null);
   assert.match(query,/FROM intervenants i JOIN users u/);
+});
+
+
+test("mission security assignment resolves business IDs to their owning users", async () => {
+  let sql = "";
+  let values = [];
+  const expected = {
+    mission_id: "mission-1",
+    client_id: "client-record-1",
+    intervenant_id: "provider-record-1",
+    client_user_id: "client-user-1",
+    intervenant_user_id: "provider-user-1"
+  };
+  const env = { DB: { prepare(statement) {
+    sql = statement;
+    return { bind(...args) {
+      values = args;
+      return { async first() { return expected; } };
+    } };
+  } } };
+  const row = await resolveMissionSecurityAssignment(env, {
+    missionId: "mission-1",
+    clientId: "client-record-1",
+    intervenantId: "provider-record-1"
+  });
+  assert.deepEqual(values, ["mission-1", "client-record-1", "provider-record-1"]);
+  assert.match(sql, /JOIN clients c ON c\.id = m\.client_id/);
+  assert.match(sql, /JOIN intervenants i ON i\.id = m\.intervenant_id/);
+  assert.match(sql, /c\.user_id AS client_user_id/);
+  assert.match(sql, /i\.user_id AS intervenant_user_id/);
+  assert.equal(row.client_user_id, "client-user-1");
+  assert.equal(row.intervenant_user_id, "provider-user-1");
+});
+
+test("mission security assignment fails closed when required identifiers are missing", async () => {
+  let databaseReads = 0;
+  const env = { DB: { prepare() { databaseReads++; throw new Error("unexpected database read"); } } };
+  assert.equal(await resolveMissionSecurityAssignment(env, {
+    missionId: "mission-1", clientId: "", intervenantId: "provider-1"
+  }), null);
+  assert.equal(databaseReads, 0);
+});
+
+test("mission security assignment fails closed without a database", async () => {
+  assert.equal(await resolveMissionSecurityAssignment({}, {
+    missionId: "mission-1", clientId: "client-1", intervenantId: "provider-1"
+  }), null);
 });
