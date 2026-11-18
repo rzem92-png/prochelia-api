@@ -158,7 +158,7 @@ async function createSession(env, userId) {
   return token;
 }
 
-async function getSessionUser(request, env) {
+export async function getSessionUser(request, env) {
   if (!env.DB) return null;
   const token = getCookie(request, SESSION_COOKIE);
   if (!token) return null;
@@ -170,6 +170,7 @@ async function getSessionUser(request, env) {
        JOIN users u ON u.id = s.user_id
       WHERE s.token_hash = ?
         AND s.expires_at > CURRENT_TIMESTAMP
+        AND s.revoked_at IS NULL
       LIMIT 1`
   ).bind(tokenHash).first();
   if (!row) return null;
@@ -322,13 +323,15 @@ async function login(request, env) {
   );
 }
 
-async function logout(request, env) {
+export async function logout(request, env) {
   if (!env.DB) return json({ ok: false, database: false, version: VERSION }, 503);
   const token = getCookie(request, SESSION_COOKIE);
   const headers = { 'set-cookie': sessionCookie('', 0) };
   if (token) {
     const tokenHash = await sha256Base64url(token);
-    await env.DB.prepare('DELETE FROM sessions WHERE token_hash = ?').bind(tokenHash).run();
+    await env.DB.prepare(`UPDATE sessions
+      SET revoked_at = CURRENT_TIMESTAMP, revoked_reason = 'USER_LOGOUT'
+      WHERE token_hash = ? AND revoked_at IS NULL`).bind(tokenHash).run();
   }
   return json({ ok: true, version: VERSION, authenticated: false }, 200, headers);
 }
