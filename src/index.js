@@ -1477,7 +1477,7 @@ async function copilotRecommend(env, input) {
   return { action, mode: solution.automatic ? 'AUTO' : 'MANAGER_APPROVAL', confidence: simple ? 0.95 : 0.82, solution, context, phase };
 }
 
-async function resolveOperationalCaseScope(env, auth, body) {
+export async function resolveOperationalCaseScope(env, auth, body) {
   const role=auth?.user?.role;
   if(role==='gerante') return {
     client_id:clean(body.client_id)||null,
