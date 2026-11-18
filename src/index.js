@@ -778,7 +778,7 @@ export async function paymentSchemaReady(env) {
       `SELECT name FROM sqlite_master WHERE type='table' AND name IN (${placeholders})`
     ).bind(...requiredTables).all();
     // An adapter must not turn a failed/partial metadata response into readiness.
-    if (result?.success === false) return false;
+    if (result?.success !== true) return false;
     const rows = Array.isArray(result?.results) ? result.results : [];
     const present = new Set(rows.filter(row => typeof row?.name === 'string').map(row => row.name));
     return requiredTables.every(name => present.has(name));
@@ -848,7 +848,7 @@ export async function paymentStatus(request, env) {
   } catch {
     return json({ok:false,error:'PAYMENT_STATUS_SCHEMA_UNAVAILABLE',version:VERSION,write_enabled:false},503);
   }
-  if (schema?.success === false || !Array.isArray(schema?.results) ||
+  if (schema?.success !== true || !Array.isArray(schema?.results) ||
       schema.results.some(row => !row || typeof row.name !== 'string')) {
     return json({ok:false,error:'PAYMENT_STATUS_SCHEMA_UNAVAILABLE',version:VERSION,write_enabled:false},503);
   }
