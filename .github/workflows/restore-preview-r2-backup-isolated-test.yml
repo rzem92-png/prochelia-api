@@ -24,7 +24,8 @@ jobs:
     if: >-
       (
         github.ref == 'refs/heads/main' ||
-        github.ref == 'refs/heads/fix/restore-preview-fresh-eu-d1-2026-11-18'
+        github.ref == 'refs/heads/fix/restore-preview-fresh-eu-d1-2026-11-18' ||
+        github.ref == 'refs/heads/fix/r2-preview-backup-signed-attestation-2026-11-18'
       ) &&
       inputs.confirm_restore == 'RESTORE_PREVIEW_R2_TO_ISOLATED_TEST_ONLY'
     runs-on: ubuntu-latest
