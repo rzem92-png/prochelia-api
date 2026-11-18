@@ -36,6 +36,16 @@ test("Preview deployment resolves the latest successful Pages Preview before gen
   assert.doesNotMatch(workflow, /579679da7ca3a68b91448a85e7151bda5794a155/);
 });
 
+test("Preview deployment preserves and validates the current Worker CORS allowlist before generating config", () => {
+  const resolve = workflow.indexOf("Resolve and verify latest Pages Preview origin before generating Worker config");
+  const preserve = workflow.indexOf("Preview Worker settings for existing CORS allowlist");
+  const generate = workflow.indexOf("Generate isolated Preview deployment config");
+  assert.ok(resolve >= 0 && preserve > resolve && generate > preserve);
+  assert.match(workflow, /PAGES_EXISTING_CORS_ORIGINS=/);
+  assert.match(workflow, /Existing Preview CORS allowlist contains an origin outside the verified Pages project namespace/);
+  assert.match(generator, /process\.env\.PAGES_EXISTING_CORS_ORIGINS/);
+});
+
 test("Preview deployment resolves the current Pages commit by default and accepts an optional exact SHA", () => {
   assert.match(workflow, /pages_commit_sha:/);
   assert.match(workflow, /PAGES_EXPECTED_COMMIT: \$\{\{ inputs\.pages_commit_sha \|\| '' \}\}/);
@@ -104,7 +114,13 @@ test("Preview deployment config generator emits isolated EU bindings and the ver
     const result = spawnSync(process.execPath, [script], {
       cwd: directory,
       encoding: "utf8",
-      env: { ...process.env, GITHUB_SHA: testCommit, PAGES_PREVIEW_ORIGIN: pagesOrigin, PAGES_PREVIEW_ALIAS: pagesAlias }
+      env: {
+        ...process.env,
+        GITHUB_SHA: testCommit,
+        PAGES_PREVIEW_ORIGIN: pagesOrigin,
+        PAGES_PREVIEW_ALIAS: pagesAlias,
+        PAGES_EXISTING_CORS_ORIGINS: "https://dde58745.prochelia.pages.dev,https://0a64987c.prochelia.pages.dev"
+      }
     });
     assert.equal(result.status, 0, result.stderr || result.stdout);
     const generated = JSON.parse(await readFile(join(directory, "wrangler.preview.generated.json"), "utf8"));
@@ -116,6 +132,8 @@ test("Preview deployment config generator emits isolated EU bindings and the ver
     assert.ok(generated.vars.CORS_ORIGIN.split(",").includes(pagesOrigin));
     assert.ok(generated.vars.CORS_ORIGIN.split(",").includes(pagesAlias));
     assert.ok(generated.vars.CORS_ORIGIN.split(",").includes("https://8480de7b.prochelia.pages.dev"));
+    assert.ok(generated.vars.CORS_ORIGIN.split(",").includes("https://dde58745.prochelia.pages.dev"));
+    assert.ok(generated.vars.CORS_ORIGIN.split(",").includes("https://0a64987c.prochelia.pages.dev"));
     assert.notEqual(generated.d1_databases[0].database_id, "04f52830-ef5a-4f17-a640-42bbc2381bba");
   } finally {
     await rm(directory, { recursive: true, force: true });
@@ -136,6 +154,19 @@ test("Preview deployment config generator refuses a missing or non-Pages origin"
       if (origin !== undefined) env.PAGES_PREVIEW_ORIGIN = origin;
       const result = spawnSync(process.execPath, [script], { cwd: directory, encoding: "utf8", env });
       assert.notEqual(result.status, 0, `unexpectedly accepted origin: ${origin}`);
+    }
+    for (const existing of ["https://example.com", "http://old.prochelia.pages.dev", "https://old.prochelia.pages.dev/path"]) {
+      const result = spawnSync(process.execPath, [script], {
+        cwd: directory,
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          GITHUB_SHA: testCommit,
+          PAGES_PREVIEW_ORIGIN: "https://8480de7b.prochelia.pages.dev",
+          PAGES_EXISTING_CORS_ORIGINS: existing
+        }
+      });
+      assert.notEqual(result.status, 0, `unexpectedly accepted existing CORS origin: ${existing}`);
     }
     for (const alias of ["http://fix-frontend-cookie-session-7y26.prochelia.pages.dev", "https://example.com", "https://fix-frontend-cookie-session-7y26.prochelia.pages.dev/path"]) {
       const result = spawnSync(process.execPath, [script], {
