@@ -13,13 +13,13 @@ on:
         default: "fix/frontend-cookie-session-auth-2026-11-17"
         type: string
       pages_commit_sha:
+        description: "Exact 40-character frontend commit SHA; must match the latest successful Pages Preview deployment"
+        required: true
+        type: string
+      pages_commit_sha:
         description: "Optional exact 40-character frontend commit to require"
         required: false
         type: string
-  workflow_run:
-    workflows:
-      - Deploy PROCHÉLIA API preview only (manual)
-    types: [completed]
 
 permissions:
   contents: read
@@ -32,33 +32,24 @@ jobs:
   preview-directory-e2e:
     if: >-
       (
-        github.ref == 'refs/heads/main' &&
-        (
-          (github.event_name == 'workflow_dispatch' && inputs.confirmation == 'RUN_PREVIEW_DIRECTORY_E2E') ||
-          (github.event_name == 'workflow_run' &&
-           github.event.workflow_run.event == 'workflow_dispatch' &&
-           github.event.workflow_run.conclusion == 'success' &&
-           github.event.workflow_run.head_branch == 'main')
-        )
-      ) ||
-      (
-        github.ref == 'refs/heads/fix/preview-e2e-dynamic-pages-pin-2026-11-17' &&
-        github.event_name == 'workflow_dispatch' &&
-        inputs.confirmation == 'RUN_PREVIEW_DIRECTORY_E2E'
-      )
+        github.ref == 'refs/heads/main' ||
+        github.ref == 'refs/heads/fix/preview-e2e-dynamic-pages-pin-2026-11-17'
+      ) &&
+      github.event_name == 'workflow_dispatch' &&
+      inputs.confirmation == 'RUN_PREVIEW_DIRECTORY_E2E'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
       CLOUDFLARE_ACCOUNT_ID: f2a79e9fa41566a8ec80fb24c02c60eb
       PREVIEW_DB_NAME: prochelia-preview-eu-2026-11-17
       PREVIEW_DB_ID: e3cf167c-37e1-4d72-9ac6-b3e27c14b97f
-      API_EXPECTED_COMMIT: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
+      API_EXPECTED_COMMIT: ${{ github.sha }}
       PAGES_PREVIEW_BRANCH: ${{ inputs.pages_branch || 'fix/frontend-cookie-session-auth-2026-11-17' }}
       PAGES_EXPECTED_COMMIT: ${{ inputs.pages_commit_sha || '' }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
-          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
+          ref: ${{ github.sha }}
           persist-credentials: false
 
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
@@ -80,6 +71,10 @@ jobs:
           [[ "$PREVIEW_DB_ID" == "e3cf167c-37e1-4d72-9ac6-b3e27c14b97f" ]]
           [[ "$PREVIEW_DB_ID" != "04f52830-ef5a-4f17-a640-42bbc2381bba" ]]
           [[ "$PAGES_PREVIEW_BRANCH" != "main" ]]
+          [[ "$PAGES_EXPECTED_COMMIT" =~ ^[0-9a-f]{40}$ ]] || {
+            echo "::error::pages_commit_sha is required and must be an exact 40-character lowercase Git SHA."
+            exit 1
+          }
           if [[ -n "$PAGES_EXPECTED_COMMIT" && ! "$PAGES_EXPECTED_COMMIT" =~ ^[0-9a-f]{40}$ ]]; then
             echo "::error::pages_commit_sha must be an exact 40-character lowercase Git SHA."
             exit 1
@@ -159,25 +154,6 @@ jobs:
           pages_url="$(jq -r '.result.url' "$RUNNER_TEMP/pages-preview.json")"
           pages_alias="$(jq -r '.result.aliases[]? | select(test("^https://[a-z0-9-]+\\.prochelia\\.pages\\.dev$"))' "$RUNNER_TEMP/pages-preview.json" | head -n 1)"
           pages_commit="$(jq -r '.result.deployment_trigger.metadata.commit_hash' "$RUNNER_TEMP/pages-preview.json")"
-          github_status="$(curl --silent --show-error --get --output "$RUNNER_TEMP/frontend-branch-commits.json" --write-out '%{http_code}' \
-            --data-urlencode "sha=$PAGES_PREVIEW_BRANCH" --data-urlencode "per_page=1" \
-            -H "Accept: application/vnd.github+json" -H "User-Agent: prochelia-preview-e2e" \
-            "https://api.github.com/repos/rzem92-png/-prochelia/commits")"
-          [[ "$github_status" == "200" ]] || {
-            echo "::error::Could not resolve the current frontend branch tip from GitHub (HTTP $github_status)."
-            exit 1
-          }
-          frontend_head="$(jq -r '.[0].sha // empty' "$RUNNER_TEMP/frontend-branch-commits.json")"
-          [[ "$frontend_head" =~ ^[0-9a-f]{40}$ && "$frontend_head" == "$pages_commit" ]] || {
-            echo "::error::Latest Pages Preview deployment commit does not match the current frontend branch tip."
-            echo "::error::Pages deployment commit: $pages_commit"
-            echo "::error::GitHub frontend branch tip: ${frontend_head:-missing}"
-            exit 1
-          }
-          if [[ -n "$PAGES_EXPECTED_COMMIT" && "$pages_commit" != "$PAGES_EXPECTED_COMMIT" ]]; then
-            echo "::error::Pages deployment commit does not match the explicitly requested frontend commit."
-            exit 1
-          fi
           [[ "$pages_url" =~ ^https://[a-z0-9-]+\.prochelia\.pages\.dev$ ]] || {
             echo "::error::Pages Preview URL is not a verified project deployment URL."
             exit 1
