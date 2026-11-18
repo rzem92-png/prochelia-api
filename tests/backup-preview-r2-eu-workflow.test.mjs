@@ -41,6 +41,19 @@ test("Preview R2 backup verifies both exact resources are EU before export", () 
   assert.match(workflow, /f2a79e9fa41566a8ec80fb24c02c60eb\.eu\.r2\.cloudflarestorage\.com/);
 });
 
+test("Preview R2 backup requires an enabled exact-prefix EU bucket lock meeting owner-approved retention before export", () => {
+  assert.match(workflow, /R2_EXPECTED_RETENTION_SECONDS: \\$\\{\\{ vars\\.R2_EXPECTED_RETENTION_SECONDS \\}\\}/);
+  const lock = workflow.indexOf("/r2/buckets/\\$R2_BUCKET/lock");
+  const exportStep = workflow.indexOf("Export preview D1 (read-only)");
+  assert.ok(lock >= 0 && exportStep > lock);
+  assert.match(workflow, /cf-r2-jurisdiction: eu/);
+  assert.match(workflow, /preview-d1\\/\\$\\{EXPECTED_DB_NAME\\}\\//);
+  assert.match(workflow, /\\.prefix == \\$prefix/);
+  assert.match(workflow, /\\.condition\\.maxAgeSeconds >= \\$retention/);
+  assert.match(workflow, /No enabled EU R2 lock rule/);
+  assert.match(workflow, /retention duration approved by the data-retention owner/);
+});
+
 test("Preview backup is encrypted, round-trip verified and cannot mutate D1 or Production", () => {
   assert.match(workflow, /cipher-algo AES256/);
   assert.match(workflow, /sqlite3 .*PRAGMA integrity_check/);
