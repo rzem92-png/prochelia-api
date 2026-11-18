@@ -30,7 +30,8 @@ const manifest = () => ({
     workflow: "PROCHÉLIA — sauvegarde D1 preview chiffrée vers R2 EU",
     run_id: "123456789",
     commit_sha: "74bd23b3d88e0acea62d1c58f30187ddce2011be",
-    ref: "refs/heads/main"
+    ref: "refs/heads/main",
+    migration_source_sha: "1fc258c9c8d25e5e7b89241504218bf102afbf27"
   },
   validation: {
     encryption: "OpenPGP-AES256",
