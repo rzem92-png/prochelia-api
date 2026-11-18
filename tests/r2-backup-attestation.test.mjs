@@ -13,7 +13,7 @@ const manifest = () => ({
   attestation_type: "prochelia.preview-d1-backup",
   created_at: "2026-11-18T10:00:00.000Z",
   source: {
-    account_id: "f2a79e9f-a415-66a8-ec80-fb24c02c60eb",
+    account_id: "f2a79e9fa41566a8ec80fb24c02c60eb",
     database_id: "e3cf167c-37e1-4d72-9ac6-b3e27c14b97f",
     database_name: "prochelia-preview-eu-2026-11-17",
     jurisdiction: "eu"
@@ -41,7 +41,15 @@ const manifest = () => ({
 
 test("R2 backup attestation uses deterministic canonical JSON", () => {
   const a = manifest();
-  const b = { ...a, source: { ...a.source, jurisdiction: "eu" } };
+  const b = {
+    validation: { foreign_key_check: "empty", sqlite_integrity_check: "ok", encryption: "OpenPGP-AES256" },
+    provenance: { ref: a.provenance.ref, commit_sha: a.provenance.commit_sha, run_id: a.provenance.run_id, workflow: a.provenance.workflow, repository: a.provenance.repository },
+    object: { ciphertext_sha256: a.object.ciphertext_sha256, plaintext_sha256: a.object.plaintext_sha256, sha256_manifest_key: a.object.sha256_manifest_key, key: a.object.key, bucket: a.object.bucket },
+    source: { jurisdiction: a.source.jurisdiction, database_name: a.source.database_name, database_id: a.source.database_id, account_id: a.source.account_id },
+    created_at: a.created_at,
+    attestation_type: a.attestation_type,
+    schema_version: a.schema_version
+  };
   assert.equal(canonicalManifest(a), canonicalManifest(b));
 });
 
