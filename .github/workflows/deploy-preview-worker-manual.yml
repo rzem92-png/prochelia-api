@@ -24,7 +24,8 @@ jobs:
     if: >-
       (
         github.ref == 'refs/heads/main' ||
-        github.ref == 'refs/heads/fix/preview-e2e-dynamic-pages-pin-2026-11-17'
+        github.ref == 'refs/heads/fix/preview-e2e-dynamic-pages-pin-2026-11-17' ||
+        github.ref == 'refs/heads/fix/preview-critical-tenant-guards-2026-11-18'
       ) &&
       inputs.confirmation == 'DEPLOY_PREVIEW_ONLY'
     runs-on: ubuntu-latest
