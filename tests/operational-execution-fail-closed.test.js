@@ -34,7 +34,7 @@ function managerEnv() {
           bind(...values) {
             return {
               async first() {
-                assert.match(sql, /FROM sessions s\\s+JOIN users u/);
+                assert.match(sql, /FROM sessions s\s+JOIN users u/);
                 assert.equal(values.length, 1);
                 return managerRow;
               },
