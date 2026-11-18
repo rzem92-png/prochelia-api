@@ -89,5 +89,5 @@ test("Preview R2 attestation summary uses printf and a single grouped append", (
   assert.match(summary, /printf 'Preview R2 object: %s\\n' "\\$R2_OBJECT_KEY"/);
   assert.match(summary, /printf 'HMAC attestation objects: %s\\.attestation\\.json and \\.attestation\\.hmac\\n'/);
   assert.match(summary, /\\} >> "\\$GITHUB_STEP_SUMMARY"/);
-  assert.doesNotMatch(summary, /echo .*\x60\$\\(/);
+  assert.doesNotMatch(summary, /echo /);
 });
