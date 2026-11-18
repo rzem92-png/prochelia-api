@@ -108,3 +108,13 @@ test("manager scope remains explicitly manager supplied", async () => {
   });
   assert.deepEqual(scope, {client_id:"client-A",company_id:"company-A",intervenant_id:"intervenant-A",mission_id:"mission-A"});
 });
+
+test("consolidated routes authorize before schema helpers can issue DDL", () => {
+  const start = source.indexOf("async function handleConsolidated");
+  const end = source.indexOf("\\n}", start);
+  assert.notEqual(start, -1);
+  assert.notEqual(end, -1);
+  const body = source.slice(start, end);
+  assert.ok(body.indexOf("requireAuthRole(request,env,requiredRoles)") < body.indexOf("ensureConsolidatedSchema(env)"));
+  assert.doesNotMatch(body, /const consolidatedPath = .*ensureConsolidatedSchema/);
+});
