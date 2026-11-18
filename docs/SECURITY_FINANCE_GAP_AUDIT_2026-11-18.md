@@ -37,7 +37,7 @@ Le schéma `trusted_devices` ne contient pas de clé publique, d'identifiant de 
 
 Le schéma `sessions` contient `id, user_id, token_hash, expires_at, created_at`, sans colonne de révocation explicite. Le logout peut supprimer une session, mais un modèle de révocation/audit complet n'est pas démontré.
 
-**Décision de sûreté :** les routes sensibles de mission ne doivent pas considérer le hash UA comme une attestation. Prochaine étape : enrôlement WebAuthn ou clé publique liée au compte, challenge à usage unique, signature de présence, rotation/révocation et tests anti-rejeu. Une clé WebCrypto seule prouve la possession d'une clé, pas une attestation matérielle.
+**Décision de sûreté :** la branche PR 287 retire le fingerprint UA et fait répondre `/api/security/presence` en 503 `DEVICE_ATTESTATION_REQUIRED` avant toute écriture tant que le challenge cryptographique n'existe pas. Prochaine étape : enrôlement WebAuthn ou clé publique liée au compte, challenge à usage unique, signature de présence, rotation/révocation et tests anti-rejeu. Une clé WebCrypto seule prouve la possession d'une clé, pas une attestation matérielle.
 
 ## 4. Webhooks et PSP — risque élevé
 
