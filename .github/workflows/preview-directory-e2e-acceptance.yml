@@ -16,6 +16,10 @@ on:
         description: "Exact 40-character frontend commit SHA; must match the latest successful Pages Preview deployment"
         required: true
         type: string
+      api_commit_sha:
+        description: "Exact 40-character Worker Preview commit SHA returned by the live Pages-to-Worker health endpoint"
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -39,7 +43,7 @@ jobs:
       CLOUDFLARE_ACCOUNT_ID: f2a79e9fa41566a8ec80fb24c02c60eb
       PREVIEW_DB_NAME: prochelia-preview-eu-2026-11-17
       PREVIEW_DB_ID: e3cf167c-37e1-4d72-9ac6-b3e27c14b97f
-      API_EXPECTED_COMMIT: ${{ github.sha }}
+      API_EXPECTED_COMMIT: ${{ inputs.api_commit_sha || '' }}
       PAGES_PREVIEW_BRANCH: ${{ inputs.pages_branch || 'fix/frontend-cookie-session-auth-2026-11-17' }}
       PAGES_EXPECTED_COMMIT: ${{ inputs.pages_commit_sha || '' }}
     steps:
@@ -67,6 +71,10 @@ jobs:
           [[ "$PREVIEW_DB_ID" == "e3cf167c-37e1-4d72-9ac6-b3e27c14b97f" ]]
           [[ "$PREVIEW_DB_ID" != "04f52830-ef5a-4f17-a640-42bbc2381bba" ]]
           [[ "$PAGES_PREVIEW_BRANCH" != "main" ]]
+          [[ "$API_EXPECTED_COMMIT" =~ ^[0-9a-f]{40}$ ]] || {
+            echo "::error::api_commit_sha is required and must be an exact 40-character lowercase Git SHA."
+            exit 1
+          }
           [[ "$PAGES_EXPECTED_COMMIT" =~ ^[0-9a-f]{40}$ ]] || {
             echo "::error::pages_commit_sha is required and must be an exact 40-character lowercase Git SHA."
             exit 1
@@ -159,6 +167,11 @@ jobs:
           fi
           cf_request "Preview Worker settings" \
             "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/prochelia-api-preview/settings" "$RUNNER_TEMP/preview-worker-settings.json"
+          worker_commit="$(jq -r '.result.bindings[] | select(.name == "PROCHELIA_COMMIT_SHA" and .type == "plain_text") | .text' "$RUNNER_TEMP/preview-worker-settings.json")"
+          [[ "$worker_commit" == "$API_EXPECTED_COMMIT" ]] || {
+            echo "::error::Preview Worker commit binding does not match the requested exact API commit."
+            exit 1
+          }
           cors_origin="$(jq -r '.result.bindings[] | select(.name == "CORS_ORIGIN" and .type == "plain_text") | .text' "$RUNNER_TEMP/preview-worker-settings.json")"
           [[ -n "$cors_origin" && "$cors_origin" != "null" ]] || {
             echo "::error::Preview Worker CORS_ORIGIN binding is missing."
@@ -201,6 +214,7 @@ jobs:
             echo "Deployment: $deployment_id"
             echo "Frontend branch: $PAGES_PREVIEW_BRANCH"
             echo "Frontend commit: $pages_commit"
+            echo "Worker commit: $API_EXPECTED_COMMIT"
             [[ -z "$pages_alias" ]] || echo "Pages Preview branch alias: $pages_alias"
             echo "Preview D1, service binding, origin and alias match the isolated Preview environment."
           } >> "$GITHUB_STEP_SUMMARY"
