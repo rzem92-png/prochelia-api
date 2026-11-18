@@ -95,6 +95,8 @@ END;
 CREATE TRIGGER IF NOT EXISTS trg_accounting_line_draft_only
 BEFORE INSERT ON accounting_journal_lines
 BEGIN
+  SELECT CASE WHEN NEW.currency NOT GLOB '[A-Z][A-Z][A-Z]'
+    THEN RAISE(ABORT, 'ACCOUNTING_LINE_CURRENCY_INVALID') END;
   SELECT CASE WHEN NOT EXISTS (
     SELECT 1 FROM accounting_journals j
     WHERE j.id = NEW.journal_id AND j.tenant_id = NEW.tenant_id
