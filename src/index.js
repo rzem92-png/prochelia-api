@@ -979,9 +979,19 @@ async function createMissionPayment(request, env) {
   }
   const net=gross-commission;
   const txId=crypto.randomUUID();
-  await env.DB.prepare(`INSERT INTO payment_transactions
+  const inserted = await env.DB.prepare(`INSERT INTO payment_transactions
     (id,idempotency_key,mission_id,client_id,intervenant_id,type,status,gross_cents,commission_cents,net_intervenant_cents,currency,provider,reason)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(txId,idem,missionId,clientId,intervenantId,'MISSION_CHARGE','pending',gross,commission,net,'EUR',paymentProvider(env),'MISSION_PAYMENT_CREATED').run();
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+    ON CONFLICT(idempotency_key) DO NOTHING`).bind(txId,idem,missionId,clientId,intervenantId,'MISSION_CHARGE','pending',gross,commission,net,'EUR',paymentProvider(env),'MISSION_PAYMENT_CREATED').run();
+  if (Number(inserted?.meta?.changes || 0) !== 1) {
+    const raced = await env.DB.prepare('SELECT * FROM payment_transactions WHERE idempotency_key=? LIMIT 1').bind(idem).first();
+    if (!raced) return json({ok:false,error:'PAYMENT_IDEMPOTENCY_STATE_UNAVAILABLE',version:VERSION},503);
+    if (!isSameMissionPaymentRequest(raced,{missionId,clientId,intervenantId,grossCents:gross,commissionCents:commission})) {
+      await paymentAudit(env,'MISSION_PAYMENT_IDEMPOTENCY_CONFLICT',{transaction_id:raced.id,mission_id:missionId,user_id:auth.user.id,metadata:{idempotency_key_reused:true,concurrent_request:true}},'DENIED');
+      return json({ok:false,error:'IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_REQUEST',version:VERSION},409);
+    }
+    return json({ok:true,version:VERSION,idempotent_replay:true,transaction:raced},200);
+  }
   await paymentAudit(env,'MISSION_PAYMENT_CREATED',{transaction_id:txId,mission_id:missionId,user_id:auth.user.id,metadata:{gross_cents:gross,commission_cents:commission,net_cents:net}},'OK');
   return json({ok:true,version:VERSION,transaction_id:txId,status:'pending',gross_cents:gross,commission_cents:commission,net_intervenant_cents:net,provider:paymentProvider(env),next:paymentsConfigured(env)?'PSP_CHARGE_REQUIRED':'PAYMENT_PROVIDER_NOT_CONFIGURED'},201);
 }
