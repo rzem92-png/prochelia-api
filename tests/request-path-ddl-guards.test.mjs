@@ -49,7 +49,7 @@ test("rate limiter checks pre-provisioned tables and performs no request-path DD
   assert.deepEqual(result, { ok: true });
   assert.ok(statements.some(sql => /sqlite_master/.test(sql)));
   assert.ok(statements.every(sql => !/\b(CREATE|ALTER|DROP)\b/i.test(sql)));
-  assert.equal(writes.length, 1);
+  assert.equal(writes.length, 0);
   assert.match(statements.find(sql => /INSERT INTO security_rate_limits/.test(sql)), /ON CONFLICT\\(bucket,subject_hash,window_start\\)/);
   assert.match(statements.find(sql => /INSERT INTO security_rate_limits/.test(sql)), /RETURNING request_count/);
 });
