@@ -4,8 +4,9 @@ import { readFile } from "node:fs/promises";
 
 const workflow = await readFile(new URL("../.github/workflows/backup-preview-d1-to-r2-eu.yml", import.meta.url), "utf8");
 
-test("Preview R2 backup is manually gated to main and pinned to the reviewed EU Preview D1 config", () => {
+test("Preview R2 backup is manually gated to main or the exact reviewed attestation branch and pinned to the reviewed EU Preview D1 config", () => {
   assert.match(workflow, /github\.ref == 'refs\/heads\/main'/);
+  assert.match(workflow, /github\.ref == 'refs\/heads\/fix\/r2-preview-backup-signed-attestation-2026-11-18'/);
   assert.match(workflow, /inputs\.confirm_preview_backup == 'BACKUP_PREVIEW_TO_R2_EU'/);
   assert.match(workflow, /ref: 1fc258c9c8d25e5e7b89241504218bf102afbf27/);
   assert.match(workflow, /clean="\\n"\.join/);
