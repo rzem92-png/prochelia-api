@@ -4,12 +4,13 @@ import { readFile } from "node:fs/promises";
 
 const workflow = await readFile(new URL("../.github/workflows/preview-directory-e2e-acceptance.yml", import.meta.url), "utf8");
 
-test("Preview E2E is gated by explicit confirmation or a successful isolated Preview deployment", () => {
+test("Preview E2E is manually gated and requires an exact frontend Pages commit SHA", () => {
   assert.match(workflow, /workflow_dispatch:/);
-  assert.match(workflow, /RUN_PREVIEW_DIRECTORY_E2E/);
-  assert.match(workflow, /workflow_run:/);
-  assert.match(workflow, /github\.event\.workflow_run\.conclusion == 'success'/);
-  assert.match(workflow, /github\.ref == 'refs\/heads\/main'/);
+  assert.ok(!workflow.includes("workflow_run:"));
+  assert.ok(workflow.includes("RUN_PREVIEW_DIRECTORY_E2E"));
+  assert.ok(workflow.includes("pages_commit_sha:"));
+  assert.ok(workflow.includes("required: true"));
+  assert.ok(workflow.includes("pages_commit_sha is required and must be an exact 40-character lowercase Git SHA"));
 });
 
 test("synthetic Preview E2E can be manually dispatched from its dedicated PR branch without merging", () => {
@@ -39,14 +40,13 @@ test("Preview E2E resolves the latest Pages Preview deployment instead of stale 
   assert.doesNotMatch(workflow, /PREVIEW_DB_ID: 04f52830-ef5a-4f17-a640-42bbc2381bba/);
 });
 
-test("Pages deployment commit must match the current GitHub frontend branch tip and any explicit SHA pin", () => {
+test("Pages deployment commit must equal the required explicit frontend SHA pin", () => {
   assert.ok(workflow.includes("pages_commit_sha:"));
-  assert.ok(workflow.includes("pages_commit_sha must be an exact 40-character lowercase Git SHA"));
-  assert.ok(workflow.includes("https://api.github.com/repos/rzem92-png/-prochelia/commits"));
-  assert.ok(workflow.includes('--data-urlencode "sha=$PAGES_PREVIEW_BRANCH"'));
-  assert.ok(workflow.includes("frontend_head"));
-  assert.ok(workflow.includes('"$frontend_head" == "$pages_commit"'));
-  assert.ok(workflow.includes('($expected == "" or .result.deployment_trigger.metadata.commit_hash == $expected)'));
+  assert.ok(workflow.includes("required: true"));
+  assert.ok(workflow.includes("PAGES_EXPECTED_COMMIT: ${{ inputs.pages_commit_sha || '' }}"));
+  assert.ok(workflow.includes("pages_commit_sha is required and must be an exact 40-character lowercase Git SHA"));
+  assert.ok(workflow.includes('.result.deployment_trigger.metadata.commit_hash == $expected'));
+  assert.ok(!workflow.includes("api.github.com/repos/rzem92-png/-prochelia/commits"));
 });
 
 test("Pages Preview configuration and deployment are checked independently from Production", () => {
@@ -120,8 +120,8 @@ test("Preview directory acceptance uses deterministic synthetic ordering and bou
 
 
 test("Live E2E checks that the deployed Preview Worker matches the exact API commit under test", () => {
-  assert.ok(workflow.includes("API_EXPECTED_COMMIT: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}"));
-  assert.ok(workflow.includes("ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}"));
+  assert.ok(workflow.includes("API_EXPECTED_COMMIT: ${{ github.sha }}"));
+  assert.ok(workflow.includes("ref: ${{ github.sha }}"));
   assert.ok(workflow.includes("body.deployment_commit !== process.env.API_EXPECTED_COMMIT"));
   assert.ok(workflow.includes("Preview Worker commit mismatch"));
 });
