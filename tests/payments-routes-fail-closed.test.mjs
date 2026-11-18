@@ -93,7 +93,7 @@ test("onboarding, mission charge and payout all fail closed before D1 writes", a
       handler: payoutRequest,
       role: "intervenant",
       path: "/api/payments/payout",
-      error: "PAYMENT_PROVIDER_NOT_CONFIGURED",
+      error: "PAYOUT_PROVIDER_NOT_CONFIGURED",
       body: { amount_eur: "50.00", provider_account_id: "acct_caller_controlled" }
     }
   ];
