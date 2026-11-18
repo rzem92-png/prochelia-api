@@ -1,8 +1,11 @@
 import test from "node:test";
+import { readFile } from "node:fs/promises";
 import assert from "node:assert/strict";
 import { createHmac } from "node:crypto";
 import { handleV7Route } from "../src/v7-routes.js";
 import { directoryList, resolveMissionSecurityAssignment, findAssignedMissionSecurity, isMissionPresenceFresh, isTrustedDeviceActive, hmacSha256Base64url, isSameMissionPaymentRequest, paymentsConfigured, supportAutoResolve } from "../src/index.js";
+
+const source = await readFile(new URL("../src/index.js", import.meta.url), "utf8");
 
 const post = (path, body) => new Request("https://example.test" + path, {
   method: "POST",
@@ -256,4 +259,23 @@ test("support auto-resolution ignores caller-supplied execution_verified and rem
   assert.doesNotMatch(update.sql,/status='RESOLVED'/);
   assert.ok(calls.some(call=>call.sql.includes("INSERT INTO support_case_events")));
   assert.ok(calls.some(call=>call.sql.includes("INSERT INTO journal")));
+});
+
+
+test("backup status never claims an automatic daily schedule without a configured trigger", () => {
+  const scaleStart=source.indexOf("async function nationalScaleStatus");
+  const scaleEnd=source.indexOf("\nasync function backupStatus",scaleStart);
+  const backupStart=scaleEnd;
+  const backupEnd=source.indexOf("\n\nconst __procheliaNationalHandle",backupStart);
+  assert.notEqual(scaleStart,-1);
+  assert.notEqual(scaleEnd,-1);
+  assert.notEqual(backupEnd,-1);
+  const scaleBody=source.slice(scaleStart,scaleEnd);
+  const backupBody=source.slice(backupStart,backupEnd);
+  assert.match(scaleBody,/automatic:false/);
+  assert.match(scaleBody,/scheduleStatus:'NOT_CONFIGURED'/);
+  assert.match(backupBody,/automatic:false/);
+  assert.match(backupBody,/scheduleStatus:'NOT_CONFIGURED'/);
+  assert.match(backupBody,/retentionStatus:'UNVERIFIED'/);
+  assert.doesNotMatch(backupBody,/frequency:'DAILY'/);
 });
