@@ -52,7 +52,7 @@ test("Preview deployment requires an exact frontend Pages commit SHA", () => {
   assert.ok(workflow.includes("PAGES_EXPECTED_COMMIT: ${{ inputs.pages_commit_sha || '' }}"));
   assert.ok(workflow.includes("pages_commit_sha is required and must be an exact 40-character lowercase Git SHA"));
   assert.ok(workflow.includes('[[ "$PAGES_EXPECTED_COMMIT" =~ ^[0-9a-f]{40}$ ]]'));
-  assert.ok(workflow.includes('($expected == "" or .result.deployment_trigger.metadata.commit_hash == $expected)') === false);
+  assert.ok(workflow.includes('.result.deployment_trigger.metadata.commit_hash == $expected'));
   assert.ok(workflow.includes('.result.deployment_trigger.metadata.commit_hash == $expected'));
   assert.ok(!workflow.includes("api.github.com/repos/rzem92-png/-prochelia/commits"));
 });
