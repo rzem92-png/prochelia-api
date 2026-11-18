@@ -21,7 +21,12 @@ concurrency:
 
 jobs:
   restore-isolated:
-    if: ${{ github.ref == 'refs/heads/main' && inputs.confirm_restore == 'RESTORE_PREVIEW_R2_TO_ISOLATED_TEST_ONLY' }}
+    if: >-
+      (
+        github.ref == 'refs/heads/main' ||
+        github.ref == 'refs/heads/fix/restore-preview-fresh-eu-d1-2026-11-18'
+      ) &&
+      inputs.confirm_restore == 'RESTORE_PREVIEW_R2_TO_ISOLATED_TEST_ONLY'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
@@ -45,6 +50,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          case "$GITHUB_REF" in
+            refs/heads/main|refs/heads/fix/restore-preview-fresh-eu-d1-2026-11-18) ;;
+            *) echo "::error::Restore is restricted to main or the dedicated isolated-restore branch."; exit 1 ;;
+          esac
           test "$CLOUDFLARE_ACCOUNT_ID" = "$EXPECTED_ACCOUNT_ID"
           for name in CLOUDFLARE_API_TOKEN BACKUP_ENCRYPTION_KEY AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY; do
             test -n "${!name:-}" || { echo "::error::Required secret missing: $name"; exit 1; }
