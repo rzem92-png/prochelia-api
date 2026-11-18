@@ -86,8 +86,8 @@ test("Preview R2 backup refuses to reuse an object key or reuse the encryption s
 
 test("Preview R2 attestation summary uses printf and a single grouped append", () => {
   const summary = workflow.slice(workflow.indexOf("Record non-secret backup attestation evidence"));
-  assert.match(summary, /printf 'Preview R2 object: %s\\n' "\\$R2_OBJECT_KEY"/);
-  assert.match(summary, /printf 'HMAC attestation objects: %s\\.attestation\\.json and \\.attestation\\.hmac\\n'/);
-  assert.match(summary, /\\} >> "\\$GITHUB_STEP_SUMMARY"/);
+  assert.ok(summary.includes(`printf 'Preview R2 object: %s\\n' "$R2_OBJECT_KEY"`));
+  assert.ok(summary.includes(`printf 'HMAC attestation objects: %s.attestation.json and .attestation.hmac\\n' "$R2_OBJECT_KEY"`));
+  assert.ok(summary.includes(`} >> "$GITHUB_STEP_SUMMARY"`));
   assert.doesNotMatch(summary, /echo /);
 });
