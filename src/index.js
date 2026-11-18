@@ -3030,18 +3030,24 @@ function financeIso(v) {
   return Number.isNaN(d.getTime()) ? null : d.toISOString();
 }
 
-async function financeRowsForUser(env, user) {
+export async function financeRowsForUser(env, user) {
   const role = String(user.role||'').toUpperCase();
   const uid = user.id;
   const params = [];
-  let where = '';
+  let where = '1=0';
   if (['GERANTE','ADMIN','FINANCE'].includes(role)) {
     where = '1=1';
   } else if (role === 'INTERVENANT') {
-    where = 'intervenant_id=?'; params.push(uid);
-  } else {
-    where = 'client_id=?'; params.push(uid);
+    const profile = await env.DB.prepare('SELECT id FROM intervenants WHERE user_id=? LIMIT 1').bind(uid).first();
+    where = 'intervenant_id=?';
+    params.push(profile?.id || '__NO_VERIFIED_INTERVENANT_PROFILE__');
+  } else if (['CLIENT','CLIENT_SOCIAL'].includes(role)) {
+    const profile = await env.DB.prepare('SELECT id FROM clients WHERE user_id=? LIMIT 1').bind(uid).first();
+    where = 'client_id=?';
+    params.push(profile?.id || '__NO_VERIFIED_CLIENT_PROFILE__');
   }
+  // Company/support aliases have no verified company_id in payment_transactions.
+  // They receive no payment rows rather than falling back to user_id as a tenant ID.
 
   let payments = [];
   try {
