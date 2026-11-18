@@ -126,16 +126,30 @@ jobs:
           status="$(curl --silent --show-error --output "$RUNNER_TEMP/preview-r2-eu.json" --write-out '%{http_code}' "https://api.cloudflare.com/client/v4/accounts/$EXPECTED_ACCOUNT_ID/r2/buckets/$R2_BUCKET" -H "Authorization: Bearer $token" -H 'cf-r2-jurisdiction: eu')"
           test "$status" = "200" || { echo "::error::EU R2 bucket lookup failed (HTTP $status); no export performed."; exit 1; }
           jq -e --arg bucket "$R2_BUCKET" '.success == true and .result.name == $bucket and .result.jurisdiction == "eu"' "$RUNNER_TEMP/preview-r2-eu.json" >/dev/null || { echo "::error::R2 bucket jurisdiction is not explicitly EU."; exit 1; }
-          expected_retention="${R2_EXPECTED_RETENTION_SECONDS:-}"
-          if ! [[ "$expected_retention" =~ ^[1-9][0-9]*$ ]]; then
-            echo "::error::Set repository variable R2_EXPECTED_RETENTION_SECONDS to the retention duration approved by the data-retention owner; refusing backup upload."
-            exit 1
-          fi
+          prefix="preview-d1/${EXPECTED_DB_NAME}/"
           status="$(curl --silent --show-error --output "$RUNNER_TEMP/r2-lock-rules.json" --write-out '%{http_code}' "https://api.cloudflare.com/client/v4/accounts/$EXPECTED_ACCOUNT_ID/r2/buckets/$R2_BUCKET/lock" -H "Authorization: Bearer $token" -H 'cf-r2-jurisdiction: eu')"
           test "$status" = "200" || { echo "::error::EU R2 bucket lock rules lookup failed (HTTP $status); refusing backup upload."; exit 1; }
-          jq -e --arg prefix "preview-d1/${EXPECTED_DB_NAME}/" --argjson retention "$expected_retention" '
+          jq -e --arg prefix "$prefix" '
             .success == true and
             (.result.rules | type == "array") and
+            any(.result.rules[]?;
+              .enabled == true and
+              .prefix == $prefix and
+              .condition.type == "Age" and
+              (.condition.maxAgeSeconds | type == "number" and . > 0)
+            )
+          ' "$RUNNER_TEMP/r2-lock-rules.json" >/dev/null || {
+            echo "::error::No enabled EU R2 lock rule with a positive age was found for the exact Preview backup prefix; refusing backup upload."
+            exit 1
+          }
+          actual_retention="$(jq -r --arg prefix "$prefix" '[.result.rules[]? | select(.enabled == true and .prefix == $prefix and .condition.type == "Age" and (.condition.maxAgeSeconds | type == "number" and . > 0)) | .condition.maxAgeSeconds] | max // empty' "$RUNNER_TEMP/r2-lock-rules.json")"
+          expected_retention="${R2_EXPECTED_RETENTION_SECONDS:-}"
+          if ! [[ "$expected_retention" =~ ^[1-9][0-9]*$ ]]; then
+            echo "::error::Set repository variable R2_EXPECTED_RETENTION_SECONDS to the retention duration approved by the data-retention owner; verified EU lock age is ${actual_retention} seconds; refusing backup upload."
+            exit 1
+          fi
+          jq -e --arg prefix "$prefix" --argjson retention "$expected_retention" '
+            .success == true and
             any(.result.rules[]?;
               .enabled == true and
               .prefix == $prefix and
