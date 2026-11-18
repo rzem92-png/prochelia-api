@@ -1885,7 +1885,7 @@ async function consolidatedInfo(env) {
   return json({ok:true,version:VERSION,architecture:'UNIQUE_TRANSVERSAL_ENGINE',phase,automation:'simple_low_impact_auto_sensitive_manager',mobile_pc:'responsive_web_required',domains:['B2C','B2B','missions','matching','metiers','incidents','remplacement','paiements','finance','comptabilite','reclamations','commercial','recrutement','RGPD','securite','audit','copilote'],b2b_rule:'societe paie intervenant; PROCHÉLIA facture commissions/service',b2c_rule:'client paie la prestation; orchestration du reversement intervenant',note:'Aucune opération financière réelle n’est simulée : les fonds passent par un PSP configuré et vérifié.'});
 }
 
-async function handleConsolidated(request, env) {
+export async function handleConsolidated(request, env) {
   const url=new URL(request.url);
   // Authenticate and authorize before running any schema helper. These helpers
   // issue DDL; an anonymous GET must never be able to trigger database writes.
