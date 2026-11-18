@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { handleV7Route } from "../src/v7-routes.js";
-import { directoryList, resolveMissionSecurityAssignment, findAssignedMissionSecurity } from "../src/index.js";
+import { directoryList, resolveMissionSecurityAssignment, findAssignedMissionSecurity, isMissionPresenceFresh } from "../src/index.js";
 
 const post = (path, body) => new Request("https://example.test" + path, {
   method: "POST",
@@ -189,4 +189,14 @@ test("mission security code lookup fails closed for missing identity", async () 
   const env = { DB: { prepare() { reads++; throw new Error("unexpected database read"); } } };
   assert.equal(await findAssignedMissionSecurity(env, "mission-1", ""), null);
   assert.equal(reads, 0);
+});
+
+
+test("mission code verification requires a fresh presence timestamp", () => {
+  const now = Date.parse("2026-11-18T12:00:00.000Z");
+  assert.equal(isMissionPresenceFresh("2026-11-18 11:50:00", now), true);
+  assert.equal(isMissionPresenceFresh("2026-11-18 11:49:59", now), false);
+  assert.equal(isMissionPresenceFresh("2026-11-18 12:00:01", now), false);
+  assert.equal(isMissionPresenceFresh(null, now), false);
+  assert.equal(isMissionPresenceFresh("not-a-date", now), false);
 });
