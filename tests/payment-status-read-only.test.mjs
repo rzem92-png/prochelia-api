@@ -33,7 +33,7 @@ test("payment status is read-only and does not invent a zero wallet when schema 
           },
           async all() {
             assert.match(sql, /sqlite_master/);
-            return { results: [] };
+            return { success: true, results: [] };
           },
           async run() {
             writes.push(sql);
@@ -118,6 +118,42 @@ test("payment status fails closed when schema metadata lookup throws", async () 
             };
           },
           async all() { throw new Error("Synthetic D1 metadata outage"); }
+        };
+      }
+    }
+  };
+  const request = new Request("https://api.example.test/api/payments/status", {
+    headers: { cookie: "prochelia_session=synthetic-session-token" }
+  });
+  const response = await paymentStatus(request, env);
+  assert.equal(response.status, 503);
+  assert.equal((await response.json()).error, "PAYMENT_STATUS_SCHEMA_UNAVAILABLE");
+});
+
+
+test("payment status fails closed when D1 success status is missing", async () => {
+  const env = {
+    DB: {
+      prepare(sql) {
+        return {
+          bind() {
+            return {
+              async first() {
+                if (/FROM sessions s/.test(sql)) {
+                  return {
+                    id: "synthetic-user", role: "intervenant", email: "synthetic@example.test",
+                    first_name: "Synthetic", last_name: "User", phone: null, status: "active",
+                    created_at: "2026-01-01 00:00:00", updated_at: "2026-01-01 00:00:00",
+                    session_id: "synthetic-session"
+                  };
+                }
+                throw new Error("Financial reads must not follow malformed D1 metadata");
+              }
+            };
+          },
+          async all() {
+            return { results: [] };
+          }
         };
       }
     }
