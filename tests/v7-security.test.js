@@ -248,7 +248,20 @@ test("real payout reservations remain disabled until a PSP adapter is implemente
 
 test("support auto-resolution ignores caller-supplied execution_verified and remains open pending server evidence", async () => {
   const calls=[];
-  const DB={prepare(sql){return {bind(...values){return {async run(){calls.push({sql,values});return {success:true};}}};}}};
+  const DB = {
+    prepare(sql) {
+      return {
+        bind(...values) {
+          return {
+            async run() {
+              calls.push({sql,values});
+              return {success:true};
+            }
+          };
+        }
+      };
+    }
+  };
   const result=await supportAutoResolve({DB},"synthetic-case","synthetic-user","client","DELAY_LIGHT",{execution_verified:true});
   assert.equal(result.status,"WAITING_ACTION");
   assert.equal(result.closed,false);
