@@ -590,6 +590,24 @@ async function deliverSecurityCodes(env, payload) {
   return {ok:true,channel:'authenticated_notification_webhook'};
 }
 
+export async function resolveMissionSecurityAssignment(env, { missionId, clientId, intervenantId }) {
+  if (!env?.DB || !missionId || !clientId || !intervenantId) return null;
+  return env.DB.prepare(`
+    SELECT m.id AS mission_id,
+           m.client_id,
+           m.intervenant_id,
+           c.user_id AS client_user_id,
+           i.user_id AS intervenant_user_id
+      FROM missions m
+      JOIN clients c ON c.id = m.client_id
+      JOIN intervenants i ON i.id = m.intervenant_id
+     WHERE m.id = ?
+       AND m.client_id = ?
+       AND m.intervenant_id = ?
+     LIMIT 1
+  `).bind(missionId, clientId, intervenantId).first();
+}
+
 async function securityPrepareMission(request, env) {
   const auth = await getSessionUser(request, env);
   if (!requireRole(auth, ['gerante'])) return json({ok:false,error:auth?.user?'FORBIDDEN':'UNAUTHENTICATED',version:VERSION}, auth?.user?403:401);
@@ -597,7 +615,9 @@ async function securityPrepareMission(request, env) {
   const body = await readJson(request);
   const missionId=clean(body?.mission_id), clientId=clean(body?.client_id), intervenantId=clean(body?.intervenant_id);
   if(!missionId||!clientId||!intervenantId) return json({ok:false,error:'MISSION_SECURITY_FIELDS_REQUIRED',version:VERSION},400);
-  const verified = await requireVerifiedIntervenant(env,intervenantId);
+  const assignment = await resolveMissionSecurityAssignment(env, { missionId, clientId, intervenantId });
+  if (!assignment) return json({ok:false,error:'MISSION_ASSIGNMENT_MISMATCH',version:VERSION},409);
+  const verified = await requireVerifiedIntervenant(env, assignment.intervenant_user_id);
   if(!verified) return json({ok:false,error:'INTERVENANT_IDENTITY_NOT_VERIFIED',version:VERSION},409);
   const existing=await env.DB.prepare('SELECT id,status FROM mission_security WHERE mission_id=? LIMIT 1').bind(missionId).first();
   if(existing) return json({ok:false,error:'MISSION_SECURITY_ALREADY_PREPARED',version:VERSION,status:existing.status},409);
@@ -634,7 +654,12 @@ async function securityPresence(request, env) {
   if(!identity) return json({ok:false,error:'INTERVENANT_IDENTITY_NOT_VERIFIED',version:VERSION},403);
   const body=await readJson(request), missionId=clean(body?.mission_id);
   if(!missionId) return json({ok:false,error:'MISSION_ID_REQUIRED',version:VERSION},400);
-  const sec=await env.DB.prepare('SELECT * FROM mission_security WHERE mission_id=? AND intervenant_id=? LIMIT 1').bind(missionId,auth.user.id).first();
+  const sec=await env.DB.prepare(`
+    SELECT ms.* FROM mission_security ms
+    JOIN intervenants i ON i.id = ms.intervenant_id
+    WHERE ms.mission_id = ? AND i.user_id = ?
+    LIMIT 1
+  `).bind(missionId,auth.user.id).first();
   if(!sec) return json({ok:false,error:'MISSION_NOT_ASSIGNED_OR_NOT_PREPARED',version:VERSION},404);
   const device=await deviceHash(request,auth.user.id);
   await env.DB.prepare(`INSERT INTO trusted_devices (id,user_id,device_hash,expires_at) VALUES (?,?,?,datetime('now',?)) ON CONFLICT(user_id,device_hash) DO UPDATE SET last_seen_at=CURRENT_TIMESTAMP,expires_at=excluded.expires_at,status='active'`)
@@ -730,7 +755,10 @@ async function securityResendCodes(request, env) {
   if(!missionId) return json({ok:false,error:'MISSION_ID_REQUIRED',version:VERSION},400);
   const sec=await env.DB.prepare('SELECT * FROM mission_security WHERE mission_id=? LIMIT 1').bind(missionId).first();
   if(!sec) return json({ok:false,error:'MISSION_SECURITY_NOT_FOUND',version:VERSION},404);
-  if(auth.user.role==='client' && sec.client_id!==auth.user.id) return json({ok:false,error:'FORBIDDEN',version:VERSION},403);
+  if(auth.user.role==='client') {
+    const client = await env.DB.prepare('SELECT user_id FROM clients WHERE id=? LIMIT 1').bind(sec.client_id).first();
+    if (!client || client.user_id !== auth.user.id) return json({ok:false,error:'FORBIDDEN',version:VERSION},403);
+  }
   if(sec.status==='completed') return json({ok:false,error:'MISSION_ALREADY_COMPLETED',version:VERSION},409);
   return json({ok:false,error:'SECURITY_CODE_RESEND_REQUIRES_REGENERATION_FLOW',version:VERSION,message:'Pour éviter la réutilisation d’un ancien secret, la réémission doit générer de nouveaux codes et invalider les précédents.'},409);
 }
