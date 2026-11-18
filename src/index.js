@@ -3152,7 +3152,7 @@ async function nationalScaleStatus(env){
     unlimitedInBusinessRules:true,
     database:'D1',
     documents:'R2_RECOMMENDED',
-    backups:{provider:'R2',automatic:false,scheduleStatus:'NOT_CONFIGURED',encrypted:true,attestationRequired:true},
+    backups:{provider:'R2',automatic:false,scheduleStatus:'NOT_CONFIGURED',encrypted:false,encryptionStatus:'UNVERIFIED',attestationRequired:true},
     pagination:{cursorRecommended:true,maxPageSize:100},
     tables:(t.results||[]).map(x=>x.name),
     config:c.results||[]
@@ -3168,13 +3168,16 @@ async function backupStatus(env){
   return {
     ok:true,
     schemaReady:!!table,
-    configured:!!env.BACKUP_BUCKET&&!!env.BACKUP_ENCRYPTION_KEY,
+    configured:false,
+    storageBindingPresent:!!env.BACKUP_BUCKET,
+    encryptionKeyPresent:!!env.BACKUP_ENCRYPTION_KEY,
     automatic:false,
     frequency:null,
     scheduleStatus:'NOT_CONFIGURED',
     retentionDays:null,
     retentionStatus:'UNVERIFIED',
     attestationRequired:true,
+    attestationStatus:'UNVERIFIED',
     manualExecutionEnabled:false,
     runs:r.results||[]
   };
@@ -3560,6 +3563,12 @@ handle = async function(request,env){
     // the database is unavailable, instead of masking them as a generic 500.
     if (isMutatingMethod(preflightMethod) && !securityOriginAllowed(request,env)) {
       return json({ok:false,error:'ORIGIN_NOT_ALLOWED',version:VERSION},403);
+    }
+    // The legacy backup path is disabled until the HMAC/Object Lock/isolated-restore
+    // pipeline is unified. Reject before the rate limiter so this disabled route
+    // cannot trigger schema DDL or any D1/R2 write.
+    if (preflightPath === '/api/system/backup/run' && preflightMethod === 'POST') {
+      return json({ok:false,error:'BACKUP_ATTESTATION_PIPELINE_REQUIRED',version:VERSION,write_enabled:false},503);
     }
     // Block anonymous mission validation before rate limiting touches D1.
     if (preflightPath === '/api/missions/validate') {

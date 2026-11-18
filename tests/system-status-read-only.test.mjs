@@ -95,6 +95,8 @@ test("GET /api/system/scale is read-only and never creates or seeds schema", asy
   assert.equal(body.schemaReady, true);
   assert.equal(body.backups.automatic, false);
   assert.equal(body.backups.attestationRequired, true);
+  assert.equal(body.backups.encrypted, false);
+  assert.equal(body.backups.encryptionStatus, "UNVERIFIED");
   assert.ok(statements.every(sql => !/\b(CREATE|INSERT|UPDATE|DELETE|ALTER|DROP)\b/i.test(sql)));
   assert.equal(writes.length, 0);
 });
@@ -108,6 +110,10 @@ test("GET /api/system/backups reads evidence without DDL or D1 writes", async ()
   assert.equal(body.automatic, false);
   assert.equal(body.retentionStatus, "UNVERIFIED");
   assert.equal(body.attestationRequired, true);
+  assert.equal(body.attestationStatus, "UNVERIFIED");
+  assert.equal(body.configured, false);
+  assert.equal(body.storageBindingPresent, true);
+  assert.equal(body.encryptionKeyPresent, true);
   assert.equal(body.manualExecutionEnabled, false);
   assert.ok(statements.every(sql => !/\b(CREATE|INSERT|UPDATE|DELETE|ALTER|DROP)\b/i.test(sql)));
   assert.equal(writes.length, 0);
