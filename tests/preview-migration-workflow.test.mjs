@@ -42,7 +42,10 @@ test("Preview migration workflow validates the full canonical migration chain", 
     "0019_backup_verifications.sql",
     "0020_auth_login_rate_limits.sql",
     "0021_supra_audit_events.sql",
-    "0022_supra_persisted_approvals.sql"
+    "0022_supra_persisted_approvals.sql",
+    "0023_tenant_double_entry_accounting.sql",
+    "0024_tenant_membership_authority.sql",
+    "0025_session_revocation.sql"
   ];
   for (const migration of expected) assert.ok(workflow.includes(`"${migration}"`), `missing canonical migration ${migration}`);
 });
@@ -89,12 +92,12 @@ test("Preview post-migration verification checks identity, mission-security and 
   ]) assert.ok(workflow.includes(name), `missing post-migration verification for ${name}`);
 });
 
-test("Preview migration workflow accepts only an empty EU D1 or the exact 23-entry canonical registry", () => {
+test("Preview migration workflow accepts only an empty EU D1, the exact 23-entry reviewed baseline or the exact 26-entry target", () => {
   assert.match(workflow, /SELECT type, name FROM sqlite_master ORDER BY type, name/);
   assert.match(workflow, /registry_present/);
   assert.match(workflow, /non_internal/);
   assert.match(workflow, /len\(local\) != 23/);
-  assert.match(workflow, /remote == local/);
+  assert.match(workflow, /remote == base/);
   assert.match(workflow, /remote differs from both reviewed safe states|differs from both reviewed safe states/);
   assert.doesNotMatch(workflow, /legacy=/);
   assert.doesNotMatch(workflow, /baseline=\(local-pending\)\|legacy/);
@@ -133,8 +136,8 @@ test("Preview migration refuses to export D1 unless R2 bucket jurisdiction is ve
 });
 
 
-test("Preview migration workflow pins the exact reviewed migration source commit", () => {
-  assert.match(workflow, /ref: 1fc258c9c8d25e5e7b89241504218bf102afbf27/);
+test("Preview migration workflow checks out the exact dispatched reviewed commit", () => {
+  assert.match(workflow, /ref: \\$\\{\\{ github\\.sha \\}\\}/);
   assert.doesNotMatch(workflow, /ref: integration\/nexus-supra-core-preview-2026-11-16/);
   assert.match(workflow, /0021_supra_audit_events\.sql/);
   assert.match(workflow, /0022_supra_persisted_approvals\.sql/);
@@ -230,4 +233,15 @@ test("restore workflows recognize the new EU Preview backup and never target Pre
   for (const workflow of [restore, restoreV2, verify, verifyV2, productionRestore]) {
     assert.ok(workflow.includes(previewId), "restore/verification target guard must forbid EU Preview D1");
   }
+});
+
+test("Preview migration workflow verifies accounting, tenant and session-revocation objects after apply", () => {
+  assert.match(workflow, /Verify new accounting, tenant and session-revocation schema/);
+  for (const name of [
+    "accounting_entities","accounting_accounts","accounting_journals","accounting_journal_lines",
+    "tenants","tenant_memberships","tenant_membership_events",
+    "idx_tenant_membership_one_nonrevoked_per_user","idx_tenant_membership_one_owner",
+    "trg_tenant_membership_revocation_terminal","trg_session_revocation_terminal",
+    "revoked_at","revoked_reason","revoked_by_user_id","last_seen_at"
+  ]) assert.ok(workflow.includes(name), `missing post-migration verification for ${name}`);
 });
