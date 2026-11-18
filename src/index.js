@@ -542,10 +542,8 @@ async function requireVerifiedIntervenant(env, userId) {
   return row || null;
 }
 
-async function deviceHash(request, userId) {
-  const raw = [userId, request.headers.get('user-agent') || '', request.headers.get('sec-ch-ua') || ''].join('|');
-  return sha256Base64url(raw);
-}
+// Legacy User-Agent/client-hint fingerprints are not cryptographic device attestations.
+ // They are intentionally not used to grant mission trust.
 
 async function securityIdentityStart(request, env) {
   const auth = await getSessionUser(request, env);
@@ -687,28 +685,20 @@ export async function findAssignedMissionSecurity(env, missionId, userId) {
   `).bind(missionId, userId).first();
 }
 
-async function securityPresence(request, env) {
-  const auth=await getSessionUser(request,env);
-  if(!requireRole(auth,['intervenant'])) return json({ok:false,error:auth?.user?'FORBIDDEN':'UNAUTHENTICATED',version:VERSION},auth?.user?403:401);
-  await ensureSecuritySchema(env);
-  const identity = await requireVerifiedIntervenant(env, auth.user.id);
-  if(!identity) return json({ok:false,error:'INTERVENANT_IDENTITY_NOT_VERIFIED',version:VERSION},403);
-  const body=await readJson(request), missionId=clean(body?.mission_id);
-  if(!missionId) return json({ok:false,error:'MISSION_ID_REQUIRED',version:VERSION},400);
-  const sec=await findAssignedMissionSecurity(env, missionId, auth.user.id);
-  if(!sec) return json({ok:false,error:'MISSION_NOT_ASSIGNED_OR_NOT_PREPARED',version:VERSION},404);
-  const device=await deviceHash(request,auth.user.id);
-  const deviceWrite = await env.DB.prepare(`INSERT INTO trusted_devices (id,user_id,device_hash,expires_at) VALUES (?,?,?,datetime('now',?))
-    ON CONFLICT(user_id,device_hash) DO UPDATE SET last_seen_at=CURRENT_TIMESTAMP,expires_at=excluded.expires_at
-    WHERE trusted_devices.status='active' AND trusted_devices.revoked_at IS NULL`)
-    .bind(crypto.randomUUID(),auth.user.id,device,`+${SECURITY_DEVICE_TTL_SECONDS} seconds`).run();
-  if (Number(deviceWrite?.meta?.changes || 0) !== 1) {
-    await securityAudit(env,'SECURITY_DEVICE_REACTIVATION_BLOCKED',missionId,auth.user.id,auth.user.role,'DENIED',{reason:'DEVICE_REVOKED_OR_INACTIVE'});
-    return json({ok:false,error:'DEVICE_REVOKED_OR_INACTIVE',version:VERSION},403);
+export async function securityPresence(request, env) {
+  const auth = await getSessionUser(request, env);
+  if (!requireRole(auth, ['intervenant'])) {
+    return json({ ok: false, error: auth?.user ? 'FORBIDDEN' : 'UNAUTHENTICATED', version: VERSION }, auth?.user ? 403 : 401);
   }
-  await env.DB.prepare(`UPDATE mission_security SET last_presence_at=CURRENT_TIMESTAMP,last_device_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(device,sec.id).run();
-  await securityAudit(env,'MISSION_PRESENCE_RECORDED',missionId,auth.user.id,auth.user.role,'OK',{device_bound:true});
-  return json({ok:true,version:VERSION,mission_id:missionId,presence:'RECORDED',device_bound:true},200);
+  // Fail closed: the legacy device_hash is derived from spoofable User-Agent headers.
+  // No presence or trust record may be written until a challenge-bound public key or
+  // WebAuthn credential has been enrolled and its proof of possession verified.
+  return json({
+    ok: false,
+    error: 'DEVICE_ATTESTATION_REQUIRED',
+    message: 'Mission presence is disabled until cryptographic device enrollment and proof of possession are implemented.',
+    version: VERSION
+  }, 503);
 }
 
 export async function consumeMissionSecurityCode(env, securityId, purpose, expectedHash) {
