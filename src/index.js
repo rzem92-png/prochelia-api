@@ -1790,7 +1790,9 @@ function financeStrategicQuote({basePriceCents=0,phaseFactor=1,urgency='normal',
 }
 
 async function pricingQuote(request, env) {
-  const gate=await requireAuthRole(request,env,['gerante','client','entreprise','intervenant']); if(gate.error)return gate.error;
+  // Client-supplied pricing inputs are not authoritative. Keep quote persistence
+  // manager-only until the server-owned catalogue/policy contract is complete.
+  const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
   const b=await readJson(request)||{};
   const phase=String(b.phase||await getSetting(env,'project_phase','TEST')).toUpperCase();
   const cfg=PROJECT_PHASES[phase]||PROJECT_PHASES.TEST;
