@@ -15,6 +15,7 @@ test("Preview E2E is manually gated and requires an exact frontend Pages commit 
 
 test("synthetic Preview E2E can be manually dispatched from its dedicated PR branch without merging", () => {
   assert.ok(workflow.includes("github.ref == 'refs/heads/fix/preview-e2e-dynamic-pages-pin-2026-11-17'"));
+  assert.ok(workflow.includes("github.ref == 'refs/heads/fix/preview-critical-tenant-guards-2026-11-18'"));
   assert.ok(workflow.includes("github.event_name == 'workflow_dispatch'"));
   assert.ok(workflow.includes("inputs.confirmation == 'RUN_PREVIEW_DIRECTORY_E2E'"));
 });
