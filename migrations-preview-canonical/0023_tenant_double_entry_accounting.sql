@@ -71,7 +71,7 @@ CREATE TABLE IF NOT EXISTS accounting_journal_lines (
   line_number INTEGER NOT NULL CHECK (typeof(line_number) = 'integer' AND line_number > 0),
   side TEXT NOT NULL CHECK (side IN ('DEBIT', 'CREDIT')),
   amount_cents INTEGER NOT NULL CHECK (typeof(amount_cents) = 'integer' AND amount_cents > 0),
-  currency TEXT NOT NULL CHECK (length(currency) = 3),
+  currency TEXT NOT NULL CHECK (currency GLOB '[A-Z][A-Z][A-Z]'),
   description TEXT,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   UNIQUE (journal_id, line_number),
@@ -179,4 +179,28 @@ BEFORE DELETE ON accounting_journals
 WHEN OLD.status = 'POSTED'
 BEGIN
   SELECT RAISE(ABORT, 'POSTED_ACCOUNTING_JOURNAL_IMMUTABLE');
+END;
+
+-- Historical ledger semantics: account/entity identity and classification cannot
+-- be silently rewritten after they have appeared in a posted journal.
+CREATE TRIGGER IF NOT EXISTS trg_accounting_entity_identity_immutable_after_posting
+BEFORE UPDATE OF tenant_id, legal_name, country_code, base_currency ON accounting_entities
+WHEN EXISTS (
+  SELECT 1 FROM accounting_journals
+  WHERE entity_id = OLD.id AND tenant_id = OLD.tenant_id AND status = 'POSTED'
+)
+BEGIN
+  SELECT RAISE(ABORT, 'POSTED_ACCOUNTING_ENTITY_IDENTITY_IMMUTABLE');
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_accounting_account_classification_immutable_after_posting
+BEFORE UPDATE OF tenant_id, entity_id, account_code, account_name, account_type, normal_balance ON accounting_accounts
+WHEN EXISTS (
+  SELECT 1 FROM accounting_journal_lines l
+  JOIN accounting_journals j
+    ON j.id = l.journal_id AND j.tenant_id = l.tenant_id AND j.entity_id = l.entity_id
+  WHERE l.account_id = OLD.id AND j.status = 'POSTED'
+)
+BEGIN
+  SELECT RAISE(ABORT, 'POSTED_ACCOUNTING_ACCOUNT_CLASSIFICATION_IMMUTABLE');
 END;
