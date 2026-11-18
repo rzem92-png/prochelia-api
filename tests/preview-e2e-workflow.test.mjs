@@ -40,13 +40,13 @@ test("Preview E2E resolves the latest Pages Preview deployment instead of stale 
 });
 
 test("Pages deployment commit must match the current GitHub frontend branch tip and any explicit SHA pin", () => {
-  assert.match(workflow, /pages_commit_sha:/);
-  assert.match(workflow, /pages_commit_sha must be an exact 40-character lowercase Git SHA/);
-  assert.match(workflow, /api\\.github\\.com\\/repos\\/rzem92-png\\/-prochelia\\/commits/);
-  assert.match(workflow, /--data-urlencode "sha=\\$PAGES_PREVIEW_BRANCH"/);
-  assert.match(workflow, /frontend_head/);
-  assert.match(workflow, /"\\$frontend_head" == "\\$pages_commit"/);
-  assert.match(workflow, /\\(\\$expected == "" or \\.result\\.deployment_trigger\\.metadata\\.commit_hash == \\$expected\\)/);
+  assert.ok(workflow.includes("pages_commit_sha:"));
+  assert.ok(workflow.includes("pages_commit_sha must be an exact 40-character lowercase Git SHA"));
+  assert.ok(workflow.includes("https://api.github.com/repos/rzem92-png/-prochelia/commits"));
+  assert.ok(workflow.includes('--data-urlencode "sha=$PAGES_PREVIEW_BRANCH"'));
+  assert.ok(workflow.includes("frontend_head"));
+  assert.ok(workflow.includes('"$frontend_head" == "$pages_commit"'));
+  assert.ok(workflow.includes('($expected == "" or .result.deployment_trigger.metadata.commit_hash == $expected)'));
 });
 
 test("Pages Preview configuration and deployment are checked independently from Production", () => {
