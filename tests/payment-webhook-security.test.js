@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createHmac, webcrypto } from "node:crypto";
-import { verifyWebhookSignature } from "../src/index.js";
+import { verifyWebhookSignature, webhookProviderForRequest } from "../src/index.js";
 
 globalThis.crypto ??= webcrypto;
 
@@ -82,4 +82,15 @@ test("invalid Stripe native header cannot fall back to a valid generic signature
 test("Stripe native signature requires a dedicated Stripe secret", async () => {
   const request = stripeRequest();
   assert.equal(await verifyWebhookSignature(request, { PAYMENT_WEBHOOK_SECRET: secret }, payload), false);
+});
+
+
+test("Stripe-signed event provider cannot be overridden by an untrusted payload field", () => {
+  const request = stripeRequest();
+  assert.equal(webhookProviderForRequest(request, { provider: "other-provider" }, {}), "stripe");
+});
+
+test("generic webhook provider resolution retains the configured legacy contract", () => {
+  const request = new Request("https://example.test/api/payments/webhook", { method: "POST" });
+  assert.equal(webhookProviderForRequest(request, { provider: "internal-provider" }, {}), "internal-provider");
 });
