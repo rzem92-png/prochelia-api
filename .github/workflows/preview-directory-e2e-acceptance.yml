@@ -133,7 +133,7 @@ jobs:
             .result.services.PROCHELIA_API.service == $worker and
             .result.deployment_trigger.metadata.branch == $branch and
             (.result.deployment_trigger.metadata.commit_hash | type == "string" and test("^[0-9a-f]{40}$")) and
-            ($expected == "" or .result.deployment_trigger.metadata.commit_hash == $expected)
+            .result.deployment_trigger.metadata.commit_hash == $expected
           ' "$RUNNER_TEMP/pages-preview.json" >/dev/null; then
             echo "::error::Latest Pages Preview deployment is stale, skipped, failed, misbound, or built from an unexpected branch/commit."
             jq -c '{
