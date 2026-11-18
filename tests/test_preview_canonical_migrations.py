@@ -29,6 +29,7 @@ EXPECTED = [
     "0022_supra_persisted_approvals.sql",
     "0023_tenant_double_entry_accounting.sql",
     "0024_tenant_membership_authority.sql",
+    "0025_session_revocation.sql",
 ]
 
 actual = sorted(path.name for path in MIGRATIONS.glob("*.sql"))
@@ -298,3 +299,30 @@ try:
 except sqlite3.IntegrityError as exc:
     assert "TENANT_NOT_ACTIVE" in str(exc), str(exc)
 print("PASS: tenant membership lifecycle, cross-tenant event isolation, append-only audit and terminal revocation.")
+
+# Explicit session revocation is reasoned, immutable and cannot be reversed.
+db.execute("""
+    INSERT INTO sessions(id, user_id, token_hash, expires_at)
+    VALUES ('session-a', 'user-a', 'synthetic-token-hash-a', '2027-01-01T00:00:00Z')
+""")
+try:
+    db.execute("UPDATE sessions SET revoked_at=CURRENT_TIMESTAMP WHERE id='session-a'")
+    raise AssertionError("Session revocation without a reason was incorrectly accepted")
+except sqlite3.IntegrityError as exc:
+    assert "REVOCATION_REASON_REQUIRED" in str(exc), str(exc)
+db.execute("""
+    UPDATE sessions SET revoked_at=CURRENT_TIMESTAMP, revoked_reason='USER_LOGOUT',
+      revoked_by_user_id='user-a' WHERE id='session-a'
+""")
+for sql in [
+    "UPDATE sessions SET revoked_at=NULL WHERE id='session-a'",
+    "UPDATE sessions SET revoked_reason='ADMIN_REVOKED' WHERE id='session-a'",
+    "UPDATE sessions SET token_hash='replacement-hash' WHERE id='session-a'",
+    "UPDATE sessions SET user_id='user-b' WHERE id='session-a'",
+]:
+    try:
+        db.execute(sql)
+        raise AssertionError(f"Revoked session was mutable or reactivatable: {sql}")
+    except sqlite3.IntegrityError as exc:
+        assert "IMMUTABLE" in str(exc) or "TERMINAL" in str(exc), str(exc)
+print("PASS: explicit session revocation requires a reason and is terminal; session identity is immutable.")
