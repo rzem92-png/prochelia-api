@@ -9,6 +9,7 @@ import { fileURLToPath } from "node:url";
 const workflow = await readFile(new URL("../.github/workflows/deploy-preview-worker-manual.yml", import.meta.url), "utf8");
 const workerBuild = await readFile(new URL("../.github/workflows/worker-build-validation.yml", import.meta.url), "utf8");
 const generator = await readFile(new URL("../scripts/generate-preview-wrangler-config.mjs", import.meta.url), "utf8");
+const testCommit = "a".repeat(40);
 
 test("Preview deploy is manual and requires exact confirmation on main or its dedicated PR branch", () => {
   assert.match(workflow, /workflow_dispatch:/);
@@ -48,6 +49,8 @@ test("Preview deploy pins isolated Worker and Preview D1, never Production", () 
   assert.match(generator, /04f52830-ef5a-4f17-a640-42bbc2381bba/);
   assert.match(generator, /preview\.name === production\.name/);
   assert.match(generator, /APP_ENV:\s*"preview"/);
+  assert.match(generator, /PROCHELIA_COMMIT_SHA:\s*previewCommitSha/);
+  assert.match(generator, /process\.env\.GITHUB_SHA/);
   assert.doesNotMatch(workflow, /keep_vars|--keep-vars/);
   assert.match(generator, /r2_buckets:\s*\[\{/);
   assert.match(generator, /binding:\s*"BACKUP_BUCKET"/);
@@ -100,12 +103,13 @@ test("Preview deployment config generator emits isolated EU bindings and the ver
     const result = spawnSync(process.execPath, [script], {
       cwd: directory,
       encoding: "utf8",
-      env: { ...process.env, PAGES_PREVIEW_ORIGIN: pagesOrigin, PAGES_PREVIEW_ALIAS: pagesAlias }
+      env: { ...process.env, GITHUB_SHA: testCommit, PAGES_PREVIEW_ORIGIN: pagesOrigin, PAGES_PREVIEW_ALIAS: pagesAlias }
     });
     assert.equal(result.status, 0, result.stderr || result.stdout);
     const generated = JSON.parse(await readFile(join(directory, "wrangler.preview.generated.json"), "utf8"));
     assert.equal(generated.name, "prochelia-api-preview");
     assert.equal(generated.vars.APP_ENV, "preview");
+    assert.equal(generated.vars.PROCHELIA_COMMIT_SHA, testCommit);
     assert.equal(generated.d1_databases[0].database_id, "e3cf167c-37e1-4d72-9ac6-b3e27c14b97f");
     assert.equal(generated.r2_buckets[0].jurisdiction, "eu");
     assert.ok(generated.vars.CORS_ORIGIN.split(",").includes(pagesOrigin));
@@ -125,7 +129,7 @@ test("Preview deployment config generator refuses a missing or non-Pages origin"
     }));
     const script = fileURLToPath(new URL("../scripts/generate-preview-wrangler-config.mjs", import.meta.url));
     for (const origin of [undefined, "http://9b529a78.prochelia.pages.dev", "https://example.com", "https://9b529a78.prochelia.pages.dev/path"]) {
-      const env = { ...process.env };
+      const env = { ...process.env, GITHUB_SHA: testCommit };
       delete env.PAGES_PREVIEW_ORIGIN;
       if (origin !== undefined) env.PAGES_PREVIEW_ORIGIN = origin;
       const result = spawnSync(process.execPath, [script], { cwd: directory, encoding: "utf8", env });
@@ -135,9 +139,34 @@ test("Preview deployment config generator refuses a missing or non-Pages origin"
       const result = spawnSync(process.execPath, [script], {
         cwd: directory,
         encoding: "utf8",
-        env: { ...process.env, PAGES_PREVIEW_ORIGIN: "https://8480de7b.prochelia.pages.dev", PAGES_PREVIEW_ALIAS: alias }
+        env: { ...process.env, GITHUB_SHA: testCommit, PAGES_PREVIEW_ORIGIN: "https://8480de7b.prochelia.pages.dev", PAGES_PREVIEW_ALIAS: alias }
       });
       assert.notEqual(result.status, 0, `unexpectedly accepted alias: ${alias}`);
+    }
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+
+test("Preview config generator rejects a missing or malformed API commit SHA", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "prochelia-preview-invalid-commit-"));
+  try {
+    await writeFile(join(directory, "wrangler.jsonc"), JSON.stringify({
+      name: "prochelia-api",
+      d1_databases: [{ binding: "DB", database_id: "04f52830-ef5a-4f17-a640-42bbc2381bba" }]
+    }));
+    const script = fileURLToPath(new URL("../scripts/generate-preview-wrangler-config.mjs", import.meta.url));
+    for (const sha of [undefined, "not-a-git-sha", "A".repeat(40)]) {
+      const env = {
+        ...process.env,
+        PAGES_PREVIEW_ORIGIN: "https://8480de7b.prochelia.pages.dev",
+        PAGES_PREVIEW_ALIAS: "https://fix-frontend-cookie-session-7y26.prochelia.pages.dev"
+      };
+      delete env.GITHUB_SHA;
+      if (sha !== undefined) env.GITHUB_SHA = sha;
+      const result = spawnSync(process.execPath, [script], { cwd: directory, encoding: "utf8", env });
+      assert.notEqual(result.status, 0, `unexpectedly accepted API commit SHA: ${sha}`);
     }
   } finally {
     await rm(directory, { recursive: true, force: true });

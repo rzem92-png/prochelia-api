@@ -113,3 +113,11 @@ test("Preview directory acceptance uses deterministic synthetic ordering and bou
   assert.match(workflow, /offset=not-a-number/);
   assert.doesNotMatch(workflow, /offset=50001/);
 });
+
+
+test("Live E2E checks that the deployed Preview Worker matches the exact API commit under test", () => {
+  assert.ok(workflow.includes("API_EXPECTED_COMMIT: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}"));
+  assert.ok(workflow.includes("ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}"));
+  assert.ok(workflow.includes("body.deployment_commit !== process.env.API_EXPECTED_COMMIT"));
+  assert.ok(workflow.includes("Preview Worker commit mismatch"));
+});

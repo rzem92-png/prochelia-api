@@ -189,9 +189,12 @@ async function getPrestations(env) {
 }
 
 async function health(env) {
-  if (!env.DB) return json({ ok: false, database: false, service: 'PROCHÉLIA API', version: VERSION }, 503);
+  const previewDeployment = env.APP_ENV === 'preview'
+    ? { deployment_commit: env.PROCHELIA_COMMIT_SHA || null }
+    : {};
+  if (!env.DB) return json({ ok: false, database: false, service: 'PROCHÉLIA API', version: VERSION, ...previewDeployment }, 503);
   const result = await env.DB.prepare('SELECT 1 AS ok').first();
-  return json({ ok: true, database: result?.ok === 1, service: 'PROCHÉLIA API', version: VERSION });
+  return json({ ok: true, database: result?.ok === 1, service: 'PROCHÉLIA API', version: VERSION, ...previewDeployment });
 }
 
 async function coreAccountsSchema(env) {

@@ -212,5 +212,6 @@ jobs:
             echo 'Preview Worker only: prochelia-api-preview.'
             echo 'D1 binding is pinned to Preview DB e3cf167c-37e1-4d72-9ac6-b3e27c14b97f.'
             echo "Preview CORS allowlist includes the exact Pages Preview origin and validated branch alias when present."
+            echo "Preview API commit deployed: ${GITHUB_SHA} (also exposed by the Preview health probe)."
             echo 'Preview APP_ENV and explicit CORS configuration are applied; no dashboard variables are implicitly preserved. No migrations, no production Worker, and no production D1 changes.'
           } >> "$GITHUB_STEP_SUMMARY"

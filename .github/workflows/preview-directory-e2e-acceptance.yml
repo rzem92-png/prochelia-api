@@ -52,11 +52,13 @@ jobs:
       CLOUDFLARE_ACCOUNT_ID: f2a79e9fa41566a8ec80fb24c02c60eb
       PREVIEW_DB_NAME: prochelia-preview-eu-2026-11-17
       PREVIEW_DB_ID: e3cf167c-37e1-4d72-9ac6-b3e27c14b97f
+      API_EXPECTED_COMMIT: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
       PAGES_PREVIEW_BRANCH: ${{ inputs.pages_branch || 'fix/frontend-cookie-session-auth-2026-11-17' }}
       PAGES_EXPECTED_COMMIT: ${{ inputs.pages_commit_sha || '' }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
+          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
           persist-credentials: false
 
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
@@ -225,7 +227,10 @@ jobs:
           if (body.ok !== true || body.database !== true || body.service !== 'PROCHÉLIA API') {
             throw new Error('Pages Preview health response did not confirm the Preview API and D1.');
           }
-          console.log(`PASS: same-origin Pages-to-Worker health path; deployment ${process.env.PAGES_DEPLOYMENT_ID}; commit ${process.env.PAGES_COMMIT_SHA}.`);
+          if (body.deployment_commit !== process.env.API_EXPECTED_COMMIT) {
+            throw new Error(`Preview Worker commit mismatch: expected ${process.env.API_EXPECTED_COMMIT}, received ${body.deployment_commit ?? 'missing'}.`);
+          }
+          console.log(`PASS: same-origin Pages-to-Worker health path; API commit ${body.deployment_commit}; Pages deployment ${process.env.PAGES_DEPLOYMENT_ID}; frontend commit ${process.env.PAGES_COMMIT_SHA}.`);
           NODE
 
       - name: Read current directory offsets without reading personal rows

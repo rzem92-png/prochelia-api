@@ -5,6 +5,11 @@ const expectedPreviewId = "e3cf167c-37e1-4d72-9ac6-b3e27c14b97f";
 const expectedProductionId = "04f52830-ef5a-4f17-a640-42bbc2381bba";
 const pagesPreviewOrigin = process.env.PAGES_PREVIEW_ORIGIN || "";
 const pagesPreviewAlias = process.env.PAGES_PREVIEW_ALIAS || "";
+const previewCommitSha = process.env.GITHUB_SHA || "";
+
+if (!/^[0-9a-f]{40}$/.test(previewCommitSha)) {
+  throw new Error("GITHUB_SHA must be an exact 40-character lowercase Git SHA");
+}
 
 if (production.name !== "prochelia-api") {
   throw new Error("Unexpected Production Worker config");
@@ -39,7 +44,8 @@ const preview = {
   workers_dev: true,
   vars: {
     APP_ENV: "preview",
-    CORS_ORIGIN: corsOrigins.join(",")
+    CORS_ORIGIN: corsOrigins.join(","),
+    PROCHELIA_COMMIT_SHA: previewCommitSha
   },
   d1_databases: [{
     binding: "DB",
@@ -64,4 +70,4 @@ if (preview.name === production.name ||
 }
 
 fs.writeFileSync("wrangler.preview.generated.json", JSON.stringify(preview, null, 2));
-console.log("Verified isolated Preview Worker, EU D1, EU R2 and Pages Preview origin/alias.");
+console.log("Verified isolated Preview Worker, EU D1, EU R2, Pages origin/alias and API commit.");
