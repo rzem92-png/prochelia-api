@@ -72,6 +72,17 @@ db.execute("""
     INSERT INTO accounting_entities(id, tenant_id, legal_name, country_code, base_currency)
     VALUES ('entity-b', 'tenant-b', 'Other Tenant', 'FR', 'EUR')
 """)
+try:
+    db.execute("""
+        INSERT INTO accounting_journals(
+          id, tenant_id, entity_id, journal_code, journal_date, currency,
+          source_type, source_id, idempotency_key, status, created_by, posted_by, posted_at
+        ) VALUES ('journal-direct-posted', 'tenant-a', 'entity-a', 'VE', '2026-11-18', 'EUR',
+                  'TEST', 'direct-post', 'tenant-a:direct-post:1', 'POSTED', 'user-a', 'user-a', CURRENT_TIMESTAMP)
+    """)
+    raise AssertionError("Journal inserted directly as POSTED was incorrectly accepted")
+except sqlite3.IntegrityError as exc:
+    assert "MUST_START_AS_DRAFT" in str(exc), str(exc)
 for account_id, code, name, typ, normal in [
     ("cash-a", "512000", "Banque", "ASSET", "DEBIT"),
     ("revenue-a", "706000", "Prestations", "REVENUE", "CREDIT"),
@@ -146,15 +157,69 @@ db.execute("""
     VALUES ('line-r2', 'tenant-a', 'entity-a', 'journal-reversal', 'revenue-a', 2, 'DEBIT', 10000, 'EUR')
 """)
 db.execute("UPDATE accounting_journals SET status='POSTED', posted_by='user-a', posted_at=CURRENT_TIMESTAMP WHERE id='journal-reversal'")
+# A second draft reversal is allowed, but only one may ever be posted.
+db.execute("""
+    INSERT INTO accounting_journals(
+      id, tenant_id, entity_id, journal_code, journal_date, currency,
+      source_type, source_id, idempotency_key, created_by, reversal_of_journal_id
+    ) VALUES ('journal-second-reversal', 'tenant-a', 'entity-a', 'OD', '2026-11-18', 'EUR',
+              'REVERSAL', 'journal-a', 'tenant-a:reversal:2', 'user-a', 'journal-a')
+""")
+db.execute("""
+    INSERT INTO accounting_journal_lines(id, tenant_id, entity_id, journal_id, account_id, line_number, side, amount_cents, currency)
+    VALUES ('line-r2a', 'tenant-a', 'entity-a', 'journal-second-reversal', 'cash-a', 1, 'CREDIT', 10000, 'EUR')
+""")
+db.execute("""
+    INSERT INTO accounting_journal_lines(id, tenant_id, entity_id, journal_id, account_id, line_number, side, amount_cents, currency)
+    VALUES ('line-r2b', 'tenant-a', 'entity-a', 'journal-second-reversal', 'revenue-a', 2, 'DEBIT', 10000, 'EUR')
+""")
 try:
+    db.execute("UPDATE accounting_journals SET status='POSTED', posted_by='user-a', posted_at=CURRENT_TIMESTAMP WHERE id='journal-second-reversal'")
+    raise AssertionError("Second posted reversal was incorrectly accepted")
+except sqlite3.IntegrityError as exc:
+    assert "UNIQUE" in str(exc), str(exc)
+
+# Reversal matching must compare line multiplicities, not merely find one matching
+# line for each original row (which would allow duplicated source lines to reuse one match).
+db.execute("""
+    INSERT INTO accounting_journals(
+      id, tenant_id, entity_id, journal_code, journal_date, currency,
+      source_type, source_id, idempotency_key, created_by
+    ) VALUES ('journal-duplicate-original', 'tenant-a', 'entity-a', 'VE', '2026-11-18', 'EUR',
+              'TEST', 'duplicate-source', 'tenant-a:duplicate-original:1', 'user-a')
+""")
+for line_id, account_id, line_number, side in [
+    ("dup-o1", "cash-a", 1, "DEBIT"),
+    ("dup-o2", "cash-a", 2, "DEBIT"),
+    ("dup-o3", "revenue-a", 3, "CREDIT"),
+    ("dup-o4", "revenue-a", 4, "CREDIT"),
+]:
     db.execute("""
-        INSERT INTO accounting_journals(
-          id, tenant_id, entity_id, journal_code, journal_date, currency,
-          source_type, source_id, idempotency_key, created_by, reversal_of_journal_id
-        ) VALUES ('journal-second-reversal', 'tenant-a', 'entity-a', 'OD', '2026-11-18', 'EUR',
-                  'REVERSAL', 'journal-a', 'tenant-a:reversal:2', 'user-a', 'journal-a')
-    """)
-    raise AssertionError("Second reversal was incorrectly accepted")
-except sqlite3.IntegrityError:
-    pass
+        INSERT INTO accounting_journal_lines(id, tenant_id, entity_id, journal_id, account_id, line_number, side, amount_cents, currency)
+        VALUES (?, 'tenant-a', 'entity-a', 'journal-duplicate-original', ?, ?, ?, 1000, 'EUR')
+    """, (line_id, account_id, line_number, side))
+db.execute("UPDATE accounting_journals SET status='POSTED', posted_by='user-a', posted_at=CURRENT_TIMESTAMP WHERE id='journal-duplicate-original'")
+db.execute("""
+    INSERT INTO accounting_journals(
+      id, tenant_id, entity_id, journal_code, journal_date, currency,
+      source_type, source_id, idempotency_key, created_by, reversal_of_journal_id
+    ) VALUES ('journal-duplicate-reversal', 'tenant-a', 'entity-a', 'OD', '2026-11-18', 'EUR',
+              'REVERSAL', 'journal-duplicate-original', 'tenant-a:duplicate-reversal:1',
+              'user-a', 'journal-duplicate-original')
+""")
+for line_id, account_id, line_number, side, amount in [
+    ("dup-r1", "cash-a", 1, "CREDIT", 1000),
+    ("dup-r2", "cash-a", 2, "CREDIT", 500),
+    ("dup-r3", "revenue-a", 3, "DEBIT", 1000),
+    ("dup-r4", "revenue-a", 4, "DEBIT", 500),
+]:
+    db.execute("""
+        INSERT INTO accounting_journal_lines(id, tenant_id, entity_id, journal_id, account_id, line_number, side, amount_cents, currency)
+        VALUES (?, 'tenant-a', 'entity-a', 'journal-duplicate-reversal', ?, ?, ?, ?, 'EUR')
+    """, (line_id, account_id, line_number, side, amount))
+try:
+    db.execute("UPDATE accounting_journals SET status='POSTED', posted_by='user-a', posted_at=CURRENT_TIMESTAMP WHERE id='journal-duplicate-reversal'")
+    raise AssertionError("Non-exact duplicate-line reversal was incorrectly accepted")
+except sqlite3.IntegrityError as exc:
+    assert "EXACTLY_MIRROR" in str(exc), str(exc)
 print("PASS: tenant-scoped double-entry posting, idempotency, immutable posts and exact reversal constraints.")
