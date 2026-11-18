@@ -99,3 +99,31 @@ Le statut ne peut passer à GO que si toutes les preuves suivantes sont disponib
 ## Journal d'exécution
 
 Ajouter pour chaque passage : date/heure UTC, ressources et SHA observés, actions en Preview, tests et liens de logs, fichiers/PR touchés, régressions, limites, approbations humaines requises. Ne jamais inscrire un succès sans preuve vérifiable.
+
+## Mise à jour de contrôle — 18 novembre 2026, session de reprise
+
+### PR et intégration
+- PR API ouvertes : #234, #287, #288, #289, #290 et #291 ; PR frontend #32 ouverte. Leur état ouvert n'est pas une approbation de fusion.
+- Les contrôles CI précédemment observés sur les SHA courants de #287, #288, #289 et #290 ont réussi pour les suites indiquées dans le journal de session, mais ils ne remplacent pas les preuves runtime.
+- La relance frontend #32 (run 44300168100) a échoué avant exécution des étapes (steps=null, 404 BlobNotFound). Incident d'infrastructure de logs à diagnostiquer, sans affaiblir les tests.
+
+### Sauvegarde et migrations Preview
+- Relecture du workflow .github/workflows/apply-preview-d1-migrations.yml sur la branche de #290 : le workflow vérifie l'identité et la juridiction EU de D1/R2, exporte, chiffre, téléverse et compare l'objet téléchargé.
+- Limite critique : ce parcours ne démontre pas une restauration dans une D1 isolée de validation avant migration ; il ne vérifie pas non plus explicitement la rétention approuvée et l'Object Lock du préfixe objet exact, ni la consommation de l'attestation HMAC de #288.
+- En conséquence, le parcours actuel ne satisfait pas encore le gate de restauration/immutabilité défini dans ce document. Ne pas déclencher APPLY_PREVIEW_ONLY et ne pas appliquer de migration distante tant que ces contrôles ne sont pas intégrés, testés et approuvés.
+- Le run backup #44302717496 s'était arrêté avant l'export : R2_EXPECTED_RETENTION_SECONDS vide ; aucun backup restaurable n'est prouvé par ce run.
+
+### Schéma, finance et sécurité
+- L'inspection SQL antérieure de D1 Preview relevait 95 tables et 23 migrations, mais pas encore de tables tenant/membership attendues ni de contexte tenant actif dans les sessions ; le registre d'audit Supra ne démontrait pas encore une chaîne d'intégrité complète.
+- Le schéma comptable existant n'est pas une preuve de comptabilité en partie double opérationnelle. La PR #290 ajoute des migrations de schéma ; elles ne sont pas appliquées à distance.
+- La PR #289 apporte un vérificateur natif de signature Stripe, mais paymentsConfigured(env) reste faux : aucun adaptateur PSP opérationnel ni E2E Sandbox complet n'est démontré ; les paiements et reversements réels restent bloqués.
+- Le modèle de device trust ne démontre pas encore un enrôlement cryptographique complet (clé publique, challenge/attestation, révocation et anti-rejeu).
+
+### Configuration Pages / Worker
+- Pages Preview a été observé avec le binding de service PROCHELIA_API vers prochelia-api-preview et le D1 Preview EU attendu.
+- La variable Preview PROCHELIA_TRUSTED_API_ORIGIN pointe vers un ancien déploiement Pages staging ; vérifier sa nécessité et sa cohérence avant de promouvoir le frontend.
+- La configuration Pages Production contient SUPRA_API_ORIGIN vers un Worker de branche/feature. Le proxy de la PR frontend #32 s'appuie sur PROCHELIA_API_ORIGIN/binding de service ; l'usage réel de SUPRA_API_ORIGIN n'est pas établi. Ne pas modifier à l'aveugle : inventorier les références runtime puis faire un test de routage sur Preview.
+- Aucun changement de configuration Cloudflare n'a été effectué pendant cette reprise.
+
+### Décision
+**NO-GO maintenu.** Aucun merge, aucune migration distante, aucun changement de Production et aucun paiement réel. Les validations comptables, juridiques, fiscales, DPO et bancaires restent à effectuer par les professionnels et responsables habilités.
