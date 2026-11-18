@@ -96,7 +96,7 @@ test("Preview migration workflow accepts only an empty EU D1, the exact 23-entry
   assert.match(workflow, /SELECT type, name FROM sqlite_master ORDER BY type, name/);
   assert.match(workflow, /registry_present/);
   assert.match(workflow, /non_internal/);
-  assert.match(workflow, /len\\(local\\) != 26/);
+  assert.match(workflow, /len\(local\) != 26/);
   assert.match(workflow, /remote == base/);
   assert.match(workflow, /remote differs from both reviewed safe states|differs from both reviewed safe states/);
   assert.doesNotMatch(workflow, /legacy=/);
