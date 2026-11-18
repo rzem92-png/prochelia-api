@@ -220,4 +220,6 @@ test("Preview deploy captures the prior active version and verifies the new acti
   assert.match(workflow, /prochelia-preview-backups-eu-v2/);
   assert.match(workflow, /e3cf167c-37e1-4d72-9ac6-b3e27c14b97f/);
   assert.match(workflow, /jurisdiction !== "eu"/);
+  assert.match(workflow, /PAGES_EXISTING_CORS_ORIGINS/);
+  assert.match(workflow, /previously authorized CORS origin was dropped/);
 });
