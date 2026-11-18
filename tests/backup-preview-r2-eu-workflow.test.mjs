@@ -77,3 +77,9 @@ test("Preview R2 backup stores and verifies the signed manifest beside the encry
   assert.match(workflow, /ciphertext_sha256/);
   assert.match(workflow, /plaintext_sha256/);
 });
+
+test("Preview R2 backup refuses to reuse an object key or reuse the encryption secret for HMAC", () => {
+  assert.match(workflow, /BACKUP_ATTESTATION_HMAC_KEY.*BACKUP_ENCRYPTION_KEY/s);
+  assert.match(workflow, /aws s3api list-objects-v2/);
+  assert.match(workflow, /refusing to overwrite an earlier attestation/);
+});
