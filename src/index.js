@@ -900,6 +900,15 @@ function moneyCents(value) {
   return Number.isSafeInteger(cents) ? cents : null;
 }
 
+export function isSameMissionPaymentRequest(existing, requested) {
+  if (!existing || !requested) return false;
+  return String(existing.mission_id || '') === String(requested.missionId || '') &&
+    String(existing.client_id || '') === String(requested.clientId || '') &&
+    String(existing.intervenant_id || '') === String(requested.intervenantId || '') &&
+    Number(existing.gross_cents) === Number(requested.grossCents) &&
+    Number(existing.commission_cents) === Number(requested.commissionCents);
+}
+
 async function paymentAudit(env, eventType, data = {}, result = 'OK') {
   await env.DB.prepare(`INSERT INTO payment_audit
     (id,event_type,transaction_id,payout_id,mission_id,user_id,result,metadata_json)
@@ -961,7 +970,13 @@ async function createMissionPayment(request, env) {
   const idem=clean(request.headers.get('idempotency-key'))||clean(body?.idempotency_key);
   if(!idem) return json({ok:false,error:'IDEMPOTENCY_KEY_REQUIRED',version:VERSION},400);
   const old=await env.DB.prepare('SELECT * FROM payment_transactions WHERE idempotency_key=? LIMIT 1').bind(idem).first();
-  if(old) return json({ok:true,version:VERSION,idempotent_replay:true,transaction:old},200);
+  if(old) {
+    if (!isSameMissionPaymentRequest(old,{missionId,clientId,intervenantId,grossCents:gross,commissionCents:commission})) {
+      await paymentAudit(env,'MISSION_PAYMENT_IDEMPOTENCY_CONFLICT',{transaction_id:old.id,mission_id:missionId,user_id:auth.user.id,metadata:{idempotency_key_reused:true}},'DENIED');
+      return json({ok:false,error:'IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_REQUEST',version:VERSION},409);
+    }
+    return json({ok:true,version:VERSION,idempotent_replay:true,transaction:old},200);
+  }
   const net=gross-commission;
   const txId=crypto.randomUUID();
   await env.DB.prepare(`INSERT INTO payment_transactions
