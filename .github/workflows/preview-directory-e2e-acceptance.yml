@@ -16,10 +16,6 @@ on:
         description: "Exact 40-character frontend commit SHA; must match the latest successful Pages Preview deployment"
         required: true
         type: string
-      pages_commit_sha:
-        description: "Optional exact 40-character frontend commit to require"
-        required: false
-        type: string
 
 permissions:
   contents: read
