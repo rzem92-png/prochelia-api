@@ -45,8 +45,11 @@ test("Preview R2 backup verifies both exact resources are EU before export", () 
 test("Preview R2 backup requires an enabled exact-prefix EU bucket lock meeting owner-approved retention before export", () => {
   assert.ok(workflow.includes("R2_EXPECTED_RETENTION_SECONDS: ${{ vars.R2_EXPECTED_RETENTION_SECONDS }}"));
   const lock = workflow.indexOf("/r2/buckets/$R2_BUCKET/lock");
+  const retention = workflow.indexOf('expected_retention="${R2_EXPECTED_RETENTION_SECONDS:-}"');
   const exportStep = workflow.indexOf("Export preview D1 (read-only)");
-  assert.ok(lock >= 0 && exportStep > lock);
+  assert.ok(lock >= 0 && retention > lock && exportStep > retention);
+  assert.ok(workflow.includes("verified EU lock age is"));
+  assert.ok(workflow.includes("type == \"number\" and . > 0"));
   assert.ok(workflow.includes("cf-r2-jurisdiction: eu"));
   assert.ok(workflow.includes("preview-d1/${EXPECTED_DB_NAME}/"));
   assert.ok(workflow.includes(".prefix == $prefix"));
