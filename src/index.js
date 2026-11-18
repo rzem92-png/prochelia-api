@@ -1715,7 +1715,7 @@ function financeStrategicQuote({basePriceCents=0,phaseFactor=1,urgency='normal',
   };
 }
 
-async function pricingQuote(request, env) {
+export async function pricingQuote(request, env) {
   const gate=await requireAuthRole(request,env,['gerante','client','entreprise','intervenant']); if(gate.error)return gate.error;
   // Fail closed: browser-supplied financial inputs are not an authoritative pricing policy.
   // Re-enable only after verified tenant context, server-owned policy versioning and
