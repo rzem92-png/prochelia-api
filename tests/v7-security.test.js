@@ -1,7 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { createHmac } from "node:crypto";
 import { handleV7Route } from "../src/v7-routes.js";
-import { directoryList, resolveMissionSecurityAssignment, findAssignedMissionSecurity, isMissionPresenceFresh } from "../src/index.js";
+import { directoryList, resolveMissionSecurityAssignment, findAssignedMissionSecurity, isMissionPresenceFresh, hmacSha256Base64url } from "../src/index.js";
 
 const post = (path, body) => new Request("https://example.test" + path, {
   method: "POST",
@@ -199,4 +200,14 @@ test("mission code verification requires a fresh presence timestamp", () => {
   assert.equal(isMissionPresenceFresh("2026-11-18 12:00:01", now), false);
   assert.equal(isMissionPresenceFresh(null, now), false);
   assert.equal(isMissionPresenceFresh("not-a-date", now), false);
+});
+
+
+test("security notification signatures use standard HMAC-SHA256", async () => {
+  const secret = "0123456789abcdef0123456789abcdef";
+  const message = '{"event":"PROCHELIA_SECURITY_CODES","mission_id":"synthetic"}';
+  const expected = createHmac("sha256", secret).update(message).digest("base64url");
+  assert.equal(await hmacSha256Base64url(secret, message), expected);
+  await assert.rejects(() => hmacSha256Base64url("short", message), /HMAC_SECRET_OR_MESSAGE_INVALID/);
+  await assert.rejects(() => hmacSha256Base64url(secret, null), /HMAC_SECRET_OR_MESSAGE_INVALID/);
 });
