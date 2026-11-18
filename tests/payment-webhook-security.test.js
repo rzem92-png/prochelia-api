@@ -64,7 +64,7 @@ test("Stripe native signature rejects altered payloads and stale or future times
 
 test("Stripe native signature rejects malformed and duplicate timestamps", async () => {
   const digest = createHmac("sha256", secret).update(String(Math.floor(Date.now() / 1000)) + "." + payload).digest("hex");
-  for (const header of ["t=abc,v1=" + digest, "t=1,t=2,v1=" + digest, "t=" + Math.floor(Date.now() / 1000) + ",v1=bad"]) {
+  for (const header of ["t=abc,v1=" + digest, "t=1,t=2,v1=" + digest, "t=" + Math.floor(Date.now() / 1000) + ",v1=bad", "t=" + Math.floor(Date.now() / 1000) + ",v1=" + "0".repeat(64) + "=trailing"]) {
     const request = new Request("https://example.test/api/payments/webhook", { method: "POST", headers: { "stripe-signature": header } });
     assert.equal(await verifyWebhookSignature(request, { STRIPE_WEBHOOK_SECRET: secret }, payload), false);
   }
