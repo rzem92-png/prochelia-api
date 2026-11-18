@@ -839,19 +839,34 @@ export async function paymentStatus(request, env) {
   if (!auth) return json({ok:false,error:'UNAUTHENTICATED',version:VERSION},401);
 
   // Status is read-only. Never create a schema or a zero-balance wallet from a GET.
-  const schema = await env.DB.prepare(
-    "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('wallets','payment_accounts','payout_requests')"
-  ).all();
-  const tables = new Set((schema?.results || []).map(row => row.name));
-  const wallet = tables.has('wallets')
-    ? await env.DB.prepare('SELECT * FROM wallets WHERE user_id=? LIMIT 1').bind(auth.user.id).first()
-    : null;
-  const account = tables.has('payment_accounts')
-    ? await env.DB.prepare('SELECT * FROM payment_accounts WHERE user_id=? LIMIT 1').bind(auth.user.id).first()
-    : null;
-  const pending = tables.has('payout_requests')
-    ? await env.DB.prepare("SELECT COUNT(*) total FROM payout_requests WHERE user_id=? AND status IN ('requested','processing')").bind(auth.user.id).first()
-    : null;
+  // Do not trust partial/failed sqlite_master results as evidence that financial tables are ready.
+  let schema;
+  try {
+    schema = await env.DB.prepare(
+      "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('wallets','payment_accounts','payout_requests')"
+    ).all();
+  } catch {
+    return json({ok:false,error:'PAYMENT_STATUS_SCHEMA_UNAVAILABLE',version:VERSION,write_enabled:false},503);
+  }
+  if (schema?.success === false || !Array.isArray(schema?.results) ||
+      schema.results.some(row => !row || typeof row.name !== 'string')) {
+    return json({ok:false,error:'PAYMENT_STATUS_SCHEMA_UNAVAILABLE',version:VERSION,write_enabled:false},503);
+  }
+  const tables = new Set(schema.results.map(row => row.name));
+  let wallet = null, account = null, pending = null;
+  try {
+    wallet = tables.has('wallets')
+      ? await env.DB.prepare('SELECT * FROM wallets WHERE user_id=? LIMIT 1').bind(auth.user.id).first()
+      : null;
+    account = tables.has('payment_accounts')
+      ? await env.DB.prepare('SELECT * FROM payment_accounts WHERE user_id=? LIMIT 1').bind(auth.user.id).first()
+      : null;
+    pending = tables.has('payout_requests')
+      ? await env.DB.prepare("SELECT COUNT(*) total FROM payout_requests WHERE user_id=? AND status IN ('requested','processing')").bind(auth.user.id).first()
+      : null;
+  } catch {
+    return json({ok:false,error:'PAYMENT_STATUS_READ_FAILED',version:VERSION,write_enabled:false},503);
+  }
 
   return json({
     ok:true,
