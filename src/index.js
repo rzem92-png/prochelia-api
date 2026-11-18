@@ -1086,10 +1086,18 @@ export function webhookProviderForRequest(request, event, env) {
   return clean(event?.provider) || paymentProvider(env);
 }
 
-export function webhookReplayDecision(existingPayloadHash, incomingPayloadHash) {
+export function webhookEventInsertDecision(result) {
+  if (result?.success !== true) return 'FAILED';
+  const changes = result?.meta?.changes;
+  if (!Number.isInteger(changes) || changes < 0 || changes > 1) return 'FAILED';
+  return changes === 1 ? 'INSERTED' : 'EXISTS';
+}
+
+export function webhookReplayDecision(existingPayloadHash, incomingPayloadHash, processed) {
   if (typeof existingPayloadHash !== 'string' || !existingPayloadHash ||
       typeof incomingPayloadHash !== 'string' || !incomingPayloadHash) return 'CONFLICT';
-  return existingPayloadHash === incomingPayloadHash ? 'DUPLICATE' : 'CONFLICT';
+  if (existingPayloadHash !== incomingPayloadHash) return 'CONFLICT';
+  return processed === 1 || processed === true ? 'DUPLICATE' : 'PENDING';
 }
 
 export function requiresAtomicFinancialSettlement(eventType) {
@@ -1121,10 +1129,28 @@ export async function paymentWebhook(request, env) {
   }
   if (!(await paymentSchemaReady(env))) return json({ok:false,error:'PAYMENT_SCHEMA_NOT_MIGRATED',version:VERSION,write_enabled:false},503);
   const payloadHash=await sha256Base64url(raw);
-  const inserted=await env.DB.prepare(`INSERT OR IGNORE INTO payment_webhook_events (id,provider,event_id,event_type,signature_valid,payload_hash) VALUES (?,?,?,?,1,?)`).bind(crypto.randomUUID(),provider,eventId,type,payloadHash).run();
-  if(!inserted.meta?.changes) {
-    const existing=await env.DB.prepare(`SELECT payload_hash FROM payment_webhook_events WHERE provider=? AND event_id=? LIMIT 1`).bind(provider,eventId).first();
-    if(webhookReplayDecision(existing?.payload_hash,payloadHash)!=='DUPLICATE') {
+  let inserted;
+  try {
+    inserted=await env.DB.prepare(`INSERT OR IGNORE INTO payment_webhook_events (id,provider,event_id,event_type,signature_valid,payload_hash) VALUES (?,?,?,?,1,?)`).bind(crypto.randomUUID(),provider,eventId,type,payloadHash).run();
+  } catch {
+    return json({ok:false,error:'PAYMENT_WEBHOOK_PERSIST_FAILED',version:VERSION,retryable:true,write_enabled:false},503);
+  }
+  const insertDecision=webhookEventInsertDecision(inserted);
+  if(insertDecision==='FAILED') {
+    return json({ok:false,error:'PAYMENT_WEBHOOK_PERSIST_FAILED',version:VERSION,retryable:true,write_enabled:false},503);
+  }
+  if(insertDecision==='EXISTS') {
+    let existing;
+    try {
+      existing=await env.DB.prepare(`SELECT payload_hash,processed FROM payment_webhook_events WHERE provider=? AND event_id=? LIMIT 1`).bind(provider,eventId).first();
+    } catch {
+      return json({ok:false,error:'PAYMENT_WEBHOOK_REPLAY_CHECK_FAILED',version:VERSION,retryable:true,write_enabled:false},503);
+    }
+    const replay=webhookReplayDecision(existing?.payload_hash,payloadHash,existing?.processed);
+    if(replay==='PENDING') {
+      return json({ok:false,error:'WEBHOOK_EVENT_PENDING_RECONCILIATION',version:VERSION,retryable:true,write_enabled:false},503);
+    }
+    if(replay!=='DUPLICATE') {
       await paymentAudit(env,'PSP_WEBHOOK_EVENT_ID_PAYLOAD_CONFLICT',{metadata:{provider,event_id:eventId,event_type:type}},'CONFLICT');
       return json({ok:false,error:'WEBHOOK_EVENT_ID_PAYLOAD_CONFLICT',version:VERSION},409);
     }
