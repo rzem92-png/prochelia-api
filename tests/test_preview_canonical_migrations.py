@@ -28,6 +28,7 @@ EXPECTED = [
     "0021_supra_audit_events.sql",
     "0022_supra_persisted_approvals.sql",
     "0023_tenant_double_entry_accounting.sql",
+    "0024_tenant_membership_authority.sql",
 ]
 
 actual = sorted(path.name for path in MIGRATIONS.glob("*.sql"))
@@ -63,6 +64,33 @@ accounting_tables = {
     "accounting_journals", "accounting_journal_lines",
 }
 assert accounting_tables <= tables, f"Missing accounting tables: {sorted(accounting_tables-tables)}"
+# Tenant authority and membership lifecycle fixtures.
+tenant_tables = {"tenants", "tenant_memberships", "tenant_membership_events"}
+assert tenant_tables <= tables, f"Missing tenant authority tables: {sorted(tenant_tables-tables)}"
+for user_id, email in [("user-a", "user-a@example.test"), ("user-b", "user-b@example.test"), ("user-admin", "admin@example.test")]:
+    db.execute("INSERT INTO users(id, role, email, first_name, last_name, password_hash) VALUES (?, 'client', ?, 'Synthetic', 'User', 'not-a-real-password-hash')", (user_id, email))
+db.execute("INSERT INTO tenants(id, slug, display_name) VALUES ('tenant-a', 'tenant-a', 'Tenant A')")
+db.execute("INSERT INTO tenants(id, slug, display_name) VALUES ('tenant-b', 'tenant-b', 'Tenant B')")
+db.execute("INSERT INTO tenant_memberships(id, tenant_id, user_id, role, status, invited_by_user_id) VALUES ('membership-a', 'tenant-a', 'user-a', 'OWNER', 'INVITED', 'user-admin')")
+db.execute("UPDATE tenant_memberships SET status='ACTIVE', accepted_at=CURRENT_TIMESTAMP WHERE id='membership-a'")
+db.execute("INSERT INTO tenant_membership_events(id, tenant_id, membership_id, actor_user_id, event_type, previous_status, new_status, reason_code) VALUES ('membership-event-a', 'tenant-a', 'membership-a', 'user-admin', 'ACCEPTED', 'INVITED', 'ACTIVE', 'INVITATION_ACCEPTED')")
+try:
+    db.execute("INSERT INTO tenant_membership_events(id, tenant_id, membership_id, actor_user_id, event_type, previous_status, new_status, reason_code) VALUES ('membership-event-cross-tenant', 'tenant-b', 'membership-a', 'user-admin', 'ACCEPTED', 'INVITED', 'ACTIVE', 'CROSS_TENANT_TEST')")
+    raise AssertionError("Cross-tenant membership event was incorrectly accepted")
+except sqlite3.IntegrityError:
+    pass
+for sql in ["UPDATE tenant_membership_events SET reason_code='tampered' WHERE id='membership-event-a'", "DELETE FROM tenant_membership_events WHERE id='membership-event-a'"]:
+    try:
+        db.execute(sql)
+        raise AssertionError(f"Append-only membership history was mutable: {sql}")
+    except sqlite3.IntegrityError as exc:
+        assert "APPEND_ONLY" in str(exc), str(exc)
+db.execute("UPDATE tenant_memberships SET status='REVOKED', revoked_at=CURRENT_TIMESTAMP WHERE id='membership-a'")
+try:
+    db.execute("UPDATE tenant_memberships SET status='ACTIVE' WHERE id='membership-a'")
+    raise AssertionError("Revoked membership was incorrectly reactivated")
+except sqlite3.IntegrityError as exc:
+    assert "REVOKED_TERMINAL" in str(exc), str(exc)
 
 db.execute("""
     INSERT INTO accounting_entities(id, tenant_id, legal_name, country_code, base_currency)
@@ -261,3 +289,12 @@ except sqlite3.IntegrityError as exc:
     assert "ACCOUNTING_LINE_CURRENCY_INVALID" in str(exc), str(exc)
 
 print("PASS: posted legal-entity and account classification metadata are immutable; account deactivation remains available; line currency is normalized.")
+# Entity tenancy is enforced by the database, not merely by caller-supplied IDs.
+db.execute("INSERT INTO tenants(id, slug, display_name) VALUES ('tenant-inactive', 'tenant-inactive', 'Inactive tenant')")
+db.execute("UPDATE tenants SET status='SUSPENDED' WHERE id='tenant-inactive'")
+try:
+    db.execute("INSERT INTO accounting_entities(id, tenant_id, legal_name, country_code, base_currency) VALUES ('entity-inactive-tenant', 'tenant-inactive', 'Inactive', 'FR', 'EUR')")
+    raise AssertionError("Accounting entity for inactive tenant was incorrectly accepted")
+except sqlite3.IntegrityError as exc:
+    assert "TENANT_NOT_ACTIVE" in str(exc), str(exc)
+print("PASS: tenant membership lifecycle, cross-tenant event isolation, append-only audit and terminal revocation.")
