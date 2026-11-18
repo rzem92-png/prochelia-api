@@ -111,7 +111,7 @@ test("manager scope remains explicitly manager supplied", async () => {
 
 test("consolidated routes authorize before schema helpers can issue DDL", () => {
   const start = source.indexOf("async function handleConsolidated");
-  const end = source.indexOf("\\n}", start);
+  const end = source.indexOf("\n}", start);
   assert.notEqual(start, -1);
   assert.notEqual(end, -1);
   const body = source.slice(start, end);
