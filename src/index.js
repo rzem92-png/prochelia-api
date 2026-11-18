@@ -871,15 +871,45 @@ export async function paymentOnboard(request, env) {
   return json({ok:false,error:'PSP_ONBOARDING_NOT_IMPLEMENTED',version:VERSION,write_enabled:false},503);
 }
 
-async function paymentStatus(request, env) {
-  const auth=await getSessionUser(request,env);
-  if(!auth) return json({ok:false,error:'UNAUTHENTICATED',version:VERSION},401);
-  await ensurePaymentSchema(env);
-  let wallet=await env.DB.prepare('SELECT * FROM wallets WHERE user_id=? LIMIT 1').bind(auth.user.id).first();
-  if(!wallet){ await env.DB.prepare('INSERT INTO wallets (id,user_id) VALUES (?,?)').bind(crypto.randomUUID(),auth.user.id).run(); wallet=await env.DB.prepare('SELECT * FROM wallets WHERE user_id=? LIMIT 1').bind(auth.user.id).first(); }
-  const account=await env.DB.prepare('SELECT * FROM payment_accounts WHERE user_id=? LIMIT 1').bind(auth.user.id).first();
-  const pending=await env.DB.prepare(`SELECT COUNT(*) total FROM payout_requests WHERE user_id=? AND status IN ('requested','processing')`).bind(auth.user.id).first();
-  return json({ok:true,version:VERSION,provider:paymentProvider(env),payments_configured:paymentsConfigured(env),wallet:{currency:wallet.currency,available_cents:wallet.available_cents,pending_cents:wallet.pending_cents,paid_cents:wallet.paid_cents,reserved_cents:wallet.reserved_cents},payout_account:account?{status:account.status,onboarding_status:account.onboarding_status,payouts_enabled:!!account.payouts_enabled}:null,pending_payouts:Number(pending?.total||0)},200);
+export async function paymentStatus(request, env) {
+  const auth = await getSessionUser(request, env);
+  if (!auth) return json({ok:false,error:'UNAUTHENTICATED',version:VERSION},401);
+
+  // Status is read-only. Never create a schema or a zero-balance wallet from a GET.
+  const schema = await env.DB.prepare(
+    "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('wallets','payment_accounts','payout_requests')"
+  ).all();
+  const tables = new Set((schema?.results || []).map(row => row.name));
+  const wallet = tables.has('wallets')
+    ? await env.DB.prepare('SELECT * FROM wallets WHERE user_id=? LIMIT 1').bind(auth.user.id).first()
+    : null;
+  const account = tables.has('payment_accounts')
+    ? await env.DB.prepare('SELECT * FROM payment_accounts WHERE user_id=? LIMIT 1').bind(auth.user.id).first()
+    : null;
+  const pending = tables.has('payout_requests')
+    ? await env.DB.prepare("SELECT COUNT(*) total FROM payout_requests WHERE user_id=? AND status IN ('requested','processing')").bind(auth.user.id).first()
+    : null;
+
+  return json({
+    ok:true,
+    version:VERSION,
+    provider:paymentProvider(env),
+    payments_configured:paymentsConfigured(env),
+    data_status:tables.has('wallets') ? 'READ_ONLY' : 'NOT_INITIALIZED',
+    wallet:wallet ? {
+      currency:wallet.currency,
+      available_cents:wallet.available_cents,
+      pending_cents:wallet.pending_cents,
+      paid_cents:wallet.paid_cents,
+      reserved_cents:wallet.reserved_cents
+    } : null,
+    payout_account:account ? {
+      status:account.status,
+      onboarding_status:account.onboarding_status,
+      payouts_enabled:!!account.payouts_enabled
+    } : null,
+    pending_payouts:pending ? Number(pending.total || 0) : null
+  },200);
 }
 
 export async function createMissionPayment(request, env) {
@@ -969,6 +999,7 @@ export async function reservePayoutAtomically(env, input) {
 export async function payoutRequest(request, env) {
   const auth = await getSessionUser(request, env);
   if (!requireRole(auth, ['intervenant'])) return json({ok:false,error:auth?.user?'FORBIDDEN':'UNAUTHENTICATED',version:VERSION}, auth?.user ? 403 : 401);
+  if (!paymentsConfigured(env)) return json({ok:false,error:'PAYOUT_PROVIDER_NOT_CONFIGURED',version:VERSION,write_enabled:false},503);
   await ensurePaymentSchema(env);
   const body = await readJson(request);
   const amount = moneyCents(body?.amount_eur);
@@ -985,10 +1016,6 @@ export async function payoutRequest(request, env) {
       return json({ok:false,error:'IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_REQUEST',version:VERSION},409);
     }
     return json({ok:true,version:VERSION,idempotent_replay:true,payout:existing},200);
-  }
-  // Never reserve or lock wallet funds while no reviewed PSP payout adapter is operational.
-  if (!paymentsConfigured(env)) {
-    return json({ok:false,error:'PAYOUT_PROVIDER_NOT_CONFIGURED',version:VERSION,write_enabled:false},503);
   }
   const account = await env.DB.prepare('SELECT * FROM payment_accounts WHERE user_id=? LIMIT 1').bind(auth.user.id).first();
   if (!account || Number(account.payouts_enabled) !== 1) {
@@ -1049,7 +1076,7 @@ export function requiresAtomicFinancialSettlement(eventType) {
   ]).has(String(eventType || '').trim());
 }
 
-async function paymentWebhook(request, env) {
+export async function paymentWebhook(request, env) {
   // Reject unauthenticated and malformed events before any D1 schema access.
   // This prevents arbitrary callers from triggering CREATE TABLE/INDEX writes.
   const raw = await request.text();
@@ -1060,6 +1087,9 @@ async function paymentWebhook(request, env) {
   const eventId = clean(event?.id), type = clean(event?.type);
   if (!eventId || !type || typeof event !== 'object' || Array.isArray(event)) {
     return json({ok:false,error:'INVALID_WEBHOOK_EVENT',version:VERSION},400);
+  }
+  if (!paymentsConfigured(env)) {
+    return json({ok:false,error:'PAYMENT_PROVIDER_NOT_CONFIGURED',version:VERSION,write_enabled:false},503);
   }
   // Do not accept financial state transitions until the settlement ledger can
   // atomically deduplicate by transaction/payout, not only by provider event ID.
