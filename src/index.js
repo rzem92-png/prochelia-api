@@ -176,7 +176,7 @@ export async function getSessionUser(request, env) {
   ).bind(tokenHash).first();
   if (!row) return null;
   if (row.status !== 'active') return null;
-  return { user: safeUser(row), session_id: row.session_id, token_hash: tokenHash };
+  return { user: safeUser(row), session_id: row.session_id, session_active_tenant_id: row.session_active_tenant_id || null, token_hash: tokenHash };
 }
 
 function requireRole(auth, roles) {
