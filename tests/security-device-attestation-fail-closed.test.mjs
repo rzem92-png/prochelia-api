@@ -5,6 +5,7 @@ import {
   securityPresence,
   securityPrepareMission,
   securityVerifyCode,
+  securityResendCodes,
   securityStatus
 } from "../src/index.js";
 
@@ -79,6 +80,14 @@ test("mission security preparation refuses before creating or delivering one-tim
   const response = await securityPrepareMission(request("/api/security/mission/prepare", {
     mission_id: "synthetic-mission-1", client_id: "synthetic-client-1", intervenant_id: "synthetic-provider-1"
   }), env);
+  assert.equal(response.status, 503);
+  assert.equal((await response.json()).error, "DEVICE_ATTESTATION_REQUIRED");
+  assert.equal(statements.length, 1, "only the authenticated session lookup is permitted");
+});
+
+test("mission code resend refuses before reading or mutating prepared codes", async () => {
+  const { env, statements } = authenticatedEnv("gerante");
+  const response = await securityResendCodes(request("/api/security/resend", { mission_id: "synthetic-mission-1" }), env);
   assert.equal(response.status, 503);
   assert.equal((await response.json()).error, "DEVICE_ATTESTATION_REQUIRED");
   assert.equal(statements.length, 1, "only the authenticated session lookup is permitted");
