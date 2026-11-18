@@ -713,21 +713,17 @@ export async function securityVerifyCode(request, env) {
   }, 503);
 }
 
-async function securityResendCodes(request, env) {
-  const auth=await getSessionUser(request,env);
-  if(!requireRole(auth,['gerante','client'])) return json({ok:false,error:auth?.user?'FORBIDDEN':'UNAUTHENTICATED',version:VERSION},auth?.user?403:401);
-  await ensureSecuritySchema(env);
-  const body=await readJson(request);
-  const missionId=clean(body?.mission_id);
-  if(!missionId) return json({ok:false,error:'MISSION_ID_REQUIRED',version:VERSION},400);
-  const sec=await env.DB.prepare('SELECT * FROM mission_security WHERE mission_id=? LIMIT 1').bind(missionId).first();
-  if(!sec) return json({ok:false,error:'MISSION_SECURITY_NOT_FOUND',version:VERSION},404);
-  if(auth.user.role==='client') {
-    const client = await env.DB.prepare('SELECT user_id FROM clients WHERE id=? LIMIT 1').bind(sec.client_id).first();
-    if (!client || client.user_id !== auth.user.id) return json({ok:false,error:'FORBIDDEN',version:VERSION},403);
+export async function securityResendCodes(request, env) {
+  const auth = await getSessionUser(request, env);
+  if (!requireRole(auth, ['gerante', 'client'])) {
+    return json({ ok: false, error: auth?.user ? 'FORBIDDEN' : 'UNAUTHENTICATED', version: VERSION }, auth?.user ? 403 : 401);
   }
-  if(sec.status==='completed') return json({ok:false,error:'MISSION_ALREADY_COMPLETED',version:VERSION},409);
-  return json({ok:false,error:'SECURITY_CODE_RESEND_REQUIRES_REGENERATION_FLOW',version:VERSION,message:'Pour éviter la réutilisation d’un ancien secret, la réémission doit générer de nouveaux codes et invalider les précédents.'},409);
+  return json({
+    ok: false,
+    error: 'DEVICE_ATTESTATION_REQUIRED',
+    message: 'Security code resend is disabled until the cryptographic mission security flow is implemented.',
+    version: VERSION
+  }, 503);
 }
 
 async function securityClientCode(request, env) {
