@@ -27,7 +27,7 @@ test("payment schema readiness is a read-only metadata query", async () => {
             return {
               async all() {
                 calls.push({ method: "all" });
-                return { results: REQUIRED.map(name => ({ name })) };
+                return { success: true, results: REQUIRED.map(name => ({ name })) };
               },
               async run() {
                 throw new Error("Payment schema readiness must never write");
@@ -58,7 +58,7 @@ test("payment schema readiness fails closed when any required table is missing",
           bind(...values) {
             return {
               async all() {
-                return { results: values.slice(0, -1).map(name => ({ name })) };
+                return { success: true, results: values.slice(0, -1).map(name => ({ name })) };
               }
             };
           }
@@ -108,6 +108,26 @@ test("payment schema readiness fails closed on an unsuccessful metadata response
             return {
               async all() {
                 return { success: false, results: REQUIRED.map(name => ({ name })) };
+              }
+            };
+          }
+        };
+      }
+    }
+  };
+  assert.equal(await paymentSchemaReady(env), false);
+});
+
+
+test("payment schema readiness fails closed when D1 success status is missing", async () => {
+  const env = {
+    DB: {
+      prepare() {
+        return {
+          bind() {
+            return {
+              async all() {
+                return { results: REQUIRED.map(name => ({ name })) };
               }
             };
           }
