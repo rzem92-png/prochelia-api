@@ -98,7 +98,7 @@ test("Preview migration workflow accepts only an empty EU D1, the exact 23-entry
   assert.match(workflow, /non_internal/);
   assert.match(workflow, /len\(local\) != 26/);
   assert.match(workflow, /remote == base/);
-  assert.match(workflow, /remote differs from both reviewed safe states|differs from both reviewed safe states/);
+  assert.match(workflow, /differs from the exact reviewed 23-entry baseline and 26-entry target/);
   assert.doesNotMatch(workflow, /legacy=/);
   assert.doesNotMatch(workflow, /baseline=\(local-pending\)\|legacy/);
 });
