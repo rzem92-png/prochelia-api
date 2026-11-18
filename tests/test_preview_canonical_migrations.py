@@ -223,3 +223,41 @@ try:
 except sqlite3.IntegrityError as exc:
     assert "EXACTLY_MIRROR" in str(exc), str(exc)
 print("PASS: tenant-scoped double-entry posting, idempotency, immutable posts and exact reversal constraints.")
+
+
+# Posted history must retain stable legal-entity and account classification metadata.
+for sql in [
+    "UPDATE accounting_entities SET base_currency='USD' WHERE id='entity-a'",
+    "UPDATE accounting_entities SET legal_name='Renamed entity' WHERE id='entity-a'",
+    "UPDATE accounting_accounts SET account_code='999999' WHERE id='cash-a'",
+    "UPDATE accounting_accounts SET account_type='LIABILITY' WHERE id='cash-a'",
+    "UPDATE accounting_accounts SET normal_balance='CREDIT' WHERE id='cash-a'",
+]:
+    try:
+        db.execute(sql)
+        raise AssertionError(f"Posted ledger identity/classification mutation was incorrectly accepted: {sql}")
+    except sqlite3.IntegrityError as exc:
+        assert "IMMUTABLE" in str(exc), str(exc)
+
+# Operational deactivation is permitted without rewriting historical classification.
+db.execute("UPDATE accounting_accounts SET is_active=0 WHERE id='cash-a'")
+assert db.execute("SELECT is_active FROM accounting_accounts WHERE id='cash-a'").fetchone()[0] == 0
+
+# Line currency must use the same uppercase ISO-like three-letter contract as the journal.
+db.execute("""
+    INSERT INTO accounting_journals(
+      id, tenant_id, entity_id, journal_code, journal_date, currency,
+      source_type, source_id, idempotency_key, created_by
+    ) VALUES ('journal-currency-test', 'tenant-a', 'entity-a', 'VE', '2026-11-18', 'EUR',
+              'TEST', 'currency-test', 'tenant-a:currency-test:1', 'user-a')
+""")
+try:
+    db.execute("""
+        INSERT INTO accounting_journal_lines(id, tenant_id, entity_id, journal_id, account_id, line_number, side, amount_cents, currency)
+        VALUES ('line-lowercase-currency', 'tenant-a', 'entity-a', 'journal-currency-test', 'revenue-a', 1, 'CREDIT', 100, 'eur')
+    """)
+    raise AssertionError("Lowercase journal-line currency was incorrectly accepted")
+except sqlite3.IntegrityError as exc:
+    assert "CHECK constraint failed" in str(exc), str(exc)
+
+print("PASS: posted legal-entity and account classification metadata are immutable; account deactivation remains available; line currency is normalized.")
