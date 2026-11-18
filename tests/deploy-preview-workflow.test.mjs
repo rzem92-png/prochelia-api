@@ -96,6 +96,9 @@ test("Preview deploy runs the complete security suite and dry-run before the onl
   assert.match(workflow, /tests\/bootstrap-atomic\.test\.js/);
   assert.match(workflow, /--dry-run/);
   assert.match(workflow, /wrangler@4 deploy --config wrangler\.preview\.generated\.json/);
+  assert.ok(workflow.includes('--message "PROCHELIA Preview commit $GITHUB_SHA"'));
+  assert.ok(workflow.includes('version.result?.annotations?.["workers/message"]'));
+  assert.ok(workflow.includes("deploymentMessage.includes(sha)"));
   assert.match(workflow, /node scripts\/generate-preview-wrangler-config\.mjs/);
   assert.doesNotMatch(workflow, /d1 migrations apply/);
 });
