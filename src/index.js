@@ -2641,14 +2641,21 @@ async function processBackgroundJobs(request,env) {
   const results=[];
   for(const job of rows.results||[]) {
     try {
-      await env.DB.prepare(`UPDATE background_jobs SET status='RUNNING',locked_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='PENDING'`).bind(job.id).run();
+      // Atomic compare-and-set claim: only the worker that changed PENDING -> RUNNING
+      // may execute or finalize this job. A zero-row update means another worker won.
+      const claim=await env.DB.prepare(`UPDATE background_jobs SET status='RUNNING',locked_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='PENDING'`).bind(job.id).run();
+      if(Number(claim?.meta?.changes||0)!==1) {
+        results.push({id:job.id,status:'SKIPPED',reason:'CLAIM_NOT_ACQUIRED'});
+        continue;
+      }
       let result={performed:false,reason:'JOB_TYPE_NOT_IMPLEMENTED'};
       const payload=JSON.parse(job.payload_json||'{}');
-      if(job.job_type==='PROCESS_ACTION_OUTBOX') result={performed:true,delegation:'Use /api/ops/outbox/process'};
+      if(job.job_type==='PROCESS_ACTION_OUTBOX') result={performed:false,reason:'DELEGATED_HANDLER_NOT_EXECUTED',delegation:'Use /api/ops/outbox/process'};
       else if(job.job_type==='PRODUCTION_AUDIT') result=await productionConfigCheck(env);
-      else if(job.job_type==='COPILOT_BRIEFING') result={performed:true,delegation:'Use /api/copilot/briefing'};
+      else if(job.job_type==='COPILOT_BRIEFING') result={performed:false,reason:'DELEGATED_HANDLER_NOT_EXECUTED',delegation:'Use /api/copilot/briefing'};
+      // Only a handler result that proves its own completion may mark a job DONE.
       const done=result.performed===true || result.overall===true;
-      await env.DB.prepare(`UPDATE background_jobs SET status=?,result_json=?,attempts=attempts+1,updated_at=CURRENT_TIMESTAMP,completed_at=? WHERE id=?`)
+      await env.DB.prepare(`UPDATE background_jobs SET status=?,result_json=?,attempts=attempts+1,updated_at=CURRENT_TIMESTAMP,completed_at=? WHERE id=? AND status='RUNNING'`)
         .bind(done?'DONE':'WAITING_PROVIDER',JSON.stringify(result),done?new Date().toISOString():null,job.id).run();
       results.push({id:job.id,status:done?'DONE':'WAITING_PROVIDER',result});
     } catch(e) {
@@ -3473,7 +3480,10 @@ handle = async function(request,env){
    ============================================================================ */
 
 async function productionSubjectHash(request, route){
-  const ip=clean(request.headers.get('CF-Connecting-IP')) || clean(request.headers.get('X-Forwarded-For')) || 'unknown';
+  // CF-Connecting-IP is supplied by Cloudflare's edge. Never trust the
+  // caller-controlled X-Forwarded-For chain for abuse-control identity.
+  const ip=clean(request.headers.get('CF-Connecting-IP'));
+  if(!ip) throw new Error('TRUSTED_CLIENT_IP_UNAVAILABLE');
   return sha256Base64url(`${ip}|${route}`);
 }
 
@@ -3492,7 +3502,11 @@ export async function productionRateLimit(request,env){
   const limit=sensitive ? 20 : 120;
   const windowSeconds=60;
   const bucket=`${sensitive?'SENSITIVE':'GENERAL'}:${path}`;
-  const subject=await productionSubjectHash(request,path);
+  let subject;
+  try { subject=await productionSubjectHash(request,path); }
+  catch {
+    return {ok:false,response:json({ok:false,error:'RATE_LIMIT_CLIENT_ID_UNAVAILABLE',version:VERSION},503)};
+  }
   const now=Math.floor(Date.now()/1000);
   const start=new Date(Math.floor(now/windowSeconds)*windowSeconds*1000).toISOString();
   // Schema must be provisioned by a reviewed migration; a request never creates it.
@@ -3501,12 +3515,16 @@ export async function productionRateLimit(request,env){
   if(!existingTables.has('security_rate_limits')||!existingTables.has('production_security_events')){
     return {ok:false,response:json({ok:false,error:'RATE_LIMIT_SCHEMA_NOT_READY',version:VERSION},503)};
   }
-  const existing=await env.DB.prepare(`SELECT request_count FROM security_rate_limits WHERE bucket=? AND subject_hash=? AND window_start=? LIMIT 1`).bind(bucket,subject,start).first();
-  const count=Number(existing?.request_count||0)+1;
-  if(existing){
-    await env.DB.prepare(`UPDATE security_rate_limits SET request_count=? WHERE bucket=? AND subject_hash=? AND window_start=?`).bind(count,bucket,subject,start).run();
-  }else{
-    await env.DB.prepare(`INSERT INTO security_rate_limits(id,bucket,subject_hash,window_start,request_count) VALUES(?,?,?,?,1)`).bind(crypto.randomUUID(),bucket,subject,start).run();
+  // One atomic UPSERT replaces the racy SELECT + UPDATE/INSERT sequence.
+  // The migration enforces UNIQUE(bucket, subject_hash, window_start).
+  const incremented=await env.DB.prepare(`INSERT INTO security_rate_limits(id,bucket,subject_hash,window_start,request_count)
+    VALUES(?,?,?,?,1)
+    ON CONFLICT(bucket,subject_hash,window_start)
+    DO UPDATE SET request_count=security_rate_limits.request_count+1
+    RETURNING request_count`).bind(crypto.randomUUID(),bucket,subject,start).first();
+  const count=Number(incremented?.request_count);
+  if(!Number.isSafeInteger(count)||count<1) {
+    return {ok:false,response:json({ok:false,error:'RATE_LIMIT_COUNTER_UNAVAILABLE',version:VERSION},503)};
   }
   if(count>limit){
     await env.DB.prepare(`INSERT INTO production_security_events(id,event_type,route,subject_hash,decision,details_json) VALUES(?,?,?,?,?,?)`)
