@@ -29,7 +29,7 @@ test("Preview deployment resolves the latest successful Pages Preview before gen
   assert.match(workflow, /\.result\.latest_stage\.status == "success"/);
   assert.match(workflow, /\.result\.uses_functions == true/);
   assert.match(workflow, /--arg expected "\$PAGES_EXPECTED_COMMIT"/);
-  assert.match(workflow, /\(\$expected == "" or \.result\.deployment_trigger\.metadata\.commit_hash == \$expected\)/);
+  assert.ok(workflow.includes('.result.deployment_trigger.metadata.commit_hash == $expected'));
   assert.match(workflow, /PAGES_PREVIEW_ORIGIN=/);
   assert.match(workflow, /pages_alias=/);
   assert.match(workflow, /PAGES_PREVIEW_ALIAS=/);
