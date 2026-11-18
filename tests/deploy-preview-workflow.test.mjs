@@ -59,6 +59,7 @@ test("Preview deploy pins isolated Worker and Preview D1, never Production", () 
   assert.match(generator, /pagesPreviewAlias/);
   assert.match(generator, /https:\/\/83a36d32\.prochelia\.pages\.dev/);
   assert.match(generator, /https:\/\/6c01ea4a\.prochelia\.pages\.dev/);
+  assert.match(generator, /https:\/\/8480de7b\.prochelia\.pages\.dev/);
   assert.match(generator, /bucket_name:\s*"prochelia-preview-backups-eu-v2"/);
   assert.match(generator, /jurisdiction:\s*"eu"/);
   assert.match(workflow, /Verify dedicated Preview R2 bucket has EU jurisdiction/);
@@ -92,7 +93,7 @@ test("checkout and Node setup actions are pinned to immutable SHAs", () => {
 
 test("Preview deployment config generator emits isolated EU bindings and the verified Pages origin", async () => {
   const directory = await mkdtemp(join(tmpdir(), "prochelia-preview-config-"));
-  const pagesOrigin = "https://8480de7b.prochelia.pages.dev";
+  const pagesOrigin = "https://dde58745.prochelia.pages.dev";
   const pagesAlias = "https://fix-frontend-cookie-session-7y26.prochelia.pages.dev";
   try {
     await writeFile(join(directory, "wrangler.jsonc"), JSON.stringify({
@@ -114,6 +115,7 @@ test("Preview deployment config generator emits isolated EU bindings and the ver
     assert.equal(generated.r2_buckets[0].jurisdiction, "eu");
     assert.ok(generated.vars.CORS_ORIGIN.split(",").includes(pagesOrigin));
     assert.ok(generated.vars.CORS_ORIGIN.split(",").includes(pagesAlias));
+    assert.ok(generated.vars.CORS_ORIGIN.split(",").includes("https://8480de7b.prochelia.pages.dev"));
     assert.notEqual(generated.d1_databases[0].database_id, "04f52830-ef5a-4f17-a640-42bbc2381bba");
   } finally {
     await rm(directory, { recursive: true, force: true });
