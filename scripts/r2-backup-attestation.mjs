@@ -5,7 +5,8 @@ import { fileURLToPath } from "node:url";
 
 const HEX_64 = /^[0-9a-f]{64}$/;
 const SHA_40 = /^[0-9a-f]{40}$/;
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;\nconst ACCOUNT_ID = /^[0-9a-f]{32}$/;
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+const ACCOUNT_ID = /^[0-9a-f]{32}$/;
 
 function normalize(value) {
   if (Array.isArray(value)) return value.map(normalize);
