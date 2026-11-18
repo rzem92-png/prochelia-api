@@ -773,11 +773,15 @@ export async function paymentSchemaReady(env) {
     'payment_wallet_ledger'
   ];
   const placeholders = requiredTables.map(() => '?').join(',');
-  const result = await env.DB.prepare(
-    `SELECT name FROM sqlite_master WHERE type='table' AND name IN (${placeholders})`
-  ).bind(...requiredTables).all();
-  const present = new Set((result?.results || []).map(row => row.name));
-  return requiredTables.every(name => present.has(name));
+  try {
+    const result = await env.DB.prepare(
+      `SELECT name FROM sqlite_master WHERE type='table' AND name IN (${placeholders})`
+    ).bind(...requiredTables).all();
+    const present = new Set((result?.results || []).map(row => row.name));
+    return requiredTables.every(name => present.has(name));
+  } catch {
+    return false;
+  }
 }
 
 function moneyCents(value) {
