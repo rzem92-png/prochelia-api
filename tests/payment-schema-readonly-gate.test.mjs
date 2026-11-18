@@ -78,3 +78,22 @@ test("payment request handlers no longer contain a runtime DDL schema helper", a
   assert.doesNotMatch(source, /ensurePaymentSchema/);
   assert.match(source, /paymentSchemaReady\(env\)/);
 });
+
+test("payment schema readiness fails closed when the metadata query fails", async () => {
+  const env = {
+    DB: {
+      prepare() {
+        return {
+          bind() {
+            return {
+              async all() {
+                throw new Error("synthetic D1 metadata failure");
+              }
+            };
+          }
+        };
+      }
+    }
+  };
+  assert.equal(await paymentSchemaReady(env), false);
+});
