@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { handleV7Route } from "../src/v7-routes.js";
-import { directoryList, resolveMissionSecurityAssignment } from "../src/index.js";
+import { directoryList, resolveMissionSecurityAssignment, findAssignedMissionSecurity } from "../src/index.js";
 
 const post = (path, body) => new Request("https://example.test" + path, {
   method: "POST",
@@ -163,4 +163,30 @@ test("mission security assignment fails closed without a database", async () => 
   assert.equal(await resolveMissionSecurityAssignment({}, {
     missionId: "mission-1", clientId: "client-1", intervenantId: "provider-1"
   }), null);
+});
+
+
+test("mission security code lookup binds business assignment to the authenticated user", async () => {
+  let sql = "";
+  let values = [];
+  const expected = { id: "security-1", mission_id: "mission-1", intervenant_id: "provider-record-1" };
+  const env = { DB: { prepare(statement) {
+    sql = statement;
+    return { bind(...args) {
+      values = args;
+      return { async first() { return args[0] === "mission-1" && args[1] === "provider-user-1" ? expected : null; } };
+    } };
+  } } };
+  assert.equal(await findAssignedMissionSecurity(env, "mission-1", "provider-user-1"), expected);
+  assert.equal(await findAssignedMissionSecurity(env, "mission-1", "different-user"), null);
+  assert.deepEqual(values, ["mission-1", "different-user"]);
+  assert.match(sql, /JOIN intervenants i ON i\.id = ms\.intervenant_id/);
+  assert.match(sql, /i\.user_id = \?/);
+});
+
+test("mission security code lookup fails closed for missing identity", async () => {
+  let reads = 0;
+  const env = { DB: { prepare() { reads++; throw new Error("unexpected database read"); } } };
+  assert.equal(await findAssignedMissionSecurity(env, "mission-1", ""), null);
+  assert.equal(reads, 0);
 });
