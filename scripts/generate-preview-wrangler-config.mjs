@@ -32,6 +32,7 @@ const allowedOrigins = [
   "https://db884f74.prochelia.pages.dev",
   "https://repair-prochelia-frontend-xs.prochelia.pages.dev",
   "https://6c01ea4a.prochelia.pages.dev",
+  "https://8480de7b.prochelia.pages.dev",
   pagesPreviewOrigin,
   ...(pagesPreviewAlias ? [pagesPreviewAlias] : [])
 ];
