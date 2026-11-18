@@ -108,7 +108,7 @@ test("security status reports device attestation and mission verification as dis
 test("mission trust routes do not create trusted_devices or update mission_security", () => {
   const checks = [
     ["export async function securityPresence", "\nexport async function consumeMissionSecurityCode"],
-    ["export async function securityVerifyCode", "\nasync function securityResendCodes"],
+    ["export async function securityVerifyCode", "\nexport async function securityResendCodes"],
     ["export async function securityPrepareMission", "\nexport function isMissionPresenceFresh"],
     ["export async function securityResendCodes", "\nasync function securityClientCode"]
   ];
