@@ -70,3 +70,7 @@ test("Restore requires and verifies the HMAC attestation before decrypting or wr
   assert.match(workflow, /cipher_expected/);
   assert.match(workflow, /attested_plain/);
 });
+
+test("Restore refuses to reuse the encryption secret as the HMAC attestation key", () => {
+  assert.match(workflow, /BACKUP_ATTESTATION_HMAC_KEY.*BACKUP_ENCRYPTION_KEY/s);
+});
