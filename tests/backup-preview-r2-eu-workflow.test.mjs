@@ -57,3 +57,23 @@ test("Preview backup token assignments close the command substitution and quoted
   assert.equal(lines.length, 2);
   for (const line of lines) assert.ok(line.endsWith(")\""), line);
 });
+
+test("Preview R2 backup requires a separate HMAC attestation key and checks its minimum length", () => {
+  assert.match(workflow, /BACKUP_ATTESTATION_HMAC_KEY: \$\{\{ secrets\.BACKUP_ATTESTATION_HMAC_KEY \}\}/);
+  assert.match(workflow, /BACKUP_ATTESTATION_HMAC_KEY/);
+  assert.match(workflow, /attestation_key_length/);
+  assert.match(workflow, /at least 32 UTF-8 bytes/);
+});
+
+test("Preview R2 backup stores and verifies the signed manifest beside the encrypted object", () => {
+  const prepare = workflow.indexOf("Prepare signed Preview backup attestation");
+  const upload = workflow.indexOf("Upload encrypted backup and signed attestation");
+  const verify = workflow.indexOf("Download backup and verify HMAC attestation");
+  assert.ok(prepare >= 0 && upload > prepare && verify > upload);
+  assert.match(workflow, /r2-backup-attestation\.mjs sign/);
+  assert.match(workflow, /r2-backup-attestation\.mjs verify/);
+  assert.match(workflow, /\.attestation\.json/);
+  assert.match(workflow, /\.attestation\.hmac/);
+  assert.match(workflow, /ciphertext_sha256/);
+  assert.match(workflow, /plaintext_sha256/);
+});
