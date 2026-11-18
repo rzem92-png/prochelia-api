@@ -777,7 +777,10 @@ export async function paymentSchemaReady(env) {
     const result = await env.DB.prepare(
       `SELECT name FROM sqlite_master WHERE type='table' AND name IN (${placeholders})`
     ).bind(...requiredTables).all();
-    const present = new Set((result?.results || []).map(row => row.name));
+    // An adapter must not turn a failed/partial metadata response into readiness.
+    if (result?.success === false) return false;
+    const rows = Array.isArray(result?.results) ? result.results : [];
+    const present = new Set(rows.filter(row => typeof row?.name === 'string').map(row => row.name));
     return requiredTables.every(name => present.has(name));
   } catch {
     return false;

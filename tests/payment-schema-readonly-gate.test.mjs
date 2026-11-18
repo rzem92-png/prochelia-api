@@ -97,3 +97,23 @@ test("payment schema readiness fails closed when the metadata query fails", asyn
   };
   assert.equal(await paymentSchemaReady(env), false);
 });
+
+
+test("payment schema readiness fails closed on an unsuccessful metadata response even if rows are present", async () => {
+  const env = {
+    DB: {
+      prepare() {
+        return {
+          bind() {
+            return {
+              async all() {
+                return { success: false, results: REQUIRED.map(name => ({ name })) };
+              }
+            };
+          }
+        };
+      }
+    }
+  };
+  assert.equal(await paymentSchemaReady(env), false);
+});
