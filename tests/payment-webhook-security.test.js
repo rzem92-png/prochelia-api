@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createHmac, webcrypto } from "node:crypto";
-import { verifyWebhookSignature, webhookProviderForRequest } from "../src/index.js";
+import { verifyWebhookSignature, webhookProviderForRequest, webhookReplayDecision } from "../src/index.js";
 
 globalThis.crypto ??= webcrypto;
 
