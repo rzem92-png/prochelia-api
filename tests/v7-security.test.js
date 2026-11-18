@@ -271,7 +271,7 @@ test("support auto-resolution ignores caller-supplied execution_verified and rem
   assert.match(update.sql,/status='WAITING_ACTION'/);
   assert.doesNotMatch(update.sql,/status='RESOLVED'/);
   assert.ok(calls.some(call=>call.sql.includes("INSERT INTO support_case_events")));
-  assert.ok(calls.some(call=>call.sql.includes("INSERT INTO journal")));
+  assert.ok(calls.some(call=>call.sql.includes("INSERT INTO activity_journal")));
 });
 
 
