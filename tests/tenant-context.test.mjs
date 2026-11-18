@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { webcrypto } from "node:crypto";
-import { tenantContextRoute } from "../src/index.js";
+import { tenantContextRoute, selectTenantForSession } from "../src/index.js";
 globalThis.crypto ??= webcrypto;
 
 function makeEnv({ authenticated = true, membership = true, activeTenant = "tenant-a" } = {}) {
@@ -94,4 +94,52 @@ test("tenant context route rejects non-GET methods before database access", asyn
   }), { DB: mock.DB });
   assert.equal(response.status, 405);
   assert.equal(mock.statements.length, 0);
+});
+
+test("tenant selection updates only the authenticated session after strict Origin and membership checks", async () => {
+  const statements = [];
+  const DB = { prepare(sql) {
+    statements.push(sql);
+    return { bind(...args) {
+      if (sql.includes("JOIN users u")) return { async first() {
+        return { id: "user-verified-by-session", role: "client", status: "active",
+          session_id: "session-a", session_active_tenant_id: null };
+      }};
+      if (sql.includes("UPDATE sessions")) {
+        assert.deepEqual(args, ["tenant-a", "session-a", "user-verified-by-session", "tenant-a"]);
+        return { async run() { return { meta: { changes: 1 } }; }};
+      }
+      if (sql.includes("JOIN tenant_memberships m")) return { async first() {
+        return { tenant_id: "tenant-a", tenant_slug: "tenant-a", tenant_name: "Tenant A",
+          membership_id: "membership-a", membership_role: "OWNER" };
+      }};
+      throw new Error("Unexpected SQL: " + sql);
+    }};
+  }};
+  const req = new Request("https://api.example.test/api/tenant/select", {
+    method: "POST",
+    headers: {
+      origin: "https://4c3cec36.prochelia.pages.dev",
+      "content-type": "application/json",
+      cookie: "prochelia_session=synthetic-session-token"
+    },
+    body: JSON.stringify({ tenant_id: "tenant-a" })
+  });
+  const response = await selectTenantForSession(req, { DB, CORS_ORIGIN: "https://4c3cec36.prochelia.pages.dev" });
+  assert.equal(response.status, 200);
+  assert.equal((await response.json()).tenant.id, "tenant-a");
+  assert.match(statements[1], /EXISTS/);
+  assert.match(statements[1], /m\.status = 'ACTIVE'/);
+  assert.match(statements[1], /t\.status = 'ACTIVE'/);
+});
+
+test("tenant selection rejects absent/untrusted Origin before database access", async () => {
+  const DB = { prepare() { throw new Error("DB must not be reached"); } };
+  const req = new Request("https://api.example.test/api/tenant/select", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ tenant_id: "tenant-a" })
+  });
+  const response = await selectTenantForSession(req, { DB, CORS_ORIGIN: "https://4c3cec36.prochelia.pages.dev" });
+  assert.equal(response.status, 403);
 });
