@@ -1886,9 +1886,26 @@ async function consolidatedInfo(env) {
 
 async function handleConsolidated(request, env) {
   const url=new URL(request.url);
-  const consolidatedPath = ['/api/consolidated/info','/api/ops/dashboard','/api/journal','/api/cases','/api/cases/approve','/api/metiers','/api/metiers/suggest','/api/pricing/quote','/api/finance/summary','/api/complaints','/api/settings/phase'].includes(url.pathname);
-  if (consolidatedPath) {
-    try { await ensureConsolidatedSchema(env); } catch (e) { return json({ok:false,error:'CONSOLIDATED_SCHEMA_ERROR',version:VERSION,message:e.message},500); }
+  // Authenticate and authorize before running any schema helper. These helpers
+  // issue DDL; an anonymous GET must never be able to trigger database writes.
+  const schemaRoutes = new Map([
+    ['/api/ops/dashboard:GET',['gerante']],
+    ['/api/journal:GET',['gerante']],
+    ['/api/cases:POST',['gerante','client','intervenant','entreprise']],
+    ['/api/cases/approve:POST',['gerante']],
+    ['/api/metiers:GET',['gerante','entreprise','client','intervenant']],
+    ['/api/metiers/suggest:POST',['gerante']],
+    ['/api/pricing/quote:POST',['gerante']],
+    ['/api/finance/summary:GET',['gerante']],
+    ['/api/complaints:POST',['gerante','client','entreprise']],
+    ['/api/settings/phase:POST',['gerante']]
+  ]);
+  const requiredRoles=schemaRoutes.get(url.pathname+':'+request.method);
+  if(requiredRoles) {
+    const access=await requireAuthRole(request,env,requiredRoles);
+    if(access.error) return access.error;
+    try { await ensureConsolidatedSchema(env); }
+    catch (e) { return json({ok:false,error:'CONSOLIDATED_SCHEMA_ERROR',version:VERSION},500); }
   }
   if(url.pathname==='/api/consolidated/info' && request.method==='GET') return consolidatedInfo(env);
   if(url.pathname==='/api/ops/dashboard' && request.method==='GET') return getOperationsDashboard(request,env);
