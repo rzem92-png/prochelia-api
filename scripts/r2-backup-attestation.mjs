@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 
 const HEX_64 = /^[0-9a-f]{64}$/;
 const SHA_40 = /^[0-9a-f]{40}$/;
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;\nconst ACCOUNT_ID = /^[0-9a-f]{32}$/;
 
 function normalize(value) {
   if (Array.isArray(value)) return value.map(normalize);
@@ -30,7 +30,7 @@ export function validateManifest(manifest) {
   const object = manifest.object || {};
   const provenance = manifest.provenance || {};
   const validation = manifest.validation || {};
-  if (!UUID.test(source.account_id || "") || !UUID.test(source.database_id || "") ||
+  if (!ACCOUNT_ID.test(source.account_id || "") || !UUID.test(source.database_id || "") ||
       !source.database_name || source.jurisdiction !== "eu") {
     throw new Error("ATTESTATION_SOURCE_INVALID");
   }
