@@ -6,6 +6,10 @@ const expectedProductionId = "04f52830-ef5a-4f17-a640-42bbc2381bba";
 const pagesPreviewOrigin = process.env.PAGES_PREVIEW_ORIGIN || "";
 const pagesPreviewAlias = process.env.PAGES_PREVIEW_ALIAS || "";
 const previewCommitSha = process.env.GITHUB_SHA || "";
+const existingCorsOrigins = (process.env.PAGES_EXISTING_CORS_ORIGINS || "")
+  .split(",")
+  .map((origin) => origin.trim())
+  .filter(Boolean);
 
 if (!/^[0-9a-f]{40}$/.test(previewCommitSha)) {
   throw new Error("GITHUB_SHA must be an exact 40-character lowercase Git SHA");
@@ -23,8 +27,14 @@ if (!/^https:\/\/[a-z0-9-]+\.prochelia\.pages\.dev$/.test(pagesPreviewOrigin)) {
 if (pagesPreviewAlias && !/^https:\/\/[a-z0-9-]+\.prochelia\.pages\.dev$/.test(pagesPreviewAlias)) {
   throw new Error("PAGES_PREVIEW_ALIAS must be a verified HTTPS Pages Preview alias");
 }
+for (const origin of existingCorsOrigins) {
+  if (!/^https:\/\/[a-z0-9-]+\.prochelia\.pages\.dev$/.test(origin)) {
+    throw new Error("PAGES_EXISTING_CORS_ORIGINS contains an unverified or non-Pages origin");
+  }
+}
 
 const allowedOrigins = [
+  ...existingCorsOrigins,
   "https://83a36d32.prochelia.pages.dev",
   "https://c3ceec86.prochelia.pages.dev",
   "https://staging-prochelia-v14-restor.prochelia.pages.dev",
