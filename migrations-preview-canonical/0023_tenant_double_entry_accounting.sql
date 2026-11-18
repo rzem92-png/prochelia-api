@@ -4,8 +4,8 @@ CREATE TABLE IF NOT EXISTS accounting_entities (
   id TEXT PRIMARY KEY NOT NULL,
   tenant_id TEXT NOT NULL,
   legal_name TEXT NOT NULL,
-  country_code TEXT NOT NULL CHECK (length(country_code) = 2),
-  base_currency TEXT NOT NULL CHECK (length(base_currency) = 3),
+  country_code TEXT NOT NULL CHECK (country_code GLOB '[A-Z][A-Z]'),
+  base_currency TEXT NOT NULL CHECK (base_currency GLOB '[A-Z][A-Z][A-Z]'),
   status TEXT NOT NULL DEFAULT 'ACTIVE' CHECK (status IN ('ACTIVE', 'SUSPENDED', 'CLOSED')),
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -18,7 +18,7 @@ CREATE TABLE IF NOT EXISTS accounting_accounts (
   id TEXT PRIMARY KEY NOT NULL,
   tenant_id TEXT NOT NULL,
   entity_id TEXT NOT NULL,
-  account_code TEXT NOT NULL,
+  account_code TEXT NOT NULL CHECK (length(trim(account_code)) > 0),
   account_name TEXT NOT NULL,
   account_type TEXT NOT NULL CHECK (account_type IN ('ASSET', 'LIABILITY', 'EQUITY', 'REVENUE', 'EXPENSE')),
   normal_balance TEXT NOT NULL CHECK (normal_balance IN ('DEBIT', 'CREDIT')),
@@ -36,14 +36,14 @@ CREATE TABLE IF NOT EXISTS accounting_journals (
   tenant_id TEXT NOT NULL,
   entity_id TEXT NOT NULL,
   journal_code TEXT NOT NULL,
-  journal_date TEXT NOT NULL,
-  currency TEXT NOT NULL CHECK (length(currency) = 3),
+  journal_date TEXT NOT NULL CHECK (date(journal_date) IS NOT NULL AND date(journal_date) = journal_date),
+  currency TEXT NOT NULL CHECK (currency GLOB '[A-Z][A-Z][A-Z]'),
   source_type TEXT NOT NULL,
   source_id TEXT NOT NULL,
-  idempotency_key TEXT NOT NULL,
+  idempotency_key TEXT NOT NULL CHECK (length(trim(idempotency_key)) > 0),
   description TEXT,
   status TEXT NOT NULL DEFAULT 'DRAFT' CHECK (status IN ('DRAFT', 'POSTED')),
-  created_by TEXT NOT NULL,
+  created_by TEXT NOT NULL CHECK (length(trim(created_by)) > 0),
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   posted_by TEXT,
   posted_at TEXT,
@@ -60,7 +60,7 @@ CREATE INDEX IF NOT EXISTS idx_accounting_journals_source
   ON accounting_journals(tenant_id, source_type, source_id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_accounting_journals_one_reversal
   ON accounting_journals(reversal_of_journal_id)
-  WHERE reversal_of_journal_id IS NOT NULL;
+  WHERE reversal_of_journal_id IS NOT NULL AND status = 'POSTED';
 
 CREATE TABLE IF NOT EXISTS accounting_journal_lines (
   id TEXT PRIMARY KEY NOT NULL,
@@ -68,9 +68,9 @@ CREATE TABLE IF NOT EXISTS accounting_journal_lines (
   entity_id TEXT NOT NULL,
   journal_id TEXT NOT NULL,
   account_id TEXT NOT NULL,
-  line_number INTEGER NOT NULL CHECK (line_number > 0),
+  line_number INTEGER NOT NULL CHECK (typeof(line_number) = 'integer' AND line_number > 0),
   side TEXT NOT NULL CHECK (side IN ('DEBIT', 'CREDIT')),
-  amount_cents INTEGER NOT NULL CHECK (amount_cents > 0),
+  amount_cents INTEGER NOT NULL CHECK (typeof(amount_cents) = 'integer' AND amount_cents > 0),
   currency TEXT NOT NULL CHECK (length(currency) = 3),
   description TEXT,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -84,6 +84,13 @@ CREATE INDEX IF NOT EXISTS idx_accounting_lines_journal
   ON accounting_journal_lines(tenant_id, journal_id, line_number);
 CREATE INDEX IF NOT EXISTS idx_accounting_lines_account
   ON accounting_journal_lines(tenant_id, entity_id, account_id, created_at);
+
+CREATE TRIGGER IF NOT EXISTS trg_accounting_journal_insert_draft_only
+BEFORE INSERT ON accounting_journals
+WHEN NEW.status <> 'DRAFT'
+BEGIN
+  SELECT RAISE(ABORT, 'ACCOUNTING_JOURNAL_MUST_START_AS_DRAFT');
+END;
 
 CREATE TRIGGER IF NOT EXISTS trg_accounting_line_draft_only
 BEFORE INSERT ON accounting_journal_lines
@@ -132,18 +139,31 @@ BEGIN
     WHERE original.id = NEW.reversal_of_journal_id
       AND original.tenant_id = NEW.tenant_id AND original.entity_id = NEW.entity_id
       AND original.currency = NEW.currency AND original.status = 'POSTED'
-      AND (SELECT COUNT(*) FROM accounting_journal_lines WHERE journal_id = original.id)
-          = (SELECT COUNT(*) FROM accounting_journal_lines WHERE journal_id = NEW.id)
       AND NOT EXISTS (
-        SELECT 1 FROM accounting_journal_lines old_line
-        WHERE old_line.journal_id = original.id AND NOT EXISTS (
-          SELECT 1 FROM accounting_journal_lines new_line
-          WHERE new_line.journal_id = NEW.id
-            AND new_line.account_id = old_line.account_id
-            AND new_line.amount_cents = old_line.amount_cents
-            AND new_line.currency = old_line.currency
-            AND new_line.side = CASE old_line.side WHEN 'DEBIT' THEN 'CREDIT' ELSE 'DEBIT' END
-        )
+        SELECT account_id, amount_cents, currency,
+               CASE side WHEN 'DEBIT' THEN 'CREDIT' ELSE 'DEBIT' END AS side,
+               COUNT(*) AS line_count
+        FROM accounting_journal_lines
+        WHERE journal_id = original.id
+        GROUP BY account_id, amount_cents, currency, side
+        EXCEPT
+        SELECT account_id, amount_cents, currency, side, COUNT(*) AS line_count
+        FROM accounting_journal_lines
+        WHERE journal_id = NEW.id
+        GROUP BY account_id, amount_cents, currency, side
+      )
+      AND NOT EXISTS (
+        SELECT account_id, amount_cents, currency, side, COUNT(*) AS line_count
+        FROM accounting_journal_lines
+        WHERE journal_id = NEW.id
+        GROUP BY account_id, amount_cents, currency, side
+        EXCEPT
+        SELECT account_id, amount_cents, currency,
+               CASE side WHEN 'DEBIT' THEN 'CREDIT' ELSE 'DEBIT' END AS side,
+               COUNT(*) AS line_count
+        FROM accounting_journal_lines
+        WHERE journal_id = original.id
+        GROUP BY account_id, amount_cents, currency, side
       )
   ) THEN RAISE(ABORT, 'ACCOUNTING_REVERSAL_MUST_EXACTLY_MIRROR_POSTED_JOURNAL') END;
 END;
