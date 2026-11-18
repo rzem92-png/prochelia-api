@@ -136,3 +136,7 @@ Ajouter pour chaque passage : date/heure UTC, ressources et SHA observés, actio
 - Gate bloquant : ne pas déclencher `APPLY_PREVIEW_ONLY` tant que le workflow de migration ne lie pas explicitement une attestation HMAC vérifiée, une règle de rétention approuvée sur le préfixe exact et une restauration isolée réussie au backup utilisé.
 
 Décision inchangée : aucun merge, aucune migration distante, aucun changement Production et aucun paiement réel.
+
+## Dernier relevé opérationnel
+
+Le relevé horodaté du **18 novembre 2026 à 15:17 CET** est consigné dans [PROCHELIA-RUN-2026-11-18-1517.md](./PROCHELIA-RUN-2026-11-18-1517.md). Il remplace les observations plus anciennes lorsque les états diffèrent, notamment pour le nombre de tables D1, le Worker actif, le résultat du build Pages, le contrôle R2 et la protection des branches. Il confirme le NO-GO, l'absence de déploiement/écriture pendant ce passage et les actions humaines requises.
