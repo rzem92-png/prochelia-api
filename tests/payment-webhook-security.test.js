@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createHmac, webcrypto } from "node:crypto";
-import { verifyWebhookSignature, webhookProviderForRequest, webhookReplayDecision } from "../src/index.js";
+import { verifyWebhookSignature, webhookProviderForRequest, webhookReplayDecision, webhookEventInsertDecision } from "../src/index.js";
 
 globalThis.crypto ??= webcrypto;
 
@@ -95,11 +95,22 @@ test("generic webhook provider resolution retains the configured legacy contract
   assert.equal(webhookProviderForRequest(request, { provider: "internal-provider" }, {}), "internal-provider");
 });
 
-test("webhook event idempotency accepts only an exact previously stored payload hash", () => {
+test("webhook event idempotency accepts only an exact previously processed payload hash", () => {
   const samePayloadHash = sign();
   const differentPayloadHash = sign(payload + " ");
-  assert.equal(webhookReplayDecision(samePayloadHash, samePayloadHash), "DUPLICATE");
-  assert.equal(webhookReplayDecision(samePayloadHash, differentPayloadHash), "CONFLICT");
-  assert.equal(webhookReplayDecision(null, samePayloadHash), "CONFLICT");
-  assert.equal(webhookReplayDecision(samePayloadHash, undefined), "CONFLICT");
+  assert.equal(webhookReplayDecision(samePayloadHash, samePayloadHash, 1), "DUPLICATE");
+  assert.equal(webhookReplayDecision(samePayloadHash, samePayloadHash, 0), "PENDING");
+  assert.equal(webhookReplayDecision(samePayloadHash, samePayloadHash, undefined), "PENDING");
+  assert.equal(webhookReplayDecision(samePayloadHash, differentPayloadHash, 1), "CONFLICT");
+  assert.equal(webhookReplayDecision(null, samePayloadHash, 1), "CONFLICT");
+  assert.equal(webhookReplayDecision(samePayloadHash, undefined, 1), "CONFLICT");
+});
+
+test("webhook insert outcome requires a successful D1 result and an explicit single-row count", () => {
+  assert.equal(webhookEventInsertDecision({ success: true, meta: { changes: 1 } }), "INSERTED");
+  assert.equal(webhookEventInsertDecision({ success: true, meta: { changes: 0 } }), "EXISTS");
+  assert.equal(webhookEventInsertDecision({ success: false, meta: { changes: 1 } }), "FAILED");
+  assert.equal(webhookEventInsertDecision({ meta: { changes: 0 } }), "FAILED");
+  assert.equal(webhookEventInsertDecision({ success: true, meta: {} }), "FAILED");
+  assert.equal(webhookEventInsertDecision({ success: true, meta: { changes: 2 } }), "FAILED");
 });
