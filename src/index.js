@@ -1419,7 +1419,7 @@ async function journal(env, actorType, actorId, action, entityType=null, entityI
     .bind(crypto.randomUUID(),actorType,actorId,action,entityType,entityId,result,JSON.stringify(metadata)).run();
 }
 
-async function copilotRecommend(env, input) {
+export async function copilotRecommend(env, input) {
   const { caseType, impact='LOW', phase='TEST', context={} } = input;
   // Fail closed: recommendations are proposals only until tenant-scoped authorization,
   // resource validation and an audited approval/execution path are available.
@@ -1435,7 +1435,7 @@ async function copilotRecommend(env, input) {
   };
 }
 
-async function createOperationalCase(request, env) {
+export async function createOperationalCase(request, env) {
   const gate=await requireAuthRole(request,env,['gerante','client','intervenant','entreprise']); if(gate.error)return gate.error;
   // Do not persist client-supplied tenant/resource identifiers. The authenticated
   // session currently has no verified workspace membership context; fail closed.
@@ -1542,13 +1542,13 @@ async function processActionOutbox(request, env) {
   return json({ok:true,version:VERSION,processed},200);
 }
 
-async function executeOperationalCase(env, caseId, approverId=null, automatic=false) {
+export async function executeOperationalCase(env, caseId, approverId=null, automatic=false) {
   // Central kill switch: no caller may execute operational mutations until
   // tenant/workspace context and resource-level authorization are implemented.
   return {ok:false,error:'TENANT_SCOPED_EXECUTION_NOT_IMPLEMENTED'};
 }
 
-async function approveOperationalCase(request, env) {
+export async function approveOperationalCase(request, env) {
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
   // Fail closed: the current session does not yet prove tenant/workspace membership
   // and the case/resource ownership checks are not implemented end-to-end.
@@ -2283,93 +2283,28 @@ async function dynamicUpdate(env, table, id, updates) {
   return {ok:true,updated:usable.map(([k])=>k)};
 }
 
-async function queueAction(env, actionType, entityType, entityId, payload, idem) {
-  const key = idem || crypto.randomUUID();
-  const existing = await env.DB.prepare('SELECT * FROM action_outbox WHERE idempotency_key=? LIMIT 1').bind(key).first();
-  if (existing) return existing;
-  const id = crypto.randomUUID();
-  await env.DB.prepare(`INSERT INTO action_outbox(id,action_type,entity_type,entity_id,idempotency_key,payload_json) VALUES(?,?,?,?,?,?)`)
-    .bind(id,actionType,entityType||null,entityId||null,key,JSON.stringify(payload||{})).run();
-  return await env.DB.prepare('SELECT * FROM action_outbox WHERE id=?').bind(id).first();
+export async function queueAction(env, actionType, entityType, entityId, payload, idem) {
+  // Central fail-closed guard: no outbox item may be created until tenant scope,
+  // entity ownership and a reviewed action policy are enforced server-side.
+  return {ok:false,error:'TENANT_SCOPED_EXECUTION_NOT_IMPLEMENTED'};
 }
 
-async function executeQueuedAction(env, action) {
-  if (!action) return {ok:false,error:'ACTION_NOT_FOUND'};
-  const payload = JSON.parse(action.payload_json||'{}');
-  const now = new Date().toISOString();
-  try {
-    let result = {performed:false,action:action.action_type};
-    if (action.action_type === 'NOTIFY') {
-      const channel = payload.channel || 'IN_APP';
-      if (await tableExists(env,'notification_outbox')) {
-        const id = crypto.randomUUID();
-        const cols = await tableColumns(env,'notification_outbox');
-        const values = {id,channel,status:'PENDING',recipient_id:payload.recipient_id||null,
-          user_id:payload.recipient_id||null,type:payload.type||'OPERATIONAL',
-          title:payload.title||'PROCHÉLIA',message:payload.message||'',payload_json:JSON.stringify(payload)};
-        const usable = Object.entries(values).filter(([k])=>cols.includes(k));
-        if (usable.length) {
-          const sql=`INSERT INTO notification_outbox(${usable.map(x=>x[0]).join(',')}) VALUES(${usable.map(()=>'?').join(',')})`;
-          await env.DB.prepare(sql).bind(...usable.map(x=>x[1])).run();
-          result={performed:true,channel,notification_queued:true};
-        } else result={performed:false,reason:'NOTIFICATION_SCHEMA_INCOMPATIBLE'};
-      } else result={performed:false,reason:'NOTIFICATION_TABLE_MISSING'};
-    } else if (action.action_type === 'RESCHEDULE_MISSION') {
-      result = await dynamicUpdate(env,'missions',action.entity_id,{scheduled_at:payload.scheduled_at,date:payload.date,time:payload.time,status:payload.status||'RESCHEDULED'});
-      result.action='RESCHEDULE_MISSION';
-    } else if (action.action_type === 'ASSIGN_REPLACEMENT') {
-      result = await dynamicUpdate(env,'missions',action.entity_id,{intervenant_id:payload.intervenant_id,assigned_intervenant_id:payload.intervenant_id,status:payload.status||'ASSIGNED'});
-      result.action='ASSIGN_REPLACEMENT';
-    } else if (action.action_type === 'REFUND') {
-      result={performed:false,requires_provider:true,reason:'PSP_EXECUTION_REQUIRED',payload};
-    } else if (action.action_type === 'PAYOUT') {
-      result={performed:false,requires_provider:true,reason:'PSP_EXECUTION_REQUIRED',payload};
-    } else if (action.action_type === 'ACCOUNTING_ENTRY') {
-      if (await tableExists(env,'accounting_ledger')) {
-        const cols=await tableColumns(env,'accounting_ledger');
-        const values={id:crypto.randomUUID(),entry_type:payload.entry_type||'OPERATIONAL',amount_cents:Number(payload.amount_cents||0),
-          debit_cents:Number(payload.debit_cents||0),credit_cents:Number(payload.credit_cents||0),reference_type:action.entity_type,
-          reference_id:action.entity_id,description:payload.description||'',metadata_json:JSON.stringify(payload)};
-        const usable=Object.entries(values).filter(([k])=>cols.includes(k));
-        if(usable.length){
-          await env.DB.prepare(`INSERT INTO accounting_ledger(${usable.map(x=>x[0]).join(',')}) VALUES(${usable.map(()=>'?').join(',')})`).bind(...usable.map(x=>x[1])).run();
-          result={performed:true,accounting_recorded:true};
-        } else result={performed:false,reason:'ACCOUNTING_SCHEMA_INCOMPATIBLE'};
-      } else result={performed:false,reason:'ACCOUNTING_TABLE_MISSING'};
-    } else result={performed:false,reason:'ACTION_TYPE_NOT_IMPLEMENTED'};
-
-    const finalStatus = result.performed ? 'DONE' : (result.requires_provider ? 'WAITING_PROVIDER' : 'FAILED');
-    await env.DB.prepare(`UPDATE action_outbox SET status=?,result_json=?,attempts=attempts+1,updated_at=CURRENT_TIMESTAMP,executed_at=? WHERE id=?`)
-      .bind(finalStatus,JSON.stringify(result),result.performed?now:null,action.id).run();
-    return {ok:true,status:finalStatus,result};
-  } catch(e) {
-    await env.DB.prepare(`UPDATE action_outbox SET status='FAILED',last_error=?,attempts=attempts+1,updated_at=CURRENT_TIMESTAMP WHERE id=?`)
-      .bind(String(e.message||e),action.id).run();
-    return {ok:false,error:'ACTION_EXECUTION_FAILED',message:e.message};
-  }
+export async function executeQueuedAction(env, action) {
+  // Defense in depth: the executor itself cannot perform mission or ledger writes.
+  return {ok:false,error:'TENANT_SCOPED_EXECUTION_NOT_IMPLEMENTED'};
 }
 
-async function operationalExecute(request, env) {
+export async function operationalExecute(request, env) {
   const gate=await requireAuthRole(request,env,['gerante']);
   if(gate.error)return gate.error;
-  await ensureConsolidatedSchema(env); await ensureOperationalSchema(env);
-  const b=await readJson(request)||{};
-  if(!b.case_id)return json({ok:false,error:'CASE_ID_REQUIRED',version:VERSION},400);
-  const c=await env.DB.prepare('SELECT * FROM operational_cases WHERE id=? LIMIT 1').bind(b.case_id).first();
-  if(!c)return json({ok:false,error:'CASE_NOT_FOUND',version:VERSION},404);
-  const solution=JSON.parse(c.proposed_solution_json||'{}');
-  const actions=Array.isArray(b.actions)?b.actions:(Array.isArray(solution.actions)?solution.actions:[]);
-  if(!actions.length)return json({ok:false,error:'NO_ACTIONS_DEFINED',version:VERSION},400);
-  const results=[];
-  for(const a of actions){
-    const q=await queueAction(env,a.action_type||a.type,c.mission_id?'MISSION':'CASE',a.entity_id||c.mission_id,{...a},a.idempotency_key);
-    results.push(await executeQueuedAction(env,q));
-  }
-  const allDone=results.every(x=>x.ok && ['DONE'].includes(x.status));
-  await env.DB.prepare(`UPDATE operational_cases SET status=?,resolution_json=?,updated_at=CURRENT_TIMESTAMP,resolved_at=? WHERE id=?`)
-    .bind(allDone?'RESOLVED':'IN_PROGRESS',JSON.stringify({approved_by:gate.auth.user.id,results}),allDone?new Date().toISOString():null,c.id).run();
-  await journal(env,'gerante',gate.auth.user.id,'CASE_EXECUTED','operational_case',c.id,allDone?'OK':'PARTIAL',{results});
-  return json({ok:true,version:VERSION,case_id:c.id,status:allDone?'RESOLVED':'IN_PROGRESS',results});
+  // Keep the legacy route disabled before schema creation, queue insertion or
+  // mission/ledger mutation. A manager session alone is not resource-level proof.
+  return json({
+    ok:false,
+    error:'TENANT_SCOPED_EXECUTION_NOT_IMPLEMENTED',
+    message:'Operational execution remains disabled until tenant-scoped authorization and reviewed business actions are implemented.',
+    version:VERSION
+  },503);
 }
 
 async function scoreClients(request, env) {
