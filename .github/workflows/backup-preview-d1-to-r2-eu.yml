@@ -284,6 +284,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          echo "Preview R2 object: `$R2_OBJECT_KEY`" >> "$GITHUB_STEP_SUMMARY"
-          echo "HMAC attestation objects: `$R2_OBJECT_KEY.attestation.json` and `.attestation.hmac`" >> "$GITHUB_STEP_SUMMARY"
-          echo "Attestation manifest SHA-256: `$(sha256sum "$RUNNER_TEMP/prochelia-r2/attestation.json" | awk '{print $1}')`" >> "$GITHUB_STEP_SUMMARY"
+          {
+            printf 'Preview R2 object: `%s`\n' "$R2_OBJECT_KEY"
+            printf 'HMAC attestation objects: `%s.attestation.json` and `.attestation.hmac`\n' "$R2_OBJECT_KEY"
+            printf 'Attestation manifest SHA-256: `%s`\n' "$(sha256sum "$RUNNER_TEMP/prochelia-r2/attestation.json" | awk '{print $1}')"
+          } >> "$GITHUB_STEP_SUMMARY"
