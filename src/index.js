@@ -1,4 +1,5 @@
 import { handleV7Route } from "./v7-routes.js";
+import { resolveTenantContext } from "./tenant-context.js";
 // PROCHÉLIA — INDEX BACKEND CONSOLIDÉ UNIQUE
 // Référence de consolidation : V14.1 Finance + sécurité/RBAC existants.
 // Généré le 19/10/2026. À déployer uniquement après recette avec la vraie base D1.
@@ -334,6 +335,19 @@ export async function logout(request, env) {
       WHERE token_hash = ? AND revoked_at IS NULL`).bind(tokenHash).run();
   }
   return json({ ok: true, version: VERSION, authenticated: false }, 200, headers);
+}
+
+export async function tenantContextRoute(request, env) {
+  if (request.method !== "GET") {
+    return json({ ok: false, error: "METHOD_NOT_ALLOWED", version: VERSION }, 405, { allow: "GET" });
+  }
+  const auth = await getSessionUser(request, env);
+  if (!auth) return json({ ok: false, error: "UNAUTHENTICATED", version: VERSION }, 401);
+  const context = await resolveTenantContext(request, env, auth);
+  if (!context.ok) {
+    return json({ ok: false, error: context.error, version: VERSION }, context.status);
+  }
+  return json({ ok: true, version: VERSION, tenant: context.tenant });
 }
 
 async function me(request, env) {
@@ -1300,6 +1314,10 @@ async function handleBase(request, env) {
     return bootstrap(request, env);
   }
 
+  if (url.pathname === '/api/tenant/context') {
+    return tenantContextRoute(request, env);
+  }
+
   if (url.pathname === '/api/readiness') {
     if (request.method !== 'GET') return json({ ok: false, ready: false, database: false, version: VERSION }, 503);
     if (!env.DB) return json({ ok: false, ready: false, database: false, version: VERSION }, 503);
@@ -1327,7 +1345,7 @@ async function handleBase(request, env) {
         '/api/health','/api/prestations','/api/core/schema',
         '/api/missions/schema','/api/missions/validate','/api/missions',
         '/api/auth/status','/api/auth/login','/api/auth/logout','/api/auth/me',
-        '/api/auth/bootstrap','/api/security/identity/start','/api/security/identity/approve','/api/security/mission/prepare','/api/security/presence','/api/security/code/verify','/api/security/resend','/api/security/client-code','/api/security/status','/api/payments/onboard','/api/payments/status','/api/payments/mission/create','/api/payments/mission/finalize','/api/payments/payout','/api/payments/webhook','/api/payments/dispute','/api/payments/dispute/resolve','/api/readiness','/api/info'
+        '/api/auth/bootstrap','/api/tenant/context','/api/security/identity/start','/api/security/identity/approve','/api/security/mission/prepare','/api/security/presence','/api/security/code/verify','/api/security/resend','/api/security/client-code','/api/security/status','/api/payments/onboard','/api/payments/status','/api/payments/mission/create','/api/payments/mission/finalize','/api/payments/payout','/api/payments/webhook','/api/payments/dispute','/api/payments/dispute/resolve','/api/readiness','/api/info'
       ],
       writes: { missions: false, bootstrap: true },
       status: 'AUTH_RBAC_IDENTITY_PRESENCE_SECURITY_HARDENED_FOR_TEST'
