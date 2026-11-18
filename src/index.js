@@ -1093,6 +1093,13 @@ export async function verifyWebhookSignature(request, env, rawBody) {
   return constantTimeStringEqual(supplied, base64url(mac));
 }
 
+export function webhookProviderForRequest(request, event, env) {
+  // A successfully verified Stripe-Signature header is the provider identity;
+  // never let an untrusted JSON field relabel a Stripe-signed event.
+  if (request.headers.get('stripe-signature') !== null) return 'stripe';
+  return clean(event?.provider) || paymentProvider(env);
+}
+
 export function requiresAtomicFinancialSettlement(eventType) {
   return new Set([
     'payment_succeeded','charge_succeeded','payment_failed','charge_failed',
@@ -1107,7 +1114,7 @@ export async function paymentWebhook(request, env) {
   if (!(await verifyWebhookSignature(request, env, raw))) return json({ok:false,error:'INVALID_WEBHOOK_SIGNATURE',version:VERSION},401);
   let event;
   try { event = JSON.parse(raw); } catch { return json({ok:false,error:'INVALID_WEBHOOK_JSON',version:VERSION},400); }
-  const provider = clean(event?.provider) || paymentProvider(env);
+  const provider = webhookProviderForRequest(request, event, env);
   const eventId = clean(event?.id), type = clean(event?.type);
   if (!eventId || !type || typeof event !== 'object' || Array.isArray(event)) {
     return json({ok:false,error:'INVALID_WEBHOOK_EVENT',version:VERSION},400);
