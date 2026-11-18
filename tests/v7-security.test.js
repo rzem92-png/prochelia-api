@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createHmac } from "node:crypto";
 import { handleV7Route } from "../src/v7-routes.js";
-import { directoryList, resolveMissionSecurityAssignment, findAssignedMissionSecurity, isMissionPresenceFresh, hmacSha256Base64url } from "../src/index.js";
+import { directoryList, resolveMissionSecurityAssignment, findAssignedMissionSecurity, isMissionPresenceFresh, isTrustedDeviceActive, hmacSha256Base64url } from "../src/index.js";
 
 const post = (path, body) => new Request("https://example.test" + path, {
   method: "POST",
@@ -210,4 +210,14 @@ test("security notification signatures use standard HMAC-SHA256", async () => {
   assert.equal(await hmacSha256Base64url(secret, message), expected);
   await assert.rejects(() => hmacSha256Base64url("short", message), /HMAC_SECRET_OR_MESSAGE_INVALID/);
   await assert.rejects(() => hmacSha256Base64url(secret, null), /HMAC_SECRET_OR_MESSAGE_INVALID/);
+});
+
+
+test("revoked or expired devices cannot pass mission trust checks", () => {
+  const now = Date.parse("2026-11-18T12:00:00.000Z");
+  assert.equal(isTrustedDeviceActive({status:"active",revoked_at:null,expires_at:"2026-11-18 12:05:00"},now),true);
+  assert.equal(isTrustedDeviceActive({status:"revoked",revoked_at:"2026-11-18 11:59:00",expires_at:"2026-11-18 12:05:00"},now),false);
+  assert.equal(isTrustedDeviceActive({status:"active",revoked_at:"2026-11-18 11:59:00",expires_at:"2026-11-18 12:05:00"},now),false);
+  assert.equal(isTrustedDeviceActive({status:"active",revoked_at:null,expires_at:"2026-11-18 11:59:59"},now),false);
+  assert.equal(isTrustedDeviceActive(null,now),false);
 });
