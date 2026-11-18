@@ -10,6 +10,7 @@ const SECURITY_CODE_TTL_SECONDS = 15 * 60;
 const SECURITY_MAX_ATTEMPTS = 5;
 const SECURITY_LOCK_SECONDS = 15 * 60;
 const SECURITY_DEVICE_TTL_SECONDS = 60 * 60 * 24 * 30;
+const SECURITY_PRESENCE_TTL_SECONDS = 10 * 60;
 const SESSION_COOKIE = 'prochelia_session';
 const PBKDF2_ITERATIONS = 100000;
 const SESSION_TTL_SECONDS = 60 * 60 * 24 * 7; // 7 days
@@ -646,6 +647,13 @@ async function securityPrepareMission(request, env) {
   return json({ok:true,version:VERSION,mission_id:missionId,status:'prepared',arrival:{expires_at:arrivalExpiry},end:{expires_at:endExpiry},delivery:{channel:delivery.channel,delivered:true},security_note:'Les codes en clair ne sont jamais renvoyés par l’API.'},201);
 }
 
+export function isMissionPresenceFresh(value, now = Date.now()) {
+  if (typeof value !== 'string' || !value.trim() || !Number.isFinite(now)) return false;
+  const normalized = value.includes('T') ? value : value.replace(' ', 'T') + 'Z';
+  const timestamp = Date.parse(normalized);
+  return Number.isFinite(timestamp) && timestamp <= now && now - timestamp <= SECURITY_PRESENCE_TTL_SECONDS * 1000;
+}
+
 export async function findAssignedMissionSecurity(env, missionId, userId) {
   if (!env?.DB || !missionId || !userId) return null;
   return env.DB.prepare(`
@@ -709,9 +717,9 @@ async function securityVerifyCode(request, env) {
     await securityAudit(env,'SECURITY_IDENTITY_RECHECK_FAILED',missionId,auth.user.id,auth.user.role,'DENIED',{});
     return json({ok:false,error:'INTERVENANT_IDENTITY_NOT_VERIFIED',version:VERSION},403);
   }
-  if(!sec.last_presence_at) {
-    await securityAudit(env,'SECURITY_PRESENCE_REQUIRED',missionId,auth.user.id,auth.user.role,'DENIED',{purpose});
-    return json({ok:false,error:'PRESENCE_CHECK_REQUIRED',version:VERSION,message:'La présence de l’intervenant doit être enregistrée avant la validation du code.'},428);
+  if(!isMissionPresenceFresh(sec.last_presence_at)) {
+    await securityAudit(env,'SECURITY_PRESENCE_REQUIRED',missionId,auth.user.id,auth.user.role,'DENIED',{purpose,reason:'MISSING_OR_STALE_PRESENCE'});
+    return json({ok:false,error:'PRESENCE_CHECK_REQUIRED',version:VERSION,message:'Une présence récente (moins de 10 minutes) doit être enregistrée avant la validation du code.'},428);
   }
   const device=await deviceHash(request,auth.user.id);
   const trusted = await env.DB.prepare(`SELECT id,status,expires_at FROM trusted_devices WHERE user_id=? AND device_hash=? AND status='active' AND expires_at>CURRENT_TIMESTAMP LIMIT 1`).bind(auth.user.id,device).first();
