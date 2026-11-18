@@ -244,7 +244,7 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-        run: npx --yes wrangler@4 deploy --config wrangler.preview.generated.json
+        run: npx --yes wrangler@4 deploy --config wrangler.preview.generated.json --message "PROCHELIA Preview commit $GITHUB_SHA"
       - name: Verify deployed Preview Worker version, bindings and commit read-back
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -305,6 +305,8 @@ jobs:
           const activeVersionId = active?.versions?.[0]?.version_id;
           if (!active || active.versions?.length !== 1 || active.versions[0].percentage !== 100) fail("Expected one active Preview Worker version at 100%.");
           if (version.result?.id !== activeVersionId) fail("Version details do not match the active Preview Worker deployment.");
+          const deploymentMessage = version.result?.annotations?.["workers/message"];
+          if (typeof deploymentMessage !== "string" || !deploymentMessage.includes(sha)) fail("Active Preview Worker version annotation does not include this workflow commit SHA.");
           const settingsBindings = settings.result?.bindings || [];
           const versionBindings = version.result?.resources?.bindings || [];
           const find = (items, name, type) => items.find(binding => binding.name === name && binding.type === type);
@@ -327,7 +329,7 @@ jobs:
           };
           assertBindings(settingsBindings, "Worker settings");
           assertBindings(versionBindings, "Active Worker version");
-          console.log("PASS: a new Preview Worker version is active at 100%; its exact version bindings confirm Preview D1, EU R2, APP_ENV, API commit SHA and current Pages CORS origins.");
+          console.log("PASS: a new Preview Worker version is active at 100%; its immutable version message and exact bindings confirm this workflow commit, Preview D1, EU R2, APP_ENV and current Pages CORS origins.");
           NODE
       - name: Record deployment guardrails
         run: |
