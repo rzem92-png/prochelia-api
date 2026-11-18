@@ -53,6 +53,10 @@ jobs:
             echo "::error::BACKUP_ATTESTATION_HMAC_KEY must contain at least 32 UTF-8 bytes."
             exit 1
           fi
+          if [[ "$BACKUP_ATTESTATION_HMAC_KEY" == "$BACKUP_ENCRYPTION_KEY" ]]; then
+            echo "::error::Backup attestation and encryption keys must be distinct secrets."
+            exit 1
+          fi
           # R2 S3 Access Key IDs are 32 characters. Check shape early without ever printing secret values.
           access_key_length="${#AWS_ACCESS_KEY_ID}"
           if [[ "$access_key_length" -ne 32 ]]; then
@@ -214,6 +218,11 @@ jobs:
           export PATH="$HOME/.local/bin:$PATH"
           key="$R2_OBJECT_KEY"
           test -n "$key"
+          aws s3api list-objects-v2 --bucket "$R2_BUCKET" --prefix "$key" --max-keys 10 --endpoint-url "$R2_ENDPOINT" --region auto --output json > "$RUNNER_TEMP/prochelia-r2/existing-objects.json"
+          jq -e --arg key "$key" '[.Contents[]?.Key | select(. == $key or . == ($key + ".sha256") or . == ($key + ".attestation.json") or . == ($key + ".attestation.hmac"))] | length == 0' "$RUNNER_TEMP/prochelia-r2/existing-objects.json" >/dev/null || {
+            echo "::error::R2 backup object key already exists; refusing to overwrite an earlier attestation."
+            exit 1
+          }
           aws s3 cp "$RUNNER_TEMP/prochelia-r2/preview.sql.gpg" "s3://$R2_BUCKET/$key" --endpoint-url "$R2_ENDPOINT" --region auto --only-show-errors
           aws s3 cp "$RUNNER_TEMP/prochelia-r2/manifest.sha256" "s3://$R2_BUCKET/$key.sha256" --endpoint-url "$R2_ENDPOINT" --region auto --only-show-errors
           aws s3 cp "$RUNNER_TEMP/prochelia-r2/attestation.json" "s3://$R2_BUCKET/$key.attestation.json" --endpoint-url "$R2_ENDPOINT" --region auto --only-show-errors
