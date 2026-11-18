@@ -90,9 +90,12 @@ test("Stripe-signed event provider cannot be overridden by an untrusted payload 
   assert.equal(webhookProviderForRequest(request, { provider: "other-provider" }, {}), "stripe");
 });
 
-test("generic webhook provider resolution retains the configured legacy contract", () => {
+test("generic webhook provider resolution uses server configuration, not payload provider", () => {
   const request = new Request("https://example.test/api/payments/webhook", { method: "POST" });
-  assert.equal(webhookProviderForRequest(request, { provider: "internal-provider" }, {}), "internal-provider");
+  assert.equal(
+    webhookProviderForRequest(request, { provider: "stripe" }, { PAYMENT_PROVIDER: "internal-provider" }),
+    "internal-provider"
+  );
 });
 
 test("webhook event idempotency accepts only an exact previously processed payload hash", () => {
