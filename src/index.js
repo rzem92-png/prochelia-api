@@ -1108,6 +1108,12 @@ export function webhookProviderForRequest(request, event, env) {
   return clean(event?.provider) || paymentProvider(env);
 }
 
+export function webhookReplayDecision(existingPayloadHash, incomingPayloadHash) {
+  if (typeof existingPayloadHash !== 'string' || !existingPayloadHash ||
+      typeof incomingPayloadHash !== 'string' || !incomingPayloadHash) return 'CONFLICT';
+  return existingPayloadHash === incomingPayloadHash ? 'DUPLICATE' : 'CONFLICT';
+}
+
 export function requiresAtomicFinancialSettlement(eventType) {
   return new Set([
     'payment_succeeded','charge_succeeded','payment_failed','charge_failed',
@@ -1138,7 +1144,14 @@ export async function paymentWebhook(request, env) {
   await ensurePaymentSchema(env);
   const payloadHash=await sha256Base64url(raw);
   const inserted=await env.DB.prepare(`INSERT OR IGNORE INTO payment_webhook_events (id,provider,event_id,event_type,signature_valid,payload_hash) VALUES (?,?,?,?,1,?)`).bind(crypto.randomUUID(),provider,eventId,type,payloadHash).run();
-  if(!inserted.meta?.changes) return json({ok:true,version:VERSION,duplicate:true,event_id:eventId},200);
+  if(!inserted.meta?.changes) {
+    const existing=await env.DB.prepare(`SELECT payload_hash FROM payment_webhook_events WHERE provider=? AND event_id=? LIMIT 1`).bind(provider,eventId).first();
+    if(webhookReplayDecision(existing?.payload_hash,payloadHash)!=='DUPLICATE') {
+      await paymentAudit(env,'PSP_WEBHOOK_EVENT_ID_PAYLOAD_CONFLICT',{metadata:{provider,event_id:eventId,event_type:type}},'CONFLICT');
+      return json({ok:false,error:'WEBHOOK_EVENT_ID_PAYLOAD_CONFLICT',version:VERSION},409);
+    }
+    return json({ok:true,version:VERSION,duplicate:true,event_id:eventId},200);
+  }
   const txId=clean(event?.data?.transaction_id), payoutId=clean(event?.data?.payout_id);
   if(txId){
     const tx=await env.DB.prepare('SELECT * FROM payment_transactions WHERE id=? LIMIT 1').bind(txId).first();
