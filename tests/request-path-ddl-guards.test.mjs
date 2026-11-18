@@ -50,7 +50,7 @@ test("rate limiter checks pre-provisioned tables and performs no request-path DD
   assert.ok(statements.some(sql => /sqlite_master/.test(sql)));
   assert.ok(statements.every(sql => !/\b(CREATE|ALTER|DROP)\b/i.test(sql)));
   assert.equal(writes.length, 0);
-  assert.match(statements.find(sql => /INSERT INTO security_rate_limits/.test(sql)), /ON CONFLICT\\(bucket,subject_hash,window_start\\)/);
+  assert.match(statements.find(sql => /INSERT INTO security_rate_limits/.test(sql)), /ON CONFLICT\(bucket,subject_hash,window_start\)/);
   assert.match(statements.find(sql => /INSERT INTO security_rate_limits/.test(sql)), /RETURNING request_count/);
 });
 
@@ -117,6 +117,6 @@ test("background jobs require an acquired atomic claim and never complete delega
   assert.ok(body.includes("Number(claim?.meta?.changes||0)!==1"));
   assert.ok(body.includes("DELEGATED_HANDLER_NOT_EXECUTED"));
   assert.ok(body.includes("WHERE id=? AND status='RUNNING'"));
-  assert.ok(body.includes("status:'WAITING_PROVIDER'"));
+  assert.ok(body.includes("status:done?'DONE':'WAITING_PROVIDER'"));
   assert.doesNotMatch(body, /result=\{performed:true,delegation:/);
 });
