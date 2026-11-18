@@ -201,11 +201,113 @@ jobs:
             exit 1
           }
           echo "PASS: dedicated Preview R2 bucket jurisdiction is eu."
+      - name: Capture current active Preview Worker version before deployment
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$CLOUDFLARE_ACCOUNT_ID" == "f2a79e9fa41566a8ec80fb24c02c60eb" ]]
+          token="$(printf '%s' "$CLOUDFLARE_API_TOKEN" | sed -E 's/^[[:space:]]*Bearer[[:space:]]+//I; s/^[[:space:]]+//; s/[[:space:]]+$//')"
+          [[ -n "$token" ]]
+          status="$(curl --silent --show-error --output "$RUNNER_TEMP/preview-worker-before.json" --write-out '%{http_code}' \
+            -H "Authorization: Bearer $token" \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/prochelia-api-preview/deployments?per_page=1&page=1")"
+          [[ "$status" == "200" ]]
+          jq -e '.success == true and (.result.deployments[0].versions | length == 1) and .result.deployments[0].versions[0].percentage == 100' "$RUNNER_TEMP/preview-worker-before.json" >/dev/null || {
+            echo "::error::Could not identify one fully active Preview Worker version before deployment."
+            exit 1
+          }
+          previous_version="$(jq -r '.result.deployments[0].versions[0].version_id' "$RUNNER_TEMP/preview-worker-before.json")"
+          [[ "$previous_version" =~ ^[0-9a-f-]{36}$ ]]
+          printf 'PREVIEW_PREVIOUS_VERSION_ID=%s\n' "$previous_version" >> "$GITHUB_ENV"
+          echo "Captured current Preview Worker version for post-deployment comparison."
       - name: Deploy ONLY the isolated Preview Worker
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: npx --yes wrangler@4 deploy --config wrangler.preview.generated.json
+      - name: Verify deployed Preview Worker version, bindings and commit read-back
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$CLOUDFLARE_ACCOUNT_ID" == "f2a79e9fa41566a8ec80fb24c02c60eb" ]]
+          token="$(printf '%s' "$CLOUDFLARE_API_TOKEN" | sed -E 's/^[[:space:]]*Bearer[[:space:]]+//I; s/^[[:space:]]+//; s/[[:space:]]+$//')"
+          [[ -n "$token" ]]
+          cf_get() {
+            local label="$1" url="$2" output="$3" status
+            status="$(curl --silent --show-error --output "$output" --write-out '%{http_code}' \
+              -H "Authorization: Bearer $token" "$url")"
+            if [[ "$status" != "200" ]] || ! jq -e '.success == true' "$output" >/dev/null; then
+              echo "::error::$label failed (HTTP $status)."
+              jq -c '{errors, messages}' "$output" 2>/dev/null || true
+              return 1
+            fi
+          }
+          cf_get "Preview Worker settings read-back" \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/prochelia-api-preview/settings" \
+            "$RUNNER_TEMP/preview-worker-settings-after.json"
+          cf_get "Preview Worker active deployment read-back" \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/prochelia-api-preview/deployments?per_page=1&page=1" \
+            "$RUNNER_TEMP/preview-worker-deployments-after.json"
+          jq -e '.result.deployments[0].versions | length == 1 and .[0].percentage == 100' \
+            "$RUNNER_TEMP/preview-worker-deployments-after.json" >/dev/null || {
+              echo "::error::The latest Preview Worker deployment is not a single 100% active version."
+              exit 1
+            }
+          active_version="$(jq -r '.result.deployments[0].versions[0].version_id // empty' "$RUNNER_TEMP/preview-worker-deployments-after.json")"
+          [[ "$active_version" =~ ^[0-9a-f-]{36}$ ]]
+          [[ "$active_version" != "$PREVIEW_PREVIOUS_VERSION_ID" ]] || {
+            echo "::error::Preview Worker deployment did not advance to a new version."
+            exit 1
+          }
+          cf_get "Active Preview Worker version resource read-back" \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/prochelia-api-preview/versions/$active_version" \
+            "$RUNNER_TEMP/preview-worker-version-after.json"
+          PREVIEW_SETTINGS_FILE="$RUNNER_TEMP/preview-worker-settings-after.json" \
+          PREVIEW_DEPLOYMENTS_FILE="$RUNNER_TEMP/preview-worker-deployments-after.json" \
+          PREVIEW_VERSION_FILE="$RUNNER_TEMP/preview-worker-version-after.json" \
+          node --input-type=module <<'NODE'
+          import fs from "node:fs";
+          const read = name => JSON.parse(fs.readFileSync(process.env[name], "utf8"));
+          const settings = read("PREVIEW_SETTINGS_FILE");
+          const deployments = read("PREVIEW_DEPLOYMENTS_FILE");
+          const version = read("PREVIEW_VERSION_FILE");
+          const fail = message => { console.error(message); process.exit(1); };
+          const dbId = "e3cf167c-37e1-4d72-9ac6-b3e27c14b97f";
+          const bucketName = "prochelia-preview-backups-eu-v2";
+          const sha = process.env.GITHUB_SHA;
+          const origin = process.env.PAGES_PREVIEW_ORIGIN;
+          const alias = process.env.PAGES_PREVIEW_ALIAS || "";
+          const active = deployments.result?.deployments?.[0];
+          const activeVersionId = active?.versions?.[0]?.version_id;
+          if (!active || active.versions?.length !== 1 || active.versions[0].percentage !== 100) fail("Expected one active Preview Worker version at 100%.");
+          if (version.result?.id !== activeVersionId) fail("Version details do not match the active Preview Worker deployment.");
+          const settingsBindings = settings.result?.bindings || [];
+          const versionBindings = version.result?.resources?.bindings || [];
+          const find = (items, name, type) => items.find(binding => binding.name === name && binding.type === type);
+          const assertBindings = (items, label) => {
+            const db = find(items, "DB", "d1");
+            const r2 = find(items, "BACKUP_BUCKET", "r2_bucket");
+            const appEnv = find(items, "APP_ENV", "plain_text");
+            const commit = find(items, "PROCHELIA_COMMIT_SHA", "plain_text");
+            const cors = find(items, "CORS_ORIGIN", "plain_text");
+            if (!(db?.id === dbId || db?.database_id === dbId)) fail(label + ": D1 Preview binding mismatch.");
+            if (r2?.bucket_name !== bucketName || r2?.jurisdiction !== "eu") fail(label + ": R2 EU binding mismatch.");
+            if (appEnv?.text !== "preview") fail(label + ": APP_ENV is not preview.");
+            if (commit?.text !== sha) fail(label + ": PROCHELIA_COMMIT_SHA does not match this workflow commit.");
+            const origins = String(cors?.text || "").split(",").map(value => value.trim());
+            if (!origin || !origins.includes(origin)) fail(label + ": exact Pages Preview origin is absent from CORS.");
+            if (alias && !origins.includes(alias)) fail(label + ": exact Pages Preview alias is absent from CORS.");
+          };
+          assertBindings(settingsBindings, "Worker settings");
+          assertBindings(versionBindings, "Active Worker version");
+          console.log("PASS: a new Preview Worker version is active at 100%; its exact version bindings confirm Preview D1, EU R2, APP_ENV, API commit SHA and current Pages CORS origins.");
+          NODE
       - name: Record deployment guardrails
         run: |
           {
