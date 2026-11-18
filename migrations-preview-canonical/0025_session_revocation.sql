@@ -4,6 +4,7 @@ ALTER TABLE sessions ADD COLUMN revoked_at TEXT;
 ALTER TABLE sessions ADD COLUMN revoked_reason TEXT;
 ALTER TABLE sessions ADD COLUMN revoked_by_user_id TEXT REFERENCES users(id);
 ALTER TABLE sessions ADD COLUMN last_seen_at TEXT;
+ALTER TABLE sessions ADD COLUMN active_tenant_id TEXT REFERENCES tenants(id);
 
 CREATE INDEX IF NOT EXISTS idx_sessions_user_active_expiry
   ON sessions(user_id, expires_at)
