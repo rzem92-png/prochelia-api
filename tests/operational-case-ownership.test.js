@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
-import { resolveOperationalCaseScope, financeRowsForUser } from "../src/index.js";
+import { resolveOperationalCaseScope, financeRowsForUser, handleConsolidated } from "../src/index.js";
 
 const source = await readFile(new URL("../src/index.js", import.meta.url), "utf8");
 
@@ -178,4 +178,15 @@ test("finance client without a verified profile receives no payment rows", async
   const paymentQuery = DB.calls.find(x=>x.sql.includes("FROM payment_transactions"));
   assert.match(paymentQuery.sql,/WHERE 1=0/);
   assert.deepEqual(paymentQuery.values,[]);
+});
+
+test("anonymous dashboard request is rejected before any consolidated schema DDL", async () => {
+  let prepareCalls = 0;
+  const DB = { prepare() { prepareCalls++; throw new Error("DDL/query must not run for anonymous request"); } };
+  const response = await handleConsolidated(
+    new Request("https://api.example.test/api/ops/dashboard",{method:"GET"}),
+    {DB}
+  );
+  assert.equal(response.status,401);
+  assert.equal(prepareCalls,0);
 });
