@@ -93,6 +93,24 @@ try:
 except sqlite3.IntegrityError as exc:
     assert "REVOKED_TERMINAL" in str(exc), str(exc)
 
+# Re-invitation is a new membership record; only one non-revoked membership per user/tenant.
+db.execute("""
+    INSERT INTO tenant_memberships(id, tenant_id, user_id, role, status, invited_by_user_id)
+    VALUES ('membership-a-reinvite', 'tenant-a', 'user-a', 'MEMBER', 'INVITED', 'user-admin')
+""")
+db.execute("""
+    INSERT INTO tenant_memberships(id, tenant_id, user_id, role, status, invited_by_user_id)
+    VALUES ('membership-owner-a2', 'tenant-a', 'user-b', 'OWNER', 'INVITED', 'user-admin')
+""")
+try:
+    db.execute("""
+        INSERT INTO tenant_memberships(id, tenant_id, user_id, role, status, invited_by_user_id)
+        VALUES ('membership-owner-a3', 'tenant-a', 'user-admin', 'OWNER', 'INVITED', 'user-a')
+    """)
+    raise AssertionError("A second non-revoked tenant owner was incorrectly accepted")
+except sqlite3.IntegrityError:
+    pass
+
 db.execute("""
     INSERT INTO accounting_entities(id, tenant_id, legal_name, country_code, base_currency)
     VALUES ('entity-a', 'tenant-a', 'PROCHÉLIA France', 'FR', 'EUR')
