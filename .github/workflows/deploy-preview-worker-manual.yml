@@ -298,6 +298,7 @@ jobs:
           const sha = process.env.GITHUB_SHA;
           const origin = process.env.PAGES_PREVIEW_ORIGIN;
           const alias = process.env.PAGES_PREVIEW_ALIAS || "";
+          const previousOrigins = String(process.env.PAGES_EXISTING_CORS_ORIGINS || "").split(",").map(value => value.trim()).filter(Boolean);
           const active = deployments.result?.deployments?.[0];
           const activeVersionId = active?.versions?.[0]?.version_id;
           if (!active || active.versions?.length !== 1 || active.versions[0].percentage !== 100) fail("Expected one active Preview Worker version at 100%.");
@@ -318,6 +319,9 @@ jobs:
             const origins = String(cors?.text || "").split(",").map(value => value.trim());
             if (!origin || !origins.includes(origin)) fail(label + ": exact Pages Preview origin is absent from CORS.");
             if (alias && !origins.includes(alias)) fail(label + ": exact Pages Preview alias is absent from CORS.");
+            for (const previousOrigin of previousOrigins) {
+              if (!origins.includes(previousOrigin)) fail(label + ": previously authorized CORS origin was dropped: " + previousOrigin);
+            }
           };
           assertBindings(settingsBindings, "Worker settings");
           assertBindings(versionBindings, "Active Worker version");
