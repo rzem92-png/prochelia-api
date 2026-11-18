@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import {
   financeDashboard,
   financeExport,
@@ -80,4 +81,17 @@ test("finance workspace endpoints fail closed before schema DDL, business reads,
     assert.match(statements[0], /FROM sessions s/);
     assert.equal(writes.length, 0, "no finance data may be written: " + path);
   }
+});
+
+test("operations dashboard does not present the legacy single-line ledger as a finance KPI", async () => {
+  const source = await readFile(new URL("../src/index.js", import.meta.url), "utf8");
+  const start = source.indexOf("async function getOperationsDashboard");
+  const end = source.indexOf("\nasync function getJournal", start);
+  assert.notEqual(start, -1);
+  assert.notEqual(end, -1);
+  const body = source.slice(start, end);
+  assert.doesNotMatch(body, /accounting_ledger/);
+  assert.match(body, /finance_status = 'TENANT_SCOPED_FINANCE_NOT_READY'/);
+  assert.match(body, /ledger_balance = null/);
+  assert.match(body, /proposal_only_fail_closed_pending_tenant_ownership/);
 });
