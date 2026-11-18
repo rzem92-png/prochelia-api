@@ -43,12 +43,17 @@ export function validateManifest(manifest) {
       !HEX_64.test(object.ciphertext_sha256 || "")) {
     throw new Error("ATTESTATION_OBJECT_INVALID");
   }
-  if (typeof provenance.repository !== "string" || !provenance.repository ||
+  if (provenance.repository !== "rzem92-png/prochelia-api" ||
       typeof provenance.workflow !== "string" || !provenance.workflow ||
       !/^\d+$/.test(String(provenance.run_id || "")) ||
       !SHA_40.test(provenance.commit_sha || "") ||
-      typeof provenance.ref !== "string" || !provenance.ref) {
+      provenance.ref !== "refs/heads/main" ||
+      !SHA_40.test(provenance.migration_source_sha || "")) {
     throw new Error("ATTESTATION_PROVENANCE_INVALID");
+  }
+  const expectedObjectName = provenance.run_id + "-" + provenance.commit_sha.slice(0, 12) + ".sql.gpg";
+  if (object.key.split("/").at(-1) !== expectedObjectName) {
+    throw new Error("ATTESTATION_OBJECT_PROVENANCE_MISMATCH");
   }
   if (typeof manifest.created_at !== "string" || Number.isNaN(Date.parse(manifest.created_at)) ||
       validation.sqlite_integrity_check !== "ok" ||
