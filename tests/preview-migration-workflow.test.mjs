@@ -184,7 +184,9 @@ test("all canonical migrations required by the remote apply gate physically exis
     "0015_production_security_events.sql", "0016_security_identity_schema.sql",
     "0017_document_security_scans.sql", "0018_consolidated_business_schema.sql",
     "0019_backup_verifications.sql", "0020_auth_login_rate_limits.sql",
-    "0021_supra_audit_events.sql", "0022_supra_persisted_approvals.sql"
+    "0021_supra_audit_events.sql", "0022_supra_persisted_approvals.sql",
+    "0023_tenant_double_entry_accounting.sql", "0024_tenant_membership_authority.sql",
+    "0025_session_revocation.sql"
   ];
   const actual = new Set(await readdir(new URL("../migrations-preview-canonical/", import.meta.url)));
   const missing = expected.filter(name => !actual.has(name));
