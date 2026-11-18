@@ -4,9 +4,11 @@ import { readFile } from "node:fs/promises";
 
 const workflow = await readFile(new URL("../.github/workflows/restore-preview-r2-backup-isolated-test.yml", import.meta.url), "utf8");
 
-test("Preview R2 restore is manually gated to the reviewed main branch", () => {
-  assert.match(workflow, /github\.ref == 'refs\/heads\/main'/);
-  assert.match(workflow, /RESTORE_PREVIEW_R2_TO_ISOLATED_TEST_ONLY/);
+test("Preview R2 restore is manually gated to main or the dedicated isolated-restore branch", () => {
+  assert.ok(workflow.includes("github.ref == 'refs/heads/main'"));
+  assert.ok(workflow.includes("github.ref == 'refs/heads/fix/restore-preview-fresh-eu-d1-2026-11-18'"));
+  assert.ok(workflow.includes("refs/heads/main|refs/heads/fix/restore-preview-fresh-eu-d1-2026-11-18"));
+  assert.ok(workflow.includes("RESTORE_PREVIEW_R2_TO_ISOLATED_TEST_ONLY"));
 });
 
 test("Restore source is pinned to the new EU Preview D1 and matching R2 object prefix", () => {
