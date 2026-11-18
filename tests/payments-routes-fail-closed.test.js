@@ -73,6 +73,15 @@ test("provider name and webhook secret never enable payments", () => {
   }), false);
 });
 
+test("Stripe test/live key-shaped configuration never enables a PSP adapter", () => {
+  for (const env of [
+    { PAYMENT_PROVIDER: "stripe", PAYMENT_WEBHOOK_SECRET: "whsec_synthetic", STRIPE_SECRET_KEY: "sk_test_synthetic" },
+    { PAYMENT_PROVIDER: "stripe", PAYMENT_WEBHOOK_SECRET: "whsec_synthetic", STRIPE_SECRET_KEY: "sk_live_synthetic" }
+  ]) {
+    assert.equal(paymentsConfigured(env), false);
+  }
+});
+
 test("onboarding, mission charge and payout all fail closed before D1 writes", async () => {
   const cases = [
     {
