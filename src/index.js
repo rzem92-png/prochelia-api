@@ -669,6 +669,14 @@ export function isMissionPresenceFresh(value, now = Date.now()) {
   return Number.isFinite(timestamp) && timestamp <= now && now - timestamp <= SECURITY_PRESENCE_TTL_SECONDS * 1000;
 }
 
+export function isTrustedDeviceActive(device, now = Date.now()) {
+  if (!device || device.status !== 'active' || device.revoked_at || !Number.isFinite(now)) return false;
+  if (typeof device.expires_at !== 'string' || !device.expires_at.trim()) return false;
+  const normalized = device.expires_at.includes('T') ? device.expires_at : device.expires_at.replace(' ', 'T') + 'Z';
+  const expiresAt = Date.parse(normalized);
+  return Number.isFinite(expiresAt) && expiresAt > now;
+}
+
 export async function findAssignedMissionSecurity(env, missionId, userId) {
   if (!env?.DB || !missionId || !userId) return null;
   return env.DB.prepare(`
@@ -690,8 +698,14 @@ async function securityPresence(request, env) {
   const sec=await findAssignedMissionSecurity(env, missionId, auth.user.id);
   if(!sec) return json({ok:false,error:'MISSION_NOT_ASSIGNED_OR_NOT_PREPARED',version:VERSION},404);
   const device=await deviceHash(request,auth.user.id);
-  await env.DB.prepare(`INSERT INTO trusted_devices (id,user_id,device_hash,expires_at) VALUES (?,?,?,datetime('now',?)) ON CONFLICT(user_id,device_hash) DO UPDATE SET last_seen_at=CURRENT_TIMESTAMP,expires_at=excluded.expires_at,status='active'`)
+  const deviceWrite = await env.DB.prepare(`INSERT INTO trusted_devices (id,user_id,device_hash,expires_at) VALUES (?,?,?,datetime('now',?))
+    ON CONFLICT(user_id,device_hash) DO UPDATE SET last_seen_at=CURRENT_TIMESTAMP,expires_at=excluded.expires_at
+    WHERE trusted_devices.status='active' AND trusted_devices.revoked_at IS NULL`)
     .bind(crypto.randomUUID(),auth.user.id,device,`+${SECURITY_DEVICE_TTL_SECONDS} seconds`).run();
+  if (Number(deviceWrite?.meta?.changes || 0) !== 1) {
+    await securityAudit(env,'SECURITY_DEVICE_REACTIVATION_BLOCKED',missionId,auth.user.id,auth.user.role,'DENIED',{reason:'DEVICE_REVOKED_OR_INACTIVE'});
+    return json({ok:false,error:'DEVICE_REVOKED_OR_INACTIVE',version:VERSION},403);
+  }
   await env.DB.prepare(`UPDATE mission_security SET last_presence_at=CURRENT_TIMESTAMP,last_device_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(device,sec.id).run();
   await securityAudit(env,'MISSION_PRESENCE_RECORDED',missionId,auth.user.id,auth.user.role,'OK',{device_bound:true});
   return json({ok:true,version:VERSION,mission_id:missionId,presence:'RECORDED',device_bound:true},200);
@@ -737,8 +751,8 @@ async function securityVerifyCode(request, env) {
     return json({ok:false,error:'PRESENCE_CHECK_REQUIRED',version:VERSION,message:'Une présence récente (moins de 10 minutes) doit être enregistrée avant la validation du code.'},428);
   }
   const device=await deviceHash(request,auth.user.id);
-  const trusted = await env.DB.prepare(`SELECT id,status,expires_at FROM trusted_devices WHERE user_id=? AND device_hash=? AND status='active' AND expires_at>CURRENT_TIMESTAMP LIMIT 1`).bind(auth.user.id,device).first();
-  if(!trusted || sec.last_device_id !== device) {
+  const trusted = await env.DB.prepare(`SELECT id,status,expires_at,revoked_at FROM trusted_devices WHERE user_id=? AND device_hash=? AND status='active' AND revoked_at IS NULL AND expires_at>CURRENT_TIMESTAMP LIMIT 1`).bind(auth.user.id,device).first();
+  if(!isTrustedDeviceActive(trusted) || sec.last_device_id !== device) {
     await securityAudit(env,'SECURITY_DEVICE_RECHECK_FAILED',missionId,auth.user.id,auth.user.role,'DENIED',{purpose});
     return json({ok:false,error:'DEVICE_NOT_TRUSTED_FOR_MISSION',version:VERSION},403);
   }
