@@ -166,7 +166,7 @@ export async function getSessionUser(request, env) {
   const tokenHash = await sha256Base64url(token);
   const row = await env.DB.prepare(
     `SELECT u.id, u.role, u.email, u.first_name, u.last_name, u.phone, u.status, u.created_at, u.updated_at,
-            s.id AS session_id
+            s.id AS session_id, s.active_tenant_id AS session_active_tenant_id
        FROM sessions s
        JOIN users u ON u.id = s.user_id
       WHERE s.token_hash = ?
