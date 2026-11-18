@@ -1779,7 +1779,7 @@ async function financeSummary(request, env) {
   return json({ok:true,version:VERSION,finance:{gross_cents:Number(tx?.gross||0),commission_cents:Number(tx?.commission||0),provider_fee_cents:Number(tx?.provider_fee||0),refund_cents:Number(tx?.refunds||0),intervenant_cents:Number(tx?.intervenant||0),ledger_balance_cents:Number(ledger?.balance||0),expenses_cents:Number(expenses?.total||0),net_estimate_cents:Number(ledger?.balance||0)-Number(expenses?.total||0),pending_cents:Number(pending?.total||0),pending_transactions:Number(pending?.n||0),paid_cents:Number(paid?.total||0),paid_transactions:Number(paid?.n||0),payouts_pending_cents:Number(payouts?.total||0),payouts_pending:Number(payouts?.n||0),disputed_cents:Number(disputed?.total||0),disputes_pending:Number(disputed?.n||0)},models:{B2C:'client -> PROCHÉLIA -> intervenant',B2B:'société -> intervenant ; PROCHÉLIA facture sa commission/service'},finance_core_version:FINANCE_STRATEGIC_VERSION});
 }
 
-async function complaintCreate(request, env) {
+export async function complaintCreate(request, env) {
   const gate=await requireAuthRole(request,env,['gerante','client','entreprise']); if(gate.error)return gate.error;
   // Fail closed: complaint ownership cannot be established from the current session.
   // Never persist client-supplied client/company/mission identifiers without tenant checks.
