@@ -94,3 +94,12 @@ test("generic webhook provider resolution retains the configured legacy contract
   const request = new Request("https://example.test/api/payments/webhook", { method: "POST" });
   assert.equal(webhookProviderForRequest(request, { provider: "internal-provider" }, {}), "internal-provider");
 });
+
+test("webhook event idempotency accepts only an exact previously stored payload hash", () => {
+  const samePayloadHash = sign();
+  const differentPayloadHash = sign(payload + " ");
+  assert.equal(webhookReplayDecision(samePayloadHash, samePayloadHash), "DUPLICATE");
+  assert.equal(webhookReplayDecision(samePayloadHash, differentPayloadHash), "CONFLICT");
+  assert.equal(webhookReplayDecision(null, samePayloadHash), "CONFLICT");
+  assert.equal(webhookReplayDecision(samePayloadHash, undefined), "CONFLICT");
+});
