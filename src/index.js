@@ -757,71 +757,27 @@ export async function securityStatus(request, env) {
    IMPORTANT : les fonds réels passent par un PSP agréé ; PROCHÉLIA
    conserve le ledger métier, les états, l'idempotence et l'audit.
 =============================================================== */
-async function ensurePaymentSchema(env) {
-  if (!env.DB) throw new Error('DATABASE_REQUIRED');
-  const statements = [
-    `CREATE TABLE IF NOT EXISTS payment_accounts (
-      id TEXT PRIMARY KEY, user_id TEXT NOT NULL UNIQUE, provider TEXT NOT NULL,
-      provider_account_id TEXT, status TEXT NOT NULL DEFAULT 'pending',
-      onboarding_status TEXT NOT NULL DEFAULT 'required',
-      payouts_enabled INTEGER NOT NULL DEFAULT 0,
-      charges_enabled INTEGER NOT NULL DEFAULT 0,
-      currency TEXT NOT NULL DEFAULT 'EUR',
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )`,
-    `CREATE TABLE IF NOT EXISTS wallets (
-      id TEXT PRIMARY KEY, user_id TEXT NOT NULL UNIQUE, currency TEXT NOT NULL DEFAULT 'EUR',
-      available_cents INTEGER NOT NULL DEFAULT 0, pending_cents INTEGER NOT NULL DEFAULT 0,
-      paid_cents INTEGER NOT NULL DEFAULT 0, reserved_cents INTEGER NOT NULL DEFAULT 0,
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )`,
-    `CREATE TABLE IF NOT EXISTS payment_transactions (
-      id TEXT PRIMARY KEY, idempotency_key TEXT NOT NULL UNIQUE, mission_id TEXT,
-      client_id TEXT, intervenant_id TEXT, type TEXT NOT NULL, status TEXT NOT NULL,
-      gross_cents INTEGER NOT NULL DEFAULT 0, commission_cents INTEGER NOT NULL DEFAULT 0,
-      provider_fee_cents INTEGER NOT NULL DEFAULT 0, refund_cents INTEGER NOT NULL DEFAULT 0,
-      net_intervenant_cents INTEGER NOT NULL DEFAULT 0, currency TEXT NOT NULL DEFAULT 'EUR',
-      provider TEXT, provider_payment_id TEXT, provider_payout_id TEXT,
-      reason TEXT, metadata_json TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )`,
-    `CREATE INDEX IF NOT EXISTS idx_payment_tx_mission ON payment_transactions(mission_id, created_at)`,
-    `CREATE INDEX IF NOT EXISTS idx_payment_tx_intervenant ON payment_transactions(intervenant_id, status, created_at)`,
-    `CREATE TABLE IF NOT EXISTS payout_requests (
-      id TEXT PRIMARY KEY, idempotency_key TEXT NOT NULL UNIQUE, wallet_id TEXT NOT NULL,
-      user_id TEXT NOT NULL, amount_cents INTEGER NOT NULL, currency TEXT NOT NULL DEFAULT 'EUR',
-      mode TEXT NOT NULL DEFAULT 'standard', status TEXT NOT NULL DEFAULT 'requested',
-      provider TEXT, provider_payout_id TEXT, failure_code TEXT, failure_message TEXT,
-      requested_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, completed_at TEXT,
-      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )`,
-    `CREATE INDEX IF NOT EXISTS idx_payout_user ON payout_requests(user_id, status, requested_at)`,
-    `CREATE TABLE IF NOT EXISTS payment_webhook_events (
-      id TEXT PRIMARY KEY, provider TEXT NOT NULL, event_id TEXT NOT NULL,
-      event_type TEXT NOT NULL, signature_valid INTEGER NOT NULL DEFAULT 0,
-      processed INTEGER NOT NULL DEFAULT 0, payload_hash TEXT, received_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      processed_at TEXT, UNIQUE(provider, event_id)
-    )`,
-    `CREATE TABLE IF NOT EXISTS payment_disputes (
-      id TEXT PRIMARY KEY, mission_id TEXT, transaction_id TEXT, client_id TEXT, intervenant_id TEXT,
-      status TEXT NOT NULL DEFAULT 'open', reason TEXT, amount_cents INTEGER NOT NULL DEFAULT 0,
-      resolution TEXT, resolved_at TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )`,
-    `CREATE TABLE IF NOT EXISTS payment_reconciliation (
-      id TEXT PRIMARY KEY, provider TEXT NOT NULL, external_id TEXT NOT NULL,
-      internal_transaction_id TEXT, internal_payout_id TEXT, amount_cents INTEGER,
-      currency TEXT, status TEXT NOT NULL DEFAULT 'unmatched', checked_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      UNIQUE(provider, external_id)
-    )`,
-    `CREATE TABLE IF NOT EXISTS payment_audit (
-      id TEXT PRIMARY KEY, event_type TEXT NOT NULL, transaction_id TEXT, payout_id TEXT,
-      mission_id TEXT, user_id TEXT, result TEXT NOT NULL, metadata_json TEXT,
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )`
+export async function paymentSchemaReady(env) {
+  // Runtime handlers must never create payment tables or indexes. The schema is
+  // provisioned only by an explicitly reviewed, versioned migration workflow.
+  if (!env?.DB) return false;
+  const requiredTables = [
+    'payment_accounts',
+    'wallets',
+    'payment_transactions',
+    'payout_requests',
+    'payment_webhook_events',
+    'payment_disputes',
+    'payment_reconciliation',
+    'payment_audit',
+    'payment_wallet_ledger'
   ];
-  for (const sql of statements) await env.DB.prepare(sql).run();
+  const placeholders = requiredTables.map(() => '?').join(',');
+  const result = await env.DB.prepare(
+    `SELECT name FROM sqlite_master WHERE type='table' AND name IN (${placeholders})`
+  ).bind(...requiredTables).all();
+  const present = new Set((result?.results || []).map(row => row.name));
+  return requiredTables.every(name => present.has(name));
 }
 
 function moneyCents(value) {
@@ -916,7 +872,7 @@ export async function createMissionPayment(request, env) {
   const auth=await getSessionUser(request,env);
   if(!requireRole(auth,['gerante'])) return json({ok:false,error:auth?.user?'FORBIDDEN':'UNAUTHENTICATED',version:VERSION},auth?.user?403:401);
   if (!paymentsConfigured(env)) return json({ok:false,error:'PAYMENT_PROVIDER_NOT_CONFIGURED',version:VERSION,write_enabled:false},503);
-  await ensurePaymentSchema(env);
+  if (!(await paymentSchemaReady(env))) return json({ok:false,error:'PAYMENT_SCHEMA_NOT_MIGRATED',version:VERSION,write_enabled:false},503);
   const body=await readJson(request);
   const missionId=clean(body?.mission_id), clientId=clean(body?.client_id), intervenantId=clean(body?.intervenant_id);
   const gross=moneyCents(body?.gross_eur), commission=moneyCents(body?.commission_eur);
@@ -1000,7 +956,7 @@ export async function payoutRequest(request, env) {
   const auth = await getSessionUser(request, env);
   if (!requireRole(auth, ['intervenant'])) return json({ok:false,error:auth?.user?'FORBIDDEN':'UNAUTHENTICATED',version:VERSION}, auth?.user ? 403 : 401);
   if (!paymentsConfigured(env)) return json({ok:false,error:'PAYOUT_PROVIDER_NOT_CONFIGURED',version:VERSION,write_enabled:false},503);
-  await ensurePaymentSchema(env);
+  if (!(await paymentSchemaReady(env))) return json({ok:false,error:'PAYMENT_SCHEMA_NOT_MIGRATED',version:VERSION,write_enabled:false},503);
   const body = await readJson(request);
   const amount = moneyCents(body?.amount_eur);
   const mode = clean(body?.mode) || 'standard';
@@ -1059,6 +1015,38 @@ function constantTimeStringEqual(actual, expected) {
 }
 
 export async function verifyWebhookSignature(request, env, rawBody) {
+  // Stripe has its own signing secret and format; never reuse the generic
+  // internal webhook secret across providers.
+  const stripeHeader = request.headers.get('stripe-signature');
+  if (stripeHeader !== null) {
+    const secret = env?.STRIPE_WEBHOOK_SECRET;
+    if (typeof secret !== 'string' || !secret) return false;
+    const fields = stripeHeader.split(',').map(part => {
+      const item = part.trim();
+      const separator = item.indexOf('=');
+      return separator > 0 ? [item.slice(0, separator), item.slice(separator + 1)] : [item, ''];
+    });
+    const timestamps = fields.filter(([name]) => name === 't').map(([, value]) => value);
+    const signatures = fields.filter(([name]) => name === 'v1').map(([, value]) => value);
+    if (timestamps.length !== 1 || !/^\d{1,12}$/.test(timestamps[0] || '') ||
+        signatures.length === 0 || signatures.some(value => !/^[0-9a-f]{64}$/i.test(value || ''))) return false;
+
+    const timestamp = Number(timestamps[0]);
+    const now = Math.floor(Date.now() / 1000);
+    const tolerance = 300;
+    if (!Number.isSafeInteger(timestamp) || Math.abs(now - timestamp) > tolerance) return false;
+
+    const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+    const signedPayload = new TextEncoder().encode(timestamps[0] + '.' + rawBody);
+    const mac = new Uint8Array(await crypto.subtle.sign('HMAC', key, signedPayload));
+    const expected = Array.from(mac, byte => byte.toString(16).padStart(2, '0')).join('');
+    let matched = 0;
+    for (const signature of signatures) {
+      matched |= Number(constantTimeStringEqual(signature.toLowerCase(), expected));
+    }
+    return matched === 1;
+  }
+
   const secret = env?.PAYMENT_WEBHOOK_SECRET;
   if (typeof secret !== 'string' || !secret) return false;
   const signature = request.headers.get('x-prochelia-signature') || request.headers.get('x-webhook-signature') || '';
@@ -1069,6 +1057,19 @@ export async function verifyWebhookSignature(request, env, rawBody) {
   return constantTimeStringEqual(supplied, base64url(mac));
 }
 
+export function webhookProviderForRequest(request, event, env) {
+  // A successfully verified Stripe-Signature header is the provider identity;
+  // never let an untrusted JSON field relabel a Stripe-signed event.
+  if (request.headers.get('stripe-signature') !== null) return 'stripe';
+  return clean(event?.provider) || paymentProvider(env);
+}
+
+export function webhookReplayDecision(existingPayloadHash, incomingPayloadHash) {
+  if (typeof existingPayloadHash !== 'string' || !existingPayloadHash ||
+      typeof incomingPayloadHash !== 'string' || !incomingPayloadHash) return 'CONFLICT';
+  return existingPayloadHash === incomingPayloadHash ? 'DUPLICATE' : 'CONFLICT';
+}
+
 export function requiresAtomicFinancialSettlement(eventType) {
   return new Set([
     'payment_succeeded','charge_succeeded','payment_failed','charge_failed',
@@ -1077,13 +1078,13 @@ export function requiresAtomicFinancialSettlement(eventType) {
 }
 
 export async function paymentWebhook(request, env) {
-  // Reject unauthenticated and malformed events before any D1 schema access.
-  // This prevents arbitrary callers from triggering CREATE TABLE/INDEX writes.
+  // Reject unauthenticated and malformed events before schema inspection.
+  // The schema gate below is read-only; migrations are never run from a request.
   const raw = await request.text();
   if (!(await verifyWebhookSignature(request, env, raw))) return json({ok:false,error:'INVALID_WEBHOOK_SIGNATURE',version:VERSION},401);
   let event;
   try { event = JSON.parse(raw); } catch { return json({ok:false,error:'INVALID_WEBHOOK_JSON',version:VERSION},400); }
-  const provider = clean(event?.provider) || paymentProvider(env);
+  const provider = webhookProviderForRequest(request, event, env);
   const eventId = clean(event?.id), type = clean(event?.type);
   if (!eventId || !type || typeof event !== 'object' || Array.isArray(event)) {
     return json({ok:false,error:'INVALID_WEBHOOK_EVENT',version:VERSION},400);
@@ -1096,10 +1097,17 @@ export async function paymentWebhook(request, env) {
   if (requiresAtomicFinancialSettlement(type)) {
     return json({ok:false,error:'ATOMIC_SETTLEMENT_LEDGER_REQUIRED',version:VERSION,retryable:true},503);
   }
-  await ensurePaymentSchema(env);
+  if (!(await paymentSchemaReady(env))) return json({ok:false,error:'PAYMENT_SCHEMA_NOT_MIGRATED',version:VERSION,write_enabled:false},503);
   const payloadHash=await sha256Base64url(raw);
   const inserted=await env.DB.prepare(`INSERT OR IGNORE INTO payment_webhook_events (id,provider,event_id,event_type,signature_valid,payload_hash) VALUES (?,?,?,?,1,?)`).bind(crypto.randomUUID(),provider,eventId,type,payloadHash).run();
-  if(!inserted.meta?.changes) return json({ok:true,version:VERSION,duplicate:true,event_id:eventId},200);
+  if(!inserted.meta?.changes) {
+    const existing=await env.DB.prepare(`SELECT payload_hash FROM payment_webhook_events WHERE provider=? AND event_id=? LIMIT 1`).bind(provider,eventId).first();
+    if(webhookReplayDecision(existing?.payload_hash,payloadHash)!=='DUPLICATE') {
+      await paymentAudit(env,'PSP_WEBHOOK_EVENT_ID_PAYLOAD_CONFLICT',{metadata:{provider,event_id:eventId,event_type:type}},'CONFLICT');
+      return json({ok:false,error:'WEBHOOK_EVENT_ID_PAYLOAD_CONFLICT',version:VERSION},409);
+    }
+    return json({ok:true,version:VERSION,duplicate:true,event_id:eventId},200);
+  }
   const txId=clean(event?.data?.transaction_id), payoutId=clean(event?.data?.payout_id);
   if(txId){
     const tx=await env.DB.prepare('SELECT * FROM payment_transactions WHERE id=? LIMIT 1').bind(txId).first();
@@ -1139,7 +1147,7 @@ export async function paymentWebhook(request, env) {
 async function openPaymentDispute(request, env) {
   const auth = await getSessionUser(request, env);
   if (!requireRole(auth, ['client','gerante'])) return json({ok:false,error:auth?.user?'FORBIDDEN':'UNAUTHENTICATED',version:VERSION}, auth?.user ? 403 : 401);
-  await ensurePaymentSchema(env);
+  if (!(await paymentSchemaReady(env))) return json({ok:false,error:'PAYMENT_SCHEMA_NOT_MIGRATED',version:VERSION,write_enabled:false},503);
   const body = await readJson(request);
   const missionId = clean(body?.mission_id);
   const reason = clean(body?.reason);
@@ -2573,7 +2581,7 @@ async function productionConfigCheck(env, { persist = false } = {}) {
   if (!env?.DB) throw new Error('DATABASE_REQUIRED');
   // Readiness GETs must inspect current state, not auto-create or mutate schema.
   if (persist) {
-    await ensureConsolidatedSchema(env); await ensurePaymentSchema(env); await ensureOperationalSchema(env); await ensureStrategicSchema(env); await ensureFinalHardeningSchema(env);
+    await ensureConsolidatedSchema(env); if (!(await paymentSchemaReady(env))) return json({ok:false,error:'PAYMENT_SCHEMA_NOT_MIGRATED',version:VERSION,write_enabled:false},503); await ensureOperationalSchema(env); await ensureStrategicSchema(env); await ensureFinalHardeningSchema(env);
   }
   const checks=[];
   const requiredTables=['users','sessions','missions','payment_transactions','payment_webhook_events','payment_disputes','operational_cases','action_outbox','notification_outbox','accounting_ledger','promotions','promotion_recommendations','activity_journal','compliance_events'];

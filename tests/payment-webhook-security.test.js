@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createHmac, webcrypto } from "node:crypto";
-import { verifyWebhookSignature } from "../src/index.js";
+import { verifyWebhookSignature, webhookProviderForRequest, webhookReplayDecision } from "../src/index.js";
 
 globalThis.crypto ??= webcrypto;
 
@@ -37,12 +37,69 @@ test("webhook signature accepts the sha256= prefix and rejects a changed payload
   assert.equal(await verifyWebhookSignature(request, { PAYMENT_WEBHOOK_SECRET: secret }, payload + " "), false);
 });
 
-test("Stripe native timestamped signatures are rejected until a Stripe-specific adapter is implemented", async () => {
-  const timestamp = "1794992400";
-  const stripeDigest = createHmac("sha256", secret).update(timestamp + "." + payload).digest("hex");
+const stripeRequest = (body = payload, timestamp = Math.floor(Date.now() / 1000), extraSignatures = []) => {
+  const digest = createHmac("sha256", secret).update(String(timestamp) + "." + body).digest("hex");
+  return new Request("https://example.test/api/payments/webhook", {
+    method: "POST",
+    headers: { "stripe-signature": [`t=${timestamp}`, ...extraSignatures.map(value => `v1=${value}`), `v1=${digest}`].join(",") }
+  });
+};
+
+test("Stripe native v1 signature accepts the exact raw body within the five-minute tolerance", async () => {
+  assert.equal(await verifyWebhookSignature(stripeRequest(), { STRIPE_WEBHOOK_SECRET: secret }, payload), true);
+});
+
+test("Stripe native signature supports multiple v1 signatures during secret rotation", async () => {
+  const request = stripeRequest(payload, Math.floor(Date.now() / 1000), ["0".repeat(64)]);
+  assert.equal(await verifyWebhookSignature(request, { STRIPE_WEBHOOK_SECRET: secret }, payload), true);
+});
+
+test("Stripe native signature rejects altered payloads and stale or future timestamps", async () => {
+  const now = Math.floor(Date.now() / 1000);
+  const request = stripeRequest();
+  assert.equal(await verifyWebhookSignature(request, { STRIPE_WEBHOOK_SECRET: secret }, payload + " "), false);
+  assert.equal(await verifyWebhookSignature(stripeRequest(payload, now - 301), { STRIPE_WEBHOOK_SECRET: secret }, payload), false);
+  assert.equal(await verifyWebhookSignature(stripeRequest(payload, now + 301), { STRIPE_WEBHOOK_SECRET: secret }, payload), false);
+});
+
+test("Stripe native signature rejects malformed and duplicate timestamps", async () => {
+  const digest = createHmac("sha256", secret).update(String(Math.floor(Date.now() / 1000)) + "." + payload).digest("hex");
+  for (const header of ["t=abc,v1=" + digest, "t=1,t=2,v1=" + digest, "t=" + Math.floor(Date.now() / 1000) + ",v1=bad", "t=" + Math.floor(Date.now() / 1000) + ",v1=" + "0".repeat(64) + "=trailing"]) {
+    const request = new Request("https://example.test/api/payments/webhook", { method: "POST", headers: { "stripe-signature": header } });
+    assert.equal(await verifyWebhookSignature(request, { STRIPE_WEBHOOK_SECRET: secret }, payload), false);
+  }
+});
+
+test("invalid Stripe native header cannot fall back to a valid generic signature", async () => {
   const request = new Request("https://example.test/api/payments/webhook", {
     method: "POST",
-    headers: { "stripe-signature": `t=${timestamp},v1=${stripeDigest}` }
+    headers: { "stripe-signature": "t=bad,v1=" + "0".repeat(64), "x-prochelia-signature": sign() }
   });
+  assert.equal(await verifyWebhookSignature(request, { STRIPE_WEBHOOK_SECRET: secret }, payload), false);
+});
+
+
+test("Stripe native signature requires a dedicated Stripe secret", async () => {
+  const request = stripeRequest();
   assert.equal(await verifyWebhookSignature(request, { PAYMENT_WEBHOOK_SECRET: secret }, payload), false);
+});
+
+
+test("Stripe-signed event provider cannot be overridden by an untrusted payload field", () => {
+  const request = stripeRequest();
+  assert.equal(webhookProviderForRequest(request, { provider: "other-provider" }, {}), "stripe");
+});
+
+test("generic webhook provider resolution retains the configured legacy contract", () => {
+  const request = new Request("https://example.test/api/payments/webhook", { method: "POST" });
+  assert.equal(webhookProviderForRequest(request, { provider: "internal-provider" }, {}), "internal-provider");
+});
+
+test("webhook event idempotency accepts only an exact previously stored payload hash", () => {
+  const samePayloadHash = sign();
+  const differentPayloadHash = sign(payload + " ");
+  assert.equal(webhookReplayDecision(samePayloadHash, samePayloadHash), "DUPLICATE");
+  assert.equal(webhookReplayDecision(samePayloadHash, differentPayloadHash), "CONFLICT");
+  assert.equal(webhookReplayDecision(null, samePayloadHash), "CONFLICT");
+  assert.equal(webhookReplayDecision(samePayloadHash, undefined), "CONFLICT");
 });
