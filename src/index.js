@@ -350,6 +350,58 @@ export async function tenantContextRoute(request, env) {
   return json({ ok: true, version: VERSION, tenant: context.tenant });
 }
 
+export async function selectTenantForSession(request, env) {
+  if (request.method !== "POST") {
+    return json({ ok: false, error: "METHOD_NOT_ALLOWED", version: VERSION }, 405, { allow: "POST" });
+  }
+  // This endpoint changes server-side session context. Require a real, allowlisted browser Origin.
+  if (!request.headers.get("origin") || !securityOriginAllowed(request, env)) {
+    return json({ ok: false, error: "ORIGIN_NOT_ALLOWED", version: VERSION }, 403);
+  }
+  if (!(request.headers.get("content-type") || "").toLowerCase().startsWith("application/json")) {
+    return json({ ok: false, error: "JSON_REQUIRED", version: VERSION }, 415);
+  }
+  const auth = await getSessionUser(request, env);
+  if (!auth) return json({ ok: false, error: "UNAUTHENTICATED", version: VERSION }, 401);
+  let body;
+  try { body = await request.json(); } catch {
+    return json({ ok: false, error: "INVALID_JSON", version: VERSION }, 400);
+  }
+  const tenantId = typeof body?.tenant_id === "string" ? body.tenant_id.trim() : "";
+  if (!tenantId || tenantId.length > 128) {
+    return json({ ok: false, error: "TENANT_ID_REQUIRED", version: VERSION }, 400);
+  }
+  try {
+    const result = await env.DB.prepare(`
+      UPDATE sessions
+         SET active_tenant_id = ?, last_seen_at = CURRENT_TIMESTAMP
+       WHERE id = ?
+         AND user_id = ?
+         AND expires_at > CURRENT_TIMESTAMP
+         AND revoked_at IS NULL
+         AND EXISTS (
+           SELECT 1
+             FROM tenant_memberships m
+             JOIN tenants t ON t.id = m.tenant_id
+            WHERE m.user_id = sessions.user_id
+              AND m.tenant_id = ?
+              AND m.status = 'ACTIVE'
+              AND t.status = 'ACTIVE'
+         )
+    `).bind(tenantId, auth.session_id, auth.user.id, tenantId).run();
+    if (Number(result?.meta?.changes || 0) !== 1) {
+      return json({ ok: false, error: "TENANT_MEMBERSHIP_REQUIRED", version: VERSION }, 403);
+    }
+    const context = await resolveTenantContext(request, env, {
+      ...auth, session_active_tenant_id: tenantId
+    });
+    if (!context.ok) return json({ ok: false, error: context.error, version: VERSION }, context.status);
+    return json({ ok: true, version: VERSION, tenant: context.tenant });
+  } catch {
+    return json({ ok: false, error: "TENANT_CONTEXT_UNAVAILABLE", version: VERSION }, 503);
+  }
+}
+
 async function me(request, env) {
   const auth = await getSessionUser(request, env);
   if (!auth) return json({ ok: false, authenticated: false, error: 'UNAUTHENTICATED', version: VERSION }, 401);
@@ -1316,6 +1368,10 @@ async function handleBase(request, env) {
 
   if (url.pathname === '/api/tenant/context') {
     return tenantContextRoute(request, env);
+  }
+
+  if (url.pathname === '/api/tenant/select') {
+    return selectTenantForSession(request, env);
   }
 
   if (url.pathname === '/api/readiness') {
