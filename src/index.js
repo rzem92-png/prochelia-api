@@ -1521,26 +1521,21 @@ async function journal(env, actorType, actorId, action, entityType=null, entityI
     .bind(crypto.randomUUID(),actorType,actorId,action,entityType,entityId,result,JSON.stringify(metadata)).run();
 }
 
-async function copilotRecommend(env, input) {
-  const { caseType, impact='LOW', phase='TEST', context={} } = input;
+export async function copilotRecommend(env, input) {
+  const safeInput = input && typeof input === 'object' && !Array.isArray(input) ? input : {};
+  const caseType = typeof safeInput.caseType === 'string' ? safeInput.caseType : 'unknown';
+  const impact = typeof safeInput.impact === 'string' ? safeInput.impact.toUpperCase() : 'HIGH';
+  const phase = typeof safeInput.phase === 'string' ? safeInput.phase : 'TEST';
+  const context = safeInput.context && typeof safeInput.context === 'object' && !Array.isArray(safeInput.context) ? safeInput.context : {};
   const sensitive = SENSITIVE_CASES.has(caseType) || impact === 'CRITICAL' || impact === 'HIGH';
-  const simple = SIMPLE_CASES.has(caseType) && !sensitive;
-  let action = 'ANALYZE_AND_PROPOSE';
-  let solution = { steps:['qualify','simulate','notify','audit'], automatic:false };
-  if (simple) {
-    action='AUTO_RESOLVE';
-    solution={steps:['detect','validate_rules','execute','verify','notify','audit','close'],automatic:true};
-  } else if (caseType==='retard_intervenant' || caseType==='absence_intervenant' || caseType==='aucun_profil_disponible') {
-    action='SEARCH_REPLACEMENT';
-    solution={steps:['recalculate_delay','search_qualified_available_profiles','score_distance_reliability','propose_replacement','notify','audit'],automatic:false};
-  } else if (caseType==='panne_application' || caseType==='incident_technique') {
-    action='CONTINUITY';
-    solution={steps:['isolate_failure','protect_client_flow','retry_safe_operation','fallback_channel','verify','audit'],automatic:!sensitive};
-  } else if (caseType==='reclamation_client' || caseType==='litige') {
-    action='RESOLVE_CASE';
-    solution={steps:['collect_evidence','reconcile_mission','reconcile_finance','calculate_impact','propose_resolution','notify','audit'],automatic:false};
-  }
-  return { action, mode: solution.automatic ? 'AUTO' : 'MANAGER_APPROVAL', confidence: simple ? 0.95 : 0.82, solution, context, phase };
+  return {
+    action: 'ANALYZE_AND_PROPOSE',
+    mode: 'MANAGER_APPROVAL',
+    confidence: sensitive ? 0.70 : 0.80,
+    solution: { steps: ['qualify', 'simulate', 'prepare_proposal', 'audit'], automatic: false },
+    context,
+    phase
+  };
 }
 
 export async function resolveOperationalCaseScope(env, auth, body) {
@@ -1576,31 +1571,18 @@ export async function resolveOperationalCaseScope(env, auth, body) {
   return {error:'COMPANY_OWNERSHIP_NOT_VERIFIED'};
 }
 
-async function createOperationalCase(request, env) {
-  const gate=await requireAuthRole(request,env,['gerante','client','intervenant','entreprise']); if(gate.error)return gate.error;
-  const body=await readJson(request)||{};
-  const caseType=clean(body.case_type); if(!caseType)return json({ok:false,error:'CASE_TYPE_REQUIRED',version:VERSION},400);
-  const scope=await resolveOperationalCaseScope(env,gate.auth,body);
-  if(scope.error) return json({ok:false,error:scope.error,version:VERSION},403);
-  const manager=gate.auth.user.role==='gerante';
-  const phase=String(await getSetting(env,'project_phase','TEST')).toUpperCase();
-  const impact=String(body.impact_level||'LOW').toUpperCase();
-  const priority=CASE_PRIORITIES[impact]||10;
-  // Non-manager submissions are proposals only: never execute Copilot actions automatically.
-  const safeContext=manager && body.context && typeof body.context==='object' ? body.context : {};
-  let rec=await copilotRecommend(env,{caseType,impact,phase,context:safeContext});
-  if(!manager) rec={...rec,action:'PROPOSE',mode:'MANAGER_APPROVAL'};
-  const id=crypto.randomUUID();
-  const requiresManager=manager && rec.mode==='MANAGER_APPROVAL' ? 1 : (manager ? 0 : 1);
-  const status='OPEN';
-  await env.DB.prepare(`INSERT INTO operational_cases(id,case_type,source,phase,priority,status,auto_mode,client_id,company_id,intervenant_id,mission_id,impact_level,description,context_json,proposed_solution_json,requires_manager) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
-    .bind(id,caseType,'API',phase,priority,status,rec.mode,scope.client_id,scope.company_id,scope.intervenant_id,scope.mission_id,impact,clean(body.description)||null,JSON.stringify(safeContext),JSON.stringify(rec),requiresManager).run();
-  await env.DB.prepare(`INSERT INTO copilot_log(id,case_id,action_type,recommendation,confidence,mode) VALUES(?,?,?,?,?,?)`)
-    .bind(crypto.randomUUID(),id,rec.action,JSON.stringify(rec.solution),rec.confidence,rec.mode).run();
-  await journal(env,'copilot',null,'CASE_CREATED','operational_case',id,'OK',{caseType,impact,submittedByRole:gate.auth.user.role});
-  return json({ok:true,version:VERSION,case_id:id,recommendation:rec,status:'WAITING_MANAGER'},201);
+export async function createOperationalCase(request, env) {
+  const gate = await requireAuthRole(request, env, ['gerante', 'client', 'intervenant', 'entreprise']);
+  if (gate.error) return gate.error;
+  // Tenant membership and resource ownership are not yet fully represented in the canonical schema.
+  // Do not persist caller-supplied client/company/mission identifiers until server-side membership exists.
+  return json({
+    ok: false,
+    error: 'TENANT_SCOPED_CASE_CREATION_NOT_IMPLEMENTED',
+    message: 'Operational case creation remains disabled until tenant membership and resource ownership are verified server-side.',
+    version: VERSION
+  }, 503);
 }
-
 
 async function getTableColumns(env, table) {
   if (!env.DB) return [];
@@ -1696,27 +1678,21 @@ async function processActionOutbox(request, env) {
   return json({ok:true,version:VERSION,processed},200);
 }
 
-async function executeOperationalCase(env, caseId, approverId=null, automatic=false) {
-  const c=await env.DB.prepare('SELECT * FROM operational_cases WHERE id=? LIMIT 1').bind(caseId).first();
-  if(!c)return {ok:false,error:'CASE_NOT_FOUND'};
-  if(c.status==='RESOLVED')return {ok:true,already:true};
-  const rec=c.proposed_solution_json?JSON.parse(c.proposed_solution_json):{};
-  if(c.requires_manager && !automatic && !approverId) return {ok:false,error:'MANAGER_APPROVAL_REQUIRED'};
-  const businessResults = await executeCaseBusinessAction(env,c,rec,approverId,automatic);
-  const resolution={executed:true,automatic,action:rec.action||'RESOLVE',steps:rec.solution?.steps||[],business_results:businessResults,executed_at:new Date().toISOString()};
-  await env.DB.prepare(`INSERT INTO case_actions(id,case_id,action_code,mode,status,payload_json,result_json,completed_at) VALUES(?,?,?,?,?,?,?,CURRENT_TIMESTAMP)`)
-    .bind(crypto.randomUUID(),caseId,rec.action||'RESOLVE',automatic?'AUTO':'MANAGER','COMPLETED',JSON.stringify(rec),JSON.stringify(resolution)).run();
-  await env.DB.prepare(`UPDATE operational_cases SET status='RESOLVED',resolution_json=?,requires_manager=0,updated_at=CURRENT_TIMESTAMP,resolved_at=CURRENT_TIMESTAMP WHERE id=?`).bind(JSON.stringify(resolution),caseId).run();
-  await env.DB.prepare(`UPDATE copilot_log SET approved_by=COALESCE(?,approved_by),result=? WHERE case_id=? AND id=(SELECT id FROM copilot_log WHERE case_id=? ORDER BY created_at DESC LIMIT 1)`).bind(approverId,JSON.stringify(resolution),caseId,caseId).run();
-  await journal(env,automatic?'copilot':'gerante',approverId,automatic?'AUTO_CASE_RESOLVED':'CASE_RESOLVED','operational_case',caseId,'OK',resolution);
-  return {ok:true,case_id:caseId,resolution};
+export async function executeOperationalCase(env, caseId, approverId = null, automatic = false) {
+  // No operational executor may mutate missions, payments, or accounting until tenant scope and approvals are enforced.
+  void env; void caseId; void approverId; void automatic;
+  return { ok: false, error: 'TENANT_SCOPED_EXECUTION_NOT_IMPLEMENTED' };
 }
 
-async function approveOperationalCase(request, env) {
-  const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
-  const body=await readJson(request)||{}; if(!body.case_id)return json({ok:false,error:'CASE_ID_REQUIRED',version:VERSION},400);
-  const result=await executeOperationalCase(env,body.case_id,gate.auth.user.id,false);
-  return json({...result,version:VERSION},result.ok?200:409);
+export async function approveOperationalCase(request, env) {
+  const gate = await requireAuthRole(request, env, ['gerante']);
+  if (gate.error) return gate.error;
+  return json({
+    ok: false,
+    error: 'TENANT_SCOPED_APPROVAL_NOT_IMPLEMENTED',
+    message: 'Operational approval is disabled until resource ownership, separation of duties and tenant scope are enforced.',
+    version: VERSION
+  }, 503);
 }
 
 async function getOperationsDashboard(request, env) {
@@ -1855,86 +1831,41 @@ function financeStrategicQuote({basePriceCents=0,phaseFactor=1,urgency='normal',
   };
 }
 
-async function pricingQuote(request, env) {
-  // Client-supplied pricing inputs are not authoritative. Keep quote persistence
-  // manager-only until the server-owned catalogue/policy contract is complete.
-  const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
-  const b=await readJson(request)||{};
-  const phase=String(b.phase||await getSetting(env,'project_phase','TEST')).toUpperCase();
-  const cfg=PROJECT_PHASES[phase]||PROJECT_PHASES.TEST;
-  const distance=Number(b.distance_km||0);const duration=Number(b.duration_minutes||60);
-  const base=Number(b.base_price_cents||0);
-  const clientType=String(b.client_type||'B2C').toUpperCase();
-  const serviceCode=clean(b.service_code)||null;
-
-  let policy=null;
-  try {
-    policy=await env.DB.prepare(`SELECT * FROM pricing_policies WHERE active=1 AND phase=? AND client_type=? AND (service_code=? OR service_code IS NULL) ORDER BY CASE WHEN service_code=? THEN 0 ELSE 1 END LIMIT 1`)
-      .bind(phase,clientType,serviceCode,serviceCode).first();
-  } catch (_) {}
-
-  const fuelMode=String(b.fuel_mode||'normal').toLowerCase()==='high'?'high':'normal';
-  const fuelRateLegacy=Number(b.fuel_cost_per_km_cents??await getSetting(env,'fuel_cost_per_km_cents',20));
-  const fuelPriceCentsPerLitre=Number(b.fuel_price_cents_per_litre??await getSetting(env,fuelMode==='high'?'fuel_reference_price_cents_litre_high':'fuel_reference_price_cents_litre_normal',fuelMode==='high'?200:175));
-  const software=Number(b.software_cost_cents||await getSetting(env,'software_monthly_cost_cents',0));
-  const pspPercent=Number(b.psp_percent||0);const pspFixed=Number(b.psp_fixed_cents||0);
-  const targetMargin=Number(b.target_margin_percent??policy?.target_margin_percent??await getSetting(env,'default_margin_percent',FINANCE_STRATEGIC.marginFloorPercent));
-  const commissionRate=Number(b.platform_fee_percent!=null?b.platform_fee_percent/100:(policy?.platform_fee_percent!=null?policy.platform_fee_percent/100:FINANCE_STRATEGIC.commissionDefaultPercent/100));
-  const intervenantFloor=Math.max(0,Math.round(Number(b.intervenant_floor_cents??policy?.intervenant_floor_cents??(base*0.70))));
-  const regulatedMax=b.regulated_max_cents!=null?Number(b.regulated_max_cents):(policy?.client_ceiling_cents>0?Number(policy.client_ceiling_cents):null);
-  const strategic=financeStrategicQuote({
-    basePriceCents:base,
-    phaseFactor:cfg.pricingFactor,
-    urgency:b.urgency||'normal',
-    evening:Boolean(b.evening),night:Boolean(b.night),saturday:Boolean(b.saturday),sunday:Boolean(b.sunday),holiday:Boolean(b.holiday),lastMinute:Boolean(b.last_minute||b.lastMinute),
-    distanceKm:distance,fuelMode,fuelPriceCentsPerLitre,commissionRate,discountCents:Number(b.discount_cents||0),regulatedMaxCents:regulatedMax,
-    intervenantFloorCents:intervenantFloor,pspPercent,pspFixedCents:pspFixed,softwareCostCents:software,targetMarginPercent:targetMargin
-  });
-  /* Compatibilité avec l'ancien contrat : fuel_cost_cents reste disponible. */
-  const legacyFuel=Math.max(0,Math.round(distance*fuelRateLegacy));
-  const quote={
-    phase,clientType,distance,duration,
-    client_price_cents:strategic.client_price_cents,
-    intervenant_amount_cents:strategic.intervenant_amount_cents,
-    platform_commission_cents:strategic.commission_cents,
-    psp_cost_cents:strategic.psp_cost_cents,
-    software_cost_cents:strategic.software_cost_cents,
-    fuel_cost_cents:strategic.travel.total_cost_cents,
-    estimated_margin_cents:strategic.estimated_margin_cents,
-    strategic_finance:strategic,
-    assumptions:{market_position:'strategic',fuel_included:true,fuel_mode:fuelMode,fuel_reference_price_cents_per_litre:fuelPriceCentsPerLitre,legacy_fuel_cost_per_km_cents:legacyFuel,software_included:true,target_margin_percent:targetMargin,commission_rate_percent:commissionRate*100,b2b_rule:'company_pays_intervenant_platform_bills_commission',single_finance_engine:true}
-  };
-  await env.DB.prepare(`INSERT INTO pricing_quotes(id,phase,client_type,service_code,distance_km,duration_minutes,client_price_cents,intervenant_amount_cents,platform_commission_cents,psp_cost_cents,software_cost_cents,fuel_cost_cents,estimated_margin_cents,assumptions_json) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
-    .bind(crypto.randomUUID(),phase,clientType,serviceCode,distance,duration,quote.client_price_cents,quote.intervenant_amount_cents,quote.platform_commission_cents,quote.psp_cost_cents,quote.software_cost_cents,quote.fuel_cost_cents,quote.estimated_margin_cents,JSON.stringify(quote.assumptions)).run();
-  return json({ok:true,version:VERSION,quote},200);
+export async function pricingQuote(request, env) {
+  const gate = await requireAuthRole(request, env, ['gerante']);
+  if (gate.error) return gate.error;
+  // Client-supplied inputs and unverified business scope cannot authorize a commercial quote.
+  return json({
+    ok: false,
+    error: 'SERVER_PRICING_POLICY_NOT_READY',
+    message: 'Quote generation is unavailable until tenant-scoped server-owned pricing policies and deterministic bounds are validated.',
+    version: VERSION
+  }, 503);
 }
 
-async function financeSummary(request, env) {
-  const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
-  const tx=await env.DB.prepare(`SELECT COALESCE(SUM(gross_cents),0) gross,COALESCE(SUM(commission_cents),0) commission,COALESCE(SUM(provider_fee_cents),0) provider_fee,COALESCE(SUM(refund_cents),0) refunds,COALESCE(SUM(net_intervenant_cents),0) intervenant FROM payment_transactions`).first();
-  const ledger=await env.DB.prepare(`SELECT COALESCE(SUM(CASE WHEN direction='CREDIT' THEN amount_cents ELSE -amount_cents END),0) balance FROM accounting_ledger`).first();
-  const expenses=await env.DB.prepare(`SELECT COALESCE(SUM(amount_cents),0) total FROM business_expenses`).first();
-  const pending=await env.DB.prepare(`SELECT COALESCE(SUM(gross_cents),0) total,COUNT(*) n FROM payment_transactions WHERE status IN ('pending','processing','held')`).first();
-  const paid=await env.DB.prepare(`SELECT COALESCE(SUM(gross_cents),0) total,COUNT(*) n FROM payment_transactions WHERE status='paid'`).first();
-  const payouts=await env.DB.prepare(`SELECT COALESCE(SUM(amount_cents),0) total,COUNT(*) n FROM payout_requests WHERE status IN ('requested','processing')`).first();
-  const disputed=await env.DB.prepare(`SELECT COALESCE(SUM(amount_cents),0) total,COUNT(*) n FROM payment_disputes WHERE status IN ('open','pending')`).first().catch(()=>null);
-  return json({ok:true,version:VERSION,finance:{gross_cents:Number(tx?.gross||0),commission_cents:Number(tx?.commission||0),provider_fee_cents:Number(tx?.provider_fee||0),refund_cents:Number(tx?.refunds||0),intervenant_cents:Number(tx?.intervenant||0),ledger_balance_cents:Number(ledger?.balance||0),expenses_cents:Number(expenses?.total||0),net_estimate_cents:Number(ledger?.balance||0)-Number(expenses?.total||0),pending_cents:Number(pending?.total||0),pending_transactions:Number(pending?.n||0),paid_cents:Number(paid?.total||0),paid_transactions:Number(paid?.n||0),payouts_pending_cents:Number(payouts?.total||0),payouts_pending:Number(payouts?.n||0),disputed_cents:Number(disputed?.total||0),disputes_pending:Number(disputed?.n||0)},models:{B2C:'client -> PROCHÉLIA -> intervenant',B2B:'société -> intervenant ; PROCHÉLIA facture sa commission/service'},finance_core_version:FINANCE_STRATEGIC_VERSION});
+export async function financeSummary(request, env) {
+  const gate = await requireAuthRole(request, env, ['gerante']);
+  if (gate.error) return gate.error;
+  // Existing aggregates are global, not tenant-, legal-entity-, period-, or currency-scoped.
+  // Never present them as company accounts or accounting evidence.
+  return json({
+    ok: false,
+    error: 'TENANT_SCOPED_FINANCE_NOT_READY',
+    message: 'Financial reporting is unavailable until tenant-scoped, currency-aware and reconciled accounting queries are implemented.',
+    version: VERSION
+  }, 503);
 }
 
-async function complaintCreate(request, env) {
-  const gate=await requireAuthRole(request,env,['gerante','client','entreprise']); if(gate.error)return gate.error;
-  const b=await readJson(request)||{};if(!b.category)return json({ok:false,error:'CATEGORY_REQUIRED',version:VERSION},400);
-  const scope=await resolveOperationalCaseScope(env,gate.auth,b);
-  if(scope.error) return json({ok:false,error:scope.error,version:VERSION},403);
-  const id=crypto.randomUUID();
-  const caseType=SIMPLE_CASES.has(b.category)?b.category:'reclamation_client';
-  const fakeReq=new Request(request.url,{method:'POST',headers:request.headers,body:JSON.stringify({case_type:caseType,client_id:scope.client_id,company_id:scope.company_id,intervenant_id:scope.intervenant_id,mission_id:scope.mission_id,description:b.description,impact_level:b.severity||'LOW',context:{complaint_id:id}})});
-  const caseResponse=await createOperationalCase(fakeReq,env);
-  const caseJson=await caseResponse.json();
-  if(!caseResponse.ok) return json({ok:false,error:caseJson.error||'CASE_CREATION_FAILED',version:VERSION},caseResponse.status);
-  await env.DB.prepare(`INSERT INTO complaints(id,client_type,client_id,company_id,mission_id,category,severity,description,resolution_case_id) VALUES(?,?,?,?,?,?,?,?,?)`)
-    .bind(id,gate.auth.user.role==='gerante' && ['B2C','B2B'].includes(String(b.client_type||'').toUpperCase()) ? String(b.client_type).toUpperCase() : 'B2C',scope.client_id,scope.company_id,scope.mission_id,b.category,String(b.severity||'LOW'),b.description||null,caseJson.case_id||null).run();
-  return json({ok:true,version:VERSION,complaint_id:id,resolution_case_id:caseJson.case_id||null,copilot:caseJson.recommendation||null},201);
+export async function complaintCreate(request, env) {
+  const gate = await requireAuthRole(request, env, ['gerante', 'client', 'entreprise']);
+  if (gate.error) return gate.error;
+  // Do not persist caller-supplied client/company/mission IDs without verified ownership.
+  return json({
+    ok: false,
+    error: 'TENANT_SCOPED_COMPLAINTS_NOT_READY',
+    message: 'Complaint submission is unavailable until ownership and tenant membership are verified server-side.',
+    version: VERSION
+  }, 503);
 }
 
 async function setPhase(request, env) {
@@ -2467,93 +2398,28 @@ async function dynamicUpdate(env, table, id, updates) {
   return {ok:true,updated:usable.map(([k])=>k)};
 }
 
-async function queueAction(env, actionType, entityType, entityId, payload, idem) {
-  const key = idem || crypto.randomUUID();
-  const existing = await env.DB.prepare('SELECT * FROM action_outbox WHERE idempotency_key=? LIMIT 1').bind(key).first();
-  if (existing) return existing;
-  const id = crypto.randomUUID();
-  await env.DB.prepare(`INSERT INTO action_outbox(id,action_type,entity_type,entity_id,idempotency_key,payload_json) VALUES(?,?,?,?,?,?)`)
-    .bind(id,actionType,entityType||null,entityId||null,key,JSON.stringify(payload||{})).run();
-  return await env.DB.prepare('SELECT * FROM action_outbox WHERE id=?').bind(id).first();
+export async function queueAction(env, actionType, entityType, entityId, payload, idem) {
+  // Queue writes are disabled until every action has a verified tenant/resource scope and approval policy.
+  void env; void actionType; void entityType; void entityId; void payload; void idem;
+  return { ok: false, error: 'TENANT_SCOPED_EXECUTION_NOT_IMPLEMENTED' };
 }
 
-async function executeQueuedAction(env, action) {
-  if (!action) return {ok:false,error:'ACTION_NOT_FOUND'};
-  const payload = JSON.parse(action.payload_json||'{}');
-  const now = new Date().toISOString();
-  try {
-    let result = {performed:false,action:action.action_type};
-    if (action.action_type === 'NOTIFY') {
-      const channel = payload.channel || 'IN_APP';
-      if (await tableExists(env,'notification_outbox')) {
-        const id = crypto.randomUUID();
-        const cols = await tableColumns(env,'notification_outbox');
-        const values = {id,channel,status:'PENDING',recipient_id:payload.recipient_id||null,
-          user_id:payload.recipient_id||null,type:payload.type||'OPERATIONAL',
-          title:payload.title||'PROCHÉLIA',message:payload.message||'',payload_json:JSON.stringify(payload)};
-        const usable = Object.entries(values).filter(([k])=>cols.includes(k));
-        if (usable.length) {
-          const sql=`INSERT INTO notification_outbox(${usable.map(x=>x[0]).join(',')}) VALUES(${usable.map(()=>'?').join(',')})`;
-          await env.DB.prepare(sql).bind(...usable.map(x=>x[1])).run();
-          result={performed:true,channel,notification_queued:true};
-        } else result={performed:false,reason:'NOTIFICATION_SCHEMA_INCOMPATIBLE'};
-      } else result={performed:false,reason:'NOTIFICATION_TABLE_MISSING'};
-    } else if (action.action_type === 'RESCHEDULE_MISSION') {
-      result = await dynamicUpdate(env,'missions',action.entity_id,{scheduled_at:payload.scheduled_at,date:payload.date,time:payload.time,status:payload.status||'RESCHEDULED'});
-      result.action='RESCHEDULE_MISSION';
-    } else if (action.action_type === 'ASSIGN_REPLACEMENT') {
-      result = await dynamicUpdate(env,'missions',action.entity_id,{intervenant_id:payload.intervenant_id,assigned_intervenant_id:payload.intervenant_id,status:payload.status||'ASSIGNED'});
-      result.action='ASSIGN_REPLACEMENT';
-    } else if (action.action_type === 'REFUND') {
-      result={performed:false,requires_provider:true,reason:'PSP_EXECUTION_REQUIRED',payload};
-    } else if (action.action_type === 'PAYOUT') {
-      result={performed:false,requires_provider:true,reason:'PSP_EXECUTION_REQUIRED',payload};
-    } else if (action.action_type === 'ACCOUNTING_ENTRY') {
-      if (await tableExists(env,'accounting_ledger')) {
-        const cols=await tableColumns(env,'accounting_ledger');
-        const values={id:crypto.randomUUID(),entry_type:payload.entry_type||'OPERATIONAL',amount_cents:Number(payload.amount_cents||0),
-          debit_cents:Number(payload.debit_cents||0),credit_cents:Number(payload.credit_cents||0),reference_type:action.entity_type,
-          reference_id:action.entity_id,description:payload.description||'',metadata_json:JSON.stringify(payload)};
-        const usable=Object.entries(values).filter(([k])=>cols.includes(k));
-        if(usable.length){
-          await env.DB.prepare(`INSERT INTO accounting_ledger(${usable.map(x=>x[0]).join(',')}) VALUES(${usable.map(()=>'?').join(',')})`).bind(...usable.map(x=>x[1])).run();
-          result={performed:true,accounting_recorded:true};
-        } else result={performed:false,reason:'ACCOUNTING_SCHEMA_INCOMPATIBLE'};
-      } else result={performed:false,reason:'ACCOUNTING_TABLE_MISSING'};
-    } else result={performed:false,reason:'ACTION_TYPE_NOT_IMPLEMENTED'};
-
-    const finalStatus = result.performed ? 'DONE' : (result.requires_provider ? 'WAITING_PROVIDER' : 'FAILED');
-    await env.DB.prepare(`UPDATE action_outbox SET status=?,result_json=?,attempts=attempts+1,updated_at=CURRENT_TIMESTAMP,executed_at=? WHERE id=?`)
-      .bind(finalStatus,JSON.stringify(result),result.performed?now:null,action.id).run();
-    return {ok:true,status:finalStatus,result};
-  } catch(e) {
-    await env.DB.prepare(`UPDATE action_outbox SET status='FAILED',last_error=?,attempts=attempts+1,updated_at=CURRENT_TIMESTAMP WHERE id=?`)
-      .bind(String(e.message||e),action.id).run();
-    return {ok:false,error:'ACTION_EXECUTION_FAILED',message:e.message};
-  }
+export async function executeQueuedAction(env, action) {
+  // Fail closed: no notification, mission, refund, payout, or accounting action is executed
+  // through the legacy unscoped outbox until its tenant-aware executor is reviewed.
+  void env; void action;
+  return { ok: false, error: 'TENANT_SCOPED_EXECUTION_NOT_IMPLEMENTED' };
 }
 
-async function operationalExecute(request, env) {
-  const gate=await requireAuthRole(request,env,['gerante']);
-  if(gate.error)return gate.error;
-  await ensureConsolidatedSchema(env); await ensureOperationalSchema(env);
-  const b=await readJson(request)||{};
-  if(!b.case_id)return json({ok:false,error:'CASE_ID_REQUIRED',version:VERSION},400);
-  const c=await env.DB.prepare('SELECT * FROM operational_cases WHERE id=? LIMIT 1').bind(b.case_id).first();
-  if(!c)return json({ok:false,error:'CASE_NOT_FOUND',version:VERSION},404);
-  const solution=JSON.parse(c.proposed_solution_json||'{}');
-  const actions=Array.isArray(b.actions)?b.actions:(Array.isArray(solution.actions)?solution.actions:[]);
-  if(!actions.length)return json({ok:false,error:'NO_ACTIONS_DEFINED',version:VERSION},400);
-  const results=[];
-  for(const a of actions){
-    const q=await queueAction(env,a.action_type||a.type,c.mission_id?'MISSION':'CASE',a.entity_id||c.mission_id,{...a},a.idempotency_key);
-    results.push(await executeQueuedAction(env,q));
-  }
-  const allDone=results.every(x=>x.ok && ['DONE'].includes(x.status));
-  await env.DB.prepare(`UPDATE operational_cases SET status=?,resolution_json=?,updated_at=CURRENT_TIMESTAMP,resolved_at=? WHERE id=?`)
-    .bind(allDone?'RESOLVED':'IN_PROGRESS',JSON.stringify({approved_by:gate.auth.user.id,results}),allDone?new Date().toISOString():null,c.id).run();
-  await journal(env,'gerante',gate.auth.user.id,'CASE_EXECUTED','operational_case',c.id,allDone?'OK':'PARTIAL',{results});
-  return json({ok:true,version:VERSION,case_id:c.id,status:allDone?'RESOLVED':'IN_PROGRESS',results});
+export async function operationalExecute(request, env) {
+  const gate = await requireAuthRole(request, env, ['gerante']);
+  if (gate.error) return gate.error;
+  return json({
+    ok: false,
+    error: 'TENANT_SCOPED_EXECUTION_NOT_IMPLEMENTED',
+    message: 'Operational execution is disabled until tenant ownership, action-bound approval and audit controls are enforced.',
+    version: VERSION
+  }, 503);
 }
 
 async function scoreClients(request, env) {
