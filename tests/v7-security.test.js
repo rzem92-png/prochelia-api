@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createHmac } from "node:crypto";
 import { handleV7Route } from "../src/v7-routes.js";
-import { directoryList, resolveMissionSecurityAssignment, findAssignedMissionSecurity, isMissionPresenceFresh, isTrustedDeviceActive, hmacSha256Base64url, isSameMissionPaymentRequest } from "../src/index.js";
+import { directoryList, resolveMissionSecurityAssignment, findAssignedMissionSecurity, isMissionPresenceFresh, isTrustedDeviceActive, hmacSha256Base64url, isSameMissionPaymentRequest, paymentsConfigured } from "../src/index.js";
 
 const post = (path, body) => new Request("https://example.test" + path, {
   method: "POST",
@@ -233,4 +233,11 @@ test("mission payment idempotency keys are bound to the full payment request", (
   assert.equal(isSameMissionPaymentRequest(existing,{...same,clientId:"c-2"}),false);
   assert.equal(isSameMissionPaymentRequest(existing,{...same,intervenantId:"i-2"}),false);
   assert.equal(isSameMissionPaymentRequest(null,same),false);
+});
+
+
+test("real payout reservations remain disabled until a PSP adapter is implemented", () => {
+  assert.equal(paymentsConfigured({PAYMENT_PROVIDER:"stripe",PAYMENT_WEBHOOK_SECRET:"x".repeat(48)}),false);
+  assert.equal(paymentsConfigured({PAYMENT_PROVIDER:"psp_adapter"}),false);
+  assert.equal(paymentsConfigured({}),false);
 });
