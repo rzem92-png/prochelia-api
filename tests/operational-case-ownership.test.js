@@ -43,5 +43,5 @@ test("persisted pricing quotes are manager-only until server-owned policy is aut
   assert.notEqual(start, -1);
   assert.notEqual(end, -1);
   const body = source.slice(start, end);
-  assert.match(body, /requireAuthRole\\(request,env,\\['gerante'\\]\\)/);
+  assert.ok(body.includes("requireAuthRole(request,env,['gerante'])"));
 });
