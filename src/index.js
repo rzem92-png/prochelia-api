@@ -861,22 +861,14 @@ export function paymentsConfigured(env) {
   return false;
 }
 
-async function paymentOnboard(request, env) {
+export async function paymentOnboard(request, env) {
   const auth = await getSessionUser(request, env);
-  if (!requireRole(auth, ['intervenant'])) return json({ok:false,error:auth?.user?'FORBIDDEN':'UNAUTHENTICATED',version:VERSION},auth?.user?403:401);
-  await ensurePaymentSchema(env);
-  const body = await readJson(request);
-  const provider = paymentProvider(env);
-  const accountId = clean(body?.provider_account_id) || null;
-  const existing = await env.DB.prepare('SELECT * FROM payment_accounts WHERE user_id=? LIMIT 1').bind(auth.user.id).first();
-  if (existing) return json({ok:true,version:VERSION,account:existing,action:'REUSE_EXISTING'},200);
-  const id=crypto.randomUUID();
-  await env.DB.prepare(`INSERT INTO payment_accounts
-    (id,user_id,provider,provider_account_id,status,onboarding_status)
-    VALUES (?,?,?,?, 'pending','required')`).bind(id,auth.user.id,provider,accountId).run();
-  await env.DB.prepare(`INSERT INTO wallets (id,user_id) VALUES (?,?)`).bind(crypto.randomUUID(),auth.user.id).run();
-  await paymentAudit(env,'PAYOUT_ACCOUNT_CREATED',{user_id:auth.user.id,metadata:{provider}},'OK');
-  return json({ok:true,version:VERSION,account_id:id,provider,onboarding_status:'required',next:'PSP_ONBOARDING_REQUIRED'},201);
+  if (!requireRole(auth, ['intervenant'])) {
+    return json({ok:false,error:auth?.user?'FORBIDDEN':'UNAUTHENTICATED',version:VERSION},auth?.user?403:401);
+  }
+  // No authenticated PSP onboarding adapter or provider callback exists.
+  // Do not accept caller-supplied provider IDs or create placeholder accounts/wallets.
+  return json({ok:false,error:'PSP_ONBOARDING_NOT_IMPLEMENTED',version:VERSION,write_enabled:false},503);
 }
 
 async function paymentStatus(request, env) {
@@ -890,9 +882,10 @@ async function paymentStatus(request, env) {
   return json({ok:true,version:VERSION,provider:paymentProvider(env),payments_configured:paymentsConfigured(env),wallet:{currency:wallet.currency,available_cents:wallet.available_cents,pending_cents:wallet.pending_cents,paid_cents:wallet.paid_cents,reserved_cents:wallet.reserved_cents},payout_account:account?{status:account.status,onboarding_status:account.onboarding_status,payouts_enabled:!!account.payouts_enabled}:null,pending_payouts:Number(pending?.total||0)},200);
 }
 
-async function createMissionPayment(request, env) {
+export async function createMissionPayment(request, env) {
   const auth=await getSessionUser(request,env);
   if(!requireRole(auth,['gerante'])) return json({ok:false,error:auth?.user?'FORBIDDEN':'UNAUTHENTICATED',version:VERSION},auth?.user?403:401);
+  if (!paymentsConfigured(env)) return json({ok:false,error:'PAYMENT_PROVIDER_NOT_CONFIGURED',version:VERSION,write_enabled:false},503);
   await ensurePaymentSchema(env);
   const body=await readJson(request);
   const missionId=clean(body?.mission_id), clientId=clean(body?.client_id), intervenantId=clean(body?.intervenant_id);
@@ -973,7 +966,7 @@ export async function reservePayoutAtomically(env, input) {
   return { ok: inserted && debited, reason: inserted && debited ? null : 'NOT_RESERVED' };
 }
 
-async function payoutRequest(request, env) {
+export async function payoutRequest(request, env) {
   const auth = await getSessionUser(request, env);
   if (!requireRole(auth, ['intervenant'])) return json({ok:false,error:auth?.user?'FORBIDDEN':'UNAUTHENTICATED',version:VERSION}, auth?.user ? 403 : 401);
   await ensurePaymentSchema(env);
