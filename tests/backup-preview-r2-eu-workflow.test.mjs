@@ -83,3 +83,10 @@ test("Preview R2 backup refuses to reuse an object key or reuse the encryption s
   assert.match(workflow, /aws s3api list-objects-v2/);
   assert.match(workflow, /refusing to overwrite an earlier attestation/);
 });
+
+test("Preview R2 attestation summary uses printf and a single grouped append", () => {
+  const summary = workflow.slice(workflow.indexOf("Record non-secret backup attestation evidence"));
+  assert.match(summary, /printf 'Preview R2 object: .*%s.*\\\\n'/);
+  assert.match(summary, /\\} >> "\\$GITHUB_STEP_SUMMARY"/);
+  assert.doesNotMatch(summary, /echo .*\x60\$\\(/);
+});
