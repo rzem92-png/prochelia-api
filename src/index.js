@@ -1865,7 +1865,7 @@ async function complaintCreate(request, env) {
   const caseJson=await caseResponse.json();
   if(!caseResponse.ok) return json({ok:false,error:caseJson.error||'CASE_CREATION_FAILED',version:VERSION},caseResponse.status);
   await env.DB.prepare(`INSERT INTO complaints(id,client_type,client_id,company_id,mission_id,category,severity,description,resolution_case_id) VALUES(?,?,?,?,?,?,?,?,?)`)
-    .bind(id,String(b.client_type|| (gate.auth.user.role==='client'?'B2C':'B2B')),scope.client_id,scope.company_id,scope.mission_id,b.category,String(b.severity||'LOW'),b.description||null,caseJson.case_id||null).run();
+    .bind(id,gate.auth.user.role==='gerante' && ['B2C','B2B'].includes(String(b.client_type||'').toUpperCase()) ? String(b.client_type).toUpperCase() : 'B2C',scope.client_id,scope.company_id,scope.mission_id,b.category,String(b.severity||'LOW'),b.description||null,caseJson.case_id||null).run();
   return json({ok:true,version:VERSION,complaint_id:id,resolution_case_id:caseJson.case_id||null,copilot:caseJson.recommendation||null},201);
 }
 
