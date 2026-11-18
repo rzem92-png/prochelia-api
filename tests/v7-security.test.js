@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createHmac } from "node:crypto";
 import { handleV7Route } from "../src/v7-routes.js";
-import { directoryList, resolveMissionSecurityAssignment, findAssignedMissionSecurity, isMissionPresenceFresh, isTrustedDeviceActive, hmacSha256Base64url, isSameMissionPaymentRequest, paymentsConfigured } from "../src/index.js";
+import { directoryList, resolveMissionSecurityAssignment, findAssignedMissionSecurity, isMissionPresenceFresh, isTrustedDeviceActive, hmacSha256Base64url, isSameMissionPaymentRequest, paymentsConfigured, supportAutoResolve } from "../src/index.js";
 
 const post = (path, body) => new Request("https://example.test" + path, {
   method: "POST",
@@ -240,4 +240,20 @@ test("real payout reservations remain disabled until a PSP adapter is implemente
   assert.equal(paymentsConfigured({PAYMENT_PROVIDER:"stripe",PAYMENT_WEBHOOK_SECRET:"x".repeat(48)}),false);
   assert.equal(paymentsConfigured({PAYMENT_PROVIDER:"psp_adapter"}),false);
   assert.equal(paymentsConfigured({}),false);
+});
+
+
+test("support auto-resolution ignores caller-supplied execution_verified and remains open pending server evidence", async () => {
+  const calls=[];
+  const DB={prepare(sql){return {bind(...values){return {async run(){calls.push({sql,values});return {success:true};}}};}}};
+  const result=await supportAutoResolve({DB},"synthetic-case","synthetic-user","client","DELAY_LIGHT",{execution_verified:true});
+  assert.equal(result.status,"WAITING_ACTION");
+  assert.equal(result.closed,false);
+  assert.equal(result.reason,"NO_SERVER_VERIFIED_DOWNSTREAM_ACTION");
+  const update=calls.find(call=>call.sql.includes("UPDATE support_cases"));
+  assert.ok(update);
+  assert.match(update.sql,/status='WAITING_ACTION'/);
+  assert.doesNotMatch(update.sql,/status='RESOLVED'/);
+  assert.ok(calls.some(call=>call.sql.includes("INSERT INTO support_case_events")));
+  assert.ok(calls.some(call=>call.sql.includes("INSERT INTO journal")));
 });
