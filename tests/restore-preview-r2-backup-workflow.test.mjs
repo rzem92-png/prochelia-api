@@ -76,7 +76,7 @@ test("Restore refuses to reuse the encryption secret as the HMAC attestation key
 });
 test("HMAC restore can be manually dispatched from its reviewed attestation branch", () => {
   assert.ok(workflow.includes("github.ref == 'refs/heads/fix/r2-preview-backup-signed-attestation-2026-11-18'"));
-  assert.ok(workflow.includes("refs/heads/fix/r2-preview-backup-signed-attestation-2026-11-18|"));
+  assert.ok(workflow.includes("refs/heads/fix/r2-preview-backup-signed-attestation-2026-11-18) ;;"));
   assert.match(workflow, /RESTORE_DB_ID.*!=.*PRODUCTION_DB_ID/);
   assert.match(workflow, /Confirm isolated restore database is empty before any remote write/);
 });
