@@ -46,15 +46,15 @@ test("Preview deployment preserves and validates the current Worker CORS allowli
   assert.match(generator, /process\.env\.PAGES_EXISTING_CORS_ORIGINS/);
 });
 
-test("Preview deployment requires the Pages deployment SHA to equal the current GitHub frontend branch tip", () => {
+test("Preview deployment requires an exact frontend Pages commit SHA", () => {
   assert.ok(workflow.includes("pages_commit_sha:"));
+  assert.ok(workflow.includes("required: true"));
   assert.ok(workflow.includes("PAGES_EXPECTED_COMMIT: ${{ inputs.pages_commit_sha || '' }}"));
-  assert.ok(workflow.includes("pages_commit_sha must be an exact 40-character lowercase Git SHA"));
-  assert.ok(workflow.includes('[[ -n "$PAGES_EXPECTED_COMMIT" && ! "$PAGES_EXPECTED_COMMIT" =~ ^[0-9a-f]{40}$ ]]'));
-  assert.ok(workflow.includes("https://api.github.com/repos/rzem92-png/-prochelia/commits"));
-  assert.ok(workflow.includes('--data-urlencode "sha=$pages_branch"'));
-  assert.ok(workflow.includes("frontend_head"));
-  assert.ok(workflow.includes('"$frontend_head" == "$pages_commit"'));
+  assert.ok(workflow.includes("pages_commit_sha is required and must be an exact 40-character lowercase Git SHA"));
+  assert.ok(workflow.includes('[[ "$PAGES_EXPECTED_COMMIT" =~ ^[0-9a-f]{40}$ ]]'));
+  assert.ok(workflow.includes('($expected == "" or .result.deployment_trigger.metadata.commit_hash == $expected)') === false);
+  assert.ok(workflow.includes('.result.deployment_trigger.metadata.commit_hash == $expected'));
+  assert.ok(!workflow.includes("api.github.com/repos/rzem92-png/-prochelia/commits"));
 });
 
 test("Preview deploy pins isolated Worker and Preview D1, never Production", () => {
