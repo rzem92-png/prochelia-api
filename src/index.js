@@ -1061,6 +1061,29 @@ function constantTimeStringEqual(actual, expected) {
 export async function verifyWebhookSignature(request, env, rawBody) {
   const secret = env?.PAYMENT_WEBHOOK_SECRET;
   if (typeof secret !== 'string' || !secret) return false;
+
+  // Stripe signs the exact raw request body with a timestamped v1 HMAC.
+  // If the native header is present, never fall back to the generic header.
+  const stripeHeader = request.headers.get('stripe-signature');
+  if (stripeHeader !== null) {
+    const fields = stripeHeader.split(',').map(part => part.trim().split('=', 2));
+    const timestamps = fields.filter(([name]) => name === 't').map(([, value]) => value);
+    const signatures = fields.filter(([name]) => name === 'v1').map(([, value]) => value);
+    if (timestamps.length !== 1 || !/^\d{1,12}$/.test(timestamps[0] || '') ||
+        signatures.length === 0 || signatures.some(value => !/^[0-9a-f]{64}$/i.test(value || ''))) return false;
+
+    const timestamp = Number(timestamps[0]);
+    const now = Math.floor(Date.now() / 1000);
+    const tolerance = 300;
+    if (!Number.isSafeInteger(timestamp) || Math.abs(now - timestamp) > tolerance) return false;
+
+    const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+    const signedPayload = new TextEncoder().encode(timestamps[0] + '.' + rawBody);
+    const mac = new Uint8Array(await crypto.subtle.sign('HMAC', key, signedPayload));
+    const expected = Array.from(mac, byte => byte.toString(16).padStart(2, '0')).join('');
+    return signatures.some(signature => constantTimeStringEqual(signature.toLowerCase(), expected));
+  }
+
   const signature = request.headers.get('x-prochelia-signature') || request.headers.get('x-webhook-signature') || '';
   const supplied = signature.startsWith('sha256=') ? signature.slice(7) : signature;
   if (!/^[A-Za-z0-9_-]{43}$/.test(supplied)) return false;
