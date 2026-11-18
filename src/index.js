@@ -646,6 +646,16 @@ async function securityPrepareMission(request, env) {
   return json({ok:true,version:VERSION,mission_id:missionId,status:'prepared',arrival:{expires_at:arrivalExpiry},end:{expires_at:endExpiry},delivery:{channel:delivery.channel,delivered:true},security_note:'Les codes en clair ne sont jamais renvoyés par l’API.'},201);
 }
 
+export async function findAssignedMissionSecurity(env, missionId, userId) {
+  if (!env?.DB || !missionId || !userId) return null;
+  return env.DB.prepare(`
+    SELECT ms.* FROM mission_security ms
+    JOIN intervenants i ON i.id = ms.intervenant_id
+    WHERE ms.mission_id = ? AND i.user_id = ?
+    LIMIT 1
+  `).bind(missionId, userId).first();
+}
+
 async function securityPresence(request, env) {
   const auth=await getSessionUser(request,env);
   if(!requireRole(auth,['intervenant'])) return json({ok:false,error:auth?.user?'FORBIDDEN':'UNAUTHENTICATED',version:VERSION},auth?.user?403:401);
@@ -654,12 +664,7 @@ async function securityPresence(request, env) {
   if(!identity) return json({ok:false,error:'INTERVENANT_IDENTITY_NOT_VERIFIED',version:VERSION},403);
   const body=await readJson(request), missionId=clean(body?.mission_id);
   if(!missionId) return json({ok:false,error:'MISSION_ID_REQUIRED',version:VERSION},400);
-  const sec=await env.DB.prepare(`
-    SELECT ms.* FROM mission_security ms
-    JOIN intervenants i ON i.id = ms.intervenant_id
-    WHERE ms.mission_id = ? AND i.user_id = ?
-    LIMIT 1
-  `).bind(missionId,auth.user.id).first();
+  const sec=await findAssignedMissionSecurity(env, missionId, auth.user.id);
   if(!sec) return json({ok:false,error:'MISSION_NOT_ASSIGNED_OR_NOT_PREPARED',version:VERSION},404);
   const device=await deviceHash(request,auth.user.id);
   await env.DB.prepare(`INSERT INTO trusted_devices (id,user_id,device_hash,expires_at) VALUES (?,?,?,datetime('now',?)) ON CONFLICT(user_id,device_hash) DO UPDATE SET last_seen_at=CURRENT_TIMESTAMP,expires_at=excluded.expires_at,status='active'`)
@@ -697,7 +702,7 @@ async function securityVerifyCode(request, env) {
   await ensureSecuritySchema(env);
   const body=await readJson(request), missionId=clean(body?.mission_id), purpose=clean(body?.purpose), code=clean(body?.code);
   if(!missionId||!['ARRIVAL','END'].includes(purpose)||!/^[0-9]{6}$/.test(code)) return json({ok:false,error:'INVALID_SECURITY_CODE_REQUEST',version:VERSION},400);
-  const sec=await env.DB.prepare('SELECT * FROM mission_security WHERE mission_id=? AND intervenant_id=? LIMIT 1').bind(missionId,auth.user.id).first();
+  const sec=await findAssignedMissionSecurity(env, missionId, auth.user.id);
   if(!sec) return json({ok:false,error:'MISSION_NOT_ASSIGNED_OR_NOT_PREPARED',version:VERSION},404);
   const identity = await requireVerifiedIntervenant(env, auth.user.id);
   if(!identity) {
