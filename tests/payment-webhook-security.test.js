@@ -16,25 +16,25 @@ test("webhook signature rejects requests when no secret is configured", async ()
 
 test("webhook signature rejects a missing signature", async () => {
   const request = new Request("https://example.test/api/payments/webhook", { method: "POST" });
-  assert.equal(await verifyWebhookSignature(request, { PAYMENT_WEBHOOK_SECRET: secret }, payload), false);
+  assert.equal(await verifyWebhookSignature(request, { STRIPE_WEBHOOK_SECRET: secret }, payload), false);
 });
 
 test("webhook signature rejects malformed and incorrect signatures", async () => {
   for (const signature of ["bad", "sha256=bad", "A".repeat(43)]) {
     const request = new Request("https://example.test/api/payments/webhook", { method: "POST", headers: { "x-prochelia-signature": signature } });
-    assert.equal(await verifyWebhookSignature(request, { PAYMENT_WEBHOOK_SECRET: secret }, payload), false);
+    assert.equal(await verifyWebhookSignature(request, { STRIPE_WEBHOOK_SECRET: secret }, payload), false);
   }
 });
 
 test("webhook signature accepts the exact HMAC-SHA256 base64url digest", async () => {
   const request = new Request("https://example.test/api/payments/webhook", { method: "POST", headers: { "x-prochelia-signature": sign() } });
-  assert.equal(await verifyWebhookSignature(request, { PAYMENT_WEBHOOK_SECRET: secret }, payload), true);
+  assert.equal(await verifyWebhookSignature(request, { STRIPE_WEBHOOK_SECRET: secret }, payload), true);
 });
 
 test("webhook signature accepts the sha256= prefix and rejects a changed payload", async () => {
   const request = new Request("https://example.test/api/payments/webhook", { method: "POST", headers: { "x-webhook-signature": `sha256=${sign()}` } });
-  assert.equal(await verifyWebhookSignature(request, { PAYMENT_WEBHOOK_SECRET: secret }, payload), true);
-  assert.equal(await verifyWebhookSignature(request, { PAYMENT_WEBHOOK_SECRET: secret }, payload + " "), false);
+  assert.equal(await verifyWebhookSignature(request, { STRIPE_WEBHOOK_SECRET: secret }, payload), true);
+  assert.equal(await verifyWebhookSignature(request, { STRIPE_WEBHOOK_SECRET: secret }, payload + " "), false);
 });
 
 const stripeRequest = (body = payload, timestamp = Math.floor(Date.now() / 1000), extraSignatures = []) => {
@@ -46,27 +46,27 @@ const stripeRequest = (body = payload, timestamp = Math.floor(Date.now() / 1000)
 };
 
 test("Stripe native v1 signature accepts the exact raw body within the five-minute tolerance", async () => {
-  assert.equal(await verifyWebhookSignature(stripeRequest(), { PAYMENT_WEBHOOK_SECRET: secret }, payload), true);
+  assert.equal(await verifyWebhookSignature(stripeRequest(), { STRIPE_WEBHOOK_SECRET: secret }, payload), true);
 });
 
 test("Stripe native signature supports multiple v1 signatures during secret rotation", async () => {
   const request = stripeRequest(payload, Math.floor(Date.now() / 1000), ["0".repeat(64)]);
-  assert.equal(await verifyWebhookSignature(request, { PAYMENT_WEBHOOK_SECRET: secret }, payload), true);
+  assert.equal(await verifyWebhookSignature(request, { STRIPE_WEBHOOK_SECRET: secret }, payload), true);
 });
 
 test("Stripe native signature rejects altered payloads and stale or future timestamps", async () => {
   const now = Math.floor(Date.now() / 1000);
   const request = stripeRequest();
-  assert.equal(await verifyWebhookSignature(request, { PAYMENT_WEBHOOK_SECRET: secret }, payload + " "), false);
-  assert.equal(await verifyWebhookSignature(stripeRequest(payload, now - 301), { PAYMENT_WEBHOOK_SECRET: secret }, payload), false);
-  assert.equal(await verifyWebhookSignature(stripeRequest(payload, now + 301), { PAYMENT_WEBHOOK_SECRET: secret }, payload), false);
+  assert.equal(await verifyWebhookSignature(request, { STRIPE_WEBHOOK_SECRET: secret }, payload + " "), false);
+  assert.equal(await verifyWebhookSignature(stripeRequest(payload, now - 301), { STRIPE_WEBHOOK_SECRET: secret }, payload), false);
+  assert.equal(await verifyWebhookSignature(stripeRequest(payload, now + 301), { STRIPE_WEBHOOK_SECRET: secret }, payload), false);
 });
 
 test("Stripe native signature rejects malformed and duplicate timestamps", async () => {
   const digest = createHmac("sha256", secret).update(String(Math.floor(Date.now() / 1000)) + "." + payload).digest("hex");
   for (const header of ["t=abc,v1=" + digest, "t=1,t=2,v1=" + digest, "t=" + Math.floor(Date.now() / 1000) + ",v1=bad"]) {
     const request = new Request("https://example.test/api/payments/webhook", { method: "POST", headers: { "stripe-signature": header } });
-    assert.equal(await verifyWebhookSignature(request, { PAYMENT_WEBHOOK_SECRET: secret }, payload), false);
+    assert.equal(await verifyWebhookSignature(request, { STRIPE_WEBHOOK_SECRET: secret }, payload), false);
   }
 });
 
@@ -75,5 +75,11 @@ test("invalid Stripe native header cannot fall back to a valid generic signature
     method: "POST",
     headers: { "stripe-signature": "t=bad,v1=" + "0".repeat(64), "x-prochelia-signature": sign() }
   });
+  assert.equal(await verifyWebhookSignature(request, { STRIPE_WEBHOOK_SECRET: secret }, payload), false);
+});
+
+
+test("Stripe native signature requires a dedicated Stripe secret", async () => {
+  const request = stripeRequest();
   assert.equal(await verifyWebhookSignature(request, { PAYMENT_WEBHOOK_SECRET: secret }, payload), false);
 });
