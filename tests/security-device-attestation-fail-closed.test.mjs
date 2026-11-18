@@ -109,7 +109,8 @@ test("mission trust routes do not create trusted_devices or update mission_secur
   const checks = [
     ["export async function securityPresence", "\nexport async function consumeMissionSecurityCode"],
     ["export async function securityVerifyCode", "\nasync function securityResendCodes"],
-    ["export async function securityPrepareMission", "\nexport function isMissionPresenceFresh"]
+    ["export async function securityPrepareMission", "\nexport function isMissionPresenceFresh"],
+    ["export async function securityResendCodes", "\nasync function securityClientCode"]
   ];
   for (const [startMarker, endMarker] of checks) {
     const start = source.indexOf(startMarker);
