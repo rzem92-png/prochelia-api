@@ -493,7 +493,7 @@ jobs:
           python3 - "$response" <<'PY'
           import json, pathlib, sys
           columns={row["name"] for row in json.loads(pathlib.Path(sys.argv[1]).read_text())["result"][0]["results"]}
-          required={"revoked_at","revoked_reason","revoked_by_user_id","last_seen_at"}
+          required={"revoked_at","revoked_reason","revoked_by_user_id","last_seen_at","active_tenant_id"}
           if not required <= columns:
             print("::error::Session revocation columns are missing:", sorted(required-columns))
             raise SystemExit(1)
