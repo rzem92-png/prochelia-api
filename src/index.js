@@ -3039,12 +3039,10 @@ export async function financeRowsForUser(env, user) {
     where = '1=1';
   } else if (role === 'INTERVENANT') {
     const profile = await env.DB.prepare('SELECT id FROM intervenants WHERE user_id=? LIMIT 1').bind(uid).first();
-    where = 'intervenant_id=?';
-    params.push(profile?.id || '__NO_VERIFIED_INTERVENANT_PROFILE__');
+    if (profile?.id) { where = 'intervenant_id=?'; params.push(profile.id); }
   } else if (['CLIENT','CLIENT_SOCIAL'].includes(role)) {
     const profile = await env.DB.prepare('SELECT id FROM clients WHERE user_id=? LIMIT 1').bind(uid).first();
-    where = 'client_id=?';
-    params.push(profile?.id || '__NO_VERIFIED_CLIENT_PROFILE__');
+    if (profile?.id) { where = 'client_id=?'; params.push(profile.id); }
   }
   // Company/support aliases have no verified company_id in payment_transactions.
   // They receive no payment rows rather than falling back to user_id as a tenant ID.
