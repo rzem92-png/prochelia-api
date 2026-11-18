@@ -1638,11 +1638,14 @@ async function getOperationsDashboard(request, env) {
     complaints:"SELECT COUNT(*) AS n FROM complaints WHERE status NOT IN ('RESOLVED','CLOSED')",
     commercial:"SELECT COUNT(*) AS n FROM commercial_tasks WHERE status='OPEN'",
     recruitment:"SELECT COUNT(*) AS n FROM recruitment_tasks WHERE status='OPEN'",
-    notifications:"SELECT COUNT(*) AS n FROM notification_outbox WHERE status='PENDING'",
-    ledger:"SELECT COALESCE(SUM(CASE WHEN direction='CREDIT' THEN amount_cents ELSE -amount_cents END),0) AS n FROM accounting_ledger"
+    notifications:"SELECT COUNT(*) AS n FROM notification_outbox WHERE status='PENDING'"
   };
   const out={}; for(const [k,q] of Object.entries(queries)){const r=await env.DB.prepare(q).first();out[k]=Number(r?.n||0);}
-  return json({ok:true,version:VERSION,phase:await getSetting(env,'project_phase','TEST'),automation:'simple_low_impact_auto_sensitive_manager',dashboard:out},200);
+  out.legacy_auto_cases = out.auto_cases;
+  delete out.auto_cases;
+  out.finance_status = 'TENANT_SCOPED_FINANCE_NOT_READY';
+  out.ledger_balance = null;
+  return json({ok:true,version:VERSION,phase:await getSetting(env,'project_phase','TEST'),automation:'proposal_only_fail_closed_pending_tenant_ownership',dashboard:out},200);
 }
 
 async function getJournal(request, env) {
