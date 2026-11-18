@@ -127,3 +127,12 @@ Ajouter pour chaque passage : date/heure UTC, ressources et SHA observés, actio
 
 ### Décision
 **NO-GO maintenu.** Aucun merge, aucune migration distante, aucun changement de Production et aucun paiement réel. Les validations comptables, juridiques, fiscales, DPO et bancaires restent à effectuer par les professionnels et responsables habilités.
+## Rectification après relecture des workflows PR #288 et #290 — 18 novembre 2026
+
+- PR #288, branche `fix/r2-preview-backup-signed-attestation-2026-11-18` : le workflow de backup contient maintenant le contrôle de la règle R2 EU `/lock` sur le préfixe exact `preview-d1/${EXPECTED_DB_NAME}/`, compare la durée à la variable `R2_EXPECTED_RETENTION_SECONDS`, et vérifie le manifeste HMAC, les empreintes chiffrée/déchiffrée et le round-trip SQLite local. Le dernier run connu #44302717496 s'était arrêté avant export parce que la variable de rétention était vide. Il ne prouve donc ni backup runtime ni restauration distante isolée.
+- Le workflow distinct `restore-preview-r2-backup-isolated-test.yml` de #288 cible une D1 de validation séparée et vérifie l'attestation avant restauration. Son existence dans le dépôt n'est pas une preuve d'exécution réussie ; il doit être exécuté explicitement après configuration des secrets et validation humaine.
+- PR #290, branche `feat/accounting-double-entry-ledger-2026-11-18` : le workflow de migration compare les 26 migrations et le schéma distant à la baseline 23 et à la cible 26. Il ne consomme toutefois pas le manifeste HMAC de #288, ne vérifie pas lui-même l'Object Lock/la rétention R2, et n'exécute pas une restauration distante isolée avant l'écriture Preview.
+- Les PR #288 et #290 ont reçu des commentaires détaillant ces constats et les gates manquants (commentaires #6980160278 et #6980161651).
+- Gate bloquant : ne pas déclencher `APPLY_PREVIEW_ONLY` tant que le workflow de migration ne lie pas explicitement une attestation HMAC vérifiée, une règle de rétention approuvée sur le préfixe exact et une restauration isolée réussie au backup utilisé.
+
+Décision inchangée : aucun merge, aucune migration distante, aucun changement Production et aucun paiement réel.
