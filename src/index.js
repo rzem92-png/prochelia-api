@@ -1767,7 +1767,7 @@ async function pricingQuote(request, env) {
   return json({ok:true,version:VERSION,quote},200);
 }
 
-async function financeSummary(request, env) {
+export async function financeSummary(request, env) {
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
   // Fail closed: current aggregates are global and are not scoped to a verified
   // tenant, accounting period or currency. Do not expose them as company finance.
