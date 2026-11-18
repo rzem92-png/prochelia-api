@@ -22,8 +22,8 @@ test("synthetic Preview E2E can be manually dispatched from its dedicated PR bra
 test("Preview E2E resolves the latest Pages Preview deployment instead of stale hardcoded IDs", () => {
   assert.match(workflow, /PREVIEW_DB_ID: e3cf167c-37e1-4d72-9ac6-b3e27c14b97f/);
   assert.match(workflow, /PAGES_PREVIEW_BRANCH:/);
-  assert.match(workflow, /PAGES_EXPECTED_COMMIT: \$\{\{ inputs\.pages_commit_sha \|\| '' \}\}/);
-  assert.match(workflow, /\(\$expected == "" or \.result\.deployment_trigger\.metadata\.commit_hash == \$expected\)/);
+  assert.ok(workflow.includes("PAGES_EXPECTED_COMMIT: ${{ inputs.pages_commit_sha || '' }}"));
+  assert.ok(workflow.includes('.result.deployment_trigger.metadata.commit_hash == $expected'));
   assert.doesNotMatch(workflow, /579679da7ca3a68b91448a85e7151bda5794a155/);
   assert.match(workflow, /pages\/projects\/prochelia\/deployments\?env=preview&per_page=1&page=1/);
   assert.match(workflow, /\.result\[0\]\.id/);
