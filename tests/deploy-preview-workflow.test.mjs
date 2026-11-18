@@ -174,3 +174,19 @@ test("Preview config generator rejects a missing or malformed API commit SHA", a
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+test("Preview deploy captures the prior active version and verifies the new active version and bindings after deployment", () => {
+  const capture = workflow.indexOf("Capture current active Preview Worker version before deployment");
+  const deploy = workflow.indexOf("Deploy ONLY the isolated Preview Worker");
+  const verify = workflow.indexOf("Verify deployed Preview Worker version, bindings and commit read-back");
+  const summary = workflow.indexOf("Record deployment guardrails");
+  assert.ok(capture >= 0 && deploy > capture && verify > deploy && summary > verify);
+  assert.match(workflow, /PREVIEW_PREVIOUS_VERSION_ID=/);
+  assert.match(workflow, /workers\/scripts\/prochelia-api-preview\/deployments\?per_page=1&page=1/);
+  assert.match(workflow, /workers\/scripts\/prochelia-api-preview\/settings/);
+  assert.match(workflow, /workers\/scripts\/prochelia-api-preview\/versions\/\$active_version/);
+  assert.match(workflow, /PROCHELIA_COMMIT_SHA/);
+  assert.match(workflow, /prochelia-preview-backups-eu-v2/);
+  assert.match(workflow, /e3cf167c-37e1-4d72-9ac6-b3e27c14b97f/);
+  assert.match(workflow, /jurisdiction !== "eu"/);
+});
