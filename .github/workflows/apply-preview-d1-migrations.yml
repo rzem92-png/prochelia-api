@@ -305,12 +305,29 @@ jobs:
               print(f"::error::Expected exactly 26 canonical migrations; found {len(local)}.")
               raise SystemExit(1)
           non_internal=[row for row in objects if row["name"] not in {"_cf_KV","d1_migrations"} and not row["name"].startswith("sqlite_")]
+          import sqlite3
+          def schema_for(names):
+              db=sqlite3.connect(":memory:")
+              db.execute("PRAGMA foreign_keys=ON")
+              for name in sorted(names):
+                  db.executescript((pathlib.Path("migrations-preview-canonical") / name).read_text())
+              violations=db.execute("PRAGMA foreign_key_check").fetchall()
+              if violations:
+                  raise SystemExit(f"Canonical local schema has foreign-key violations: {violations[:10]}")
+              result={(row[0],row[1]) for row in db.execute(
+                  "SELECT type,name FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY type,name"
+              ) if row[1] not in {"d1_migrations","_cf_KV"}}
+              db.close()
+              return result
+          remote_schema={(row["type"],row["name"]) for row in non_internal}
+          base_schema=schema_for(base)
+          target_schema=schema_for(local)
           if not remote and not non_internal:
               print("PASS: new EU Preview D1 is empty; all 26 canonical migrations are pending.")
-          elif registry_present and remote == base:
-              print("PASS: exact 23-entry reviewed Preview baseline found; only the three additive migrations 0023-0025 are pending.")
-          elif registry_present and remote == local:
-              print("PASS: exact 26-entry canonical migration registry is already applied; rerun is idempotent.")
+          elif registry_present and remote == base and remote_schema == base_schema:
+              print("PASS: exact 23-entry registry AND exact schema inventory match the reviewed Preview baseline; only migrations 0023-0025 are pending.")
+          elif registry_present and remote == local and remote_schema == target_schema:
+              print("PASS: exact 26-entry registry AND exact schema inventory match the canonical target; rerun is idempotent.")
           else:
               print("::error::Preview migration registry differs from the exact reviewed 23-entry baseline and 26-entry target; no migration will run.")
               print("Unexpected remote names:", ", ".join(sorted(remote-local)) or "(none)")
@@ -466,7 +483,7 @@ jobs:
             raise SystemExit(1)
           print("PASS: 7 accounting/tenant tables, 14 indexes and 18 immutability/scope triggers verified.")
           PY
-          jq -n '{sql:"PRAGMA table_info(sessions)",params:[]}' > "$request"
+          jq -n '{sql:"SELECT name FROM pragma_table_info('"'"'sessions'"'"')",params:[]}' > "$request"
           status="$(curl --silent --show-error --output "$response" --write-out '%{http_code}' \
             -X POST -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
             -H "Content-Type: application/json" --data-binary @"$request" \
