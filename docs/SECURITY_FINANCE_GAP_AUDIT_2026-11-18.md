@@ -55,7 +55,7 @@ La table `business_expenses` ne porte pas de `tenant_id` ni d'entité juridique.
 
 Le tableau de synthèse existant agrège globalement transactions, dépenses et lignes de ledger, sans périmètre d'entreprise, de période ou de devise. Une ligne isolée ne constitue pas une écriture comptable équilibrée.
 
-**Décision de sûreté :** la branche de garde-fous retourne désormais 503 pour les synthèses financières non scindées par tenant. Les actions d'outbox comptables sont bloquées tant qu'un journal équilibré, idempotent, réversible et approuvé n'existe pas. Aucune écriture ou déclaration comptable n'est autorisée par Nexus Supra.
+**Décision de sûreté :** la branche PR 287 retourne 503 pour la synthèse, le dashboard, les exports, les écritures manuelles et la création/résolution des problèmes financiers tant que le périmètre tenant/entité/période/devise et les preuves comptables ne sont pas établis. Les actions d'outbox comptables sont également bloquées tant qu'un journal équilibré, idempotent, réversible et approuvé n'existe pas. Aucune écriture ou déclaration comptable n'est autorisée par Nexus Supra.
 
 Travail restant : entités juridiques séparées France/Algérie, plan de comptes et règles fiscales validés localement, pièces justificatives, partie double, écritures immuables et contrepassations, rapprochements bancaires/PSP, clôtures et exports réconciliés, revue d'expert-comptable.
 
