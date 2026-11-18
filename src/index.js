@@ -757,71 +757,27 @@ export async function securityStatus(request, env) {
    IMPORTANT : les fonds réels passent par un PSP agréé ; PROCHÉLIA
    conserve le ledger métier, les états, l'idempotence et l'audit.
 =============================================================== */
-async function ensurePaymentSchema(env) {
-  if (!env.DB) throw new Error('DATABASE_REQUIRED');
-  const statements = [
-    `CREATE TABLE IF NOT EXISTS payment_accounts (
-      id TEXT PRIMARY KEY, user_id TEXT NOT NULL UNIQUE, provider TEXT NOT NULL,
-      provider_account_id TEXT, status TEXT NOT NULL DEFAULT 'pending',
-      onboarding_status TEXT NOT NULL DEFAULT 'required',
-      payouts_enabled INTEGER NOT NULL DEFAULT 0,
-      charges_enabled INTEGER NOT NULL DEFAULT 0,
-      currency TEXT NOT NULL DEFAULT 'EUR',
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )`,
-    `CREATE TABLE IF NOT EXISTS wallets (
-      id TEXT PRIMARY KEY, user_id TEXT NOT NULL UNIQUE, currency TEXT NOT NULL DEFAULT 'EUR',
-      available_cents INTEGER NOT NULL DEFAULT 0, pending_cents INTEGER NOT NULL DEFAULT 0,
-      paid_cents INTEGER NOT NULL DEFAULT 0, reserved_cents INTEGER NOT NULL DEFAULT 0,
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )`,
-    `CREATE TABLE IF NOT EXISTS payment_transactions (
-      id TEXT PRIMARY KEY, idempotency_key TEXT NOT NULL UNIQUE, mission_id TEXT,
-      client_id TEXT, intervenant_id TEXT, type TEXT NOT NULL, status TEXT NOT NULL,
-      gross_cents INTEGER NOT NULL DEFAULT 0, commission_cents INTEGER NOT NULL DEFAULT 0,
-      provider_fee_cents INTEGER NOT NULL DEFAULT 0, refund_cents INTEGER NOT NULL DEFAULT 0,
-      net_intervenant_cents INTEGER NOT NULL DEFAULT 0, currency TEXT NOT NULL DEFAULT 'EUR',
-      provider TEXT, provider_payment_id TEXT, provider_payout_id TEXT,
-      reason TEXT, metadata_json TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )`,
-    `CREATE INDEX IF NOT EXISTS idx_payment_tx_mission ON payment_transactions(mission_id, created_at)`,
-    `CREATE INDEX IF NOT EXISTS idx_payment_tx_intervenant ON payment_transactions(intervenant_id, status, created_at)`,
-    `CREATE TABLE IF NOT EXISTS payout_requests (
-      id TEXT PRIMARY KEY, idempotency_key TEXT NOT NULL UNIQUE, wallet_id TEXT NOT NULL,
-      user_id TEXT NOT NULL, amount_cents INTEGER NOT NULL, currency TEXT NOT NULL DEFAULT 'EUR',
-      mode TEXT NOT NULL DEFAULT 'standard', status TEXT NOT NULL DEFAULT 'requested',
-      provider TEXT, provider_payout_id TEXT, failure_code TEXT, failure_message TEXT,
-      requested_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, completed_at TEXT,
-      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )`,
-    `CREATE INDEX IF NOT EXISTS idx_payout_user ON payout_requests(user_id, status, requested_at)`,
-    `CREATE TABLE IF NOT EXISTS payment_webhook_events (
-      id TEXT PRIMARY KEY, provider TEXT NOT NULL, event_id TEXT NOT NULL,
-      event_type TEXT NOT NULL, signature_valid INTEGER NOT NULL DEFAULT 0,
-      processed INTEGER NOT NULL DEFAULT 0, payload_hash TEXT, received_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      processed_at TEXT, UNIQUE(provider, event_id)
-    )`,
-    `CREATE TABLE IF NOT EXISTS payment_disputes (
-      id TEXT PRIMARY KEY, mission_id TEXT, transaction_id TEXT, client_id TEXT, intervenant_id TEXT,
-      status TEXT NOT NULL DEFAULT 'open', reason TEXT, amount_cents INTEGER NOT NULL DEFAULT 0,
-      resolution TEXT, resolved_at TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )`,
-    `CREATE TABLE IF NOT EXISTS payment_reconciliation (
-      id TEXT PRIMARY KEY, provider TEXT NOT NULL, external_id TEXT NOT NULL,
-      internal_transaction_id TEXT, internal_payout_id TEXT, amount_cents INTEGER,
-      currency TEXT, status TEXT NOT NULL DEFAULT 'unmatched', checked_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      UNIQUE(provider, external_id)
-    )`,
-    `CREATE TABLE IF NOT EXISTS payment_audit (
-      id TEXT PRIMARY KEY, event_type TEXT NOT NULL, transaction_id TEXT, payout_id TEXT,
-      mission_id TEXT, user_id TEXT, result TEXT NOT NULL, metadata_json TEXT,
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )`
+export async function paymentSchemaReady(env) {
+  // Runtime handlers must never create payment tables or indexes. The schema is
+  // provisioned only by an explicitly reviewed, versioned migration workflow.
+  if (!env?.DB) return false;
+  const requiredTables = [
+    'payment_accounts',
+    'wallets',
+    'payment_transactions',
+    'payout_requests',
+    'payment_webhook_events',
+    'payment_disputes',
+    'payment_reconciliation',
+    'payment_audit',
+    'payment_wallet_ledger'
   ];
-  for (const sql of statements) await env.DB.prepare(sql).run();
+  const placeholders = requiredTables.map(() => '?').join(',');
+  const result = await env.DB.prepare(
+    `SELECT name FROM sqlite_master WHERE type='table' AND name IN (${placeholders})`
+  ).bind(...requiredTables).all();
+  const present = new Set((result?.results || []).map(row => row.name));
+  return requiredTables.every(name => present.has(name));
 }
 
 function moneyCents(value) {
@@ -916,7 +872,7 @@ export async function createMissionPayment(request, env) {
   const auth=await getSessionUser(request,env);
   if(!requireRole(auth,['gerante'])) return json({ok:false,error:auth?.user?'FORBIDDEN':'UNAUTHENTICATED',version:VERSION},auth?.user?403:401);
   if (!paymentsConfigured(env)) return json({ok:false,error:'PAYMENT_PROVIDER_NOT_CONFIGURED',version:VERSION,write_enabled:false},503);
-  await ensurePaymentSchema(env);
+  if (!(await paymentSchemaReady(env))) return json({ok:false,error:'PAYMENT_SCHEMA_NOT_MIGRATED',version:VERSION,write_enabled:false},503);
   const body=await readJson(request);
   const missionId=clean(body?.mission_id), clientId=clean(body?.client_id), intervenantId=clean(body?.intervenant_id);
   const gross=moneyCents(body?.gross_eur), commission=moneyCents(body?.commission_eur);
@@ -1000,7 +956,7 @@ export async function payoutRequest(request, env) {
   const auth = await getSessionUser(request, env);
   if (!requireRole(auth, ['intervenant'])) return json({ok:false,error:auth?.user?'FORBIDDEN':'UNAUTHENTICATED',version:VERSION}, auth?.user ? 403 : 401);
   if (!paymentsConfigured(env)) return json({ok:false,error:'PAYOUT_PROVIDER_NOT_CONFIGURED',version:VERSION,write_enabled:false},503);
-  await ensurePaymentSchema(env);
+  if (!(await paymentSchemaReady(env))) return json({ok:false,error:'PAYMENT_SCHEMA_NOT_MIGRATED',version:VERSION,write_enabled:false},503);
   const body = await readJson(request);
   const amount = moneyCents(body?.amount_eur);
   const mode = clean(body?.mode) || 'standard';
@@ -1122,8 +1078,8 @@ export function requiresAtomicFinancialSettlement(eventType) {
 }
 
 export async function paymentWebhook(request, env) {
-  // Reject unauthenticated and malformed events before any D1 schema access.
-  // This prevents arbitrary callers from triggering CREATE TABLE/INDEX writes.
+  // Reject unauthenticated and malformed events before schema inspection.
+  // The schema gate below is read-only; migrations are never run from a request.
   const raw = await request.text();
   if (!(await verifyWebhookSignature(request, env, raw))) return json({ok:false,error:'INVALID_WEBHOOK_SIGNATURE',version:VERSION},401);
   let event;
@@ -1141,7 +1097,7 @@ export async function paymentWebhook(request, env) {
   if (requiresAtomicFinancialSettlement(type)) {
     return json({ok:false,error:'ATOMIC_SETTLEMENT_LEDGER_REQUIRED',version:VERSION,retryable:true},503);
   }
-  await ensurePaymentSchema(env);
+  if (!(await paymentSchemaReady(env))) return json({ok:false,error:'PAYMENT_SCHEMA_NOT_MIGRATED',version:VERSION,write_enabled:false},503);
   const payloadHash=await sha256Base64url(raw);
   const inserted=await env.DB.prepare(`INSERT OR IGNORE INTO payment_webhook_events (id,provider,event_id,event_type,signature_valid,payload_hash) VALUES (?,?,?,?,1,?)`).bind(crypto.randomUUID(),provider,eventId,type,payloadHash).run();
   if(!inserted.meta?.changes) {
@@ -1191,7 +1147,7 @@ export async function paymentWebhook(request, env) {
 async function openPaymentDispute(request, env) {
   const auth = await getSessionUser(request, env);
   if (!requireRole(auth, ['client','gerante'])) return json({ok:false,error:auth?.user?'FORBIDDEN':'UNAUTHENTICATED',version:VERSION}, auth?.user ? 403 : 401);
-  await ensurePaymentSchema(env);
+  if (!(await paymentSchemaReady(env))) return json({ok:false,error:'PAYMENT_SCHEMA_NOT_MIGRATED',version:VERSION,write_enabled:false},503);
   const body = await readJson(request);
   const missionId = clean(body?.mission_id);
   const reason = clean(body?.reason);
@@ -2625,7 +2581,7 @@ async function productionConfigCheck(env, { persist = false } = {}) {
   if (!env?.DB) throw new Error('DATABASE_REQUIRED');
   // Readiness GETs must inspect current state, not auto-create or mutate schema.
   if (persist) {
-    await ensureConsolidatedSchema(env); await ensurePaymentSchema(env); await ensureOperationalSchema(env); await ensureStrategicSchema(env); await ensureFinalHardeningSchema(env);
+    await ensureConsolidatedSchema(env); if (!(await paymentSchemaReady(env))) return json({ok:false,error:'PAYMENT_SCHEMA_NOT_MIGRATED',version:VERSION,write_enabled:false},503); await ensureOperationalSchema(env); await ensureStrategicSchema(env); await ensureFinalHardeningSchema(env);
   }
   const checks=[];
   const requiredTables=['users','sessions','missions','payment_transactions','payment_webhook_events','payment_disputes','operational_cases','action_outbox','notification_outbox','accounting_ledger','promotions','promotion_recommendations','activity_journal','compliance_events'];
