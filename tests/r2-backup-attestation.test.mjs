@@ -76,3 +76,13 @@ test("R2 backup attestation refuses short keys and non-EU or malformed provenanc
   value.source.jurisdiction = "us";
   assert.throws(() => validateManifest(value), /ATTESTATION_SOURCE_INVALID/);
 });
+
+test("R2 backup attestation rejects non-main provenance and malformed signatures", () => {
+  const value = manifest();
+  const signature = signManifest(value, key);
+  assert.equal(verifyManifest(value, "0".repeat(63), key), false);
+  const nonMain = manifest();
+  nonMain.provenance.ref = "refs/heads/fix/r2-preview-backup-signed-attestation-2026-11-18";
+  assert.throws(() => signManifest(nonMain, key), /ATTESTATION_PROVENANCE_INVALID/);
+  assert.equal(verifyManifest(value, signature, key), true);
+});
