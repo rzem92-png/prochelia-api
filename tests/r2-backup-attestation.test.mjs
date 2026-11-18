@@ -77,12 +77,16 @@ test("R2 backup attestation refuses short keys and non-EU or malformed provenanc
   assert.throws(() => validateManifest(value), /ATTESTATION_SOURCE_INVALID/);
 });
 
-test("R2 backup attestation rejects non-main provenance and malformed signatures", () => {
+test("R2 backup attestation accepts main and the exact reviewed Preview branch, but rejects all other refs", () => {
   const value = manifest();
   const signature = signManifest(value, key);
   assert.equal(verifyManifest(value, "0".repeat(63), key), false);
-  const nonMain = manifest();
-  nonMain.provenance.ref = "refs/heads/fix/r2-preview-backup-signed-attestation-2026-11-18";
-  assert.throws(() => signManifest(nonMain, key), /ATTESTATION_PROVENANCE_INVALID/);
+  const previewBranch = manifest();
+  previewBranch.provenance.ref = "refs/heads/fix/r2-preview-backup-signed-attestation-2026-11-18";
+  const previewSignature = signManifest(previewBranch, key);
+  assert.equal(verifyManifest(previewBranch, previewSignature, key), true);
+  const untrustedBranch = manifest();
+  untrustedBranch.provenance.ref = "refs/heads/attacker-controlled-branch";
+  assert.throws(() => signManifest(untrustedBranch, key), /ATTESTATION_PROVENANCE_INVALID/);
   assert.equal(verifyManifest(value, signature, key), true);
 });
