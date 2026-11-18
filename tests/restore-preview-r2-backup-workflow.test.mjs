@@ -56,3 +56,17 @@ test("Restore target is the newly provisioned empty EU-only validation database"
   assert.match(workflow, /RESTORE_DB_ID.*!=.*PRODUCTION_DB_ID/);
   assert.match(workflow, /Confirm isolated restore database is empty before any remote write/);
 });
+
+test("Restore requires and verifies the HMAC attestation before decrypting or writing D1", () => {
+  assert.match(workflow, /BACKUP_ATTESTATION_HMAC_KEY: \$\{\{ secrets\.BACKUP_ATTESTATION_HMAC_KEY \}\}/);
+  assert.match(workflow, /BACKUP_ATTESTATION_HMAC_KEY.*32 UTF-8 bytes/s);
+  assert.match(workflow, /\.attestation\.json/);
+  assert.match(workflow, /\.attestation\.hmac/);
+  const verify = workflow.indexOf("Verify HMAC attestation and exact Preview source before decryption");
+  const decrypt = workflow.indexOf("Decrypt, verify checksum and test local SQLite restoration");
+  const remoteWrite = workflow.indexOf("Restore only into the isolated D1 database");
+  assert.ok(verify >= 0 && decrypt > verify && remoteWrite > decrypt);
+  assert.match(workflow, /r2-backup-attestation\.mjs verify/);
+  assert.match(workflow, /cipher_expected/);
+  assert.match(workflow, /attested_plain/);
+});
