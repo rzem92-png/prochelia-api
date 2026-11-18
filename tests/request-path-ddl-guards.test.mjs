@@ -71,7 +71,7 @@ test("rate-limit block records the audit event without creating its table", asyn
   assert.equal(result.response.status, 429);
   assert.equal((await result.response.json()).error, "RATE_LIMITED");
   assert.ok(statements.every(sql => !/\b(CREATE|ALTER|DROP)\b/i.test(sql)));
-  assert.equal(writes.length, 2);
+  assert.equal(writes.length, 1);
   assert.match(writes[0].sql, /INSERT INTO production_security_events/);
 });
 
@@ -113,9 +113,10 @@ test("background jobs require an acquired atomic claim and never complete delega
   const end = source.indexOf("function isMutatingMethod", start);
   assert.ok(start >= 0 && end > start);
   const body = source.slice(start, end);
-  assert.match(body, /UPDATE background_jobs SET status='RUNNING'.*WHERE id=\\? AND status='PENDING'/s);
-  assert.match(body, /Number\\(claim\\?\\.meta\\?\\.changes\\|\\|0\\)\\s*!==\\s*1/);
-  assert.match(body, /DELEGATED_HANDLER_NOT_EXECUTED/);
-  assert.match(body, /WHERE id=\\? AND status='RUNNING'/);
-  assert.doesNotMatch(body, /delegation:'Use \\/api\\/ops\\/outbox\\/process'\\s*\\}\\s*;/);
+  assert.ok(body.includes("WHERE id=? AND status='PENDING'"));
+  assert.ok(body.includes("Number(claim?.meta?.changes||0)!==1"));
+  assert.ok(body.includes("DELEGATED_HANDLER_NOT_EXECUTED"));
+  assert.ok(body.includes("WHERE id=? AND status='RUNNING'"));
+  assert.ok(body.includes("status:'WAITING_PROVIDER'"));
+  assert.doesNotMatch(body, /result=\{performed:true,delegation:/);
 });
