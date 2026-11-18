@@ -61,6 +61,7 @@ jobs:
           done
           test "${#AWS_ACCESS_KEY_ID}" -eq 32 || { echo "::error::R2 S3 Access Key ID must be 32 characters."; exit 1; }
           test "${#BACKUP_ATTESTATION_HMAC_KEY}" -ge 32 || { echo "::error::BACKUP_ATTESTATION_HMAC_KEY must contain at least 32 UTF-8 bytes."; exit 1; }
+          test "$BACKUP_ATTESTATION_HMAC_KEY" != "$BACKUP_ENCRYPTION_KEY" || { echo "::error::Backup attestation and encryption keys must be distinct secrets."; exit 1; }
           if ! [[ "$BACKUP_OBJECT_KEY" =~ ^preview-d1/prochelia-preview-eu-2026-11-17/[0-9]{4}/[0-9]{2}/[0-9]{2}/[0-9]+-[0-9a-f]{12}\.sql\.gpg$ ]]; then
             echo "::error::Object key does not match the exact generated Preview backup key format."
             exit 1
