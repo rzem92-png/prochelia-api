@@ -258,6 +258,6 @@ try:
     """)
     raise AssertionError("Lowercase journal-line currency was incorrectly accepted")
 except sqlite3.IntegrityError as exc:
-    assert "CHECK constraint failed" in str(exc), str(exc)
+    assert "ACCOUNTING_LINE_CURRENCY_INVALID" in str(exc), str(exc)
 
 print("PASS: posted legal-entity and account classification metadata are immutable; account deactivation remains available; line currency is normalized.")
