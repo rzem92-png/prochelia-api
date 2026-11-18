@@ -2609,7 +2609,10 @@ async function finalProductionAudit(request,env) {
 
 async function copilotNextActions(request,env) {
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
-  await ensureConsolidatedSchema(env); await ensureOperationalSchema(env); await ensureStrategicSchema(env); await ensureFinalHardeningSchema(env);
+  const requiredTables=['platform_settings','operational_cases','promotion_recommendations','action_outbox'];
+  const missingTables=[];
+  for(const table of requiredTables) if(!await tableExists(env,table)) missingTables.push(table);
+  if(missingTables.length) return json({ok:false,error:'SUPRA_READ_MODEL_SCHEMA_NOT_READY',missing_tables:missingTables,version:VERSION},503);
   const phase=await getSetting(env,'project_phase','TEST');
   const items=[];
   const cases=await env.DB.prepare(`SELECT id,case_type,priority,status,impact_level,description,proposed_solution_json FROM operational_cases WHERE status NOT IN ('RESOLVED','CLOSED') ORDER BY priority DESC,created_at ASC LIMIT 30`).all();
@@ -2623,7 +2626,7 @@ async function copilotNextActions(request,env) {
 }
 
 async function enqueueBackgroundJob(env, jobType, payload={}, maxAttempts=5) {
-  await ensureFinalHardeningSchema(env);
+  if(!await tableExists(env,'background_jobs')) throw new Error('BACKGROUND_JOB_SCHEMA_NOT_READY');
   const id=crypto.randomUUID();
   await env.DB.prepare(`INSERT INTO background_jobs(id,job_type,payload_json,max_attempts) VALUES(?,?,?,?)`).bind(id,jobType,JSON.stringify(payload),maxAttempts).run();
   return id;
@@ -2631,7 +2634,9 @@ async function enqueueBackgroundJob(env, jobType, payload={}, maxAttempts=5) {
 
 async function processBackgroundJobs(request,env) {
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
-  await ensureFinalHardeningSchema(env); await ensureOperationalSchema(env);
+  const missingTables=[];
+  for(const table of ['background_jobs','activity_journal']) if(!await tableExists(env,table)) missingTables.push(table);
+  if(missingTables.length) return json({ok:false,error:'BACKGROUND_JOB_SCHEMA_NOT_READY',missing_tables:missingTables,version:VERSION},503);
   const rows=await env.DB.prepare(`SELECT * FROM background_jobs WHERE status='PENDING' AND run_after<=CURRENT_TIMESTAMP ORDER BY created_at LIMIT 25`).all();
   const results=[];
   for(const job of rows.results||[]) {
@@ -2640,7 +2645,7 @@ async function processBackgroundJobs(request,env) {
       let result={performed:false,reason:'JOB_TYPE_NOT_IMPLEMENTED'};
       const payload=JSON.parse(job.payload_json||'{}');
       if(job.job_type==='PROCESS_ACTION_OUTBOX') result={performed:true,delegation:'Use /api/ops/outbox/process'};
-      else if(job.job_type==='PRODUCTION_AUDIT') result=await productionConfigCheck(env,{persist:true});
+      else if(job.job_type==='PRODUCTION_AUDIT') result=await productionConfigCheck(env);
       else if(job.job_type==='COPILOT_BRIEFING') result={performed:true,delegation:'Use /api/copilot/briefing'};
       const done=result.performed===true || result.overall===true;
       await env.DB.prepare(`UPDATE background_jobs SET status=?,result_json=?,attempts=attempts+1,updated_at=CURRENT_TIMESTAMP,completed_at=? WHERE id=?`)
@@ -3467,23 +3472,14 @@ handle = async function(request,env){
    - traçabilité des blocages de sécurité
    ============================================================================ */
 
-async function productionSafetySchema(env){
-  if(!env.DB) throw new Error('DATABASE_REQUIRED');
-  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS production_security_events (
-    id TEXT PRIMARY KEY, event_type TEXT NOT NULL, route TEXT, subject_hash TEXT,
-    decision TEXT NOT NULL, details_json TEXT NOT NULL DEFAULT '{}',
-    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-  )`).run();
-  await env.DB.prepare(`CREATE INDEX IF NOT EXISTS idx_prod_sec_events_date ON production_security_events(event_type,created_at)`).run();
-}
-
 async function productionSubjectHash(request, route){
   const ip=clean(request.headers.get('CF-Connecting-IP')) || clean(request.headers.get('X-Forwarded-For')) || 'unknown';
   return sha256Hex(`${ip}|${route}`);
 }
 
-async function productionRateLimit(request,env){
+export async function productionRateLimit(request,env){
   if(!isMutatingMethod(request.method)) return {ok:true};
+  if(!env?.DB) return {ok:false,response:json({ok:false,error:'DATABASE_UNAVAILABLE',version:VERSION},503)};
   const path=new URL(request.url).pathname;
   const sensitive =
     path.startsWith('/api/auth/') ||
@@ -3499,7 +3495,12 @@ async function productionRateLimit(request,env){
   const subject=await productionSubjectHash(request,path);
   const now=Math.floor(Date.now()/1000);
   const start=new Date(Math.floor(now/windowSeconds)*windowSeconds*1000).toISOString();
-  await ensureFinalHardeningSchema(env);
+  // Schema must be provisioned by a reviewed migration; a request never creates it.
+  const schema=await env.DB.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name IN ('security_rate_limits','production_security_events')`).all();
+  const existingTables=new Set((schema.results||[]).map(x=>String(x.name)));
+  if(!existingTables.has('security_rate_limits')||!existingTables.has('production_security_events')){
+    return {ok:false,response:json({ok:false,error:'RATE_LIMIT_SCHEMA_NOT_READY',version:VERSION},503)};
+  }
   const existing=await env.DB.prepare(`SELECT request_count FROM security_rate_limits WHERE bucket=? AND subject_hash=? AND window_start=? LIMIT 1`).bind(bucket,subject,start).first();
   const count=Number(existing?.request_count||0)+1;
   if(existing){
@@ -3508,7 +3509,6 @@ async function productionRateLimit(request,env){
     await env.DB.prepare(`INSERT INTO security_rate_limits(id,bucket,subject_hash,window_start,request_count) VALUES(?,?,?,?,1)`).bind(crypto.randomUUID(),bucket,subject,start).run();
   }
   if(count>limit){
-    await productionSafetySchema(env);
     await env.DB.prepare(`INSERT INTO production_security_events(id,event_type,route,subject_hash,decision,details_json) VALUES(?,?,?,?,?,?)`)
       .bind(crypto.randomUUID(),'RATE_LIMIT',path,subject,'BLOCKED',JSON.stringify({limit,windowSeconds})).run();
     return {ok:false,response:json({ok:false,error:'RATE_LIMITED',version:VERSION,retry_after_seconds:Math.max(1,windowSeconds-(now%windowSeconds))},429,{'retry-after':String(Math.max(1,windowSeconds-(now%windowSeconds)))})};
