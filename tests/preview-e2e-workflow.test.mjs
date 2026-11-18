@@ -39,10 +39,14 @@ test("Preview E2E resolves the latest Pages Preview deployment instead of stale 
   assert.doesNotMatch(workflow, /PREVIEW_DB_ID: 04f52830-ef5a-4f17-a640-42bbc2381bba/);
 });
 
-test("Pages commit is resolved dynamically unless an exact optional SHA is supplied", () => {
+test("Pages deployment commit must match the current GitHub frontend branch tip and any explicit SHA pin", () => {
   assert.match(workflow, /pages_commit_sha:/);
   assert.match(workflow, /pages_commit_sha must be an exact 40-character lowercase Git SHA/);
-  assert.match(workflow, /\(\$expected == "" or \.result\.deployment_trigger\.metadata\.commit_hash == \$expected\)/);
+  assert.match(workflow, /api\\.github\\.com\\/repos\\/rzem92-png\\/-prochelia\\/commits/);
+  assert.match(workflow, /--data-urlencode "sha=\\$PAGES_PREVIEW_BRANCH"/);
+  assert.match(workflow, /frontend_head/);
+  assert.match(workflow, /"\\$frontend_head" == "\\$pages_commit"/);
+  assert.match(workflow, /\\(\\$expected == "" or \\.result\\.deployment_trigger\\.metadata\\.commit_hash == \\$expected\\)/);
 });
 
 test("Pages Preview configuration and deployment are checked independently from Production", () => {
