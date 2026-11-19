@@ -30,6 +30,7 @@ EXPECTED = [
     "0023_tenant_double_entry_accounting.sql",
     "0024_tenant_membership_authority.sql",
     "0025_session_revocation.sql",
+    "0026_accounting_currency_consistency.sql",
 ]
 
 actual = sorted(path.name for path in MIGRATIONS.glob("*.sql"))
@@ -375,3 +376,51 @@ for sql in [
     except sqlite3.IntegrityError as exc:
         assert "IMMUTABLE" in str(exc) or "TERMINAL" in str(exc), str(exc)
 print("PASS: explicit session revocation requires a reason and is terminal; session identity is immutable.")
+
+# Journal currency must remain consistent from line creation through posting.
+db.execute("""
+    INSERT INTO accounting_journals(
+      id, tenant_id, entity_id, journal_code, journal_date, currency,
+      source_type, source_id, idempotency_key, created_by
+    ) VALUES ('journal-currency-guard', 'tenant-a', 'entity-a', 'VE', '2026-11-18', 'EUR',
+              'TEST', 'currency-guard', 'tenant-a:currency-guard:1', 'user-a')
+""")
+db.execute("""
+    INSERT INTO accounting_journal_lines(id, tenant_id, entity_id, journal_id, account_id, line_number, side, amount_cents, currency)
+    VALUES ('currency-guard-debit', 'tenant-a', 'entity-a', 'journal-currency-guard', 'cash-a', 1, 'DEBIT', 2500, 'EUR')
+""")
+db.execute("""
+    INSERT INTO accounting_journal_lines(id, tenant_id, entity_id, journal_id, account_id, line_number, side, amount_cents, currency)
+    VALUES ('currency-guard-credit', 'tenant-a', 'entity-a', 'journal-currency-guard', 'revenue-a', 2, 'CREDIT', 2500, 'EUR')
+""")
+try:
+    db.execute("UPDATE accounting_journals SET currency='USD' WHERE id='journal-currency-guard'")
+    raise AssertionError("Draft journal currency changed after lines existed")
+except sqlite3.IntegrityError as exc:
+    assert "CURRENCY_IMMUTABLE_WITH_LINES" in str(exc), str(exc)
+# Simulate legacy/corrupt data bypassing the currency immutability trigger, then
+# prove the posting guard independently rejects the inconsistent header/lines.
+db.execute("DROP TRIGGER trg_accounting_journal_currency_immutable_with_lines")
+db.execute("UPDATE accounting_journals SET currency='USD' WHERE id='journal-currency-guard'")
+try:
+    db.execute("UPDATE accounting_journals SET status='POSTED', posted_by='user-a', posted_at=CURRENT_TIMESTAMP WHERE id='journal-currency-guard'")
+    raise AssertionError("Journal with line/header currency mismatch was posted")
+except sqlite3.IntegrityError as exc:
+    assert "LINE_CURRENCY_MISMATCH" in str(exc), str(exc)
+db.execute("DROP TRIGGER trg_accounting_journal_post_currency_match")
+db.execute("UPDATE accounting_journals SET currency='EUR' WHERE id='journal-currency-guard'")
+db.executescript("""
+CREATE TRIGGER trg_accounting_journal_currency_immutable_with_lines
+BEFORE UPDATE OF currency ON accounting_journals
+WHEN NEW.currency <> OLD.currency
+  AND EXISTS (SELECT 1 FROM accounting_journal_lines WHERE journal_id=OLD.id AND tenant_id=OLD.tenant_id AND entity_id=OLD.entity_id)
+BEGIN SELECT RAISE(ABORT, 'ACCOUNTING_JOURNAL_CURRENCY_IMMUTABLE_WITH_LINES'); END;
+CREATE TRIGGER trg_accounting_journal_post_currency_match
+BEFORE UPDATE OF status ON accounting_journals
+WHEN OLD.status='DRAFT' AND NEW.status='POSTED'
+  AND EXISTS (SELECT 1 FROM accounting_journal_lines WHERE journal_id=NEW.id AND (tenant_id<>NEW.tenant_id OR entity_id<>NEW.entity_id OR currency<>NEW.currency))
+BEGIN SELECT RAISE(ABORT, 'ACCOUNTING_JOURNAL_LINE_CURRENCY_MISMATCH'); END;
+""")
+db.execute("UPDATE accounting_journals SET status='POSTED', posted_by='user-a', posted_at=CURRENT_TIMESTAMP WHERE id='journal-currency-guard'")
+assert db.execute("SELECT status FROM accounting_journals WHERE id='journal-currency-guard'").fetchone()[0] == "POSTED"
+print("PASS: journal currency cannot change after lines exist; posting rejects any header/line currency mismatch.")
