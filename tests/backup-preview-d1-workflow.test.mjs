@@ -41,6 +41,8 @@ test("scheduled artifact contains only an AES-256 encrypted export with bounded 
   assert.ok(workflow.includes("sha256sum"));
   assert.ok(workflow.includes("--decrypt"));
   assert.ok(workflow.includes("retention-days: 7"));
+  assert.ok(workflow.includes("actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f"));
+  assert.ok(!workflow.includes("actions/upload-artifact@v6"));
   const pathStart = workflow.indexOf("          path: |");
   const pathEnd = workflow.indexOf("          if-no-files-found:", pathStart);
   assert.ok(pathStart >= 0 && pathEnd > pathStart);
