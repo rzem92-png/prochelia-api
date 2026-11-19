@@ -1337,11 +1337,11 @@ async function handleBase(request, env) {
 =============================================================== */
 
 const PROJECT_PHASES = {
-  TEST:       {automation:'ASSISTED', pricingFactor:0.90, autoSimple:true},
-  LANCEMENT:  {automation:'SEMI_AUTO', pricingFactor:0.94, autoSimple:true},
-  AVANCE:     {automation:'AUTO', pricingFactor:1.00, autoSimple:true},
-  EXPERT:     {automation:'AUTO_PLUS', pricingFactor:1.03, autoSimple:true},
-  NATIONAL:   {automation:'INDUSTRIAL', pricingFactor:1.05, autoSimple:true}
+  TEST:       {automation:'PROPOSAL_ONLY', pricingFactor:0.90, autoSimple:false},
+  LANCEMENT:  {automation:'PROPOSAL_ONLY', pricingFactor:0.94, autoSimple:false},
+  AVANCE:     {automation:'PROPOSAL_ONLY', pricingFactor:1.00, autoSimple:false},
+  EXPERT:     {automation:'PROPOSAL_ONLY', pricingFactor:1.03, autoSimple:false},
+  NATIONAL:   {automation:'PROPOSAL_ONLY', pricingFactor:1.05, autoSimple:false}
 };
 
 const CASE_PRIORITIES = { LOW:10, MEDIUM:30, HIGH:60, CRITICAL:100 };
