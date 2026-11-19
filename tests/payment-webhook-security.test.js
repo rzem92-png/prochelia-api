@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createHmac, webcrypto } from "node:crypto";
-import { verifyWebhookSignature, webhookProviderForRequest, webhookReplayDecision, webhookEventInsertDecision } from "../src/index.js";
+import { verifyWebhookSignature, webhookProviderForRequest, webhookReplayDecision, webhookEventInsertDecision, readBoundedWebhookBody } from "../src/index.js";
 
 globalThis.crypto ??= webcrypto;
 
@@ -116,4 +116,48 @@ test("webhook insert outcome requires a successful D1 result and an explicit sin
   assert.equal(webhookEventInsertDecision({ meta: { changes: 0 } }), "FAILED");
   assert.equal(webhookEventInsertDecision({ success: true, meta: {} }), "FAILED");
   assert.equal(webhookEventInsertDecision({ success: true, meta: { changes: 2 } }), "FAILED");
+});
+
+
+test("webhook body reader accepts an exact bounded UTF-8 body", async () => {
+  const body = "€".repeat(100);
+  const request = new Request("https://example.test/api/payments/webhook", {
+    method: "POST",
+    body
+  });
+  const result = await readBoundedWebhookBody(request, new TextEncoder().encode(body).byteLength);
+  assert.deepEqual(result, { ok: true, body });
+});
+
+test("webhook body reader rejects oversized declared and streamed bodies", async () => {
+  const declared = new Request("https://example.test/api/payments/webhook", {
+    method: "POST",
+    headers: { "content-length": "1001" },
+    body: "x"
+  });
+  assert.deepEqual(await readBoundedWebhookBody(declared, 1000), { ok: false, reason: "too_large" });
+
+  const stream = new ReadableStream({
+    start(controller) {
+      controller.enqueue(new TextEncoder().encode("x".repeat(600)));
+      controller.enqueue(new TextEncoder().encode("y".repeat(600)));
+      controller.close();
+    }
+  });
+  const streamed = new Request("https://example.test/api/payments/webhook", {
+    method: "POST",
+    body: stream,
+    duplex: "half"
+  });
+  assert.deepEqual(await readBoundedWebhookBody(streamed, 1000), { ok: false, reason: "too_large" });
+});
+
+test("webhook body reader rejects invalid UTF-8 and invalid limits", async () => {
+  const invalidUtf8 = new Request("https://example.test/api/payments/webhook", {
+    method: "POST",
+    body: new Uint8Array([0xc3, 0x28])
+  });
+  assert.deepEqual(await readBoundedWebhookBody(invalidUtf8), { ok: false, reason: "invalid_utf8" });
+  const valid = new Request("https://example.test/api/payments/webhook", { method: "POST", body: "ok" });
+  assert.deepEqual(await readBoundedWebhookBody(valid, 0), { ok: false, reason: "invalid_limit" });
 });
