@@ -3210,7 +3210,9 @@ async function requireNationalContinuitySchema(env){
   const result=await env.DB.prepare(
     `SELECT name FROM sqlite_master WHERE type='table' AND name IN (?,?,?)`
   ).bind(...required).all();
-  const present=new Set((result.results||[]).map(row=>String(row.name)));
+  if(!result || result.success!==true || !Array.isArray(result.results))
+    throw new Error('NATIONAL_CONTINUITY_SCHEMA_LOOKUP_FAILED');
+  const present=new Set(result.results.map(row=>String(row?.name||'')));
   const missing=required.filter(name=>!present.has(name));
   if(missing.length) throw new Error(`NATIONAL_CONTINUITY_SCHEMA_NOT_READY:${missing.join(',')}`);
 }
