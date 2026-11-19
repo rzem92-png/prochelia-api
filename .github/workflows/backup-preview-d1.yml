@@ -149,7 +149,7 @@ jobs:
           printf 'database=%s\ncreated_utc=%s\nencrypted_file=prochelia-preview.sql.gpg\n' "$DB_NAME" "$(date -u +%FT%TZ)" > "$RUNNER_TEMP/prochelia-backup/README.txt"
 
       - name: Publier uniquement l'archive chiffrée
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: prochelia-preview-d1-encrypted-${{ github.run_id }}
           path: |
