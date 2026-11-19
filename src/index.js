@@ -1385,7 +1385,7 @@ async function ensureConsolidatedSchema(env) {
     fuel_cost_per_km_cents:'20',
     default_margin_percent:'15',
     software_monthly_cost_cents:'0',
-    automation_policy:'simple_low_impact_auto_sensitive_manager',
+    automation_policy:'proposal_only_no_background_execution',
     b2b_model:'company_pays_intervenant_platform_bills_commission',
     b2c_model:'client_pays_platform_platform_pays_intervenant'
   };
@@ -1773,7 +1773,7 @@ async function setPhase(request, env) {
 async function consolidatedInfo(env) {
   // Public metadata remains read-only and must work before the manager has initialized settings.
   const phase=await getSetting(env,'project_phase','TEST').catch(()=> 'TEST');
-  return json({ok:true,version:VERSION,architecture:'UNIQUE_TRANSVERSAL_ENGINE',phase,automation:'simple_low_impact_auto_sensitive_manager',mobile_pc:'responsive_web_required',domains:['B2C','B2B','missions','matching','metiers','incidents','remplacement','paiements','finance','comptabilite','reclamations','commercial','recrutement','RGPD','securite','audit','copilote'],b2b_rule:'societe paie intervenant; PROCHÉLIA facture commissions/service',b2c_rule:'client paie la prestation; orchestration du reversement intervenant',note:'Aucune opération financière réelle n’est simulée : les fonds passent par un PSP configuré et vérifié.'});
+  return json({ok:true,version:VERSION,architecture:'UNIQUE_TRANSVERSAL_ENGINE',phase,automation:'proposal_only_no_background_execution',mobile_pc:'responsive_web_required',domains:['B2C','B2B','missions','matching','metiers','incidents','remplacement','paiements','finance','comptabilite','reclamations','commercial','recrutement','RGPD','securite','audit','copilote'],b2b_rule:'societe paie intervenant; PROCHÉLIA facture commissions/service',b2c_rule:'client paie la prestation; orchestration du reversement intervenant',note:'Aucune opération financière réelle n’est simulée : les fonds passent par un PSP configuré et vérifié.'});
 }
 
 export async function handleConsolidated(request, env) {
@@ -2421,14 +2421,24 @@ async function systemAudit(request, env) {
   return json({ok:true,version:VERSION,production_readiness:overall?'OK':'ATTENTION',checks});
 }
 
-async function handleV139(request, env) {
+export async function handleV139(request, env) {
   const url=new URL(request.url);
-  const operationalPaths=[
-    '/api/ops/case/execute','/api/ops/outbox/process','/api/copilot/briefing','/api/clients/score','/api/loyalty/update',
-    '/api/quality','/api/capacity/dashboard','/api/finance/forecast','/api/system/audit'
-  ];
-  if(operationalPaths.includes(url.pathname)){
-    try{await ensureOperationalSchema(env);}catch(e){return json({ok:false,error:'OPERATIONAL_SCHEMA_ERROR',version:VERSION,message:e.message},500);}
+  const blockedRoutes=new Map([
+    ['/api/ops/case/execute:POST',{roles:['gerante'],error:'TENANT_SCOPED_EXECUTION_NOT_IMPLEMENTED',message:'Exécution bloquée tant que le périmètre tenant, l’approbation liée à l’action et la piste d’audit ne sont pas validés.'}],
+    ['/api/ops/outbox/process:POST',{roles:['gerante'],error:'TENANT_SCOPED_EXECUTION_NOT_IMPLEMENTED',message:'Le traitement des files reste bloqué tant que chaque action ne dispose pas d’un périmètre tenant et d’un contrôle d’approbation.'}],
+    ['/api/copilot/briefing:GET',{roles:['gerante'],error:'TENANT_SCOPED_OPERATIONAL_NOT_READY',message:'Le briefing transversal est bloqué tant que les dossiers, alertes et recommandations ne sont pas filtrés par tenant.'}],
+    ['/api/clients/score:POST',{roles:['gerante'],error:'TENANT_SCOPED_OPERATIONAL_NOT_READY',message:'Le scoring client global est bloqué jusqu’à la vérification de la propriété et du périmètre tenant.'}],
+    ['/api/loyalty/update:POST',{roles:['gerante'],error:'TENANT_SCOPED_OPERATIONAL_NOT_READY',message:'Les points fidélité ne peuvent pas être modifiés à partir d’identifiants client/entreprise fournis par l’appelant.'}],
+    ['/api/quality:POST',{roles:['gerante','client','entreprise'],error:'TENANT_SCOPED_OPERATIONAL_NOT_READY',message:'Les événements qualité sont bloqués jusqu’à la vérification serveur de la mission et de son propriétaire.'}],
+    ['/api/capacity/dashboard:GET',{roles:['gerante'],error:'TENANT_SCOPED_OPERATIONAL_NOT_READY',message:'Le tableau de capacité global est bloqué jusqu’à la séparation des données par tenant.'}],
+    ['/api/finance/forecast:POST',{roles:['gerante'],error:'TENANT_SCOPED_FINANCE_NOT_READY',message:'Les prévisions financières globales ne sont pas des comptes certifiés et restent désactivées jusqu’au ledger tenant et aux rapprochements.'}],
+    ['/api/system/audit:GET',{roles:['gerante'],error:'FULL_PRODUCTION_AUDIT_NOT_VERIFIED',message:'Un simple inventaire de tables ne peut pas déclarer la plateforme prête pour la production.'}]
+  ]);
+  const policy=blockedRoutes.get(url.pathname+':'+request.method);
+  if(policy){
+    const gate=await requireAuthRole(request,env,policy.roles);
+    if(gate.error)return gate.error;
+    return json({ok:false,error:policy.error,message:policy.message,version:VERSION,write_enabled:false,automation:'proposal_only_no_background_execution'},503);
   }
   if(url.pathname==='/api/ops/case/execute'&&request.method==='POST')return operationalExecute(request,env);
   if(url.pathname==='/api/ops/outbox/process'&&request.method==='POST')return processActionOutbox(request,env);
@@ -2508,7 +2518,7 @@ async function productionConfigCheck(env, { persist = false } = {}) {
     await ensureConsolidatedSchema(env); await ensurePaymentSchema(env); await ensureOperationalSchema(env); await ensureStrategicSchema(env); await ensureFinalHardeningSchema(env);
   }
   const checks=[];
-  const requiredTables=['users','sessions','missions','payment_transactions','payment_webhook_events','payment_disputes','operational_cases','action_outbox','notification_outbox','accounting_ledger','promotions','promotion_recommendations','activity_journal','compliance_events'];
+  const requiredTables=['users','sessions','missions','payment_transactions','payment_webhook_events','payment_disputes','operational_cases','action_outbox','notification_outbox','accounting_ledger','tenants','tenant_memberships','tenant_membership_events','accounting_entities','accounting_accounts','accounting_journals','accounting_journal_lines','promotions','promotion_recommendations','activity_journal','compliance_events'];
   for(const t of requiredTables) checks.push({code:`TABLE:${t}`,status:await tableExists(env,t)?'OK':'MISSING'});
   const pspRequired=['PAYMENT_PROVIDER','PAYMENT_WEBHOOK_SECRET'];
   for(const k of pspRequired) checks.push({code:`SECRET:${k}`,status:finalSecretConfigured(env,k)?'OK':'NOT_CONFIGURED'});
@@ -2519,24 +2529,50 @@ async function productionConfigCheck(env, { persist = false } = {}) {
   const missionCols=await tableColumns(env,'missions');
   const usefulMissionCols=['id','client_id','intervenant_id'];
   checks.push({code:'MISSION_CORE_COLUMNS',status:usefulMissionCols.every(x=>missionCols.includes(x))?'OK':'INCOMPLETE',missing:usefulMissionCols.filter(x=>!missionCols.includes(x))});
+  const sessionCols=await tableColumns(env,'sessions');
+  const requiredSessionCols=['revoked_at','revoked_reason','active_tenant_id'];
+  checks.push({code:'SESSION_REVOCATION_AND_TENANT_COLUMNS',status:requiredSessionCols.every(x=>sessionCols.includes(x))?'OK':'INCOMPLETE',missing:requiredSessionCols.filter(x=>!sessionCols.includes(x))});
+  checks.push({code:'PSP_ADAPTER',status:paymentsConfigured(env)?'OK':'NOT_IMPLEMENTED'});
+  checks.push({code:'R2_BACKUP_ATTESTATION_KEY',status:finalSecretConfigured(env,'BACKUP_ATTESTATION_HMAC_KEY')?'CONFIGURED':'NOT_CONFIGURED'});
+  const hardBlockers=[
+    {code:'TENANT_AUTHORIZATION_E2E',status:'NOT_VERIFIED',detail:'Tenant membership, session selection, ownership and cross-tenant denial require Preview E2E evidence.'},
+    {code:'DOUBLE_ENTRY_ACCOUNTING_RUNTIME',status:'NOT_VERIFIED',detail:'Schema and balanced posting controls require applied Preview migrations and runtime tests.'},
+    {code:'R2_RETENTION_AND_HMAC_ATTESTATION',status:'UNVERIFIED',detail:'Durable signed attestation, retention lock and isolated restore evidence are not yet validated together.'},
+    {code:'CRYPTOGRAPHIC_DEVICE_ENROLLMENT',status:'NOT_IMPLEMENTED',detail:'Mission presence remains disabled until challenge-bound key enrollment and proof of possession exist.'},
+    {code:'LEGAL_AND_ACCOUNTING_PROFESSIONAL_REVIEW',status:'REQUIRED',detail:'France/Algeria legal review and expert-accountant validation require qualified human professionals.'}
+  ];
+  checks.push(...hardBlockers);
   if (persist) {
     await registerIntegration(env,'PSP','PAYMENT',['PAYMENT_PROVIDER','PAYMENT_WEBHOOK_SECRET'],['charge','refund','payout','webhook','reconciliation'],finalSecretConfigured(env,'PAYMENT_PROVIDER')&&finalSecretConfigured(env,'PAYMENT_WEBHOOK_SECRET')?'CONFIGURED':'NOT_CONFIGURED');
     await registerIntegration(env,'NOTIFICATIONS','MESSAGING',['NOTIFICATION_PROVIDER'],['email','sms','push'],finalSecretConfigured(env,'NOTIFICATION_PROVIDER')?'CONFIGURED':'NOT_CONFIGURED');
     await registerIntegration(env,'MAPS','LOCATION',['MAPS_PROVIDER','MAPS_API_KEY'],['distance','geocoding','routing'],finalSecretConfigured(env,'MAPS_API_KEY')?'CONFIGURED':'NOT_CONFIGURED');
     await registerIntegration(env,'MARKET_DATA','COMMERCIAL',['MARKET_DATA_PROVIDER'],['market_prices','competitor_signals'],finalSecretConfigured(env,'MARKET_DATA_PROVIDER')?'CONFIGURED':'NOT_CONFIGURED');
   }
-  const blocking=checks.filter(x=>['MISSING','INCOMPLETE'].includes(x.status));
+  const blocking=checks.filter(x=>['MISSING','INCOMPLETE','NOT_IMPLEMENTED','NOT_VERIFIED','UNVERIFIED','REQUIRED'].includes(x.status));
   const externalNotConfigured=checks.filter(x=>x.status==='NOT_CONFIGURED' && ['SECRET:PAYMENT_PROVIDER','SECRET:PAYMENT_WEBHOOK_SECRET'].includes(x.code));
   const overall=blocking.length===0 && externalNotConfigured.length===0;
   if (persist) for(const c of checks) await env.DB.prepare(`INSERT INTO system_config_checks(id,check_code,status,details_json) VALUES(?,?,?,?)`).bind(crypto.randomUUID(),c.code,c.status,JSON.stringify(c)).run();
-  return {overall,checks,blocking:blocking.length,externalNotConfigured:externalNotConfigured.length};
+  return {overall,checks,blocking:blocking.length,externalNotConfigured:externalNotConfigured.length,hardBlockers:hardBlockers.length};
 }
 
-async function finalProductionAudit(request,env) {
+export async function finalProductionAudit(request,env) {
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
   const result=await productionConfigCheck(env);
-  // GET audit endpoint is intentionally read-only; persist audit via explicit mutation endpoint.
-  return json({ok:true,version:VERSION,production_gate:result.overall?'OPEN':'CLOSED',ready_for_real_traffic:result.overall,checks:result.checks,note:result.overall?'Architecture gate passed; external business integrations must still be exercised with sandbox/acceptance tests.':'No real production traffic should be enabled until blocking configuration/schema checks are resolved.'});
+  // A technical read-only audit is never a legal, tax or statutory-accounting certification.
+  // Production remains closed until every hard blocker and human validation is explicitly cleared.
+  return json({
+    ok:true,version:VERSION,production_gate:'CLOSED',ready_for_real_traffic:false,
+    checks:result.checks,blocking:result.blocking,external_not_configured:result.externalNotConfigured,
+    hard_blockers:result.hardBlockers,
+    human_validation_required:[
+      'Avis juridique qualifié sur France, Algérie, consommation, travail, DSA/RGPD et transferts internationaux.',
+      'Validation par expert-comptable du plan comptable, des journaux, de la TVA, des rapprochements et des clôtures.',
+      'Approbation humaine des contrats, assurances, obligations réglementaires et conditions PSP.',
+      'Autorisation explicite distincte avant tout paiement, remboursement, virement ou écriture comptable sensible.'
+    ],
+    automation:'read_only_monitoring_and_proposals_only',
+    note:'Cette vérification technique ne vaut jamais certification juridique, fiscale ou comptable. Aucun trafic réel ni mouvement de fonds ne doit être activé.'
+  },200);
 }
 
 async function copilotNextActions(request,env) {
@@ -2554,7 +2590,7 @@ async function copilotNextActions(request,env) {
   const pending=await env.DB.prepare(`SELECT id,action_type,status,attempts,last_error FROM action_outbox WHERE status IN ('PENDING','FAILED','WAITING_PROVIDER') ORDER BY created_at ASC LIMIT 20`).all();
   for(const a of pending.results||[]) items.push({priority:a.status==='FAILED'?90:50,category:'EXECUTION',type:'ACTION',id:a.id,title:a.action_type,action:a.status==='FAILED'?'RETRY_OR_REVIEW':'PROCESS',status:a.status,attempts:a.attempts,last_error:a.last_error});
   items.sort((a,b)=>b.priority-a.priority);
-  return json({ok:true,version:VERSION,phase,top_actions:items.slice(0,30),automation_policy:'simple_low_impact_auto_sensitive_manager'});
+  return json({ok:true,version:VERSION,phase,top_actions:items.slice(0,30),automation_policy:'proposal_only_no_background_execution'});
 }
 
 async function enqueueBackgroundJob(env, jobType, payload={}, maxAttempts=5) {
@@ -2564,34 +2600,15 @@ async function enqueueBackgroundJob(env, jobType, payload={}, maxAttempts=5) {
   return id;
 }
 
-async function processBackgroundJobs(request,env) {
+export async function processBackgroundJobs(request,env) {
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
-  const missingTables=[];
-  for(const table of ['background_jobs','activity_journal']) if(!await tableExists(env,table)) missingTables.push(table);
-  if(missingTables.length) return json({ok:false,error:'BACKGROUND_JOB_SCHEMA_NOT_READY',missing_tables:missingTables,version:VERSION},503);
-  const rows=await env.DB.prepare(`SELECT * FROM background_jobs WHERE status='PENDING' AND run_after<=CURRENT_TIMESTAMP ORDER BY created_at LIMIT 25`).all();
-  const results=[];
-  for(const job of rows.results||[]) {
-    try {
-      await env.DB.prepare(`UPDATE background_jobs SET status='RUNNING',locked_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='PENDING'`).bind(job.id).run();
-      let result={performed:false,reason:'JOB_TYPE_NOT_IMPLEMENTED'};
-      const payload=JSON.parse(job.payload_json||'{}');
-      if(job.job_type==='PROCESS_ACTION_OUTBOX') result={performed:true,delegation:'Use /api/ops/outbox/process'};
-      else if(job.job_type==='PRODUCTION_AUDIT') result=await productionConfigCheck(env);
-      else if(job.job_type==='COPILOT_BRIEFING') result={performed:true,delegation:'Use /api/copilot/briefing'};
-      const done=result.performed===true || result.overall===true;
-      await env.DB.prepare(`UPDATE background_jobs SET status=?,result_json=?,attempts=attempts+1,updated_at=CURRENT_TIMESTAMP,completed_at=? WHERE id=?`)
-        .bind(done?'DONE':'WAITING_PROVIDER',JSON.stringify(result),done?new Date().toISOString():null,job.id).run();
-      results.push({id:job.id,status:done?'DONE':'WAITING_PROVIDER',result});
-    } catch(e) {
-      const attempts=Number(job.attempts||0)+1;
-      const status=attempts>=Number(job.max_attempts||5)?'FAILED':'PENDING';
-      await env.DB.prepare(`UPDATE background_jobs SET status=?,attempts=?,last_error=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(status,attempts,String(e.message||e),job.id).run();
-      results.push({id:job.id,status,error:String(e.message||e)});
-    }
-  }
-  await journal(env,'gerante',gate.auth.user.id,'BACKGROUND_JOBS_PROCESSED','system',null,'OK',{count:results.length});
-  return json({ok:true,version:VERSION,processed:results.length,results});
+  // No background executor is currently authorized. Keep the endpoint read-only/fail-closed:
+  // proposals and monitoring may be generated, but jobs are not marked done or executed.
+  return json({
+    ok:false,version:VERSION,error:'BACKGROUND_EXECUTOR_NOT_IMPLEMENTED',
+    write_enabled:false,automation:'proposal_only_no_background_execution',
+    message:'Aucun exécuteur autonome vérifié n’est activé. Les actions restent des propositions jusqu’à l’approbation et à l’implémentation de handlers traçables.'
+  },503);
 }
 
 function isMutatingMethod(method){ return ['POST','PUT','PATCH','DELETE'].includes(method); }
