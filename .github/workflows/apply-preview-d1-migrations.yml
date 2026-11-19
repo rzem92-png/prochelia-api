@@ -438,7 +438,26 @@ jobs:
           set -euo pipefail
           request="$RUNNER_TEMP/verify-new-schema-request.json"
           response="$RUNNER_TEMP/verify-new-schema-response.json"
-          jq -n '{sql:"SELECT type, name FROM sqlite_master WHERE name IN ('"'"''accounting_entities','accounting_accounts','accounting_journals','accounting_journal_lines','tenants','tenant_memberships','tenant_membership_events','idx_accounting_entities_tenant','idx_accounting_accounts_tenant_entity','idx_accounting_journals_tenant_date','idx_accounting_journals_source','idx_accounting_journals_one_reversal','idx_accounting_lines_journal','idx_accounting_lines_account','idx_tenant_membership_one_nonrevoked_per_user','idx_tenant_membership_one_owner','idx_tenant_memberships_user_status','idx_tenant_memberships_tenant_role_status','idx_tenant_membership_events_tenant_time','idx_sessions_user_active_expiry','idx_sessions_revoked_at','trg_accounting_journal_insert_draft_only','trg_accounting_line_draft_only','trg_accounting_lines_no_update_posted','trg_accounting_lines_no_delete_posted','trg_accounting_journal_post_guard','trg_accounting_posted_journal_immutable','trg_accounting_posted_journal_no_delete','trg_accounting_entity_identity_immutable_after_posting','trg_accounting_account_classification_immutable_after_posting','trg_accounting_journal_currency_immutable_with_lines','trg_accounting_journal_post_currency_match','trg_tenant_membership_events_no_update','trg_tenant_membership_events_no_delete','trg_tenant_membership_revocation_terminal','trg_tenant_membership_event_tenant_match','trg_accounting_entity_requires_active_tenant','trg_accounting_entity_tenant_stable','trg_session_identity_immutable','trg_session_revocation_terminal','trg_session_revocation_metadata_required','trg_session_active_tenant_requires_membership_insert','trg_session_active_tenant_requires_membership''"'"') ORDER BY type, name",params:[]}' > "$request"
+          sql="$(cat <<'SQL'
+SELECT type, name FROM sqlite_master WHERE name IN (
+  'accounting_entities','accounting_accounts','accounting_journals','accounting_journal_lines',
+  'tenants','tenant_memberships','tenant_membership_events',
+  'idx_accounting_entities_tenant','idx_accounting_accounts_tenant_entity','idx_accounting_journals_tenant_date',
+  'idx_accounting_journals_source','idx_accounting_journals_one_reversal','idx_accounting_lines_journal','idx_accounting_lines_account',
+  'idx_tenant_membership_one_nonrevoked_per_user','idx_tenant_membership_one_owner','idx_tenant_memberships_user_status',
+  'idx_tenant_memberships_tenant_role_status','idx_tenant_membership_events_tenant_time','idx_sessions_user_active_expiry','idx_sessions_revoked_at',
+  'trg_accounting_journal_insert_draft_only','trg_accounting_line_draft_only','trg_accounting_lines_no_update_posted','trg_accounting_lines_no_delete_posted',
+  'trg_accounting_journal_post_guard','trg_accounting_posted_journal_immutable','trg_accounting_posted_journal_no_delete',
+  'trg_accounting_entity_identity_immutable_after_posting','trg_accounting_account_classification_immutable_after_posting',
+  'trg_accounting_journal_currency_immutable_with_lines','trg_accounting_journal_post_currency_match',
+  'trg_tenant_membership_events_no_update','trg_tenant_membership_events_no_delete','trg_tenant_membership_revocation_terminal',
+  'trg_tenant_membership_event_tenant_match','trg_accounting_entity_requires_active_tenant','trg_accounting_entity_tenant_stable',
+  'trg_session_identity_immutable','trg_session_revocation_terminal','trg_session_revocation_metadata_required',
+  'trg_session_active_tenant_requires_membership_insert','trg_session_active_tenant_requires_membership'
+) ORDER BY type, name
+SQL
+)"
+          jq -n --arg sql "$sql" '{sql:$sql,params:[]}' > "$request"
           status="$(curl --silent --show-error --output "$response" --write-out '%{http_code}' \
             -X POST -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
             -H "Content-Type: application/json" --data-binary @"$request" \
