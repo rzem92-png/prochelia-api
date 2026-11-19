@@ -24,6 +24,12 @@ jobs:
       # Identifiant de compte confirmé depuis le tableau de bord Cloudflare fourni.
       CLOUDFLARE_ACCOUNT_ID: f2a79e9fa41566a8ec80fb24c02c60eb
     steps:
+      - name: Checkout repository sources required by the Preview-only Wrangler config
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
       - name: Vérifier les secrets requis et la cible Cloudflare
         shell: bash
         env:
@@ -87,7 +93,7 @@ jobs:
           fi
 
       - name: Installer Node.js
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
           node-version: "22"
           package-manager-cache: false
