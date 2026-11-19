@@ -116,3 +116,34 @@ test("persisted approval request is reachable through the main Nexus router", as
   assert.equal(body.request.requiredApprovals, 2);
   assert.ok(statements.some(item => item.sql.includes("INSERT INTO supra_approval_requests")));
 });
+
+
+test("SUPRA fail-closed input is rejected with 422 and audited as rejected, never as a prepared plan", async () => {
+  const DB = makeDb();
+  const response = await handleSupraRoute(new Request("https://example.test/api/supra/plan", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      case_type: "paiement",
+      action: "REFUND",
+      impact: "HIGH",
+      market: "fr"
+    })
+  }), { DB }, manager);
+  const payload = await response.json();
+  assert.equal(response.status, 422);
+  assert.equal(payload.ok, false);
+  assert.equal(payload.error, "SUPRA_INPUT_REJECTED");
+  assert.equal(payload.plan.rejectionReason, "UNEXPECTED_INPUT_FIELD");
+  assert.equal(payload.decision.risk, "HIGH");
+  assert.equal(payload.decision.managerApprovalRequired, true);
+  assert.equal(payload.executionAllowed, false);
+  assert.equal(payload.audit.recorded, true);
+  assert.equal(DB.calls.length, 1);
+  assert.match(DB.calls[0].sql, /INSERT INTO supra_audit_events/);
+  assert.equal(DB.calls[0].values[3], "PLAN_INPUT_REJECTED");
+  assert.equal(DB.calls[0].values[4], "securite");
+  assert.equal(DB.calls[0].values[5], "INVALID_INPUT");
+  assert.equal(DB.calls[0].values[6], "HIGH");
+  assert.equal(DB.calls[0].values[7], 1);
+});
