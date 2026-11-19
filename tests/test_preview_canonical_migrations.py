@@ -177,6 +177,21 @@ try:
 except sqlite3.IntegrityError as exc:
     assert "IMMUTABLE" in str(exc), str(exc)
 try:
+    db.execute("UPDATE accounting_journals SET status='DRAFT' WHERE id='journal-a'")
+    raise AssertionError("Posted journal header was incorrectly unposted")
+except sqlite3.IntegrityError as exc:
+    assert "IMMUTABLE" in str(exc), str(exc)
+try:
+    db.execute("UPDATE accounting_journals SET journal_date='2026-11-19' WHERE id='journal-a'")
+    raise AssertionError("Posted journal metadata was incorrectly mutable")
+except sqlite3.IntegrityError as exc:
+    assert "IMMUTABLE" in str(exc), str(exc)
+try:
+    db.execute("DELETE FROM accounting_journals WHERE id='journal-a'")
+    raise AssertionError("Posted journal was incorrectly deletable")
+except sqlite3.IntegrityError as exc:
+    assert "IMMUTABLE" in str(exc), str(exc)
+try:
     db.execute("""
         INSERT INTO accounting_journals(
           id, tenant_id, entity_id, journal_code, journal_date, currency,
