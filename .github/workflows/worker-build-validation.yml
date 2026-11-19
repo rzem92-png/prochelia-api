@@ -9,7 +9,9 @@ on:
       - "scripts/generate-preview-wrangler-config.mjs"
       - ".github/workflows/worker-build-validation.yml"
   push:
-    branches: [main]
+    branches:
+      - main
+      - fix/preview-critical-tenant-guards-2026-11-18
     paths:
       - "src/**"
       - "wrangler.jsonc"
