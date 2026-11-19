@@ -406,7 +406,7 @@ jobs:
           CLOUDFLARE_API_TOKEN="$token" npx --yes wrangler@4 d1 execute "$PREVIEW_DB_NAME" --remote --config "$RUNNER_TEMP/wrangler.preview.json" --file="$RUNNER_TEMP/preview-e2e-cleanup.sql" --yes
           payload="{\"sql\":\"SELECT (SELECT COUNT(*) FROM users WHERE id LIKE 'e2e-$GITHUB_RUN_ID-%') AS users, (SELECT COUNT(*) FROM sessions WHERE id LIKE 'e2e-$GITHUB_RUN_ID-%') AS sessions, (SELECT COUNT(*) FROM clients WHERE id LIKE 'e2e-$GITHUB_RUN_ID-%') AS clients, (SELECT COUNT(*) FROM intervenants WHERE id LIKE 'e2e-$GITHUB_RUN_ID-%') AS intervenants\"}"
           status="$(curl --silent --show-error --output "$RUNNER_TEMP/cleanup-check.json" --write-out '%{http_code}' \
-            -X POST -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -H "Content-Type: application/json" \
+            -X POST -H "Authorization: Bearer $token" -H "Content-Type: application/json" \
             --data "$payload" "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/d1/database/$PREVIEW_DB_ID/query")"
           [[ "$status" == "200" ]]
           jq -e '.success == true and .result[0].results[0].users == 0 and .result[0].results[0].sessions == 0 and .result[0].results[0].clients == 0 and .result[0].results[0].intervenants == 0' "$RUNNER_TEMP/cleanup-check.json" >/dev/null
