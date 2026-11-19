@@ -24,7 +24,7 @@ test("Preview deployment refuses a candidate that would roll back the active Wor
   const generate = workflow.indexOf("Generate isolated Preview deployment config");
   const deploy = workflow.indexOf("Deploy ONLY the isolated Preview Worker");
   assert.ok(guard >= 0 && generate > guard && deploy > generate);
-  assert.match(workflow, /fetch-depth:\\s*0/);
+  assert.match(workflow, /fetch-depth:\s*0/);
   assert.match(workflow, /PROCHELIA_COMMIT_SHA/);
   assert.match(workflow, /git cat-file -e/);
   assert.match(workflow, /candidate commit is not a descendant of the active Preview Worker commit/);
