@@ -9,6 +9,9 @@ test("Preview E2E is manually gated and requires an exact frontend Pages commit 
   assert.ok(!workflow.includes("workflow_run:"));
   assert.ok(workflow.includes("RUN_PREVIEW_DIRECTORY_E2E"));
   assert.ok(workflow.includes("pages_branch:"));
+  assert.ok(workflow.includes("PAGES_PREVIEW_BRANCH: ${{ inputs.pages_branch || '' }}"));
+  assert.ok(workflow.includes('[[ -n "$PAGES_PREVIEW_BRANCH" && "$PAGES_PREVIEW_BRANCH" != "main" ]]'));
+  assert.ok(!workflow.includes("fix/frontend-cookie-session-auth-2026-11-17"));
   assert.ok(workflow.includes("pages_commit_sha:"));
   assert.ok(workflow.includes("required: true"));
   assert.ok(!workflow.includes('default: "fix/frontend-cookie-session-auth-2026-11-17"'));
@@ -33,6 +36,8 @@ test("Preview E2E resolves the latest Pages Preview deployment instead of stale 
   assert.match(workflow, /\.result\.uses_functions == true/);
   assert.match(workflow, /\.result\.d1_databases\.DB\.id == \$db/);
   assert.match(workflow, /\.result\.services\.PROCHELIA_API\.service == \$worker/);
+  assert.ok(workflow.includes('.result.deployment_configs.preview.env_vars.SUPRA_API_ORIGIN.value == $api_origin'));
+  assert.ok(workflow.includes('api_origin "https://prochelia-api-preview.rzem92.workers.dev"'));
   assert.match(workflow, /\.result\.deployment_trigger\.metadata\.branch == \$branch/);
   assert.match(workflow, /\.result\.deployment_trigger\.metadata\.commit_hash/);
   assert.doesNotMatch(workflow, /83a36d32-4880-4417-a684-f9247e42debf/);
@@ -59,15 +64,14 @@ test("Pages Preview configuration and deployment are checked independently from 
   assert.match(workflow, /\.result\.is_skipped == false/);
 });
 
-test("Preview Worker CORS allowlist must contain the current Pages origin and its stable branch alias", () => {
+test("Pages same-origin proxy is pinned to the isolated Preview Worker without a redundant CORS gate", () => {
   assert.ok(workflow.includes("workers/scripts/prochelia-api-preview/settings"));
-  assert.ok(workflow.includes("CORS_ORIGIN"));
-  assert.ok(workflow.includes("pages_alias="));
+  assert.ok(workflow.includes("SUPRA_API_ORIGIN"));
+  assert.ok(workflow.includes("PROCHELIA_API.service"));
+  assert.ok(workflow.includes("https://prochelia-api-preview.rzem92.workers.dev"));
   assert.ok(workflow.includes("PAGES_PREVIEW_ALIAS="));
-  assert.ok(workflow.includes("expected_origins"));
-  assert.ok(workflow.includes('IFS=\',\' read -r -a allowed_origins <<< "$cors_origin"'));
-  assert.ok(workflow.includes('== "$expected_origin"'));
-  assert.ok(workflow.includes("Do not change the Production Worker"));
+  assert.ok(!workflow.includes("cors_origin="));
+  assert.ok(!workflow.includes("expected_origins"));
 });
 
 test("Pages same-origin proxy probes the Worker Origin guard without creating business data", () => {
