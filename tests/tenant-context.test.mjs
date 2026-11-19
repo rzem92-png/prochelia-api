@@ -74,7 +74,7 @@ test("tenant context fails closed when session has no selection and memberships 
         return { id: "user-verified-by-session", role: "client", status: "active",
           session_id: "session-a", session_active_tenant_id: null };
       }};
-      return { async all() { return { results: [
+      return { async all() { return { success: true, results: [
         { tenant_id: "tenant-a" }, { tenant_id: "tenant-b" }
       ]}; }};
     }};
@@ -85,6 +85,39 @@ test("tenant context fails closed when session has no selection and memberships 
   const response = await tenantContextRoute(req, { DB: mock.DB });
   assert.equal(response.status, 409);
   assert.equal((await response.json()).error, "TENANT_SELECTION_REQUIRED");
+});
+
+
+test("tenant context refuses partial membership rows when D1 explicitly reports failure", async () => {
+  for (const d1Response of [
+    { success: false, results: [{
+      tenant_id: "tenant-attacker", tenant_slug: "attacker", tenant_name: "Untrusted",
+      membership_id: "membership-untrusted", membership_role: "OWNER"
+    }] },
+    { results: [{
+      tenant_id: "tenant-attacker", tenant_slug: "attacker", tenant_name: "Untrusted",
+      membership_id: "membership-untrusted", membership_role: "OWNER"
+    }] }
+  ]) {
+    const statements = [];
+    const DB = { prepare(sql) {
+      statements.push(sql);
+      return { bind() {
+        if (sql.includes("JOIN users u")) return { async first() {
+          return { id: "user-verified-by-session", role: "client", status: "active",
+            session_id: "session-a", session_active_tenant_id: null };
+        }};
+        return { async all() { return d1Response; }};
+      }};
+    }};
+    const req = new Request("https://api.example.test/api/tenant/context", {
+      headers: { cookie: "prochelia_session=synthetic-session-token" }
+    });
+    const response = await tenantContextRoute(req, { DB });
+    assert.equal(response.status, 503);
+    assert.equal((await response.json()).error, "TENANT_CONTEXT_UNAVAILABLE");
+    assert.equal(statements.length, 2);
+  }
 });
 
 test("tenant context route rejects non-GET methods before database access", async () => {
