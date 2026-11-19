@@ -8,9 +8,8 @@ on:
         required: true
         type: string
       pages_branch:
-        description: "Expected frontend Preview branch for the Pages-to-Worker E2E path"
-        required: false
-        default: "fix/frontend-cookie-session-auth-2026-11-17"
+        description: "Exact expected frontend Preview branch for the Pages-to-Worker E2E path"
+        required: true
         type: string
       pages_commit_sha:
         description: "Exact 40-character frontend commit SHA; must match the latest successful Pages Preview deployment"
