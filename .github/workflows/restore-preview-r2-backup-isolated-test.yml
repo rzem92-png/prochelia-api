@@ -23,9 +23,7 @@ jobs:
   restore-isolated:
     if: >-
       (
-        github.ref == 'refs/heads/main' ||
-        github.ref == 'refs/heads/fix/restore-preview-fresh-eu-d1-2026-11-18' ||
-        github.ref == 'refs/heads/fix/r2-preview-backup-signed-attestation-2026-11-18'
+        github.ref == 'refs/heads/main'
       ) &&
       inputs.confirm_restore == 'RESTORE_PREVIEW_R2_TO_ISOLATED_TEST_ONLY'
     runs-on: ubuntu-latest
@@ -53,7 +51,7 @@ jobs:
         run: |
           set -euo pipefail
           case "$GITHUB_REF" in
-            refs/heads/main|refs/heads/fix/restore-preview-fresh-eu-d1-2026-11-18|refs/heads/fix/r2-preview-backup-signed-attestation-2026-11-18) ;;
+            refs/heads/main) ;;
             *) echo "::error::Restore is restricted to main or the dedicated isolated-restore branch."; exit 1 ;;
           esac
           test "$CLOUDFLARE_ACCOUNT_ID" = "$EXPECTED_ACCOUNT_ID"
@@ -164,7 +162,7 @@ jobs:
             .object.key == $key and
             .object.sha256_manifest_key == ($key + ".sha256") and
             .provenance.repository == "rzem92-png/prochelia-api" and
-            (.provenance.ref == "refs/heads/main" or .provenance.ref == "refs/heads/fix/r2-preview-backup-signed-attestation-2026-11-18") and
+            .provenance.ref == "refs/heads/main" and
             (.provenance.migration_source_sha | test("^[0-9a-f]{40}$")) and
             .validation.sqlite_integrity_check == "ok" and
             .validation.foreign_key_check == "empty" and
