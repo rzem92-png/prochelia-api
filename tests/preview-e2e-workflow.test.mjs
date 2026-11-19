@@ -144,7 +144,7 @@ test("Preview D1 seed and cleanup normalize raw and Bearer-prefixed Cloudflare t
   assert.ok(seedStart >= 0 && exerciseStart > seedStart && cleanupStart > exerciseStart);
   const seed = workflow.slice(seedStart, exerciseStart);
   const cleanup = workflow.slice(cleanupStart);
-  const normalization = "sed -E 's/^[[:space:]]*Bearer[[:space:]]+//I; s/^[[:space:]]+//; s/[[:space:]]+$//' | tr -d '\r\n'";
+  const normalization = "sed -E 's/^[[:space:]]*Bearer[[:space:]]+//I; s/^[[:space:]]+//; s/[[:space:]]+$//' | tr -d '\\r\\n'";
   assert.ok(seed.includes(normalization));
   assert.ok(cleanup.includes(normalization));
   assert.match(seed, /CLOUDFLARE_API_TOKEN="\$token" npx/);
