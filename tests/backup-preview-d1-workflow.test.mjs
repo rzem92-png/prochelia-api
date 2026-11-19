@@ -12,7 +12,7 @@ const config = JSON.parse(configText
 
 test("scheduled Preview backup runs only from main and checks out its exact immutable workflow commit", () => {
   assert.ok(workflow.includes("if: github.ref == 'refs/heads/main'"));
-  assert.ok(workflow.includes("actions/checkout@11d5960a326750d5838078e36cf38b85af677262"));
+  assert.ok(workflow.includes("actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09"));
   assert.ok(workflow.includes("ref: ${{ github.sha }}"));
   assert.ok(workflow.includes("persist-credentials: false"));
 });
