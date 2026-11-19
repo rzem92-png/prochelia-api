@@ -1783,13 +1783,8 @@ export async function handleConsolidated(request, env) {
   const schemaRoutes = new Map([
     ['/api/ops/dashboard:GET',['gerante']],
     ['/api/journal:GET',['gerante']],
-    ['/api/cases:POST',['gerante','client','intervenant','entreprise']],
-    ['/api/cases/approve:POST',['gerante']],
     ['/api/metiers:GET',['gerante','entreprise','client','intervenant']],
     ['/api/metiers/suggest:POST',['gerante']],
-    ['/api/pricing/quote:POST',['gerante']],
-    ['/api/finance/summary:GET',['gerante']],
-    ['/api/complaints:POST',['gerante','client','entreprise']],
     ['/api/settings/phase:POST',['gerante']]
   ]);
   const requiredRoles=schemaRoutes.get(url.pathname+':'+request.method);
