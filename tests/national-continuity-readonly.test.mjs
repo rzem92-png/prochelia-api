@@ -19,6 +19,9 @@ test("national continuity schema guard is read-only and fails closed when tables
     assert.ok(guard.includes(table), `missing required schema table: ${table}`);
   }
   assert.match(guard, /NATIONAL_CONTINUITY_SCHEMA_NOT_READY/);
+  assert.match(guard, /result\.success!==true/);
+  assert.match(guard, /Array\.isArray\(result\.results\)/);
+  assert.match(guard, /NATIONAL_CONTINUITY_SCHEMA_LOOKUP_FAILED/);
   assert.doesNotMatch(guard, /\b(CREATE|INSERT|UPDATE|DELETE|ALTER|DROP)\b/i);
 });
 
