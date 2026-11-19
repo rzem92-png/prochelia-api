@@ -45,7 +45,13 @@ export async function resolveTenantContext(_request, env, auth) {
        ORDER BY t.id
        LIMIT 2
     `).bind(sessionId, userId).all();
-    const rows = result?.results || [];
+
+    // D1 may return partial rows alongside an unsuccessful response.
+    // Never authorize a tenant unless the database explicitly confirms success.
+    if (result?.success !== true || !Array.isArray(result.results)) {
+      return { ok: false, status: 503, error: "TENANT_CONTEXT_UNAVAILABLE" };
+    }
+    const rows = result.results;
     if (rows.length === 0) return { ok: false, status: 403, error: "TENANT_MEMBERSHIP_REQUIRED" };
     if (rows.length > 1) return { ok: false, status: 409, error: "TENANT_SELECTION_REQUIRED" };
     const row = rows[0];
