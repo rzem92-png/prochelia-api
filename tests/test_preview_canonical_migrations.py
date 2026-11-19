@@ -35,6 +35,25 @@ EXPECTED = [
     "0028_tenant_accounting_entity_delete_guard.sql",
 ]
 
+# Keep the manual Preview migration gate synchronized with the canonical chain.
+WORKFLOW = ROOT / ".github" / "workflows" / "apply-preview-d1-migrations.yml"
+workflow_text = WORKFLOW.read_text(encoding="utf-8")
+assert '"0028_tenant_accounting_entity_delete_guard.sql"' in workflow_text, (
+    "Preview migration workflow omits the latest canonical migration 0028"
+)
+assert "if len(local) != 29:" in workflow_text, (
+    "Preview migration workflow must require exactly 29 canonical migrations"
+)
+assert "exact 29-entry registry" in workflow_text, (
+    "Preview migration workflow target registry count is stale"
+)
+assert "all 29 canonical migrations are pending" in workflow_text, (
+    "Preview migration workflow empty-database inventory message is stale"
+)
+assert "only migrations 0023-0028 are pending" in workflow_text, (
+    "Preview migration workflow baseline-to-target range is stale"
+)
+
 actual = sorted(path.name for path in MIGRATIONS.glob("*.sql"))
 assert actual == sorted(EXPECTED), (
     f"Canonical Preview migration chain mismatch. Missing={sorted(set(EXPECTED)-set(actual))}; "
