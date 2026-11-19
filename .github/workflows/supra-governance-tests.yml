@@ -1,0 +1,32 @@
+name: SUPRA executive governance tests
+
+on:
+  pull_request:
+    paths:
+      - "src/supra-governance.js"
+      - "tests/supra-governance.test.mjs"
+      - ".github/workflows/supra-governance-tests.yml"
+  push:
+    branches: [main]
+    paths:
+      - "src/supra-governance.js"
+      - "tests/supra-governance.test.mjs"
+      - ".github/workflows/supra-governance-tests.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  governance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          package-manager-cache: false
+      - name: Syntax check SUPRA governance module
+        run: node --experimental-default-type=module --check src/supra-governance.js
+      - name: Run SUPRA governance tests
+        run: node --experimental-default-type=module --test tests/supra-governance.test.mjs
