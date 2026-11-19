@@ -61,7 +61,7 @@ test("Preview deployment preserves and validates the current Worker CORS allowli
 test("Preview deployment requires an exact frontend Pages commit SHA", () => {
   assert.ok(workflow.includes("pages_branch:"));
   assert.ok(workflow.includes('PAGES_EXPECTED_BRANCH: ${{ inputs.pages_branch || \'\' }}'));
-  assert.ok(workflow.includes('default: "integrate/supra-control-center-preview-2026-11-15"'));
+  assert.ok(!workflow.includes('default: "integrate/supra-control-center-preview-2026-11-15"'));
   assert.ok(workflow.includes("pages_branch is required, must be a valid lowercase Preview branch, and cannot be main"));
   assert.ok(workflow.includes('.result.deployment_trigger.metadata.branch == $branch'));
   assert.ok(workflow.includes('--arg branch "$PAGES_EXPECTED_BRANCH"'));
