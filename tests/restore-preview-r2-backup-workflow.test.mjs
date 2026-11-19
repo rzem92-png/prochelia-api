@@ -3,11 +3,10 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
 const workflow = await readFile(new URL("../.github/workflows/restore-preview-r2-backup-isolated-test.yml", import.meta.url), "utf8");
+const backupWorkflow = await readFile(new URL("../.github/workflows/backup-preview-d1-to-r2-eu.yml", import.meta.url), "utf8");
 
-test("Preview R2 restore is manually gated to main or the dedicated isolated-restore branch", () => {
+test("Preview R2 restore is manually gated to main only", () => {
   assert.ok(workflow.includes("github.ref == 'refs/heads/main'"));
-  assert.ok(workflow.includes("github.ref == 'refs/heads/fix/restore-preview-fresh-eu-d1-2026-11-18'"));
-  assert.ok(workflow.includes("refs/heads/main|refs/heads/fix/restore-preview-fresh-eu-d1-2026-11-18"));
   assert.ok(workflow.includes("RESTORE_PREVIEW_R2_TO_ISOLATED_TEST_ONLY"));
 });
 
@@ -55,4 +54,27 @@ test("Restore target is the newly provisioned empty EU-only validation database"
   assert.match(workflow, /RESTORE_DB_ID.*!=.*PREVIEW_DB_ID/);
   assert.match(workflow, /RESTORE_DB_ID.*!=.*PRODUCTION_DB_ID/);
   assert.match(workflow, /Confirm isolated restore database is empty before any remote write/);
+});
+
+test("Restore requires and verifies the HMAC attestation before decrypting or writing D1", () => {
+  assert.match(workflow, /BACKUP_ATTESTATION_HMAC_KEY: \$\{\{ secrets\.BACKUP_ATTESTATION_HMAC_KEY \}\}/);
+  assert.match(workflow, /BACKUP_ATTESTATION_HMAC_KEY.*32 UTF-8 bytes/s);
+  assert.match(workflow, /\.attestation\.json/);
+  assert.match(workflow, /\.attestation\.hmac/);
+  const verify = workflow.indexOf("Verify HMAC attestation and exact Preview source before decryption");
+  const decrypt = workflow.indexOf("Decrypt, verify checksum and test local SQLite restoration");
+  const remoteWrite = workflow.indexOf("Restore only into the isolated D1 database");
+  assert.ok(verify >= 0 && decrypt > verify && remoteWrite > decrypt);
+  assert.match(workflow, /r2-backup-attestation\.mjs verify/);
+  assert.match(workflow, /cipher_expected/);
+  assert.match(workflow, /attested_plain/);
+});
+
+test("Restore refuses to reuse the encryption secret as the HMAC attestation key", () => {
+  assert.match(workflow, /BACKUP_ATTESTATION_HMAC_KEY.*BACKUP_ENCRYPTION_KEY/s);
+});
+test("Isolated restore accepts only main provenance", () => {
+  assert.match(workflow, /\.provenance\.ref == "refs\/heads\/main"/);
+  assert.doesNotMatch(workflow, /fix\/r2-preview-backup-signed-attestation|fix\/restore-preview-fresh-eu-d1/);
+  assert.match(workflow, /r2-backup-attestation\.mjs verify/);
 });

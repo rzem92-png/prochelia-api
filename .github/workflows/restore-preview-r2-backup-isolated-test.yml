@@ -23,8 +23,7 @@ jobs:
   restore-isolated:
     if: >-
       (
-        github.ref == 'refs/heads/main' ||
-        github.ref == 'refs/heads/fix/restore-preview-fresh-eu-d1-2026-11-18'
+        github.ref == 'refs/heads/main'
       ) &&
       inputs.confirm_restore == 'RESTORE_PREVIEW_R2_TO_ISOLATED_TEST_ONLY'
     runs-on: ubuntu-latest
@@ -33,6 +32,7 @@ jobs:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       BACKUP_ENCRYPTION_KEY: ${{ secrets.BACKUP_ENCRYPTION_KEY }}
+      BACKUP_ATTESTATION_HMAC_KEY: ${{ secrets.BACKUP_ATTESTATION_HMAC_KEY }}
       AWS_ACCESS_KEY_ID: ${{ secrets.R2_EU_ACCESS_KEY_ID }}
       AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_EU_SECRET_ACCESS_KEY }}
       AWS_DEFAULT_REGION: auto
@@ -51,14 +51,16 @@ jobs:
         run: |
           set -euo pipefail
           case "$GITHUB_REF" in
-            refs/heads/main|refs/heads/fix/restore-preview-fresh-eu-d1-2026-11-18) ;;
+            refs/heads/main) ;;
             *) echo "::error::Restore is restricted to main or the dedicated isolated-restore branch."; exit 1 ;;
           esac
           test "$CLOUDFLARE_ACCOUNT_ID" = "$EXPECTED_ACCOUNT_ID"
-          for name in CLOUDFLARE_API_TOKEN BACKUP_ENCRYPTION_KEY AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY; do
+          for name in CLOUDFLARE_API_TOKEN BACKUP_ENCRYPTION_KEY BACKUP_ATTESTATION_HMAC_KEY AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY; do
             test -n "${!name:-}" || { echo "::error::Required secret missing: $name"; exit 1; }
           done
           test "${#AWS_ACCESS_KEY_ID}" -eq 32 || { echo "::error::R2 S3 Access Key ID must be 32 characters."; exit 1; }
+          test "${#BACKUP_ATTESTATION_HMAC_KEY}" -ge 32 || { echo "::error::BACKUP_ATTESTATION_HMAC_KEY must contain at least 32 UTF-8 bytes."; exit 1; }
+          test "$BACKUP_ATTESTATION_HMAC_KEY" != "$BACKUP_ENCRYPTION_KEY" || { echo "::error::Backup attestation and encryption keys must be distinct secrets."; exit 1; }
           if ! [[ "$BACKUP_OBJECT_KEY" =~ ^preview-d1/prochelia-preview-eu-2026-11-17/[0-9]{4}/[0-9]{2}/[0-9]{2}/[0-9]+-[0-9a-f]{12}\.sql\.gpg$ ]]; then
             echo "::error::Object key does not match the exact generated Preview backup key format."
             exit 1
@@ -137,8 +139,42 @@ jobs:
           mkdir -p "$RUNNER_TEMP/prochelia-restore"
           aws s3 cp "s3://$R2_BUCKET/$BACKUP_OBJECT_KEY" "$RUNNER_TEMP/prochelia-restore/backup.sql.gpg" --endpoint-url "$R2_ENDPOINT" --region auto --only-show-errors
           aws s3 cp "s3://$R2_BUCKET/$BACKUP_OBJECT_KEY.sha256" "$RUNNER_TEMP/prochelia-restore/backup.sha256" --endpoint-url "$R2_ENDPOINT" --region auto --only-show-errors
+          aws s3 cp "s3://$R2_BUCKET/$BACKUP_OBJECT_KEY.attestation.json" "$RUNNER_TEMP/prochelia-restore/attestation.json" --endpoint-url "$R2_ENDPOINT" --region auto --only-show-errors
+          aws s3 cp "s3://$R2_BUCKET/$BACKUP_OBJECT_KEY.attestation.hmac" "$RUNNER_TEMP/prochelia-restore/attestation.hmac" --endpoint-url "$R2_ENDPOINT" --region auto --only-show-errors
           test -s "$RUNNER_TEMP/prochelia-restore/backup.sql.gpg"
           test -s "$RUNNER_TEMP/prochelia-restore/backup.sha256"
+          test -s "$RUNNER_TEMP/prochelia-restore/attestation.json"
+          test -s "$RUNNER_TEMP/prochelia-restore/attestation.hmac"
+
+      - name: Verify HMAC attestation and exact Preview source before decryption
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/r2-backup-attestation.mjs verify "$RUNNER_TEMP/prochelia-restore/attestation.json" "$RUNNER_TEMP/prochelia-restore/attestation.hmac"
+          jq -e --arg key "$BACKUP_OBJECT_KEY" --arg bucket "$R2_BUCKET" --arg db "$PREVIEW_DB_ID" --arg name "$SOURCE_DB_NAME" --arg account "$EXPECTED_ACCOUNT_ID" '
+            .schema_version == 1 and
+            .attestation_type == "prochelia.preview-d1-backup" and
+            .source.account_id == $account and
+            .source.database_id == $db and
+            .source.database_name == $name and
+            .source.jurisdiction == "eu" and
+            .object.bucket == $bucket and
+            .object.key == $key and
+            .object.sha256_manifest_key == ($key + ".sha256") and
+            .provenance.repository == "rzem92-png/prochelia-api" and
+            .provenance.ref == "refs/heads/main" and
+            (.provenance.migration_source_sha | test("^[0-9a-f]{40}$")) and
+            .validation.sqlite_integrity_check == "ok" and
+            .validation.foreign_key_check == "empty" and
+            .validation.encryption == "OpenPGP-AES256" and
+            (.provenance.commit_sha | test("^[0-9a-f]{40}$"))
+          ' "$RUNNER_TEMP/prochelia-restore/attestation.json" >/dev/null || {
+            echo "::error::HMAC attestation does not bind this exact EU Preview backup object; restore refused."
+            exit 1
+          }
+          cipher_actual="$(sha256sum "$RUNNER_TEMP/prochelia-restore/backup.sql.gpg" | awk '{print $1}')"
+          cipher_expected="$(jq -r '.object.ciphertext_sha256' "$RUNNER_TEMP/prochelia-restore/attestation.json")"
+          test "$cipher_actual" = "$cipher_expected" || { echo "::error::Encrypted backup digest differs from signed attestation."; exit 1; }
 
       - name: Decrypt, verify checksum and test local SQLite restoration
         shell: bash
@@ -147,7 +183,8 @@ jobs:
           printf '%s' "$BACKUP_ENCRYPTION_KEY" | gpg --batch --yes --pinentry-mode loopback --passphrase-fd 0 --decrypt "$RUNNER_TEMP/prochelia-restore/backup.sql.gpg" > "$RUNNER_TEMP/prochelia-restore/backup.sql"
           actual="$(sha256sum "$RUNNER_TEMP/prochelia-restore/backup.sql" | awk '{print $1}')"
           expected="$(tr -d '[:space:]' < "$RUNNER_TEMP/prochelia-restore/backup.sha256")"
-          test "$actual" = "$expected" || { echo "::error::Backup checksum mismatch."; exit 1; }
+          attested_plain="$(jq -r '.object.plaintext_sha256' "$RUNNER_TEMP/prochelia-restore/attestation.json")"
+          test "$actual" = "$expected" && test "$actual" = "$attested_plain" || { echo "::error::Backup checksum differs from the HMAC-attested manifest."; exit 1; }
           grep -Eiq 'CREATE TABLE|INSERT INTO|CREATE INDEX|PRAGMA' "$RUNNER_TEMP/prochelia-restore/backup.sql" || { echo "::error::Decrypted file is not a valid SQL export."; exit 1; }
           sqlite3 "$RUNNER_TEMP/prochelia-restore/local-check.sqlite" < "$RUNNER_TEMP/prochelia-restore/backup.sql"
           integrity="$(sqlite3 "$RUNNER_TEMP/prochelia-restore/local-check.sqlite" 'PRAGMA integrity_check;')"
