@@ -19,8 +19,7 @@ jobs:
   backup-preview:
     if: >-
       (
-        github.ref == 'refs/heads/main' ||
-        github.ref == 'refs/heads/fix/r2-preview-backup-signed-attestation-2026-11-18'
+        github.ref == 'refs/heads/main'
       ) &&
       inputs.confirm_preview_backup == 'BACKUP_PREVIEW_TO_R2_EU'
     runs-on: ubuntu-latest
@@ -46,8 +45,8 @@ jobs:
         run: |
           set -euo pipefail
           case "$GITHUB_REF" in
-            refs/heads/main|refs/heads/fix/r2-preview-backup-signed-attestation-2026-11-18) ;;
-            *) echo "::error::Preview backup dispatch is restricted to main or the dedicated reviewed Preview attestation branch."; exit 1 ;;
+            refs/heads/main) ;;
+            *) echo "::error::Preview backup dispatch is restricted to the main branch only."; exit 1 ;;
           esac
           test "$CLOUDFLARE_ACCOUNT_ID" = "$EXPECTED_ACCOUNT_ID"
           test "$EXPECTED_DB_ID" != "$FORBIDDEN_PRODUCTION_DB_ID"
@@ -297,7 +296,7 @@ jobs:
             .object.key == $key and
             .object.sha256_manifest_key == ($key + ".sha256") and
             .provenance.repository == "rzem92-png/prochelia-api" and
-            (.provenance.ref == "refs/heads/main" or .provenance.ref == "refs/heads/fix/r2-preview-backup-signed-attestation-2026-11-18") and
+            .provenance.ref == "refs/heads/main" and
             (.provenance.migration_source_sha | test("^[0-9a-f]{40}$")) and
             .validation.sqlite_integrity_check == "ok" and
             .validation.foreign_key_check == "empty" and
