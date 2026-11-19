@@ -5,10 +5,8 @@ import { readFile } from "node:fs/promises";
 const workflow = await readFile(new URL("../.github/workflows/restore-preview-r2-backup-isolated-test.yml", import.meta.url), "utf8");
 const backupWorkflow = await readFile(new URL("../.github/workflows/backup-preview-d1-to-r2-eu.yml", import.meta.url), "utf8");
 
-test("Preview R2 restore is manually gated to main or the dedicated isolated-restore branch", () => {
+test("Preview R2 restore is manually gated to main only", () => {
   assert.ok(workflow.includes("github.ref == 'refs/heads/main'"));
-  assert.ok(workflow.includes("github.ref == 'refs/heads/fix/restore-preview-fresh-eu-d1-2026-11-18'"));
-  assert.ok(workflow.includes("refs/heads/main|refs/heads/fix/restore-preview-fresh-eu-d1-2026-11-18"));
   assert.ok(workflow.includes("RESTORE_PREVIEW_R2_TO_ISOLATED_TEST_ONLY"));
 });
 
@@ -75,27 +73,8 @@ test("Restore requires and verifies the HMAC attestation before decrypting or wr
 test("Restore refuses to reuse the encryption secret as the HMAC attestation key", () => {
   assert.match(workflow, /BACKUP_ATTESTATION_HMAC_KEY.*BACKUP_ENCRYPTION_KEY/s);
 });
-test("HMAC restore can be manually dispatched from its reviewed attestation branch", () => {
-  assert.ok(workflow.includes("github.ref == 'refs/heads/fix/r2-preview-backup-signed-attestation-2026-11-18'"));
-  assert.ok(workflow.includes("refs/heads/fix/r2-preview-backup-signed-attestation-2026-11-18) ;;"));
-  assert.match(workflow, /RESTORE_DB_ID.*!=.*PRODUCTION_DB_ID/);
-  assert.match(workflow, /Confirm isolated restore database is empty before any remote write/);
-});
-
-
-test("Signed Preview backup is manually dispatchable from the dedicated reviewed attestation branch", () => {
-  assert.match(backupWorkflow, /workflow_dispatch:/);
-  assert.ok(backupWorkflow.includes("github.ref == 'refs/heads/main'"));
-  assert.ok(backupWorkflow.includes("github.ref == 'refs/heads/fix/r2-preview-backup-signed-attestation-2026-11-18'"));
-  assert.ok(backupWorkflow.includes("refs/heads/main|refs/heads/fix/r2-preview-backup-signed-attestation-2026-11-18"));
-  assert.ok(backupWorkflow.includes("BACKUP_PREVIEW_TO_R2_EU"));
-  assert.match(backupWorkflow, /BACKUP_ATTESTATION_HMAC_KEY: \$\{\{ secrets\.BACKUP_ATTESTATION_HMAC_KEY \}\}/);
-  assert.match(backupWorkflow, /EXPECTED_DB_ID: e3cf167c-37e1-4d72-9ac6-b3e27c14b97f/);
-  assert.match(backupWorkflow, /R2_BUCKET: prochelia-preview-backups-eu-v2/);
-  assert.match(backupWorkflow, /result\.jurisdiction == "eu"/);
-});
-
-test("Isolated restore accepts only the exact signed backup provenance branches", () => {
-  assert.match(workflow, /\.provenance\.ref == "refs\/heads\/main" or \.provenance\.ref == "refs\/heads\/fix\/r2-preview-backup-signed-attestation-2026-11-18"/);
+test("Isolated restore accepts only main provenance", () => {
+  assert.match(workflow, /\.provenance\.ref == "refs\/heads\/main"/);
+  assert.doesNotMatch(workflow, /fix\/r2-preview-backup-signed-attestation|fix\/restore-preview-fresh-eu-d1/);
   assert.match(workflow, /r2-backup-attestation\.mjs verify/);
 });
