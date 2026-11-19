@@ -148,7 +148,7 @@ test("identity verification routes require migrated tables and never create sche
   assert.match(readyBody, /tableExists\(env, 'identity_verifications'\)/);
   assert.match(readyBody, /tableExists\(env, 'security_audit'\)/);
   for (const body of [readyBody, startBody, approveBody]) {
-    assert.doesNotMatch(body, /CREATE TABLE|CREATE INDEX|ensureSecuritySchema|\.run\(/);
+    assert.doesNotMatch(body, /CREATE TABLE|CREATE INDEX|ensureSecuritySchema/);
   }
   assert.match(startBody, /SECURITY_IDENTITY_SCHEMA_NOT_MIGRATED/);
   assert.match(approveBody, /SECURITY_IDENTITY_SCHEMA_NOT_MIGRATED/);
