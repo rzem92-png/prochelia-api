@@ -57,7 +57,12 @@ test("Preview deployment preserves and validates the current Worker CORS allowli
   assert.match(generator, /process\.env\.PAGES_EXISTING_CORS_ORIGINS/);
 });
 
-test("Preview deployment requires an exact frontend Pages commit SHA", () => {
+test("Preview deployment pins both the exact frontend Pages branch and commit SHA", () => {
+  assert.ok(workflow.includes("pages_branch:"));
+  assert.ok(workflow.includes("PAGES_EXPECTED_BRANCH: ${{ inputs.pages_branch || '' }}"));
+  assert.ok(workflow.includes("pages_branch is required and must be a valid branch name."));
+  assert.ok(workflow.includes("--arg expected_branch \"$PAGES_EXPECTED_BRANCH\""));
+  assert.ok(workflow.includes(".result.deployment_trigger.metadata.branch == $expected_branch"));
   assert.ok(workflow.includes("pages_commit_sha:"));
   assert.ok(workflow.includes("required: true"));
   assert.ok(workflow.includes("PAGES_EXPECTED_COMMIT: ${{ inputs.pages_commit_sha || '' }}"));
