@@ -136,3 +136,19 @@ test("Live E2E pins the deployed Preview Worker independently from the workflow 
   assert.ok(workflow.includes("body.deployment_commit !== process.env.API_EXPECTED_COMMIT"));
   assert.ok(workflow.includes("Preview Worker commit mismatch"));
 });
+
+test("Preview D1 seed and cleanup normalize raw and Bearer-prefixed Cloudflare tokens consistently", () => {
+  const seedStart = workflow.indexOf("Seed only the isolated Preview D1");
+  const exerciseStart = workflow.indexOf("Exercise Pages Preview proxy authentication");
+  const cleanupStart = workflow.indexOf("Always remove synthetic Preview fixtures");
+  assert.ok(seedStart >= 0 && exerciseStart > seedStart && cleanupStart > exerciseStart);
+  const seed = workflow.slice(seedStart, exerciseStart);
+  const cleanup = workflow.slice(cleanupStart);
+  const normalization = /sed -E 's\/\^\[\[:space:\]\]\*Bearer\[\[:space:\]\]\+\/\/I; s\/\^\[\[:space:\]\]\+\/; s\/\[[:space:]\]\+\$\/\/'/;
+  assert.match(seed, normalization);
+  assert.match(cleanup, normalization);
+  assert.match(seed, /CLOUDFLARE_API_TOKEN="\$token" npx/);
+  assert.match(cleanup, /CLOUDFLARE_API_TOKEN="\$token" npx/);
+  assert.match(cleanup, /Authorization: Bearer \$token/);
+  assert.doesNotMatch(cleanup, /Authorization: Bearer \$CLOUDFLARE_API_TOKEN/);
+});
