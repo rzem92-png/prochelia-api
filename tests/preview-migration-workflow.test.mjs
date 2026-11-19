@@ -47,7 +47,8 @@ test("Preview migration workflow validates the full canonical migration chain", 
     "0024_tenant_membership_authority.sql",
     "0025_session_revocation.sql",
     "0026_accounting_currency_consistency.sql",
-    "0027_tenant_membership_identity_immutable.sql"
+    "0027_tenant_membership_identity_immutable.sql",
+    "0028_tenant_accounting_entity_delete_guard.sql"
   ];
   for (const migration of expected) assert.ok(workflow.includes(`"${migration}"`), `missing canonical migration ${migration}`);
 });
@@ -98,7 +99,7 @@ test("Preview migration workflow accepts only an empty EU D1, the exact 23-entry
   assert.match(workflow, /SELECT type, name FROM sqlite_master ORDER BY type, name/);
   assert.match(workflow, /registry_present/);
   assert.match(workflow, /non_internal/);
-  assert.match(workflow, /len\\(local\\) != 29/);
+  assert.match(workflow, /len\(local\) != 29/);
   assert.match(workflow, /remote == base/);
   assert.match(workflow, /differs from the exact reviewed 23-entry baseline and 29-entry target/);
   assert.doesNotMatch(workflow, /legacy=/);
@@ -190,7 +191,8 @@ test("all canonical migrations required by the remote apply gate physically exis
     "0023_tenant_double_entry_accounting.sql", "0024_tenant_membership_authority.sql",
     "0025_session_revocation.sql",
     "0026_accounting_currency_consistency.sql",
-    "0027_tenant_membership_identity_immutable.sql"
+    "0027_tenant_membership_identity_immutable.sql",
+    "0028_tenant_accounting_entity_delete_guard.sql"
   ];
   const actual = new Set(await readdir(new URL("../migrations-preview-canonical/", import.meta.url)));
   const missing = expected.filter(name => !actual.has(name));
