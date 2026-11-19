@@ -7,6 +7,11 @@ on:
         description: "Type DEPLOY_PREVIEW_ONLY to deploy the isolated Preview Worker"
         required: true
         type: string
+      pages_branch:
+        description: "Exact frontend Preview branch; must match the latest successful Pages deployment"
+        required: true
+        default: "integrate/supra-control-center-preview-2026-11-15"
+        type: string
       pages_commit_sha:
         description: "Exact 40-character frontend Pages Preview commit SHA; must match the latest deployment"
         required: true
@@ -31,6 +36,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
+      PAGES_EXPECTED_BRANCH: ${{ inputs.pages_branch || '' }}
       PAGES_EXPECTED_COMMIT: ${{ inputs.pages_commit_sha || '' }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
@@ -50,6 +56,10 @@ jobs:
           set -euo pipefail
           [[ "$CLOUDFLARE_ACCOUNT_ID" == "f2a79e9fa41566a8ec80fb24c02c60eb" ]] || {
             echo "::error::Unexpected Cloudflare account; refusing Preview configuration."
+            exit 1
+          }
+          [[ "$PAGES_EXPECTED_BRANCH" =~ ^[a-z0-9][a-z0-9._/-]{0,127}$ && "$PAGES_EXPECTED_BRANCH" != "main" ]] || {
+            echo "::error::pages_branch is required, must be a valid lowercase Preview branch, and cannot be main."
             exit 1
           }
           [[ "$PAGES_EXPECTED_COMMIT" =~ ^[0-9a-f]{40}$ ]] || {
@@ -83,14 +93,14 @@ jobs:
           [[ -n "$deployment_id" ]] || { echo "::error::No Pages Preview deployment exists."; exit 1; }
           cf_get "Latest Pages Preview deployment details" \
             "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/pages/projects/prochelia/deployments/$deployment_id" "$RUNNER_TEMP/pages-preview.json"
-          jq -e --arg expected "$PAGES_EXPECTED_COMMIT" '
+          jq -e --arg expected "$PAGES_EXPECTED_COMMIT" --arg branch "$PAGES_EXPECTED_BRANCH" '
             .result.environment == "preview" and
             .result.is_skipped == false and
             .result.latest_stage.status == "success" and
             .result.uses_functions == true and
             .result.d1_databases.DB.id == "e3cf167c-37e1-4d72-9ac6-b3e27c14b97f" and
             .result.services.PROCHELIA_API.service == "prochelia-api-preview" and
-            .result.deployment_trigger.metadata.branch == "fix/frontend-cookie-session-auth-2026-11-17" and
+            .result.deployment_trigger.metadata.branch == $branch and
             (.result.deployment_trigger.metadata.commit_hash | type == "string" and test("^[0-9a-f]{40}$")) and
             .result.deployment_trigger.metadata.commit_hash == $expected
           ' "$RUNNER_TEMP/pages-preview.json" >/dev/null || {
@@ -141,6 +151,7 @@ jobs:
           {
             echo "Verified Pages Preview origin: $pages_origin"
             echo "Pages Preview deployment: $deployment_id"
+            echo "Pages Preview branch: $PAGES_EXPECTED_BRANCH"
             echo "Pages Preview commit: $pages_commit"
             [[ -z "$pages_alias" ]] || echo "Pages Preview branch alias: $pages_alias"
             echo "The verified origin and branch alias (when present) will be added to the Preview Worker CORS allowlist."
