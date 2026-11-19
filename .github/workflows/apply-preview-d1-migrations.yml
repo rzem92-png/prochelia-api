@@ -303,8 +303,8 @@ jobs:
               "0021_supra_audit_events.sql",
               "0022_supra_persisted_approvals.sql",
           }
-          if len(local) != 27:
-              print(f"::error::Expected exactly 27 canonical migrations; found {len(local)}.")
+          if len(local) != 28:
+              print(f"::error::Expected exactly 28 canonical migrations; found {len(local)}.")
               raise SystemExit(1)
           non_internal=[row for row in objects if row["name"] not in {"_cf_KV","d1_migrations"} and not row["name"].startswith("sqlite_")]
           import sqlite3
@@ -325,13 +325,13 @@ jobs:
           base_schema=schema_for(base)
           target_schema=schema_for(local)
           if not remote and not non_internal:
-              print("PASS: new EU Preview D1 is empty; all 27 canonical migrations are pending.")
+              print("PASS: new EU Preview D1 is empty; all 28 canonical migrations are pending.")
           elif registry_present and remote == base and remote_schema == base_schema:
               print("PASS: exact 23-entry registry AND exact schema inventory match the reviewed Preview baseline; only migrations 0023-0027 are pending.")
           elif registry_present and remote == local and remote_schema == target_schema:
-              print("PASS: exact 27-entry registry AND exact schema inventory match the canonical target; rerun is idempotent.")
+              print("PASS: exact 28-entry registry AND exact schema inventory match the canonical target; rerun is idempotent.")
           else:
-              print("::error::Preview migration registry differs from the exact reviewed 23-entry baseline and 27-entry target; no migration will run.")
+              print("::error::Preview migration registry differs from the exact reviewed 23-entry baseline and 28-entry target; no migration will run.")
               print("Unexpected remote names:", ", ".join(sorted(remote-local)) or "(none)")
               print("Missing expected names:", ", ".join(sorted(local-remote)) or "(none)")
               raise SystemExit(1)
