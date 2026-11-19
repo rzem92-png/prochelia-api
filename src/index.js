@@ -1109,10 +1109,59 @@ export function requiresAtomicFinancialSettlement(eventType) {
   ]).has(String(eventType || '').trim());
 }
 
+export async function readBoundedWebhookBody(request, maxBytes = 1_048_576) {
+  if (!Number.isSafeInteger(maxBytes) || maxBytes < 1) {
+    return { ok: false, reason: "invalid_limit" };
+  }
+  const declaredLength = request.headers.get("content-length");
+  if (declaredLength !== null) {
+    if (!/^\\d+$/.test(declaredLength)) return { ok: false, reason: "invalid_length" };
+    if (Number(declaredLength) > maxBytes) return { ok: false, reason: "too_large" };
+  }
+  if (!request.body) return { ok: true, body: "" };
+
+  const reader = request.body.getReader();
+  const chunks = [];
+  let total = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!(value instanceof Uint8Array)) return { ok: false, reason: "invalid_stream" };
+      total += value.byteLength;
+      if (total > maxBytes) {
+        await reader.cancel();
+        return { ok: false, reason: "too_large" };
+      }
+      chunks.push(value);
+    }
+    const bytes = new Uint8Array(total);
+    let offset = 0;
+    for (const chunk of chunks) {
+      bytes.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
+    try {
+      return { ok: true, body: new TextDecoder("utf-8", { fatal: true }).decode(bytes) };
+    } catch {
+      return { ok: false, reason: "invalid_utf8" };
+    }
+  } catch {
+    return { ok: false, reason: "read_failed" };
+  } finally {
+    try { reader.releaseLock(); } catch {}
+  }
+}
+
 export async function paymentWebhook(request, env) {
   // Reject unauthenticated and malformed events before schema inspection.
   // The schema gate below is read-only; migrations are never run from a request.
-  const raw = await request.text();
+  const bodyResult = await readBoundedWebhookBody(request);
+  if (!bodyResult.ok) {
+    const status = bodyResult.reason === "too_large" ? 413 : 400;
+    return json({ok:false,error:bodyResult.reason === "too_large" ? "WEBHOOK_BODY_TOO_LARGE" : "INVALID_WEBHOOK_BODY",version:VERSION},status);
+  }
+  const raw = bodyResult.body;
   if (!(await verifyWebhookSignature(request, env, raw))) return json({ok:false,error:'INVALID_WEBHOOK_SIGNATURE',version:VERSION},401);
   let event;
   try { event = JSON.parse(raw); } catch { return json({ok:false,error:'INVALID_WEBHOOK_JSON',version:VERSION},400); }
