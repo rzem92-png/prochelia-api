@@ -43,6 +43,6 @@ jobs:
       - name: Lint guarded Preview deployment workflows
         run: |
           go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
-          "$HOME/go/bin/actionlint" .github/workflows/deploy-preview-worker-manual.yml .github/workflows/apply-preview-d1-migrations.yml .github/workflows/preview-directory-e2e-acceptance.yml .github/workflows/provision-preview-r2-eu.yml .github/workflows/backup-preview-d1-to-r2-eu.yml .github/workflows/restore-preview-r2-backup-isolated-test.yml
+          "$HOME/go/bin/actionlint" .github/workflows/deploy-preview-worker-manual.yml .github/workflows/apply-preview-d1-migrations.yml .github/workflows/preview-directory-e2e-acceptance.yml .github/workflows/provision-preview-r2-eu.yml .github/workflows/backup-preview-d1-to-r2-eu.yml .github/workflows/backup-preview-d1.yml .github/workflows/restore-preview-r2-backup-isolated-test.yml
       - name: Run V7 authorization regression tests
         run: node --experimental-default-type=module --test tests/v7-security.test.js tests/deploy-preview-workflow.test.mjs tests/preview-e2e-workflow.test.mjs tests/payment-webhook-security.test.js tests/mission-security-atomic.test.js tests/payout-atomicity.test.js tests/payment-settlement-guard.test.js tests/payment-webhook-settlement-gate.test.js tests/payments-configured-guard.test.js tests/bootstrap-atomic.test.js tests/preview-migration-workflow.test.mjs tests/provision-preview-r2-eu-workflow.test.mjs tests/backup-preview-r2-eu-workflow.test.mjs tests/restore-preview-r2-backup-workflow.test.mjs
