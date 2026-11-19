@@ -22,6 +22,7 @@ function makeEnv({ authenticated = true, membership = true, activeTenant = "tena
           }};
         }
         if (sql.includes("FROM sessions s") && sql.includes("JOIN tenant_memberships m")) {
+          assert.deepEqual(args, ["session-a", "user-verified-by-session", activeTenant]);
           return { async first() {
             return membership ? {
               tenant_id: "tenant-a", tenant_slug: "tenant-a", tenant_name: "Tenant A",
