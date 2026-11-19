@@ -16,11 +16,13 @@ concurrency:
 jobs:
   backup-preview:
     name: Exporter et chiffrer la D1 de préproduction
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
       DB_NAME: prochelia-preview-eu-2026-11-17
       DB_ID: e3cf167c-37e1-4d72-9ac6-b3e27c14b97f
+      FORBIDDEN_PRODUCTION_DB_ID: 04f52830-ef5a-4f17-a640-42bbc2381bba
       # Identifiant de compte confirmé depuis le tableau de bord Cloudflare fourni.
       CLOUDFLARE_ACCOUNT_ID: f2a79e9fa41566a8ec80fb24c02c60eb
     steps:
@@ -29,6 +31,27 @@ jobs:
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
+
+      - name: Verify migration-only Wrangler config matches the Preview D1
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          raw = Path("wrangler.preview-migrations.jsonc").read_text()
+          clean = "\n".join(line for line in raw.splitlines() if not line.lstrip().startswith("//"))
+          config = json.loads(clean)
+          databases = config.get("d1_databases", [])
+          assert len(databases) == 1, "Expected exactly one migration-only D1 binding"
+          database = databases[0]
+          assert database.get("binding") == "PREVIEW_DB"
+          assert database.get("database_name") == "prochelia-preview-eu-2026-11-17"
+          assert database.get("database_id") == "e3cf167c-37e1-4d72-9ac6-b3e27c14b97f"
+          assert database.get("database_id") != "04f52830-ef5a-4f17-a640-42bbc2381bba"
+          assert database.get("migrations_dir") == "migrations-preview-canonical"
+          print("PASS: migration-only Wrangler config is pinned to the exact Preview D1.")
+          PY
 
       - name: Vérifier les secrets requis et la cible Cloudflare
         shell: bash
@@ -43,7 +66,7 @@ jobs:
               exit 1
             fi
           done
-          if [[ "$DB_NAME" != "prochelia-preview-eu-2026-11-17" || "$DB_ID" != "e3cf167c-37e1-4d72-9ac6-b3e27c14b97f" ]]; then
+          if [[ "$DB_NAME" != "prochelia-preview-eu-2026-11-17" || "$DB_ID" != "e3cf167c-37e1-4d72-9ac6-b3e27c14b97f" || "$DB_ID" == "$FORBIDDEN_PRODUCTION_DB_ID" ]]; then
             echo "::error::Garde-fou : la cible n'est pas la D1 de préproduction attendue."
             exit 1
           fi
