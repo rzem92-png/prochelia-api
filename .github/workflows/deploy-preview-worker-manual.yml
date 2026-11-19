@@ -7,6 +7,10 @@ on:
         description: "Type DEPLOY_PREVIEW_ONLY to deploy the isolated Preview Worker"
         required: true
         type: string
+      pages_branch:
+        description: "Exact frontend Pages Preview branch; must match the latest successful deployment"
+        required: true
+        type: string
       pages_commit_sha:
         description: "Exact 40-character frontend Pages Preview commit SHA; must match the latest deployment"
         required: true
@@ -24,18 +28,19 @@ jobs:
     if: >-
       (
         github.ref == 'refs/heads/main' ||
-        github.ref == 'refs/heads/fix/preview-e2e-dynamic-pages-pin-2026-11-17' ||
-        github.ref == 'refs/heads/fix/preview-critical-tenant-guards-2026-11-18'
+        github.ref == 'refs/heads/fix/preview-e2e-dynamic-pages-pin-2026-11-17'
       ) &&
       inputs.confirmation == 'DEPLOY_PREVIEW_ONLY'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
+      PAGES_EXPECTED_BRANCH: ${{ inputs.pages_branch || '' }}
       PAGES_EXPECTED_COMMIT: ${{ inputs.pages_commit_sha || '' }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           ref: ${{ github.sha }}
+          fetch-depth: 0
           persist-credentials: false
       - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
@@ -49,6 +54,10 @@ jobs:
           set -euo pipefail
           [[ "$CLOUDFLARE_ACCOUNT_ID" == "f2a79e9fa41566a8ec80fb24c02c60eb" ]] || {
             echo "::error::Unexpected Cloudflare account; refusing Preview configuration."
+            exit 1
+          }
+          [[ "$PAGES_EXPECTED_BRANCH" =~ ^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$ && "$PAGES_EXPECTED_BRANCH" != *".."* ]] || {
+            echo "::error::pages_branch is required and must be a valid branch name."
             exit 1
           }
           [[ "$PAGES_EXPECTED_COMMIT" =~ ^[0-9a-f]{40}$ ]] || {
@@ -82,14 +91,14 @@ jobs:
           [[ -n "$deployment_id" ]] || { echo "::error::No Pages Preview deployment exists."; exit 1; }
           cf_get "Latest Pages Preview deployment details" \
             "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/pages/projects/prochelia/deployments/$deployment_id" "$RUNNER_TEMP/pages-preview.json"
-          jq -e --arg expected "$PAGES_EXPECTED_COMMIT" '
+          jq -e --arg expected_branch "$PAGES_EXPECTED_BRANCH" --arg expected "$PAGES_EXPECTED_COMMIT" '
             .result.environment == "preview" and
             .result.is_skipped == false and
             .result.latest_stage.status == "success" and
             .result.uses_functions == true and
             .result.d1_databases.DB.id == "e3cf167c-37e1-4d72-9ac6-b3e27c14b97f" and
             .result.services.PROCHELIA_API.service == "prochelia-api-preview" and
-            .result.deployment_trigger.metadata.branch == "fix/frontend-cookie-session-auth-2026-11-17" and
+            .result.deployment_trigger.metadata.branch == $expected_branch and
             (.result.deployment_trigger.metadata.commit_hash | type == "string" and test("^[0-9a-f]{40}$")) and
             .result.deployment_trigger.metadata.commit_hash == $expected
           ' "$RUNNER_TEMP/pages-preview.json" >/dev/null || {
@@ -102,6 +111,22 @@ jobs:
           pages_alias="$(jq -r '.result.aliases[]? | select(test("^https://[a-z0-9-]+\\.prochelia\\.pages\\.dev$"))' "$RUNNER_TEMP/pages-preview.json" | head -n 1)"
           cf_get "Preview Worker settings for existing CORS allowlist" \
             "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/prochelia-api-preview/settings" "$RUNNER_TEMP/preview-worker-settings-before.json"
+          # Prevent a manual Preview deployment from rolling back fixes already active on the Worker.
+          active_worker_commit="$(jq -r '.result.bindings[] | select(.name == "PROCHELIA_COMMIT_SHA" and .type == "plain_text") | .text' "$RUNNER_TEMP/preview-worker-settings-before.json")"
+          [[ "$active_worker_commit" =~ ^[0-9a-f]{40}$ ]] || {
+            echo "::error::Active Preview Worker commit binding is missing or invalid; refusing deployment."
+            exit 1
+          }
+          if ! git cat-file -e "${active_worker_commit}^{commit}" 2>/dev/null; then
+            echo "::error::Active Preview Worker commit is not available in the checked-out Git history; refusing deployment."
+            exit 1
+          fi
+          if ! git merge-base --is-ancestor "$active_worker_commit" "$GITHUB_SHA"; then
+            echo "::error::Refusing Preview deployment: candidate commit is not a descendant of the active Preview Worker commit (rollback protection)."
+            printf 'Active Worker commit: %s\nCandidate commit: %s\n' "$active_worker_commit" "$GITHUB_SHA"
+            exit 1
+          fi
+          printf 'PREVIEW_ACTIVE_WORKER_COMMIT=%s\n' "$active_worker_commit" >> "$GITHUB_ENV"
           cors_origin="$(jq -r '.result.bindings[] | select(.name == "CORS_ORIGIN" and .type == "plain_text") | .text' "$RUNNER_TEMP/preview-worker-settings-before.json")"
           [[ -n "$cors_origin" && "$cors_origin" != "null" ]] || {
             echo "::error::Preview Worker CORS_ORIGIN is missing; refusing to replace an unknown allowlist."
