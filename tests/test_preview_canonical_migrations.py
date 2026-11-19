@@ -31,6 +31,7 @@ EXPECTED = [
     "0024_tenant_membership_authority.sql",
     "0025_session_revocation.sql",
     "0026_accounting_currency_consistency.sql",
+    "0027_tenant_membership_identity_immutable.sql",
 ]
 
 actual = sorted(path.name for path in MIGRATIONS.glob("*.sql"))
@@ -75,6 +76,16 @@ db.execute("INSERT INTO tenants(id, slug, display_name) VALUES ('tenant-a', 'ten
 db.execute("INSERT INTO tenants(id, slug, display_name) VALUES ('tenant-b', 'tenant-b', 'Tenant B')")
 db.execute("INSERT INTO tenant_memberships(id, tenant_id, user_id, role, status, invited_by_user_id) VALUES ('membership-a', 'tenant-a', 'user-a', 'OWNER', 'INVITED', 'user-admin')")
 db.execute("UPDATE tenant_memberships SET status='ACTIVE', accepted_at=CURRENT_TIMESTAMP WHERE id='membership-a'")
+for sql in [
+    "UPDATE tenant_memberships SET id='membership-a-mutated' WHERE id='membership-a'",
+    "UPDATE tenant_memberships SET tenant_id='tenant-b' WHERE id='membership-a'",
+    "UPDATE tenant_memberships SET user_id='user-b' WHERE id='membership-a'",
+]:
+    try:
+        db.execute(sql)
+        raise AssertionError(f"Tenant membership identity was mutable: {sql}")
+    except sqlite3.IntegrityError as exc:
+        assert "IDENTITY_IMMUTABLE" in str(exc), str(exc)
 db.execute("INSERT INTO tenant_membership_events(id, tenant_id, membership_id, actor_user_id, event_type, previous_status, new_status, reason_code) VALUES ('membership-event-a', 'tenant-a', 'membership-a', 'user-admin', 'ACCEPTED', 'INVITED', 'ACTIVE', 'INVITATION_ACCEPTED')")
 try:
     db.execute("INSERT INTO tenant_membership_events(id, tenant_id, membership_id, actor_user_id, event_type, previous_status, new_status, reason_code) VALUES ('membership-event-cross-tenant', 'tenant-b', 'membership-a', 'user-admin', 'ACCEPTED', 'INVITED', 'ACTIVE', 'CROSS_TENANT_TEST')")
