@@ -54,8 +54,8 @@ test("authenticated pricing quote fails closed without DDL or financial writes",
   });
   assert.equal(response.status, 503);
   assert.equal((await response.json()).error, "PRICING_POLICY_NOT_PRODUCTION_READY");
-  assert.ok(statements.every(sql => !/^\s*(CREATE|INSERT|UPDATE|DELETE|ALTER|DROP)\\b/i.test(sql)),
+  assert.ok(statements.every(sql => !/^\s*(CREATE|INSERT|UPDATE|DELETE|ALTER|DROP)\b/i.test(sql)),
     "pricing fail-closed path must not execute DDL or database writes");
-  assert.ok(statements.some(sql => /^\s*SELECT\\b/i.test(sql)),
+  assert.ok(statements.some(sql => /^\s*SELECT\b/i.test(sql)),
     "authenticated route must validate the session");
 });
