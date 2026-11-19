@@ -115,10 +115,10 @@ jobs:
           fi
           if ! git merge-base --is-ancestor "$active_worker_commit" "$GITHUB_SHA"; then
             echo "::error::Refusing Preview deployment: candidate commit is not a descendant of the active Preview Worker commit (rollback protection)."
-            printf 'Active Worker commit: %s\\nCandidate commit: %s\\n' "$active_worker_commit" "$GITHUB_SHA"
+            printf 'Active Worker commit: %s\nCandidate commit: %s\n' "$active_worker_commit" "$GITHUB_SHA"
             exit 1
           fi
-          printf 'PREVIEW_ACTIVE_WORKER_COMMIT=%s\\n' "$active_worker_commit" >> "$GITHUB_ENV"
+          printf 'PREVIEW_ACTIVE_WORKER_COMMIT=%s\n' "$active_worker_commit" >> "$GITHUB_ENV"
           cors_origin="$(jq -r '.result.bindings[] | select(.name == "CORS_ORIGIN" and .type == "plain_text") | .text' "$RUNNER_TEMP/preview-worker-settings-before.json")"
           [[ -n "$cors_origin" && "$cors_origin" != "null" ]] || {
             echo "::error::Preview Worker CORS_ORIGIN is missing; refusing to replace an unknown allowlist."
