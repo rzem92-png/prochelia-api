@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createHmac, webcrypto } from "node:crypto";
-import { verifyWebhookSignature, webhookProviderForRequest, webhookReplayDecision, webhookEventInsertDecision, readBoundedWebhookBody } from "../src/index.js";
+import { verifyWebhookSignature, webhookProviderForRequest, webhookReplayDecision, webhookEventInsertDecision, readBoundedWebhookBody, paymentWebhook } from "../src/index.js";
 
 globalThis.crypto ??= webcrypto;
 
@@ -160,4 +160,20 @@ test("webhook body reader rejects invalid UTF-8 and invalid limits", async () =>
   assert.deepEqual(await readBoundedWebhookBody(invalidUtf8), { ok: false, reason: "invalid_utf8" });
   const valid = new Request("https://example.test/api/payments/webhook", { method: "POST", body: "ok" });
   assert.deepEqual(await readBoundedWebhookBody(valid, 0), { ok: false, reason: "invalid_limit" });
+});
+
+
+test("payment webhook rejects an oversized declared body before signature or D1 access", async () => {
+  let databaseCalls = 0;
+  const request = new Request("https://example.test/api/payments/webhook", {
+    method: "POST",
+    headers: { "content-length": "1048577" },
+    body: "{}"
+  });
+  const response = await paymentWebhook(request, {
+    DB: { prepare() { databaseCalls += 1; throw new Error("D1 must not be accessed"); } }
+  });
+  assert.equal(response.status, 413);
+  assert.equal((await response.json()).error, "WEBHOOK_BODY_TOO_LARGE");
+  assert.equal(databaseCalls, 0);
 });
