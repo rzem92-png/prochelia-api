@@ -87,8 +87,9 @@ test("Copilot read model and background job routes do not invoke schema creation
   const process = source.slice(processStart, processEnd);
   assert.doesNotMatch(copilot, /ensureConsolidatedSchema|ensureOperationalSchema|ensureStrategicSchema|ensureFinalHardeningSchema/);
   assert.doesNotMatch(enqueue, /ensureFinalHardeningSchema/);
-  assert.doesNotMatch(process, /ensureFinalHardeningSchema|ensureOperationalSchema|persist:\s*true/);
+  assert.doesNotMatch(process, /ensureFinalHardeningSchema|ensureOperationalSchema|persist:\s*true|tableExists/);
+  assert.match(process, /BACKGROUND_EXECUTOR_NOT_IMPLEMENTED/);
+  assert.match(process, /write_enabled:false/);
   assert.match(copilot, /tableExists/);
   assert.match(enqueue, /tableExists/);
-  assert.match(process, /tableExists/);
 });
