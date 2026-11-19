@@ -333,11 +333,27 @@ except sqlite3.IntegrityError as exc:
     assert "TENANT_NOT_ACTIVE" in str(exc), str(exc)
 print("PASS: tenant membership lifecycle, cross-tenant event isolation, append-only audit and terminal revocation.")
 
-# Explicit session revocation is reasoned, immutable and cannot be reversed.
+# A selected tenant must be authorized at both session creation and later selection.
+db.execute("UPDATE tenant_memberships SET status='ACTIVE', accepted_at=CURRENT_TIMESTAMP WHERE id='membership-a-reinvite'")
 db.execute("""
-    INSERT INTO sessions(id, user_id, token_hash, expires_at)
-    VALUES ('session-a', 'user-a', 'synthetic-token-hash-a', '2027-01-01T00:00:00Z')
+    INSERT INTO sessions(id, user_id, token_hash, expires_at, active_tenant_id)
+    VALUES ('session-a', 'user-a', 'synthetic-token-hash-a', '2027-01-01T00:00:00Z', 'tenant-a')
 """)
+try:
+    db.execute("""
+        INSERT INTO sessions(id, user_id, token_hash, expires_at, active_tenant_id)
+        VALUES ('session-cross-tenant', 'user-a', 'synthetic-token-hash-cross', '2027-01-01T00:00:00Z', 'tenant-b')
+    """)
+    raise AssertionError("Session insert with a non-member tenant was incorrectly accepted")
+except sqlite3.IntegrityError as exc:
+    assert "SESSION_ACTIVE_TENANT_MEMBERSHIP_REQUIRED" in str(exc), str(exc)
+try:
+    db.execute("UPDATE sessions SET active_tenant_id='tenant-b' WHERE id='session-a'")
+    raise AssertionError("Session tenant switch without membership was incorrectly accepted")
+except sqlite3.IntegrityError as exc:
+    assert "SESSION_ACTIVE_TENANT_MEMBERSHIP_REQUIRED" in str(exc), str(exc)
+
+# Explicit session revocation is reasoned, immutable and cannot be reversed.
 try:
     db.execute("UPDATE sessions SET revoked_at=CURRENT_TIMESTAMP WHERE id='session-a'")
     raise AssertionError("Session revocation without a reason was incorrectly accepted")
