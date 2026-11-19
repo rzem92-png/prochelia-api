@@ -4,7 +4,7 @@ import { readFile } from "node:fs/promises";
 
 const workflow = await readFile(new URL("../.github/workflows/backup-preview-d1-to-r2-eu.yml", import.meta.url), "utf8");
 
-test("Preview R2 backup is manually gated to main or the exact reviewed attestation branch and pinned to the reviewed EU Preview D1 config", () => {
+test("Preview R2 backup is manually gated to main only and pinned to the reviewed EU Preview D1 config", () => {
   assert.match(workflow, /github\.ref == 'refs\/heads\/main'/);
   assert.match(workflow, /github\.ref == 'refs\/heads\/fix\/r2-preview-backup-signed-attestation-2026-11-18'/);
   assert.match(workflow, /inputs\.confirm_preview_backup == 'BACKUP_PREVIEW_TO_R2_EU'/);
@@ -38,7 +38,8 @@ test("Preview R2 backup verifies both exact resources are EU before export", () 
   assert.match(workflow, /\.result\.jurisdiction == "eu"/);
   assert.match(workflow, /\.result\.uuid == \$id and \.result\.name == \$name and \.result\.jurisdiction == "eu"/);
   assert.match(workflow, /prochelia-preview-backups-eu-v2/);
-  assert.ok(workflow.includes('(.provenance.ref == "refs/heads/main" or .provenance.ref == "refs/heads/fix/r2-preview-backup-signed-attestation-2026-11-18")'));
+  assert.ok(workflow.includes('.provenance.ref == "refs/heads/main"'));
+  assert.doesNotMatch(workflow, /fix\\/r2-preview-backup-signed-attestation/);
   assert.match(workflow, /f2a79e9fa41566a8ec80fb24c02c60eb\.eu\.r2\.cloudflarestorage\.com/);
 });
 
