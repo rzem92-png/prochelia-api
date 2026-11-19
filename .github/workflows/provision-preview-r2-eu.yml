@@ -58,7 +58,8 @@ jobs:
           if npx --yes wrangler@4 r2 bucket info "$BUCKET" --jurisdiction eu --json > "$RUNNER_TEMP/existing.json" 2>/dev/null; then
             echo "The dedicated EU bucket already exists; skip creation and verify it."
           else
-            echo "Expected active Preview EU bucket is absent; refusing to create a parallel resource."\n  exit 1
+            echo "Expected active Preview EU bucket is absent; refusing to create a parallel resource."
+            exit 1
           fi
           status="$(curl --silent --show-error --output "$RUNNER_TEMP/bucket.json" --write-out '%{http_code}' \
             "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/r2/buckets/$BUCKET" \
