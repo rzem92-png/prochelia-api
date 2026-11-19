@@ -8,8 +8,10 @@ test("Preview E2E is manually gated and requires an exact frontend Pages commit 
   assert.match(workflow, /workflow_dispatch:/);
   assert.ok(!workflow.includes("workflow_run:"));
   assert.ok(workflow.includes("RUN_PREVIEW_DIRECTORY_E2E"));
+  assert.ok(workflow.includes("pages_branch:"));
   assert.ok(workflow.includes("pages_commit_sha:"));
   assert.ok(workflow.includes("required: true"));
+  assert.ok(!workflow.includes('default: "fix/frontend-cookie-session-auth-2026-11-17"'));
   assert.ok(workflow.includes("pages_commit_sha is required and must be an exact 40-character lowercase Git SHA"));
 });
 
