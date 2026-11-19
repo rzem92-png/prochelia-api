@@ -40,6 +40,8 @@ jobs:
         run: |
           go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
           "$HOME/go/bin/actionlint" .github/workflows/deploy-preview-worker-manual.yml
+      - name: Test Preview deployment rollback guard
+        run: node --experimental-default-type=module --test tests/deploy-preview-workflow.test.mjs
       - name: Generate isolated Preview deployment config with non-deploying CI origin
         env:
           # This sentinel is used only by the dry-run job; the manual deploy workflow resolves the real Pages origin from Cloudflare.
