@@ -31,6 +31,48 @@ async function readJson(request) {
   catch { return null; }
 }
 
+// Read small security-sensitive JSON bodies with an enforced streaming byte limit.
+// Content-Length is an early rejection hint only; the stream itself is always bounded.
+async function readBoundedJson(request, maxBytes = 1024) {
+  const declaredLength = Number(request.headers.get('content-length'));
+  if (Number.isFinite(declaredLength) && declaredLength > maxBytes) {
+    return { ok: false, error: 'BODY_TOO_LARGE' };
+  }
+  if (!request.body) return { ok: false, error: 'INVALID_JSON' };
+  const reader = request.body.getReader();
+  const chunks = [];
+  let total = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > maxBytes) {
+        await reader.cancel();
+        return { ok: false, error: 'BODY_TOO_LARGE' };
+      }
+      chunks.push(value);
+    }
+  } catch {
+    return { ok: false, error: 'INVALID_JSON' };
+  }
+  try {
+    const bytes = new Uint8Array(total);
+    let offset = 0;
+    for (const chunk of chunks) {
+      bytes.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
+    const parsed = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes));
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return { ok: false, error: 'INVALID_JSON' };
+    }
+    return { ok: true, body: parsed };
+  } catch {
+    return { ok: false, error: 'INVALID_JSON' };
+  }
+}
+
 function clean(value) {
   return typeof value === 'string' ? value.trim() : value;
 }
@@ -363,11 +405,13 @@ export async function selectTenantForSession(request, env) {
   }
   const auth = await getSessionUser(request, env);
   if (!auth) return json({ ok: false, error: "UNAUTHENTICATED", version: VERSION }, 401);
-  let body;
-  try { body = await request.json(); } catch {
-    return json({ ok: false, error: "INVALID_JSON", version: VERSION }, 400);
+  const parsedBody = await readBoundedJson(request, 1024);
+  if (!parsedBody.ok) {
+    const tooLarge = parsedBody.error === 'BODY_TOO_LARGE';
+    return json({ ok: false, error: parsedBody.error, version: VERSION }, tooLarge ? 413 : 400);
   }
-  const tenantId = typeof body?.tenant_id === "string" ? body.tenant_id.trim() : "";
+  const body = parsedBody.body;
+  const tenantId = typeof body.tenant_id === "string" ? body.tenant_id.trim() : "";
   if (!tenantId || tenantId.length > 128) {
     return json({ ok: false, error: "TENANT_ID_REQUIRED", version: VERSION }, 400);
   }
