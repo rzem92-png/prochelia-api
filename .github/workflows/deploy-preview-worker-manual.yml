@@ -10,7 +10,6 @@ on:
       pages_branch:
         description: "Exact frontend Preview branch; must match the latest successful Pages deployment"
         required: true
-        default: "integrate/supra-control-center-preview-2026-11-15"
         type: string
       pages_commit_sha:
         description: "Exact 40-character frontend Pages Preview commit SHA; must match the latest deployment"
