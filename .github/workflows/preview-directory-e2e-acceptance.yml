@@ -43,7 +43,7 @@ jobs:
       PREVIEW_DB_NAME: prochelia-preview-eu-2026-11-17
       PREVIEW_DB_ID: e3cf167c-37e1-4d72-9ac6-b3e27c14b97f
       API_EXPECTED_COMMIT: ${{ inputs.api_commit_sha || '' }}
-      PAGES_PREVIEW_BRANCH: ${{ inputs.pages_branch || 'fix/frontend-cookie-session-auth-2026-11-17' }}
+      PAGES_PREVIEW_BRANCH: ${{ inputs.pages_branch || '' }}
       PAGES_EXPECTED_COMMIT: ${{ inputs.pages_commit_sha || '' }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -69,7 +69,10 @@ jobs:
           token="$(printf '%s' "$token" | tr -d '\r\n')"
           [[ "$PREVIEW_DB_ID" == "e3cf167c-37e1-4d72-9ac6-b3e27c14b97f" ]]
           [[ "$PREVIEW_DB_ID" != "04f52830-ef5a-4f17-a640-42bbc2381bba" ]]
-          [[ "$PAGES_PREVIEW_BRANCH" != "main" ]]
+          [[ -n "$PAGES_PREVIEW_BRANCH" && "$PAGES_PREVIEW_BRANCH" != "main" ]] || {
+            echo "::error::pages_branch is required and must identify a non-Production Pages Preview branch."
+            exit 1
+          }
           [[ "$API_EXPECTED_COMMIT" =~ ^[0-9a-f]{40}$ ]] || {
             echo "::error::api_commit_sha is required and must be an exact 40-character lowercase Git SHA."
             exit 1
@@ -108,15 +111,18 @@ jobs:
           }
           cf_request "Pages project Preview/Production configuration" \
             "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/pages/projects/prochelia" "$RUNNER_TEMP/pages-project.json"
-          jq -e --arg db "$PREVIEW_DB_ID" --arg worker "prochelia-api-preview" '
+          jq -e --arg db "$PREVIEW_DB_ID" --arg worker "prochelia-api-preview" --arg api_origin "https://prochelia-api-preview.rzem92.workers.dev" '
             .result.deployment_configs.preview.d1_databases.DB.id == $db and
             .result.deployment_configs.preview.services.PROCHELIA_API.service == $worker and
+            .result.deployment_configs.preview.env_vars.SUPRA_API_ORIGIN.type == "plain_text" and
+            .result.deployment_configs.preview.env_vars.SUPRA_API_ORIGIN.value == $api_origin and
             (.result.deployment_configs.production.d1_databases.DB.id // "") != $db
           ' "$RUNNER_TEMP/pages-project.json" >/dev/null || {
-            echo "::error::Pages project Preview binding is not isolated or does not match the expected D1/Worker."
+            echo "::error::Pages project Preview D1, Worker service binding or exact Preview API origin is invalid."
             jq -c '{
               preview_d1: .result.deployment_configs.preview.d1_databases.DB.id,
               preview_service: .result.deployment_configs.preview.services.PROCHELIA_API.service,
+              preview_api_origin: .result.deployment_configs.preview.env_vars.SUPRA_API_ORIGIN.value,
               production_d1: (.result.deployment_configs.production.d1_databases.DB.id // null)
             }' "$RUNNER_TEMP/pages-project.json"
             exit 1
@@ -171,30 +177,10 @@ jobs:
             echo "::error::Preview Worker commit binding does not match the requested exact API commit."
             exit 1
           }
-          cors_origin="$(jq -r '.result.bindings[] | select(.name == "CORS_ORIGIN" and .type == "plain_text") | .text' "$RUNNER_TEMP/preview-worker-settings.json")"
-          [[ -n "$cors_origin" && "$cors_origin" != "null" ]] || {
-            echo "::error::Preview Worker CORS_ORIGIN binding is missing."
-            exit 1
-          }
-          IFS=',' read -r -a allowed_origins <<< "$cors_origin"
-          expected_origins=("$pages_url")
-          if [[ -n "$pages_alias" ]]; then
-            expected_origins+=("$pages_alias")
-          fi
-          for expected_origin in "${expected_origins[@]}"; do
-            allowed_origin_found=false
-            for allowed_origin in "${allowed_origins[@]}"; do
-              if [[ "$(printf '%s' "$allowed_origin" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')" == "$expected_origin" ]]; then
-                allowed_origin_found=true
-              fi
-            done
-            if [[ "$allowed_origin_found" != "true" ]]; then
-              echo "::error::Preview Worker CORS_ORIGIN does not allow a current Pages Preview origin."
-              echo "::error::Add this exact origin to the PREVIEW Worker only: $expected_origin"
-              echo "::error::Do not change the Production Worker or remove the existing allowlist entries."
-              exit 1
-            fi
-          done
+          # The Pages Function validates the browser Origin itself and deliberately
+          # forwards only an allowlisted header set through the Preview service binding.
+          # It strips Origin upstream, so Worker CORS_ORIGIN is not a prerequisite for
+          # this same-origin Pages-to-Worker path.
           cat > "$RUNNER_TEMP/wrangler.preview.json" <<'JSON'
           {
             "name": "prochelia-preview-e2e",
@@ -215,7 +201,7 @@ jobs:
             echo "Frontend commit: $pages_commit"
             echo "Worker commit: $API_EXPECTED_COMMIT"
             [[ -z "$pages_alias" ]] || echo "Pages Preview branch alias: $pages_alias"
-            echo "Preview D1, service binding, origin and alias match the isolated Preview environment."
+            echo "Preview D1, service binding and exact Pages API proxy origin match the isolated Preview environment."
           } >> "$GITHUB_STEP_SUMMARY"
           echo "Exact isolated Preview D1 and current Pages deployment verified."
 
