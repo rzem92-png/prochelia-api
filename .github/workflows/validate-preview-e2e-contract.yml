@@ -5,6 +5,7 @@ on:
     branches:
       - fix/preview-e2e-dynamic-pages-pin-2026-11-17
       - fix/preview-critical-tenant-guards-2026-11-18
+      - fix/atomic-background-jobs-rate-limit-2026-11-18
     paths:
       - .github/workflows/preview-directory-e2e-acceptance.yml
       - .github/workflows/validate-preview-e2e-contract.yml
