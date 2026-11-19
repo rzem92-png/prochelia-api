@@ -15,7 +15,7 @@ test("Preview deploy is manual and requires exact confirmation on main or its de
   assert.match(workflow, /workflow_dispatch:/);
   assert.match(workflow, /DEPLOY_PREVIEW_ONLY/);
   assert.match(workflow, /github\.ref == 'refs\/heads\/main'/);
-  assert.match(workflow, /github\\.ref == 'refs\\/heads\\/fix\\/preview-workflow-alignment-active-2026-11-19'/);
+  assert.match(workflow, /github\.ref == 'refs\/heads\/fix\/preview-workflow-alignment-active-2026-11-19'/);
   assert.match(workflow, /github\.ref == 'refs\/heads\/fix\/preview-e2e-dynamic-pages-pin-2026-11-17'/);
 });
 
