@@ -176,3 +176,44 @@ test("tenant selection rejects absent/untrusted Origin before database access", 
   const response = await selectTenantForSession(req, { DB, CORS_ORIGIN: "https://4c3cec36.prochelia.pages.dev" });
   assert.equal(response.status, 403);
 });
+
+
+test("tenant selection rejects oversized declared JSON before database mutation", async () => {
+  const mock = makeEnv();
+  const req = new Request("https://api.example.test/api/tenant/select", {
+    method: "POST",
+    headers: {
+      origin: "https://4c3cec36.prochelia.pages.dev",
+      "content-type": "application/json",
+      "content-length": "2048",
+      cookie: "prochelia_session=synthetic-session-token"
+    },
+    body: JSON.stringify({ tenant_id: "tenant-a" })
+  });
+  const response = await selectTenantForSession(req, {
+    DB: mock.DB, CORS_ORIGIN: "https://4c3cec36.prochelia.pages.dev"
+  });
+  assert.equal(response.status, 413);
+  assert.equal((await response.json()).error, "BODY_TOO_LARGE");
+  assert.equal(mock.statements.length, 1, "only session authentication may query D1; no tenant update is allowed");
+});
+
+test("tenant selection enforces the byte limit even when Content-Length is absent", async () => {
+  const mock = makeEnv();
+  const payload = JSON.stringify({ tenant_id: "x".repeat(1500) });
+  const req = new Request("https://api.example.test/api/tenant/select", {
+    method: "POST",
+    headers: {
+      origin: "https://4c3cec36.prochelia.pages.dev",
+      "content-type": "application/json",
+      cookie: "prochelia_session=synthetic-session-token"
+    },
+    body: payload
+  });
+  const response = await selectTenantForSession(req, {
+    DB: mock.DB, CORS_ORIGIN: "https://4c3cec36.prochelia.pages.dev"
+  });
+  assert.equal(response.status, 413);
+  assert.equal((await response.json()).error, "BODY_TOO_LARGE");
+  assert.equal(mock.statements.length, 1, "streaming size enforcement must happen before tenant update");
+});
