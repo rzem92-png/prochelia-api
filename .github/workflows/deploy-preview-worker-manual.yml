@@ -28,6 +28,7 @@ jobs:
     if: >-
       (
         github.ref == 'refs/heads/main' ||
+        github.ref == 'refs/heads/fix/preview-workflow-alignment-active-2026-11-19' ||
         github.ref == 'refs/heads/fix/preview-e2e-dynamic-pages-pin-2026-11-17'
       ) &&
       inputs.confirmation == 'DEPLOY_PREVIEW_ONLY'
