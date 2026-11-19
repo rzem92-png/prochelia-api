@@ -87,3 +87,31 @@ test("logout without a session cookie does not access D1", async () => {
   assert.equal(response.status, 200);
   assert.equal(calls, 0);
 });
+
+
+test("logout fails closed and preserves the cookie when D1 does not confirm revocation", async () => {
+  const env = {
+    DB: {
+      prepare() {
+        return { bind() { return { async run() { return { success: false, meta: { changes: 0 } }; } }; } };
+      }
+    }
+  };
+  const response = await logout(request(), env);
+  assert.equal(response.status, 503);
+  assert.equal((await response.json()).error, "SESSION_REVOCATION_UNCONFIRMED");
+  assert.doesNotMatch(response.headers.get("set-cookie") || "", /Max-Age=0/);
+});
+
+test("logout treats a confirmed no-op as idempotent and clears the stale cookie", async () => {
+  const env = {
+    DB: {
+      prepare() {
+        return { bind() { return { async run() { return { success: true, meta: { changes: 0 } }; } }; } };
+      }
+    }
+  };
+  const response = await logout(request(), env);
+  assert.equal(response.status, 200);
+  assert.match(response.headers.get("set-cookie"), /Max-Age=0/);
+});
