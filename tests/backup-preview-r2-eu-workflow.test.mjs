@@ -61,7 +61,7 @@ test("Preview backup token assignments close the command substitution and quoted
 const scheduledWorkflow = await readFile(new URL("../.github/workflows/backup-preview-d1.yml", import.meta.url), "utf8");
 
 test("Scheduled Preview D1 backup checks out the exact workflow commit before reading Wrangler config", () => {
-  const checkout = scheduledWorkflow.indexOf("actions/checkout@11d5960a326750d5838078e36cf38b85af677262");
+  const checkout = scheduledWorkflow.indexOf("actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09");
   const secretCheck = scheduledWorkflow.indexOf("Vérifier les secrets requis et la cible Cloudflare");
   const exportStep = scheduledWorkflow.indexOf("wrangler@4 d1 export");
   assert.ok(checkout >= 0 && secretCheck > checkout && exportStep > secretCheck);
