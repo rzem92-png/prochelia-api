@@ -54,7 +54,8 @@ export async function handleSupraRoute(request, env, auth) {
   if (!isPlainRecord(body)) return reply({ ok: false, error: "INVALID_BODY" }, 400);
 
   const plan = buildSupraPlan(body);
-  const decision = assessSupraDecision({
+  const rejected = typeof plan.rejectionReason === "string" && plan.rejectionReason.length > 0;
+  const decision = rejected ? assessSupraDecision(null) : assessSupraDecision({
     caseType: body.caseType,
     impact: body.impact,
     requestedAction: body.requestedAction,
@@ -68,27 +69,28 @@ export async function handleSupraRoute(request, env, auth) {
     } : undefined
   });
 
-  const domain = typeof plan.domain === "string" ? plan.domain : "securite";
-  const action = typeof plan.requestedAction === "string" ? plan.requestedAction : "UNKNOWN";
-  const risk = typeof decision.risk === "string" ? decision.risk : "CRITICAL";
+  const domain = rejected ? "securite" : (typeof plan.domain === "string" ? plan.domain : "securite");
+  const action = rejected ? "INVALID_INPUT" : (typeof plan.requestedAction === "string" ? plan.requestedAction : "UNKNOWN");
+  const risk = rejected ? "HIGH" : (typeof decision.risk === "string" ? decision.risk : "CRITICAL");
   try {
     await writeAudit(env, auth, {
-      eventType: "PLAN_PREPARED",
+      eventType: rejected ? "PLAN_INPUT_REJECTED" : "PLAN_PREPARED",
       domain,
       action,
       risk,
-      approvalRequired: plan.autonomy?.approvalRequired !== false || decision.managerApprovalRequired
+      approvalRequired: rejected || plan.autonomy?.approvalRequired !== false || decision.managerApprovalRequired
     });
   } catch {
     return reply({ ok: false, error: "SUPRA_AUDIT_UNAVAILABLE", executionAllowed: false }, 503);
   }
 
   return reply({
-    ok: true,
+    ok: !rejected,
+    ...(rejected ? { error: "SUPRA_INPUT_REJECTED" } : {}),
     engine: "PROCHELIA_NEXUS_SUPRA",
     plan,
     decision,
     audit: { recorded: true },
     executionAllowed: false
-  });
+  }, rejected ? 422 : 200);
 }
