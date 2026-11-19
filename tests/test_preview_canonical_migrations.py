@@ -378,6 +378,7 @@ for sql in [
 print("PASS: explicit session revocation requires a reason and is terminal; session identity is immutable.")
 
 # Journal currency must remain consistent from line creation through posting.
+db.execute("UPDATE accounting_accounts SET is_active=1 WHERE id='cash-a'")
 db.execute("""
     INSERT INTO accounting_journals(
       id, tenant_id, entity_id, journal_code, journal_date, currency,
