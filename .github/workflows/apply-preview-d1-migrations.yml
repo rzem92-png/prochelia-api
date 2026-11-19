@@ -89,6 +89,7 @@ jobs:
             "0024_tenant_membership_authority.sql",
             "0025_session_revocation.sql",
             "0026_accounting_currency_consistency.sql",
+            "0027_tenant_membership_identity_immutable.sql"
           ]
           actual = sorted(p.name for p in Path("migrations-preview-canonical").glob("*.sql"))
           assert actual == sorted(expected), (
@@ -302,8 +303,8 @@ jobs:
               "0021_supra_audit_events.sql",
               "0022_supra_persisted_approvals.sql",
           }
-          if len(local) != 26:
-              print(f"::error::Expected exactly 26 canonical migrations; found {len(local)}.")
+          if len(local) != 27:
+              print(f"::error::Expected exactly 27 canonical migrations; found {len(local)}.")
               raise SystemExit(1)
           non_internal=[row for row in objects if row["name"] not in {"_cf_KV","d1_migrations"} and not row["name"].startswith("sqlite_")]
           import sqlite3
@@ -451,6 +452,7 @@ jobs:
           'trg_accounting_entity_identity_immutable_after_posting','trg_accounting_account_classification_immutable_after_posting',
           'trg_accounting_journal_currency_immutable_with_lines','trg_accounting_journal_post_currency_match',
           'trg_tenant_membership_events_no_update','trg_tenant_membership_events_no_delete','trg_tenant_membership_revocation_terminal',
+          'trg_tenant_membership_identity_immutable',
           'trg_tenant_membership_event_tenant_match','trg_accounting_entity_requires_active_tenant','trg_accounting_entity_tenant_stable',
           'trg_session_identity_immutable','trg_session_revocation_terminal','trg_session_revocation_metadata_required',
           'trg_session_active_tenant_requires_membership_insert','trg_session_active_tenant_requires_membership'
