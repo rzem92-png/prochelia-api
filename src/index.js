@@ -495,7 +495,9 @@ async function securityIdentityStart(request, env) {
 async function securityIdentityApprove(request, env) {
   const auth = await getSessionUser(request, env);
   if (!requireRole(auth, ['gerante'])) return json({ok:false,error:auth?.user?'FORBIDDEN':'UNAUTHENTICATED',version:VERSION}, auth?.user?403:401);
-  await ensureSecuritySchema(env);
+  if (!(await securityIdentitySchemaReady(env))) {
+    return json({ok:false,error:'SECURITY_IDENTITY_SCHEMA_NOT_MIGRATED',version:VERSION,write_enabled:false},503);
+  }
   const body = await readJson(request);
   const verificationId = clean(body?.verification_id);
   const status = clean(body?.status);
