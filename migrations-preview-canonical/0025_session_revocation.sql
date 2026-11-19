@@ -43,6 +43,26 @@ BEGIN
 END;
 
 -- A session may select only an active tenant for which its user has an active membership.
+CREATE TRIGGER IF NOT EXISTS trg_session_active_tenant_requires_membership_insert
+BEFORE INSERT ON sessions
+WHEN NEW.active_tenant_id IS NOT NULL AND (
+  NEW.revoked_at IS NOT NULL OR
+  NEW.expires_at <= CURRENT_TIMESTAMP OR
+  NOT EXISTS (
+    SELECT 1
+      FROM tenant_memberships m
+      JOIN tenants t ON t.id = m.tenant_id
+     WHERE m.user_id = NEW.user_id
+       AND m.tenant_id = NEW.active_tenant_id
+       AND m.status = 'ACTIVE'
+       AND t.status = 'ACTIVE'
+  )
+)
+BEGIN
+  SELECT RAISE(ABORT, 'SESSION_ACTIVE_TENANT_MEMBERSHIP_REQUIRED');
+END;
+
+-- A session may select only an active tenant for which its user has an active membership.
 CREATE TRIGGER IF NOT EXISTS trg_session_active_tenant_requires_membership
 BEFORE UPDATE OF active_tenant_id ON sessions
 WHEN NEW.active_tenant_id IS NOT NULL AND (
