@@ -467,6 +467,7 @@ jobs:
             "trg_accounting_journal_post_guard","trg_accounting_posted_journal_immutable",
             "trg_accounting_posted_journal_no_delete","trg_accounting_entity_identity_immutable_after_posting",
             "trg_accounting_account_classification_immutable_after_posting",
+    "trg_accounting_journal_currency_immutable_with_lines","trg_accounting_journal_post_currency_match",
             "trg_tenant_membership_events_no_update","trg_tenant_membership_events_no_delete",
             "trg_tenant_membership_revocation_terminal","trg_tenant_membership_event_tenant_match",
             "trg_accounting_entity_requires_active_tenant","trg_accounting_entity_tenant_stable",
@@ -481,7 +482,7 @@ jobs:
           if missing:
             print("::error::New accounting/tenant/session schema is incomplete:", sorted(missing))
             raise SystemExit(1)
-          print("PASS: 7 accounting/tenant tables, 14 indexes and 20 immutability/scope triggers verified.")
+          print("PASS: 7 accounting/tenant tables, 14 indexes and 22 immutability/scope triggers verified.")
           PY
           jq -n '{sql:"SELECT name FROM pragma_table_info('"'"'sessions'"'"')",params:[]}' > "$request"
           status="$(curl --silent --show-error --output "$response" --write-out '%{http_code}' \
