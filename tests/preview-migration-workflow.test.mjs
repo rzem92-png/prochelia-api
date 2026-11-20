@@ -305,6 +305,7 @@ test("Preview migration verifies privacy-safe cross-tenant mission opportunities
   for (const name of [
     "0032_privacy_safe_cross_tenant_mission_marketplace.sql",
     "mission_opportunity_consents", "mission_opportunities", "mission_applications", "mission_assignments",
+    "privacy-safe cross-tenant marketplace and assignment guards",
     "idx_mission_opportunities_public_feed", "idx_mission_applications_opportunity_status",
     "idx_mission_applications_provider", "idx_mission_assignments_provider_status",
     "trg_mission_opportunity_publish_guard", "trg_mission_application_submit_guard",
