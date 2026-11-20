@@ -3818,6 +3818,54 @@ async function intervenantOpportunityRoute(request, env, url) {
   }
 }
 
+async function intervenantProfileUpdateRoute(request, env) {
+  if (request.method !== 'PUT') return json({ ok: false, error: 'METHOD_NOT_ALLOWED' }, 405);
+  let auth;
+  try { auth = await getSessionUser(request, env); }
+  catch { return json({ ok: false, error: 'AUTHENTICATION_SCHEMA_UNAVAILABLE' }, 503); }
+  if (!auth?.user) return json({ ok: false, error: 'UNAUTHENTICATED' }, 401);
+  if (!requireRole(auth, ['intervenant'])) return json({ ok: false, error: 'FORBIDDEN' }, 403);
+  const tenantId = auth.session_active_tenant_id;
+  if (!tenantId) return json({ ok: false, error: 'ACTIVE_TENANT_REQUIRED' }, 403);
+  const parsed = await readLimitedJson(request, 2048);
+  if (!parsed.ok) return json({ ok: false, error: parsed.tooLarge ? 'REQUEST_TOO_LARGE' : 'INVALID_JSON' }, parsed.tooLarge ? 413 : 400);
+  const payload = parsed.value;
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return json({ ok: false, error: 'INVALID_PROFILE_PAYLOAD' }, 400);
+  const allowed = new Set(['service_area', 'hourly_rate']);
+  if (Object.keys(payload).some(key => !allowed.has(key)) || Object.keys(payload).length === 0) {
+    return json({ ok: false, error: 'UNSUPPORTED_PROFILE_FIELD' }, 400);
+  }
+  let serviceArea;
+  if (Object.hasOwn(payload, 'service_area')) {
+    if (typeof payload.service_area !== 'string' || payload.service_area.trim().length > 120) {
+      return json({ ok: false, error: 'INVALID_SERVICE_AREA' }, 400);
+    }
+    serviceArea = payload.service_area.trim();
+  }
+  let hourlyRate;
+  if (Object.hasOwn(payload, 'hourly_rate')) {
+    if (payload.hourly_rate !== null && (typeof payload.hourly_rate !== 'number' || !Number.isFinite(payload.hourly_rate) || payload.hourly_rate < 0 || payload.hourly_rate > 500)) {
+      return json({ ok: false, error: 'INVALID_HOURLY_RATE' }, 400);
+    }
+    hourlyRate = payload.hourly_rate;
+  }
+  try {
+    const current = await env.DB.prepare(
+      'SELECT id, service_area, hourly_rate FROM intervenants WHERE user_id = ? AND tenant_id = ? LIMIT 1'
+    ).bind(auth.user.id, tenantId).first();
+    if (!current?.id) return json({ ok: false, error: 'INTERVENANT_PROFILE_NOT_FOUND' }, 404);
+    const nextServiceArea = Object.hasOwn(payload, 'service_area') ? serviceArea : current.service_area;
+    const nextHourlyRate = Object.hasOwn(payload, 'hourly_rate') ? hourlyRate : current.hourly_rate;
+    const result = await env.DB.prepare(
+      'UPDATE intervenants SET service_area = ?, hourly_rate = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND user_id = ? AND tenant_id = ?'
+    ).bind(nextServiceArea, nextHourlyRate, current.id, auth.user.id, tenantId).run();
+    if (result.meta?.changes === 0) return json({ ok: false, error: 'PROFILE_NOT_UPDATED' }, 409);
+    return json({ ok: true, profile: { service_area: nextServiceArea, hourly_rate: nextHourlyRate } });
+  } catch {
+    return json({ ok: false, error: 'PROFILE_UPDATE_UNAVAILABLE' }, 503);
+  }
+}
+
 async function handle(request,env){
   try {
     if(isMutatingMethod(request.method) && !securityOriginAllowed(request,env)) return json({ok:false,error:'ORIGIN_NOT_ALLOWED',version:VERSION},403);
@@ -3833,6 +3881,7 @@ async function handle(request,env){
     if (url.pathname === '/api/intervenant/assignments') return intervenantAssignmentsRoute(request, env);
     if (url.pathname === '/api/intervenant/availability') return intervenantAvailabilityRoute(request, env, url);
     if (url.pathname === '/api/intervenant/opportunities' || /^\/api\/intervenant\/opportunities\/[^/]+\/apply$/.test(url.pathname)) return intervenantOpportunityRoute(request, env, url);
+    if (url.pathname === '/api/intervenant/profile') return intervenantProfileUpdateRoute(request, env);
     if (url.pathname === '/api/intervenant/workspace') return intervenantWorkspaceReadModel(request, env);
     if (url.pathname.startsWith('/api/supra/')) {
       let supraAuth = await getSessionUser(request, env).catch(() => null);
