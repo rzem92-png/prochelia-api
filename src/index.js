@@ -3363,6 +3363,92 @@ async function intervenantWorkspaceReadModel(request, env) {
   });
 }
 
+async function intervenantAvailabilityRoute(request, env, url) {
+  if (url.pathname !== '/api/intervenant/availability') return null;
+  if (!['GET', 'POST'].includes(request.method)) {
+    return json({ ok: false, error: 'METHOD_NOT_ALLOWED' }, 405);
+  }
+  let auth;
+  try {
+    auth = await getSessionUser(request, env);
+  } catch {
+    return json({ ok: false, error: 'AUTHENTICATION_SCHEMA_UNAVAILABLE' }, 503);
+  }
+  if (!auth?.user) return json({ ok: false, error: 'UNAUTHENTICATED' }, 401);
+  if (!requireRole(auth, ['intervenant'])) return json({ ok: false, error: 'FORBIDDEN' }, 403);
+  const tenantId = auth.session_active_tenant_id;
+  if (!tenantId) return json({ ok: false, error: 'ACTIVE_TENANT_REQUIRED' }, 403);
+
+  let profile;
+  try {
+    profile = await env.DB.prepare(
+      'SELECT id FROM intervenants WHERE user_id = ? AND tenant_id = ? LIMIT 1'
+    ).bind(auth.user.id, tenantId).first();
+  } catch {
+    return json({ ok: false, error: 'INTERVENANT_PROFILE_SCHEMA_UNAVAILABLE' }, 503);
+  }
+  if (!profile?.id) return json({ ok: false, error: 'INTERVENANT_PROFILE_NOT_FOUND' }, 404);
+
+  if (request.method === 'GET') {
+    try {
+      const result = await env.DB.prepare(
+        `SELECT id, start_at, end_at, status
+           FROM disponibilites
+          WHERE intervenant_id = ? AND tenant_id = ?
+          ORDER BY start_at ASC LIMIT 200`
+      ).bind(profile.id, tenantId).all();
+      return json({ ok: true, read_only: true, availability: result.results || [] });
+    } catch {
+      return json({ ok: false, error: 'AVAILABILITY_SCHEMA_UNAVAILABLE' }, 503);
+    }
+  }
+
+  const declaredLength = Number(request.headers.get('content-length') || 0);
+  if (declaredLength > 4096) return json({ ok: false, error: 'REQUEST_TOO_LARGE' }, 413);
+  let payload;
+  try { payload = await request.json(); }
+  catch { return json({ ok: false, error: 'INVALID_JSON' }, 400); }
+  const startAt = typeof payload?.start_at === 'string' ? payload.start_at : '';
+  const endAt = typeof payload?.end_at === 'string' ? payload.end_at : '';
+  const isoWithZone = /^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}(?::\\d{2}(?:\\.\\d{1,3})?)?(?:Z|[+-]\\d{2}:\\d{2})$/;
+  const startMs = isoWithZone.test(startAt) ? Date.parse(startAt) : NaN;
+  const endMs = isoWithZone.test(endAt) ? Date.parse(endAt) : NaN;
+  const now = Date.now();
+  if (!Number.isFinite(startMs) || !Number.isFinite(endMs) ||
+      startMs < now + 5 * 60 * 1000 || endMs <= startMs ||
+      endMs - startMs < 15 * 60 * 1000 || endMs - startMs > 24 * 60 * 60 * 1000 ||
+      startMs > now + 366 * 24 * 60 * 60 * 1000) {
+    return json({ ok: false, error: 'INVALID_AVAILABILITY_WINDOW' }, 400);
+  }
+
+  try {
+    const duplicate = await env.DB.prepare(
+      `SELECT id FROM disponibilites
+        WHERE intervenant_id = ? AND tenant_id = ?
+          AND start_at = ? AND end_at = ? AND status = 'available'
+        LIMIT 1`
+    ).bind(profile.id, tenantId, startAt, endAt).first();
+    if (duplicate) return json({ ok: true, idempotent_replay: true, availability: { id: duplicate.id } });
+
+    const conflict = await env.DB.prepare(
+      `SELECT id FROM disponibilites
+        WHERE intervenant_id = ? AND tenant_id = ? AND status = 'available'
+          AND start_at < ? AND end_at > ?
+        LIMIT 1`
+    ).bind(profile.id, tenantId, endAt, startAt).first();
+    if (conflict) return json({ ok: false, error: 'AVAILABILITY_OVERLAP' }, 409);
+
+    const id = 'availability-' + crypto.randomUUID();
+    await env.DB.prepare(
+      `INSERT INTO disponibilites(id, intervenant_id, tenant_id, start_at, end_at, status)
+       VALUES (?, ?, ?, ?, ?, 'available')`
+    ).bind(id, profile.id, tenantId, startAt, endAt).run();
+    return json({ ok: true, availability: { id, start_at: startAt, end_at: endAt, status: 'available' } }, 201);
+  } catch {
+    return json({ ok: false, error: 'AVAILABILITY_WRITE_REJECTED' }, 409);
+  }
+}
+
 async function intervenantOpportunityRoute(request, env, url) {
   const applyMatch = url.pathname.match(/^\/api\/intervenant\/opportunities\/([^/]+)\/apply$/);
   const isFeed = url.pathname === '/api/intervenant/opportunities';
