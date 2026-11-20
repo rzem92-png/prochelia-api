@@ -128,7 +128,7 @@ export async function handleSupraApprovalRoute(request, env, auth) {
       if (!["PENDING", "APPROVED"].includes(row.status)) return reply({ ok: false, error: "APPROVAL_NOT_REVOCABLE" }, 409);
       await env.DB.batch([
         env.DB.prepare("UPDATE supra_approval_requests SET status='REVOKED' WHERE id=? AND requester_user_id=? AND status IN ('PENDING','APPROVED') AND expires_at>?").bind(requestId, auth.user.id, now),
-        env.DB.prepare("INSERT INTO supra_approval_events (id, request_id, actor_user_id, actor_role, event_type, details_json) SELECT ?, ?, ?, 'GERANTE', 'REVOKED', ? WHERE EXISTS (SELECT 1 FROM supra_approval_requests WHERE id=? AND status='REVOKED')").bind(crypto.randomUUID(), requestId, auth.user.id, JSON.stringify({ reason }), requestId)
+        env.DB.prepare("INSERT INTO supra_approval_events (id, request_id, actor_user_id, actor_role, event_type, details_json) SELECT ?, ?, ?, 'GERANTE', 'REVOKED', ? WHERE EXISTS (SELECT 1 FROM supra_approval_requests WHERE id=? AND status='REVOKED') AND NOT EXISTS (SELECT 1 FROM supra_approval_events WHERE request_id=? AND event_type='REVOKED')").bind(crypto.randomUUID(), requestId, auth.user.id, JSON.stringify({ reason }), requestId, requestId)
       ]);
       const current = await env.DB.prepare("SELECT status FROM supra_approval_requests WHERE id=?").bind(requestId).first();
       return current?.status === "REVOKED" ? reply({ ok: true, requestId, status: "REVOKED" }) : reply({ ok: false, error: "APPROVAL_NOT_REVOCABLE" }, 409);
