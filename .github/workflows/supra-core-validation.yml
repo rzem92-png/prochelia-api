@@ -1,0 +1,47 @@
+name: Nexus Supra core validation
+
+on:
+  pull_request:
+    paths:
+      - "src/supra-intelligence.js"
+      - "src/supra-orchestrator.js"
+      - "src/supra-api.js"
+      - "src/supra-approvals.js"
+      - "src/index.js"
+      - "migrations/0021_supra_audit_events.sql"
+      - "migrations/0022_supra_persisted_approvals.sql"
+      - "migrations/0023_supra_append_only_audit_guards.sql"
+      - "tests/supra-intelligence.test.mjs"
+      - "tests/supra-orchestrator.test.mjs"
+      - "tests/supra-api.test.mjs"
+      - "tests/supra-worker-wiring.test.mjs"
+      - "tests/supra-approvals.test.mjs"
+      - "tests/session-cookie-malformed.test.mjs"
+      - "tests/deploy-preview-workflow.test.mjs"
+      - ".github/workflows/supra-core-validation.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  supra-core:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          package-manager-cache: false
+      - name: Syntax-check isolated Supra modules
+        run: |
+          node --experimental-default-type=module --check src/supra-intelligence.js
+          node --experimental-default-type=module --check src/supra-orchestrator.js
+          node --experimental-default-type=module --check src/supra-api.js
+          node --experimental-default-type=module --check src/supra-approvals.js
+          node --experimental-default-type=module --check src/index.js
+      - name: Run focused Supra governance regression tests
+        run: |
+          node --experimental-default-type=module --test tests/supra-intelligence.test.mjs tests/supra-orchestrator.test.mjs tests/supra-api.test.mjs tests/supra-worker-wiring.test.mjs tests/supra-approvals.test.mjs tests/session-cookie-malformed.test.mjs tests/deploy-preview-workflow.test.mjs

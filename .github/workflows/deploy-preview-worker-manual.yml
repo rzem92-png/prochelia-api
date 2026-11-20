@@ -29,7 +29,8 @@ jobs:
       (
         github.ref == 'refs/heads/main' ||
         github.ref == 'refs/heads/fix/preview-workflow-alignment-active-2026-11-19' ||
-        github.ref == 'refs/heads/fix/preview-e2e-dynamic-pages-pin-2026-11-17'
+        github.ref == 'refs/heads/fix/preview-e2e-dynamic-pages-pin-2026-11-17' ||
+        github.ref == 'refs/heads/feat/supra-core-active-preview-2026-11-20'
       ) &&
       inputs.confirmation == 'DEPLOY_PREVIEW_ONLY'
     runs-on: ubuntu-latest
