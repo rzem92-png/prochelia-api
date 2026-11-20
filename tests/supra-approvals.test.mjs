@@ -168,7 +168,7 @@ test("SUPRA audit trail and approval requests cannot be updated or deleted", asy
 });
 
 test("additive Preview repair migration installs all missing append-only guards", async () => {
-  const sql = await readFile(new URL("../migrations/0023_supra_append_only_audit_guards.sql", import.meta.url), "utf8");
+  const sql = await readFile(new URL("../migrations/0030_supra_append_only_audit_guards.sql", import.meta.url), "utf8");
   assert.match(sql, /trg_supra_audit_events_no_update/);
   assert.match(sql, /trg_supra_audit_events_no_delete/);
   assert.match(sql, /trg_supra_approval_requests_no_delete/);
