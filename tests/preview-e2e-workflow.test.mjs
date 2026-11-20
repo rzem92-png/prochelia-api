@@ -65,7 +65,10 @@ test("Pages Preview configuration and deployment are checked independently from 
 });
 
 test("Pages same-origin proxy is pinned to the isolated Preview Worker without a redundant CORS gate", () => {
-  assert.ok(workflow.includes("workers/scripts/prochelia-api-preview/settings"));
+  assert.ok(workflow.includes("workers/scripts/prochelia-api-preview/deployments?per_page=1&page=1"));
+  assert.ok(workflow.includes("/workers/scripts/prochelia-api-preview/versions/$version_id"));
+  assert.ok(workflow.includes(".result.resources.bindings[]?"));
+  assert.ok(workflow.includes('select(.name == "DB" and .type == "d1" and .database_id == $db)'));
   assert.ok(workflow.includes("SUPRA_API_ORIGIN"));
   assert.ok(workflow.includes("PROCHELIA_API.service"));
   assert.ok(workflow.includes("https://prochelia-api-preview.rzem92.workers.dev"));
@@ -133,8 +136,10 @@ test("Live E2E pins the deployed Preview Worker independently from the workflow 
   assert.ok(workflow.includes('[[ "$worker_commit" == "$API_EXPECTED_COMMIT" ]]'));
   assert.ok(!workflow.includes("API_EXPECTED_COMMIT: ${{ github.sha }}"));
   assert.ok(workflow.includes("ref: ${{ github.sha }}"));
-  assert.ok(workflow.includes("body.deployment_commit !== process.env.API_EXPECTED_COMMIT"));
-  assert.ok(workflow.includes("Preview Worker commit mismatch"));
+  assert.ok(workflow.includes("API_DEPLOYED_VERSION_ID"));
+  assert.ok(workflow.includes("API_DEPLOYED_VERSION_NUMBER"));
+  assert.ok(!workflow.includes("body.deployment_commit"));
+  assert.ok(workflow.includes("Active Preview Worker version does not match the requested commit and isolated Preview D1."));
 });
 
 test("Preview D1 seed and cleanup normalize raw and Bearer-prefixed Cloudflare tokens consistently", () => {
