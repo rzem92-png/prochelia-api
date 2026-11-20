@@ -159,3 +159,22 @@ test("intervenant assignments are read-only and restricted to the authenticated 
   ]) assert.ok(assignmentHandler.includes(fragment), "missing assignment read guard: " + fragment);
   assert.doesNotMatch(assignmentHandler, /INSERT INTO|UPDATE\\s+mission_assignments|o\\.address|client_user_id/);
 });
+
+const applicationStart = source.indexOf("async function intervenantApplicationsRoute(");
+const applicationEnd = source.indexOf("async function intervenantAssignmentsRoute(", applicationStart);
+assert.ok(applicationStart >= 0 && applicationEnd > applicationStart, "application read route must exist");
+const applicationHandler = source.slice(applicationStart, applicationEnd);
+
+test("intervenant application tracking is read-only and tenant-scoped", () => {
+  assert.ok(source.includes("url.pathname === '/api/intervenant/applications'"));
+  for (const fragment of [
+    "request.method !== 'GET'",
+    "getSessionUser(request, env)",
+    "requireRole(auth, ['intervenant'])",
+    "auth.session_active_tenant_id",
+    "WHERE a.applicant_tenant_id = ? AND a.intervenant_id = ?",
+    "read_only: true",
+    "applications: result.results"
+  ]) assert.ok(applicationHandler.includes(fragment), "missing application read guard: " + fragment);
+  assert.doesNotMatch(applicationHandler, /INSERT INTO|UPDATE\\s+mission_applications|o\\.address|client_user_id/);
+});
