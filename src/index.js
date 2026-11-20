@@ -2597,24 +2597,10 @@ export async function finalProductionAudit(request,env) {
   },200);
 }
 
-async function copilotNextActions(request,env) {
+async function copilotNextActions(request, env) {
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
-  const requiredTables=['platform_settings','operational_cases','promotion_recommendations','action_outbox'];
-  const missingTables=[];
-  for(const table of requiredTables) if(!await tableExists(env,table)) missingTables.push(table);
-  if(missingTables.length) return json({ok:false,error:'SUPRA_READ_MODEL_SCHEMA_NOT_READY',missing_tables:missingTables,version:VERSION},503);
-  const phase=await getSetting(env,'project_phase','TEST');
-  const items=[];
-  const cases=await env.DB.prepare(`SELECT id,case_type,priority,status,impact_level,description,proposed_solution_json FROM operational_cases WHERE status NOT IN ('RESOLVED','CLOSED') ORDER BY priority DESC,created_at ASC LIMIT 30`).all();
-  for(const c of cases.results||[]) items.push({priority:Number(c.priority||10),category:'OPERATIONS',type:'CASE',id:c.id,title:c.description||c.case_type,impact:c.impact_level,status:c.status,action:'REVIEW_OR_EXECUTE'});
-  const promos=await env.DB.prepare(`SELECT id,recommendation_type,discount_percent,max_safe_discount_percent,status,rationale FROM promotion_recommendations WHERE status='PROPOSED' ORDER BY created_at DESC LIMIT 20`).all();
-  for(const p of promos.results||[]) items.push({priority:30,category:'COMMERCIAL',type:'PROMOTION',id:p.id,title:`Promotion ${p.recommendation_type}`,action:'REVIEW_PROMOTION',discount_percent:p.discount_percent,max_safe_discount_percent:p.max_safe_discount_percent,rationale:p.rationale});
-  const pending=await env.DB.prepare(`SELECT id,action_type,status,attempts,last_error FROM action_outbox WHERE status IN ('PENDING','FAILED','WAITING_PROVIDER') ORDER BY created_at ASC LIMIT 20`).all();
-  for(const a of pending.results||[]) items.push({priority:a.status==='FAILED'?90:50,category:'EXECUTION',type:'ACTION',id:a.id,title:a.action_type,action:a.status==='FAILED'?'RETRY_OR_REVIEW':'PROCESS',status:a.status,attempts:a.attempts,last_error:a.last_error});
-  items.sort((a,b)=>b.priority-a.priority);
-  return json({ok:true,version:VERSION,phase,top_actions:items.slice(0,30),automation_policy:'proposal_only_no_background_execution'});
+  return legacyTenantScopeBlocked();
 }
-
 async function enqueueBackgroundJob(env, jobType, payload={}, maxAttempts=5) {
   if(!await tableExists(env,'background_jobs')) throw new Error('BACKGROUND_JOB_SCHEMA_NOT_READY');
   const id=crypto.randomUUID();
@@ -3543,6 +3529,18 @@ handle = async function(request,env){
         ok:false,
         error:'TENANT_SCOPED_EXECUTION_NOT_IMPLEMENTED',
         message:'Le traitement des files reste bloqué tant que chaque action ne dispose pas d’un périmètre tenant et d’un contrôle d’approbation.',
+        version:VERSION,
+        write_enabled:false,
+        automation:'proposal_only_no_background_execution'
+      },503);
+    }
+    // The Copilot read model still reads global operational rows. Refuse before
+    // the rate limiter until a verified tenant context and row-level scope exist.
+    if (preflightPath === '/api/copilot/next-actions' && preflightMethod === 'GET') {
+      return json({
+        ok:false,
+        error:'TENANT_DATA_SCOPE_NOT_MIGRATED',
+        message:'Les recommandations globales restent bloquées tant que le contexte tenant et l’isolation des lignes ne sont pas implémentés.',
         version:VERSION,
         write_enabled:false,
         automation:'proposal_only_no_background_execution'
