@@ -17,6 +17,8 @@ test("the intervenant workspace route is GET-only and authenticated", () => {
 
 test("the workspace scopes the profile to the authenticated user", () => {
   assert.match(handler, /FROM intervenants WHERE user_id=\? LIMIT 1/);
+  assert.match(handler, /first_name:auth\.user\.first_name/);
+  assert.match(handler, /last_name:auth\.user\.last_name/);
   assert.match(handler, /\.bind\(auth\.user\.id\)\.first\(\)/);
 });
 
