@@ -43,6 +43,9 @@ workflow_text = WORKFLOW.read_text(encoding="utf-8")
 assert '"0029_supra_append_only_audit_guards.sql"' in workflow_text, (
     "Preview migration workflow omits the latest canonical migration 0029/0030"
 )
+assert '"0030_supra_audit_tenant_scope.sql"' in workflow_text, (
+    "Preview migration workflow omits tenant-scoped SUPRA audit migration 0030"
+)
 assert "if len(local) != 31:" in workflow_text, (
     "Preview migration workflow must require exactly 31 canonical migrations"
 )
