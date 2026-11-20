@@ -38,6 +38,7 @@ EXPECTED = [
     "0031_operational_marketplace_tenant_scope.sql",
     "0032_privacy_safe_cross_tenant_mission_marketplace.sql",
     "0033_intervenant_availability_overlap_guard.sql",
+    "0034_timezone_safe_availability_overlap.sql",
 ]
 
 # Keep the manual Preview migration gate synchronized with the canonical chain.
@@ -49,16 +50,16 @@ assert '"0029_supra_append_only_audit_guards.sql"' in workflow_text, (
 assert '"0030_supra_audit_tenant_scope.sql"' in workflow_text, (
     "Preview migration workflow omits tenant-scoped SUPRA audit migration 0030"
 )
-assert "if len(local) != 34:" in workflow_text, (
-    "Preview migration workflow must require exactly 31 canonical migrations"
+assert "if len(local) != 35:" in workflow_text, (
+    "Preview migration workflow must require exactly 35 canonical migrations"
 )
-assert "exact 34-entry registry" in workflow_text, (
+assert "exact 35-entry registry" in workflow_text, (
     "Preview migration workflow target registry count is stale"
 )
-assert "all 34 canonical migrations are pending" in workflow_text, (
+assert "all 35 canonical migrations are pending" in workflow_text, (
     "Preview migration workflow empty-database inventory message is stale"
 )
-assert "only migrations 0023-0033 are pending" in workflow_text, (
+assert "only migrations 0023-0034 are pending" in workflow_text, (
     "Preview migration workflow baseline-to-target range is stale"
 )
 
@@ -652,6 +653,25 @@ db.execute("""
     INSERT INTO disponibilites(id, intervenant_id, start_at, end_at, tenant_id)
     VALUES ('market-availability-a', 'market-worker-a-row', '2026-11-21T09:00:00Z', '2026-11-21T12:00:00Z', 'market-tenant-a')
 """)
+
+# Offsets are compared as instants: 08:00Z-09:00Z ends exactly when the
+# existing 09:00Z-12:00Z slot begins and must not be rejected as overlapping.
+db.execute("""
+    INSERT INTO disponibilites(id, intervenant_id, start_at, end_at, status, tenant_id)
+    VALUES ('market-availability-offset-adjacent', 'market-worker-a-row',
+            '2026-11-21T10:00:00+02:00', '2026-11-21T11:00:00+02:00',
+            'available', 'market-tenant-a')
+""")
+try:
+    db.execute("""
+        INSERT INTO disponibilites(id, intervenant_id, start_at, end_at, status, tenant_id)
+        VALUES ('market-availability-offset-overlap', 'market-worker-a-row',
+                '2026-11-21T11:30:00+02:00', '2026-11-21T12:30:00+02:00',
+                'available', 'market-tenant-a')
+    """)
+    raise AssertionError("Timezone-offset overlapping availability was incorrectly accepted")
+except sqlite3.IntegrityError as exc:
+    assert "AVAILABILITY_OVERLAP" in str(exc), str(exc)
 db.execute("""
     INSERT INTO wallets(id, user_id, tenant_id, currency) VALUES ('market-wallet-a', 'market-worker-a', 'market-tenant-a', 'EUR')
 """)
