@@ -184,6 +184,7 @@ BEFORE INSERT ON mission_applications WHEN NOT EXISTS (
   SELECT 1
     FROM mission_opportunities o
     JOIN tenants t ON t.id=NEW.applicant_tenant_id AND t.status='ACTIVE'
+    JOIN tenants owner ON owner.id=o.owner_tenant_id AND owner.status='ACTIVE'
     JOIN tenant_memberships tm
       ON tm.user_id=NEW.applicant_user_id AND tm.tenant_id=NEW.applicant_tenant_id AND tm.status='ACTIVE'
     JOIN intervenants i
@@ -237,6 +238,8 @@ CREATE TRIGGER IF NOT EXISTS trg_mission_assignment_insert_guard
 BEFORE INSERT ON mission_assignments WHEN NOT EXISTS (
   SELECT 1
     FROM mission_applications a
+    JOIN tenants provider ON provider.id=NEW.provider_tenant_id AND provider.status='ACTIVE'
+    JOIN tenants owner ON owner.id=NEW.owner_tenant_id AND owner.status='ACTIVE'
     JOIN mission_opportunities o ON o.id=a.opportunity_id AND o.owner_tenant_id=a.owner_tenant_id
     JOIN disponibilites d ON d.intervenant_id=a.intervenant_id AND d.tenant_id=a.applicant_tenant_id
       AND d.status='available' AND d.start_at<=o.start_at AND d.end_at>=o.end_at
@@ -304,3 +307,19 @@ BEFORE INSERT ON mission_applications WHEN EXISTS (
   WHERE o.id=NEW.opportunity_id AND c.revoked_at IS NOT NULL
 )
 BEGIN SELECT RAISE(ABORT, 'MISSION_OPPORTUNITY_CONSENT_REVOKED'); END;
+
+CREATE TRIGGER IF NOT EXISTS trg_mission_opportunity_consents_no_delete
+BEFORE DELETE ON mission_opportunity_consents
+BEGIN SELECT RAISE(ABORT, 'MISSION_OPPORTUNITY_CONSENT_APPEND_ONLY'); END;
+
+CREATE TRIGGER IF NOT EXISTS trg_mission_opportunities_no_delete
+BEFORE DELETE ON mission_opportunities
+BEGIN SELECT RAISE(ABORT, 'MISSION_OPPORTUNITY_DELETE_FORBIDDEN'); END;
+
+CREATE TRIGGER IF NOT EXISTS trg_mission_applications_no_delete
+BEFORE DELETE ON mission_applications
+BEGIN SELECT RAISE(ABORT, 'MISSION_APPLICATION_DELETE_FORBIDDEN'); END;
+
+CREATE TRIGGER IF NOT EXISTS trg_mission_assignments_no_delete
+BEFORE DELETE ON mission_assignments
+BEGIN SELECT RAISE(ABORT, 'MISSION_ASSIGNMENT_DELETE_FORBIDDEN'); END;
