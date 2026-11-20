@@ -7,6 +7,8 @@ function fakeDb(firstRows = []) {
   const calls = [];
   const db = {
     calls,
+    failAll: false,
+    failBatch: false,
     prepare(sql) {
       return {
         sql,
@@ -22,12 +24,13 @@ function fakeDb(firstRows = []) {
         },
         async all() {
           calls.push({ kind: "all", sql: this.sql, values: this.values });
-          return { results: [{ approver_user_id: "manager-b", decision: "APPROVE" }] };
+          return db.failAll ? { success: false, results: [{ approver_user_id: "manager-b", decision: "APPROVE" }] } : { success: true, results: [{ approver_user_id: "manager-b", decision: "APPROVE" }] };
         }
       };
     },
     async batch(statements) {
       calls.push(...statements.map(s => ({ kind: "batch", sql: s.sql, values: s.values })));
+      if (db.failBatch) throw new Error("D1_BATCH_FAILED");
       return statements.map(() => ({ success: true, meta: { changes: 1 } }));
     }
   };
@@ -259,6 +262,32 @@ test("approval votes cannot cross authenticated tenant boundaries", async () => 
   assert.equal(response.status, 403);
   assert.equal((await response.json()).error, "TENANT_SCOPE_NOT_VERIFIED");
   assert.equal(db.calls.filter(x => x.kind === "batch").length, 0);
+});
+
+test("approval detail fails closed when the vote ledger query is incomplete", async () => {
+  const db = fakeDb([{
+    id: "req-detail-fail", requester_user_id: "manager-a", tenant_id: "tenant-1",
+    payload_json: '{"secret":"value"}'
+  }]);
+  db.failAll = true;
+  const response = await handleSupraApprovalRoute(new Request(
+    "https://app.example/api/supra/approvals/detail?requestId=req-detail-fail"
+  ), { DB: db }, managerB);
+  assert.equal(response.status, 503);
+  assert.equal((await response.json()).error, "APPROVAL_LEDGER_UNAVAILABLE");
+});
+
+test("expired approval returns service unavailable when expiry cannot be persisted", async () => {
+  const db = fakeDb([{
+    id: "req-expired-write-fail", requester_user_id: "manager-a", tenant_id: "tenant-1",
+    status: "PENDING", expires_at: "2000-01-01T00:00:00.000Z", required_approvals: 2
+  }]);
+  db.failBatch = true;
+  const response = await handleSupraApprovalRoute(post("/api/supra/approvals/decide", {
+    requestId: "req-expired-write-fail", decision: "APPROVE", reason: "Too late"
+  }), { DB: db }, managerB);
+  assert.equal(response.status, 503);
+  assert.equal((await response.json()).error, "APPROVAL_EXPIRY_WRITE_FAILED");
 });
 
 test("approval detail returns the exact persisted payload and recorded votes to managers", async () => {
