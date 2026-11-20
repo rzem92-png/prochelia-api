@@ -42,3 +42,12 @@ test("missing optional workspace tables are reported as partial data, not fabric
   assert.match(handler, /partial\.push\('wallet'\)/);
   assert.match(handler, /partial\.push\('documents'\)/);
 });
+
+test("workspace fails closed until an active tenant and tenant-scoped business tables exist", () => {
+  assert.match(handler, /ACTIVE_TENANT_REQUIRED/);
+  assert.match(handler, /BUSINESS_TENANT_SCHEMA_UNAVAILABLE/);
+  for (const table of ["intervenants", "missions", "disponibilites", "wallets", "documents"]) {
+    assert.match(handler, new RegExp("PRAGMA table_info\\(" + table + "\\\\)"));
+  }
+  assert.match(handler, /auth\.session_active_tenant_id/);
+});
