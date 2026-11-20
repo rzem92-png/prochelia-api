@@ -3603,13 +3603,31 @@ async function intervenantOpportunityRoute(request, env, url) {
     }
 
     const opportunity = await env.DB.prepare(
-      `SELECT o.id, o.owner_tenant_id, o.provider_pay_cents, o.currency
+      `SELECT o.id, o.owner_tenant_id, o.provider_pay_cents, o.currency, o.start_at, o.end_at
          FROM mission_opportunities o
          JOIN tenants t ON t.id = o.owner_tenant_id AND t.status = 'ACTIVE'
         WHERE o.id = ? AND o.status = 'OPEN' AND o.expires_at > CURRENT_TIMESTAMP
         LIMIT 1`
     ).bind(opportunityId).first();
     if (!opportunity) return json({ ok: false, error: 'OPPORTUNITY_NOT_AVAILABLE' }, 404);
+
+    // Re-check schedule conflicts at submission time; the public feed is not
+    // an authorization boundary and may be stale or deliberately bypassed.
+    // Assignment-time database guards remain the final concurrency control.
+    const assignmentConflict = await env.DB.prepare(
+      `SELECT ma.id
+         FROM mission_assignments ma
+         JOIN mission_opportunities assigned
+           ON assigned.id = ma.opportunity_id
+          AND assigned.owner_tenant_id = ma.owner_tenant_id
+        WHERE ma.provider_tenant_id = ? AND ma.intervenant_id = ?
+          AND ma.status IN ('ASSIGNED','IN_PROGRESS','DISPUTED')
+          AND assigned.start_at < ? AND assigned.end_at > ?
+        LIMIT 1`
+    ).bind(tenantId, profile.id, opportunity.end_at, opportunity.start_at).first();
+    if (assignmentConflict) {
+      return json({ ok: false, error: 'INTERVENANT_SCHEDULE_CONFLICT' }, 409);
+    }
 
     const applicationId = 'application-' + crypto.randomUUID();
     await env.DB.prepare(
