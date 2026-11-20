@@ -142,7 +142,9 @@ test("consumption rejects malformed or unapproved action types", async () => {
 });
 
 test("approval ledger schema protects immutable request identity and append-only votes/events", async () => {
-  const sql = await readFile(new URL("../migrations-preview-canonical/0022_supra_persisted_approvals.sql", import.meta.url), "utf8");
+  const schema = await readFile(new URL("../migrations-preview-canonical/0022_supra_persisted_approvals.sql", import.meta.url), "utf8");
+  const guards = await readFile(new URL("../migrations-preview-canonical/0029_supra_append_only_audit_guards.sql", import.meta.url), "utf8");
+  const sql = schema + "\n" + guards;
   assert.match(sql, /trg_supra_approval_requests_immutable/);
   assert.match(sql, /trg_supra_approval_requests_no_delete/);
   assert.match(sql, /trg_supra_approval_votes_no_update/);
@@ -158,8 +160,8 @@ test("approval ledger schema protects immutable request identity and append-only
 
 
 test("SUPRA audit trail and approval requests cannot be updated or deleted", async () => {
-  const auditSql = await readFile(new URL("../migrations/0021_supra_audit_events.sql", import.meta.url), "utf8");
-  const approvalSql = await readFile(new URL("../migrations/0022_supra_persisted_approvals.sql", import.meta.url), "utf8");
+  const auditSql = await readFile(new URL("../migrations-preview-canonical/0021_supra_audit_events.sql", import.meta.url), "utf8");
+  const approvalSql = await readFile(new URL("../migrations-preview-canonical/0022_supra_persisted_approvals.sql", import.meta.url), "utf8");
   assert.match(auditSql, /trg_supra_audit_events_no_update/);
   assert.match(auditSql, /trg_supra_audit_events_no_delete/);
   assert.match(approvalSql, /trg_supra_approval_requests_no_delete/);
@@ -168,7 +170,7 @@ test("SUPRA audit trail and approval requests cannot be updated or deleted", asy
 });
 
 test("additive Preview repair migration installs all missing append-only guards", async () => {
-  const sql = await readFile(new URL("../migrations/0023_supra_append_only_audit_guards.sql", import.meta.url), "utf8");
+  const sql = await readFile(new URL("../migrations-preview-canonical/0029_supra_append_only_audit_guards.sql", import.meta.url), "utf8");
   assert.match(sql, /trg_supra_audit_events_no_update/);
   assert.match(sql, /trg_supra_audit_events_no_delete/);
   assert.match(sql, /trg_supra_approval_requests_no_delete/);
