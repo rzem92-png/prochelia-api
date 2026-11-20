@@ -106,8 +106,15 @@ test("intervenant availability reads and writes only the authenticated user's ac
     "auth.session_active_tenant_id",
     "WHERE user_id = ? AND tenant_id = ?",
     "WHERE intervenant_id = ? AND tenant_id = ?",
-    "INSERT INTO disponibilites(id, intervenant_id, tenant_id, start_at, end_at, status)"
+    "INSERT INTO disponibilites(id, intervenant_id, tenant_id, start_at, end_at, status, idempotency_key)"
   ]) assert.ok(availabilityHandler.includes(fragment), "missing tenant-safe availability guard: " + fragment);
+});
+
+test("availability writes require a stable idempotency key before persistence", () => {
+  assert.match(availabilityHandler, /Idempotency-Key/);
+  assert.match(availabilityHandler, /IDEMPOTENCY_KEY_REQUIRED/);
+  assert.match(availabilityHandler, /IDEMPOTENCY_KEY_CONFLICT/);
+  assert.match(availabilityHandler, /idempotent_replay: true/);
 });
 
 test("availability writes reject invalid time windows and overlapping slots", () => {
