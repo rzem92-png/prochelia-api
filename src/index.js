@@ -3364,6 +3364,49 @@ async function intervenantWorkspaceReadModel(request, env) {
 }
 
 
+
+async function intervenantApplicationsRoute(request, env) {
+  if (request.method !== 'GET') {
+    return json({ ok: false, error: 'METHOD_NOT_ALLOWED' }, 405, { allow: 'GET' });
+  }
+  let auth;
+  try {
+    auth = await getSessionUser(request, env);
+  } catch {
+    return json({ ok: false, error: 'AUTHENTICATION_SCHEMA_UNAVAILABLE' }, 503);
+  }
+  if (!auth?.user) return json({ ok: false, error: 'UNAUTHENTICATED' }, 401);
+  if (!requireRole(auth, ['intervenant'])) return json({ ok: false, error: 'FORBIDDEN' }, 403);
+  const tenantId = auth.session_active_tenant_id;
+  if (!tenantId) return json({ ok: false, error: 'ACTIVE_TENANT_REQUIRED' }, 403);
+
+  let profile;
+  try {
+    profile = await env.DB.prepare(
+      'SELECT id FROM intervenants WHERE user_id = ? AND tenant_id = ? LIMIT 1'
+    ).bind(auth.user.id, tenantId).first();
+  } catch {
+    return json({ ok: false, error: 'INTERVENANT_PROFILE_SCHEMA_UNAVAILABLE' }, 503);
+  }
+  if (!profile?.id) return json({ ok: false, error: 'INTERVENANT_PROFILE_NOT_FOUND' }, 404);
+
+  try {
+    const result = await env.DB.prepare(
+      `SELECT a.id, a.status, a.applied_at, a.decided_at, a.provider_pay_cents, a.currency,
+              o.category_code, o.public_summary, o.city, o.start_at, o.end_at
+         FROM mission_applications a
+         JOIN mission_opportunities o
+           ON o.id = a.opportunity_id AND o.owner_tenant_id = a.owner_tenant_id
+        WHERE a.applicant_tenant_id = ? AND a.intervenant_id = ?
+        ORDER BY a.applied_at DESC
+        LIMIT 100`
+    ).bind(tenantId, profile.id).all();
+    return json({ ok: true, read_only: true, applications: result.results || [] });
+  } catch {
+    return json({ ok: false, error: 'APPLICATIONS_SCHEMA_UNAVAILABLE' }, 503);
+  }
+}
+
 async function intervenantAssignmentsRoute(request, env) {
   if (request.method !== 'GET') {
     return json({ ok: false, error: 'METHOD_NOT_ALLOWED' }, 405, { allow: 'GET' });
@@ -3708,6 +3751,7 @@ async function handle(request,env){
       if (request.method !== 'POST') return json({ ok: false, error: 'METHOD_NOT_ALLOWED', version: VERSION }, 405);
       return json({ ok: false, error: 'AUTHENTICATED_VALIDATION_REQUIRED', version: VERSION, write_enabled: false }, 403);
     }
+    if (url.pathname === '/api/intervenant/applications') return intervenantApplicationsRoute(request, env);
     if (url.pathname === '/api/intervenant/assignments') return intervenantAssignmentsRoute(request, env);
     if (url.pathname === '/api/intervenant/availability') return intervenantAvailabilityRoute(request, env, url);
     if (url.pathname === '/api/intervenant/opportunities' || /^\/api\/intervenant\/opportunities\/[^/]+\/apply$/.test(url.pathname)) return intervenantOpportunityRoute(request, env, url);
