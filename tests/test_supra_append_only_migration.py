@@ -3,6 +3,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 MIGRATION = ROOT / "migrations" / "0030_supra_append_only_audit_guards.sql"
+CANONICAL_MIGRATION = ROOT / "migrations-preview-canonical" / "0030_supra_append_only_audit_guards.sql"
 
 db = sqlite3.connect(":memory:")
 db.execute("PRAGMA foreign_keys = ON")
@@ -17,6 +18,8 @@ INSERT INTO supra_approval_requests(id, status) VALUES ('approval-1', 'PENDING')
 """)
 
 sql = MIGRATION.read_text(encoding="utf-8")
+canonical_sql = CANONICAL_MIGRATION.read_text(encoding="utf-8")
+assert canonical_sql == sql, "canonical Preview migration 0030 must match the independently tested migration"
 db.executescript(sql)
 
 # Reapplying is safe and must not fail.
