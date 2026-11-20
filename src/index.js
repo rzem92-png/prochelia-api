@@ -1,5 +1,5 @@
 import { handleV7Route } from "./v7-routes.js";
-import { resolveTenantContext } from "./tenant-context.js";
+import { resolveTenantContext, tenantRoleAllowed } from "./tenant-context.js";
 // PROCHÉLIA — INDEX BACKEND CONSOLIDÉ UNIQUE
 // Référence de consolidation : V14.1 Finance + sécurité/RBAC existants.
 // Généré le 19/10/2026. À déployer uniquement après recette avec la vraie base D1.
@@ -1504,6 +1504,31 @@ async function requireAuthRole(request, env, roles=[]) {
   if (!auth) return { error: json({ok:false,error:'UNAUTHENTICATED',version:VERSION},401) };
   if (roles.length && !roles.includes(auth.user.role)) return { error: json({ok:false,error:'FORBIDDEN',version:VERSION},403) };
   return { auth };
+}
+
+// Tenant-scoped authorization foundation. Use this for business data handlers;
+// platform-wide administration must remain a separate, explicit authorization path.
+export async function requireTenantAuthRole(request, env, allowedTenantRoles = []) {
+  let auth;
+  try {
+    auth = await getSessionUser(request, env);
+  } catch {
+    return { error: json({ ok: false, error: "AUTH_CONTEXT_UNAVAILABLE", version: VERSION }, 503) };
+  }
+  if (!auth) {
+    return { error: json({ ok: false, error: "UNAUTHENTICATED", version: VERSION }, 401) };
+  }
+  if (!Array.isArray(allowedTenantRoles) || allowedTenantRoles.length === 0) {
+    return { error: json({ ok: false, error: "TENANT_ROLE_POLICY_REQUIRED", version: VERSION }, 500) };
+  }
+  const context = await resolveTenantContext(request, env, auth);
+  if (!context.ok) {
+    return { error: json({ ok: false, error: context.error, version: VERSION }, context.status) };
+  }
+  if (!tenantRoleAllowed(context, allowedTenantRoles)) {
+    return { error: json({ ok: false, error: "FORBIDDEN", version: VERSION }, 403) };
+  }
+  return { auth, tenant: context.tenant };
 }
 
 async function journal(env, actorType, actorId, action, entityType=null, entityId=null, result='OK', metadata={}) {
