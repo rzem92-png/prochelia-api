@@ -3631,6 +3631,7 @@ async function handle(request,env){
       if (request.method !== 'POST') return json({ ok: false, error: 'METHOD_NOT_ALLOWED', version: VERSION }, 405);
       return json({ ok: false, error: 'AUTHENTICATED_VALIDATION_REQUIRED', version: VERSION, write_enabled: false }, 403);
     }
+    if (url.pathname === '/api/intervenant/availability') return intervenantAvailabilityRoute(request, env, url);
     if (url.pathname === '/api/intervenant/opportunities' || /^\/api\/intervenant\/opportunities\/[^/]+\/apply$/.test(url.pathname)) return intervenantOpportunityRoute(request, env, url);
     if (url.pathname === '/api/intervenant/workspace') return intervenantWorkspaceReadModel(request, env);
     if (url.pathname.startsWith('/api/supra/')) {
