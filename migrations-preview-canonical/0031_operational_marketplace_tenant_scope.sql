@@ -187,3 +187,100 @@ BEFORE INSERT ON conflits WHEN NOT EXISTS (
 
 -- Tenant identity on any row is stable after creation. Historical NULL values may
 -- only be populated through the separately reviewed legacy-attribution procedure.
+
+
+-- Tenant ownership cannot be moved after attribution. NULL legacy rows may be
+-- attributed only once, through a reviewed transaction and the parent-scope guards.
+CREATE TRIGGER IF NOT EXISTS trg_clients_tenant_immutable
+BEFORE UPDATE OF tenant_id ON clients
+WHEN OLD.tenant_id IS NOT NULL AND NEW.tenant_id <> OLD.tenant_id
+BEGIN SELECT RAISE(ABORT, 'CLIENTS_TENANT_IMMUTABLE'); END;
+
+CREATE TRIGGER IF NOT EXISTS trg_intervenants_tenant_immutable
+BEFORE UPDATE OF tenant_id ON intervenants
+WHEN OLD.tenant_id IS NOT NULL AND NEW.tenant_id <> OLD.tenant_id
+BEGIN SELECT RAISE(ABORT, 'INTERVENANTS_TENANT_IMMUTABLE'); END;
+
+CREATE TRIGGER IF NOT EXISTS trg_prestations_tenant_immutable
+BEFORE UPDATE OF tenant_id ON prestations
+WHEN OLD.tenant_id IS NOT NULL AND NEW.tenant_id <> OLD.tenant_id
+BEGIN SELECT RAISE(ABORT, 'PRESTATIONS_TENANT_IMMUTABLE'); END;
+
+CREATE TRIGGER IF NOT EXISTS trg_missions_tenant_immutable
+BEFORE UPDATE OF tenant_id ON missions
+WHEN OLD.tenant_id IS NOT NULL AND NEW.tenant_id <> OLD.tenant_id
+BEGIN SELECT RAISE(ABORT, 'MISSIONS_TENANT_IMMUTABLE'); END;
+
+CREATE TRIGGER IF NOT EXISTS trg_tarifs_tenant_immutable
+BEFORE UPDATE OF tenant_id ON tarifs
+WHEN OLD.tenant_id IS NOT NULL AND NEW.tenant_id <> OLD.tenant_id
+BEGIN SELECT RAISE(ABORT, 'TARIFS_TENANT_IMMUTABLE'); END;
+
+CREATE TRIGGER IF NOT EXISTS trg_paiements_tenant_immutable
+BEFORE UPDATE OF tenant_id ON paiements
+WHEN OLD.tenant_id IS NOT NULL AND NEW.tenant_id <> OLD.tenant_id
+BEGIN SELECT RAISE(ABORT, 'PAIEMENTS_TENANT_IMMUTABLE'); END;
+
+CREATE TRIGGER IF NOT EXISTS trg_disponibilites_tenant_immutable
+BEFORE UPDATE OF tenant_id ON disponibilites
+WHEN OLD.tenant_id IS NOT NULL AND NEW.tenant_id <> OLD.tenant_id
+BEGIN SELECT RAISE(ABORT, 'DISPONIBILITES_TENANT_IMMUTABLE'); END;
+
+CREATE TRIGGER IF NOT EXISTS trg_evaluations_tenant_immutable
+BEFORE UPDATE OF tenant_id ON evaluations
+WHEN OLD.tenant_id IS NOT NULL AND NEW.tenant_id <> OLD.tenant_id
+BEGIN SELECT RAISE(ABORT, 'EVALUATIONS_TENANT_IMMUTABLE'); END;
+
+CREATE TRIGGER IF NOT EXISTS trg_documents_tenant_immutable
+BEFORE UPDATE OF tenant_id ON documents
+WHEN OLD.tenant_id IS NOT NULL AND NEW.tenant_id <> OLD.tenant_id
+BEGIN SELECT RAISE(ABORT, 'DOCUMENTS_TENANT_IMMUTABLE'); END;
+
+CREATE TRIGGER IF NOT EXISTS trg_conflits_tenant_immutable
+BEFORE UPDATE OF tenant_id ON conflits
+WHEN OLD.tenant_id IS NOT NULL AND NEW.tenant_id <> OLD.tenant_id
+BEGIN SELECT RAISE(ABORT, 'CONFLITS_TENANT_IMMUTABLE'); END;
+
+CREATE TRIGGER IF NOT EXISTS trg_journal_tenant_immutable
+BEFORE UPDATE OF tenant_id ON journal
+WHEN OLD.tenant_id IS NOT NULL AND NEW.tenant_id <> OLD.tenant_id
+BEGIN SELECT RAISE(ABORT, 'JOURNAL_TENANT_IMMUTABLE'); END;
+
+CREATE TRIGGER IF NOT EXISTS trg_wallets_tenant_immutable
+BEFORE UPDATE OF tenant_id ON wallets
+WHEN OLD.tenant_id IS NOT NULL AND NEW.tenant_id <> OLD.tenant_id
+BEGIN SELECT RAISE(ABORT, 'WALLETS_TENANT_IMMUTABLE'); END;
+
+CREATE TRIGGER IF NOT EXISTS trg_clients_membership_scope_update
+BEFORE UPDATE OF tenant_id, user_id ON clients WHEN NEW.tenant_id IS NULL OR NOT EXISTS (
+  SELECT 1 FROM tenant_memberships m WHERE m.user_id=NEW.user_id
+    AND m.tenant_id=NEW.tenant_id AND m.status='ACTIVE'
+) BEGIN SELECT RAISE(ABORT, 'CLIENT_TENANT_MEMBERSHIP_REQUIRED'); END;
+
+CREATE TRIGGER IF NOT EXISTS trg_intervenants_membership_scope_update
+BEFORE UPDATE OF tenant_id, user_id ON intervenants WHEN NEW.tenant_id IS NULL OR NOT EXISTS (
+  SELECT 1 FROM tenant_memberships m WHERE m.user_id=NEW.user_id
+    AND m.tenant_id=NEW.tenant_id AND m.status='ACTIVE'
+) BEGIN SELECT RAISE(ABORT, 'INTERVENANT_TENANT_MEMBERSHIP_REQUIRED'); END;
+
+CREATE TRIGGER IF NOT EXISTS trg_wallets_membership_scope_update
+BEFORE UPDATE OF tenant_id, user_id ON wallets WHEN NEW.tenant_id IS NULL OR NOT EXISTS (
+  SELECT 1 FROM tenant_memberships m WHERE m.user_id=NEW.user_id
+    AND m.tenant_id=NEW.tenant_id AND m.status='ACTIVE'
+) BEGIN SELECT RAISE(ABORT, 'WALLET_TENANT_MEMBERSHIP_REQUIRED'); END;
+
+CREATE TRIGGER IF NOT EXISTS trg_documents_membership_scope_update
+BEFORE UPDATE OF tenant_id, user_id ON documents WHEN NEW.tenant_id IS NULL OR NOT EXISTS (
+  SELECT 1 FROM tenant_memberships m WHERE m.user_id=NEW.user_id
+    AND m.tenant_id=NEW.tenant_id AND m.status='ACTIVE'
+) BEGIN SELECT RAISE(ABORT, 'DOCUMENT_TENANT_MEMBERSHIP_REQUIRED'); END;
+
+CREATE TRIGGER IF NOT EXISTS trg_evaluation_mission_scope_update
+BEFORE UPDATE OF tenant_id, mission_id ON evaluations WHEN NOT EXISTS (
+  SELECT 1 FROM missions m WHERE m.id=NEW.mission_id AND m.tenant_id=NEW.tenant_id
+) BEGIN SELECT RAISE(ABORT, 'EVALUATION_MISSION_TENANT_MISMATCH'); END;
+
+CREATE TRIGGER IF NOT EXISTS trg_conflict_mission_scope_update
+BEFORE UPDATE OF tenant_id, mission_id ON conflits WHEN NOT EXISTS (
+  SELECT 1 FROM missions m WHERE m.id=NEW.mission_id AND m.tenant_id=NEW.tenant_id
+) BEGIN SELECT RAISE(ABORT, 'CONFLICT_MISSION_TENANT_MISMATCH'); END;
