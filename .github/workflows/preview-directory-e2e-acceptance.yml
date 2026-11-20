@@ -184,8 +184,8 @@ jobs:
           }
           cf_request "Active Preview Worker version details" \
             "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/prochelia-api-preview/versions/$version_id" "$RUNNER_TEMP/preview-worker-version.json"
-          if ! jq -e --arg expected "$API_EXPECTED_COMMIT" --arg db "$PREVIEW_DB_ID" '
-            .result.id == $version_id or .result.id != null
+          if ! jq -e --arg version "$version_id" '
+            .result.id == $version and (.result.resources.bindings | type == "array")
           ' "$RUNNER_TEMP/preview-worker-version.json" >/dev/null; then
             echo "::error::Active Preview Worker version details are incomplete."
             exit 1
