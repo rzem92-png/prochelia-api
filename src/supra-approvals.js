@@ -289,9 +289,17 @@ export async function handleSupraApprovalRoute(request, env, auth) {
     if (/UNIQUE|constraint/i.test(message)) return reply({ ok: false, error: "DUPLICATE_OR_CONCURRENT_APPROVAL" }, 409);
     return reply({ ok: false, error: "APPROVAL_DECISION_WRITE_FAILED" }, 503);
   }
-  const current = await env.DB.prepare("SELECT status, required_approvals FROM supra_approval_requests WHERE id=?").bind(requestId).first();
-  const votes = await env.DB.prepare("SELECT COUNT(*) AS count FROM supra_approval_votes WHERE request_id=? AND decision='APPROVE'").bind(requestId).first();
-  return reply({ ok: true, requestId, status: current?.status || "PENDING", approvalCount: Number(votes?.count || 0), requiredApprovals: Number(current?.required_approvals || 0) });
+  try {
+    const current = await env.DB.prepare("SELECT status, required_approvals FROM supra_approval_requests WHERE id=?").bind(requestId).first();
+    const votes = await env.DB.prepare("SELECT COUNT(*) AS count FROM supra_approval_votes WHERE request_id=? AND decision='APPROVE'").bind(requestId).first();
+    if (!current || !Number.isSafeInteger(Number(votes?.count)) || Number(votes.count) < 0 ||
+        !Number.isSafeInteger(Number(current.required_approvals)) || Number(current.required_approvals) < 1) {
+      return reply({ ok: false, error: "APPROVAL_LEDGER_UNAVAILABLE" }, 503);
+    }
+    return reply({ ok: true, requestId, status: current.status, approvalCount: Number(votes.count), requiredApprovals: Number(current.required_approvals) });
+  } catch {
+    return reply({ ok: false, error: "APPROVAL_LEDGER_UNAVAILABLE" }, 503);
+  }
 }
 
 // Internal server-only primitive. Do not expose this as a browser route.
