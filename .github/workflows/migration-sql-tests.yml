@@ -6,6 +6,7 @@ on:
       - "migrations/**"
       - "migrations-preview-canonical/**"
       - "tests/test_migrations_sqlite.py"
+      - "tests/test_supra_append_only_migration.py"
       - "tests/test_preview_canonical_migrations.py"
       - "scripts/prepare-d1-restore.py"
       - "tests/test_prepare_d1_restore.py"
@@ -36,5 +37,6 @@ jobs:
       - name: Validate migration SQL and payment ledger invariants in isolated SQLite
         run: |
           python3 tests/test_migrations_sqlite.py
+          python3 tests/test_supra_append_only_migration.py
           python3 tests/test_preview_canonical_migrations.py
           python3 tests/test_prepare_d1_restore.py
