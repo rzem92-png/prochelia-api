@@ -3039,19 +3039,6 @@ async function handleCommercialRecruitment(request,env){
 async function handle(request,env){
   try {
     const url=new URL(request.url);
-    // This legacy outbox route is globally disabled until tenant ownership,
-    // action-bound approvals and a verified executor are implemented. Return
-    // before CORS/session helpers or any D1 schema/business access.
-    if(url.pathname==='/api/ops/outbox/process' && request.method==='POST') {
-      return json({
-        ok:false,
-        error:'TENANT_SCOPED_EXECUTION_NOT_IMPLEMENTED',
-        message:'Le traitement des files reste bloqué tant que chaque action ne dispose pas d’un périmètre tenant et d’un contrôle d’approbation.',
-        version:VERSION,
-        write_enabled:false,
-        automation:'proposal_only_no_background_execution'
-      },503);
-    }
     if(isMutatingMethod(request.method) && !securityOriginAllowed(request,env)) return json({ok:false,error:'ORIGIN_NOT_ALLOWED',version:VERSION},403);
     // Fail closed before any schema helper touches D1: unauthenticated callers
     // must not use mission validation as an existence oracle for private IDs.
@@ -3525,6 +3512,19 @@ handle = async function(request,env){
     // the database is unavailable, instead of masking them as a generic 500.
     if (isMutatingMethod(preflightMethod) && !securityOriginAllowed(request,env)) {
       return json({ok:false,error:'ORIGIN_NOT_ALLOWED',version:VERSION},403);
+    }
+    // Block the legacy outbox before the persistent rate limiter. The route
+    // remains unavailable until tenant scope, action-bound approval and a
+    // verified executor exist; even this refusal must not touch D1.
+    if (preflightPath === '/api/ops/outbox/process' && preflightMethod === 'POST') {
+      return json({
+        ok:false,
+        error:'TENANT_SCOPED_EXECUTION_NOT_IMPLEMENTED',
+        message:'Le traitement des files reste bloqué tant que chaque action ne dispose pas d’un périmètre tenant et d’un contrôle d’approbation.',
+        version:VERSION,
+        write_enabled:false,
+        automation:'proposal_only_no_background_execution'
+      },503);
     }
     // The legacy backup path is disabled until the HMAC/Object Lock/isolated-restore
     // pipeline is unified. Reject before the rate limiter so this disabled route
