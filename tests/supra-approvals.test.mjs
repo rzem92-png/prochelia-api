@@ -111,6 +111,7 @@ test("approval decision records distinct approver votes and only approves at the
   for (const eventType of ["APPROVED", "REJECTED"]) {
     const eventInsert = db.calls.find(x => x.sql.includes("event_type='" + eventType + "'"));
     assert.ok(eventInsert?.sql.includes("NOT EXISTS"), eventType + " audit event must be idempotent under concurrent votes");
+    assert.equal(eventInsert.values.length, 5, eventType + " audit insert must bind every SQL parameter");
   }
 });
 
@@ -302,6 +303,7 @@ test("only the requester can revoke an unconsumed approval", async () => {
   assert.ok(db.calls.some(x => x.sql.includes("status IN ('PENDING','APPROVED')")));
   const revokeEventInsert = db.calls.find(x => x.sql.includes("event_type='REVOKED'"));
   assert.ok(revokeEventInsert?.sql.includes("NOT EXISTS"), "concurrent revocations must not append duplicate audit events");
+  assert.equal(revokeEventInsert.values.length, 6);
 });
 
 test("a different manager cannot revoke another manager's request", async () => {
@@ -346,4 +348,5 @@ test("concurrent expiry checks cannot append duplicate EXPIRED audit events", as
   assert.equal((await response.json()).error, "APPROVAL_EXPIRED");
   const expiryInsert = db.calls.find(x => x.sql.includes("event_type='EXPIRED'"));
   assert.ok(expiryInsert?.sql.includes("NOT EXISTS"));
+  assert.equal(expiryInsert.values.length, 5);
 });
