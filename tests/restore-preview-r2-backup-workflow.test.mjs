@@ -47,7 +47,7 @@ test("Restore workflow pins third-party actions and restricts the generated obje
 });
 
 test("Restore uses the dedicated, explicitly EU-jurisdiction Preview bucket provisioned for this project", () => {
-  assert.match(workflow, /R2_BUCKET: prochelia-preview-backups-eu-locked/);
-  assert.match(workflow, /prochelia-preview-backups-eu-locked/);
-  assert.doesNotMatch(workflow, /prochelia-preview-backups-eu-v2/);
+  assert.match(workflow, /R2_BUCKET: prochelia-preview-backups-eu-v2/);
+  assert.match(workflow, /prochelia-preview-backups-eu-v2/);
+  assert.doesNotMatch(workflow, /prochelia-preview-backups-eu-locked/);
 });
