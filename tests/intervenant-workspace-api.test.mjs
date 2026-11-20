@@ -94,31 +94,34 @@ test("canonical Worker dispatch exposes only the exact intervenant opportunity r
   assert.match(source, /url\.pathname === '\/api\/intervenant\/workspace'/);
 });
 
-
 const availabilityStart = source.indexOf("async function intervenantAvailabilityRoute(");
-const availabilityEnd = source.indexOf("\\nasync function intervenantOpportunityRoute(", availabilityStart);
+const availabilityEnd = source.indexOf("\nasync function intervenantOpportunityRoute(", availabilityStart);
 assert.ok(availabilityStart >= 0 && availabilityEnd > availabilityStart, "availability route must exist in canonical API Worker");
 const availabilityHandler = source.slice(availabilityStart, availabilityEnd);
 
 test("intervenant availability reads and writes only the authenticated user's active tenant", () => {
-  assert.match(availabilityHandler, /getSessionUser\\(request, env\\)/);
-  assert.match(availabilityHandler, /requireRole\\(auth, \\['intervenant'\\]\\)/);
-  assert.match(availabilityHandler, /auth\\.session_active_tenant_id/);
-  assert.match(availabilityHandler, /WHERE user_id = \\? AND tenant_id = \\?/);
-  assert.match(availabilityHandler, /WHERE intervenant_id = \\? AND tenant_id = \\?/);
-  assert.match(availabilityHandler, /INSERT INTO disponibilites\\(id, intervenant_id, tenant_id, start_at, end_at, status\\)/);
+  for (const fragment of [
+    "getSessionUser(request, env)",
+    "requireRole(auth, ['intervenant'])",
+    "auth.session_active_tenant_id",
+    "WHERE user_id = ? AND tenant_id = ?",
+    "WHERE intervenant_id = ? AND tenant_id = ?",
+    "INSERT INTO disponibilites(id, intervenant_id, tenant_id, start_at, end_at, status)"
+  ]) assert.ok(availabilityHandler.includes(fragment), "missing tenant-safe availability guard: " + fragment);
 });
 
 test("availability writes reject invalid time windows and overlapping slots", () => {
-  assert.match(availabilityHandler, /isoWithZone\\.test\\(startAt\\)/);
-  assert.match(availabilityHandler, /INVALID_AVAILABILITY_WINDOW/);
-  assert.match(availabilityHandler, /AVAILABILITY_OVERLAP/);
-  assert.match(availabilityHandler, /start_at < \\? AND end_at > \\?/);
-  assert.match(availabilityHandler, /endMs - startMs > 24 \\* 60 \\* 60 \\* 1000/);
+  for (const fragment of [
+    "isoWithZone.test(startAt)",
+    "INVALID_AVAILABILITY_WINDOW",
+    "AVAILABILITY_OVERLAP",
+    "start_at < ? AND end_at > ?",
+    "endMs - startMs > 24 * 60 * 60 * 1000"
+  ]) assert.ok(availabilityHandler.includes(fragment), "missing availability validation: " + fragment);
 });
 
 test("availability API is registered in the canonical Worker and fails closed on unsupported methods", () => {
-  assert.match(availabilityHandler, /!\\['GET', 'POST'\\]\\.includes\\(request\\.method\\)/);
-  assert.match(source, /url\\.pathname === '\\/api\\/intervenant\\/availability'/);
-  assert.match(source, /intervenantAvailabilityRoute\\(request, env, url\\)/);
+  assert.ok(availabilityHandler.includes("!['GET', 'POST'].includes(request.method)"));
+  assert.ok(source.includes("url.pathname === '/api/intervenant/availability'"));
+  assert.ok(source.includes("intervenantAvailabilityRoute(request, env, url)"));
 });
