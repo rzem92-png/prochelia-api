@@ -53,7 +53,11 @@ function manager(auth) {
 
 function sameOrigin(request) {
   const origin = request.headers.get("origin");
-  return !!origin && origin === new URL(request.url).origin;
+  if (origin) return origin === new URL(request.url).origin;
+  // Pages Functions validates the browser Origin before creating this server-side
+  // Service Binding request. The proxy creates this marker itself; it never copies
+  // a caller-supplied value from browser headers.
+  return request.headers.get("x-prochelia-proxy-verified") === "same-origin";
 }
 
 
