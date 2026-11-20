@@ -296,6 +296,8 @@ test("only the requester can revoke an unconsumed approval", async () => {
   assert.equal(response.status, 200);
   assert.equal((await response.json()).status, "REVOKED");
   assert.ok(db.calls.some(x => x.sql.includes("status IN ('PENDING','APPROVED')")));
+  const revokeEventInsert = db.calls.find(x => x.sql.includes("event_type='REVOKED'"));
+  assert.ok(revokeEventInsert?.sql.includes("NOT EXISTS"), "concurrent revocations must not append duplicate audit events");
 });
 
 test("a different manager cannot revoke another manager's request", async () => {
