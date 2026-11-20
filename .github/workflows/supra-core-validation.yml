@@ -9,6 +9,7 @@ on:
       - "migrations-preview-canonical/0021_supra_audit_events.sql"
       - "migrations-preview-canonical/0022_supra_persisted_approvals.sql"
       - "migrations-preview-canonical/0029_supra_append_only_audit_guards.sql"
+      - "migrations-preview-canonical/0030_supra_audit_tenant_scope.sql"
       - "tests/supra-*.test.mjs"
       - "tests/session-cookie-malformed.test.mjs"
       - ".github/workflows/supra-core-validation.yml"
