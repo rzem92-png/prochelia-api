@@ -39,6 +39,7 @@ EXPECTED = [
     "0032_privacy_safe_cross_tenant_mission_marketplace.sql",
     "0033_intervenant_availability_overlap_guard.sql",
     "0034_timezone_safe_availability_overlap.sql",
+    "0035_validate_availability_intervals.sql",
 ]
 
 # Keep the manual Preview migration gate synchronized with the canonical chain.
@@ -50,19 +51,19 @@ assert '"0029_supra_append_only_audit_guards.sql"' in workflow_text, (
 assert '"0030_supra_audit_tenant_scope.sql"' in workflow_text, (
     "Preview migration workflow omits tenant-scoped SUPRA audit migration 0030"
 )
-assert "if len(local) != 35:" in workflow_text, (
+assert "if len(local) != 36:" in workflow_text, (
     "Preview migration workflow must require exactly 35 canonical migrations"
 )
-assert "exact 35-entry registry" in workflow_text, (
+assert "exact 36-entry registry" in workflow_text, (
     "Preview migration workflow target registry count is stale"
 )
-assert "all 35 canonical migrations are pending" in workflow_text, (
+assert "all 36 canonical migrations are pending" in workflow_text, (
     "Preview migration workflow empty-database inventory message is stale"
 )
-assert "only migrations 0023-0034 are pending" in workflow_text, (
+assert "only migrations 0023-0035 are pending" in workflow_text, (
     "Preview migration workflow baseline-to-target range is stale"
 )
-assert '"0034_timezone_safe_availability_overlap.sql"' in workflow_text, (
+assert '"0035_validate_availability_intervals.sql"' in workflow_text, (
     "Preview migration workflow omits timezone-safe availability migration 0034"
 )
 
