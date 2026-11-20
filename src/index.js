@@ -3349,6 +3349,8 @@ async function intervenantWorkspaceReadModel(request, env) {
   return json({
     ok:true,version:VERSION,read_only:true,writes:false,
     profile:{
+      first_name:auth.user.first_name||null,
+      last_name:auth.user.last_name||null,
       professional_status:profile.professional_status||null,
       description:profile.description||null,
       service_area:profile.service_area||null,
