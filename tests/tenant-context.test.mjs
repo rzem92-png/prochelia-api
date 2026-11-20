@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { webcrypto } from "node:crypto";
-import { tenantContextRoute, selectTenantForSession } from "../src/index.js";
+import { tenantContextRoute, selectTenantForSession, requireTenantAuthRole } from "../src/index.js";
 globalThis.crypto ??= webcrypto;
 
 function makeEnv({ authenticated = true, membership = true, activeTenant = "tenant-a" } = {}) {
@@ -206,4 +206,42 @@ test("tenant selection fails closed when D1 reports an unsuccessful update with 
   });
   assert.equal(response.status, 503);
   assert.equal((await response.json()).error, "TENANT_CONTEXT_UNAVAILABLE");
+});
+
+
+test("tenant authorization uses the server-resolved membership role, not the global user role", async () => {
+  const mock = makeEnv();
+  const req = new Request("https://api.example.test/api/tenant/protected", {
+    headers: { cookie: "prochelia_session=synthetic-session-token", "x-prochelia-tenant-id": "attacker-tenant" }
+  });
+  const result = await requireTenantAuthRole(req, { DB: mock.DB }, ["OWNER", "ADMIN"]);
+  assert.equal(result.error, undefined);
+  assert.equal(result.auth.user.role, "client");
+  assert.equal(result.tenant.id, "tenant-a");
+  assert.equal(result.tenant.role, "OWNER");
+  assert.match(mock.statements[1], /s\.active_tenant_id/);
+});
+
+test("tenant authorization rejects unauthenticated sessions and inactive/non-member context", async () => {
+  const req = new Request("https://api.example.test/api/tenant/protected", {
+    headers: { cookie: "prochelia_session=synthetic-session-token" }
+  });
+  const unauth = makeEnv({ authenticated: false });
+  const denied = await requireTenantAuthRole(req, { DB: unauth.DB }, ["OWNER"]);
+  assert.equal(denied.error.status, 401);
+  const nonMember = makeEnv({ membership: false });
+  const noMembership = await requireTenantAuthRole(req, { DB: nonMember.DB }, ["OWNER"]);
+  assert.equal(noMembership.error.status, 403);
+});
+
+test("tenant authorization rejects disallowed membership roles and missing policy", async () => {
+  const req = new Request("https://api.example.test/api/tenant/protected", {
+    headers: { cookie: "prochelia_session=synthetic-session-token" }
+  });
+  const mock = makeEnv();
+  const denied = await requireTenantAuthRole(req, { DB: mock.DB }, ["READ_ONLY"]);
+  assert.equal(denied.error.status, 403);
+  const missingPolicy = await requireTenantAuthRole(req, { DB: makeEnv().DB }, []);
+  assert.equal(missingPolicy.error.status, 500);
+  assert.equal((await missingPolicy.error.json()).error, "TENANT_ROLE_POLICY_REQUIRED");
 });
