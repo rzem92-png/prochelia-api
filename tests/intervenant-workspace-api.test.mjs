@@ -25,6 +25,7 @@ test("workspace requires an authenticated intervenant role", () => {
 test("workspace resources are scoped to the authenticated owner", () => {
   assert.ok(handler.includes("FROM intervenants WHERE user_id = ? AND tenant_id = ?"));
   assert.ok(handler.includes("WHERE m.intervenant_id = ? AND m.tenant_id = ?"));
+  assert.ok(handler.includes("p.id = m.prestation_id AND p.tenant_id = m.tenant_id"));
   assert.ok(handler.includes("FROM disponibilites WHERE intervenant_id = ? AND tenant_id = ?"));
   assert.ok(handler.includes("FROM wallets WHERE user_id = ? AND tenant_id = ?"));
   assert.ok(handler.includes("FROM documents WHERE user_id = ? AND tenant_id = ?"));
@@ -47,7 +48,7 @@ test("workspace fails closed until an active tenant and tenant-scoped business t
   assert.match(handler, /ACTIVE_TENANT_REQUIRED/);
   assert.match(handler, /BUSINESS_TENANT_SCHEMA_UNAVAILABLE/);
   assert.match(handler, /PRAGMA table_info/);
-  for (const table of ["intervenants", "missions", "disponibilites", "wallets", "documents"]) {
+  for (const table of ["intervenants", "missions", "prestations", "disponibilites", "wallets", "documents"]) {
     assert.ok(handler.includes("'" + table + "'"));
   }
   assert.match(handler, /auth\.session_active_tenant_id/);
