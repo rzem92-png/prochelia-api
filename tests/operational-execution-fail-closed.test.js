@@ -154,7 +154,7 @@ test("action outbox HTTP route returns 503 before schema setup or outbox reads",
   const response = await worker.fetch(managerRequest("/api/ops/outbox/process"), env);
   assert.equal(response.status, 503);
   assert.equal((await response.json()).error, "TENANT_SCOPED_EXECUTION_NOT_IMPLEMENTED");
-  assert.equal(statements.length, 1, "only the authenticated session lookup is allowed");
+  assert.equal(statements.length, 0, "disabled route must not access D1 at all");
   assert.equal(writes.length, 0);
 });
 
