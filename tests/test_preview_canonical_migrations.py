@@ -567,6 +567,9 @@ required_marketplace_triggers = {
     "trg_evaluation_mission_scope", "trg_evaluation_mission_scope_update",
     "trg_conflict_mission_scope", "trg_conflict_mission_scope_update",
 }
+required_marketplace_indexes = {"idx_clients_id_tenant", "idx_intervenants_id_tenant", "idx_prestations_id_tenant", "idx_missions_id_tenant", "idx_disponibilites_id_tenant"}
+marketplace_indexes = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='index'")}
+assert required_marketplace_indexes <= marketplace_indexes, f"Missing composite tenant indexes: {sorted(required_marketplace_indexes-marketplace_indexes)}"
 required_marketplace_triggers |= {
     f"trg_{table}_tenant_immutable" for table in marketplace_columns
 }
