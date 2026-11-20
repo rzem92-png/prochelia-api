@@ -50,5 +50,5 @@ jobs:
             tests/supra-tenant-integration.test.mjs \
             tests/session-cookie-malformed.test.mjs \
             tests/pricing-quote-guardrails.test.mjs \
-            tests/scheduled-backup-config.test.mjs \\
+            tests/scheduled-backup-config.test.mjs \
             tests/intervenant-workspace-api.test.mjs
