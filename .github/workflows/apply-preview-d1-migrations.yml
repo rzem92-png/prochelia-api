@@ -97,7 +97,8 @@ jobs:
             "0032_privacy_safe_cross_tenant_mission_marketplace.sql",
             "0033_intervenant_availability_overlap_guard.sql",
             "0034_timezone_safe_availability_overlap.sql",
-            "0035_validate_availability_intervals.sql"
+            "0035_validate_availability_intervals.sql",
+            "0036_intervenant_availability_idempotency.sql"
           ]
           actual = sorted(p.name for p in Path("migrations-preview-canonical").glob("*.sql"))
           assert actual == sorted(expected), (
@@ -311,8 +312,8 @@ jobs:
               "0021_supra_audit_events.sql",
               "0022_supra_persisted_approvals.sql",
           }
-          if len(local) != 36:
-              print(f"::error::Expected exactly 36 canonical migrations; found {len(local)}.")
+          if len(local) != 37:
+              print(f"::error::Expected exactly 37 canonical migrations; found {len(local)}.")
               raise SystemExit(1)
           non_internal=[row for row in objects if row["name"] not in {"_cf_KV","d1_migrations"} and not row["name"].startswith("sqlite_")]
           import sqlite3
@@ -333,13 +334,13 @@ jobs:
           base_schema=schema_for(base)
           target_schema=schema_for(local)
           if not remote and not non_internal:
-              print("PASS: new EU Preview D1 is empty; all 36 canonical migrations are pending.")
+              print("PASS: new EU Preview D1 is empty; all 37 canonical migrations are pending.")
           elif registry_present and remote == base and remote_schema == base_schema:
-              print("PASS: exact 23-entry registry AND exact schema inventory match the reviewed Preview baseline; only migrations 0023-0035 are pending.")
+              print("PASS: exact 23-entry registry AND exact schema inventory match the reviewed Preview baseline; only migrations 0023-0036 are pending.")
           elif registry_present and remote == local and remote_schema == target_schema:
-              print("PASS: exact 36-entry registry AND exact schema inventory match the canonical target; rerun is idempotent.")
+              print("PASS: exact 37-entry registry AND exact schema inventory match the canonical target; rerun is idempotent.")
           else:
-              print("::error::Preview migration registry differs from the exact reviewed 23-entry baseline and 36-entry target; no migration will run.")
+              print("::error::Preview migration registry differs from the exact reviewed 23-entry baseline and 37-entry target; no migration will run.")
               print("Unexpected remote names:", ", ".join(sorted(remote-local)) or "(none)")
               print("Missing expected names:", ", ".join(sorted(local-remote)) or "(none)")
               raise SystemExit(1)
@@ -365,7 +366,7 @@ jobs:
           supra_guards_payload="$RUNNER_TEMP/verify-supra-guards-request.json"
 
           # Keep each SELECT below Cloudflare D1's compound-SELECT term limit.
-          jq -n --arg sql "SELECT name FROM d1_migrations WHERE name IN ('0016_security_identity_schema.sql','0020_auth_login_rate_limits.sql','0021_supra_audit_events.sql','0022_supra_persisted_approvals.sql','0029_supra_append_only_audit_guards.sql','0030_supra_audit_tenant_scope.sql','0031_operational_marketplace_tenant_scope.sql','0032_privacy_safe_cross_tenant_mission_marketplace.sql','0033_intervenant_availability_overlap_guard.sql','0034_timezone_safe_availability_overlap.sql','0035_validate_availability_intervals.sql') ORDER BY name" '{sql:$sql,params:[]}' > "$migrations_payload"
+          jq -n --arg sql "SELECT name FROM d1_migrations WHERE name IN ('0016_security_identity_schema.sql','0020_auth_login_rate_limits.sql','0021_supra_audit_events.sql','0022_supra_persisted_approvals.sql','0029_supra_append_only_audit_guards.sql','0030_supra_audit_tenant_scope.sql','0031_operational_marketplace_tenant_scope.sql','0032_privacy_safe_cross_tenant_mission_marketplace.sql','0033_intervenant_availability_overlap_guard.sql','0034_timezone_safe_availability_overlap.sql','0035_validate_availability_intervals.sql','0036_intervenant_availability_idempotency.sql') ORDER BY name" '{sql:$sql,params:[]}' > "$migrations_payload"
           jq -n '{sql:"SELECT type, name FROM sqlite_master WHERE (type = '"'"'table'"'"' AND name IN ('"'"'identity_verifications'"'"','"'"'trusted_devices'"'"','"'"'mission_security'"'"','"'"'mission_security_attempts'"'"','"'"'security_audit'"'"','"'"'auth_login_rate_limits'"'"','"'"'supra_audit_events'"'"','"'"'supra_approval_requests'"'"','"'"'supra_approval_votes'"'"','"'"'supra_approval_events'"'"')) OR (type = '"'"'index'"'"' AND name IN ('"'"'idx_identity_verifications_user'"'"','"'"'idx_mission_security_intervenant'"'"','"'"'idx_security_attempts_security'"'"','"'"'idx_security_audit_mission'"'"','"'"'idx_auth_login_rate_limits_window'"'"','"'"'idx_supra_audit_events_created_at'"'"','"'"'idx_supra_audit_events_tenant_created_at'"'"','"'"'idx_supra_audit_events_actor'"'"','"'"'idx_supra_approval_requests_status_expiry'"'"','"'"'idx_supra_approval_requests_tenant_resource'"'"','"'"'idx_supra_approval_votes_request'"'"','"'"'idx_supra_approval_events_request'"'"')) OR (type = '"'"'trigger'"'"' AND name IN ('"'"'trg_supra_audit_events_require_active_tenant'"'"','"'"'trg_supra_approval_requests_immutable'"'"','"'"'trg_supra_approval_votes_no_update'"'"','"'"'trg_supra_approval_votes_no_delete'"'"','"'"'trg_supra_approval_events_no_update'"'"','"'"'trg_supra_approval_events_no_delete'"'"','"'"'trg_supra_approval_status_transitions'"'"','"'"'trg_supra_approval_status_evidence'"'"')) ORDER BY type, name",params:[]}' > "$objects_payload"
           jq -n --arg sql "SELECT name FROM sqlite_master WHERE type='trigger' AND name IN ('trg_supra_audit_events_no_update','trg_supra_audit_events_no_delete','trg_supra_approval_requests_no_delete','trg_supra_audit_events_require_active_tenant') ORDER BY name" '{sql:$sql,params:[]}' > "$supra_guards_payload"
 
