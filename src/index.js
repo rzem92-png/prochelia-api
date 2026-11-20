@@ -3261,7 +3261,14 @@ async function handleCommercialRecruitment(request,env){
 
 async function intervenantWorkspaceReadModel(request, env) {
   if (request.method !== 'GET') return json({ ok: false, error: 'METHOD_NOT_ALLOWED' }, 405);
-  const auth = await getSessionUser(request, env).catch(() => null);
+  let auth;
+  try {
+    auth = await getSessionUser(request, env);
+  } catch {
+    // Missing canonical session columns must be visible as a readiness failure,
+    // never disguised as an invalid user credential.
+    return json({ ok: false, error: 'AUTHENTICATION_SCHEMA_UNAVAILABLE' }, 503);
+  }
   if (!auth?.user) return json({ ok: false, error: 'UNAUTHENTICATED' }, 401);
   if (!requireRole(auth, ['intervenant'])) return json({ ok: false, error: 'FORBIDDEN' }, 403);
 
