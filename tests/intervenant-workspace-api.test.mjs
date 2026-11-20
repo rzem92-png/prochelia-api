@@ -208,10 +208,10 @@ test("withdrawal route is dispatched only for the exact application path", () =>
 
 test("availability request JSON is bounded while streaming even without Content-Length", async () => {
   const helperStart = source.indexOf("async function readLimitedJson(");
-  const helperEnd = source.indexOf("\\n\\nfunction clean(", helperStart);
+  const helperEnd = source.indexOf("\n\nfunction clean(", helperStart);
   assert.ok(helperStart >= 0 && helperEnd > helperStart, "bounded JSON reader must exist");
   const helper = source.slice(helperStart, helperEnd);
-  const readLimitedJson = new Function(helper + "\\nreturn readLimitedJson;")();
+  const readLimitedJson = new Function(helper + "\nreturn readLimitedJson;")();
 
   const makeRequest = (chunks, contentLength = null) => ({
     headers: { get: (name) => name.toLowerCase() === "content-length" ? contentLength : null },
