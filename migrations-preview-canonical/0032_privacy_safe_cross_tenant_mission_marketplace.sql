@@ -111,6 +111,29 @@ CREATE TABLE IF NOT EXISTS mission_assignments (
 CREATE INDEX IF NOT EXISTS idx_mission_assignments_provider_status
   ON mission_assignments(provider_tenant_id, intervenant_id, status, assigned_at);
 
+CREATE TABLE IF NOT EXISTS intervenant_skills (
+  id TEXT PRIMARY KEY NOT NULL,
+  tenant_id TEXT NOT NULL,
+  intervenant_id TEXT NOT NULL,
+  skill_code TEXT NOT NULL CHECK (skill_code=lower(skill_code) AND length(trim(skill_code)) BETWEEN 2 AND 80),
+  verification_status TEXT NOT NULL DEFAULT 'PENDING' CHECK (verification_status IN ('PENDING','VERIFIED','REJECTED','REVOKED')),
+  evidence_sha256 TEXT CHECK (evidence_sha256 IS NULL OR (length(evidence_sha256)=64 AND lower(evidence_sha256)=evidence_sha256)),
+  verified_by_user_id TEXT,
+  verified_at TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE (intervenant_id, tenant_id, skill_code),
+  FOREIGN KEY (tenant_id) REFERENCES tenants(id),
+  FOREIGN KEY (intervenant_id, tenant_id) REFERENCES intervenants(id, tenant_id),
+  FOREIGN KEY (verified_by_user_id) REFERENCES users(id),
+  CHECK (
+    (verification_status='VERIFIED' AND evidence_sha256 IS NOT NULL AND verified_by_user_id IS NOT NULL AND verified_at IS NOT NULL)
+    OR verification_status<>'VERIFIED'
+  )
+);
+CREATE INDEX IF NOT EXISTS idx_intervenant_skills_verified
+  ON intervenant_skills(tenant_id, intervenant_id, verification_status, skill_code);
+
 -- A consent is valid only for the client who owns the mission in the same tenant.
 CREATE TRIGGER IF NOT EXISTS trg_mission_opportunity_consent_owner_scope
 BEFORE INSERT ON mission_opportunity_consents WHEN NOT EXISTS (
@@ -179,6 +202,45 @@ BEGIN SELECT RAISE(ABORT, 'MISSION_OPPORTUNITY_INVALID_STATUS_TRANSITION'); END;
 
 -- Applications are cross-tenant by design, but the applicant identity, active
 -- membership, verified profile, schedule availability and pay snapshot are bound.
+CREATE TRIGGER IF NOT EXISTS trg_intervenant_skill_insert_scope
+BEFORE INSERT ON intervenant_skills WHEN NOT EXISTS (
+  SELECT 1 FROM intervenants i JOIN tenants t ON t.id=NEW.tenant_id AND t.status='ACTIVE'
+  WHERE i.id=NEW.intervenant_id AND i.tenant_id=NEW.tenant_id
+) BEGIN SELECT RAISE(ABORT, 'INTERVENANT_SKILL_TENANT_SCOPE_MISMATCH'); END;
+
+CREATE TRIGGER IF NOT EXISTS trg_intervenant_skill_verification_guard
+BEFORE INSERT ON intervenant_skills WHEN NEW.verification_status='VERIFIED' AND NOT EXISTS (
+  SELECT 1 FROM tenant_memberships tm
+  WHERE tm.user_id=NEW.verified_by_user_id AND tm.tenant_id=NEW.tenant_id
+    AND tm.status='ACTIVE' AND tm.role IN ('OWNER','ADMIN','MANAGER')
+) BEGIN SELECT RAISE(ABORT, 'INTERVENANT_SKILL_VERIFIER_NOT_AUTHORIZED'); END;
+
+CREATE TRIGGER IF NOT EXISTS trg_intervenant_skill_identity_immutable
+BEFORE UPDATE ON intervenant_skills
+WHEN NEW.id<>OLD.id OR NEW.tenant_id<>OLD.tenant_id
+  OR NEW.intervenant_id<>OLD.intervenant_id OR NEW.skill_code<>OLD.skill_code
+  OR NEW.evidence_sha256 IS NOT OLD.evidence_sha256
+  OR NEW.created_at<>OLD.created_at
+  OR (OLD.verification_status='VERIFIED' AND NEW.verification_status NOT IN ('VERIFIED','REVOKED'))
+  OR (OLD.verification_status IN ('REJECTED','REVOKED') AND NEW.verification_status<>OLD.verification_status)
+BEGIN SELECT RAISE(ABORT, 'INTERVENANT_SKILL_IDENTITY_OR_STATUS_IMMUTABLE'); END;
+
+CREATE TRIGGER IF NOT EXISTS trg_intervenant_skill_update_verification_guard
+BEFORE UPDATE OF verification_status ON intervenant_skills
+WHEN NEW.verification_status='VERIFIED' AND (
+  NEW.verified_at IS NULL OR NEW.verified_by_user_id IS NULL
+  OR NOT EXISTS (
+    SELECT 1 FROM tenant_memberships tm
+    WHERE tm.user_id=NEW.verified_by_user_id AND tm.tenant_id=NEW.tenant_id
+      AND tm.status='ACTIVE' AND tm.role IN ('OWNER','ADMIN','MANAGER')
+  )
+)
+BEGIN SELECT RAISE(ABORT, 'INTERVENANT_SKILL_VERIFIER_NOT_AUTHORIZED'); END;
+
+CREATE TRIGGER IF NOT EXISTS trg_intervenant_skills_no_delete
+BEFORE DELETE ON intervenant_skills
+BEGIN SELECT RAISE(ABORT, 'INTERVENANT_SKILL_HISTORY_APPEND_ONLY'); END;
+
 CREATE TRIGGER IF NOT EXISTS trg_mission_application_submit_guard
 BEFORE INSERT ON mission_applications WHEN NOT EXISTS (
   SELECT 1
@@ -197,6 +259,15 @@ BEFORE INSERT ON mission_applications WHEN NOT EXISTS (
      AND o.status='OPEN' AND o.expires_at>CURRENT_TIMESTAMP
      AND o.provider_pay_cents=NEW.provider_pay_cents AND o.currency=NEW.currency
      AND lower(i.validation_status) IN ('verified','approved','active')
+     AND NOT EXISTS (
+       SELECT 1 FROM json_each(o.required_skills_json) required_skill
+       WHERE NOT EXISTS (
+         SELECT 1 FROM intervenant_skills skill
+         WHERE skill.intervenant_id=i.id AND skill.tenant_id=i.tenant_id
+           AND skill.skill_code=lower(CAST(required_skill.value AS TEXT))
+           AND skill.verification_status='VERIFIED'
+       )
+     )
 )
 BEGIN SELECT RAISE(ABORT, 'MISSION_APPLICATION_ELIGIBILITY_GUARD_FAILED'); END;
 
