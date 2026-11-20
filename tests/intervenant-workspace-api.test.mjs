@@ -204,3 +204,35 @@ test("withdrawal route is dispatched only for the exact application path", () =>
   assert.ok(source.includes("url.pathname.match(/^\\/api"));
   assert.ok(source.includes("applications\\/([^/]+)\\/withdraw$/"));
 });
+
+
+test("availability request JSON is bounded while streaming even without Content-Length", async () => {
+  const helperStart = source.indexOf("async function readLimitedJson(");
+  const helperEnd = source.indexOf("\\n\\nfunction clean(", helperStart);
+  assert.ok(helperStart >= 0 && helperEnd > helperStart, "bounded JSON reader must exist");
+  const helper = source.slice(helperStart, helperEnd);
+  const readLimitedJson = new Function(helper + "\\nreturn readLimitedJson;")();
+
+  const makeRequest = (chunks, contentLength = null) => ({
+    headers: { get: (name) => name.toLowerCase() === "content-length" ? contentLength : null },
+    body: new ReadableStream({
+      start(controller) {
+        for (const chunk of chunks) controller.enqueue(new TextEncoder().encode(chunk));
+        controller.close();
+      }
+    })
+  });
+
+  const valid = await readLimitedJson(makeRequest(['{"start_at":"2030-01-01T10:00:00Z"}']));
+  assert.equal(valid.ok, true);
+  assert.equal(valid.value.start_at, "2030-01-01T10:00:00Z");
+
+  const oversized = await readLimitedJson(makeRequest(["x".repeat(3000), "y".repeat(2000)]), 4096);
+  assert.deepEqual(oversized, { ok: false, tooLarge: true });
+
+  const declaredOversized = await readLimitedJson(makeRequest(["{}"], "5000"), 4096);
+  assert.deepEqual(declaredOversized, { ok: false, tooLarge: true });
+
+  const malformed = await readLimitedJson(makeRequest(["{not-json}"]));
+  assert.deepEqual(malformed, { ok: false, tooLarge: false });
+});
