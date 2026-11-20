@@ -104,3 +104,19 @@ test("logout does not clear the session cookie when D1 cannot confirm revocation
   assert.equal((await response.json()).error, "SESSION_REVOCATION_UNCONFIRMED");
   assert.equal(response.headers.get("set-cookie"), null);
 });
+
+test("logout keeps the cookie and returns 503 when the D1 revocation call throws", async () => {
+  const env = {
+    DB: {
+      prepare() {
+        return { bind() {
+          return { async run() { throw new Error("synthetic D1 outage"); } };
+        }};
+      }
+    }
+  };
+  const response = await logout(request(), env);
+  assert.equal(response.status, 503);
+  assert.equal((await response.json()).error, "SESSION_REVOCATION_UNCONFIRMED");
+  assert.equal(response.headers.get("set-cookie"), null);
+});
