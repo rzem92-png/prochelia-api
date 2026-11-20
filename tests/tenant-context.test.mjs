@@ -22,6 +22,7 @@ function makeEnv({ authenticated = true, membership = true, activeTenant = "tena
           }};
         }
         if (sql.includes("FROM sessions s") && sql.includes("JOIN tenant_memberships m")) {
+          assert.deepEqual(args, ["session-a", "user-verified-by-session", activeTenant]);
           return { async first() {
             return membership ? {
               tenant_id: "tenant-a", tenant_slug: "tenant-a", tenant_name: "Tenant A",
@@ -49,6 +50,7 @@ test("tenant context is derived from authenticated server-side session, not requ
   assert.equal(body.tenant.id, "tenant-a");
   assert.equal(body.tenant.role, "OWNER");
   assert.match(mock.statements[1], /s\.active_tenant_id/);
+  assert.match(mock.statements[1], /AND s\.active_tenant_id = \?/);
   assert.match(mock.statements[1], /m\.status = 'ACTIVE'/);
   assert.match(mock.statements[1], /t\.status = 'ACTIVE'/);
 });
