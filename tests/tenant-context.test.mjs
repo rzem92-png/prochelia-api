@@ -245,3 +245,18 @@ test("tenant authorization rejects disallowed membership roles and missing polic
   assert.equal(missingPolicy.error.status, 500);
   assert.equal((await missingPolicy.error.json()).error, "TENANT_ROLE_POLICY_REQUIRED");
 });
+
+
+test("legacy business handlers are fail-closed until tenant ownership is migrated", async () => {
+  const source = await (await import("node:fs/promises")).readFile(new URL("../src/index.js", import.meta.url), "utf8");
+  const handlers = ["createOperationalCase","processActionOutbox","approveOperationalCase","getOperationsDashboard","getJournal","financeSummary","complaintCreate","promotionList","activatePromotion","strategicDashboard","scoreClients","qualityCreate","capacityDashboard","financeForecast"];
+  for (const name of handlers) {
+    const start = source.indexOf("async function " + name + "(request, env) {");
+    assert.notEqual(start, -1, name + " exists");
+    const body = source.slice(start, source.indexOf("\n}", start));
+    assert.match(body, /return legacyTenantScopeBlocked\(\)/, name + " must fail closed before legacy SQL");
+    const block = body.indexOf("return legacyTenantScopeBlocked()");
+    const firstQuery = body.search(/\.prepare\s*\(/);
+    assert.ok(firstQuery === -1 || block < firstQuery, name + " must block before D1 query/write");
+  }
+});
