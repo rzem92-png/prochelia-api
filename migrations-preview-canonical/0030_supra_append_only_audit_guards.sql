@@ -1,6 +1,6 @@
--- PROCHÉLIA — repair append-only guards for deployed Nexus Supra audit/approval tables.
--- This canonical Preview migration follows tenant/accounting migrations 0023–0029.
--- It is additive and does not rewrite existing rows or enable business execution.
+-- PROCHÉLIA — idempotent repair of append-only SUPRA audit/approval guards.
+-- Sequence 0030 follows the canonical accounting/tenant chain through 0029.
+-- This is additive only: no business execution, financial action, or row rewrite.
 
 CREATE TRIGGER IF NOT EXISTS trg_supra_audit_events_no_update
 BEFORE UPDATE ON supra_audit_events
