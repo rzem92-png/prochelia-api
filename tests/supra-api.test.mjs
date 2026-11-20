@@ -142,11 +142,12 @@ test("SUPRA fail-closed input is rejected with 422 and audited as rejected, neve
   assert.equal(payload.audit.recorded, true);
   assert.equal(DB.calls.length, 1);
   assert.match(DB.calls[0].sql, /INSERT INTO supra_audit_events/);
-  assert.equal(DB.calls[0].values[3], "PLAN_INPUT_REJECTED");
-  assert.equal(DB.calls[0].values[4], "securite");
-  assert.equal(DB.calls[0].values[5], "INVALID_INPUT");
-  assert.equal(DB.calls[0].values[6], "HIGH");
-  assert.equal(DB.calls[0].values[7], 1);
+  assert.equal(DB.calls[0].values[1], "tenant-preview");
+  assert.equal(DB.calls[0].values[4], "PLAN_INPUT_REJECTED");
+  assert.equal(DB.calls[0].values[5], "securite");
+  assert.equal(DB.calls[0].values[6], "INVALID_INPUT");
+  assert.equal(DB.calls[0].values[7], "HIGH");
+  assert.equal(DB.calls[0].values[8], 1);
 });
 
 
@@ -170,4 +171,17 @@ test("SUPRA plan does not claim audit persistence when D1 reports success false"
   assert.equal(response.status, 503);
   assert.equal(payload.executionAllowed, false);
   assert.equal(payload.audit?.recorded, undefined);
+});
+
+
+test("SUPRA audit write binds the server-derived tenant, never a client-selected tenant", async () => {
+  const DB = makeDb();
+  const response = await handleSupraRoute(new Request("https://example.test/api/supra/plan", {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ caseType: "routine", requestedAction: "GENERATE_SUMMARY", impact: "LOW", tenant_id: "attacker-tenant" })
+  }), { DB }, manager);
+  assert.equal(response.status, 422);
+  assert.equal(DB.calls.length, 1);
+  assert.match(DB.calls[0].sql, /tenant_id/);
+  assert.equal(DB.calls[0].values[1], "tenant-preview");
 });
