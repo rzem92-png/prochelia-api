@@ -194,12 +194,12 @@ test("legacy cross-tenant operational and strategic handlers fail closed before 
   for (const name of handlers) {
     const start = source.indexOf("async function " + name + "(request, env) {");
     assert.notEqual(start, -1, name + " exists");
-    const end = source.indexOf("\\n}", start);
+    const end = source.indexOf("\n}", start);
     assert.notEqual(end, -1, name + " has a function boundary");
     const body = source.slice(start, end);
     const auth = body.indexOf("requireAuthRole(");
     const block = body.indexOf("return legacyTenantScopeBlocked()");
-    const firstD1 = body.search(/\\.prepare\\s*\\(/);
+    const firstD1 = body.search(/\.prepare\s*\(/);
     assert.ok(auth >= 0 && block > auth, name + " must authenticate before refusing");
     assert.ok(firstD1 === -1 || block < firstD1, name + " must refuse before any D1 access");
   }
