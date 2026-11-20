@@ -87,3 +87,20 @@ test("logout without a session cookie does not access D1", async () => {
   assert.equal(response.status, 200);
   assert.equal(calls, 0);
 });
+
+
+test("logout does not clear the session cookie when D1 cannot confirm revocation", async () => {
+  const env = {
+    DB: {
+      prepare() {
+        return { bind() {
+          return { async run() { return { success: false, meta: { changes: 1 } }; } };
+        }};
+      }
+    }
+  };
+  const response = await logout(request(), env);
+  assert.equal(response.status, 503);
+  assert.equal((await response.json()).error, "SESSION_REVOCATION_UNCONFIRMED");
+  assert.equal(response.headers.get("set-cookie"), null);
+});
