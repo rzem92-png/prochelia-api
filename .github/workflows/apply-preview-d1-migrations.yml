@@ -633,3 +633,56 @@ jobs:
           print("PASS: tenant_id columns verified on all 12 operational marketplace tables.")
           PY
           echo "PASS: operational marketplace tenant scope migration verification completed."
+
+      - name: Verify privacy-safe cross-tenant marketplace and assignment guards
+        shell: bash
+        run: |
+          set -euo pipefail
+          request="$RUNNER_TEMP/verify-marketplace-assignment-request.json"
+          response="$RUNNER_TEMP/verify-marketplace-assignment-response.json"
+          sql="SELECT type, name FROM sqlite_master WHERE name IN ('mission_opportunity_consents','mission_opportunities','mission_applications','mission_assignments','idx_mission_opportunity_consents_owner_status','idx_mission_opportunities_public_feed','idx_mission_opportunities_owner','idx_mission_applications_opportunity_status','idx_mission_applications_provider','idx_mission_assignments_provider_status','trg_mission_opportunity_consent_owner_scope','trg_mission_opportunity_consent_identity_immutable','trg_mission_opportunity_consent_revoke','trg_mission_opportunity_publish_guard','trg_mission_opportunity_identity_immutable','trg_mission_opportunity_status_transition','trg_mission_application_submit_guard','trg_mission_application_status_transition','trg_mission_application_accept_guard','trg_mission_application_identity_immutable','trg_mission_assignment_insert_guard','trg_mission_application_accepted_create_assignment','trg_mission_assignment_identity_immutable','trg_mission_assignment_status_transition','trg_mission_assignment_start_timestamp','trg_mission_assignment_completion_timestamp','trg_mission_opportunity_consent_revocation_blocks_new_applications','trg_mission_opportunity_consents_no_delete','trg_mission_opportunities_no_delete','trg_mission_applications_no_delete','trg_mission_assignments_no_delete') ORDER BY type,name"
+          jq -n --arg sql "$sql" '{sql:$sql,params:[]}' > "$request"
+          status="$(curl --silent --show-error --output "$response" --write-out '%{http_code}' -X POST -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -H "Content-Type: application/json" --data-binary @"$request" "https://api.cloudflare.com/client/v4/accounts/$EXPECTED_ACCOUNT_ID/d1/database/$EXPECTED_DB_ID/query")"
+          test "$status" = "200" || { echo "::error::Marketplace opportunity schema verification failed (HTTP $status)."; exit 1; }
+          jq -e '.success == true' "$response" >/dev/null
+          python3 - "$response" <<'PY'
+          import json, pathlib, sys
+          rows=json.loads(pathlib.Path(sys.argv[1]).read_text())["result"][0]["results"]
+          actual={(r["type"],r["name"]) for r in rows}
+          tables={"mission_opportunity_consents","mission_opportunities","mission_applications","mission_assignments"}
+          indexes={"idx_mission_opportunity_consents_owner_status","idx_mission_opportunities_public_feed","idx_mission_opportunities_owner","idx_mission_applications_opportunity_status","idx_mission_applications_provider","idx_mission_assignments_provider_status"}
+          triggers={
+            "trg_mission_opportunity_consent_owner_scope","trg_mission_opportunity_consent_identity_immutable",
+            "trg_mission_opportunity_consent_revoke","trg_mission_opportunity_publish_guard",
+            "trg_mission_opportunity_identity_immutable","trg_mission_opportunity_status_transition",
+            "trg_mission_application_submit_guard","trg_mission_application_status_transition",
+            "trg_mission_application_accept_guard","trg_mission_application_identity_immutable",
+            "trg_mission_assignment_insert_guard","trg_mission_application_accepted_create_assignment",
+            "trg_mission_assignment_identity_immutable","trg_mission_assignment_status_transition",
+            "trg_mission_assignment_start_timestamp","trg_mission_assignment_completion_timestamp",
+            "trg_mission_opportunity_consent_revocation_blocks_new_applications",
+            "trg_mission_opportunity_consents_no_delete","trg_mission_opportunities_no_delete",
+            "trg_mission_applications_no_delete","trg_mission_assignments_no_delete"
+          }
+          missing=({("table",x) for x in tables}|{("index",x) for x in indexes}|{("trigger",x) for x in triggers})-actual
+          if missing:
+            print("::error::Cross-tenant marketplace schema incomplete:", sorted(missing))
+            raise SystemExit(1)
+          print("PASS: privacy consent, public opportunity, application, atomic assignment tables and guards verified.")
+          PY
+          sql="SELECT name FROM pragma_table_info('mission_opportunities')"
+          jq -n --arg sql "$sql" '{sql:$sql,params:[]}' > "$request"
+          status="$(curl --silent --show-error --output "$response" --write-out '%{http_code}' -X POST -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -H "Content-Type: application/json" --data-binary @"$request" "https://api.cloudflare.com/client/v4/accounts/$EXPECTED_ACCOUNT_ID/d1/database/$EXPECTED_DB_ID/query")"
+          test "$status" = "200" || { echo "::error::Public opportunity privacy schema check failed (HTTP $status)."; exit 1; }
+          jq -e '.success == true' "$response" >/dev/null
+          python3 - "$response" <<'PY'
+          import json, pathlib, sys
+          columns={r["name"] for r in json.loads(pathlib.Path(sys.argv[1]).read_text())["result"][0]["results"]}
+          required={"owner_tenant_id","mission_id","public_summary","city","start_at","end_at","provider_pay_cents","currency","status"}
+          forbidden={"address","client_user_id","file_reference"}
+          if not required <= columns or columns & forbidden:
+            print("::error::Public opportunity projection is incomplete or contains private fields.")
+            print("Missing:", sorted(required-columns), "Forbidden:", sorted(columns & forbidden))
+            raise SystemExit(1)
+          print("PASS: public opportunity projection contains required sanitized fields and no direct client/address fields.")
+          PY
