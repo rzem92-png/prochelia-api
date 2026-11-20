@@ -27,7 +27,7 @@ jobs:
       AWS_ACCESS_KEY_ID: ${{ secrets.R2_EU_ACCESS_KEY_ID }}
       AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_EU_SECRET_ACCESS_KEY }}
       AWS_DEFAULT_REGION: auto
-      R2_BUCKET: prochelia-preview-backups-eu-v2
+      R2_BUCKET: prochelia-preview-backups-eu-locked
       R2_ENDPOINT: https://f2a79e9fa41566a8ec80fb24c02c60eb.eu.r2.cloudflarestorage.com
       EXPECTED_DB_NAME: prochelia-preview-eu-2026-11-17
       EXPECTED_DB_ID: e3cf167c-37e1-4d72-9ac6-b3e27c14b97f
@@ -105,7 +105,7 @@ jobs:
             echo "::error::R2_EU_ACCESS_KEY_ID must be a 32-character R2 S3 Access Key ID."
             exit 1
           }
-          test "$R2_BUCKET" = "prochelia-preview-backups-eu-v2"
+          test "$R2_BUCKET" = "prochelia-preview-backups-eu-locked"
 
       - name: Install Node.js
         uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
