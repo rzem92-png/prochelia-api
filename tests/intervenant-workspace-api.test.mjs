@@ -243,7 +243,7 @@ test("opportunity application bodies use the same streaming byte limit", () => {
   const end = source.indexOf("\nasync function handle(request,env){", start);
   assert.ok(start >= 0 && end > start, "opportunity route must exist");
   const route = source.slice(start, end);
-  assert.match(route, /readLimitedJson\\(request, 4096\\)/);
-  assert.doesNotMatch(route, /request\\.json\\(\\)/);
+  assert.match(route, /readLimitedJson\(request, 4096\)/);
+  assert.doesNotMatch(route, /request\.json\(\)/);
   assert.match(route, /REQUEST_TOO_LARGE/);
 });
