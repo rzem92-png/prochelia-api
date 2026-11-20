@@ -4,6 +4,8 @@ on:
   pull_request:
     paths:
       - "src/index.js"
+      - "wrangler.jsonc"
+      - "tests/scheduled-backup-config.test.mjs"
       - "src/tenant-context.js"
       - "src/supra-*.js"
       - "migrations-preview-canonical/0021_supra_audit_events.sql"
@@ -46,4 +48,5 @@ jobs:
             tests/supra-approvals.test.mjs \
             tests/supra-tenant-integration.test.mjs \
             tests/session-cookie-malformed.test.mjs \
-            tests/pricing-quote-guardrails.test.mjs
+            tests/pricing-quote-guardrails.test.mjs \
+            tests/scheduled-backup-config.test.mjs
