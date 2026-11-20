@@ -4,6 +4,7 @@ import { readFile } from "node:fs/promises";
 
 const worker = await readFile(new URL("../src/index.js", import.meta.url), "utf8");
 const migration = await readFile(new URL("../migrations-preview-canonical/0034_timezone_safe_availability_overlap.sql", import.meta.url), "utf8");
+const validationMigration = await readFile(new URL("../migrations-preview-canonical/0035_validate_availability_intervals.sql", import.meta.url), "utf8");
 
 const start = worker.indexOf("async function intervenantAvailabilityRoute(");
 const end = worker.indexOf("\nasync function intervenantOpportunityRoute(", start);
@@ -46,4 +47,25 @@ test("database-enforced overlap conflicts remain explicit to the intervenant API
   assert.match(route, /String\(error\?\.message \|\| error\)\.includes\('AVAILABILITY_OVERLAP'\)/);
   assert.match(route, /error: 'AVAILABILITY_OVERLAP' }, 409/);
   assert.match(route, /error: 'AVAILABILITY_WRITE_REJECTED' }, 409/);
+});
+
+test("availability API requires an explicit timezone and rejects unsafe durations", () => {
+  assert.match(route, /const isoWithZone = \/\^\\d\{4\}-\\d\{2\}-\\d\{2\}T/);
+  assert.match(route, /startMs < now \+ 5 \* 60 \* 1000/);
+  assert.match(route, /endMs - startMs < 15 \* 60 \* 1000/);
+  assert.match(route, /endMs - startMs > 24 \* 60 \* 60 \* 1000/);
+  assert.match(route, /startMs > now \+ 366 \* 24 \* 60 \* 60 \* 1000/);
+});
+
+test("database rejects malformed, zero-length and reversed active availability intervals", () => {
+  assert.match(validationMigration, /julianday\(NEW\.start_at\) IS NULL/);
+  assert.match(validationMigration, /julianday\(NEW\.end_at\) IS NULL/);
+  assert.match(validationMigration, /julianday\(NEW\.end_at\) <= julianday\(NEW\.start_at\)/);
+  assert.equal((validationMigration.match(/RAISE\(ABORT, 'AVAILABILITY_INTERVAL_INVALID'\)/g) || []).length, 2);
+});
+
+test("availability interval validation covers INSERT and UPDATE without changing historical inactive rows", () => {
+  assert.match(validationMigration, /BEFORE INSERT ON disponibilites/);
+  assert.match(validationMigration, /BEFORE UPDATE OF start_at, end_at, status ON disponibilites/);
+  assert.match(validationMigration, /WHEN NEW\.status = 'available'/);
 });
