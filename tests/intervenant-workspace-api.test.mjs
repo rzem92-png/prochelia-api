@@ -24,7 +24,7 @@ test("workspace requires an authenticated intervenant role", () => {
 
 test("workspace resources are scoped to the authenticated owner", () => {
   assert.ok(handler.includes("FROM intervenants WHERE user_id = ? AND tenant_id = ?"));
-  assert.match(handler, /WHERE m\\.intervenant_id = \\? AND m\\.tenant_id = \\?/);
+  assert.ok(handler.includes("WHERE m.intervenant_id = ? AND m.tenant_id = ?"));
   assert.ok(handler.includes("FROM disponibilites WHERE intervenant_id = ? AND tenant_id = ?"));
   assert.ok(handler.includes("FROM wallets WHERE user_id = ? AND tenant_id = ?"));
   assert.ok(handler.includes("FROM documents WHERE user_id = ? AND tenant_id = ?"));
