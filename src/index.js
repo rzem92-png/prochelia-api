@@ -3450,7 +3450,12 @@ async function intervenantAvailabilityRoute(request, env, url) {
        VALUES (?, ?, ?, ?, ?, 'available')`
     ).bind(id, profile.id, tenantId, canonicalStartAt, canonicalEndAt).run();
     return json({ ok: true, availability: { id, start_at: canonicalStartAt, end_at: canonicalEndAt, status: 'available' } }, 201);
-  } catch {
+  } catch (error) {
+    // The database trigger is the final concurrency-safe guard. Preserve its
+    // domain result so the intervenant receives a precise conflict response.
+    if (String(error?.message || error).includes('AVAILABILITY_OVERLAP')) {
+      return json({ ok: false, error: 'AVAILABILITY_OVERLAP' }, 409);
+    }
     return json({ ok: false, error: 'AVAILABILITY_WRITE_REJECTED' }, 409);
   }
 }
