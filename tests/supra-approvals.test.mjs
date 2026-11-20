@@ -144,6 +144,7 @@ test("consumption rejects malformed or unapproved action types", async () => {
 test("approval ledger schema protects immutable request identity and append-only votes/events", async () => {
   const sql = await readFile(new URL("../migrations/0022_supra_persisted_approvals.sql", import.meta.url), "utf8");
   assert.match(sql, /trg_supra_approval_requests_immutable/);
+  assert.match(sql, /trg_supra_approval_requests_no_delete/);
   assert.match(sql, /trg_supra_approval_votes_no_update/);
   assert.match(sql, /trg_supra_approval_votes_no_delete/);
   assert.match(sql, /trg_supra_approval_events_no_update/);
@@ -155,6 +156,16 @@ test("approval ledger schema protects immutable request identity and append-only
   assert.match(sql, /UNIQUE \(request_id, approver_user_id\)/);
 });
 
+
+test("SUPRA audit trail and approval requests cannot be updated or deleted", async () => {
+  const auditSql = await readFile(new URL("../migrations/0021_supra_audit_events.sql", import.meta.url), "utf8");
+  const approvalSql = await readFile(new URL("../migrations/0022_supra_persisted_approvals.sql", import.meta.url), "utf8");
+  assert.match(auditSql, /trg_supra_audit_events_no_update/);
+  assert.match(auditSql, /trg_supra_audit_events_no_delete/);
+  assert.match(approvalSql, /trg_supra_approval_requests_no_delete/);
+  assert.match(approvalSql, /SUPRA_AUDIT_EVENTS_ARE_APPEND_ONLY/);
+  assert.match(approvalSql, /APPROVAL_REQUESTS_ARE_APPEND_ONLY/);
+});
 
 test("all approval endpoints fail closed when the authenticated session has no server-derived tenant", async () => {
   const managerWithoutTenant = { user: { id: "manager-no-tenant", role: "gerante" } };
