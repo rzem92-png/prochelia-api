@@ -90,6 +90,7 @@ test("Copilot read model and background job routes do not invoke schema creation
   assert.doesNotMatch(process, /ensureFinalHardeningSchema|ensureOperationalSchema|persist:\s*true|tableExists/);
   assert.match(process, /BACKGROUND_EXECUTOR_NOT_IMPLEMENTED/);
   assert.match(process, /write_enabled:false/);
-  assert.match(copilot, /return legacyTenantScopeBlocked\\(\\)/);\n  assert.doesNotMatch(copilot, /tableExists|\\.prepare\\s*\\(/);
+  assert.match(copilot, /return legacyTenantScopeBlocked\(\)/);
+  assert.doesNotMatch(copilot, /tableExists|\.prepare\s*\(/);
   assert.match(enqueue, /tableExists/);
 });
