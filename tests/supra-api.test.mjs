@@ -14,7 +14,7 @@ function makeDb() {
     }
   };
 }
-const manager = { user: { id: "manager-1", role: "GERANTE", tenant_id: "tenant-preview" } };
+const manager = { user: { id: "manager-1", role: "GERANTE", tenant_id: "tenant-preview", tenant_role: "OWNER" } };
 const client = { user: { id: "client-1", role: "CLIENT" } };
 
 test("SUPRA route ignores unrelated paths", async () => {
@@ -184,4 +184,21 @@ test("SUPRA audit write binds the server-derived tenant, never a client-selected
   assert.equal(DB.calls.length, 1);
   assert.match(DB.calls[0].sql, /tenant_id/);
   assert.equal(DB.calls[0].values[1], "tenant-preview");
+});
+
+
+test("SUPRA rejects a global manager who lacks an administrative role in the active tenant", async () => {
+  const DB = makeDb();
+  const auth = { user: { id: "manager-2", role: "GERANTE", tenant_id: "tenant-preview", tenant_role: "READ_ONLY" } };
+  const response = await handleSupraRoute(new Request("https://example.test/api/supra/domains"), { DB }, auth);
+  assert.equal(response.status, 403);
+  assert.equal(DB.calls.length, 0);
+});
+
+test("SUPRA rejects an administrative global role without an active tenant membership role", async () => {
+  const DB = makeDb();
+  const auth = { user: { id: "manager-3", role: "GERANTE", tenant_id: "tenant-preview" } };
+  const response = await handleSupraRoute(new Request("https://example.test/api/supra/domains"), { DB }, auth);
+  assert.equal(response.status, 403);
+  assert.equal(DB.calls.length, 0);
 });
