@@ -3749,14 +3749,11 @@ async function intervenantOpportunityRoute(request, env, url) {
   if (!/^[A-Za-z0-9._:-]{8,160}$/.test(idempotencyKey)) {
     return json({ ok: false, error: 'IDEMPOTENCY_KEY_REQUIRED' }, 400);
   }
-  const contentLength = Number(request.headers.get('content-length') || 0);
-  if (contentLength > 4096) return json({ ok: false, error: 'REQUEST_TOO_LARGE' }, 413);
-  let payload = {};
-  try {
-    payload = await request.json();
-  } catch {
-    return json({ ok: false, error: 'INVALID_JSON' }, 400);
+  const parsedPayload = await readLimitedJson(request, 4096);
+  if (!parsedPayload.ok) {
+    return json({ ok: false, error: parsedPayload.tooLarge ? 'REQUEST_TOO_LARGE' : 'INVALID_JSON' }, parsedPayload.tooLarge ? 413 : 400);
   }
+  const payload = parsedPayload.value;
   const publicNote = typeof payload?.public_note === 'string' ? payload.public_note.trim() : '';
   if (publicNote.length > 500 || /[\u0000-\u0008\u000B\u000C\u000E-\u001F]/.test(publicNote)) {
     return json({ ok: false, error: 'INVALID_PUBLIC_NOTE' }, 400);
