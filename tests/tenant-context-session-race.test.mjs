@@ -19,16 +19,10 @@ test("active tenant resolution rechecks the exact tenant captured by session aut
       }};
     }
   };
-  const auth = {
-    user: { id: "user-a" },
-    session_id: "session-a",
-    session_active_tenant_id: "tenant-a"
-  };
-
+  const auth = { user: { id: "user-a" }, session_id: "session-a", session_active_tenant_id: "tenant-a" };
   const result = await resolveTenantContext(new Request("https://api.example.test/"), { DB }, auth);
-
   assert.equal(result.ok, true);
-  assert.match(sql, /s\.active_tenant_id = \?/);
+  assert.ok(sql.includes("AND s.active_tenant_id = ?"));
   assert.deepEqual(params, ["session-a", "user-a", "tenant-a"]);
 });
 
@@ -49,15 +43,9 @@ test("no-selection resolution requires the session to remain unselected at query
       }};
     }
   };
-  const auth = {
-    user: { id: "user-a" },
-    session_id: "session-a",
-    session_active_tenant_id: null
-  };
-
+  const auth = { user: { id: "user-a" }, session_id: "session-a", session_active_tenant_id: null };
   const result = await resolveTenantContext(new Request("https://api.example.test/"), { DB }, auth);
-
   assert.equal(result.ok, true);
-  assert.match(sql, /s\.active_tenant_id IS NULL/);
+  assert.ok(sql.includes("AND s.active_tenant_id IS NULL"));
   assert.deepEqual(params, ["session-a", "user-a"]);
 });
