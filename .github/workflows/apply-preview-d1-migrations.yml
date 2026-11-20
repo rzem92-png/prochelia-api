@@ -92,7 +92,6 @@ jobs:
             "0027_tenant_membership_identity_immutable.sql",
             "0028_tenant_accounting_entity_delete_guard.sql",
             "0029_supra_append_only_audit_guards.sql",
-              "0030_supra_audit_tenant_scope.sql",
             "0030_supra_audit_tenant_scope.sql"
           ]
           actual = sorted(p.name for p in Path("migrations-preview-canonical").glob("*.sql"))
