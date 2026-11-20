@@ -33,7 +33,7 @@ jobs:
           go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
           "$HOME/go/bin/actionlint" .github/workflows/restore-production-backup-isolated-test.yml
           "$HOME/go/bin/actionlint" .github/workflows/preview-directory-e2e-acceptance.yml
-          "$HOME/go/bin/actionlint" .github/workflows/restore-production-backup-isolated-test.yml
+          "$HOME/go/bin/actionlint" .github/workflows/migration-sql-tests.yml
       - name: Validate migration SQL and payment ledger invariants in isolated SQLite
         run: |
           python3 tests/test_migrations_sqlite.py
