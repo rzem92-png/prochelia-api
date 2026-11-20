@@ -6,7 +6,8 @@ import {
   financeExport,
   financeEntryCreate,
   financeProblemCreate,
-  financeProblemResolve
+  financeProblemResolve,
+  handleConsolidated
 } from "../src/index.js";
 
 function managerEnv() {
@@ -94,4 +95,25 @@ test("operations dashboard does not present the legacy single-line ledger as a f
   assert.match(body, /finance_status = 'TENANT_SCOPED_FINANCE_NOT_READY'/);
   assert.match(body, /ledger_balance = null/);
   assert.match(body, /proposal_only_fail_closed_pending_tenant_ownership/);
+});
+
+
+test("consolidated routes that are deliberately disabled return 503 without runtime schema DDL", async () => {
+  const routes = [
+    ["/api/finance/summary", "GET", null, "TENANT_SCOPED_FINANCE_NOT_READY"],
+    ["/api/pricing/quote", "POST", { service_code: "SYNTHETIC" }, "SERVER_PRICING_POLICY_NOT_READY"],
+    ["/api/cases", "POST", { client_id: "synthetic-client" }, "TENANT_SCOPED_CASE_CREATION_NOT_IMPLEMENTED"],
+    ["/api/cases/approve", "POST", { case_id: "synthetic-case" }, "TENANT_SCOPED_APPROVAL_NOT_IMPLEMENTED"],
+    ["/api/complaints", "POST", { client_id: "synthetic-client" }, "TENANT_SCOPED_COMPLAINTS_NOT_READY"]
+  ];
+
+  for (const [path, method, body, expectedError] of routes) {
+    const { env, statements, writes } = managerEnv();
+    const response = await handleConsolidated(managerRequest(path, method, body), env);
+    assert.equal(response.status, 503, path);
+    assert.equal((await response.json()).error, expectedError, path);
+    assert.equal(statements.length, 1, "only the authenticated session lookup is permitted: " + path);
+    assert.match(statements[0], /FROM sessions s/);
+    assert.equal(writes.length, 0, "no schema or business write may occur: " + path);
+  }
 });

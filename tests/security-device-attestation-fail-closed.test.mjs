@@ -132,3 +132,24 @@ test("unauthenticated mission presence remains rejected", async () => {
   assert.equal((await response.json()).error, "UNAUTHENTICATED");
   assert.equal(databaseCalls, 0);
 });
+
+test("identity verification routes require migrated tables and never create schema at request time", () => {
+  const readyStart = source.indexOf("async function securityIdentitySchemaReady");
+  const startStart = source.indexOf("async function securityIdentityStart");
+  const approveStart = source.indexOf("async function securityIdentityApprove", startStart);
+  const deliverStart = source.indexOf("async function deliverSecurityCodes", approveStart);
+  assert.notEqual(readyStart, -1);
+  assert.notEqual(startStart, -1);
+  assert.notEqual(approveStart, -1);
+  assert.notEqual(deliverStart, -1);
+  const readyBody = source.slice(readyStart, startStart);
+  const startBody = source.slice(startStart, approveStart);
+  const approveBody = source.slice(approveStart, deliverStart);
+  assert.match(readyBody, /tableExists\(env, 'identity_verifications'\)/);
+  assert.match(readyBody, /tableExists\(env, 'security_audit'\)/);
+  for (const body of [readyBody, startBody, approveBody]) {
+    assert.doesNotMatch(body, /CREATE TABLE|CREATE INDEX|ensureSecuritySchema/);
+  }
+  assert.match(startBody, /SECURITY_IDENTITY_SCHEMA_NOT_MIGRATED/);
+  assert.match(approveBody, /SECURITY_IDENTITY_SCHEMA_NOT_MIGRATED/);
+});

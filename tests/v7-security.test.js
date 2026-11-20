@@ -1,9 +1,10 @@
 import test from "node:test";
 import { readFile } from "node:fs/promises";
 import assert from "node:assert/strict";
-import { createHmac } from "node:crypto";
+import { createHmac, webcrypto } from "node:crypto";
+globalThis.crypto ??= webcrypto;
 import { handleV7Route } from "../src/v7-routes.js";
-import { directoryList, resolveMissionSecurityAssignment, findAssignedMissionSecurity, isMissionPresenceFresh, isTrustedDeviceActive, hmacSha256Base64url, isSameMissionPaymentRequest, paymentsConfigured, supportAutoResolve } from "../src/index.js";
+import { directoryList, resolveMissionSecurityAssignment, findAssignedMissionSecurity, isMissionPresenceFresh, isTrustedDeviceActive, hmacSha256Base64url, isSameMissionPaymentRequest, paymentsConfigured, supportAutoResolve, handleV139, finalProductionAudit, processBackgroundJobs } from "../src/index.js";
 
 const source = await readFile(new URL("../src/index.js", import.meta.url), "utf8");
 
@@ -291,4 +292,99 @@ test("backup status never claims an automatic daily schedule without a configure
   assert.match(backupBody,/scheduleStatus:'NOT_CONFIGURED'/);
   assert.match(backupBody,/retentionStatus:'UNVERIFIED'/);
   assert.doesNotMatch(backupBody,/frequency:'DAILY'/);
+});
+
+function makeAuthenticatedPreviewEnv() {
+  const statements=[];
+  const columns=[
+    'id','idempotency_key','mission_id','client_id','intervenant_id','gross_cents',
+    'commission_cents','provider_fee_cents','refund_cents','net_intervenant_cents',
+    'status','provider_payment_id','revoked_at','revoked_reason','active_tenant_id'
+  ];
+  const DB={
+    prepare(sql) {
+      statements.push(sql);
+      return {
+        bind() { return this; },
+        async first() {
+          return {
+            id:'synthetic-manager',role:'gerante',email:'manager@example.test',
+            first_name:'Synthetic',last_name:'Manager',phone:null,status:'active',
+            created_at:'2026-01-01 00:00:00',updated_at:'2026-01-01 00:00:00',
+            session_id:'synthetic-session'
+          };
+        },
+        async all() { return { results: columns.map(name=>({name})) }; },
+        async run() { throw new Error('Unexpected D1 write in fail-closed production test'); }
+      };
+    }
+  };
+  return {
+    env:{DB,PAYMENT_PROVIDER:'stripe',PAYMENT_WEBHOOK_SECRET:'configured-but-not-an-adapter',BOOTSTRAP_TOKEN:'synthetic-bootstrap'},
+    statements
+  };
+}
+
+function authenticatedRequest(path, method='GET') {
+  const headers=new Headers({
+    cookie:'prochelia_session=synthetic-session-token',
+    origin:'https://preview.example.test'
+  });
+  const init={method,headers};
+  if(method==='POST') {
+    headers.set('content-type','application/json');
+    init.body='{}';
+  }
+  return new Request('https://api.example.test'+path,init);
+}
+
+test('unscoped finance and operational routes fail closed before schema DDL or business reads', async () => {
+  const routes=[
+    ['/api/ops/case/execute','POST','TENANT_SCOPED_EXECUTION_NOT_IMPLEMENTED'],
+    ['/api/ops/outbox/process','POST','TENANT_SCOPED_EXECUTION_NOT_IMPLEMENTED'],
+    ['/api/copilot/briefing','GET','TENANT_SCOPED_OPERATIONAL_NOT_READY'],
+    ['/api/clients/score','POST','TENANT_SCOPED_OPERATIONAL_NOT_READY'],
+    ['/api/loyalty/update','POST','TENANT_SCOPED_OPERATIONAL_NOT_READY'],
+    ['/api/quality','POST','TENANT_SCOPED_OPERATIONAL_NOT_READY'],
+    ['/api/capacity/dashboard','GET','TENANT_SCOPED_OPERATIONAL_NOT_READY'],
+    ['/api/finance/forecast','POST','TENANT_SCOPED_FINANCE_NOT_READY'],
+    ['/api/system/audit','GET','FULL_PRODUCTION_AUDIT_NOT_VERIFIED']
+  ];
+  for(const [path,method,error] of routes) {
+    const {env,statements}=makeAuthenticatedPreviewEnv();
+    const response=await handleV139(authenticatedRequest(path,method),env);
+    const body=await response.json();
+    assert.equal(response.status,503,path);
+    assert.equal(body.error,error,path);
+    assert.equal(body.write_enabled,false,path);
+    assert.equal(statements.length,1,path+' must perform authentication only; no schema or business query');
+    assert.match(statements[0],/FROM sessions/,path);
+  }
+});
+
+test('background job endpoint never marks delegated work complete or executes jobs', async () => {
+  const {env,statements}=makeAuthenticatedPreviewEnv();
+  const response=await processBackgroundJobs(authenticatedRequest('/api/jobs/process','POST'),env);
+  const body=await response.json();
+  assert.equal(response.status,503);
+  assert.equal(body.error,'BACKGROUND_EXECUTOR_NOT_IMPLEMENTED');
+  assert.equal(body.write_enabled,false);
+  assert.equal(body.automation,'proposal_only_no_background_execution');
+  assert.equal(statements.length,1,'only session authentication may query D1');
+});
+
+test('production audit remains closed even when legacy tables and PSP secrets appear configured', async () => {
+  const {env,statements}=makeAuthenticatedPreviewEnv();
+  const response=await finalProductionAudit(authenticatedRequest('/api/system/final-audit'),env);
+  const body=await response.json();
+  assert.equal(response.status,200);
+  assert.equal(body.production_gate,'CLOSED');
+  assert.equal(body.ready_for_real_traffic,false);
+  assert.ok(body.checks.some(x=>x.code==='PSP_ADAPTER'&&x.status==='NOT_IMPLEMENTED'));
+  assert.ok(body.checks.some(x=>x.code==='TENANT_AUTHORIZATION_E2E'&&x.status==='NOT_VERIFIED'));
+  assert.ok(body.checks.some(x=>x.code==='DOUBLE_ENTRY_ACCOUNTING_RUNTIME'&&x.status==='NOT_VERIFIED'));
+  assert.ok(body.checks.some(x=>x.code==='R2_RETENTION_AND_HMAC_ATTESTATION'&&x.status==='UNVERIFIED'));
+  assert.ok(body.checks.some(x=>x.code==='CRYPTOGRAPHIC_DEVICE_ENROLLMENT'&&x.status==='NOT_IMPLEMENTED'));
+  assert.ok(body.human_validation_required.length>=3);
+  assert.ok(statements.every(sql=>!(/^(INSERT|UPDATE|DELETE|CREATE|DROP|ALTER)/i).test(sql.trim())));
 });

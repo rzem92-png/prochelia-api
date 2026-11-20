@@ -19,6 +19,17 @@ test("Preview deploy is manual and requires exact confirmation on main or its de
   assert.ok(workflow.includes("github.ref == 'refs/heads/fix/preview-critical-tenant-guards-2026-11-18'"));
 });
 
+test("Preview deployment refuses a candidate that would roll back the active Worker", () => {
+  const guard = workflow.indexOf("git merge-base --is-ancestor");
+  const generate = workflow.indexOf("Generate isolated Preview deployment config");
+  const deploy = workflow.indexOf("Deploy ONLY the isolated Preview Worker");
+  assert.ok(guard >= 0 && generate > guard && deploy > generate);
+  assert.match(workflow, /fetch-depth:\s*0/);
+  assert.match(workflow, /PROCHELIA_COMMIT_SHA/);
+  assert.match(workflow, /git cat-file -e/);
+  assert.match(workflow, /candidate commit is not a descendant of the active Preview Worker commit/);
+});
+
 test("Preview deployment resolves the latest successful Pages Preview before generating Worker config", () => {
   const resolve = workflow.indexOf("Resolve and verify latest Pages Preview origin before generating Worker config");
   const generate = workflow.indexOf("Generate isolated Preview deployment config");
@@ -48,6 +59,12 @@ test("Preview deployment preserves and validates the current Worker CORS allowli
 });
 
 test("Preview deployment requires an exact frontend Pages commit SHA", () => {
+  assert.ok(workflow.includes("pages_branch:"));
+  assert.ok(workflow.includes('PAGES_EXPECTED_BRANCH: ${{ inputs.pages_branch || \'\' }}'));
+  assert.ok(!workflow.includes('default: "integrate/supra-control-center-preview-2026-11-15"'));
+  assert.ok(workflow.includes("pages_branch is required, must be a valid lowercase Preview branch, and cannot be main"));
+  assert.ok(workflow.includes('.result.deployment_trigger.metadata.branch == $branch'));
+  assert.ok(workflow.includes('--arg branch "$PAGES_EXPECTED_BRANCH"'));
   assert.ok(workflow.includes("pages_commit_sha:"));
   assert.ok(workflow.includes("required: true"));
   assert.ok(workflow.includes("PAGES_EXPECTED_COMMIT: ${{ inputs.pages_commit_sha || '' }}"));

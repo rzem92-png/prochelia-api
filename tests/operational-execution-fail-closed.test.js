@@ -1,5 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import worker from "../src/index.js";
 import {
   copilotRecommend,
   createOperationalCase,
@@ -7,7 +9,8 @@ import {
   executeOperationalCase,
   queueAction,
   executeQueuedAction,
-  operationalExecute
+  operationalExecute,
+  processBackgroundJobs
 } from "../src/index.js";
 
 const managerRow = {
@@ -133,5 +136,82 @@ test("case creation and approval remain disabled before any business write", asy
     assert.equal((await response.json()).error, expected);
     assert.equal(statements.length, 1, "only the authenticated session lookup is allowed");
     assert.equal(writes.length, 0);
+  }
+});
+
+
+test("background job endpoint remains proposal-only and performs no D1 writes", async () => {
+  const { env, statements, writes } = managerEnv();
+  const response = await processBackgroundJobs(managerRequest("/api/jobs/process"), env);
+  assert.equal(response.status, 503);
+  assert.equal((await response.json()).error, "BACKGROUND_EXECUTOR_NOT_IMPLEMENTED");
+  assert.equal(statements.length, 1, "only the authenticated session lookup is allowed");
+  assert.equal(writes.length, 0);
+});
+
+test("action outbox HTTP route returns 503 before schema setup or outbox reads", async () => {
+  const { env, statements, writes } = managerEnv();
+  const response = await worker.fetch(managerRequest("/api/ops/outbox/process"), env);
+  assert.equal(response.status, 503);
+  assert.equal((await response.json()).error, "TENANT_SCOPED_EXECUTION_NOT_IMPLEMENTED");
+  assert.equal(statements.length, 0, "disabled route must not access D1 at all");
+  assert.equal(writes.length, 0);
+});
+
+test("Copilot next-actions is blocked before the rate limiter or any D1 access", async () => {
+  const env = { DB: { prepare() { throw new Error("D1 must not be touched"); } } };
+  const request = new Request("https://api.example.test/api/copilot/next-actions", { method: "GET" });
+  const response = await worker.fetch(request, env);
+  assert.equal(response.status, 503);
+  const body = await response.json();
+  assert.equal(body.error, "TENANT_DATA_SCOPE_NOT_MIGRATED");
+  assert.equal(body.write_enabled, false);
+  assert.equal(body.automation, "proposal_only_no_background_execution");
+});
+
+test("action outbox preflight blocks before the D1-backed rate limiter", async () => {
+  const source = await readFile(new URL("../src/index.js", import.meta.url), "utf8");
+  const wrapperStart = source.indexOf("const __procheliaProductionSafetyHandle = handle;");
+  assert.notEqual(wrapperStart, -1, "final production safety wrapper exists");
+  const wrapper = source.slice(wrapperStart);
+  const guard = wrapper.indexOf("preflightPath === '/api/ops/outbox/process'");
+  const limiter = wrapper.indexOf("const rate=await productionRateLimit(request,env)");
+  assert.ok(guard >= 0 && limiter > guard, "disabled outbox must be rejected before rate-limit D1 access");
+});
+
+test("action outbox route has an authenticated fail-closed guard before its legacy handler", async () => {
+  const source = await readFile(new URL("../src/index.js", import.meta.url), "utf8");
+  const start = source.indexOf("async function handleV139");
+  assert.notEqual(start, -1, "legacy route dispatcher exists");
+  const end = source.indexOf("\n}", start);
+  const dispatcher = source.slice(start, end);
+  const guard = dispatcher.indexOf("const blockedRoutes");
+  const routePolicy = dispatcher.indexOf("'/api/ops/outbox/process:POST'");
+  const policyLookup = dispatcher.indexOf("const policy=blockedRoutes.get");
+  const policyBranch = dispatcher.indexOf("if(policy)");
+  const authGate = dispatcher.indexOf("await requireAuthRole(request,env,policy.roles)");
+  const failClosed = dispatcher.indexOf("return json({ok:false,error:policy.error");
+  const legacyRoute = dispatcher.indexOf("if(url.pathname==='/api/ops/outbox/process'&&request.method==='POST')");
+  assert.ok(guard >= 0 && routePolicy > guard, "outbox route is explicitly listed in the guard map");
+  assert.ok(policyLookup > routePolicy && policyBranch > policyLookup, "guard policy is resolved before legacy dispatch");
+  assert.ok(authGate > policyBranch && failClosed > authGate, "authorization precedes the explicit 503 response");
+  assert.ok(legacyRoute > failClosed, "guard executes before the legacy outbox handler can be called");
+});
+
+
+test("legacy cross-tenant operational and strategic handlers fail closed before D1 access", async () => {
+  const source = await readFile(new URL("../src/index.js", import.meta.url), "utf8");
+  const handlers = ["copilotNextActions","processActionOutbox","getOperationsDashboard","getJournal","promotionList","activatePromotion","strategicDashboard","scoreClients","qualityCreate","capacityDashboard","financeForecast"];
+  for (const name of handlers) {
+    const start = source.indexOf("async function " + name + "(request, env) {");
+    assert.notEqual(start, -1, name + " exists");
+    const end = source.indexOf("\n}", start);
+    assert.notEqual(end, -1, name + " has a function boundary");
+    const body = source.slice(start, end);
+    const auth = body.indexOf("requireAuthRole(");
+    const block = body.indexOf("return legacyTenantScopeBlocked()");
+    const firstD1 = body.search(/\.prepare\s*\(/);
+    assert.ok(auth >= 0 && block > auth, name + " must authenticate before refusing");
+    assert.ok(firstD1 === -1 || block < firstD1, name + " must refuse before any D1 access");
   }
 });

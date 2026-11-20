@@ -444,82 +444,15 @@ async function authStatus(request, env) {
    Chaîne : identité vérifiée -> compte -> appareil -> mission ->
    présence -> code client -> journal d'audit.
 =============================================================== */
-async function ensureSecuritySchema(env) {
-  if (!env.DB) throw new Error('DATABASE_REQUIRED');
-  const statements = [
-    `CREATE TABLE IF NOT EXISTS identity_verifications (
-      id TEXT PRIMARY KEY,
-      user_id TEXT NOT NULL,
-      status TEXT NOT NULL DEFAULT 'pending',
-      level TEXT NOT NULL DEFAULT 'standard',
-      provider TEXT,
-      provider_reference TEXT,
-      verified_at TEXT,
-      expires_at TEXT,
-      rejection_reason TEXT,
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )`,
-    `CREATE INDEX IF NOT EXISTS idx_identity_verifications_user ON identity_verifications(user_id, status, updated_at)`,
-    `CREATE TABLE IF NOT EXISTS trusted_devices (
-      id TEXT PRIMARY KEY,
-      user_id TEXT NOT NULL,
-      device_hash TEXT NOT NULL,
-      status TEXT NOT NULL DEFAULT 'active',
-      first_seen_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      last_seen_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      expires_at TEXT NOT NULL,
-      revoked_at TEXT,
-      UNIQUE(user_id, device_hash)
-    )`,
-    `CREATE TABLE IF NOT EXISTS mission_security (
-      id TEXT PRIMARY KEY,
-      mission_id TEXT NOT NULL UNIQUE,
-      client_id TEXT NOT NULL,
-      intervenant_id TEXT NOT NULL,
-      risk_level TEXT NOT NULL DEFAULT 'standard',
-      arrival_code_hash TEXT,
-      arrival_expires_at TEXT,
-      arrival_used_at TEXT,
-      end_code_hash TEXT,
-      end_expires_at TEXT,
-      end_used_at TEXT,
-      status TEXT NOT NULL DEFAULT 'prepared',
-      locked_until TEXT,
-      arrival_started_at TEXT,
-      ended_at TEXT,
-      last_presence_at TEXT,
-      last_device_id TEXT,
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )`,
-    `CREATE INDEX IF NOT EXISTS idx_mission_security_intervenant ON mission_security(intervenant_id, status)`,
-    `CREATE TABLE IF NOT EXISTS mission_security_attempts (
-      id TEXT PRIMARY KEY,
-      security_id TEXT NOT NULL,
-      purpose TEXT NOT NULL,
-      actor_user_id TEXT,
-      device_id TEXT,
-      result TEXT NOT NULL,
-      reason TEXT,
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )`,
-    `CREATE INDEX IF NOT EXISTS idx_security_attempts_security ON mission_security_attempts(security_id, created_at)`,
-    `CREATE TABLE IF NOT EXISTS security_audit (
-      id TEXT PRIMARY KEY,
-      event_type TEXT NOT NULL,
-      mission_id TEXT,
-      user_id TEXT,
-      actor_role TEXT,
-      result TEXT NOT NULL,
-      metadata_json TEXT,
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )`,
-    `CREATE INDEX IF NOT EXISTS idx_security_audit_mission ON security_audit(mission_id, created_at)`
-  ];
-  for (const sql of statements) await env.DB.prepare(sql).run();
+async function securityIdentitySchemaReady(env) {
+  if (!env?.DB) return false;
+  try {
+    return await tableExists(env, 'identity_verifications') &&
+      await tableExists(env, 'security_audit');
+  } catch {
+    return false;
+  }
 }
-
 function securityCode() {
   const n = new DataView(randomBytes(4).buffer).getUint32(0) % 1000000;
   return String(n).padStart(6, '0');
@@ -548,7 +481,9 @@ async function requireVerifiedIntervenant(env, userId) {
 async function securityIdentityStart(request, env) {
   const auth = await getSessionUser(request, env);
   if (!requireRole(auth, ['intervenant'])) return json({ok:false,error:auth?.user?'FORBIDDEN':'UNAUTHENTICATED',version:VERSION}, auth?.user?403:401);
-  await ensureSecuritySchema(env);
+  if (!(await securityIdentitySchemaReady(env))) {
+    return json({ok:false,error:'SECURITY_IDENTITY_SCHEMA_NOT_MIGRATED',version:VERSION,write_enabled:false},503);
+  }
   const id = crypto.randomUUID();
   await env.DB.prepare(
     `INSERT INTO identity_verifications (id,user_id,status,level) VALUES (?,?, 'pending','standard')`
@@ -560,7 +495,9 @@ async function securityIdentityStart(request, env) {
 async function securityIdentityApprove(request, env) {
   const auth = await getSessionUser(request, env);
   if (!requireRole(auth, ['gerante'])) return json({ok:false,error:auth?.user?'FORBIDDEN':'UNAUTHENTICATED',version:VERSION}, auth?.user?403:401);
-  await ensureSecuritySchema(env);
+  if (!(await securityIdentitySchemaReady(env))) {
+    return json({ok:false,error:'SECURITY_IDENTITY_SCHEMA_NOT_MIGRATED',version:VERSION,write_enabled:false},503);
+  }
   const body = await readJson(request);
   const verificationId = clean(body?.verification_id);
   const status = clean(body?.status);
@@ -1400,11 +1337,11 @@ async function handleBase(request, env) {
 =============================================================== */
 
 const PROJECT_PHASES = {
-  TEST:       {automation:'ASSISTED', pricingFactor:0.90, autoSimple:true},
-  LANCEMENT:  {automation:'SEMI_AUTO', pricingFactor:0.94, autoSimple:true},
-  AVANCE:     {automation:'AUTO', pricingFactor:1.00, autoSimple:true},
-  EXPERT:     {automation:'AUTO_PLUS', pricingFactor:1.03, autoSimple:true},
-  NATIONAL:   {automation:'INDUSTRIAL', pricingFactor:1.05, autoSimple:true}
+  TEST:       {automation:'PROPOSAL_ONLY', pricingFactor:0.90, autoSimple:false},
+  LANCEMENT:  {automation:'PROPOSAL_ONLY', pricingFactor:0.94, autoSimple:false},
+  AVANCE:     {automation:'PROPOSAL_ONLY', pricingFactor:1.00, autoSimple:false},
+  EXPERT:     {automation:'PROPOSAL_ONLY', pricingFactor:1.03, autoSimple:false},
+  NATIONAL:   {automation:'PROPOSAL_ONLY', pricingFactor:1.05, autoSimple:false}
 };
 
 const CASE_PRIORITIES = { LOW:10, MEDIUM:30, HIGH:60, CRITICAL:100 };
@@ -1448,7 +1385,7 @@ async function ensureConsolidatedSchema(env) {
     fuel_cost_per_km_cents:'20',
     default_margin_percent:'15',
     software_monthly_cost_cents:'0',
-    automation_policy:'simple_low_impact_auto_sensitive_manager',
+    automation_policy:'proposal_only_no_background_execution',
     b2b_model:'company_pays_intervenant_platform_bills_commission',
     b2c_model:'client_pays_platform_platform_pays_intervenant'
   };
@@ -1611,8 +1548,21 @@ async function executeCaseBusinessAction(env, c, rec, actorId=null, automatic=fa
   return results;
 }
 
+
+function legacyTenantScopeBlocked() {
+  return json({
+    ok: false,
+    error: "TENANT_DATA_SCOPE_NOT_MIGRATED",
+    message: "This legacy resource is unavailable until tenant ownership and row-level isolation are validated.",
+    version: VERSION,
+    write_enabled: false,
+    automation: "proposal_only_no_background_execution"
+  }, 503);
+}
+
 async function processActionOutbox(request, env) {
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
+  return legacyTenantScopeBlocked();
   await ensureOperationalSchema(env);
   const rows=await env.DB.prepare(`SELECT * FROM action_outbox WHERE status='PENDING' ORDER BY created_at ASC LIMIT 50`).all();
   const processed=[];
@@ -1651,6 +1601,7 @@ export async function approveOperationalCase(request, env) {
 
 async function getOperationsDashboard(request, env) {
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
+  return legacyTenantScopeBlocked();
   const queries={
     open_cases:"SELECT COUNT(*) AS n FROM operational_cases WHERE status NOT IN ('RESOLVED','CLOSED')",
     auto_cases:"SELECT COUNT(*) AS n FROM operational_cases WHERE status='RESOLVED' AND auto_mode='AUTO'",
@@ -1669,6 +1620,7 @@ async function getOperationsDashboard(request, env) {
 
 async function getJournal(request, env) {
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
+  return legacyTenantScopeBlocked();
   const type=new URL(request.url).searchParams.get('type');
   const tables={copilot_log:'SELECT * FROM copilot_log ORDER BY created_at DESC LIMIT 200',activity_journal:'SELECT * FROM activity_journal ORDER BY created_at DESC LIMIT 200',commercial_tasks:'SELECT * FROM commercial_tasks ORDER BY created_at DESC LIMIT 200',recruitment_tasks:'SELECT * FROM recruitment_tasks ORDER BY created_at DESC LIMIT 200',operational_cases:'SELECT * FROM operational_cases ORDER BY created_at DESC LIMIT 200'};
   if(type && !tables[type])return json({ok:false,error:'UNKNOWN_JOURNAL',version:VERSION},400);
@@ -1836,7 +1788,7 @@ async function setPhase(request, env) {
 async function consolidatedInfo(env) {
   // Public metadata remains read-only and must work before the manager has initialized settings.
   const phase=await getSetting(env,'project_phase','TEST').catch(()=> 'TEST');
-  return json({ok:true,version:VERSION,architecture:'UNIQUE_TRANSVERSAL_ENGINE',phase,automation:'simple_low_impact_auto_sensitive_manager',mobile_pc:'responsive_web_required',domains:['B2C','B2B','missions','matching','metiers','incidents','remplacement','paiements','finance','comptabilite','reclamations','commercial','recrutement','RGPD','securite','audit','copilote'],b2b_rule:'societe paie intervenant; PROCHÉLIA facture commissions/service',b2c_rule:'client paie la prestation; orchestration du reversement intervenant',note:'Aucune opération financière réelle n’est simulée : les fonds passent par un PSP configuré et vérifié.'});
+  return json({ok:true,version:VERSION,architecture:'UNIQUE_TRANSVERSAL_ENGINE',phase,automation:'proposal_only_no_background_execution',mobile_pc:'responsive_web_required',domains:['B2C','B2B','missions','matching','metiers','incidents','remplacement','paiements','finance','comptabilite','reclamations','commercial','recrutement','RGPD','securite','audit','copilote'],b2b_rule:'societe paie intervenant; PROCHÉLIA facture commissions/service',b2c_rule:'client paie la prestation; orchestration du reversement intervenant',note:'Aucune opération financière réelle n’est simulée : les fonds passent par un PSP configuré et vérifié.'});
 }
 
 export async function handleConsolidated(request, env) {
@@ -1846,13 +1798,8 @@ export async function handleConsolidated(request, env) {
   const schemaRoutes = new Map([
     ['/api/ops/dashboard:GET',['gerante']],
     ['/api/journal:GET',['gerante']],
-    ['/api/cases:POST',['gerante','client','intervenant','entreprise']],
-    ['/api/cases/approve:POST',['gerante']],
     ['/api/metiers:GET',['gerante','entreprise','client','intervenant']],
     ['/api/metiers/suggest:POST',['gerante']],
-    ['/api/pricing/quote:POST',['gerante']],
-    ['/api/finance/summary:GET',['gerante']],
-    ['/api/complaints:POST',['gerante','client','entreprise']],
     ['/api/settings/phase:POST',['gerante']]
   ]);
   const requiredRoles=schemaRoutes.get(url.pathname+':'+request.method);
@@ -2175,6 +2122,7 @@ async function createPromotion(request, env) {
 async function promotionList(request, env) {
   const gate = await requireAuthRole(request, env, ['gerante','entreprise','client']);
   if (gate.error) return gate.error;
+  return legacyTenantScopeBlocked();
   await ensureStrategicSchema(env);
   const status = new URL(request.url).searchParams.get('status');
   const q = status
@@ -2187,6 +2135,7 @@ async function promotionList(request, env) {
 async function activatePromotion(request, env) {
   const gate = await requireAuthRole(request, env, ['gerante']);
   if (gate.error) return gate.error;
+  return legacyTenantScopeBlocked();
   await ensureStrategicSchema(env);
   const b = await readJson(request) || {};
   if (!b.promotion_id) return json({ok:false,error:'PROMOTION_ID_REQUIRED',version:VERSION},400);
@@ -2206,6 +2155,7 @@ async function activatePromotion(request, env) {
 async function strategicDashboard(request, env) {
   const gate = await requireAuthRole(request, env, ['gerante']);
   if (gate.error) return gate.error;
+  return legacyTenantScopeBlocked();
   await ensureStrategicSchema(env);
 
   const queries = {
@@ -2381,6 +2331,7 @@ export async function operationalExecute(request, env) {
 
 async function scoreClients(request, env) {
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
+  return legacyTenantScopeBlocked();
   await ensureStrategicSchema(env); await ensureOperationalSchema(env);
   const rows=[];
   if(await tableExists(env,'payment_transactions')){
@@ -2419,6 +2370,7 @@ async function loyaltyUpdate(request, env) {
 
 async function qualityCreate(request, env) {
   const gate=await requireAuthRole(request,env,['gerante','client','entreprise']); if(gate.error)return gate.error;
+  return legacyTenantScopeBlocked();
   await ensureOperationalSchema(env); const b=await readJson(request)||{};
   if(!b.mission_id)return json({ok:false,error:'MISSION_ID_REQUIRED',version:VERSION},400);
   const id=crypto.randomUUID();
@@ -2429,6 +2381,7 @@ async function qualityCreate(request, env) {
 
 async function capacityDashboard(request, env) {
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
+  return legacyTenantScopeBlocked();
   await ensureOperationalSchema(env);
   let missions=0, available=0;
   if(await tableExists(env,'missions')) { const r=await env.DB.prepare(`SELECT COUNT(*) n FROM missions WHERE date(created_at)>=date('now','-7 day')`).first(); missions=Number(r?.n||0); }
@@ -2442,6 +2395,7 @@ async function capacityDashboard(request, env) {
 
 async function financeForecast(request, env) {
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
+  return legacyTenantScopeBlocked();
   const months=Math.max(1,Math.min(12,Number((await readJson(request)||{}).months||3)));
   const tx=await env.DB.prepare(`SELECT COALESCE(SUM(gross_cents),0) gross,COALESCE(SUM(commission_cents),0) commission,COALESCE(SUM(provider_fee_cents),0) provider_fee,COALESCE(SUM(refund_cents),0) refunds,COALESCE(SUM(net_intervenant_cents),0) intervenant FROM payment_transactions WHERE created_at>=datetime('now','-90 day')`).first();
   const base=Number(tx?.gross||0)/3;
@@ -2489,14 +2443,24 @@ async function systemAudit(request, env) {
   return json({ok:true,version:VERSION,production_readiness:overall?'OK':'ATTENTION',checks});
 }
 
-async function handleV139(request, env) {
+export async function handleV139(request, env) {
   const url=new URL(request.url);
-  const operationalPaths=[
-    '/api/ops/case/execute','/api/ops/outbox/process','/api/copilot/briefing','/api/clients/score','/api/loyalty/update',
-    '/api/quality','/api/capacity/dashboard','/api/finance/forecast','/api/system/audit'
-  ];
-  if(operationalPaths.includes(url.pathname)){
-    try{await ensureOperationalSchema(env);}catch(e){return json({ok:false,error:'OPERATIONAL_SCHEMA_ERROR',version:VERSION,message:e.message},500);}
+  const blockedRoutes=new Map([
+    ['/api/ops/case/execute:POST',{roles:['gerante'],error:'TENANT_SCOPED_EXECUTION_NOT_IMPLEMENTED',message:'Exécution bloquée tant que le périmètre tenant, l’approbation liée à l’action et la piste d’audit ne sont pas validés.'}],
+    ['/api/ops/outbox/process:POST',{roles:['gerante'],error:'TENANT_SCOPED_EXECUTION_NOT_IMPLEMENTED',message:'Le traitement des files reste bloqué tant que chaque action ne dispose pas d’un périmètre tenant et d’un contrôle d’approbation.'}],
+    ['/api/copilot/briefing:GET',{roles:['gerante'],error:'TENANT_SCOPED_OPERATIONAL_NOT_READY',message:'Le briefing transversal est bloqué tant que les dossiers, alertes et recommandations ne sont pas filtrés par tenant.'}],
+    ['/api/clients/score:POST',{roles:['gerante'],error:'TENANT_SCOPED_OPERATIONAL_NOT_READY',message:'Le scoring client global est bloqué jusqu’à la vérification de la propriété et du périmètre tenant.'}],
+    ['/api/loyalty/update:POST',{roles:['gerante'],error:'TENANT_SCOPED_OPERATIONAL_NOT_READY',message:'Les points fidélité ne peuvent pas être modifiés à partir d’identifiants client/entreprise fournis par l’appelant.'}],
+    ['/api/quality:POST',{roles:['gerante','client','entreprise'],error:'TENANT_SCOPED_OPERATIONAL_NOT_READY',message:'Les événements qualité sont bloqués jusqu’à la vérification serveur de la mission et de son propriétaire.'}],
+    ['/api/capacity/dashboard:GET',{roles:['gerante'],error:'TENANT_SCOPED_OPERATIONAL_NOT_READY',message:'Le tableau de capacité global est bloqué jusqu’à la séparation des données par tenant.'}],
+    ['/api/finance/forecast:POST',{roles:['gerante'],error:'TENANT_SCOPED_FINANCE_NOT_READY',message:'Les prévisions financières globales ne sont pas des comptes certifiés et restent désactivées jusqu’au ledger tenant et aux rapprochements.'}],
+    ['/api/system/audit:GET',{roles:['gerante'],error:'FULL_PRODUCTION_AUDIT_NOT_VERIFIED',message:'Un simple inventaire de tables ne peut pas déclarer la plateforme prête pour la production.'}]
+  ]);
+  const policy=blockedRoutes.get(url.pathname+':'+request.method);
+  if(policy){
+    const gate=await requireAuthRole(request,env,policy.roles);
+    if(gate.error)return gate.error;
+    return json({ok:false,error:policy.error,message:policy.message,version:VERSION,write_enabled:false,automation:'proposal_only_no_background_execution'},503);
   }
   if(url.pathname==='/api/ops/case/execute'&&request.method==='POST')return operationalExecute(request,env);
   if(url.pathname==='/api/ops/outbox/process'&&request.method==='POST')return processActionOutbox(request,env);
@@ -2576,7 +2540,7 @@ async function productionConfigCheck(env, { persist = false } = {}) {
     await ensureConsolidatedSchema(env); await ensurePaymentSchema(env); await ensureOperationalSchema(env); await ensureStrategicSchema(env); await ensureFinalHardeningSchema(env);
   }
   const checks=[];
-  const requiredTables=['users','sessions','missions','payment_transactions','payment_webhook_events','payment_disputes','operational_cases','action_outbox','notification_outbox','accounting_ledger','promotions','promotion_recommendations','activity_journal','compliance_events'];
+  const requiredTables=['users','sessions','missions','payment_transactions','payment_webhook_events','payment_disputes','operational_cases','action_outbox','notification_outbox','accounting_ledger','tenants','tenant_memberships','tenant_membership_events','accounting_entities','accounting_accounts','accounting_journals','accounting_journal_lines','promotions','promotion_recommendations','activity_journal','compliance_events'];
   for(const t of requiredTables) checks.push({code:`TABLE:${t}`,status:await tableExists(env,t)?'OK':'MISSING'});
   const pspRequired=['PAYMENT_PROVIDER','PAYMENT_WEBHOOK_SECRET'];
   for(const k of pspRequired) checks.push({code:`SECRET:${k}`,status:finalSecretConfigured(env,k)?'OK':'NOT_CONFIGURED'});
@@ -2587,74 +2551,72 @@ async function productionConfigCheck(env, { persist = false } = {}) {
   const missionCols=await tableColumns(env,'missions');
   const usefulMissionCols=['id','client_id','intervenant_id'];
   checks.push({code:'MISSION_CORE_COLUMNS',status:usefulMissionCols.every(x=>missionCols.includes(x))?'OK':'INCOMPLETE',missing:usefulMissionCols.filter(x=>!missionCols.includes(x))});
+  const sessionCols=await tableColumns(env,'sessions');
+  const requiredSessionCols=['revoked_at','revoked_reason','active_tenant_id'];
+  checks.push({code:'SESSION_REVOCATION_AND_TENANT_COLUMNS',status:requiredSessionCols.every(x=>sessionCols.includes(x))?'OK':'INCOMPLETE',missing:requiredSessionCols.filter(x=>!sessionCols.includes(x))});
+  checks.push({code:'PSP_ADAPTER',status:paymentsConfigured(env)?'OK':'NOT_IMPLEMENTED'});
+  checks.push({code:'R2_BACKUP_ATTESTATION_KEY',status:finalSecretConfigured(env,'BACKUP_ATTESTATION_HMAC_KEY')?'CONFIGURED':'NOT_CONFIGURED'});
+  const hardBlockers=[
+    {code:'TENANT_AUTHORIZATION_E2E',status:'NOT_VERIFIED',detail:'Tenant membership, session selection, ownership and cross-tenant denial require Preview E2E evidence.'},
+    {code:'DOUBLE_ENTRY_ACCOUNTING_RUNTIME',status:'NOT_VERIFIED',detail:'Schema and balanced posting controls require applied Preview migrations and runtime tests.'},
+    {code:'R2_RETENTION_AND_HMAC_ATTESTATION',status:'UNVERIFIED',detail:'Durable signed attestation, retention lock and isolated restore evidence are not yet validated together.'},
+    {code:'CRYPTOGRAPHIC_DEVICE_ENROLLMENT',status:'NOT_IMPLEMENTED',detail:'Mission presence remains disabled until challenge-bound key enrollment and proof of possession exist.'},
+    {code:'LEGAL_AND_ACCOUNTING_PROFESSIONAL_REVIEW',status:'REQUIRED',detail:'France/Algeria legal review and expert-accountant validation require qualified human professionals.'}
+  ];
+  checks.push(...hardBlockers);
   if (persist) {
     await registerIntegration(env,'PSP','PAYMENT',['PAYMENT_PROVIDER','PAYMENT_WEBHOOK_SECRET'],['charge','refund','payout','webhook','reconciliation'],finalSecretConfigured(env,'PAYMENT_PROVIDER')&&finalSecretConfigured(env,'PAYMENT_WEBHOOK_SECRET')?'CONFIGURED':'NOT_CONFIGURED');
     await registerIntegration(env,'NOTIFICATIONS','MESSAGING',['NOTIFICATION_PROVIDER'],['email','sms','push'],finalSecretConfigured(env,'NOTIFICATION_PROVIDER')?'CONFIGURED':'NOT_CONFIGURED');
     await registerIntegration(env,'MAPS','LOCATION',['MAPS_PROVIDER','MAPS_API_KEY'],['distance','geocoding','routing'],finalSecretConfigured(env,'MAPS_API_KEY')?'CONFIGURED':'NOT_CONFIGURED');
     await registerIntegration(env,'MARKET_DATA','COMMERCIAL',['MARKET_DATA_PROVIDER'],['market_prices','competitor_signals'],finalSecretConfigured(env,'MARKET_DATA_PROVIDER')?'CONFIGURED':'NOT_CONFIGURED');
   }
-  const blocking=checks.filter(x=>['MISSING','INCOMPLETE'].includes(x.status));
+  const blocking=checks.filter(x=>['MISSING','INCOMPLETE','NOT_IMPLEMENTED','NOT_VERIFIED','UNVERIFIED','REQUIRED'].includes(x.status));
   const externalNotConfigured=checks.filter(x=>x.status==='NOT_CONFIGURED' && ['SECRET:PAYMENT_PROVIDER','SECRET:PAYMENT_WEBHOOK_SECRET'].includes(x.code));
   const overall=blocking.length===0 && externalNotConfigured.length===0;
   if (persist) for(const c of checks) await env.DB.prepare(`INSERT INTO system_config_checks(id,check_code,status,details_json) VALUES(?,?,?,?)`).bind(crypto.randomUUID(),c.code,c.status,JSON.stringify(c)).run();
-  return {overall,checks,blocking:blocking.length,externalNotConfigured:externalNotConfigured.length};
+  return {overall,checks,blocking:blocking.length,externalNotConfigured:externalNotConfigured.length,hardBlockers:hardBlockers.length};
 }
 
-async function finalProductionAudit(request,env) {
+export async function finalProductionAudit(request,env) {
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
   const result=await productionConfigCheck(env);
-  // GET audit endpoint is intentionally read-only; persist audit via explicit mutation endpoint.
-  return json({ok:true,version:VERSION,production_gate:result.overall?'OPEN':'CLOSED',ready_for_real_traffic:result.overall,checks:result.checks,note:result.overall?'Architecture gate passed; external business integrations must still be exercised with sandbox/acceptance tests.':'No real production traffic should be enabled until blocking configuration/schema checks are resolved.'});
+  // A technical read-only audit is never a legal, tax or statutory-accounting certification.
+  // Production remains closed until every hard blocker and human validation is explicitly cleared.
+  return json({
+    ok:true,version:VERSION,production_gate:'CLOSED',ready_for_real_traffic:false,
+    checks:result.checks,blocking:result.blocking,external_not_configured:result.externalNotConfigured,
+    hard_blockers:result.hardBlockers,
+    human_validation_required:[
+      'Avis juridique qualifié sur France, Algérie, consommation, travail, DSA/RGPD et transferts internationaux.',
+      'Validation par expert-comptable du plan comptable, des journaux, de la TVA, des rapprochements et des clôtures.',
+      'Approbation humaine des contrats, assurances, obligations réglementaires et conditions PSP.',
+      'Autorisation explicite distincte avant tout paiement, remboursement, virement ou écriture comptable sensible.'
+    ],
+    automation:'read_only_monitoring_and_proposals_only',
+    note:'Cette vérification technique ne vaut jamais certification juridique, fiscale ou comptable. Aucun trafic réel ni mouvement de fonds ne doit être activé.'
+  },200);
 }
 
-async function copilotNextActions(request,env) {
+async function copilotNextActions(request, env) {
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
-  await ensureConsolidatedSchema(env); await ensureOperationalSchema(env); await ensureStrategicSchema(env); await ensureFinalHardeningSchema(env);
-  const phase=await getSetting(env,'project_phase','TEST');
-  const items=[];
-  const cases=await env.DB.prepare(`SELECT id,case_type,priority,status,impact_level,description,proposed_solution_json FROM operational_cases WHERE status NOT IN ('RESOLVED','CLOSED') ORDER BY priority DESC,created_at ASC LIMIT 30`).all();
-  for(const c of cases.results||[]) items.push({priority:Number(c.priority||10),category:'OPERATIONS',type:'CASE',id:c.id,title:c.description||c.case_type,impact:c.impact_level,status:c.status,action:'REVIEW_OR_EXECUTE'});
-  const promos=await env.DB.prepare(`SELECT id,recommendation_type,discount_percent,max_safe_discount_percent,status,rationale FROM promotion_recommendations WHERE status='PROPOSED' ORDER BY created_at DESC LIMIT 20`).all();
-  for(const p of promos.results||[]) items.push({priority:30,category:'COMMERCIAL',type:'PROMOTION',id:p.id,title:`Promotion ${p.recommendation_type}`,action:'REVIEW_PROMOTION',discount_percent:p.discount_percent,max_safe_discount_percent:p.max_safe_discount_percent,rationale:p.rationale});
-  const pending=await env.DB.prepare(`SELECT id,action_type,status,attempts,last_error FROM action_outbox WHERE status IN ('PENDING','FAILED','WAITING_PROVIDER') ORDER BY created_at ASC LIMIT 20`).all();
-  for(const a of pending.results||[]) items.push({priority:a.status==='FAILED'?90:50,category:'EXECUTION',type:'ACTION',id:a.id,title:a.action_type,action:a.status==='FAILED'?'RETRY_OR_REVIEW':'PROCESS',status:a.status,attempts:a.attempts,last_error:a.last_error});
-  items.sort((a,b)=>b.priority-a.priority);
-  return json({ok:true,version:VERSION,phase,top_actions:items.slice(0,30),automation_policy:'simple_low_impact_auto_sensitive_manager'});
+  return legacyTenantScopeBlocked();
 }
-
 async function enqueueBackgroundJob(env, jobType, payload={}, maxAttempts=5) {
-  await ensureFinalHardeningSchema(env);
+  if(!await tableExists(env,'background_jobs')) throw new Error('BACKGROUND_JOB_SCHEMA_NOT_READY');
   const id=crypto.randomUUID();
   await env.DB.prepare(`INSERT INTO background_jobs(id,job_type,payload_json,max_attempts) VALUES(?,?,?,?)`).bind(id,jobType,JSON.stringify(payload),maxAttempts).run();
   return id;
 }
 
-async function processBackgroundJobs(request,env) {
+export async function processBackgroundJobs(request,env) {
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
-  await ensureFinalHardeningSchema(env); await ensureOperationalSchema(env);
-  const rows=await env.DB.prepare(`SELECT * FROM background_jobs WHERE status='PENDING' AND run_after<=CURRENT_TIMESTAMP ORDER BY created_at LIMIT 25`).all();
-  const results=[];
-  for(const job of rows.results||[]) {
-    try {
-      await env.DB.prepare(`UPDATE background_jobs SET status='RUNNING',locked_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='PENDING'`).bind(job.id).run();
-      let result={performed:false,reason:'JOB_TYPE_NOT_IMPLEMENTED'};
-      const payload=JSON.parse(job.payload_json||'{}');
-      if(job.job_type==='PROCESS_ACTION_OUTBOX') result={performed:true,delegation:'Use /api/ops/outbox/process'};
-      else if(job.job_type==='PRODUCTION_AUDIT') result=await productionConfigCheck(env,{persist:true});
-      else if(job.job_type==='COPILOT_BRIEFING') result={performed:true,delegation:'Use /api/copilot/briefing'};
-      const done=result.performed===true || result.overall===true;
-      await env.DB.prepare(`UPDATE background_jobs SET status=?,result_json=?,attempts=attempts+1,updated_at=CURRENT_TIMESTAMP,completed_at=? WHERE id=?`)
-        .bind(done?'DONE':'WAITING_PROVIDER',JSON.stringify(result),done?new Date().toISOString():null,job.id).run();
-      results.push({id:job.id,status:done?'DONE':'WAITING_PROVIDER',result});
-    } catch(e) {
-      const attempts=Number(job.attempts||0)+1;
-      const status=attempts>=Number(job.max_attempts||5)?'FAILED':'PENDING';
-      await env.DB.prepare(`UPDATE background_jobs SET status=?,attempts=?,last_error=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(status,attempts,String(e.message||e),job.id).run();
-      results.push({id:job.id,status,error:String(e.message||e)});
-    }
-  }
-  await journal(env,'gerante',gate.auth.user.id,'BACKGROUND_JOBS_PROCESSED','system',null,'OK',{count:results.length});
-  return json({ok:true,version:VERSION,processed:results.length,results});
+  // No background executor is currently authorized. Keep the endpoint read-only/fail-closed:
+  // proposals and monitoring may be generated, but jobs are not marked done or executed.
+  return json({
+    ok:false,version:VERSION,error:'BACKGROUND_EXECUTOR_NOT_IMPLEMENTED',
+    write_enabled:false,automation:'proposal_only_no_background_execution',
+    message:'Aucun exécuteur autonome vérifié n’est activé. Les actions restent des propositions jusqu’à l’approbation et à l’implémentation de handlers traçables.'
+  },503);
 }
 
 function isMutatingMethod(method){ return ['POST','PUT','PATCH','DELETE'].includes(method); }
@@ -3084,8 +3046,8 @@ async function handleCommercialRecruitment(request,env){
 
 async function handle(request,env){
   try {
-    if(isMutatingMethod(request.method) && !securityOriginAllowed(request,env)) return json({ok:false,error:'ORIGIN_NOT_ALLOWED',version:VERSION},403);
     const url=new URL(request.url);
+    if(isMutatingMethod(request.method) && !securityOriginAllowed(request,env)) return json({ok:false,error:'ORIGIN_NOT_ALLOWED',version:VERSION},403);
     // Fail closed before any schema helper touches D1: unauthenticated callers
     // must not use mission validation as an existence oracle for private IDs.
     if (url.pathname === '/api/missions/validate') {
@@ -3120,9 +3082,9 @@ async function handle(request,env){
 export default {
   fetch(request,env){ return handle(request,env); },
   async scheduled(event,env,ctx){
-    if(event?.cron && (event.cron==='0 3 * * *' || event.cron==='0 3 * * 0')){
-      ctx.waitUntil(runNationalBackup(env,'AUTOMATIC'));
-    }
+    // Intentionally disabled: no scheduled backup may run before the HMAC/Object Lock/restore
+    // pipeline is unified and explicitly validated. This handler performs no D1 or R2 writes.
+    void event; void env; void ctx;
   }
 };
 
@@ -3135,91 +3097,52 @@ export default {
    - déclenchement manuel + automatique par Cron
    - journal des sauvegardes
    ============================================================================ */
-const NATIONAL_SCALE_DEFAULTS = Object.freeze({
-  maxPageSize:100, defaultPageSize:50, importBatchSize:500,
-  noArtificialUserCap:true, cursorPaginationRecommended:true,
-  documentsStorage:'R2', backupFrequency:'DAILY', backupRetentionDays:90
-});
-
-async function ensureNationalContinuitySchema(env){
-  if(!env.DB) throw new Error('DATABASE_REQUIRED');
-  const sqls=[
-    `CREATE TABLE IF NOT EXISTS platform_scale_config(id TEXT PRIMARY KEY,key TEXT NOT NULL UNIQUE,value_json TEXT NOT NULL,updated_at TEXT DEFAULT CURRENT_TIMESTAMP)`,
-    `CREATE TABLE IF NOT EXISTS backup_runs(id TEXT PRIMARY KEY,status TEXT NOT NULL,trigger_type TEXT NOT NULL,storage_provider TEXT,started_at TEXT DEFAULT CURRENT_TIMESTAMP,completed_at TEXT,object_count INTEGER DEFAULT 0,row_count INTEGER DEFAULT 0,error_message TEXT,metadata_json TEXT)`,
-    `CREATE TABLE IF NOT EXISTS backup_objects(id TEXT PRIMARY KEY,backup_run_id TEXT NOT NULL,object_key TEXT NOT NULL,table_name TEXT,row_count INTEGER DEFAULT 0,byte_size INTEGER DEFAULT 0,checksum TEXT,encrypted INTEGER DEFAULT 0,created_at TEXT DEFAULT CURRENT_TIMESTAMP)`,
-    `CREATE INDEX IF NOT EXISTS idx_backup_runs_date ON backup_runs(status,started_at)`,
-    `CREATE INDEX IF NOT EXISTS idx_backup_objects_run ON backup_objects(backup_run_id)`,
-    `CREATE INDEX IF NOT EXISTS idx_scale_key ON platform_scale_config(key)`
-  ];
-  for(const q of sqls) await env.DB.prepare(q).run();
-  for(const [k,v] of Object.entries(NATIONAL_SCALE_DEFAULTS))
-    await env.DB.prepare(`INSERT OR IGNORE INTO platform_scale_config(id,key,value_json) VALUES(?,?,?)`).bind(crypto.randomUUID(),k,JSON.stringify(v)).run();
-}
-
-function b64(u8){let s='';for(let i=0;i<u8.length;i+=0x8000)s+=String.fromCharCode(...u8.subarray(i,i+0x8000));return btoa(s)}
-async function backupEncrypt(text,secret){
-  if(!secret) throw new Error('BACKUP_ENCRYPTION_KEY_REQUIRED');
-  const h=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(secret));
-  const key=await crypto.subtle.importKey('raw',h,{name:'AES-GCM'},false,['encrypt']);
-  const iv=crypto.getRandomValues(new Uint8Array(12));
-  const data=await crypto.subtle.encrypt({name:'AES-GCM',iv},key,new TextEncoder().encode(text));
-  return JSON.stringify({v:1,alg:'AES-256-GCM',iv:b64(iv),data:b64(new Uint8Array(data))});
-}
-async function backupHash(text){
-  const d=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(text));
-  return [...new Uint8Array(d)].map(x=>x.toString(16).padStart(2,'0')).join('');
-}
-async function backupTables(env){
-  const r=await env.DB.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name`).all();
-  return (r.results||[]).map(x=>String(x.name));
-}
-async function runNationalBackup(env,trigger='MANUAL'){
-  await ensureNationalContinuitySchema(env);
-  if(!env.BACKUP_BUCKET) throw new Error('BACKUP_R2_NOT_CONFIGURED');
-  const secret=env.BACKUP_ENCRYPTION_KEY;
-  if(!secret) throw new Error('BACKUP_ENCRYPTION_KEY_REQUIRED');
-  const runId=crypto.randomUUID(), day=new Date().toISOString().slice(0,10);
-  await env.DB.prepare(`INSERT INTO backup_runs(id,status,trigger_type,storage_provider,metadata_json) VALUES(?,?,?,?,?)`).bind(runId,'RUNNING',trigger,'R2',JSON.stringify({version:VERSION,scope:'FULL_LOGICAL_DB'})).run();
-  let objects=0,rowsTotal=0;
-  try{
-    for(const table of await backupTables(env)){
-      let offset=0, tableRows=0;
-      while(true){
-        const safe=table.replace(/"/g,'""');
-        const r=await env.DB.prepare(`SELECT * FROM "${safe}" LIMIT ? OFFSET ?`).bind(500,offset).all();
-        const rows=r.results||[]; if(!rows.length) break;
-        const plain=rows.map(x=>JSON.stringify(x)).join('\n')+'\n';
-        const enc=await backupEncrypt(plain,secret);
-        const key=`prochelia/backups/${day}/${runId}/${table}/part-${String(offset/500).padStart(8,'0')}.json.enc`;
-        await env.BACKUP_BUCKET.put(key,enc,{httpMetadata:{contentType:'application/octet-stream'}});
-        await env.DB.prepare(`INSERT INTO backup_objects(id,backup_run_id,object_key,table_name,row_count,byte_size,checksum,encrypted) VALUES(?,?,?,?,?,?,?,1)`).bind(crypto.randomUUID(),runId,key,table,rows.length,new TextEncoder().encode(enc).byteLength,await backupHash(enc)).run();
-        objects++; rowsTotal+=rows.length; tableRows+=rows.length; offset+=rows.length;
-        if(rows.length<500) break;
-      }
-      if(!tableRows){
-        const key=`prochelia/backups/${day}/${runId}/${table}/empty.json.enc`,enc=await backupEncrypt('',secret);
-        await env.BACKUP_BUCKET.put(key,enc,{httpMetadata:{contentType:'application/octet-stream'}});
-        await env.DB.prepare(`INSERT INTO backup_objects(id,backup_run_id,object_key,table_name,row_count,byte_size,checksum,encrypted) VALUES(?,?,?,?,?,?,?,1)`).bind(crypto.randomUUID(),runId,key,table,0,new TextEncoder().encode(enc).byteLength,await backupHash(enc)).run();
-        objects++;
-      }
-    }
-    await env.DB.prepare(`UPDATE backup_runs SET status='COMPLETED',completed_at=CURRENT_TIMESTAMP,object_count=?,row_count=? WHERE id=?`).bind(objects,rowsTotal,runId).run();
-    return {ok:true,runId,status:'COMPLETED',objectCount:objects,rowCount:rowsTotal,storage:'R2',encrypted:true};
-  }catch(e){
-    await env.DB.prepare(`UPDATE backup_runs SET status='FAILED',completed_at=CURRENT_TIMESTAMP,object_count=?,row_count=?,error_message=? WHERE id=?`).bind(objects,rowsTotal,String(e.message||e),runId).run();
-    throw e;
-  }
-}
 async function nationalScaleStatus(env){
-  await ensureNationalContinuitySchema(env);
-  const c=await env.DB.prepare(`SELECT key,value_json FROM platform_scale_config ORDER BY key`).all();
+  if(!env.DB) throw new Error('DATABASE_REQUIRED');
+  // GET status endpoints are strictly read-only: never create schema or seed defaults.
   const t=await env.DB.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name`).all();
-  return {ok:true,mode:'NATIONAL_SCALE',artificialUserCap:false,unlimitedInBusinessRules:true,database:'D1',documents:'R2_RECOMMENDED',backups:{provider:'R2',automatic:false,scheduleStatus:'NOT_CONFIGURED',encrypted:true},pagination:{cursorRecommended:true,maxPageSize:100},tables:(t.results||[]).map(x=>x.name),config:(c.results||[])};
+  const tableNames=new Set((t.results||[]).map(x=>String(x.name)));
+  const c=tableNames.has('platform_scale_config')
+    ? await env.DB.prepare(`SELECT key,value_json FROM platform_scale_config ORDER BY key`).all()
+    : {results:[]};
+  const required=['platform_scale_config','backup_runs','backup_objects'];
+  return {
+    ok:true,
+    mode:'NATIONAL_SCALE',
+    schemaReady:required.every(name=>tableNames.has(name)),
+    artificialUserCap:false,
+    unlimitedInBusinessRules:true,
+    database:'D1',
+    documents:'R2_RECOMMENDED',
+    backups:{provider:'R2',automatic:false,scheduleStatus:'NOT_CONFIGURED',encrypted:false,encryptionStatus:'UNVERIFIED',attestationRequired:true},
+    pagination:{cursorRecommended:true,maxPageSize:100},
+    tables:(t.results||[]).map(x=>x.name),
+    config:c.results||[]
+  };
 }
 async function backupStatus(env){
-  await ensureNationalContinuitySchema(env);
-  const r=await env.DB.prepare(`SELECT * FROM backup_runs ORDER BY started_at DESC LIMIT 20`).all();
-  return {ok:true,configured:!!env.BACKUP_BUCKET&&!!env.BACKUP_ENCRYPTION_KEY,automatic:false,frequency:null,scheduleStatus:'NOT_CONFIGURED',retentionDays:null,retentionStatus:'UNVERIFIED',runs:r.results||[]};
+  if(!env.DB) throw new Error('DATABASE_REQUIRED');
+  // Read existing backup evidence only. Missing tables are reported, never created here.
+  const table=await env.DB.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name='backup_runs' LIMIT 1`).first();
+  const r=table
+    ? await env.DB.prepare(`SELECT * FROM backup_runs ORDER BY started_at DESC LIMIT 20`).all()
+    : {results:[]};
+  return {
+    ok:true,
+    schemaReady:!!table,
+    configured:false,
+    storageBindingPresent:!!env.BACKUP_BUCKET,
+    encryptionKeyPresent:!!env.BACKUP_ENCRYPTION_KEY,
+    automatic:false,
+    frequency:null,
+    scheduleStatus:'NOT_CONFIGURED',
+    retentionDays:null,
+    retentionStatus:'UNVERIFIED',
+    attestationRequired:true,
+    attestationStatus:'UNVERIFIED',
+    manualExecutionEnabled:false,
+    runs:r.results||[]
+  };
 }
 
 const __procheliaNationalHandle = handle;
@@ -3236,7 +3159,7 @@ handle = async function(request,env){
     }
     if(request.method==='POST'&&url.pathname==='/api/system/backup/run'){
       const auth=await getSessionUser(request,env).catch(()=>null); if(!auth?.user||String(auth.user.role||'').toUpperCase()!=='GERANTE') return json({ok:false,error:'FORBIDDEN'},403);
-      return json(await runNationalBackup(env,'MANUAL'));
+      return json({ok:false,error:'BACKUP_ATTESTATION_PIPELINE_REQUIRED',message:'La sauvegarde reste désactivée jusqu’à la validation du pipeline HMAC, de la rétention Object Lock et de la restauration isolée.',version:VERSION,write_enabled:false},503);
     }
     return __procheliaNationalHandle(request,env);
   }catch(e){return json({ok:false,error:'NATIONAL_CONTINUITY_ERROR',message:String(e.message||e)},500)}
@@ -3506,23 +3429,14 @@ handle = async function(request,env){
    - traçabilité des blocages de sécurité
    ============================================================================ */
 
-async function productionSafetySchema(env){
-  if(!env.DB) throw new Error('DATABASE_REQUIRED');
-  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS production_security_events (
-    id TEXT PRIMARY KEY, event_type TEXT NOT NULL, route TEXT, subject_hash TEXT,
-    decision TEXT NOT NULL, details_json TEXT NOT NULL DEFAULT '{}',
-    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-  )`).run();
-  await env.DB.prepare(`CREATE INDEX IF NOT EXISTS idx_prod_sec_events_date ON production_security_events(event_type,created_at)`).run();
-}
-
 async function productionSubjectHash(request, route){
   const ip=clean(request.headers.get('CF-Connecting-IP')) || clean(request.headers.get('X-Forwarded-For')) || 'unknown';
-  return sha256Hex(`${ip}|${route}`);
+  return sha256Base64url(`${ip}|${route}`);
 }
 
-async function productionRateLimit(request,env){
+export async function productionRateLimit(request,env){
   if(!isMutatingMethod(request.method)) return {ok:true};
+  if(!env?.DB) return {ok:false,response:json({ok:false,error:'DATABASE_UNAVAILABLE',version:VERSION},503)};
   const path=new URL(request.url).pathname;
   const sensitive =
     path.startsWith('/api/auth/') ||
@@ -3538,7 +3452,12 @@ async function productionRateLimit(request,env){
   const subject=await productionSubjectHash(request,path);
   const now=Math.floor(Date.now()/1000);
   const start=new Date(Math.floor(now/windowSeconds)*windowSeconds*1000).toISOString();
-  await ensureFinalHardeningSchema(env);
+  // Schema must be provisioned by a reviewed migration; a request never creates it.
+  const schema=await env.DB.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name IN ('security_rate_limits','production_security_events')`).all();
+  const existingTables=new Set((schema.results||[]).map(x=>String(x.name)));
+  if(!existingTables.has('security_rate_limits')||!existingTables.has('production_security_events')){
+    return {ok:false,response:json({ok:false,error:'RATE_LIMIT_SCHEMA_NOT_READY',version:VERSION},503)};
+  }
   const existing=await env.DB.prepare(`SELECT request_count FROM security_rate_limits WHERE bucket=? AND subject_hash=? AND window_start=? LIMIT 1`).bind(bucket,subject,start).first();
   const count=Number(existing?.request_count||0)+1;
   if(existing){
@@ -3547,7 +3466,6 @@ async function productionRateLimit(request,env){
     await env.DB.prepare(`INSERT INTO security_rate_limits(id,bucket,subject_hash,window_start,request_count) VALUES(?,?,?,?,1)`).bind(crypto.randomUUID(),bucket,subject,start).run();
   }
   if(count>limit){
-    await productionSafetySchema(env);
     await env.DB.prepare(`INSERT INTO production_security_events(id,event_type,route,subject_hash,decision,details_json) VALUES(?,?,?,?,?,?)`)
       .bind(crypto.randomUUID(),'RATE_LIMIT',path,subject,'BLOCKED',JSON.stringify({limit,windowSeconds})).run();
     return {ok:false,response:json({ok:false,error:'RATE_LIMITED',version:VERSION,retry_after_seconds:Math.max(1,windowSeconds-(now%windowSeconds))},429,{'retry-after':String(Math.max(1,windowSeconds-(now%windowSeconds)))})};
@@ -3602,6 +3520,37 @@ handle = async function(request,env){
     // the database is unavailable, instead of masking them as a generic 500.
     if (isMutatingMethod(preflightMethod) && !securityOriginAllowed(request,env)) {
       return json({ok:false,error:'ORIGIN_NOT_ALLOWED',version:VERSION},403);
+    }
+    // Block the legacy outbox before the persistent rate limiter. The route
+    // remains unavailable until tenant scope, action-bound approval and a
+    // verified executor exist; even this refusal must not touch D1.
+    if (preflightPath === '/api/ops/outbox/process' && preflightMethod === 'POST') {
+      return json({
+        ok:false,
+        error:'TENANT_SCOPED_EXECUTION_NOT_IMPLEMENTED',
+        message:'Le traitement des files reste bloqué tant que chaque action ne dispose pas d’un périmètre tenant et d’un contrôle d’approbation.',
+        version:VERSION,
+        write_enabled:false,
+        automation:'proposal_only_no_background_execution'
+      },503);
+    }
+    // The Copilot read model still reads global operational rows. Refuse before
+    // the rate limiter until a verified tenant context and row-level scope exist.
+    if (preflightPath === '/api/copilot/next-actions' && preflightMethod === 'GET') {
+      return json({
+        ok:false,
+        error:'TENANT_DATA_SCOPE_NOT_MIGRATED',
+        message:'Les recommandations globales restent bloquées tant que le contexte tenant et l’isolation des lignes ne sont pas implémentés.',
+        version:VERSION,
+        write_enabled:false,
+        automation:'proposal_only_no_background_execution'
+      },503);
+    }
+    // The legacy backup path is disabled until the HMAC/Object Lock/isolated-restore
+    // pipeline is unified. Reject before the rate limiter so this disabled route
+    // cannot trigger schema DDL or any D1/R2 write.
+    if (preflightPath === '/api/system/backup/run' && preflightMethod === 'POST') {
+      return json({ok:false,error:'BACKUP_ATTESTATION_PIPELINE_REQUIRED',version:VERSION,write_enabled:false},503);
     }
     // Block anonymous mission validation before rate limiting touches D1.
     if (preflightPath === '/api/missions/validate') {
