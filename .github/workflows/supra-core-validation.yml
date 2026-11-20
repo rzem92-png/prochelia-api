@@ -10,7 +10,7 @@ on:
       - "src/index.js"
       - "migrations/0021_supra_audit_events.sql"
       - "migrations/0022_supra_persisted_approvals.sql"
-      - "migrations/0023_supra_append_only_audit_guards.sql"
+      - "migrations/0030_supra_append_only_audit_guards.sql"
       - "tests/supra-intelligence.test.mjs"
       - "tests/supra-orchestrator.test.mjs"
       - "tests/supra-api.test.mjs"
