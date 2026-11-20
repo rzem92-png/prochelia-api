@@ -140,7 +140,7 @@ test("tenant selection updates only the authenticated session after strict Origi
       }};
       if (sql.includes("UPDATE sessions")) {
         assert.deepEqual(args, ["tenant-a", "session-a", "user-verified-by-session", "tenant-a"]);
-        return { async run() { return { meta: { changes: 1 } }; }};
+        return { async run() { return { success: true, meta: { changes: 1 } }; }};
       }
       if (sql.includes("JOIN tenant_memberships m")) return { async first() {
         return { tenant_id: "tenant-a", tenant_slug: "tenant-a", tenant_name: "Tenant A",
@@ -175,4 +175,34 @@ test("tenant selection rejects absent/untrusted Origin before database access", 
   });
   const response = await selectTenantForSession(req, { DB, CORS_ORIGIN: "https://4c3cec36.prochelia.pages.dev" });
   assert.equal(response.status, 403);
+});
+
+
+test("tenant selection fails closed when D1 reports an unsuccessful update with partial change metadata", async () => {
+  const DB = { prepare(sql) {
+    return { bind() {
+      if (sql.includes("JOIN users u")) return { async first() {
+        return { id: "user-verified-by-session", role: "client", status: "active",
+          session_id: "session-a", session_active_tenant_id: null };
+      }};
+      if (sql.includes("UPDATE sessions")) return { async run() {
+        return { success: false, meta: { changes: 1 } };
+      }};
+      throw new Error("Unexpected SQL: " + sql);
+    }};
+  }};
+  const req = new Request("https://api.example.test/api/tenant/select", {
+    method: "POST",
+    headers: {
+      origin: "https://4c3cec36.prochelia.pages.dev",
+      "content-type": "application/json",
+      cookie: "prochelia_session=synthetic-session-token"
+    },
+    body: JSON.stringify({ tenant_id: "tenant-a" })
+  });
+  const response = await selectTenantForSession(req, {
+    DB, CORS_ORIGIN: "https://4c3cec36.prochelia.pages.dev"
+  });
+  assert.equal(response.status, 503);
+  assert.equal((await response.json()).error, "TENANT_CONTEXT_UNAVAILABLE");
 });
