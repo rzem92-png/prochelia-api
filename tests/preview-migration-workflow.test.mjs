@@ -177,6 +177,13 @@ test("Preview migration workflow verifies every persisted approval table, index 
   assert.match(workflow, /actual_triggers != expected_triggers/);
 });
 
+
+test("Preview post-migration inventory queries include every object introduced by SUPRA tenant-scope migration 0030", () => {
+  assert.match(workflow, /idx_supra_audit_events_created_at[\\s\\S]*idx_supra_audit_events_tenant_created_at/);
+  assert.match(workflow, /trg_supra_audit_events_require_active_tenant[\\s\\S]*trg_supra_approval_requests_immutable/);
+  assert.match(workflow, /trg_supra_audit_events_no_update','trg_supra_audit_events_no_delete','trg_supra_approval_requests_no_delete','trg_supra_audit_events_require_active_tenant/);
+});
+
 test("Preview migration commands use only the dedicated migration-only D1 config", () => {
   assert.match(workflow, /Path\("wrangler\.preview-migrations\.jsonc"\)/);
   assert.match(workflow, /db\["binding"\] == "PREVIEW_DB"/);
