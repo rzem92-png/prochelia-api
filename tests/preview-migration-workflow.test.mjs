@@ -50,7 +50,8 @@ test("Preview migration workflow validates the full canonical migration chain", 
     "0027_tenant_membership_identity_immutable.sql",
     "0028_tenant_accounting_entity_delete_guard.sql",
     "0029_supra_append_only_audit_guards.sql",
-    "0030_supra_audit_tenant_scope.sql"
+    "0030_supra_audit_tenant_scope.sql",
+    "0031_operational_marketplace_tenant_scope.sql"
   ];
   for (const migration of expected) assert.ok(workflow.includes(`"${migration}"`), `missing canonical migration ${migration}`);
 });
@@ -103,13 +104,13 @@ test("Preview post-migration verification checks identity, mission-security and 
   ]) assert.ok(workflow.includes(name), `missing post-migration verification for ${name}`);
 });
 
-test("Preview migration workflow accepts only an empty EU D1, the exact 23-entry reviewed baseline or the exact 31-entry target", () => {
+test("Preview migration workflow accepts only an empty EU D1, the exact 23-entry reviewed baseline or the exact 32-entry target", () => {
   assert.match(workflow, /SELECT type, name FROM sqlite_master ORDER BY type, name/);
   assert.match(workflow, /registry_present/);
   assert.match(workflow, /non_internal/);
-  assert.match(workflow, /len\(local\) != 31/);
+  assert.match(workflow, /len\(local\) != 32/);
   assert.match(workflow, /remote == base/);
-  assert.match(workflow, /differs from the exact reviewed 23-entry baseline and 31-entry target/);
+  assert.match(workflow, /differs from the exact reviewed 23-entry baseline and 32-entry target/);
   assert.doesNotMatch(workflow, /legacy=/);
   assert.doesNotMatch(workflow, /baseline=\(local-pending\)\|legacy/);
 });
@@ -279,4 +280,21 @@ test("Preview migration workflow verifies accounting, tenant and session-revocat
     "trg_tenant_membership_revocation_terminal","trg_tenant_membership_identity_immutable","trg_session_revocation_terminal",
     "revoked_at","revoked_reason","revoked_by_user_id","last_seen_at"
   ]) assert.ok(workflow.includes(name), `missing post-migration verification for ${name}`);
+});
+
+test("Preview migration verifies operational marketplace tenant scope", () => {
+  for (const name of [
+    "0031_operational_marketplace_tenant_scope.sql",
+    "idx_clients_tenant_user", "idx_intervenants_tenant_user",
+    "idx_prestations_tenant_active", "idx_missions_tenant_status_start",
+    "idx_missions_tenant_intervenant", "idx_tarifs_tenant_prestation_active",
+    "idx_paiements_tenant_mission", "idx_disponibilites_tenant_intervenant_start",
+    "idx_evaluations_tenant_mission", "idx_documents_tenant_user",
+    "idx_conflits_tenant_mission", "idx_journal_tenant_created", "idx_wallets_tenant_user",
+    "trg_missions_relationship_scope_insert", "trg_missions_relationship_scope_update",
+    "trg_availability_intervenant_scope", "trg_payment_mission_scope",
+    "trg_tarif_prestation_scope", "trg_evaluation_mission_scope", "trg_conflict_mission_scope",
+    "Verify operational marketplace tenant boundary",
+    "tenant_id columns verified on all 12 operational marketplace tables"
+  ]) assert.ok(workflow.includes(name), `missing operational marketplace tenant verification: ${name}`);
 });
