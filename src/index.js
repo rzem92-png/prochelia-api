@@ -33,6 +33,36 @@ async function readJson(request) {
   catch { return null; }
 }
 
+async function readLimitedJson(request, maxBytes = 4096) {
+  const declaredLength = request.headers.get('content-length');
+  if (declaredLength && /^\\d+$/.test(declaredLength) && Number(declaredLength) > maxBytes) {
+    return { ok: false, tooLarge: true };
+  }
+  if (!request.body) return { ok: false, tooLarge: false };
+  const reader = request.body.getReader();
+  const decoder = new TextDecoder();
+  let total = 0;
+  let text = '';
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > maxBytes) {
+        await reader.cancel();
+        return { ok: false, tooLarge: true };
+      }
+      text += decoder.decode(value, { stream: true });
+    }
+    text += decoder.decode();
+    return { ok: true, value: JSON.parse(text) };
+  } catch {
+    return { ok: false, tooLarge: false };
+  } finally {
+    try { reader.releaseLock(); } catch {}
+  }
+}
+
 function clean(value) {
   return typeof value === 'string' ? value.trim() : value;
 }
@@ -3544,11 +3574,11 @@ async function intervenantAvailabilityRoute(request, env, url) {
     }
   }
 
-  const declaredLength = Number(request.headers.get('content-length') || 0);
-  if (declaredLength > 4096) return json({ ok: false, error: 'REQUEST_TOO_LARGE' }, 413);
-  let payload;
-  try { payload = await request.json(); }
-  catch { return json({ ok: false, error: 'INVALID_JSON' }, 400); }
+  const parsedPayload = await readLimitedJson(request, 4096);
+  if (!parsedPayload.ok) {
+    return json({ ok: false, error: parsedPayload.tooLarge ? 'REQUEST_TOO_LARGE' : 'INVALID_JSON' }, parsedPayload.tooLarge ? 413 : 400);
+  }
+  const payload = parsedPayload.value;
   const startAt = typeof payload?.start_at === 'string' ? payload.start_at : '';
   const endAt = typeof payload?.end_at === 'string' ? payload.end_at : '';
   const isoWithZone = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?(?:Z|[+-]\d{2}:\d{2})$/;
