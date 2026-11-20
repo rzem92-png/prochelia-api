@@ -3259,6 +3259,86 @@ async function handleCommercialRecruitment(request,env){
 }
 
 
+async function intervenantWorkspaceReadModel(request, env) {
+  if (request.method !== 'GET') return json({ ok: false, error: 'METHOD_NOT_ALLOWED' }, 405);
+  const auth = await getSessionUser(request, env).catch(() => null);
+  if (!auth?.user) return json({ ok: false, error: 'UNAUTHENTICATED' }, 401);
+  if (!requireRole(auth, ['intervenant'])) return json({ ok: false, error: 'FORBIDDEN' }, 403);
+
+  const partial = [];
+  let profile;
+  try {
+    profile = await env.DB.prepare(
+      'SELECT id, professional_status, description, service_area, hourly_rate, validation_status FROM intervenants WHERE user_id = ? LIMIT 1'
+    ).bind(auth.user.id).first();
+  } catch {
+    return json({ ok: false, error: 'WORKSPACE_SCHEMA_UNAVAILABLE' }, 503);
+  }
+  if (!profile?.id) return json({ ok: false, error: 'INTERVENANT_PROFILE_NOT_FOUND' }, 404);
+
+  let missions = [];
+  try {
+    const result = await env.DB.prepare(
+      `SELECT m.id, m.prestation_id, p.name AS prestation_name, m.start_at, m.end_at, m.status
+         FROM missions m
+         LEFT JOIN prestations p ON p.id = m.prestation_id
+        WHERE m.intervenant_id = ?
+        ORDER BY m.start_at DESC
+        LIMIT 50`
+    ).bind(profile.id).all();
+    missions = result.results || [];
+  } catch { partial.push('missions'); }
+
+  let availability = [];
+  try {
+    const result = await env.DB.prepare(
+      'SELECT id, start_at, end_at, status FROM disponibilites WHERE intervenant_id = ? ORDER BY start_at LIMIT 100'
+    ).bind(profile.id).all();
+    availability = result.results || [];
+  } catch { partial.push('availability'); }
+
+  let wallet = null;
+  try {
+    wallet = await env.DB.prepare(
+      'SELECT currency, available_cents, pending_cents, paid_cents, reserved_cents FROM wallets WHERE user_id = ? LIMIT 1'
+    ).bind(auth.user.id).first();
+  } catch { partial.push('wallet'); }
+
+  let documentCounts = { total: 0, pending: 0, expired: 0 };
+  try {
+    const result = await env.DB.prepare(
+      'SELECT status, expires_at FROM documents WHERE user_id = ? LIMIT 200'
+    ).bind(auth.user.id).all();
+    const now = Date.now();
+    for (const row of result.results || []) {
+      documentCounts.total++;
+      const expired = row.expires_at && Date.parse(row.expires_at) < now;
+      if (expired) documentCounts.expired++;
+      else if (!['verified', 'approved', 'valid'].includes(String(row.status || '').toLowerCase())) documentCounts.pending++;
+    }
+  } catch { partial.push('documents'); }
+
+  return json({
+    ok: true,
+    read_only: true,
+    writes: false,
+    profile: {
+      first_name: auth.user.first_name || null,
+      last_name: auth.user.last_name || null,
+      professional_status: profile.professional_status || null,
+      description: profile.description || null,
+      service_area: profile.service_area || null,
+      hourly_rate: profile.hourly_rate ?? null,
+      validation_status: profile.validation_status || null
+    },
+    missions,
+    availability,
+    finance: { wallet, payout_account: null },
+    documents: documentCounts,
+    partial_data: partial
+  });
+}
+
 async function handle(request,env){
   try {
     if(isMutatingMethod(request.method) && !securityOriginAllowed(request,env)) return json({ok:false,error:'ORIGIN_NOT_ALLOWED',version:VERSION},403);
