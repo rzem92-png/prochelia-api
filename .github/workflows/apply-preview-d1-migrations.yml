@@ -678,7 +678,7 @@ jobs:
           python3 - "$response" <<'PY'
           import json, pathlib, sys
           columns={r["name"] for r in json.loads(pathlib.Path(sys.argv[1]).read_text())["result"][0]["results"]}
-          required={"owner_tenant_id","mission_id","public_summary","city","start_at","end_at","provider_pay_cents","currency","status"}
+          required={"owner_tenant_id","mission_id","public_summary","city","postal_prefix","start_at","end_at","provider_pay_cents","currency","required_skills_json","status"}
           forbidden={"address","client_user_id","file_reference"}
           if not required <= columns or columns & forbidden:
             print("::error::Public opportunity projection is incomplete or contains private fields.")
