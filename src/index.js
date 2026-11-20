@@ -35,7 +35,7 @@ async function readJson(request) {
 
 async function readLimitedJson(request, maxBytes = 4096) {
   const declaredLength = request.headers.get('content-length');
-  if (declaredLength && /^\\d+$/.test(declaredLength) && Number(declaredLength) > maxBytes) {
+  if (declaredLength && /^\d+$/.test(declaredLength) && Number(declaredLength) > maxBytes) {
     return { ok: false, tooLarge: true };
   }
   if (!request.body) return { ok: false, tooLarge: false };
