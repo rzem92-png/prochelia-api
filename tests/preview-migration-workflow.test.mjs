@@ -52,7 +52,8 @@ test("Preview migration workflow validates the full canonical migration chain", 
     "0029_supra_append_only_audit_guards.sql",
     "0030_supra_audit_tenant_scope.sql",
     "0031_operational_marketplace_tenant_scope.sql",
-    "0032_privacy_safe_cross_tenant_mission_marketplace.sql"
+    "0032_privacy_safe_cross_tenant_mission_marketplace.sql",
+    "0033_intervenant_availability_overlap_guard.sql"
   ];
   for (const migration of expected) assert.ok(workflow.includes(`"${migration}"`), `missing canonical migration ${migration}`);
 });
@@ -105,7 +106,7 @@ test("Preview post-migration verification checks identity, mission-security and 
   ]) assert.ok(workflow.includes(name), `missing post-migration verification for ${name}`);
 });
 
-test("Preview migration workflow accepts only an empty EU D1, the exact 23-entry reviewed baseline or the exact 33-entry target", () => {
+test("Preview migration workflow accepts only an empty EU D1, the exact 23-entry reviewed baseline or the exact 34-entry target", () => {
   assert.match(workflow, /SELECT type, name FROM sqlite_master ORDER BY type, name/);
   assert.match(workflow, /registry_present/);
   assert.match(workflow, /non_internal/);
@@ -304,6 +305,7 @@ test("Preview migration verifies operational marketplace tenant scope", () => {
 test("Preview migration verifies privacy-safe cross-tenant mission opportunities and atomic assignments", () => {
   for (const name of [
     "0032_privacy_safe_cross_tenant_mission_marketplace.sql",
+    "0033_intervenant_availability_overlap_guard.sql",
     "mission_opportunity_consents", "mission_opportunities", "mission_applications", "mission_assignments", "intervenant_skills", "idx_intervenant_skills_verified",
     "trg_intervenant_skill_insert_scope", "trg_intervenant_skill_verification_guard", "trg_intervenant_skill_identity_immutable", "trg_intervenant_skill_update_verification_guard", "trg_intervenant_skills_no_delete",
     "privacy-safe cross-tenant marketplace and assignment guards",
