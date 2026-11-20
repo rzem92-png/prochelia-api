@@ -1,0 +1,46 @@
+name: Nexus Supra canonical integration validation
+
+on:
+  pull_request:
+    paths:
+      - "src/index.js"
+      - "src/tenant-context.js"
+      - "src/supra-*.js"
+      - "migrations-preview-canonical/0021_supra_audit_events.sql"
+      - "migrations-preview-canonical/0022_supra_persisted_approvals.sql"
+      - "migrations-preview-canonical/0029_supra_append_only_audit_guards.sql"
+      - "tests/supra-*.test.mjs"
+      - "tests/session-cookie-malformed.test.mjs"
+      - ".github/workflows/supra-core-validation.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  supra-canonical:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          package-manager-cache: false
+      - name: Syntax-check Nexus modules and canonical Worker
+        run: |
+          node --experimental-default-type=module --check src/supra-intelligence.js
+          node --experimental-default-type=module --check src/supra-orchestrator.js
+          node --experimental-default-type=module --check src/supra-api.js
+          node --experimental-default-type=module --check src/supra-approvals.js
+          node --experimental-default-type=module --check src/index.js
+      - name: Run Nexus governance, API, approval and tenant integration tests
+        run: |
+          node --experimental-default-type=module --test \
+            tests/supra-intelligence.test.mjs \
+            tests/supra-orchestrator.test.mjs \
+            tests/supra-api.test.mjs \
+            tests/supra-approvals.test.mjs \
+            tests/supra-tenant-integration.test.mjs \
+            tests/session-cookie-malformed.test.mjs
