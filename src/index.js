@@ -3605,8 +3605,8 @@ handle = async function(request,env){
     if (isMutatingMethod(preflightMethod) && !securityOriginAllowed(request,env)) {
       return json({ok:false,error:'ORIGIN_NOT_ALLOWED',version:VERSION},403);
     }
-    // Same-origin Pages proxy handles its own OPTIONS; direct browser API calls
-    // may use only explicitly configured origins and never a wildcard.
+    // Explicit CORS preflight for the authenticated Nexus browser API.
+    // Same-origin Pages proxy handles its own OPTIONS; direct calls never use a wildcard.
     if (preflightPath.startsWith('/api/supra/') && preflightMethod === 'OPTIONS') {
       const origin = request.headers.get('origin');
       if (origin && !securityOriginAllowed(request,env)) {
