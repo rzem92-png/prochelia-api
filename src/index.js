@@ -1409,7 +1409,7 @@ async function handleBase(request, env) {
         '/api/health','/api/prestations','/api/core/schema',
         '/api/missions/schema','/api/missions/validate','/api/missions',
         '/api/auth/status','/api/auth/login','/api/auth/logout','/api/auth/me',
-        '/api/auth/bootstrap','/api/tenant/context','/api/tenant/select','/api/intervenant/workspace','/api/security/identity/start','/api/security/identity/approve','/api/security/mission/prepare','/api/security/presence','/api/security/code/verify','/api/security/resend','/api/security/client-code','/api/security/status','/api/payments/onboard','/api/payments/status','/api/payments/mission/create','/api/payments/mission/finalize','/api/payments/payout','/api/payments/webhook','/api/payments/dispute','/api/payments/dispute/resolve','/api/readiness','/api/info'
+        '/api/auth/bootstrap','/api/tenant/context','/api/tenant/select','/api/security/identity/start','/api/security/identity/approve','/api/security/mission/prepare','/api/security/presence','/api/security/code/verify','/api/security/resend','/api/security/client-code','/api/security/status','/api/payments/onboard','/api/payments/status','/api/payments/mission/create','/api/payments/mission/finalize','/api/payments/payout','/api/payments/webhook','/api/payments/dispute','/api/payments/dispute/resolve','/api/readiness','/api/info'
       ],
       writes: { missions: false, bootstrap: true, tenant_selection: true },
       status: 'AUTH_RBAC_IDENTITY_PRESENCE_SECURITY_HARDENED_FOR_TEST'
@@ -3258,133 +3258,11 @@ async function handleCommercialRecruitment(request,env){
   return null;
 }
 
-async function intervenantWorkspaceReadModel(request, env) {
-  const auth = await getSessionUser(request, env);
-  if (!requireRole(auth, ['intervenant'])) {
-    return json({ok:false,error:auth?.user?'FORBIDDEN':'UNAUTHENTICATED',version:VERSION}, auth?.user?403:401);
-  }
-  if (!env?.DB) return json({ok:false,error:'DATABASE_UNAVAILABLE',version:VERSION},503);
-
-  // Read-only, owner-scoped projection. Never create schemas or expose client addresses here.
-  const intervenantColumns = await tableColumns(env, 'intervenants');
-  if (!intervenantColumns.includes('id') || !intervenantColumns.includes('user_id')) {
-    return json({ok:false,error:'INTERVENANT_PROFILE_SCHEMA_UNAVAILABLE',version:VERSION},503);
-  }
-  const profile = await env.DB.prepare(
-    'SELECT id, professional_status, description, service_area, hourly_rate, validation_status FROM intervenants WHERE user_id=? LIMIT 1'
-  ).bind(auth.user.id).first();
-  if (!profile) return json({ok:false,error:'INTERVENANT_PROFILE_NOT_FOUND',version:VERSION},404);
-
-  const partial = [];
-  let missions = [];
-  const missionColumns = await tableColumns(env, 'missions');
-  if (missionColumns.includes('id') && missionColumns.includes('intervenant_id')) {
-    const selected = ['m.id'];
-    for (const col of ['start_at','end_at','status','price_intervenant','commission','created_at','updated_at']) {
-      if (missionColumns.includes(col)) selected.push('m.' + col);
-    }
-    const hasPrestations = await tableExists(env, 'prestations');
-    const prestationColumns = hasPrestations ? await tableColumns(env, 'prestations') : [];
-    const joinPrestation = prestationColumns.includes('id') && prestationColumns.includes('name') && missionColumns.includes('prestation_id');
-    if (joinPrestation) selected.push('p.name AS prestation_name');
-    const order = missionColumns.includes('start_at') ? 'm.start_at DESC' : 'm.id DESC';
-    const sql = 'SELECT ' + selected.join(', ') + ' FROM missions m ' +
-      (joinPrestation ? 'LEFT JOIN prestations p ON p.id=m.prestation_id ' : '') +
-      'WHERE m.intervenant_id=? ORDER BY ' + order + ' LIMIT 50';
-    const result = await env.DB.prepare(sql).bind(profile.id).all();
-    missions = result.results || [];
-  } else {
-    partial.push('missions');
-  }
-
-  let availability = [];
-  const availabilityColumns = await tableColumns(env, 'disponibilites');
-  if (availabilityColumns.includes('intervenant_id')) {
-    const selected = ['id','start_at','end_at','status'].filter((col) => availabilityColumns.includes(col));
-    if (selected.includes('id') && selected.includes('start_at') && selected.includes('end_at')) {
-      const result = await env.DB.prepare(
-        'SELECT ' + selected.join(', ') + ' FROM disponibilites WHERE intervenant_id=? ORDER BY start_at DESC LIMIT 100'
-      ).bind(profile.id).all();
-      availability = result.results || [];
-    } else partial.push('availability');
-  } else partial.push('availability');
-
-  let wallet = null;
-  let payoutAccount = null;
-  const walletColumns = await tableColumns(env, 'wallets');
-  if (walletColumns.includes('user_id')) {
-    const fields = ['currency','available_cents','pending_cents','paid_cents','reserved_cents'].filter((col) => walletColumns.includes(col));
-    if (fields.length) wallet = await env.DB.prepare(
-      'SELECT ' + fields.join(', ') + ' FROM wallets WHERE user_id=? LIMIT 1'
-    ).bind(auth.user.id).first();
-  }
-  const accountColumns = await tableColumns(env, 'payment_accounts');
-  if (accountColumns.includes('user_id')) {
-    const fields = ['status','onboarding_status','payouts_enabled'].filter((col) => accountColumns.includes(col));
-    if (fields.length) payoutAccount = await env.DB.prepare(
-      'SELECT ' + fields.join(', ') + ' FROM payment_accounts WHERE user_id=? LIMIT 1'
-    ).bind(auth.user.id).first();
-  }
-
-  let documents = {total:0,pending:0,expired:0};
-  const documentColumns = await tableColumns(env, 'documents');
-  if (documentColumns.includes('user_id') && documentColumns.includes('status') && documentColumns.includes('expires_at')) {
-    const row = await env.DB.prepare(
-      "SELECT COUNT(*) AS total, SUM(CASE WHEN status='pending' THEN 1 ELSE 0 END) AS pending, " +
-      "SUM(CASE WHEN expires_at IS NOT NULL AND expires_at < CURRENT_TIMESTAMP THEN 1 ELSE 0 END) AS expired " +
-      "FROM documents WHERE user_id=?"
-    ).bind(auth.user.id).first();
-    documents = {total:Number(row?.total||0),pending:Number(row?.pending||0),expired:Number(row?.expired||0)};
-  } else partial.push('documents');
-
-  let reputation = null;
-  const evaluationColumns = await tableColumns(env, 'evaluations');
-  if (evaluationColumns.includes('target_user_id') && evaluationColumns.includes('rating')) {
-    const row = await env.DB.prepare(
-      'SELECT COUNT(*) AS total, AVG(rating) AS average FROM evaluations WHERE target_user_id=?'
-    ).bind(auth.user.id).first();
-    reputation = {total:Number(row?.total||0),average:row?.average===null||row?.average===undefined?null:Number(row.average)};
-  }
-
-  return json({
-    ok:true,version:VERSION,read_only:true,writes:false,
-    profile:{
-      first_name:auth.user.first_name||null,
-      last_name:auth.user.last_name||null,
-      professional_status:profile.professional_status||null,
-      description:profile.description||null,
-      service_area:profile.service_area||null,
-      hourly_rate:profile.hourly_rate===null||profile.hourly_rate===undefined?null:Number(profile.hourly_rate),
-      validation_status:profile.validation_status||'pending'
-    },
-    missions,availability,documents,reputation,
-    finance:{
-      wallet:wallet?{
-        currency:wallet.currency||'EUR',
-        available_cents:Number(wallet.available_cents||0),
-        pending_cents:Number(wallet.pending_cents||0),
-        paid_cents:Number(wallet.paid_cents||0),
-        reserved_cents:Number(wallet.reserved_cents||0)
-      }:null,
-      payout_account:payoutAccount?{
-        status:payoutAccount.status||null,
-        onboarding_status:payoutAccount.onboarding_status||null,
-        payouts_enabled:!!payoutAccount.payouts_enabled
-      }:null,
-      real_payments_enabled:paymentsConfigured(env)
-    },
-    partial_data:partial
-  },200);
-}
 
 async function handle(request,env){
   try {
     if(isMutatingMethod(request.method) && !securityOriginAllowed(request,env)) return json({ok:false,error:'ORIGIN_NOT_ALLOWED',version:VERSION},403);
     const url=new URL(request.url);
-    if (url.pathname === '/api/intervenant/workspace') {
-      if (request.method !== 'GET') return json({ok:false,error:'METHOD_NOT_ALLOWED',version:VERSION},405,{'allow':'GET'});
-      return intervenantWorkspaceReadModel(request,env);
-    }
     // Fail closed before any schema helper touches D1: unauthenticated callers
     // must not use mission validation as an existence oracle for private IDs.
     if (url.pathname === '/api/missions/validate') {
