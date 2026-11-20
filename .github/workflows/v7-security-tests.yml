@@ -10,6 +10,7 @@ on:
       - ".github/workflows/v7-security-tests.yml"
       - ".github/workflows/supra-core-validation.yml"
       - "migrations/0030_supra_append_only_audit_guards.sql"
+      - "migrations-preview-canonical/0030_supra_append_only_audit_guards.sql"
       - ".github/workflows/apply-preview-d1-migrations.yml"
       - ".github/workflows/deploy-preview-worker-manual.yml"
       - ".github/workflows/preview-directory-e2e-acceptance.yml"
