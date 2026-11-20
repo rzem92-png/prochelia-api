@@ -17,12 +17,13 @@ export async function resolveTenantContext(_request, env, auth) {
           JOIN tenants t ON t.id = m.tenant_id
          WHERE s.id = ?
            AND s.user_id = ?
+           AND s.active_tenant_id = ?
            AND s.expires_at > CURRENT_TIMESTAMP
            AND s.revoked_at IS NULL
            AND m.status = 'ACTIVE'
            AND t.status = 'ACTIVE'
          LIMIT 1
-      `).bind(sessionId, userId).first();
+      `).bind(sessionId, userId, activeTenantId).first();
       if (!row) return { ok: false, status: 403, error: "TENANT_MEMBERSHIP_REQUIRED" };
       return { ok: true, tenant: {
         id: row.tenant_id, slug: row.tenant_slug, name: row.tenant_name,
