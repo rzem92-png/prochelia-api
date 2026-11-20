@@ -45,7 +45,10 @@ async function sha256Hex(value) {
 }
 
 function manager(auth) {
-  return !!auth?.user?.id && String(auth.user.role || "").toUpperCase() === "GERANTE";
+  return !!auth?.user?.id &&
+    String(auth.user.role || "").toUpperCase() === "GERANTE" &&
+    ["OWNER", "ADMIN", "MANAGER"].includes(String(auth.user.tenant_role || "").toUpperCase()) &&
+    typeof auth.user.tenant_id === "string" && auth.user.tenant_id.length > 0;
 }
 
 function sameOrigin(request) {
