@@ -490,10 +490,10 @@ assert required_supra_guards <= supra_triggers, (
 
 db.execute("""
     INSERT INTO supra_audit_events(
-      id, actor_user_id, actor_role, event_type, domain, action, risk,
+      id, tenant_id, actor_user_id, actor_role, event_type, domain, action, risk,
       approval_required, execution_allowed
     ) VALUES (
-      'supra-audit-synthetic', 'user-a', 'gerante', 'PLAN_CREATED',
+      'supra-audit-synthetic', 'tenant-a', 'user-a', 'gerante', 'PLAN_CREATED',
       'GOVERNANCE', 'RECOMMEND_ONLY', 'LOW', 0, 0
     )
 """)
