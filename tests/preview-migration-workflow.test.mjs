@@ -54,6 +54,7 @@ test("Preview migration workflow validates the full canonical migration chain", 
     "0031_operational_marketplace_tenant_scope.sql",
     "0032_privacy_safe_cross_tenant_mission_marketplace.sql",
     "0033_intervenant_availability_overlap_guard.sql",
+    "0034_timezone_safe_availability_overlap.sql",
     "0035_validate_availability_intervals.sql"
   ];
   for (const migration of expected) assert.ok(workflow.includes(`"${migration}"`), `missing canonical migration ${migration}`);
