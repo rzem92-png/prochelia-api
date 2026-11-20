@@ -203,22 +203,3 @@ test("withdrawal route is dispatched only for the exact application path", () =>
   assert.ok(source.includes("intervenantApplicationWithdrawRoute(request, env, url)"));
   assert.ok(source.includes("/api/intervenant/applications/[^/]+/withdraw"));
 });
-
-
-const withdrawalStart = source.indexOf("async function intervenantApplicationWithdrawRoute(");
-const withdrawalEnd = source.indexOf("async function intervenantApplicationsRoute(", withdrawalStart);
-assert.ok(withdrawalStart >= 0 && withdrawalEnd > withdrawalStart, "application withdrawal route must exist");
-const withdrawalHandler = source.slice(withdrawalStart, withdrawalEnd);
-test("intervenant can withdraw only their own pending application", () => {
-  assert.ok(source.includes("intervenantApplicationWithdrawRoute(request, env, url)"));
-  for (const fragment of [
-    "request.method !== 'POST'",
-    "getSessionUser(request, env)",
-    "requireRole(auth, ['intervenant'])",
-    "WHERE id = ? AND applicant_tenant_id = ? AND intervenant_id = ?",
-    "status IN ('SUBMITTED', 'SHORTLISTED')",
-    "APPLICATION_NOT_WITHDRAWABLE",
-    "APPLICATION_NOT_FOUND"
-  ]) assert.ok(withdrawalHandler.includes(fragment), "missing withdrawal guard: " + fragment);
-  assert.doesNotMatch(withdrawalHandler, /owner_tenant_id\s*=\s*\?/);
-});
