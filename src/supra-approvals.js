@@ -236,7 +236,9 @@ export async function handleSupraApprovalRoute(request, env, auth) {
         env.DB.prepare("UPDATE supra_approval_requests SET status='EXPIRED' WHERE id=? AND status='PENDING' AND expires_at<=?").bind(requestId, now),
         env.DB.prepare(`INSERT INTO supra_approval_events
           (id, request_id, actor_user_id, actor_role, event_type, details_json)
-          VALUES (?, ?, ?, 'GERANTE', 'EXPIRED', '{}')`).bind(crypto.randomUUID(), requestId, auth.user.id)
+          SELECT ?, ?, ?, 'GERANTE', 'EXPIRED', '{}'
+           WHERE EXISTS (SELECT 1 FROM supra_approval_requests WHERE id=? AND status='EXPIRED')
+             AND NOT EXISTS (SELECT 1 FROM supra_approval_events WHERE request_id=? AND event_type='EXPIRED')`).bind(crypto.randomUUID(), requestId, auth.user.id, requestId, requestId)
       ]);
     } catch {}
     return reply({ ok: false, error: "APPROVAL_EXPIRED" }, 409);
@@ -266,12 +268,14 @@ export async function handleSupraApprovalRoute(request, env, auth) {
       env.DB.prepare(`INSERT INTO supra_approval_events
         (id, request_id, actor_user_id, actor_role, event_type, details_json)
         SELECT ?, ?, ?, 'GERANTE', 'APPROVED', '{}'
-         WHERE EXISTS (SELECT 1 FROM supra_approval_requests WHERE id=? AND status='APPROVED')`)
-        .bind(crypto.randomUUID(), requestId, auth.user.id, requestId),
+         WHERE EXISTS (SELECT 1 FROM supra_approval_requests WHERE id=? AND status='APPROVED')
+           AND NOT EXISTS (SELECT 1 FROM supra_approval_events WHERE request_id=? AND event_type='APPROVED')`)
+        .bind(crypto.randomUUID(), requestId, auth.user.id, requestId, requestId),
       env.DB.prepare(`INSERT INTO supra_approval_events
         (id, request_id, actor_user_id, actor_role, event_type, details_json)
         SELECT ?, ?, ?, 'GERANTE', 'REJECTED', '{}'
-         WHERE EXISTS (SELECT 1 FROM supra_approval_requests WHERE id=? AND status='REJECTED')`)
+         WHERE EXISTS (SELECT 1 FROM supra_approval_requests WHERE id=? AND status='REJECTED')
+           AND NOT EXISTS (SELECT 1 FROM supra_approval_events WHERE request_id=? AND event_type='REJECTED')`)
         .bind(crypto.randomUUID(), requestId, auth.user.id, requestId)
     ];
     await env.DB.batch(batch);
