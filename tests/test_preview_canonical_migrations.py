@@ -584,6 +584,7 @@ for user_id, email, role in [
     ("market-worker-a", "market-worker-a@example.test", "intervenant"),
     ("market-client-b", "market-client-b@example.test", "client"),
     ("market-worker-b", "market-worker-b@example.test", "intervenant"),
+    ("market-manager-a", "market-manager-a@example.test", "gerante"),
     ("market-manager-b", "market-manager-b@example.test", "gerante"),
 ]:
     db.execute(
@@ -667,6 +668,10 @@ print("PASS: operational marketplace tables require active tenant membership, te
 db.execute("""
     INSERT INTO tenant_memberships(id, tenant_id, user_id, role, status, invited_by_user_id, accepted_at)
     VALUES ('membership-manager-b', 'market-tenant-b', 'market-manager-b', 'MANAGER', 'ACTIVE', 'user-admin', CURRENT_TIMESTAMP)
+""")
+db.execute("""
+    INSERT INTO tenant_memberships(id, tenant_id, user_id, role, status, invited_by_user_id, accepted_at)
+    VALUES ('membership-manager-a', 'market-tenant-a', 'market-manager-a', 'MANAGER', 'ACTIVE', 'user-admin', CURRENT_TIMESTAMP)
 """)
 # Privacy-safe cross-tenant opportunity publication, application and atomic assignment.
 marketplace_tables = {
@@ -774,7 +779,7 @@ db.execute("""
 db.execute("""
     UPDATE mission_applications
        SET status='ACCEPTED', decided_at=CURRENT_TIMESTAMP,
-           decided_by_user_id='market-client-a', version=version+1
+           decided_by_user_id='market-manager-a', version=version+1
      WHERE id='market-application-b'
 """)
 assignment = db.execute("""
