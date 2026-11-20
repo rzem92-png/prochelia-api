@@ -7,10 +7,18 @@ on:
         description: "Type RUN_PREVIEW_DIRECTORY_E2E to seed synthetic Preview data and test the live Pages-to-Worker path"
         required: true
         type: string
-  workflow_run:
-    workflows:
-      - Deploy PROCHÉLIA API preview only (manual)
-    types: [completed]
+      pages_branch:
+        description: "Exact expected frontend Preview branch for the Pages-to-Worker E2E path"
+        required: true
+        type: string
+      pages_commit_sha:
+        description: "Exact 40-character frontend commit SHA; must match the latest successful Pages Preview deployment"
+        required: true
+        type: string
+      api_commit_sha:
+        description: "Exact 40-character Worker Preview commit SHA returned by the live Pages-to-Worker health endpoint"
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -22,25 +30,25 @@ concurrency:
 jobs:
   preview-directory-e2e:
     if: >-
-      github.ref == 'refs/heads/main' &&
       (
-        (github.event_name == 'workflow_dispatch' && inputs.confirmation == 'RUN_PREVIEW_DIRECTORY_E2E') ||
-        (github.event_name == 'workflow_run' &&
-         github.event.workflow_run.event == 'workflow_dispatch' &&
-         github.event.workflow_run.conclusion == 'success' &&
-         github.event.workflow_run.head_branch == 'main')
-      )
+        github.ref == 'refs/heads/main' ||
+        github.ref == 'refs/heads/fix/preview-e2e-dynamic-pages-pin-2026-11-17'
+      ) &&
+      github.event_name == 'workflow_dispatch' &&
+      inputs.confirmation == 'RUN_PREVIEW_DIRECTORY_E2E'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
       CLOUDFLARE_ACCOUNT_ID: f2a79e9fa41566a8ec80fb24c02c60eb
       PREVIEW_DB_NAME: prochelia-preview-eu-2026-11-17
       PREVIEW_DB_ID: e3cf167c-37e1-4d72-9ac6-b3e27c14b97f
-      PAGES_PREVIEW_URL: https://83a36d32.prochelia.pages.dev
-      PAGES_DEPLOYMENT_ID: 83a36d32-4880-4417-a684-f9247e42debf
+      API_EXPECTED_COMMIT: ${{ inputs.api_commit_sha || '' }}
+      PAGES_PREVIEW_BRANCH: ${{ inputs.pages_branch || '' }}
+      PAGES_EXPECTED_COMMIT: ${{ inputs.pages_commit_sha || '' }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
+          ref: ${{ github.sha }}
           persist-credentials: false
 
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
@@ -50,7 +58,7 @@ jobs:
       - name: Validate E2E workflow and synthetic fixture contract
         run: node --experimental-default-type=module --test tests/preview-e2e-workflow.test.mjs
 
-      - name: Verify Preview D1 identity and generate pinned Wrangler config
+      - name: Verify Preview D1 and resolve the latest successful Pages Preview deployment
         shell: bash
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -59,6 +67,24 @@ jobs:
           [[ -n "${CLOUDFLARE_API_TOKEN:-}" ]] || { echo "::error::Cloudflare API token is missing."; exit 1; }
           token="${CLOUDFLARE_API_TOKEN#Bearer }"
           token="$(printf '%s' "$token" | tr -d '\r\n')"
+          [[ "$PREVIEW_DB_ID" == "e3cf167c-37e1-4d72-9ac6-b3e27c14b97f" ]]
+          [[ "$PREVIEW_DB_ID" != "04f52830-ef5a-4f17-a640-42bbc2381bba" ]]
+          [[ -n "$PAGES_PREVIEW_BRANCH" && "$PAGES_PREVIEW_BRANCH" != "main" ]] || {
+            echo "::error::pages_branch is required and must identify a non-Production Pages Preview branch."
+            exit 1
+          }
+          [[ "$API_EXPECTED_COMMIT" =~ ^[0-9a-f]{40}$ ]] || {
+            echo "::error::api_commit_sha is required and must be an exact 40-character lowercase Git SHA."
+            exit 1
+          }
+          [[ "$PAGES_EXPECTED_COMMIT" =~ ^[0-9a-f]{40}$ ]] || {
+            echo "::error::pages_commit_sha is required and must be an exact 40-character lowercase Git SHA."
+            exit 1
+          }
+          if [[ -n "$PAGES_EXPECTED_COMMIT" && ! "$PAGES_EXPECTED_COMMIT" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::pages_commit_sha must be an exact 40-character lowercase Git SHA."
+            exit 1
+          fi
           cf_request() {
             local label="$1" url="$2" output="$3" status
             status="$(curl --silent --show-error --output "$output" --write-out '%{http_code}' \
@@ -73,43 +99,117 @@ jobs:
           cf_request "Cloudflare token verification" \
             "https://api.cloudflare.com/client/v4/user/tokens/verify" "$RUNNER_TEMP/token.json"
           jq -e '.result.status == "active"' "$RUNNER_TEMP/token.json" >/dev/null || {
-            echo "::error::Cloudflare token verification returned HTTP 200 but token status is not active."
-            jq -c '{result: {status: .result.status}, errors}' "$RUNNER_TEMP/token.json"
+            echo "::error::Cloudflare token is not active."
             exit 1
           }
           cf_request "Preview D1 access" \
             "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/d1/database/$PREVIEW_DB_ID" "$RUNNER_TEMP/preview-d1.json"
           jq -e --arg name "$PREVIEW_DB_NAME" --arg id "$PREVIEW_DB_ID" '.result.name == $name and .result.uuid == $id' "$RUNNER_TEMP/preview-d1.json" >/dev/null || {
-            echo "::error::Preview D1 identity mismatch (name/UUID does not match the pinned Preview database)."
+            echo "::error::Preview D1 identity mismatch."
             jq -c '{result: {name: .result.name, uuid: .result.uuid}, errors}' "$RUNNER_TEMP/preview-d1.json"
             exit 1
           }
-          cf_request "Pages Preview deployment access" \
-            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/pages/projects/prochelia/deployments/$PAGES_DEPLOYMENT_ID" "$RUNNER_TEMP/pages-preview.json"
-          if ! jq -e --arg db "$PREVIEW_DB_ID" --arg worker "prochelia-api-preview" --arg commit "3846562300e97a1816b2aa7e317448449270c2bc" '
-            .success == true and
+          cf_request "Pages project Preview/Production configuration" \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/pages/projects/prochelia" "$RUNNER_TEMP/pages-project.json"
+          jq -e --arg db "$PREVIEW_DB_ID" --arg worker "prochelia-api-preview" --arg api_origin "https://prochelia-api-preview.rzem92.workers.dev" '
+            .result.deployment_configs.preview.d1_databases.DB.id == $db and
+            .result.deployment_configs.preview.services.PROCHELIA_API.service == $worker and
+            .result.deployment_configs.preview.env_vars.SUPRA_API_ORIGIN.type == "plain_text" and
+            .result.deployment_configs.preview.env_vars.SUPRA_API_ORIGIN.value == $api_origin and
+            (.result.deployment_configs.production.d1_databases.DB.id // "") != $db
+          ' "$RUNNER_TEMP/pages-project.json" >/dev/null || {
+            echo "::error::Pages project Preview D1, Worker service binding or exact Preview API origin is invalid."
+            jq -c '{
+              preview_d1: .result.deployment_configs.preview.d1_databases.DB.id,
+              preview_service: .result.deployment_configs.preview.services.PROCHELIA_API.service,
+              preview_api_origin: .result.deployment_configs.preview.env_vars.SUPRA_API_ORIGIN.value,
+              production_d1: (.result.deployment_configs.production.d1_databases.DB.id // null)
+            }' "$RUNNER_TEMP/pages-project.json"
+            exit 1
+          }
+          cf_request "Latest Pages Preview deployment listing" \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/pages/projects/prochelia/deployments?env=preview&per_page=1&page=1" "$RUNNER_TEMP/pages-deployments.json"
+          deployment_id="$(jq -r '.result[0].id // empty' "$RUNNER_TEMP/pages-deployments.json")"
+          [[ -n "$deployment_id" ]] || { echo "::error::No Pages Preview deployment exists."; exit 1; }
+          cf_request "Latest Pages Preview deployment details" \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/pages/projects/prochelia/deployments/$deployment_id" "$RUNNER_TEMP/pages-preview.json"
+          if ! jq -e --arg db "$PREVIEW_DB_ID" --arg worker "prochelia-api-preview" --arg branch "$PAGES_PREVIEW_BRANCH" --arg expected "$PAGES_EXPECTED_COMMIT" '
             .result.environment == "preview" and
+            .result.is_skipped == false and
+            .result.latest_stage.status == "success" and
             .result.uses_functions == true and
             .result.d1_databases.DB.id == $db and
             .result.services.PROCHELIA_API.service == $worker and
-            .result.deployment_trigger.metadata.commit_hash == $commit
+            .result.deployment_trigger.metadata.branch == $branch and
+            (.result.deployment_trigger.metadata.commit_hash | type == "string" and test("^[0-9a-f]{40}$")) and
+            .result.deployment_trigger.metadata.commit_hash == $expected
           ' "$RUNNER_TEMP/pages-preview.json" >/dev/null; then
-            echo "::error::Pages Preview deployment bindings/commit mismatch. Safe metadata diagnostic follows."
-            jq -c --arg db "$PREVIEW_DB_ID" --arg worker "prochelia-api-preview" --arg commit "e69fde70fb28405aa8117eaf041aed618d3da664" '
-              {
-                expected: {environment: "preview", uses_functions: true, d1_database_id: $db, worker_service: $worker, commit_hash: $commit},
-                observed: {
-                  environment: .result.environment,
-                  uses_functions: .result.uses_functions,
-                  d1_database_id: .result.d1_databases.DB.id,
-                  worker_service: .result.services.PROCHELIA_API.service,
-                  commit_hash: .result.deployment_trigger.metadata.commit_hash
-                }
+            echo "::error::Latest Pages Preview deployment is stale, skipped, failed, misbound, or built from an unexpected branch/commit."
+            jq -c '{
+              observed: {
+                id: .result.id,
+                environment: .result.environment,
+                is_skipped: .result.is_skipped,
+                latest_stage: .result.latest_stage,
+                uses_functions: .result.uses_functions,
+                d1_database_id: .result.d1_databases.DB.id,
+                worker_service: .result.services.PROCHELIA_API.service,
+                branch: .result.deployment_trigger.metadata.branch,
+                commit_hash: .result.deployment_trigger.metadata.commit_hash
               }
-            ' "$RUNNER_TEMP/pages-preview.json"
+            }' "$RUNNER_TEMP/pages-preview.json"
             exit 1
           fi
-          [[ "$PREVIEW_DB_ID" != "04f52830-ef5a-4f17-a640-42bbc2381bba" ]]
+          pages_url="$(jq -r '.result.url' "$RUNNER_TEMP/pages-preview.json")"
+          pages_alias="$(jq -r '.result.aliases[]? | select(test("^https://[a-z0-9-]+\\.prochelia\\.pages\\.dev$"))' "$RUNNER_TEMP/pages-preview.json" | head -n 1)"
+          pages_commit="$(jq -r '.result.deployment_trigger.metadata.commit_hash' "$RUNNER_TEMP/pages-preview.json")"
+          [[ "$pages_url" =~ ^https://[a-z0-9-]+\.prochelia\.pages\.dev$ ]] || {
+            echo "::error::Pages Preview URL is not a verified project deployment URL."
+            exit 1
+          }
+          if [[ -n "$pages_alias" ]]; then
+            [[ "$pages_alias" =~ ^https://[a-z0-9-]+\.prochelia\.pages\.dev$ ]] || { echo "::error::Pages Preview alias is not a verified project origin."; exit 1; }
+          fi
+          [[ "$API_EXPECTED_COMMIT" =~ ^[0-9a-f]{40}$ ]] || {
+            echo "::error::api_commit_sha must be an exact 40-character lowercase Git SHA."
+            exit 1
+          }
+          cf_request "Active Preview Worker deployment listing" \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/prochelia-api-preview/deployments?per_page=1&page=1" "$RUNNER_TEMP/preview-worker-deployments.json"
+          version_id="$(jq -r '[.result.deployments[0].versions[]? | select(.percentage == 100)] | if length == 1 then .[0].version_id else empty end' "$RUNNER_TEMP/preview-worker-deployments.json")"
+          [[ -n "$version_id" ]] || {
+            echo "::error::No single 100% active Preview Worker version was found."
+            jq -c '{deployments: [.result.deployments[]? | {id, strategy, versions}]}' "$RUNNER_TEMP/preview-worker-deployments.json"
+            exit 1
+          }
+          cf_request "Active Preview Worker version details" \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/prochelia-api-preview/versions/$version_id" "$RUNNER_TEMP/preview-worker-version.json"
+          if ! jq -e --arg version "$version_id" '
+            .result.id == $version and (.result.resources.bindings | type == "array")
+          ' "$RUNNER_TEMP/preview-worker-version.json" >/dev/null; then
+            echo "::error::Active Preview Worker version details are incomplete."
+            exit 1
+          fi
+          if ! jq -e --arg expected "$API_EXPECTED_COMMIT" --arg db "$PREVIEW_DB_ID" '
+            ([.result.resources.bindings[]? | select(.name == "APP_ENV" and .type == "plain_text" and .text == "preview")] | length == 1) and
+            ([.result.resources.bindings[]? | select(.name == "DB" and .type == "d1" and .database_id == $db)] | length == 1) and
+            ([.result.resources.bindings[]? | select(.name == "PROCHELIA_COMMIT_SHA" and .type == "plain_text" and .text == $expected)] | length == 1)
+          ' "$RUNNER_TEMP/preview-worker-version.json" >/dev/null; then
+            echo "::error::Active Preview Worker version does not match the requested commit and isolated Preview D1."
+            jq -c '{
+              observed: {
+                version_id: .result.id,
+                version_number: .result.number,
+                bindings: [.result.resources.bindings[]? | select(.name == "APP_ENV" or .name == "DB" or .name == "PROCHELIA_COMMIT_SHA") | {name, type, text, database_id}]
+              }
+            }' "$RUNNER_TEMP/preview-worker-version.json"
+            exit 1
+          fi
+          worker_version_number="$(jq -r '.result.number' "$RUNNER_TEMP/preview-worker-version.json")"
+          # The Pages Function validates the browser Origin itself and deliberately
+          # forwards only an allowlisted header set through the Preview service binding.
+          # It strips Origin upstream, so Worker CORS_ORIGIN is not a prerequisite for
+          # this same-origin Pages-to-Worker path.
           cat > "$RUNNER_TEMP/wrangler.preview.json" <<'JSON'
           {
             "name": "prochelia-preview-e2e",
@@ -121,8 +221,34 @@ jobs:
             }]
           }
           JSON
-          printf 'CLOUDFLARE_API_TOKEN=%s\n' "$token" >> "$GITHUB_ENV"
-          echo "Exact isolated Preview D1 identity verified."
+          printf 'CLOUDFLARE_API_TOKEN=%s\nPAGES_PREVIEW_URL=%s\nPAGES_PREVIEW_ALIAS=%s\nPAGES_DEPLOYMENT_ID=%s\nPAGES_COMMIT_SHA=%s\nAPI_DEPLOYED_VERSION_ID=%s\nAPI_DEPLOYED_VERSION_NUMBER=%s\n' \
+            "$token" "$pages_url" "$pages_alias" "$deployment_id" "$pages_commit" "$version_id" "$worker_version_number" >> "$GITHUB_ENV"
+          {
+            echo "Verified Pages Preview: $pages_url"
+            echo "Deployment: $deployment_id"
+            echo "Frontend branch: $PAGES_PREVIEW_BRANCH"
+            echo "Frontend commit: $pages_commit"
+            echo "Worker commit: $API_EXPECTED_COMMIT"
+            echo "Worker version: $worker_version_number ($version_id)"
+            [[ -z "$pages_alias" ]] || echo "Pages Preview branch alias: $pages_alias"
+            echo "Preview D1, service binding and exact Pages API proxy origin match the isolated Preview environment."
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "Exact isolated Preview D1 and current Pages deployment verified."
+
+      - name: Verify Pages-to-Worker health path
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          const url = new URL('/api/health', process.env.PAGES_PREVIEW_URL);
+          const response = await fetch(url, { headers: { accept: 'application/json' }, redirect: 'manual' });
+          if (response.status !== 200) throw new Error(`Pages Preview /api/health expected HTTP 200, got ${response.status}`);
+          const body = await response.json();
+          if (body.ok !== true || body.database !== true || body.service !== 'PROCHÉLIA API') {
+            throw new Error('Pages Preview health response did not confirm the Preview API and D1.');
+          }
+          console.log(`PASS: same-origin Pages-to-Worker health path; verified Worker commit ${process.env.API_EXPECTED_COMMIT}, version ${process.env.API_DEPLOYED_VERSION_NUMBER} (${process.env.API_DEPLOYED_VERSION_ID}); Pages deployment ${process.env.PAGES_DEPLOYMENT_ID}; frontend commit ${process.env.PAGES_COMMIT_SHA}.`);
+          NODE
 
       - name: Read current directory offsets without reading personal rows
         shell: bash
@@ -132,7 +258,7 @@ jobs:
           set -euo pipefail
           payload='{"sql":"SELECT (SELECT COUNT(*) FROM clients) AS clients, (SELECT COUNT(*) FROM intervenants) AS intervenants"}'
           status="$(curl --silent --show-error --output "$RUNNER_TEMP/preview-counts.json" --write-out '%{http_code}' \
-            -X POST -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -H "Content-Type: application/json" \
+            -X POST -H "Authorization: Bearer $token" -H "Content-Type: application/json" \
             --data "$payload" "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/d1/database/$PREVIEW_DB_ID/query")"
           [[ "$status" == "200" ]]
           jq -e '.success == true' "$RUNNER_TEMP/preview-counts.json" >/dev/null
@@ -213,24 +339,26 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         run: |
           set -euo pipefail
+          token="$(printf '%s' "$CLOUDFLARE_API_TOKEN" | sed -E 's/^[[:space:]]*Bearer[[:space:]]+//I; s/^[[:space:]]+//; s/[[:space:]]+$//' | tr -d '\r\n')"
+          [[ -n "$token" ]] || { echo "::error::Cloudflare API token is empty after normalization."; exit 1; }
           [[ "$PREVIEW_DB_ID" == "e3cf167c-37e1-4d72-9ac6-b3e27c14b97f" ]]
           [[ "$PREVIEW_DB_ID" != "04f52830-ef5a-4f17-a640-42bbc2381bba" ]]
-          npx --yes wrangler@4 d1 execute "$PREVIEW_DB_NAME" --remote --config "$RUNNER_TEMP/wrangler.preview.json" --file="$RUNNER_TEMP/preview-e2e-seed.sql" --yes
+          CLOUDFLARE_API_TOKEN="$token" npx --yes wrangler@4 d1 execute "$PREVIEW_DB_NAME" --remote --config "$RUNNER_TEMP/wrangler.preview.json" --file="$RUNNER_TEMP/preview-e2e-seed.sql" --yes
           echo "Synthetic fixtures inserted into Preview D1 only."
 
-      - name: Exercise Preview Worker authentication, role checks and pagination
+      - name: Exercise Pages Preview proxy authentication, role checks and pagination
         shell: bash
         run: |
           set -euo pipefail
           node --input-type=module <<'NODE'
-          const base = 'https://prochelia-api-preview.rzem92.workers.dev';
+          const base = process.env.PAGES_PREVIEW_URL;
           const prefix = process.env.E2E_PREFIX;
           const manager = process.env.E2E_MANAGER_TOKEN;
           const client = process.env.E2E_CLIENT_TOKEN;
           const clientOffset = Number(process.env.E2E_CLIENT_OFFSET);
           const providerOffset = Number(process.env.E2E_INTERVENANT_OFFSET);
           async function request(path, token) {
-            const headers = { accept: 'application/json' };
+            const headers = { accept: 'application/json', origin: base };
             if (token) headers.cookie = 'prochelia_session=' + token;
             return fetch(base + path, { headers, redirect: 'manual' });
           }
@@ -238,6 +366,26 @@ jobs:
             const response = await request(path, token);
             if (response.status !== expected) throw new Error(`${path}: expected HTTP ${expected}, got ${response.status}`);
             return response;
+          }
+          const originProbe = await fetch(base + '/api/missions/validate', {
+            method: 'POST',
+            headers: { accept: 'application/json', 'content-type': 'application/json', origin: base },
+            body: '{}',
+            redirect: 'manual'
+          });
+          const originProbeBody = await originProbe.json();
+          if (originProbe.status !== 403 || originProbeBody.error !== 'AUTHENTICATED_VALIDATION_REQUIRED') {
+            throw new Error('Pages Preview origin was not accepted by the Preview Worker, or the safe closed mission-validation guard changed');
+          }
+          const rejectedOriginProbe = await fetch(base + '/api/missions/validate', {
+            method: 'POST',
+            headers: { accept: 'application/json', 'content-type': 'application/json', origin: 'https://untrusted.example' },
+            body: '{}',
+            redirect: 'manual'
+          });
+          const rejectedOriginBody = await rejectedOriginProbe.json();
+          if (rejectedOriginProbe.status !== 403 || rejectedOriginBody.error !== 'ORIGIN_NOT_ALLOWED') {
+            throw new Error('Preview Worker did not reject an untrusted browser origin before mission validation');
           }
           await expectStatus('/api/clients', null, 401);
           await expectStatus('/api/intervenants', null, 401);
@@ -265,7 +413,7 @@ jobs:
           if (providerBody.has_more !== false || providerBody.next_offset !== null) {
             throw new Error('Intervenant directory pagination end marker mismatch');
           }
-          console.log('PASS: Preview Worker endpoints; unauthenticated 401; client role 403; invalid offset 400; manager directory pagination and provider listing verified.');
+          console.log('PASS: Pages Preview origin accepted by the Worker; unauthenticated 401; client role 403; invalid offset 400; manager directory pagination and provider listing verified.');
           NODE
 
       - name: Always remove synthetic Preview fixtures and verify cleanup
@@ -280,10 +428,12 @@ jobs:
             exit 0
           fi
           [[ "$PREVIEW_DB_ID" == "e3cf167c-37e1-4d72-9ac6-b3e27c14b97f" ]]
-          npx --yes wrangler@4 d1 execute "$PREVIEW_DB_NAME" --remote --config "$RUNNER_TEMP/wrangler.preview.json" --file="$RUNNER_TEMP/preview-e2e-cleanup.sql" --yes
+          token="$(printf '%s' "$CLOUDFLARE_API_TOKEN" | sed -E 's/^[[:space:]]*Bearer[[:space:]]+//I; s/^[[:space:]]+//; s/[[:space:]]+$//' | tr -d '\r\n')"
+          [[ -n "$token" ]] || { echo "::error::Cloudflare API token is empty after normalization; cleanup cannot proceed."; exit 1; }
+          CLOUDFLARE_API_TOKEN="$token" npx --yes wrangler@4 d1 execute "$PREVIEW_DB_NAME" --remote --config "$RUNNER_TEMP/wrangler.preview.json" --file="$RUNNER_TEMP/preview-e2e-cleanup.sql" --yes
           payload="{\"sql\":\"SELECT (SELECT COUNT(*) FROM users WHERE id LIKE 'e2e-$GITHUB_RUN_ID-%') AS users, (SELECT COUNT(*) FROM sessions WHERE id LIKE 'e2e-$GITHUB_RUN_ID-%') AS sessions, (SELECT COUNT(*) FROM clients WHERE id LIKE 'e2e-$GITHUB_RUN_ID-%') AS clients, (SELECT COUNT(*) FROM intervenants WHERE id LIKE 'e2e-$GITHUB_RUN_ID-%') AS intervenants\"}"
           status="$(curl --silent --show-error --output "$RUNNER_TEMP/cleanup-check.json" --write-out '%{http_code}' \
-            -X POST -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -H "Content-Type: application/json" \
+            -X POST -H "Authorization: Bearer $token" -H "Content-Type: application/json" \
             --data "$payload" "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/d1/database/$PREVIEW_DB_ID/query")"
           [[ "$status" == "200" ]]
           jq -e '.success == true and .result[0].results[0].users == 0 and .result[0].results[0].sessions == 0 and .result[0].results[0].clients == 0 and .result[0].results[0].intervenants == 0' "$RUNNER_TEMP/cleanup-check.json" >/dev/null
