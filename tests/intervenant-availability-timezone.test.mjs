@@ -5,6 +5,7 @@ import { readFile } from "node:fs/promises";
 const worker = await readFile(new URL("../src/index.js", import.meta.url), "utf8");
 const migration = await readFile(new URL("../migrations-preview-canonical/0034_timezone_safe_availability_overlap.sql", import.meta.url), "utf8");
 const validationMigration = await readFile(new URL("../migrations-preview-canonical/0035_validate_availability_intervals.sql", import.meta.url), "utf8");
+const idempotencyMigration = await readFile(new URL("../migrations-preview-canonical/0036_intervenant_availability_idempotency.sql", import.meta.url), "utf8");
 
 const start = worker.indexOf("async function intervenantAvailabilityRoute(");
 const end = worker.indexOf("\nasync function intervenantOpportunityRoute(", start);
@@ -68,4 +69,21 @@ test("availability interval validation covers INSERT and UPDATE without changing
   assert.match(validationMigration, /BEFORE INSERT ON disponibilites/);
   assert.match(validationMigration, /BEFORE UPDATE OF start_at, end_at, status ON disponibilites/);
   assert.match(validationMigration, /WHEN NEW\.status = 'available'/);
+});
+
+
+test("availability POST requires a durable idempotency key scoped to tenant and intervenant", () => {
+  assert.match(route, /Idempotency-Key/);
+  assert.match(route, /IDEMPOTENCY_KEY_REQUIRED/);
+  assert.match(route, /IDEMPOTENCY_KEY_CONFLICT/);
+  assert.match(route, /idempotent_replay: true/);
+  assert.match(route, /idempotency_key\)/);
+  assert.match(route, /WHERE tenant_id = \? AND intervenant_id = \? AND idempotency_key = \?/);
+});
+
+test("availability idempotency is enforced by a tenant/profile-scoped unique database index", () => {
+  assert.match(idempotencyMigration, /ALTER TABLE disponibilites ADD COLUMN idempotency_key TEXT/);
+  assert.match(idempotencyMigration, /CREATE UNIQUE INDEX IF NOT EXISTS idx_disponibilites_tenant_intervenant_idempotency/);
+  assert.match(idempotencyMigration, /ON disponibilites\(tenant_id, intervenant_id, idempotency_key\)/);
+  assert.match(idempotencyMigration, /WHERE idempotency_key IS NOT NULL/);
 });
