@@ -1508,6 +1508,16 @@ async function requireAuthRole(request, env, roles=[]) {
 
 // Tenant-scoped authorization foundation. Use this for business data handlers;
 // platform-wide administration must remain a separate, explicit authorization path.
+
+function legacyTenantScopeBlocked() {
+  return json({
+    ok: false,
+    error: "TENANT_DATA_SCOPE_NOT_MIGRATED",
+    message: "This legacy resource is temporarily unavailable until tenant ownership and row-level isolation are validated.",
+    version: VERSION
+  }, 503);
+}
+
 export async function requireTenantAuthRole(request, env, allowedTenantRoles = []) {
   let auth;
   try {
@@ -1560,6 +1570,7 @@ async function copilotRecommend(env, input) {
 
 async function createOperationalCase(request, env) {
   const gate=await requireAuthRole(request,env,['gerante','client','intervenant','entreprise']); if(gate.error)return gate.error;
+  return legacyTenantScopeBlocked();
   const body=await readJson(request)||{};
   const caseType=clean(body.case_type); if(!caseType)return json({ok:false,error:'CASE_TYPE_REQUIRED',version:VERSION},400);
   const phase=String(await getSetting(env,'project_phase','TEST')).toUpperCase();
@@ -1654,6 +1665,7 @@ async function executeCaseBusinessAction(env, c, rec, actorId=null, automatic=fa
 
 async function processActionOutbox(request, env) {
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
+  return legacyTenantScopeBlocked();
   await ensureOperationalSchema(env);
   const rows=await env.DB.prepare(`SELECT * FROM action_outbox WHERE status='PENDING' ORDER BY created_at ASC LIMIT 50`).all();
   const processed=[];
@@ -1691,6 +1703,7 @@ async function executeOperationalCase(env, caseId, approverId=null, automatic=fa
 
 async function approveOperationalCase(request, env) {
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
+  return legacyTenantScopeBlocked();
   const body=await readJson(request)||{}; if(!body.case_id)return json({ok:false,error:'CASE_ID_REQUIRED',version:VERSION},400);
   const result=await executeOperationalCase(env,body.case_id,gate.auth.user.id,false);
   return json({...result,version:VERSION},result.ok?200:409);
@@ -1698,6 +1711,7 @@ async function approveOperationalCase(request, env) {
 
 async function getOperationsDashboard(request, env) {
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
+  return legacyTenantScopeBlocked();
   const queries={
     open_cases:"SELECT COUNT(*) AS n FROM operational_cases WHERE status NOT IN ('RESOLVED','CLOSED')",
     auto_cases:"SELECT COUNT(*) AS n FROM operational_cases WHERE status='RESOLVED' AND auto_mode='AUTO'",
@@ -1713,6 +1727,7 @@ async function getOperationsDashboard(request, env) {
 
 async function getJournal(request, env) {
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
+  return legacyTenantScopeBlocked();
   const type=new URL(request.url).searchParams.get('type');
   const tables={copilot_log:'SELECT * FROM copilot_log ORDER BY created_at DESC LIMIT 200',activity_journal:'SELECT * FROM activity_journal ORDER BY created_at DESC LIMIT 200',commercial_tasks:'SELECT * FROM commercial_tasks ORDER BY created_at DESC LIMIT 200',recruitment_tasks:'SELECT * FROM recruitment_tasks ORDER BY created_at DESC LIMIT 200',operational_cases:'SELECT * FROM operational_cases ORDER BY created_at DESC LIMIT 200'};
   if(type && !tables[type])return json({ok:false,error:'UNKNOWN_JOURNAL',version:VERSION},400);
@@ -1886,6 +1901,7 @@ async function pricingQuote(request, env) {
 
 async function financeSummary(request, env) {
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
+  return legacyTenantScopeBlocked();
   const tx=await env.DB.prepare(`SELECT COALESCE(SUM(gross_cents),0) gross,COALESCE(SUM(commission_cents),0) commission,COALESCE(SUM(provider_fee_cents),0) provider_fee,COALESCE(SUM(refund_cents),0) refunds,COALESCE(SUM(net_intervenant_cents),0) intervenant FROM payment_transactions`).first();
   const ledger=await env.DB.prepare(`SELECT COALESCE(SUM(CASE WHEN direction='CREDIT' THEN amount_cents ELSE -amount_cents END),0) balance FROM accounting_ledger`).first();
   const expenses=await env.DB.prepare(`SELECT COALESCE(SUM(amount_cents),0) total FROM business_expenses`).first();
@@ -1898,6 +1914,7 @@ async function financeSummary(request, env) {
 
 async function complaintCreate(request, env) {
   const gate=await requireAuthRole(request,env,['gerante','client','entreprise']); if(gate.error)return gate.error;
+  return legacyTenantScopeBlocked();
   const b=await readJson(request)||{};if(!b.category)return json({ok:false,error:'CATEGORY_REQUIRED',version:VERSION},400);
   const id=crypto.randomUUID();await env.DB.prepare(`INSERT INTO complaints(id,client_type,client_id,company_id,mission_id,category,severity,description) VALUES(?,?,?,?,?,?,?,?)`).bind(id,String(b.client_type||'B2C'),b.client_id||null,b.company_id||null,b.mission_id||null,b.category,String(b.severity||'LOW'),b.description||null).run();
   const caseType=SIMPLE_CASES.has(b.category)?b.category:'reclamation_client';
@@ -2239,6 +2256,7 @@ async function createPromotion(request, env) {
 async function promotionList(request, env) {
   const gate = await requireAuthRole(request, env, ['gerante','entreprise','client']);
   if (gate.error) return gate.error;
+  return legacyTenantScopeBlocked();
   await ensureStrategicSchema(env);
   const status = new URL(request.url).searchParams.get('status');
   const q = status
@@ -2251,6 +2269,7 @@ async function promotionList(request, env) {
 async function activatePromotion(request, env) {
   const gate = await requireAuthRole(request, env, ['gerante']);
   if (gate.error) return gate.error;
+  return legacyTenantScopeBlocked();
   await ensureStrategicSchema(env);
   const b = await readJson(request) || {};
   if (!b.promotion_id) return json({ok:false,error:'PROMOTION_ID_REQUIRED',version:VERSION},400);
@@ -2270,6 +2289,7 @@ async function activatePromotion(request, env) {
 async function strategicDashboard(request, env) {
   const gate = await requireAuthRole(request, env, ['gerante']);
   if (gate.error) return gate.error;
+  return legacyTenantScopeBlocked();
   await ensureStrategicSchema(env);
 
   const queries = {
@@ -2510,6 +2530,7 @@ async function operationalExecute(request, env) {
 
 async function scoreClients(request, env) {
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
+  return legacyTenantScopeBlocked();
   await ensureStrategicSchema(env); await ensureOperationalSchema(env);
   const rows=[];
   if(await tableExists(env,'payment_transactions')){
@@ -2548,6 +2569,7 @@ async function loyaltyUpdate(request, env) {
 
 async function qualityCreate(request, env) {
   const gate=await requireAuthRole(request,env,['gerante','client','entreprise']); if(gate.error)return gate.error;
+  return legacyTenantScopeBlocked();
   await ensureOperationalSchema(env); const b=await readJson(request)||{};
   if(!b.mission_id)return json({ok:false,error:'MISSION_ID_REQUIRED',version:VERSION},400);
   const id=crypto.randomUUID();
@@ -2558,6 +2580,7 @@ async function qualityCreate(request, env) {
 
 async function capacityDashboard(request, env) {
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
+  return legacyTenantScopeBlocked();
   await ensureOperationalSchema(env);
   let missions=0, available=0;
   if(await tableExists(env,'missions')) { const r=await env.DB.prepare(`SELECT COUNT(*) n FROM missions WHERE date(created_at)>=date('now','-7 day')`).first(); missions=Number(r?.n||0); }
@@ -2571,6 +2594,7 @@ async function capacityDashboard(request, env) {
 
 async function financeForecast(request, env) {
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
+  return legacyTenantScopeBlocked();
   const months=Math.max(1,Math.min(12,Number((await readJson(request)||{}).months||3)));
   const tx=await env.DB.prepare(`SELECT COALESCE(SUM(gross_cents),0) gross,COALESCE(SUM(commission_cents),0) commission,COALESCE(SUM(provider_fee_cents),0) provider_fee,COALESCE(SUM(refund_cents),0) refunds,COALESCE(SUM(net_intervenant_cents),0) intervenant FROM payment_transactions WHERE created_at>=datetime('now','-90 day')`).first();
   const base=Number(tx?.gross||0)/3;
