@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
+import worker from "../src/index.js";
 import {
   copilotRecommend,
   createOperationalCase,
@@ -144,6 +145,15 @@ test("background job endpoint remains proposal-only and performs no D1 writes", 
   const response = await processBackgroundJobs(managerRequest("/api/jobs/process"), env);
   assert.equal(response.status, 503);
   assert.equal((await response.json()).error, "BACKGROUND_EXECUTOR_NOT_IMPLEMENTED");
+  assert.equal(statements.length, 1, "only the authenticated session lookup is allowed");
+  assert.equal(writes.length, 0);
+});
+
+test("action outbox HTTP route returns 503 before schema setup or outbox reads", async () => {
+  const { env, statements, writes } = managerEnv();
+  const response = await worker.fetch(managerRequest("/api/ops/outbox/process"), env);
+  assert.equal(response.status, 503);
+  assert.equal((await response.json()).error, "TENANT_SCOPED_EXECUTION_NOT_IMPLEMENTED");
   assert.equal(statements.length, 1, "only the authenticated session lookup is allowed");
   assert.equal(writes.length, 0);
 });
