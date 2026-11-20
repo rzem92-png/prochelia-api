@@ -22,7 +22,7 @@ jobs:
       DB_NAME: prochelia-preview-eu-2026-11-17
       DB_ID: e3cf167c-37e1-4d72-9ac6-b3e27c14b97f
       CLOUDFLARE_ACCOUNT_ID: f2a79e9fa41566a8ec80fb24c02c60eb
-      R2_BUCKET: prochelia-preview-backups-eu-locked
+      R2_BUCKET: prochelia-preview-backups-eu-v2
       AWS_DEFAULT_REGION: auto
     steps:
       - name: Checkout exact workflow commit for pinned Preview D1 config

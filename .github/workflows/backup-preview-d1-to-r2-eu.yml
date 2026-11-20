@@ -31,7 +31,7 @@ jobs:
       EXPECTED_DB_NAME: prochelia-preview-eu-2026-11-17
       EXPECTED_DB_ID: e3cf167c-37e1-4d72-9ac6-b3e27c14b97f
       FORBIDDEN_PRODUCTION_DB_ID: 04f52830-ef5a-4f17-a640-42bbc2381bba
-      R2_BUCKET: prochelia-preview-backups-eu-locked
+      R2_BUCKET: prochelia-preview-backups-eu-v2
       R2_ENDPOINT: https://f2a79e9fa41566a8ec80fb24c02c60eb.eu.r2.cloudflarestorage.com
     steps:
       - name: Enforce preview-only branch and exact workflow commit

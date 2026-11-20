@@ -37,7 +37,7 @@ jobs:
       RESTORE_DB_ID: 3caebbc6-982a-4562-96a7-e509185e9e9a
       PREVIEW_DB_ID: e3cf167c-37e1-4d72-9ac6-b3e27c14b97f
       PRODUCTION_DB_ID: 04f52830-ef5a-4f17-a640-42bbc2381bba
-      R2_BUCKET: prochelia-preview-backups-eu-locked
+      R2_BUCKET: prochelia-preview-backups-eu-v2
       R2_ENDPOINT: https://f2a79e9fa41566a8ec80fb24c02c60eb.eu.r2.cloudflarestorage.com
       BACKUP_OBJECT_KEY: ${{ inputs.backup_object_key }}
     steps:
@@ -76,7 +76,7 @@ jobs:
           jq -e '.success == true and .result.status == "active"' "$RUNNER_TEMP/token.json" >/dev/null
           status="$(curl --silent --show-error --output "$RUNNER_TEMP/bucket.json" --write-out '%{http_code}' "https://api.cloudflare.com/client/v4/accounts/$EXPECTED_ACCOUNT_ID/r2/buckets/$R2_BUCKET" -H "Authorization: Bearer $token" -H "cf-r2-jurisdiction: eu")"
           test "$status" = "200" || { echo "::error::R2 EU bucket not found; restore refused."; exit 1; }
-          jq -e '.success == true and .result.name == "prochelia-preview-backups-eu-locked" and .result.jurisdiction == "eu"' "$RUNNER_TEMP/bucket.json" >/dev/null
+          jq -e '.success == true and .result.name == "prochelia-preview-backups-eu-v2" and .result.jurisdiction == "eu"' "$RUNNER_TEMP/bucket.json" >/dev/null
 
           status="$(curl --silent --show-error --output "$RUNNER_TEMP/source-d1.json" --write-out '%{http_code}' "https://api.cloudflare.com/client/v4/accounts/$EXPECTED_ACCOUNT_ID/d1/database/$PREVIEW_DB_ID" -H "Authorization: Bearer $token")"
           test "$status" = "200" || { echo "::error::Source Preview D1 metadata lookup failed; restore refused."; exit 1; }

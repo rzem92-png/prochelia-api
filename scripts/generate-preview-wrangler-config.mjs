@@ -34,7 +34,7 @@ const preview = {
   }],
   r2_buckets: [{
     binding: "BACKUP_BUCKET",
-    bucket_name: "prochelia-preview-backups-eu-locked",
+    bucket_name: "prochelia-preview-backups-eu-v2",
     jurisdiction: "eu"
   }],
   observability: { logs: { enabled: true, invocation_logs: true } }

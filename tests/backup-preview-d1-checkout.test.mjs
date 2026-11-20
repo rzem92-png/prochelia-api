@@ -26,7 +26,7 @@ test("Preview backup is pinned to the isolated Preview D1 and never deploys or a
 
 test("scheduled and manual backup plus restore share the provisioned locked EU bucket and dedicated credentials", () => {
   for (const content of [workflow, restore]) {
-    assert.match(content, /prochelia-preview-backups-eu-locked/);
+    assert.match(content, /prochelia-preview-backups-eu-v2/);
     assert.match(content, /secrets\.R2_EU_ACCESS_KEY_ID/);
     assert.match(content, /secrets\.R2_EU_SECRET_ACCESS_KEY/);
     assert.match(content, /cf-r2-jurisdiction: eu/);
