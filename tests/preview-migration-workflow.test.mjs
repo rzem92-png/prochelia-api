@@ -111,7 +111,7 @@ test("Preview migration workflow verifies the final registry exactly after apply
 test("Preview D1 migration requires an encrypted R2 EU backup round-trip before any schema write", () => {
   assert.match(workflow, /AWS_ACCESS_KEY_ID: \$\{\{ secrets\.R2_EU_ACCESS_KEY_ID \}\}/);
   assert.match(workflow, /AWS_SECRET_ACCESS_KEY: \$\{\{ secrets\.R2_EU_SECRET_ACCESS_KEY \}\}/);
-  assert.match(workflow, /R2_BUCKET: prochelia-preview-backups-eu-v2/);
+  assert.match(workflow, /R2_BUCKET: prochelia-preview-backups-eu-locked/);
   assert.match(workflow, /R2_ENDPOINT: https:\/\/f2a79e9fa41566a8ec80fb24c02c60eb\.eu\.r2\.cloudflarestorage\.com/);
   const upload = workflow.indexOf("Upload encrypted backup and manifest to private R2 EU bucket");
   const verify = workflow.indexOf("Download R2 backup and verify encrypted round-trip");
