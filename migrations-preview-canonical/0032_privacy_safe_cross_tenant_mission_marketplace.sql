@@ -173,7 +173,7 @@ BEFORE INSERT ON mission_opportunities WHEN
     JOIN mission_opportunity_consents c
       ON c.mission_id=m.id AND c.owner_tenant_id=m.tenant_id
     JOIN tenant_memberships tm
-      ON tm.user_id=NEW.published_by_user_id AND tm.tenant_id=NEW.owner_tenant_id AND tm.status='ACTIVE'
+      ON tm.user_id=NEW.published_by_user_id AND tm.tenant_id=NEW.owner_tenant_id AND tm.status='ACTIVE' AND tm.role IN ('OWNER','ADMIN','MANAGER')
     WHERE m.id=NEW.mission_id AND m.tenant_id=NEW.owner_tenant_id
       AND m.status='requested' AND m.intervenant_id IS NULL
       AND m.start_at=NEW.start_at AND COALESCE(m.end_at,'')=NEW.end_at
@@ -221,6 +221,7 @@ WHEN NEW.id<>OLD.id OR NEW.tenant_id<>OLD.tenant_id
   OR NEW.intervenant_id<>OLD.intervenant_id OR NEW.skill_code<>OLD.skill_code
   OR NEW.evidence_sha256 IS NOT OLD.evidence_sha256
   OR NEW.created_at<>OLD.created_at
+  OR (OLD.verification_status='VERIFIED' AND (NEW.verified_by_user_id IS NOT OLD.verified_by_user_id OR NEW.verified_at IS NOT OLD.verified_at))
   OR (OLD.verification_status='VERIFIED' AND NEW.verification_status NOT IN ('VERIFIED','REVOKED'))
   OR (OLD.verification_status IN ('REJECTED','REVOKED') AND NEW.verification_status<>OLD.verification_status)
 BEGIN SELECT RAISE(ABORT, 'INTERVENANT_SKILL_IDENTITY_OR_STATUS_IMMUTABLE'); END;
@@ -286,7 +287,7 @@ WHEN NEW.status='ACCEPTED' AND OLD.status<>'ACCEPTED' AND (
   OR NOT EXISTS (
     SELECT 1 FROM tenant_memberships tm
     JOIN mission_opportunities o ON o.owner_tenant_id=tm.tenant_id
-    WHERE o.id=NEW.opportunity_id AND tm.user_id=NEW.decided_by_user_id AND tm.status='ACTIVE'
+    WHERE o.id=NEW.opportunity_id AND tm.user_id=NEW.decided_by_user_id AND tm.status='ACTIVE' AND tm.role IN ('OWNER','ADMIN','MANAGER')
   )
   OR NOT EXISTS (
     SELECT 1 FROM mission_opportunities o
@@ -394,3 +395,17 @@ BEGIN SELECT RAISE(ABORT, 'MISSION_APPLICATION_DELETE_FORBIDDEN'); END;
 CREATE TRIGGER IF NOT EXISTS trg_mission_assignments_no_delete
 BEFORE DELETE ON mission_assignments
 BEGIN SELECT RAISE(ABORT, 'MISSION_ASSIGNMENT_DELETE_FORBIDDEN'); END;
+
+
+CREATE TRIGGER IF NOT EXISTS trg_mission_application_decision_immutable
+BEFORE UPDATE ON mission_applications
+WHEN OLD.decided_at IS NOT NULL AND (
+  NEW.decided_at IS NOT OLD.decided_at OR NEW.decided_by_user_id IS NOT OLD.decided_by_user_id
+)
+BEGIN SELECT RAISE(ABORT, 'MISSION_APPLICATION_DECISION_IMMUTABLE'); END;
+
+CREATE TRIGGER IF NOT EXISTS trg_mission_assignment_timestamps_immutable
+BEFORE UPDATE ON mission_assignments
+WHEN (OLD.started_at IS NOT NULL AND NEW.started_at IS NOT OLD.started_at)
+  OR (OLD.completed_at IS NOT NULL AND NEW.completed_at IS NOT OLD.completed_at)
+BEGIN SELECT RAISE(ABORT, 'MISSION_ASSIGNMENT_TIMESTAMPS_IMMUTABLE'); END;
