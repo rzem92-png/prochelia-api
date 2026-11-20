@@ -304,7 +304,8 @@ test("Preview migration verifies operational marketplace tenant scope", () => {
 test("Preview migration verifies privacy-safe cross-tenant mission opportunities and atomic assignments", () => {
   for (const name of [
     "0032_privacy_safe_cross_tenant_mission_marketplace.sql",
-    "mission_opportunity_consents", "mission_opportunities", "mission_applications", "mission_assignments",
+    "mission_opportunity_consents", "mission_opportunities", "mission_applications", "mission_assignments", "intervenant_skills", "idx_intervenant_skills_verified",
+    "trg_intervenant_skill_insert_scope", "trg_intervenant_skill_verification_guard", "trg_intervenant_skill_identity_immutable", "trg_intervenant_skill_update_verification_guard", "trg_intervenant_skills_no_delete",
     "privacy-safe cross-tenant marketplace and assignment guards",
     "idx_mission_opportunities_public_feed", "idx_mission_applications_opportunity_status",
     "idx_mission_applications_provider", "idx_mission_assignments_provider_status",
