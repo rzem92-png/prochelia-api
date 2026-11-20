@@ -21,11 +21,11 @@ test("availability inputs are normalized to canonical UTC before persistence", (
   assert.match(route, /canonicalEndAt/);
 });
 
-test("API overlap and duplicate checks compare actual instants across UTC offsets", () => {
-  assert.match(route, /julianday\(start_at\) = julianday\(\?\)/);
-  assert.match(route, /julianday\(end_at\) = julianday\(\?\)/);
+test("API overlap checks compare actual instants across UTC offsets and idempotency replays compare canonical instants", () => {
   assert.match(route, /julianday\(start_at\) < julianday\(\?\)/);
   assert.match(route, /julianday\(end_at\) > julianday\(\?\)/);
+  assert.match(route, /Date\.parse\(previous\.start_at\) === startMs/);
+  assert.match(route, /Date\.parse\(previous\.end_at\) === endMs/);
   assert.doesNotMatch(route, /start_at < \? AND end_at > \?/);
 });
 
