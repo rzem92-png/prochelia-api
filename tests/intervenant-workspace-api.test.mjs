@@ -53,3 +53,43 @@ test("workspace fails closed until an active tenant and tenant-scoped business t
   }
   assert.match(handler, /auth\.session_active_tenant_id/);
 });
+
+const opportunityStart = source.indexOf("async function intervenantOpportunityRoute(");
+const opportunityEnd = source.indexOf("\nasync function handle(request,env){", opportunityStart);
+assert.ok(opportunityStart >= 0 && opportunityEnd > opportunityStart, "opportunity route must exist before canonical Worker dispatch");
+const opportunityHandler = source.slice(opportunityStart, opportunityEnd);
+
+test("opportunity feed is GET-only, authenticated and restricted to verified intervenants", () => {
+  assert.match(opportunityHandler, /request\.method !== 'GET'[\s\S]{0,100}METHOD_NOT_ALLOWED/);
+  assert.match(opportunityHandler, /getSessionUser\(request, env\)/);
+  assert.match(opportunityHandler, /requireRole\(auth, \['intervenant'\]\)/);
+  assert.match(opportunityHandler, /PROFILE_VALIDATION_REQUIRED/);
+  assert.match(opportunityHandler, /session_active_tenant_id/);
+  assert.match(opportunityHandler, /verification_status = 'VERIFIED'/);
+});
+
+test("opportunity feed returns a sanitized public projection with availability and conflict checks", () => {
+  assert.match(opportunityHandler, /o\.public_summary/);
+  assert.match(opportunityHandler, /o\.city/);
+  assert.match(opportunityHandler, /o\.provider_pay_cents/);
+  assert.match(opportunityHandler, /FROM disponibilites d/);
+  assert.match(opportunityHandler, /FROM mission_assignments ma/);
+  assert.doesNotMatch(opportunityHandler, /o\.address|client_user_id|file_reference/);
+});
+
+test("applications are POST-only, idempotent and never accept client-controlled pay or tenant identity", () => {
+  assert.match(opportunityHandler, /request\.method !== 'POST'[\s\S]{0,100}METHOD_NOT_ALLOWED/);
+  assert.match(opportunityHandler, /Idempotency-Key/);
+  assert.match(opportunityHandler, /IDEMPOTENCY_KEY_CONFLICT/);
+  assert.match(opportunityHandler, /INSERT INTO mission_applications/);
+  assert.match(opportunityHandler, /opportunity\.provider_pay_cents/);
+  assert.match(opportunityHandler, /opportunity\.owner_tenant_id/);
+  assert.match(opportunityHandler, /auth\.user\.id/);
+  assert.doesNotMatch(opportunityHandler, /payload\.provider_pay_cents|payload\.owner_tenant_id|payload\.applicant_tenant_id/);
+});
+
+test("canonical Worker dispatch exposes only the exact intervenant opportunity routes", () => {
+  assert.match(source, /url\.pathname === '\/api\/intervenant\/opportunities'/);
+  assert.match(source, /intervenantOpportunityRoute\(request, env, url\)/);
+  assert.match(source, /url\.pathname === '\/api\/intervenant\/workspace'/);
+});
