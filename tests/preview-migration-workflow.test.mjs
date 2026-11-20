@@ -49,7 +49,8 @@ test("Preview migration workflow validates the full canonical migration chain", 
     "0026_accounting_currency_consistency.sql",
     "0027_tenant_membership_identity_immutable.sql",
     "0028_tenant_accounting_entity_delete_guard.sql",
-    "0029_supra_append_only_audit_guards.sql"
+    "0029_supra_append_only_audit_guards.sql",
+    "0030_supra_audit_tenant_scope.sql"
   ];
   for (const migration of expected) assert.ok(workflow.includes(`"${migration}"`), `missing canonical migration ${migration}`);
 });
@@ -85,6 +86,9 @@ test("Preview post-migration verification checks identity, mission-security and 
     "supra_audit_events",
     "idx_supra_audit_events_created_at",
     "idx_supra_audit_events_actor",
+    "0030_supra_audit_tenant_scope.sql",
+    "idx_supra_audit_events_tenant_created_at",
+    "trg_supra_audit_events_require_active_tenant",
     "0022_supra_persisted_approvals.sql",
     "supra_approval_requests", "supra_approval_votes", "supra_approval_events",
     "idx_supra_approval_requests_status_expiry", "idx_supra_approval_requests_tenant_resource",
@@ -99,13 +103,13 @@ test("Preview post-migration verification checks identity, mission-security and 
   ]) assert.ok(workflow.includes(name), `missing post-migration verification for ${name}`);
 });
 
-test("Preview migration workflow accepts only an empty EU D1, the exact 23-entry reviewed baseline or the exact 30-entry target", () => {
+test("Preview migration workflow accepts only an empty EU D1, the exact 23-entry reviewed baseline or the exact 31-entry target", () => {
   assert.match(workflow, /SELECT type, name FROM sqlite_master ORDER BY type, name/);
   assert.match(workflow, /registry_present/);
   assert.match(workflow, /non_internal/);
-  assert.match(workflow, /len\(local\) != 30/);
+  assert.match(workflow, /len\(local\) != 31/);
   assert.match(workflow, /remote == base/);
-  assert.match(workflow, /differs from the exact reviewed 23-entry baseline and 30-entry target/);
+  assert.match(workflow, /differs from the exact reviewed 23-entry baseline and 31-entry target/);
   assert.doesNotMatch(workflow, /legacy=/);
   assert.doesNotMatch(workflow, /baseline=\(local-pending\)\|legacy/);
 });
