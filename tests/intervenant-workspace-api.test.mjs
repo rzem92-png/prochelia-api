@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 
 const source = readFileSync(new URL("../src/index.js", import.meta.url), "utf8");
 const start = source.indexOf("async function intervenantWorkspaceReadModel(");
-const end = source.indexOf("\nasync function handle(request,env){", start);
+const end = source.indexOf("\nasync function intervenantOpportunityRoute(", start);
 assert.ok(start >= 0 && end > start, "workspace read model must exist in canonical API Worker");
 const handler = source.slice(start, end);
 
