@@ -133,7 +133,9 @@ test("Live E2E pins the deployed Preview Worker independently from the workflow 
   assert.ok(workflow.includes("API_EXPECTED_COMMIT: ${{ inputs.api_commit_sha || '' }}"));
   assert.ok(workflow.includes("api_commit_sha is required and must be an exact 40-character lowercase Git SHA"));
   assert.ok(workflow.includes("PROCHELIA_COMMIT_SHA"));
-  assert.ok(workflow.includes('[[ "$worker_commit" == "$API_EXPECTED_COMMIT" ]]'));
+  assert.ok(workflow.includes('select(.name == "PROCHELIA_COMMIT_SHA" and .type == "plain_text" and .text == $expected)'));
+  assert.ok(workflow.includes('select(.name == "DB" and .type == "d1" and .database_id == $db)'));
+  assert.ok(workflow.includes('[[ "$API_EXPECTED_COMMIT" =~ ^[0-9a-f]{40}$ ]]'));
   assert.ok(!workflow.includes("API_EXPECTED_COMMIT: ${{ github.sha }}"));
   assert.ok(workflow.includes("ref: ${{ github.sha }}"));
   assert.ok(workflow.includes("API_DEPLOYED_VERSION_ID"));
