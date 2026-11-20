@@ -240,7 +240,7 @@ test("availability request JSON is bounded while streaming even without Content-
 
 test("opportunity application bodies use the same streaming byte limit", () => {
   const start = source.indexOf("async function intervenantOpportunityRoute(");
-  const end = source.indexOf("\\nasync function intervenantApplicationReadRoute(", start);
+  const end = source.indexOf("\nasync function handle(request,env){", start);
   assert.ok(start >= 0 && end > start, "opportunity route must exist");
   const route = source.slice(start, end);
   assert.match(route, /readLimitedJson\\(request, 4096\\)/);
