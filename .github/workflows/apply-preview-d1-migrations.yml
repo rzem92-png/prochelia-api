@@ -335,7 +335,7 @@ jobs:
           elif registry_present and remote == local and remote_schema == target_schema:
               print("PASS: exact 32-entry registry AND exact schema inventory match the canonical target; rerun is idempotent.")
           else:
-              print("::error::Preview migration registry differs from the exact reviewed 23-entry baseline and 31-entry target; no migration will run.")
+              print("::error::Preview migration registry differs from the exact reviewed 23-entry baseline and 32-entry target; no migration will run.")
               print("Unexpected remote names:", ", ".join(sorted(remote-local)) or "(none)")
               print("Missing expected names:", ", ".join(sorted(local-remote)) or "(none)")
               raise SystemExit(1)
@@ -609,8 +609,24 @@ jobs:
             raise SystemExit(1)
           print("PASS: operational marketplace tenant indexes and relationship guards verified.")
           PY
-          jq -n '{sql:"SELECT name FROM pragma_table_info('"'clients'"') UNION ALL SELECT name FROM pragma_table_info('"'intervenants'"') UNION ALL SELECT name FROM pragma_table_info('"'missions'"') UNION ALL SELECT name FROM pragma_table_info('"'disponibilites'"') UNION ALL SELECT name FROM pragma_table_info('"'wallets'"') UNION ALL SELECT name FROM pragma_table_info('"'documents'"')",params:[]}' > "$request"
+          sql="SELECT 'clients' AS table_name, name FROM pragma_table_info('clients') UNION ALL SELECT 'intervenants', name FROM pragma_table_info('intervenants') UNION ALL SELECT 'prestations', name FROM pragma_table_info('prestations') UNION ALL SELECT 'missions', name FROM pragma_table_info('missions') UNION ALL SELECT 'tarifs', name FROM pragma_table_info('tarifs') UNION ALL SELECT 'paiements', name FROM pragma_table_info('paiements') UNION ALL SELECT 'disponibilites', name FROM pragma_table_info('disponibilites') UNION ALL SELECT 'evaluations', name FROM pragma_table_info('evaluations') UNION ALL SELECT 'documents', name FROM pragma_table_info('documents') UNION ALL SELECT 'conflits', name FROM pragma_table_info('conflits') UNION ALL SELECT 'journal', name FROM pragma_table_info('journal') UNION ALL SELECT 'wallets', name FROM pragma_table_info('wallets')"
+          jq -n --arg sql "$sql" '{sql:$sql,params:[]}' > "$request"
           status="$(curl --silent --show-error --output "$response" --write-out '%{http_code}' -X POST -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -H "Content-Type: application/json" --data-binary @"$request" "https://api.cloudflare.com/client/v4/accounts/$EXPECTED_ACCOUNT_ID/d1/database/$EXPECTED_DB_ID/query")"
           test "$status" = "200" || { echo "::error::Operational tenant_id column verification failed (HTTP $status)."; exit 1; }
           jq -e '.success == true' "$response" >/dev/null
+          python3 - "$response" <<'PY'
+          import json, pathlib, sys
+          rows=json.loads(pathlib.Path(sys.argv[1]).read_text())["result"][0]["results"]
+          missing=sorted({table for table,name in [(r["table_name"],r["name"]) for r in rows] if name=="tenant_id"} ^ {
+            "clients","intervenants","prestations","missions","tarifs","paiements",
+            "disponibilites","evaluations","documents","conflits","journal","wallets"
+          })
+          present={r["table_name"] for r in rows if r["name"]=="tenant_id"}
+          required={"clients","intervenants","prestations","missions","tarifs","paiements",
+                    "disponibilites","evaluations","documents","conflits","journal","wallets"}
+          if present != required:
+            print("::error::Missing operational tenant_id columns:", sorted(required-present))
+            raise SystemExit(1)
+          print("PASS: tenant_id columns verified on all 12 operational marketplace tables.")
+          PY
           echo "PASS: operational marketplace tenant scope migration verification completed."
