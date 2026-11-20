@@ -163,7 +163,7 @@ test("SUPRA audit trail and approval requests cannot be updated or deleted", asy
   assert.match(auditSql, /trg_supra_audit_events_no_update/);
   assert.match(auditSql, /trg_supra_audit_events_no_delete/);
   assert.match(approvalSql, /trg_supra_approval_requests_no_delete/);
-  assert.match(approvalSql, /SUPRA_AUDIT_EVENTS_ARE_APPEND_ONLY/);
+  assert.match(auditSql, /SUPRA_AUDIT_EVENTS_ARE_APPEND_ONLY/);
   assert.match(approvalSql, /APPROVAL_REQUESTS_ARE_APPEND_ONLY/);
 });
 
