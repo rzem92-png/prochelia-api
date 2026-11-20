@@ -15,6 +15,7 @@ on:
       - "tests/supra-*.test.mjs"
       - "tests/session-cookie-malformed.test.mjs"
       - "tests/pricing-quote-guardrails.test.mjs"
+      - "tests/intervenant-workspace-api.test.mjs"
       - ".github/workflows/supra-core-validation.yml"
 
 permissions:
