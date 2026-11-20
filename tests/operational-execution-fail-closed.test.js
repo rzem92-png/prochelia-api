@@ -186,3 +186,21 @@ test("action outbox route has an authenticated fail-closed guard before its lega
   assert.ok(authGate > policyBranch && failClosed > authGate, "authorization precedes the explicit 503 response");
   assert.ok(legacyRoute > failClosed, "guard executes before the legacy outbox handler can be called");
 });
+
+
+test("legacy cross-tenant operational and strategic handlers fail closed before D1 access", async () => {
+  const source = await readFile(new URL("../src/index.js", import.meta.url), "utf8");
+  const handlers = ["processActionOutbox","getOperationsDashboard","getJournal","promotionList","activatePromotion","strategicDashboard","scoreClients","qualityCreate","capacityDashboard","financeForecast"];
+  for (const name of handlers) {
+    const start = source.indexOf("async function " + name + "(request, env) {");
+    assert.notEqual(start, -1, name + " exists");
+    const end = source.indexOf("\\n}", start);
+    assert.notEqual(end, -1, name + " has a function boundary");
+    const body = source.slice(start, end);
+    const auth = body.indexOf("requireAuthRole(");
+    const block = body.indexOf("return legacyTenantScopeBlocked()");
+    const firstD1 = body.search(/\\.prepare\\s*\\(/);
+    assert.ok(auth >= 0 && block > auth, name + " must authenticate before refusing");
+    assert.ok(firstD1 === -1 || block < firstD1, name + " must refuse before any D1 access");
+  }
+});
