@@ -42,8 +42,8 @@ function post(path, body, origin = "https://app.example") {
   });
 }
 
-const managerA = { user: { id: "manager-a", role: "gerante", tenant_id: "tenant-1" } };
-const managerB = { user: { id: "manager-b", role: "gerante", tenant_id: "tenant-1" } };
+const managerA = { user: { id: "manager-a", role: "gerante", tenant_id: "tenant-1", tenant_role: "OWNER" } };
+const managerB = { user: { id: "manager-b", role: "gerante", tenant_id: "tenant-1", tenant_role: "MANAGER" } };
 
 test("approval routes reject anonymous and non-manager callers", async () => {
   const env = { DB: fakeDb() };
@@ -316,4 +316,13 @@ test("approval request body limit is enforced while streaming before D1 access",
   }), { DB: db }, managerA);
   assert.equal(response.status, 413);
   assert.equal(db.calls.length, 0);
+});
+
+
+test("approval routes reject a global manager with read-only tenant membership", async () => {
+  const response = await handleSupraApprovalRoute(
+    post("/api/supra/approvals/request", {}), { DB: fakeDb() },
+    { user: { id: "manager-readonly", role: "GERANTE", tenant_id: "tenant-1", tenant_role: "READ_ONLY" } }
+  );
+  assert.equal(response.status, 403);
 });
