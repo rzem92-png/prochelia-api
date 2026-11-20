@@ -201,5 +201,6 @@ test("intervenant can withdraw only their own pending application within their a
 });
 test("withdrawal route is dispatched only for the exact application path", () => {
   assert.ok(source.includes("intervenantApplicationWithdrawRoute(request, env, url)"));
-  assert.ok(source.includes("/api/intervenant/applications/[^/]+/withdraw"));
+  assert.ok(source.includes("url.pathname.match(/^\\/api"));
+  assert.ok(source.includes("applications\\/([^/]+)\\/withdraw$/"));
 });
