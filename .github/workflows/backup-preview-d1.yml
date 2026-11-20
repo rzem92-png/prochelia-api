@@ -24,6 +24,12 @@ jobs:
       # Identifiant de compte confirmé depuis le tableau de bord Cloudflare fourni.
       CLOUDFLARE_ACCOUNT_ID: f2a79e9fa41566a8ec80fb24c02c60eb
     steps:
+      - name: Checkout exact workflow commit for pinned Preview D1 config
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
       - name: Vérifier les secrets requis et la cible Cloudflare
         shell: bash
         env:
