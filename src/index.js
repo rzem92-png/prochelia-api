@@ -3365,6 +3365,56 @@ async function intervenantWorkspaceReadModel(request, env) {
 
 
 
+
+async function intervenantApplicationWithdrawRoute(request, env, url) {
+  const match = url.pathname.match(/^\/api\/intervenant\/applications\/([^/]+)\/withdraw$/);
+  if (!match) return null;
+  if (request.method !== 'POST') {
+    return json({ ok: false, error: 'METHOD_NOT_ALLOWED' }, 405, { allow: 'POST' });
+  }
+  let auth;
+  try {
+    auth = await getSessionUser(request, env);
+  } catch {
+    return json({ ok: false, error: 'AUTHENTICATION_SCHEMA_UNAVAILABLE' }, 503);
+  }
+  if (!auth?.user) return json({ ok: false, error: 'UNAUTHENTICATED' }, 401);
+  if (!requireRole(auth, ['intervenant'])) return json({ ok: false, error: 'FORBIDDEN' }, 403);
+  const tenantId = auth.session_active_tenant_id;
+  if (!tenantId) return json({ ok: false, error: 'ACTIVE_TENANT_REQUIRED' }, 403);
+  let profile;
+  try {
+    profile = await env.DB.prepare(
+      'SELECT id FROM intervenants WHERE user_id = ? AND tenant_id = ? LIMIT 1'
+    ).bind(auth.user.id, tenantId).first();
+  } catch {
+    return json({ ok: false, error: 'INTERVENANT_PROFILE_SCHEMA_UNAVAILABLE' }, 503);
+  }
+  if (!profile?.id) return json({ ok: false, error: 'INTERVENANT_PROFILE_NOT_FOUND' }, 404);
+
+  let applicationId;
+  try { applicationId = decodeURIComponent(match[1]); }
+  catch { return json({ ok: false, error: 'INVALID_APPLICATION_ID' }, 400); }
+  try {
+    const result = await env.DB.prepare(
+      `UPDATE mission_applications
+          SET status = 'WITHDRAWN', updated_at = CURRENT_TIMESTAMP, version = version + 1
+        WHERE id = ? AND applicant_tenant_id = ? AND intervenant_id = ?
+          AND status IN ('SUBMITTED', 'SHORTLISTED')`
+    ).bind(applicationId, tenantId, profile.id).run();
+    if (Number(result.meta?.changes || 0) === 1) {
+      return json({ ok: true, application: { id: applicationId, status: 'WITHDRAWN' } });
+    }
+    const existing = await env.DB.prepare(
+      'SELECT status FROM mission_applications WHERE id = ? AND applicant_tenant_id = ? AND intervenant_id = ? LIMIT 1'
+    ).bind(applicationId, tenantId, profile.id).first();
+    if (!existing) return json({ ok: false, error: 'APPLICATION_NOT_FOUND' }, 404);
+    return json({ ok: false, error: 'APPLICATION_NOT_WITHDRAWABLE', status: existing.status }, 409);
+  } catch {
+    return json({ ok: false, error: 'APPLICATION_WITHDRAWAL_REJECTED' }, 409);
+  }
+}
+
 async function intervenantApplicationsRoute(request, env) {
   if (request.method !== 'GET') {
     return json({ ok: false, error: 'METHOD_NOT_ALLOWED' }, 405, { allow: 'GET' });
@@ -3751,6 +3801,7 @@ async function handle(request,env){
       if (request.method !== 'POST') return json({ ok: false, error: 'METHOD_NOT_ALLOWED', version: VERSION }, 405);
       return json({ ok: false, error: 'AUTHENTICATED_VALIDATION_REQUIRED', version: VERSION, write_enabled: false }, 403);
     }
+    if (/^\/api\/intervenant\/applications\/[^/]+\/withdraw$/.test(url.pathname)) return intervenantApplicationWithdrawRoute(request, env, url);
     if (url.pathname === '/api/intervenant/applications') return intervenantApplicationsRoute(request, env);
     if (url.pathname === '/api/intervenant/assignments') return intervenantAssignmentsRoute(request, env);
     if (url.pathname === '/api/intervenant/availability') return intervenantAvailabilityRoute(request, env, url);
