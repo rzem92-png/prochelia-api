@@ -3349,6 +3349,7 @@ async function handle(request,env){
       if (request.method !== 'POST') return json({ ok: false, error: 'METHOD_NOT_ALLOWED', version: VERSION }, 405);
       return json({ ok: false, error: 'AUTHENTICATED_VALIDATION_REQUIRED', version: VERSION, write_enabled: false }, 403);
     }
+    if (url.pathname === '/api/intervenant/workspace') return intervenantWorkspaceReadModel(request, env);
     if (url.pathname.startsWith('/api/supra/')) {
       let supraAuth = await getSessionUser(request, env).catch(() => null);
       if (supraAuth?.user) {
