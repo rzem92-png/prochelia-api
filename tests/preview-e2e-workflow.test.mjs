@@ -12,14 +12,20 @@ test("Preview E2E is gated by explicit confirmation or a successful isolated Pre
   assert.match(workflow, /github\.ref == 'refs\/heads\/main'/);
 });
 
-test("Preview E2E pins its own D1, Worker and Pages deployment", () => {
+test("Preview E2E resolves the current matching Pages Preview deployment dynamically", () => {
   assert.match(workflow, /PREVIEW_DB_ID: e3cf167c-37e1-4d72-9ac6-b3e27c14b97f/);
-  assert.match(workflow, /PAGES_DEPLOYMENT_ID: 83a36d32-4880-4417-a684-f9247e42debf/);
-  assert.match(workflow, /PAGES_PREVIEW_URL: https:\/\/83a36d32\.prochelia\.pages\.dev/);
+  assert.match(workflow, /FRONTEND_BRANCH: feat\/intervenant-secure-pages-integration-2026-11-20/);
+  assert.match(workflow, /api\.github\.com\/repos\/rzem92-png\/-prochelia\/branches/);
+  assert.match(workflow, /pages\/projects\/prochelia\/deployments\?env=preview&per_page=100/);
+  assert.match(workflow, /deployment_trigger\.metadata\.branch/);
+  assert.match(workflow, /deployment_trigger\.metadata\.commit_hash/);
+  assert.match(workflow, /PAGES_DEPLOYMENT_ID=%s/);
+  assert.match(workflow, /PAGES_PREVIEW_URL=%s/);
   assert.match(workflow, /prochelia-api-preview/);
-  assert.match(workflow, /3846562300e97a1816b2aa7e317448449270c2bc/);
+  assert.doesNotMatch(workflow, /83a36d32|3846562300e97a1816b2aa7e317448449270c2bc|e69fde70fb28405aa8117eaf041aed618d3da664/);
   assert.doesNotMatch(workflow, /PREVIEW_DB_ID: 04f52830-ef5a-4f17-a640-42bbc2381bba/);
 });
+
 
 test("Pages binding mismatch diagnostics expose only non-secret deployment metadata", () => {
   const marker = "Safe metadata diagnostic follows.";
@@ -50,4 +56,15 @@ test("Preview directory acceptance exercises the deployed Worker and determinist
   assert.match(workflow, /9999-12-31 23:59:59/);
   assert.match(workflow, /offset=not-a-number/);
   assert.doesNotMatch(workflow, /offset=50001/);
+});
+
+test("Preview E2E exercises the real same-origin Pages-to-Worker proxy without session or data writes", () => {
+  assert.match(workflow, /Exercise same-origin Pages-to-Worker proxy without a session/);
+  for (const route of ["workspace","opportunities","assignments","applications"]) {
+    assert.match(workflow, new RegExp("/api/intervenant/" + route));
+  }
+  assert.match(workflow, /expected HTTP 401/);
+  assert.match(workflow, /options_status/);
+  assert.match(workflow, /expected HTTP 204/);
+  assert.match(workflow, /service binding/);
 });
