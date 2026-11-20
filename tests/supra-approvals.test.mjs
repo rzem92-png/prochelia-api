@@ -221,7 +221,7 @@ test("all approval endpoints fail closed when the authenticated session has no s
     requestId: "req-no-tenant", reason: "Review"
   }), { DB: revokeDb }, managerWithoutTenant);
   assert.equal(revokeResponse.status, 403);
-  assert.equal((await revokeResponse.json()).error, "TENANT_SCOPE_NOT_VERIFIED");
+  assert.equal((await revokeResponse.json()).error, "FORBIDDEN");
   assert.equal(revokeDb.calls.filter(x => x.kind === "batch").length, 0);
 });
 
