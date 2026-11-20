@@ -236,3 +236,14 @@ test("availability request JSON is bounded while streaming even without Content-
   const malformed = await readLimitedJson(makeRequest(["{not-json}"]));
   assert.deepEqual(malformed, { ok: false, tooLarge: false });
 });
+
+
+test("opportunity application bodies use the same streaming byte limit", () => {
+  const start = source.indexOf("async function intervenantOpportunityRoute(");
+  const end = source.indexOf("\\nasync function intervenantApplicationReadRoute(", start);
+  assert.ok(start >= 0 && end > start, "opportunity route must exist");
+  const route = source.slice(start, end);
+  assert.match(route, /readLimitedJson\\(request, 4096\\)/);
+  assert.doesNotMatch(route, /request\\.json\\(\\)/);
+  assert.match(route, /REQUEST_TOO_LARGE/);
+});
