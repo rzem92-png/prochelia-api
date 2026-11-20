@@ -54,7 +54,7 @@ test("Preview migration workflow validates the full canonical migration chain", 
     "0031_operational_marketplace_tenant_scope.sql",
     "0032_privacy_safe_cross_tenant_mission_marketplace.sql",
     "0033_intervenant_availability_overlap_guard.sql",
-    "0034_timezone_safe_availability_overlap.sql"
+    "0035_validate_availability_intervals.sql"
   ];
   for (const migration of expected) assert.ok(workflow.includes(`"${migration}"`), `missing canonical migration ${migration}`);
 });
@@ -107,13 +107,13 @@ test("Preview post-migration verification checks identity, mission-security and 
   ]) assert.ok(workflow.includes(name), `missing post-migration verification for ${name}`);
 });
 
-test("Preview migration workflow accepts only an empty EU D1, the exact 23-entry reviewed baseline or the exact 35-entry target", () => {
+test("Preview migration workflow accepts only an empty EU D1, the exact 23-entry reviewed baseline or the exact 36-entry target", () => {
   assert.match(workflow, /SELECT type, name FROM sqlite_master ORDER BY type, name/);
   assert.match(workflow, /registry_present/);
   assert.match(workflow, /non_internal/);
-  assert.match(workflow, /len\(local\) != 35/);
+  assert.match(workflow, /len\(local\) != 36/);
   assert.match(workflow, /remote == base/);
-  assert.match(workflow, /differs from the exact reviewed 23-entry baseline and 35-entry target/);
+  assert.match(workflow, /differs from the exact reviewed 23-entry baseline and 36-entry target/);
   assert.doesNotMatch(workflow, /legacy=/);
   assert.doesNotMatch(workflow, /baseline=\(local-pending\)\|legacy/);
 });
