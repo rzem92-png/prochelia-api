@@ -17,6 +17,7 @@ test("Preview deploy is manual and requires exact confirmation on main or its de
   assert.match(workflow, /github\.ref == 'refs\/heads\/main'/);
   assert.match(workflow, /github\.ref == 'refs\/heads\/fix\/preview-workflow-alignment-active-2026-11-19'/);
   assert.match(workflow, /github\.ref == 'refs\/heads\/fix\/preview-e2e-dynamic-pages-pin-2026-11-17'/);
+  assert.match(workflow, /github\\.ref == 'refs\\/heads\\/feat\\/supra-core-active-preview-2026-11-20'/);
 });
 
 test("Preview deployment refuses a candidate that would roll back the active Worker", () => {
