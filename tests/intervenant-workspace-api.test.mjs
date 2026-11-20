@@ -17,7 +17,7 @@ test("workspace requires an authenticated intervenant role", () => {
   assert.match(handler, /getSessionUser\(request, env\)/);
   assert.match(handler, /requireRole\(auth, \['intervenant'\]\)/);
   assert.match(handler, /AUTHENTICATION_SCHEMA_UNAVAILABLE/);
-  assert.match(handler, /status: '503'/);
+  assert.match(handler, /AUTHENTICATION_SCHEMA_UNAVAILABLE' \}, 503/);
   assert.match(handler, /UNAUTHENTICATED/);
   assert.match(handler, /FORBIDDEN/);
 });
