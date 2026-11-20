@@ -3410,7 +3410,7 @@ async function intervenantAvailabilityRoute(request, env, url) {
   catch { return json({ ok: false, error: 'INVALID_JSON' }, 400); }
   const startAt = typeof payload?.start_at === 'string' ? payload.start_at : '';
   const endAt = typeof payload?.end_at === 'string' ? payload.end_at : '';
-  const isoWithZone = /^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}(?::\\d{2}(?:\\.\\d{1,3})?)?(?:Z|[+-]\\d{2}:\\d{2})$/;
+  const isoWithZone = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?(?:Z|[+-]\d{2}:\d{2})$/;
   const startMs = isoWithZone.test(startAt) ? Date.parse(startAt) : NaN;
   const endMs = isoWithZone.test(endAt) ? Date.parse(endAt) : NaN;
   const now = Date.now();
