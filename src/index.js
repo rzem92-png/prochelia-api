@@ -3595,16 +3595,26 @@ async function intervenantAvailabilityRoute(request, env, url) {
   // Persist one UTC representation; compare instants, not timezone-formatted strings.
   const canonicalStartAt = new Date(startMs).toISOString();
   const canonicalEndAt = new Date(endMs).toISOString();
+  const idempotencyKey = String(request.headers.get('Idempotency-Key') || '').trim();
+  if (!/^[A-Za-z0-9._:-]{8,160}$/.test(idempotencyKey)) {
+    return json({ ok: false, error: 'IDEMPOTENCY_KEY_REQUIRED' }, 400);
+  }
 
   try {
-    const duplicate = await env.DB.prepare(
-      `SELECT id FROM disponibilites
-        WHERE intervenant_id = ? AND tenant_id = ? AND status = 'available'
-          AND julianday(start_at) = julianday(?)
-          AND julianday(end_at) = julianday(?)
+    const previous = await env.DB.prepare(
+      `SELECT id, start_at, end_at, status FROM disponibilites
+        WHERE tenant_id = ? AND intervenant_id = ? AND idempotency_key = ?
         LIMIT 1`
-    ).bind(profile.id, tenantId, canonicalStartAt, canonicalEndAt).first();
-    if (duplicate) return json({ ok: true, idempotent_replay: true, availability: { id: duplicate.id } });
+    ).bind(tenantId, profile.id, idempotencyKey).first();
+    if (previous) {
+      const samePayload = Date.parse(previous.start_at) === startMs && Date.parse(previous.end_at) === endMs;
+      if (samePayload) {
+        return json({ ok: true, idempotent_replay: true, availability: {
+          id: previous.id, start_at: previous.start_at, end_at: previous.end_at, status: previous.status
+        } });
+      }
+      return json({ ok: false, error: 'IDEMPOTENCY_KEY_CONFLICT' }, 409);
+    }
 
     const conflict = await env.DB.prepare(
       `SELECT id FROM disponibilites
@@ -3617,13 +3627,27 @@ async function intervenantAvailabilityRoute(request, env, url) {
 
     const id = 'availability-' + crypto.randomUUID();
     await env.DB.prepare(
-      `INSERT INTO disponibilites(id, intervenant_id, tenant_id, start_at, end_at, status)
-       VALUES (?, ?, ?, ?, ?, 'available')`
-    ).bind(id, profile.id, tenantId, canonicalStartAt, canonicalEndAt).run();
+      `INSERT INTO disponibilites(id, intervenant_id, tenant_id, start_at, end_at, status, idempotency_key)
+       VALUES (?, ?, ?, ?, ?, 'available', ?)`
+    ).bind(id, profile.id, tenantId, canonicalStartAt, canonicalEndAt, idempotencyKey).run();
     return json({ ok: true, availability: { id, start_at: canonicalStartAt, end_at: canonicalEndAt, status: 'available' } }, 201);
   } catch (error) {
-    // The database trigger is the final concurrency-safe guard. Preserve its
-    // domain result so the intervenant receives a precise conflict response.
+    // Resolve a concurrent replay after the unique idempotency index rejects
+    // the second INSERT. The database trigger remains the final overlap guard.
+    try {
+      const replay = await env.DB.prepare(
+        `SELECT id, start_at, end_at, status FROM disponibilites
+          WHERE tenant_id = ? AND intervenant_id = ? AND idempotency_key = ?
+          LIMIT 1`
+      ).bind(tenantId, profile.id, idempotencyKey).first();
+      if (replay) {
+        const samePayload = Date.parse(replay.start_at) === startMs && Date.parse(replay.end_at) === endMs;
+        if (samePayload) return json({ ok: true, idempotent_replay: true, availability: {
+          id: replay.id, start_at: replay.start_at, end_at: replay.end_at, status: replay.status
+        } });
+        return json({ ok: false, error: 'IDEMPOTENCY_KEY_CONFLICT' }, 409);
+      }
+    } catch {}
     if (String(error?.message || error).includes('AVAILABILITY_OVERLAP')) {
       return json({ ok: false, error: 'AVAILABILITY_OVERLAP' }, 409);
     }
