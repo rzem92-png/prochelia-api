@@ -35,6 +35,7 @@ EXPECTED = [
     "0028_tenant_accounting_entity_delete_guard.sql",
     "0029_supra_append_only_audit_guards.sql",
     "0030_supra_audit_tenant_scope.sql",
+    "0031_operational_marketplace_tenant_scope.sql",
 ]
 
 # Keep the manual Preview migration gate synchronized with the canonical chain.
@@ -46,16 +47,16 @@ assert '"0029_supra_append_only_audit_guards.sql"' in workflow_text, (
 assert '"0030_supra_audit_tenant_scope.sql"' in workflow_text, (
     "Preview migration workflow omits tenant-scoped SUPRA audit migration 0030"
 )
-assert "if len(local) != 31:" in workflow_text, (
+assert "if len(local) != 32:" in workflow_text, (
     "Preview migration workflow must require exactly 31 canonical migrations"
 )
-assert "exact 31-entry registry" in workflow_text, (
+assert "exact 32-entry registry" in workflow_text, (
     "Preview migration workflow target registry count is stale"
 )
-assert "all 31 canonical migrations are pending" in workflow_text, (
+assert "all 32 canonical migrations are pending" in workflow_text, (
     "Preview migration workflow empty-database inventory message is stale"
 )
-assert "only migrations 0023-0030 are pending" in workflow_text, (
+assert "only migrations 0023-0031 are pending" in workflow_text, (
     "Preview migration workflow baseline-to-target range is stale"
 )
 
@@ -538,3 +539,122 @@ try:
     raise AssertionError("SUPRA audit event for an unknown tenant was incorrectly accepted")
 except sqlite3.IntegrityError as exc:
     assert "SUPRA_AUDIT_ACTIVE_TENANT_REQUIRED" in str(exc), str(exc)
+
+# Operational marketplace rows are tenant-scoped at the database boundary.
+marketplace_columns = {
+    "clients", "intervenants", "prestations", "missions", "tarifs", "paiements",
+    "disponibilites", "evaluations", "documents", "conflits", "journal", "wallets",
+}
+for table in sorted(marketplace_columns):
+    columns = {row[1] for row in db.execute(f"PRAGMA table_info({table})")}
+    assert "tenant_id" in columns, f"{table} is missing tenant_id"
+marketplace_triggers = {
+    row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='trigger'")
+}
+required_marketplace_triggers = {
+    "trg_clients_require_active_tenant", "trg_intervenants_require_active_tenant",
+    "trg_prestations_require_active_tenant", "trg_missions_require_active_tenant",
+    "trg_tarifs_require_active_tenant", "trg_paiements_require_active_tenant",
+    "trg_disponibilites_require_active_tenant", "trg_evaluations_require_active_tenant",
+    "trg_documents_require_active_tenant", "trg_conflits_require_active_tenant",
+    "trg_journal_require_active_tenant", "trg_wallets_require_active_tenant",
+    "trg_clients_membership_scope", "trg_intervenants_membership_scope",
+    "trg_wallets_membership_scope", "trg_documents_membership_scope",
+    "trg_missions_relationship_scope_insert", "trg_missions_relationship_scope_update",
+    "trg_availability_intervenant_scope", "trg_availability_intervenant_scope_update",
+    "trg_tarif_prestation_scope", "trg_tarif_prestation_scope_update",
+    "trg_payment_mission_scope", "trg_payment_mission_scope_update",
+    "trg_evaluation_mission_scope", "trg_evaluation_mission_scope_update",
+    "trg_conflict_mission_scope", "trg_conflict_mission_scope_update",
+}
+required_marketplace_triggers |= {
+    f"trg_{table}_tenant_immutable" for table in marketplace_columns
+}
+assert required_marketplace_triggers <= marketplace_triggers, (
+    f"Missing operational marketplace tenant guards: {sorted(required_marketplace_triggers-marketplace_triggers)}"
+)
+
+# Create two isolated tenants and active memberships for synthetic users.
+for user_id, email, role in [
+    ("market-client-a", "market-client-a@example.test", "client"),
+    ("market-worker-a", "market-worker-a@example.test", "intervenant"),
+    ("market-client-b", "market-client-b@example.test", "client"),
+    ("market-worker-b", "market-worker-b@example.test", "intervenant"),
+]:
+    db.execute(
+        "INSERT INTO users(id, role, email, first_name, last_name, password_hash) VALUES (?, ?, ?, 'Synthetic', 'Marketplace', 'synthetic')",
+        (user_id, role, email),
+    )
+for tenant_id, slug in [("market-tenant-a", "market-tenant-a"), ("market-tenant-b", "market-tenant-b")]:
+    db.execute("INSERT INTO tenants(id, slug, display_name) VALUES (?, ?, ?)", (tenant_id, slug, slug))
+for suffix, tenant_id, user_id in [
+    ("client-a", "market-tenant-a", "market-client-a"),
+    ("worker-a", "market-tenant-a", "market-worker-a"),
+    ("client-b", "market-tenant-b", "market-client-b"),
+    ("worker-b", "market-tenant-b", "market-worker-b"),
+]:
+    membership_id = f"membership-{suffix}"
+    db.execute(
+        "INSERT INTO tenant_memberships(id, tenant_id, user_id, role, status, invited_by_user_id) VALUES (?, ?, ?, 'MEMBER', 'INVITED', 'user-admin')",
+        (membership_id, tenant_id, user_id),
+    )
+    db.execute(
+        "UPDATE tenant_memberships SET status='ACTIVE', accepted_at=CURRENT_TIMESTAMP WHERE id=?",
+        (membership_id,),
+    )
+
+# Missing tenant, inactive tenant, or non-member owner must be rejected.
+try:
+    db.execute("INSERT INTO clients(id, user_id, tenant_id) VALUES ('market-client-no-tenant', 'market-client-a', NULL)")
+    raise AssertionError("Client without tenant was incorrectly accepted")
+except sqlite3.IntegrityError as exc:
+    assert "CLIENT_ACTIVE_TENANT_REQUIRED" in str(exc), str(exc)
+try:
+    db.execute("INSERT INTO intervenants(id, user_id, tenant_id) VALUES ('market-worker-cross', 'market-worker-a', 'tenant-b')")
+    raise AssertionError("Intervenant assigned to a non-member tenant was incorrectly accepted")
+except sqlite3.IntegrityError as exc:
+    assert "INTERVENANT_TENANT_MEMBERSHIP_REQUIRED" in str(exc), str(exc)
+
+db.execute("INSERT INTO clients(id, user_id, tenant_id) VALUES ('market-client-a-row', 'market-client-a', 'market-tenant-a')")
+db.execute("INSERT INTO intervenants(id, user_id, tenant_id) VALUES ('market-worker-a-row', 'market-worker-a', 'market-tenant-a')")
+db.execute("INSERT INTO clients(id, user_id, tenant_id) VALUES ('market-client-b-row', 'market-client-b', 'market-tenant-b')")
+db.execute("INSERT INTO intervenants(id, user_id, tenant_id) VALUES ('market-worker-b-row', 'market-worker-b', 'market-tenant-b')")
+db.execute("INSERT INTO prestations(id, name, tenant_id) VALUES ('market-service-a', 'Synthetic service A', 'market-tenant-a')")
+db.execute("INSERT INTO prestations(id, name, tenant_id) VALUES ('market-service-b', 'Synthetic service B', 'market-tenant-b')")
+db.execute("""
+    INSERT INTO missions(id, client_id, intervenant_id, prestation_id, start_at, tenant_id)
+    VALUES ('market-mission-a', 'market-client-a-row', 'market-worker-a-row', 'market-service-a', '2026-11-21T09:00:00Z', 'market-tenant-a')
+""")
+try:
+    db.execute("""
+        INSERT INTO missions(id, client_id, intervenant_id, prestation_id, start_at, tenant_id)
+        VALUES ('market-mission-cross', 'market-client-a-row', 'market-worker-b-row', 'market-service-a', '2026-11-21T09:00:00Z', 'market-tenant-a')
+    """)
+    raise AssertionError("Cross-tenant mission assignment was incorrectly accepted")
+except sqlite3.IntegrityError as exc:
+    assert "MISSION_RELATIONSHIP_TENANT_MISMATCH" in str(exc), str(exc)
+try:
+    db.execute("""
+        INSERT INTO disponibilites(id, intervenant_id, start_at, end_at, tenant_id)
+        VALUES ('market-availability-cross', 'market-worker-b-row', '2026-11-21T09:00:00Z', '2026-11-21T12:00:00Z', 'market-tenant-a')
+    """)
+    raise AssertionError("Cross-tenant availability was incorrectly accepted")
+except sqlite3.IntegrityError as exc:
+    assert "AVAILABILITY_INTERVENANT_TENANT_MISMATCH" in str(exc), str(exc)
+db.execute("""
+    INSERT INTO disponibilites(id, intervenant_id, start_at, end_at, tenant_id)
+    VALUES ('market-availability-a', 'market-worker-a-row', '2026-11-21T09:00:00Z', '2026-11-21T12:00:00Z', 'market-tenant-a')
+""")
+db.execute("""
+    INSERT INTO wallets(id, user_id, tenant_id, currency) VALUES ('market-wallet-a', 'market-worker-a', 'market-tenant-a', 'EUR')
+""")
+db.execute("""
+    INSERT INTO documents(id, user_id, document_type, file_reference, tenant_id)
+    VALUES ('market-document-a', 'market-worker-a', 'IDENTITY', 'synthetic://document', 'market-tenant-a')
+""")
+try:
+    db.execute("UPDATE missions SET tenant_id='market-tenant-b' WHERE id='market-mission-a'")
+    raise AssertionError("Mission tenant reassignment was incorrectly accepted")
+except sqlite3.IntegrityError as exc:
+    assert "TENANT_IMMUTABLE" in str(exc) or "MISSION_RELATIONSHIP_TENANT_MISMATCH" in str(exc), str(exc)
+print("PASS: operational marketplace tables require active tenant membership, tenant-consistent mission relations and immutable tenant ownership.")
