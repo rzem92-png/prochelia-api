@@ -147,9 +147,12 @@ export async function handleSupraApprovalRoute(request, env, auth) {
       if (!item) return reply({ ok: false, error: "APPROVAL_NOT_FOUND" }, 404);
       if (item.tenant_id !== auth.user.tenant_id) return reply({ ok: false, error: "TENANT_SCOPE_NOT_VERIFIED" }, 403);
       const votes = await env.DB.prepare("SELECT approver_user_id, approver_role, decision, reason, created_at FROM supra_approval_votes WHERE request_id=? ORDER BY created_at, id").bind(requestId).all();
+      if (votes?.success !== true || !Array.isArray(votes.results)) {
+        return reply({ ok: false, error: "APPROVAL_LEDGER_UNAVAILABLE" }, 503);
+      }
       let payload;
       try { payload = JSON.parse(item.payload_json); } catch { return reply({ ok: false, error: "APPROVAL_PAYLOAD_CORRUPT" }, 503); }
-      return reply({ ok: true, request: { ...item, payload, votes: votes?.results || [] } });
+      return reply({ ok: true, request: { ...item, payload, votes: votes.results } });
     } catch {
       return reply({ ok: false, error: "APPROVAL_LEDGER_UNAVAILABLE" }, 503);
     }
@@ -240,7 +243,9 @@ export async function handleSupraApprovalRoute(request, env, auth) {
            WHERE EXISTS (SELECT 1 FROM supra_approval_requests WHERE id=? AND status='EXPIRED')
              AND NOT EXISTS (SELECT 1 FROM supra_approval_events WHERE request_id=? AND event_type='EXPIRED')`).bind(crypto.randomUUID(), requestId, auth.user.id, requestId, requestId)
       ]);
-    } catch {}
+    } catch {
+      return reply({ ok: false, error: "APPROVAL_EXPIRY_WRITE_FAILED" }, 503);
+    }
     return reply({ ok: false, error: "APPROVAL_EXPIRED" }, 409);
   }
 
