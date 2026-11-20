@@ -40,3 +40,10 @@ test("availability remains tenant- and intervenant-scoped in database triggers",
   assert.equal((migration.match(/existing\.tenant_id = NEW\.tenant_id/g) || []).length, 2);
   assert.equal((migration.match(/existing\.intervenant_id = NEW\.intervenant_id/g) || []).length, 2);
 });
+
+test("database-enforced overlap conflicts remain explicit to the intervenant API", () => {
+  assert.match(route, /catch \(error\)/);
+  assert.match(route, /String\(error\?\.message \|\| error\)\.includes\('AVAILABILITY_OVERLAP'\)/);
+  assert.match(route, /error: 'AVAILABILITY_OVERLAP' }, 409/);
+  assert.match(route, /error: 'AVAILABILITY_WRITE_REJECTED' }, 409/);
+});
