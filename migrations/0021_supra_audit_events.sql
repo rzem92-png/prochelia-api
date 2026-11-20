@@ -17,3 +17,16 @@ CREATE INDEX IF NOT EXISTS idx_supra_audit_events_created_at
 
 CREATE INDEX IF NOT EXISTS idx_supra_audit_events_actor
   ON supra_audit_events(actor_user_id, created_at);
+
+-- Audit evidence is append-only: application code cannot rewrite or erase history.
+CREATE TRIGGER IF NOT EXISTS trg_supra_audit_events_no_update
+BEFORE UPDATE ON supra_audit_events
+BEGIN
+  SELECT RAISE(ABORT, 'SUPRA_AUDIT_EVENTS_ARE_APPEND_ONLY');
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_supra_audit_events_no_delete
+BEFORE DELETE ON supra_audit_events
+BEGIN
+  SELECT RAISE(ABORT, 'SUPRA_AUDIT_EVENTS_ARE_APPEND_ONLY');
+END;
