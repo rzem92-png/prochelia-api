@@ -1548,8 +1548,21 @@ async function executeCaseBusinessAction(env, c, rec, actorId=null, automatic=fa
   return results;
 }
 
+
+function legacyTenantScopeBlocked() {
+  return json({
+    ok: false,
+    error: "TENANT_DATA_SCOPE_NOT_MIGRATED",
+    message: "This legacy resource is unavailable until tenant ownership and row-level isolation are validated.",
+    version: VERSION,
+    write_enabled: false,
+    automation: "proposal_only_no_background_execution"
+  }, 503);
+}
+
 async function processActionOutbox(request, env) {
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
+  return legacyTenantScopeBlocked();
   await ensureOperationalSchema(env);
   const rows=await env.DB.prepare(`SELECT * FROM action_outbox WHERE status='PENDING' ORDER BY created_at ASC LIMIT 50`).all();
   const processed=[];
@@ -1588,6 +1601,7 @@ export async function approveOperationalCase(request, env) {
 
 async function getOperationsDashboard(request, env) {
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
+  return legacyTenantScopeBlocked();
   const queries={
     open_cases:"SELECT COUNT(*) AS n FROM operational_cases WHERE status NOT IN ('RESOLVED','CLOSED')",
     auto_cases:"SELECT COUNT(*) AS n FROM operational_cases WHERE status='RESOLVED' AND auto_mode='AUTO'",
@@ -1606,6 +1620,7 @@ async function getOperationsDashboard(request, env) {
 
 async function getJournal(request, env) {
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
+  return legacyTenantScopeBlocked();
   const type=new URL(request.url).searchParams.get('type');
   const tables={copilot_log:'SELECT * FROM copilot_log ORDER BY created_at DESC LIMIT 200',activity_journal:'SELECT * FROM activity_journal ORDER BY created_at DESC LIMIT 200',commercial_tasks:'SELECT * FROM commercial_tasks ORDER BY created_at DESC LIMIT 200',recruitment_tasks:'SELECT * FROM recruitment_tasks ORDER BY created_at DESC LIMIT 200',operational_cases:'SELECT * FROM operational_cases ORDER BY created_at DESC LIMIT 200'};
   if(type && !tables[type])return json({ok:false,error:'UNKNOWN_JOURNAL',version:VERSION},400);
@@ -2107,6 +2122,7 @@ async function createPromotion(request, env) {
 async function promotionList(request, env) {
   const gate = await requireAuthRole(request, env, ['gerante','entreprise','client']);
   if (gate.error) return gate.error;
+  return legacyTenantScopeBlocked();
   await ensureStrategicSchema(env);
   const status = new URL(request.url).searchParams.get('status');
   const q = status
@@ -2119,6 +2135,7 @@ async function promotionList(request, env) {
 async function activatePromotion(request, env) {
   const gate = await requireAuthRole(request, env, ['gerante']);
   if (gate.error) return gate.error;
+  return legacyTenantScopeBlocked();
   await ensureStrategicSchema(env);
   const b = await readJson(request) || {};
   if (!b.promotion_id) return json({ok:false,error:'PROMOTION_ID_REQUIRED',version:VERSION},400);
@@ -2138,6 +2155,7 @@ async function activatePromotion(request, env) {
 async function strategicDashboard(request, env) {
   const gate = await requireAuthRole(request, env, ['gerante']);
   if (gate.error) return gate.error;
+  return legacyTenantScopeBlocked();
   await ensureStrategicSchema(env);
 
   const queries = {
@@ -2313,6 +2331,7 @@ export async function operationalExecute(request, env) {
 
 async function scoreClients(request, env) {
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
+  return legacyTenantScopeBlocked();
   await ensureStrategicSchema(env); await ensureOperationalSchema(env);
   const rows=[];
   if(await tableExists(env,'payment_transactions')){
@@ -2351,6 +2370,7 @@ async function loyaltyUpdate(request, env) {
 
 async function qualityCreate(request, env) {
   const gate=await requireAuthRole(request,env,['gerante','client','entreprise']); if(gate.error)return gate.error;
+  return legacyTenantScopeBlocked();
   await ensureOperationalSchema(env); const b=await readJson(request)||{};
   if(!b.mission_id)return json({ok:false,error:'MISSION_ID_REQUIRED',version:VERSION},400);
   const id=crypto.randomUUID();
@@ -2361,6 +2381,7 @@ async function qualityCreate(request, env) {
 
 async function capacityDashboard(request, env) {
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
+  return legacyTenantScopeBlocked();
   await ensureOperationalSchema(env);
   let missions=0, available=0;
   if(await tableExists(env,'missions')) { const r=await env.DB.prepare(`SELECT COUNT(*) n FROM missions WHERE date(created_at)>=date('now','-7 day')`).first(); missions=Number(r?.n||0); }
@@ -2374,6 +2395,7 @@ async function capacityDashboard(request, env) {
 
 async function financeForecast(request, env) {
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
+  return legacyTenantScopeBlocked();
   const months=Math.max(1,Math.min(12,Number((await readJson(request)||{}).months||3)));
   const tx=await env.DB.prepare(`SELECT COALESCE(SUM(gross_cents),0) gross,COALESCE(SUM(commission_cents),0) commission,COALESCE(SUM(provider_fee_cents),0) provider_fee,COALESCE(SUM(refund_cents),0) refunds,COALESCE(SUM(net_intervenant_cents),0) intervenant FROM payment_transactions WHERE created_at>=datetime('now','-90 day')`).first();
   const base=Number(tx?.gross||0)/3;
