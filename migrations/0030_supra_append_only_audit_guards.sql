@@ -1,6 +1,6 @@
--- Harden the already-deployed Preview Nexus Supra audit and approval records.
--- Additive repair for databases where migrations 0021 and 0022 are already recorded.
--- No business execution is enabled by this migration.
+-- PROCHÉLIA — idempotent repair of append-only SUPRA audit/approval guards.
+-- Sequence 0030 follows the canonical accounting/tenant chain through 0029.
+-- This is additive only: no business execution, financial action, or row rewrite.
 
 CREATE TRIGGER IF NOT EXISTS trg_supra_audit_events_no_update
 BEFORE UPDATE ON supra_audit_events
