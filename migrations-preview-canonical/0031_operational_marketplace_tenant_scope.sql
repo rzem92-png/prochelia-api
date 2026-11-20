@@ -16,6 +16,12 @@ ALTER TABLE conflits ADD COLUMN tenant_id TEXT REFERENCES tenants(id);
 ALTER TABLE journal ADD COLUMN tenant_id TEXT REFERENCES tenants(id);
 ALTER TABLE wallets ADD COLUMN tenant_id TEXT REFERENCES tenants(id);
 
+CREATE UNIQUE INDEX IF NOT EXISTS idx_clients_id_tenant ON clients(id, tenant_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_intervenants_id_tenant ON intervenants(id, tenant_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_prestations_id_tenant ON prestations(id, tenant_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_missions_id_tenant ON missions(id, tenant_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_disponibilites_id_tenant ON disponibilites(id, tenant_id);
+
 CREATE INDEX IF NOT EXISTS idx_clients_tenant_user ON clients(tenant_id, user_id);
 CREATE INDEX IF NOT EXISTS idx_intervenants_tenant_user ON intervenants(tenant_id, user_id);
 CREATE INDEX IF NOT EXISTS idx_prestations_tenant_active ON prestations(tenant_id, active);
