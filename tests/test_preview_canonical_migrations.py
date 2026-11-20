@@ -34,6 +34,7 @@ EXPECTED = [
     "0027_tenant_membership_identity_immutable.sql",
     "0028_tenant_accounting_entity_delete_guard.sql",
     "0029_supra_append_only_audit_guards.sql",
+    "0030_supra_audit_tenant_scope.sql",
 ]
 
 # Keep the manual Preview migration gate synchronized with the canonical chain.
@@ -42,13 +43,13 @@ workflow_text = WORKFLOW.read_text(encoding="utf-8")
 assert '"0029_supra_append_only_audit_guards.sql"' in workflow_text, (
     "Preview migration workflow omits the latest canonical migration 0029"
 )
-assert "if len(local) != 30:" in workflow_text, (
-    "Preview migration workflow must require exactly 30 canonical migrations"
+assert "if len(local) != 31:" in workflow_text, (
+    "Preview migration workflow must require exactly 31 canonical migrations"
 )
-assert "exact 30-entry registry" in workflow_text, (
+assert "exact 31-entry registry" in workflow_text, (
     "Preview migration workflow target registry count is stale"
 )
-assert "all 30 canonical migrations are pending" in workflow_text, (
+assert "all 31 canonical migrations are pending" in workflow_text, (
     "Preview migration workflow empty-database inventory message is stale"
 )
 assert "only migrations 0023-0029 are pending" in workflow_text, (
@@ -518,3 +519,19 @@ try:
 except sqlite3.IntegrityError as exc:
     assert "APPROVAL_REQUESTS_ARE_APPEND_ONLY" in str(exc), str(exc)
 print("PASS: SUPRA audit events and approval requests reject UPDATE/DELETE under migration 0029.")
+
+
+# Nexus Supra audit events are attributed to an active tenant at the database boundary.
+audit_columns = {row[1] for row in db.execute("PRAGMA table_info(supra_audit_events)")}
+assert "tenant_id" in audit_columns, "SUPRA audit table must include tenant_id"
+try:
+    db.execute("INSERT INTO supra_audit_events(id, actor_user_id, actor_role, event_type, domain, action, risk, approval_required) VALUES ('bad-audit', 'user-a', 'GERANTE', 'TEST', 'security', 'TEST', 'LOW', 0)")
+    raise AssertionError("SUPRA audit event without tenant was incorrectly accepted")
+except sqlite3.IntegrityError as exc:
+    assert "SUPRA_AUDIT_ACTIVE_TENANT_REQUIRED" in str(exc), str(exc)
+db.execute("INSERT INTO supra_audit_events(id, tenant_id, actor_user_id, actor_role, event_type, domain, action, risk, approval_required) VALUES ('good-audit', 'tenant-a', 'user-a', 'GERANTE', 'TEST', 'security', 'TEST', 'LOW', 0)")
+try:
+    db.execute("INSERT INTO supra_audit_events(id, tenant_id, actor_user_id, actor_role, event_type, domain, action, risk, approval_required) VALUES ('inactive-audit', 'unknown-tenant', 'user-a', 'GERANTE', 'TEST', 'security', 'TEST', 'LOW', 0)")
+    raise AssertionError("SUPRA audit event for an unknown tenant was incorrectly accepted")
+except sqlite3.IntegrityError as exc:
+    assert "SUPRA_AUDIT_ACTIVE_TENANT_REQUIRED" in str(exc), str(exc)
