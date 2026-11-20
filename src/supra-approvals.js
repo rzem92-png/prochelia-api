@@ -276,7 +276,7 @@ export async function handleSupraApprovalRoute(request, env, auth) {
         SELECT ?, ?, ?, 'GERANTE', 'REJECTED', '{}'
          WHERE EXISTS (SELECT 1 FROM supra_approval_requests WHERE id=? AND status='REJECTED')
            AND NOT EXISTS (SELECT 1 FROM supra_approval_events WHERE request_id=? AND event_type='REJECTED')`)
-        .bind(crypto.randomUUID(), requestId, auth.user.id, requestId)
+        .bind(crypto.randomUUID(), requestId, auth.user.id, requestId, requestId)
     ];
     await env.DB.batch(batch);
   } catch (error) {
