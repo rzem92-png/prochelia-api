@@ -62,6 +62,9 @@ assert "all 35 canonical migrations are pending" in workflow_text, (
 assert "only migrations 0023-0034 are pending" in workflow_text, (
     "Preview migration workflow baseline-to-target range is stale"
 )
+assert '"0034_timezone_safe_availability_overlap.sql"' in workflow_text, (
+    "Preview migration workflow omits timezone-safe availability migration 0034"
+)
 
 actual = sorted(path.name for path in MIGRATIONS.glob("*.sql"))
 assert actual == sorted(EXPECTED), (
