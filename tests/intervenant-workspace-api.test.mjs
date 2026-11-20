@@ -247,3 +247,31 @@ test("opportunity application bodies use the same streaming byte limit", () => {
   assert.doesNotMatch(route, /request\.json\(\)/);
   assert.match(route, /REQUEST_TOO_LARGE/);
 });
+
+const profileUpdateStart = source.indexOf("async function intervenantProfileUpdateRoute(");
+const profileUpdateEnd = source.indexOf("\\nasync function handle(request,env){", profileUpdateStart);
+assert.ok(profileUpdateStart >= 0 && profileUpdateEnd > profileUpdateStart, "profile update route must exist before canonical Worker dispatch");
+const profileUpdateHandler = source.slice(profileUpdateStart, profileUpdateEnd);
+
+test("intervenant profile updates are authenticated, tenant-scoped and limited to editable professional fields", () => {
+  for (const fragment of [
+    "request.method !== 'PUT'",
+    "getSessionUser(request, env)",
+    "requireRole(auth, ['intervenant'])",
+    "auth.session_active_tenant_id",
+    "readLimitedJson(request, 2048)",
+    "new Set(['service_area', 'hourly_rate'])",
+    "WHERE user_id = ? AND tenant_id = ?",
+    "WHERE id = ? AND user_id = ? AND tenant_id = ?",
+    "UPDATE intervenants SET service_area = ?, hourly_rate = ?",
+    "INVALID_SERVICE_AREA",
+    "INVALID_HOURLY_RATE",
+    "REQUEST_TOO_LARGE"
+  ]) assert.ok(profileUpdateHandler.includes(fragment), "missing profile update guard: " + fragment);
+  assert.doesNotMatch(profileUpdateHandler, /validation_status|user_id\\s*=\\s*payload|tenant_id\\s*=\\s*payload|INSERT INTO/);
+});
+
+test("profile update endpoint is registered exactly in the canonical Worker", () => {
+  assert.ok(source.includes("url.pathname === '/api/intervenant/profile'"));
+  assert.ok(source.includes("intervenantProfileUpdateRoute(request, env)"));
+});
