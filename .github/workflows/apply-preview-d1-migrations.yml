@@ -92,7 +92,8 @@ jobs:
             "0027_tenant_membership_identity_immutable.sql",
             "0028_tenant_accounting_entity_delete_guard.sql",
             "0029_supra_append_only_audit_guards.sql",
-            "0030_supra_audit_tenant_scope.sql"
+            "0030_supra_audit_tenant_scope.sql",
+            "0031_operational_marketplace_tenant_scope.sql"
           ]
           actual = sorted(p.name for p in Path("migrations-preview-canonical").glob("*.sql"))
           assert actual == sorted(expected), (
@@ -306,8 +307,8 @@ jobs:
               "0021_supra_audit_events.sql",
               "0022_supra_persisted_approvals.sql",
           }
-          if len(local) != 31:
-              print(f"::error::Expected exactly 31 canonical migrations; found {len(local)}.")
+          if len(local) != 32:
+              print(f"::error::Expected exactly 32 canonical migrations; found {len(local)}.")
               raise SystemExit(1)
           non_internal=[row for row in objects if row["name"] not in {"_cf_KV","d1_migrations"} and not row["name"].startswith("sqlite_")]
           import sqlite3
@@ -328,11 +329,11 @@ jobs:
           base_schema=schema_for(base)
           target_schema=schema_for(local)
           if not remote and not non_internal:
-              print("PASS: new EU Preview D1 is empty; all 31 canonical migrations are pending.")
+              print("PASS: new EU Preview D1 is empty; all 32 canonical migrations are pending.")
           elif registry_present and remote == base and remote_schema == base_schema:
-              print("PASS: exact 23-entry registry AND exact schema inventory match the reviewed Preview baseline; only migrations 0023-0030 are pending.")
+              print("PASS: exact 23-entry registry AND exact schema inventory match the reviewed Preview baseline; only migrations 0023-0031 are pending.")
           elif registry_present and remote == local and remote_schema == target_schema:
-              print("PASS: exact 31-entry registry AND exact schema inventory match the canonical target; rerun is idempotent.")
+              print("PASS: exact 32-entry registry AND exact schema inventory match the canonical target; rerun is idempotent.")
           else:
               print("::error::Preview migration registry differs from the exact reviewed 23-entry baseline and 31-entry target; no migration will run.")
               print("Unexpected remote names:", ", ".join(sorted(remote-local)) or "(none)")
@@ -360,7 +361,7 @@ jobs:
           supra_guards_payload="$RUNNER_TEMP/verify-supra-guards-request.json"
 
           # Keep each SELECT below Cloudflare D1's compound-SELECT term limit.
-          jq -n --arg sql "SELECT name FROM d1_migrations WHERE name IN ('0016_security_identity_schema.sql','0020_auth_login_rate_limits.sql','0021_supra_audit_events.sql','0022_supra_persisted_approvals.sql','0029_supra_append_only_audit_guards.sql','0030_supra_audit_tenant_scope.sql') ORDER BY name" '{sql:$sql,params:[]}' > "$migrations_payload"
+          jq -n --arg sql "SELECT name FROM d1_migrations WHERE name IN ('0016_security_identity_schema.sql','0020_auth_login_rate_limits.sql','0021_supra_audit_events.sql','0022_supra_persisted_approvals.sql','0029_supra_append_only_audit_guards.sql','0030_supra_audit_tenant_scope.sql','0031_operational_marketplace_tenant_scope.sql') ORDER BY name" '{sql:$sql,params:[]}' > "$migrations_payload"
           jq -n '{sql:"SELECT type, name FROM sqlite_master WHERE (type = '"'"'table'"'"' AND name IN ('"'"'identity_verifications'"'"','"'"'trusted_devices'"'"','"'"'mission_security'"'"','"'"'mission_security_attempts'"'"','"'"'security_audit'"'"','"'"'auth_login_rate_limits'"'"','"'"'supra_audit_events'"'"','"'"'supra_approval_requests'"'"','"'"'supra_approval_votes'"'"','"'"'supra_approval_events'"'"')) OR (type = '"'"'index'"'"' AND name IN ('"'"'idx_identity_verifications_user'"'"','"'"'idx_mission_security_intervenant'"'"','"'"'idx_security_attempts_security'"'"','"'"'idx_security_audit_mission'"'"','"'"'idx_auth_login_rate_limits_window'"'"','"'"'idx_supra_audit_events_created_at'"'"','"'"'idx_supra_audit_events_tenant_created_at'"'"','"'"'idx_supra_audit_events_actor'"'"','"'"'idx_supra_approval_requests_status_expiry'"'"','"'"'idx_supra_approval_requests_tenant_resource'"'"','"'"'idx_supra_approval_votes_request'"'"','"'"'idx_supra_approval_events_request'"'"')) OR (type = '"'"'trigger'"'"' AND name IN ('"'"'trg_supra_audit_events_require_active_tenant'"'"','"'"'trg_supra_approval_requests_immutable'"'"','"'"'trg_supra_approval_votes_no_update'"'"','"'"'trg_supra_approval_votes_no_delete'"'"','"'"'trg_supra_approval_events_no_update'"'"','"'"'trg_supra_approval_events_no_delete'"'"','"'"'trg_supra_approval_status_transitions'"'"','"'"'trg_supra_approval_status_evidence'"'"')) ORDER BY type, name",params:[]}' > "$objects_payload"
           jq -n --arg sql "SELECT name FROM sqlite_master WHERE type='trigger' AND name IN ('trg_supra_audit_events_no_update','trg_supra_audit_events_no_delete','trg_supra_approval_requests_no_delete','trg_supra_audit_events_require_active_tenant') ORDER BY name" '{sql:$sql,params:[]}' > "$supra_guards_payload"
 
@@ -389,6 +390,7 @@ jobs:
               "0022_supra_persisted_approvals.sql",
               "0029_supra_append_only_audit_guards.sql",
               "0030_supra_audit_tenant_scope.sql",
+              "0031_operational_marketplace_tenant_scope.sql",
           ])
           actual_tables=sorted(row["name"] for row in objects if row["type"] == "table")
           expected_tables=sorted([
@@ -448,7 +450,7 @@ jobs:
               print("Triggers:", actual_triggers)
               print("SUPRA append-only guards:", actual_supra_guards)
               raise SystemExit(1)
-          print("PASS: six migrations, all ten security tables, all eleven indexes, eight existing approval/audit triggers and four SUPRA tenant/append-only guards are present on Preview D1.")
+          print("PASS: seven migrations, all ten security tables, all eleven indexes, eight existing approval/audit triggers and four SUPRA tenant/append-only guards are present on Preview D1.")
           PY
           npx --yes wrangler@4 d1 migrations list "$EXPECTED_DB_NAME" --remote --config wrangler.preview-migrations.jsonc
           echo "PASS: identity, rate-limit and Nexus audit/approval migrations 0016/0020/0021/0022/0029/0030 schemas and triggers are present on Preview D1."
@@ -566,3 +568,49 @@ jobs:
               raise SystemExit(1)
           print(f"PASS: final Preview migration registry exactly matches {len(expected)} reviewed entries.")
           PY
+
+      - name: Verify operational marketplace tenant boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          request="$RUNNER_TEMP/verify-marketplace-tenant-request.json"
+          response="$RUNNER_TEMP/verify-marketplace-tenant-response.json"
+          sql="SELECT type, name FROM sqlite_master WHERE name IN ('idx_clients_tenant_user','idx_intervenants_tenant_user','idx_prestations_tenant_active','idx_missions_tenant_status_start','idx_missions_tenant_intervenant','idx_tarifs_tenant_prestation_active','idx_paiements_tenant_mission','idx_disponibilites_tenant_intervenant_start','idx_evaluations_tenant_mission','idx_documents_tenant_user','idx_conflits_tenant_mission','idx_journal_tenant_created','idx_wallets_tenant_user','trg_clients_require_active_tenant','trg_intervenants_require_active_tenant','trg_prestations_require_active_tenant','trg_missions_require_active_tenant','trg_tarifs_require_active_tenant','trg_paiements_require_active_tenant','trg_disponibilites_require_active_tenant','trg_evaluations_require_active_tenant','trg_documents_require_active_tenant','trg_conflits_require_active_tenant','trg_journal_require_active_tenant','trg_wallets_require_active_tenant','trg_missions_relationship_scope_insert','trg_missions_relationship_scope_update','trg_availability_intervenant_scope','trg_tarif_prestation_scope','trg_payment_mission_scope','trg_evaluation_mission_scope','trg_conflict_mission_scope') ORDER BY type,name"
+          jq -n --arg sql "$sql" '{sql:$sql,params:[]}' > "$request"
+          status="$(curl --silent --show-error --output "$response" --write-out '%{http_code}' -X POST -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -H "Content-Type: application/json" --data-binary @"$request" "https://api.cloudflare.com/client/v4/accounts/$EXPECTED_ACCOUNT_ID/d1/database/$EXPECTED_DB_ID/query")"
+          test "$status" = "200" || { echo "::error::Operational marketplace tenant schema verification failed (HTTP $status)."; exit 1; }
+          jq -e '.success == true' "$response" >/dev/null
+          python3 - "$response" <<'PY'
+          import json, pathlib, sys
+          rows=json.loads(pathlib.Path(sys.argv[1]).read_text())["result"][0]["results"]
+          actual={(r["type"],r["name"]) for r in rows}
+          expected_indexes={
+            "idx_clients_tenant_user","idx_intervenants_tenant_user","idx_prestations_tenant_active",
+            "idx_missions_tenant_status_start","idx_missions_tenant_intervenant",
+            "idx_tarifs_tenant_prestation_active","idx_paiements_tenant_mission",
+            "idx_disponibilites_tenant_intervenant_start","idx_evaluations_tenant_mission",
+            "idx_documents_tenant_user","idx_conflits_tenant_mission","idx_journal_tenant_created",
+            "idx_wallets_tenant_user"
+          }
+          expected_triggers={
+            "trg_clients_require_active_tenant","trg_intervenants_require_active_tenant",
+            "trg_prestations_require_active_tenant","trg_missions_require_active_tenant",
+            "trg_tarifs_require_active_tenant","trg_paiements_require_active_tenant",
+            "trg_disponibilites_require_active_tenant","trg_evaluations_require_active_tenant",
+            "trg_documents_require_active_tenant","trg_conflits_require_active_tenant",
+            "trg_journal_require_active_tenant","trg_wallets_require_active_tenant",
+            "trg_missions_relationship_scope_insert","trg_missions_relationship_scope_update",
+            "trg_availability_intervenant_scope","trg_tarif_prestation_scope",
+            "trg_payment_mission_scope","trg_evaluation_mission_scope","trg_conflict_mission_scope"
+          }
+          missing=({("index",x) for x in expected_indexes}|{("trigger",x) for x in expected_triggers})-actual
+          if missing:
+            print("::error::Operational marketplace tenant boundary is incomplete:", sorted(missing))
+            raise SystemExit(1)
+          print("PASS: operational marketplace tenant indexes and relationship guards verified.")
+          PY
+          jq -n '{sql:"SELECT name FROM pragma_table_info('"'clients'"') UNION ALL SELECT name FROM pragma_table_info('"'intervenants'"') UNION ALL SELECT name FROM pragma_table_info('"'missions'"') UNION ALL SELECT name FROM pragma_table_info('"'disponibilites'"') UNION ALL SELECT name FROM pragma_table_info('"'wallets'"') UNION ALL SELECT name FROM pragma_table_info('"'documents'"')",params:[]}' > "$request"
+          status="$(curl --silent --show-error --output "$response" --write-out '%{http_code}' -X POST -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -H "Content-Type: application/json" --data-binary @"$request" "https://api.cloudflare.com/client/v4/accounts/$EXPECTED_ACCOUNT_ID/d1/database/$EXPECTED_DB_ID/query")"
+          test "$status" = "200" || { echo "::error::Operational tenant_id column verification failed (HTTP $status)."; exit 1; }
+          jq -e '.success == true' "$response" >/dev/null
+          echo "PASS: operational marketplace tenant scope migration verification completed."
