@@ -680,7 +680,7 @@ assert required_marketplace_tables <= marketplace_tables, (
 )
 for table in required_marketplace_tables:
     columns = {row[1] for row in db.execute(f"PRAGMA table_info({table})")}
-    assert "owner_tenant_id" in columns or table == "mission_opportunity_consents", f"{table} missing owner tenant scope"
+    assert "owner_tenant_id" in columns or "tenant_id" in columns, f"{table} missing tenant scope"
 opportunity_columns = {row[1] for row in db.execute("PRAGMA table_info(mission_opportunities)")}
 assert "address" not in opportunity_columns and "client_user_id" not in opportunity_columns, (
     "Public opportunity read model must not contain client address or client identity"
