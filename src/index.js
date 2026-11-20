@@ -327,14 +327,24 @@ async function login(request, env) {
 export async function logout(request, env) {
   if (!env.DB) return json({ ok: false, database: false, version: VERSION }, 503);
   const token = getCookie(request, SESSION_COOKIE);
-  const headers = { 'set-cookie': sessionCookie('', 0) };
   if (token) {
-    const tokenHash = await sha256Base64url(token);
-    await env.DB.prepare(`UPDATE sessions
-      SET revoked_at = CURRENT_TIMESTAMP, revoked_reason = 'USER_LOGOUT'
-      WHERE token_hash = ? AND revoked_at IS NULL`).bind(tokenHash).run();
+    try {
+      const tokenHash = await sha256Base64url(token);
+      const result = await env.DB.prepare(`UPDATE sessions
+        SET revoked_at = CURRENT_TIMESTAMP, revoked_reason = 'USER_LOGOUT'
+        WHERE token_hash = ? AND revoked_at IS NULL`).bind(tokenHash).run();
+      if (result?.success !== true) {
+        return json({ ok: false, error: 'SESSION_REVOCATION_UNCONFIRMED', version: VERSION }, 503);
+      }
+    } catch {
+      return json({ ok: false, error: 'SESSION_REVOCATION_UNCONFIRMED', version: VERSION }, 503);
+    }
   }
-  return json({ ok: true, version: VERSION, authenticated: false }, 200, headers);
+  return json(
+    { ok: true, version: VERSION, authenticated: false },
+    200,
+    { 'set-cookie': sessionCookie('', 0) }
+  );
 }
 
 export async function tenantContextRoute(request, env) {
