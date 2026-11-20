@@ -158,6 +158,17 @@ test("action outbox HTTP route returns 503 before schema setup or outbox reads",
   assert.equal(writes.length, 0);
 });
 
+test("Copilot next-actions is blocked before the rate limiter or any D1 access", async () => {
+  const env = { DB: { prepare() { throw new Error("D1 must not be touched"); } } };
+  const request = new Request("https://api.example.test/api/copilot/next-actions", { method: "GET" });
+  const response = await worker.fetch(request, env);
+  assert.equal(response.status, 503);
+  const body = await response.json();
+  assert.equal(body.error, "TENANT_DATA_SCOPE_NOT_MIGRATED");
+  assert.equal(body.write_enabled, false);
+  assert.equal(body.automation, "proposal_only_no_background_execution");
+});
+
 test("action outbox preflight blocks before the D1-backed rate limiter", async () => {
   const source = await readFile(new URL("../src/index.js", import.meta.url), "utf8");
   const wrapperStart = source.indexOf("const __procheliaProductionSafetyHandle = handle;");
@@ -190,7 +201,7 @@ test("action outbox route has an authenticated fail-closed guard before its lega
 
 test("legacy cross-tenant operational and strategic handlers fail closed before D1 access", async () => {
   const source = await readFile(new URL("../src/index.js", import.meta.url), "utf8");
-  const handlers = ["processActionOutbox","getOperationsDashboard","getJournal","promotionList","activatePromotion","strategicDashboard","scoreClients","qualityCreate","capacityDashboard","financeForecast"];
+  const handlers = ["copilotNextActions","processActionOutbox","getOperationsDashboard","getJournal","promotionList","activatePromotion","strategicDashboard","scoreClients","qualityCreate","capacityDashboard","financeForecast"];
   for (const name of handlers) {
     const start = source.indexOf("async function " + name + "(request, env) {");
     assert.notEqual(start, -1, name + " exists");
