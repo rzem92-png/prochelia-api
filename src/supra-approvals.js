@@ -56,7 +56,7 @@ function sameOrigin(request) {
 
 async function readLimitedText(request, maxBytes) {
   const declaredLength = request.headers.get("content-length");
-  if (declaredLength && /^\\d+$/.test(declaredLength) && Number(declaredLength) > maxBytes) return { error: "TOO_LARGE" };
+  if (declaredLength && /^\d+$/.test(declaredLength) && Number(declaredLength) > maxBytes) return { error: "TOO_LARGE" };
   if (!request.body) return { text: "" };
   const reader = request.body.getReader();
   const chunks = [];
