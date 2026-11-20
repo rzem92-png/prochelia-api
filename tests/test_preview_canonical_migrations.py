@@ -41,7 +41,7 @@ EXPECTED = [
 WORKFLOW = ROOT / ".github" / "workflows" / "apply-preview-d1-migrations.yml"
 workflow_text = WORKFLOW.read_text(encoding="utf-8")
 assert '"0029_supra_append_only_audit_guards.sql"' in workflow_text, (
-    "Preview migration workflow omits the latest canonical migration 0029"
+    "Preview migration workflow omits the latest canonical migration 0029/0030"
 )
 assert "if len(local) != 31:" in workflow_text, (
     "Preview migration workflow must require exactly 31 canonical migrations"
@@ -52,7 +52,7 @@ assert "exact 31-entry registry" in workflow_text, (
 assert "all 31 canonical migrations are pending" in workflow_text, (
     "Preview migration workflow empty-database inventory message is stale"
 )
-assert "only migrations 0023-0029 are pending" in workflow_text, (
+assert "only migrations 0023-0030 are pending" in workflow_text, (
     "Preview migration workflow baseline-to-target range is stale"
 )
 
