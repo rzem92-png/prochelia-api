@@ -1112,7 +1112,7 @@ function constantTimeStringEqual(actual, expected) {
   return difference === 0;
 }
 
-export export async function readBoundedWebhookBody(request, maxBytes = 1_048_576) {
+export async function readBoundedWebhookBody(request, maxBytes = 1_048_576) {
   if (!Number.isSafeInteger(maxBytes) || maxBytes < 1) return { ok: false, reason: "invalid_limit" };
   const declaredLength = request.headers.get("content-length");
   if (declaredLength !== null) {
