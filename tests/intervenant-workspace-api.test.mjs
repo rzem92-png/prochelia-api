@@ -23,11 +23,11 @@ test("workspace requires an authenticated intervenant role", () => {
 });
 
 test("workspace resources are scoped to the authenticated owner", () => {
-  assert.match(handler, /FROM intervenants WHERE user_id = \?/);
-  assert.match(handler, /WHERE m\.intervenant_id = \?/);
-  assert.match(handler, /FROM disponibilites WHERE intervenant_id = \?/);
-  assert.match(handler, /FROM wallets WHERE user_id = \?/);
-  assert.match(handler, /FROM documents WHERE user_id = \?/);
+  assert.match(handler, /FROM intervenants WHERE user_id = \\? AND tenant_id = \\?/);
+  assert.match(handler, /WHERE m\\.intervenant_id = \\? AND m\\.tenant_id = \\?/);
+  assert.match(handler, /FROM disponibilites WHERE intervenant_id = \\? AND tenant_id = \\?/);
+  assert.match(handler, /FROM wallets WHERE user_id = \\? AND tenant_id = \\?/);
+  assert.match(handler, /FROM documents WHERE user_id = \\? AND tenant_id = \\?/);
 });
 
 test("workspace response is read-only and excludes client addresses and raw document references", () => {
