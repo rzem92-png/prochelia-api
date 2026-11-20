@@ -1,6 +1,7 @@
 import { handleV7Route } from "./v7-routes.js";
 import { handleSupraRoute } from "./supra-api.js";
 import { resolveTenantContext } from "./tenant-context.js";
+import { handleSupraApprovalRoute } from "./supra-approvals.js";
 // PROCHÉLIA — INDEX BACKEND CONSOLIDÉ UNIQUE
 // Référence de consolidation : V14.1 Finance + sécurité/RBAC existants.
 // Généré le 19/10/2026. À déployer uniquement après recette avec la vraie base D1.
@@ -3257,6 +3258,8 @@ async function handle(request,env){
           }
         };
       }
+      const approvalResponse = await handleSupraApprovalRoute(request, env, supraAuth);
+      if (approvalResponse) return approvalResponse;
       const supraResponse = await handleSupraRoute(request, env, supraAuth);
       if (supraResponse) return supraResponse;
     }
