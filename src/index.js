@@ -3363,6 +3363,178 @@ async function intervenantWorkspaceReadModel(request, env) {
   });
 }
 
+async function intervenantOpportunityRoute(request, env, url) {
+  const applyMatch = url.pathname.match(/^\/api\/intervenant\/opportunities\/([^/]+)\/apply$/);
+  const isFeed = url.pathname === '/api/intervenant/opportunities';
+  if (!isFeed && !applyMatch) return null;
+  if (isFeed && request.method !== 'GET') {
+    return json({ ok: false, error: 'METHOD_NOT_ALLOWED' }, 405);
+  }
+  if (applyMatch && request.method !== 'POST') {
+    return json({ ok: false, error: 'METHOD_NOT_ALLOWED' }, 405);
+  }
+
+  let auth;
+  try {
+    auth = await getSessionUser(request, env);
+  } catch {
+    return json({ ok: false, error: 'AUTHENTICATION_SCHEMA_UNAVAILABLE' }, 503);
+  }
+  if (!auth?.user) return json({ ok: false, error: 'UNAUTHENTICATED' }, 401);
+  if (!requireRole(auth, ['intervenant'])) return json({ ok: false, error: 'FORBIDDEN' }, 403);
+  const tenantId = auth.session_active_tenant_id;
+  if (!tenantId) return json({ ok: false, error: 'ACTIVE_TENANT_REQUIRED' }, 403);
+
+  let profile;
+  try {
+    profile = await env.DB.prepare(
+      'SELECT id, validation_status FROM intervenants WHERE user_id = ? AND tenant_id = ? LIMIT 1'
+    ).bind(auth.user.id, tenantId).first();
+  } catch {
+    return json({ ok: false, error: 'INTERVENANT_PROFILE_SCHEMA_UNAVAILABLE' }, 503);
+  }
+  if (!profile?.id) return json({ ok: false, error: 'INTERVENANT_PROFILE_NOT_FOUND' }, 404);
+  const verifiedProfile = ['verified', 'approved', 'active'].includes(String(profile.validation_status || '').toLowerCase());
+
+  if (isFeed) {
+    if (!verifiedProfile) {
+      return json({
+        ok: true, read_only: true, eligible: false,
+        reason: 'PROFILE_VALIDATION_REQUIRED', opportunities: []
+      });
+    }
+    try {
+      const result = await env.DB.prepare(
+        `SELECT o.id, o.category_code, o.public_summary, o.city, o.postal_prefix,
+                o.start_at, o.end_at, o.provider_pay_cents, o.currency,
+                o.required_skills_json, o.expires_at,
+                (SELECT a.status FROM mission_applications a
+                  WHERE a.opportunity_id = o.id
+                    AND a.applicant_tenant_id = ?
+                    AND a.intervenant_id = ?
+                  LIMIT 1) AS application_status
+           FROM mission_opportunities o
+           JOIN tenants owner ON owner.id = o.owner_tenant_id AND owner.status = 'ACTIVE'
+          WHERE o.status = 'OPEN'
+            AND o.expires_at > CURRENT_TIMESTAMP
+            AND EXISTS (
+              SELECT 1 FROM disponibilites d
+               WHERE d.tenant_id = ? AND d.intervenant_id = ?
+                 AND d.status = 'available'
+                 AND d.start_at <= o.start_at AND d.end_at >= o.end_at
+            )
+            AND NOT EXISTS (
+              SELECT 1
+                FROM mission_assignments ma
+                JOIN mission_opportunities assigned
+                  ON assigned.id = ma.opportunity_id
+                 AND assigned.owner_tenant_id = ma.owner_tenant_id
+               WHERE ma.provider_tenant_id = ? AND ma.intervenant_id = ?
+                 AND ma.status IN ('ASSIGNED','IN_PROGRESS','DISPUTED')
+                 AND assigned.start_at < o.end_at AND assigned.end_at > o.start_at
+            )
+            AND NOT EXISTS (
+              SELECT 1 FROM json_each(o.required_skills_json) required_skill
+               WHERE NOT EXISTS (
+                 SELECT 1 FROM intervenant_skills skill
+                  WHERE skill.tenant_id = ? AND skill.intervenant_id = ?
+                    AND skill.skill_code = lower(CAST(required_skill.value AS TEXT))
+                    AND skill.verification_status = 'VERIFIED'
+               )
+            )
+          ORDER BY o.start_at ASC
+          LIMIT 100`
+      ).bind(tenantId, profile.id, tenantId, profile.id, tenantId, profile.id, tenantId, profile.id).all();
+      const opportunities = (result.results || []).map(row => {
+        let requiredSkills = [];
+        try {
+          const parsed = JSON.parse(row.required_skills_json || '[]');
+          if (Array.isArray(parsed)) requiredSkills = parsed.slice(0, 30);
+        } catch {}
+        return {
+          id: row.id,
+          category: row.category_code,
+          summary: row.public_summary,
+          city: row.city,
+          postal_prefix: row.postal_prefix || null,
+          start_at: row.start_at,
+          end_at: row.end_at,
+          provider_pay_cents: row.provider_pay_cents,
+          currency: row.currency,
+          required_skills: requiredSkills,
+          expires_at: row.expires_at,
+          application_status: row.application_status || null,
+          can_apply: !row.application_status
+        };
+      });
+      return json({ ok: true, read_only: true, eligible: true, opportunities });
+    } catch {
+      return json({ ok: false, error: 'OPPORTUNITY_SCHEMA_UNAVAILABLE' }, 503);
+    }
+  }
+
+  if (!verifiedProfile) {
+    return json({ ok: false, error: 'PROFILE_VALIDATION_REQUIRED' }, 403);
+  }
+  const opportunityId = decodeURIComponent(applyMatch[1]);
+  const idempotencyKey = String(request.headers.get('Idempotency-Key') || '').trim();
+  if (!/^[A-Za-z0-9._:-]{8,160}$/.test(idempotencyKey)) {
+    return json({ ok: false, error: 'IDEMPOTENCY_KEY_REQUIRED' }, 400);
+  }
+  const contentLength = Number(request.headers.get('content-length') || 0);
+  if (contentLength > 4096) return json({ ok: false, error: 'REQUEST_TOO_LARGE' }, 413);
+  let payload = {};
+  try {
+    payload = await request.json();
+  } catch {
+    return json({ ok: false, error: 'INVALID_JSON' }, 400);
+  }
+  const publicNote = typeof payload?.public_note === 'string' ? payload.public_note.trim() : '';
+  if (publicNote.length > 500 || /[\u0000-\u0008\u000B\u000C\u000E-\u001F]/.test(publicNote)) {
+    return json({ ok: false, error: 'INVALID_PUBLIC_NOTE' }, 400);
+  }
+
+  try {
+    const previous = await env.DB.prepare(
+      'SELECT id, opportunity_id, applicant_user_id, status FROM mission_applications WHERE applicant_tenant_id = ? AND idempotency_key = ? LIMIT 1'
+    ).bind(tenantId, idempotencyKey).first();
+    if (previous) {
+      if (previous.opportunity_id === opportunityId && previous.applicant_user_id === auth.user.id) {
+        return json({ ok: true, idempotent_replay: true, application: { id: previous.id, status: previous.status } });
+      }
+      return json({ ok: false, error: 'IDEMPOTENCY_KEY_CONFLICT' }, 409);
+    }
+
+    const opportunity = await env.DB.prepare(
+      `SELECT o.id, o.owner_tenant_id, o.provider_pay_cents, o.currency
+         FROM mission_opportunities o
+         JOIN tenants t ON t.id = o.owner_tenant_id AND t.status = 'ACTIVE'
+        WHERE o.id = ? AND o.status = 'OPEN' AND o.expires_at > CURRENT_TIMESTAMP
+        LIMIT 1`
+    ).bind(opportunityId).first();
+    if (!opportunity) return json({ ok: false, error: 'OPPORTUNITY_NOT_AVAILABLE' }, 404);
+
+    const applicationId = 'application-' + crypto.randomUUID();
+    await env.DB.prepare(
+      `INSERT INTO mission_applications(
+         id, opportunity_id, owner_tenant_id, applicant_tenant_id,
+         intervenant_id, applicant_user_id, provider_pay_cents, currency,
+         idempotency_key, public_note
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).bind(
+      applicationId, opportunity.id, opportunity.owner_tenant_id, tenantId,
+      profile.id, auth.user.id, opportunity.provider_pay_cents, opportunity.currency,
+      idempotencyKey, publicNote || null
+    ).run();
+    return json({
+      ok: true,
+      application: { id: applicationId, opportunity_id: opportunity.id, status: 'SUBMITTED' }
+    }, 201);
+  } catch {
+    return json({ ok: false, error: 'APPLICATION_NOT_ELIGIBLE_OR_OPPORTUNITY_CHANGED' }, 409);
+  }
+}
+
 async function handle(request,env){
   try {
     if(isMutatingMethod(request.method) && !securityOriginAllowed(request,env)) return json({ok:false,error:'ORIGIN_NOT_ALLOWED',version:VERSION},403);
@@ -3373,6 +3545,7 @@ async function handle(request,env){
       if (request.method !== 'POST') return json({ ok: false, error: 'METHOD_NOT_ALLOWED', version: VERSION }, 405);
       return json({ ok: false, error: 'AUTHENTICATED_VALIDATION_REQUIRED', version: VERSION, write_enabled: false }, 403);
     }
+    if (url.pathname === '/api/intervenant/opportunities' || /^\/api\/intervenant\/opportunities\/[^/]+\/apply$/.test(url.pathname)) return intervenantOpportunityRoute(request, env, url);
     if (url.pathname === '/api/intervenant/workspace') return intervenantWorkspaceReadModel(request, env);
     if (url.pathname.startsWith('/api/supra/')) {
       let supraAuth = await getSessionUser(request, env).catch(() => null);
