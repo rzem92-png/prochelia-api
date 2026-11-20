@@ -142,7 +142,7 @@ test("consumption rejects malformed or unapproved action types", async () => {
 });
 
 test("approval ledger schema protects immutable request identity and append-only votes/events", async () => {
-  const sql = await readFile(new URL("../migrations/0022_supra_persisted_approvals.sql", import.meta.url), "utf8");
+  const sql = await readFile(new URL("../migrations-preview-canonical/0022_supra_persisted_approvals.sql", import.meta.url), "utf8");
   assert.match(sql, /trg_supra_approval_requests_immutable/);
   assert.match(sql, /trg_supra_approval_requests_no_delete/);
   assert.match(sql, /trg_supra_approval_votes_no_update/);
