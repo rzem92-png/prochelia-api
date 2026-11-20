@@ -3271,13 +3271,30 @@ async function intervenantWorkspaceReadModel(request, env) {
   }
   if (!auth?.user) return json({ ok: false, error: 'UNAUTHENTICATED' }, 401);
   if (!requireRole(auth, ['intervenant'])) return json({ ok: false, error: 'FORBIDDEN' }, 403);
+  if (!auth.session_active_tenant_id) {
+    return json({ ok: false, error: 'ACTIVE_TENANT_REQUIRED' }, 403);
+  }
 
+  // Business data is not exposed until every returned domain is tenant-scoped.
+  // This deliberately blocks the legacy schema rather than mixing tenants.
+  for (const table of ['intervenants', 'missions', 'disponibilites', 'wallets', 'documents']) {
+    try {
+      const columns = await env.DB.prepare(`PRAGMA table_info(${table})`).all();
+      if (!(columns.results || []).some(column => column.name === 'tenant_id')) {
+        return json({ ok: false, error: 'BUSINESS_TENANT_SCHEMA_UNAVAILABLE', table }, 503);
+      }
+    } catch {
+      return json({ ok: false, error: 'BUSINESS_TENANT_SCHEMA_UNAVAILABLE' }, 503);
+    }
+  }
+
+  const tenantId = auth.session_active_tenant_id;
   const partial = [];
   let profile;
   try {
     profile = await env.DB.prepare(
-      'SELECT id, professional_status, description, service_area, hourly_rate, validation_status FROM intervenants WHERE user_id = ? LIMIT 1'
-    ).bind(auth.user.id).first();
+      'SELECT id, professional_status, description, service_area, hourly_rate, validation_status FROM intervenants WHERE user_id = ? AND tenant_id = ? LIMIT 1'
+    ).bind(auth.user.id, tenantId).first();
   } catch {
     return json({ ok: false, error: 'WORKSPACE_SCHEMA_UNAVAILABLE' }, 503);
   }
@@ -3289,33 +3306,33 @@ async function intervenantWorkspaceReadModel(request, env) {
       `SELECT m.id, m.prestation_id, p.name AS prestation_name, m.start_at, m.end_at, m.status
          FROM missions m
          LEFT JOIN prestations p ON p.id = m.prestation_id
-        WHERE m.intervenant_id = ?
+        WHERE m.intervenant_id = ? AND m.tenant_id = ?
         ORDER BY m.start_at DESC
         LIMIT 50`
-    ).bind(profile.id).all();
+    ).bind(profile.id, tenantId).all();
     missions = result.results || [];
   } catch { partial.push('missions'); }
 
   let availability = [];
   try {
     const result = await env.DB.prepare(
-      'SELECT id, start_at, end_at, status FROM disponibilites WHERE intervenant_id = ? ORDER BY start_at LIMIT 100'
-    ).bind(profile.id).all();
+      'SELECT id, start_at, end_at, status FROM disponibilites WHERE intervenant_id = ? AND tenant_id = ? ORDER BY start_at LIMIT 100'
+    ).bind(profile.id, tenantId).all();
     availability = result.results || [];
   } catch { partial.push('availability'); }
 
   let wallet = null;
   try {
     wallet = await env.DB.prepare(
-      'SELECT currency, available_cents, pending_cents, paid_cents, reserved_cents FROM wallets WHERE user_id = ? LIMIT 1'
-    ).bind(auth.user.id).first();
+      'SELECT currency, available_cents, pending_cents, paid_cents, reserved_cents FROM wallets WHERE user_id = ? AND tenant_id = ? LIMIT 1'
+    ).bind(auth.user.id, tenantId).first();
   } catch { partial.push('wallet'); }
 
   let documentCounts = { total: 0, pending: 0, expired: 0 };
   try {
     const result = await env.DB.prepare(
-      'SELECT status, expires_at FROM documents WHERE user_id = ? LIMIT 200'
-    ).bind(auth.user.id).all();
+      'SELECT status, expires_at FROM documents WHERE user_id = ? AND tenant_id = ? LIMIT 200'
+    ).bind(auth.user.id, tenantId).all();
     const now = Date.now();
     for (const row of result.results || []) {
       documentCounts.total++;
