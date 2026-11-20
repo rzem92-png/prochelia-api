@@ -178,3 +178,28 @@ test("intervenant application tracking is read-only and tenant-scoped", () => {
   ]) assert.ok(applicationHandler.includes(fragment), "missing application read guard: " + fragment);
   assert.doesNotMatch(applicationHandler, /INSERT INTO|UPDATE\\s+mission_applications|o\\.address|client_user_id/);
 });
+
+
+const withdrawalStart = source.indexOf("async function intervenantApplicationWithdrawRoute(");
+const withdrawalEnd = source.indexOf("async function intervenantApplicationsRoute(", withdrawalStart);
+assert.ok(withdrawalStart >= 0 && withdrawalEnd > withdrawalStart, "application withdrawal route must exist");
+const withdrawalHandler = source.slice(withdrawalStart, withdrawalEnd);
+
+test("intervenant can withdraw only their own pending application within their active tenant", () => {
+  for (const fragment of [
+    "request.method !== 'POST'",
+    "getSessionUser(request, env)",
+    "requireRole(auth, ['intervenant'])",
+    "auth.session_active_tenant_id",
+    "WHERE id = ? AND applicant_tenant_id = ? AND intervenant_id = ?",
+    "status IN ('SUBMITTED', 'SHORTLISTED')",
+    "SET status = 'WITHDRAWN'",
+    "APPLICATION_NOT_FOUND",
+    "APPLICATION_NOT_WITHDRAWABLE"
+  ]) assert.ok(withdrawalHandler.includes(fragment), "missing withdrawal guard: " + fragment);
+  assert.doesNotMatch(withdrawalHandler, /owner_tenant_id = \?/);
+});
+test("withdrawal route is dispatched only for the exact application path", () => {
+  assert.ok(source.includes("intervenantApplicationWithdrawRoute(request, env, url)"));
+  assert.ok(source.includes("/api/intervenant/applications/[^/]+/withdraw"));
+});
