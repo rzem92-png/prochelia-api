@@ -3595,6 +3595,7 @@ async function intervenantAvailabilityRoute(request, env, url) {
   // Persist one UTC representation; compare instants, not timezone-formatted strings.
   const canonicalStartAt = new Date(startMs).toISOString();
   const canonicalEndAt = new Date(endMs).toISOString();
+  // The persisted key is scoped to the authenticated tenant/profile; retries after a lost response must replay the same slot.
   const idempotencyKey = String(request.headers.get('Idempotency-Key') || '').trim();
   if (!/^[A-Za-z0-9._:-]{8,160}$/.test(idempotencyKey)) {
     return json({ ok: false, error: 'IDEMPOTENCY_KEY_REQUIRED' }, 400);
