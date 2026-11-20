@@ -52,7 +52,7 @@ assert '"0030_supra_audit_tenant_scope.sql"' in workflow_text, (
     "Preview migration workflow omits tenant-scoped SUPRA audit migration 0030"
 )
 assert "if len(local) != 36:" in workflow_text, (
-    "Preview migration workflow must require exactly 35 canonical migrations"
+    "Preview migration workflow must require exactly 36 canonical migrations"
 )
 assert "exact 36-entry registry" in workflow_text, (
     "Preview migration workflow target registry count is stale"
@@ -64,7 +64,7 @@ assert "only migrations 0023-0035 are pending" in workflow_text, (
     "Preview migration workflow baseline-to-target range is stale"
 )
 assert '"0035_validate_availability_intervals.sql"' in workflow_text, (
-    "Preview migration workflow omits timezone-safe availability migration 0034"
+    "Preview migration workflow omits availability interval validation migration 0035"
 )
 
 actual = sorted(path.name for path in MIGRATIONS.glob("*.sql"))
