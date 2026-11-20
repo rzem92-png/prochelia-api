@@ -12,7 +12,8 @@ test("Nexus Supra dispatch is behind the shared production middleware and uses a
   const block = source.slice(dispatch, dispatch + 1400);
   assert.match(block, /getSessionUser\(request, env\)/);
   assert.match(block, /resolveTenantContext\(request, env, supraAuth\)/);
-  assert.match(block, /user: \{ \.\.\.supraAuth\.user, tenant_id: tenantContext\.tenant\.id \}/);
+  assert.match(block, /tenant_id: tenantContext\.tenant\.id/);
+  assert.match(block, /tenant_role: tenantContext\.tenant\.role/);
   assert.match(block, /handleSupraRoute\(request, env, supraAuth\)/);
   assert.doesNotMatch(block, /request\.json\(\).*tenant_id/s);
 });
