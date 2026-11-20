@@ -3421,29 +3421,35 @@ async function intervenantAvailabilityRoute(request, env, url) {
     return json({ ok: false, error: 'INVALID_AVAILABILITY_WINDOW' }, 400);
   }
 
+  // Persist one UTC representation; compare instants, not timezone-formatted strings.
+  const canonicalStartAt = new Date(startMs).toISOString();
+  const canonicalEndAt = new Date(endMs).toISOString();
+
   try {
     const duplicate = await env.DB.prepare(
       `SELECT id FROM disponibilites
-        WHERE intervenant_id = ? AND tenant_id = ?
-          AND start_at = ? AND end_at = ? AND status = 'available'
+        WHERE intervenant_id = ? AND tenant_id = ? AND status = 'available'
+          AND julianday(start_at) = julianday(?)
+          AND julianday(end_at) = julianday(?)
         LIMIT 1`
-    ).bind(profile.id, tenantId, startAt, endAt).first();
+    ).bind(profile.id, tenantId, canonicalStartAt, canonicalEndAt).first();
     if (duplicate) return json({ ok: true, idempotent_replay: true, availability: { id: duplicate.id } });
 
     const conflict = await env.DB.prepare(
       `SELECT id FROM disponibilites
         WHERE intervenant_id = ? AND tenant_id = ? AND status = 'available'
-          AND start_at < ? AND end_at > ?
+          AND julianday(start_at) < julianday(?)
+          AND julianday(end_at) > julianday(?)
         LIMIT 1`
-    ).bind(profile.id, tenantId, endAt, startAt).first();
+    ).bind(profile.id, tenantId, canonicalEndAt, canonicalStartAt).first();
     if (conflict) return json({ ok: false, error: 'AVAILABILITY_OVERLAP' }, 409);
 
     const id = 'availability-' + crypto.randomUUID();
     await env.DB.prepare(
       `INSERT INTO disponibilites(id, intervenant_id, tenant_id, start_at, end_at, status)
        VALUES (?, ?, ?, ?, ?, 'available')`
-    ).bind(id, profile.id, tenantId, startAt, endAt).run();
-    return json({ ok: true, availability: { id, start_at: startAt, end_at: endAt, status: 'available' } }, 201);
+    ).bind(id, profile.id, tenantId, canonicalStartAt, canonicalEndAt).run();
+    return json({ ok: true, availability: { id, start_at: canonicalStartAt, end_at: canonicalEndAt, status: 'available' } }, 201);
   } catch {
     return json({ ok: false, error: 'AVAILABILITY_WRITE_REJECTED' }, 409);
   }
