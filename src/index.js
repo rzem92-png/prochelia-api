@@ -1,4 +1,5 @@
 import { handleV7Route } from "./v7-routes.js";
+import { handleSupraRoute } from "./supra-api.js";
 import { resolveTenantContext } from "./tenant-context.js";
 // PROCHÉLIA — INDEX BACKEND CONSOLIDÉ UNIQUE
 // Référence de consolidation : V14.1 Finance + sécurité/RBAC existants.
@@ -3231,6 +3232,23 @@ async function handle(request,env){
     if (url.pathname === '/api/missions/validate') {
       if (request.method !== 'POST') return json({ ok: false, error: 'METHOD_NOT_ALLOWED', version: VERSION }, 405);
       return json({ ok: false, error: 'AUTHENTICATED_VALIDATION_REQUIRED', version: VERSION, write_enabled: false }, 403);
+    }
+    if (url.pathname.startsWith('/api/supra/')) {
+      let supraAuth = await getSessionUser(request, env).catch(() => null);
+      if (supraAuth?.user) {
+        const tenantContext = await resolveTenantContext(request, env, supraAuth);
+        if (!tenantContext.ok) {
+          return json({ ok: false, error: tenantContext.error }, tenantContext.status);
+        }
+        // Tenant authority is derived only from the authenticated session and
+        // active server-side membership; request body/query/header values are ignored.
+        supraAuth = {
+          ...supraAuth,
+          user: { ...supraAuth.user, tenant_id: tenantContext.tenant.id }
+        };
+      }
+      const supraResponse = await handleSupraRoute(request, env, supraAuth);
+      if (supraResponse) return supraResponse;
     }
     if (url.pathname.startsWith('/api/v7/')) {
       const v7Auth = await getSessionUser(request, env).catch(() => null);
