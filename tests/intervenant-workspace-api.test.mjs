@@ -147,13 +147,15 @@ assert.ok(assignmentStart >= 0 && assignmentEnd > assignmentStart, "assignment r
 const assignmentHandler = source.slice(assignmentStart, assignmentEnd);
 
 test("intervenant assignments are read-only and restricted to the authenticated tenant profile", () => {
-  assert.match(source, /url\\.pathname === '\\/api\\/intervenant\\/assignments'/);
-  assert.match(assignmentHandler, /request\\.method !== 'GET'/);
-  assert.match(assignmentHandler, /getSessionUser\\(request, env\\)/);
-  assert.match(assignmentHandler, /requireRole\\(auth, \\['intervenant'\\]\\)/);
-  assert.match(assignmentHandler, /auth\\.session_active_tenant_id/);
-  assert.match(assignmentHandler, /WHERE a\\.provider_tenant_id = \\? AND a\\.intervenant_id = \\?/);
-  assert.match(assignmentHandler, /read_only: true/);
-  assert.match(assignmentHandler, /assignments: result\\.results/);
+  assert.ok(source.includes("url.pathname === '/api/intervenant/assignments'"));
+  for (const fragment of [
+    "request.method !== 'GET'",
+    "getSessionUser(request, env)",
+    "requireRole(auth, ['intervenant'])",
+    "auth.session_active_tenant_id",
+    "WHERE a.provider_tenant_id = ? AND a.intervenant_id = ?",
+    "read_only: true",
+    "assignments: result.results"
+  ]) assert.ok(assignmentHandler.includes(fragment), "missing assignment read guard: " + fragment);
   assert.doesNotMatch(assignmentHandler, /INSERT INTO|UPDATE\\s+mission_assignments|o\\.address|client_user_id/);
 });
