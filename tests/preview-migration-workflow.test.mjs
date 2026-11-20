@@ -47,7 +47,9 @@ test("Preview migration workflow validates the full canonical migration chain", 
     "0024_tenant_membership_authority.sql",
     "0025_session_revocation.sql",
     "0026_accounting_currency_consistency.sql",
-    "0027_tenant_membership_identity_immutable.sql"
+    "0027_tenant_membership_identity_immutable.sql",
+    "0028_tenant_accounting_entity_delete_guard.sql",
+    "0029_supra_append_only_audit_guards.sql"
   ];
   for (const migration of expected) assert.ok(workflow.includes(`"${migration}"`), `missing canonical migration ${migration}`);
 });
@@ -90,17 +92,20 @@ test("Preview post-migration verification checks identity, mission-security and 
     "trg_supra_approval_requests_immutable", "trg_supra_approval_votes_no_update",
     "trg_supra_approval_votes_no_delete", "trg_supra_approval_events_no_update",
     "trg_supra_approval_events_no_delete", "trg_supra_approval_status_transitions",
-    "trg_supra_approval_status_evidence"
+    "trg_supra_approval_status_evidence",
+    "trg_supra_audit_events_no_update",
+    "trg_supra_audit_events_no_delete",
+    "trg_supra_approval_requests_no_delete"
   ]) assert.ok(workflow.includes(name), `missing post-migration verification for ${name}`);
 });
 
-test("Preview migration workflow accepts only an empty EU D1, the exact 23-entry reviewed baseline or the exact 28-entry target", () => {
+test("Preview migration workflow accepts only an empty EU D1, the exact 23-entry reviewed baseline or the exact 30-entry target", () => {
   assert.match(workflow, /SELECT type, name FROM sqlite_master ORDER BY type, name/);
   assert.match(workflow, /registry_present/);
   assert.match(workflow, /non_internal/);
-  assert.match(workflow, /len\(local\) != 28/);
+  assert.match(workflow, /len\(local\) != 30/);
   assert.match(workflow, /remote == base/);
-  assert.match(workflow, /differs from the exact reviewed 23-entry baseline and 28-entry target/);
+  assert.match(workflow, /differs from the exact reviewed 23-entry baseline and 30-entry target/);
   assert.doesNotMatch(workflow, /legacy=/);
   assert.doesNotMatch(workflow, /baseline=\(local-pending\)\|legacy/);
 });
@@ -160,7 +165,10 @@ test("Preview migration workflow verifies every persisted approval table, index 
     "trg_supra_approval_events_no_update",
     "trg_supra_approval_events_no_delete",
     "trg_supra_approval_status_transitions",
-    "trg_supra_approval_status_evidence"
+    "trg_supra_approval_status_evidence",
+    "trg_supra_audit_events_no_update",
+    "trg_supra_audit_events_no_delete",
+    "trg_supra_approval_requests_no_delete"
   ]) assert.ok(workflow.includes(name), `missing persisted approval schema verification: ${name}`);
   assert.match(workflow, /actual_triggers != expected_triggers/);
 });
@@ -190,7 +198,9 @@ test("all canonical migrations required by the remote apply gate physically exis
     "0023_tenant_double_entry_accounting.sql", "0024_tenant_membership_authority.sql",
     "0025_session_revocation.sql",
     "0026_accounting_currency_consistency.sql",
-    "0027_tenant_membership_identity_immutable.sql"
+    "0027_tenant_membership_identity_immutable.sql",
+    "0028_tenant_accounting_entity_delete_guard.sql",
+    "0029_supra_append_only_audit_guards.sql"
   ];
   const actual = new Set(await readdir(new URL("../migrations-preview-canonical/", import.meta.url)));
   const missing = expected.filter(name => !actual.has(name));

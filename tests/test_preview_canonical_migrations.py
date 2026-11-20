@@ -33,7 +33,27 @@ EXPECTED = [
     "0026_accounting_currency_consistency.sql",
     "0027_tenant_membership_identity_immutable.sql",
     "0028_tenant_accounting_entity_delete_guard.sql",
+    "0029_supra_append_only_audit_guards.sql",
 ]
+
+# Keep the manual Preview migration gate synchronized with the canonical chain.
+WORKFLOW = ROOT / ".github" / "workflows" / "apply-preview-d1-migrations.yml"
+workflow_text = WORKFLOW.read_text(encoding="utf-8")
+assert '"0029_supra_append_only_audit_guards.sql"' in workflow_text, (
+    "Preview migration workflow omits the latest canonical migration 0029"
+)
+assert "if len(local) != 30:" in workflow_text, (
+    "Preview migration workflow must require exactly 30 canonical migrations"
+)
+assert "exact 30-entry registry" in workflow_text, (
+    "Preview migration workflow target registry count is stale"
+)
+assert "all 30 canonical migrations are pending" in workflow_text, (
+    "Preview migration workflow empty-database inventory message is stale"
+)
+assert "only migrations 0023-0029 are pending" in workflow_text, (
+    "Preview migration workflow baseline-to-target range is stale"
+)
 
 actual = sorted(path.name for path in MIGRATIONS.glob("*.sql"))
 assert actual == sorted(EXPECTED), (
@@ -449,3 +469,52 @@ except sqlite3.IntegrityError as exc:
     assert "TENANT_HAS_ACCOUNTING_ENTITIES" in str(exc), str(exc)
 assert db.execute("SELECT tenant_id FROM accounting_entities WHERE id='entity-orphan-guard'").fetchone()[0] == "tenant-orphan-guard"
 print("PASS: tenant deletion cannot orphan accounting entities even when no membership rows exist.")
+
+
+# SUPRA audit and approval records remain append-only after additive migration 0029.
+supra_triggers = {
+    row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='trigger'")
+}
+required_supra_guards = {
+    "trg_supra_audit_events_no_update",
+    "trg_supra_audit_events_no_delete",
+    "trg_supra_approval_requests_no_delete",
+}
+assert required_supra_guards <= supra_triggers, (
+    f"Missing SUPRA append-only guards: {sorted(required_supra_guards-supra_triggers)}"
+)
+
+db.execute("""
+    INSERT INTO supra_audit_events(
+      id, actor_user_id, actor_role, event_type, domain, action, risk,
+      approval_required, execution_allowed
+    ) VALUES (
+      'supra-audit-synthetic', 'user-a', 'gerante', 'PLAN_CREATED',
+      'GOVERNANCE', 'RECOMMEND_ONLY', 'LOW', 0, 0
+    )
+""")
+db.execute("""
+    INSERT INTO supra_approval_requests(
+      id, requester_user_id, tenant_id, action, resource_id, payload_hash,
+      payload_json, reason, risk, required_approvals, expires_at
+    ) VALUES (
+      'supra-approval-synthetic', 'user-a', 'tenant-a', 'SIMULATE_ONLY',
+      'synthetic-resource', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+      '{}', 'synthetic migration test', 'LOW', 1, '2026-11-20T12:00:00Z'
+    )
+""")
+for sql in [
+    "UPDATE supra_audit_events SET action='TAMPERED' WHERE id='supra-audit-synthetic'",
+    "DELETE FROM supra_audit_events WHERE id='supra-audit-synthetic'",
+]:
+    try:
+        db.execute(sql)
+        raise AssertionError(f"SUPRA audit history was mutable: {sql}")
+    except sqlite3.IntegrityError as exc:
+        assert "SUPRA_AUDIT_EVENTS_ARE_APPEND_ONLY" in str(exc), str(exc)
+try:
+    db.execute("DELETE FROM supra_approval_requests WHERE id='supra-approval-synthetic'")
+    raise AssertionError("SUPRA approval request was deletable")
+except sqlite3.IntegrityError as exc:
+    assert "APPROVAL_REQUESTS_ARE_APPEND_ONLY" in str(exc), str(exc)
+print("PASS: SUPRA audit events and approval requests reject UPDATE/DELETE under migration 0029.")
