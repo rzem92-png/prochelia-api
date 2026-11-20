@@ -249,7 +249,7 @@ test("opportunity application bodies use the same streaming byte limit", () => {
 });
 
 const profileUpdateStart = source.indexOf("async function intervenantProfileUpdateRoute(");
-const profileUpdateEnd = source.indexOf("\\nasync function handle(request,env){", profileUpdateStart);
+const profileUpdateEnd = source.indexOf("\nasync function handle(request,env){", profileUpdateStart);
 assert.ok(profileUpdateStart >= 0 && profileUpdateEnd > profileUpdateStart, "profile update route must exist before canonical Worker dispatch");
 const profileUpdateHandler = source.slice(profileUpdateStart, profileUpdateEnd);
 
