@@ -14,6 +14,7 @@ test("Nexus Supra dispatch is behind the shared production middleware and uses a
   assert.match(block, /resolveTenantContext\(request, env, supraAuth\)/);
   assert.match(block, /tenant_id: tenantContext\.tenant\.id/);
   assert.match(block, /tenant_role: tenantContext\.tenant\.role/);
+  assert.match(block, /handleSupraApprovalRoute\(request, env, supraAuth\)/);
   assert.match(block, /handleSupraRoute\(request, env, supraAuth\)/);
   assert.doesNotMatch(block, /request\.json\(\).*tenant_id/s);
 });
@@ -22,5 +23,6 @@ test("Nexus Supra never trusts caller-selected tenant identity", () => {
   const sourceContext = source.slice(source.indexOf("if (url.pathname.startsWith('/api/supra/'))"), source.indexOf("if (url.pathname.startsWith('/api/v7/'))"));
   assert.match(sourceContext, /resolveTenantContext/);
   assert.match(sourceContext, /tenantContext\.tenant\.id/);
+  assert.match(sourceContext, /handleSupraApprovalRoute\(request, env, supraAuth\)/);
   assert.doesNotMatch(sourceContext, /searchParams\.get\(['"]tenant/);
 });
