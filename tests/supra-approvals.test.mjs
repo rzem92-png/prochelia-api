@@ -190,7 +190,7 @@ test("all approval endpoints fail closed when the authenticated session has no s
     payload: { commit: "abc" }, reason: "Review"
   }), { DB: requestDb }, managerWithoutTenant);
   assert.equal(requestResponse.status, 403);
-  assert.equal((await requestResponse.json()).error, "TENANT_SCOPE_NOT_VERIFIED");
+  assert.equal((await requestResponse.json()).error, "FORBIDDEN");
   assert.equal(requestDb.calls.length, 0);
 
   const decideDb = fakeDb([{
@@ -201,7 +201,7 @@ test("all approval endpoints fail closed when the authenticated session has no s
     requestId: "req-no-tenant", decision: "APPROVE", reason: "Review"
   }), { DB: decideDb }, managerWithoutTenant);
   assert.equal(decideResponse.status, 403);
-  assert.equal((await decideResponse.json()).error, "TENANT_SCOPE_NOT_VERIFIED");
+  assert.equal((await decideResponse.json()).error, "FORBIDDEN");
   assert.equal(decideDb.calls.filter(x => x.kind === "batch").length, 0);
 
   const detailDb = fakeDb([{
@@ -211,7 +211,7 @@ test("all approval endpoints fail closed when the authenticated session has no s
     "https://app.example/api/supra/approvals/detail?requestId=req-no-tenant"
   ), { DB: detailDb }, managerWithoutTenant);
   assert.equal(detailResponse.status, 403);
-  assert.equal((await detailResponse.json()).error, "TENANT_SCOPE_NOT_VERIFIED");
+  assert.equal((await detailResponse.json()).error, "FORBIDDEN");
   assert.equal(detailDb.calls.filter(x => x.kind === "all").length, 0);
 
   const revokeDb = fakeDb([{
