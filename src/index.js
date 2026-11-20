@@ -3250,7 +3250,11 @@ async function handle(request,env){
         // active server-side membership; request body/query/header values are ignored.
         supraAuth = {
           ...supraAuth,
-          user: { ...supraAuth.user, tenant_id: tenantContext.tenant.id }
+          user: {
+            ...supraAuth.user,
+            tenant_id: tenantContext.tenant.id,
+            tenant_role: tenantContext.tenant.role
+          }
         };
       }
       const supraResponse = await handleSupraRoute(request, env, supraAuth);
