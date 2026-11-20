@@ -158,6 +158,16 @@ test("action outbox HTTP route returns 503 before schema setup or outbox reads",
   assert.equal(writes.length, 0);
 });
 
+test("action outbox preflight blocks before the D1-backed rate limiter", async () => {
+  const source = await readFile(new URL("../src/index.js", import.meta.url), "utf8");
+  const wrapperStart = source.indexOf("const __procheliaProductionSafetyHandle = handle;");
+  assert.notEqual(wrapperStart, -1, "final production safety wrapper exists");
+  const wrapper = source.slice(wrapperStart);
+  const guard = wrapper.indexOf("preflightPath === '/api/ops/outbox/process'");
+  const limiter = wrapper.indexOf("const rate=await productionRateLimit(request,env)");
+  assert.ok(guard >= 0 && limiter > guard, "disabled outbox must be rejected before rate-limit D1 access");
+});
+
 test("action outbox route has an authenticated fail-closed guard before its legacy handler", async () => {
   const source = await readFile(new URL("../src/index.js", import.meta.url), "utf8");
   const start = source.indexOf("async function handleV139");
