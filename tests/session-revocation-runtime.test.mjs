@@ -120,3 +120,19 @@ test("logout keeps the cookie and returns 503 when the D1 revocation call throws
   assert.equal((await response.json()).error, "SESSION_REVOCATION_UNCONFIRMED");
   assert.equal(response.headers.get("set-cookie"), null);
 });
+
+test("logout clears a stale cookie when D1 confirms an idempotent no-op revocation", async () => {
+  const env = {
+    DB: {
+      prepare() {
+        return { bind() {
+          return { async run() { return { success: true, meta: { changes: 0 } }; } };
+        }};
+      }
+    }
+  };
+  const response = await logout(request(), env);
+  assert.equal(response.status, 200);
+  assert.equal((await response.json()).authenticated, false);
+  assert.match(response.headers.get("set-cookie"), /Max-Age=0/);
+});
