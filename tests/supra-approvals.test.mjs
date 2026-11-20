@@ -108,6 +108,10 @@ test("approval decision records distinct approver votes and only approves at the
   assert.equal(body.approvalCount, 1);
   assert.ok(db.calls.some(x => x.sql.includes("UNIQUE") || x.sql.includes("INSERT INTO supra_approval_votes")));
   assert.ok(db.calls.some(x => x.sql.includes("COUNT(*)") && x.sql.includes("required_approvals")));
+  for (const eventType of ["APPROVED", "REJECTED"]) {
+    const eventInsert = db.calls.find(x => x.sql.includes("event_type='" + eventType + "'"));
+    assert.ok(eventInsert?.sql.includes("NOT EXISTS"), eventType + " audit event must be idempotent under concurrent votes");
+  }
 });
 
 test("approval consumption is server-only, one-time, and bound to action, tenant, resource, amount and payload hash", async () => {
@@ -327,4 +331,19 @@ test("approval routes reject a global manager with read-only tenant membership",
     { user: { id: "manager-readonly", role: "GERANTE", tenant_id: "tenant-1", tenant_role: "READ_ONLY" } }
   );
   assert.equal(response.status, 403);
+});
+
+
+test("concurrent expiry checks cannot append duplicate EXPIRED audit events", async () => {
+  const db = fakeDb([{
+    id: "req-expired", requester_user_id: "manager-a", tenant_id: "tenant-1",
+    status: "PENDING", expires_at: "2000-01-01T00:00:00.000Z", required_approvals: 2
+  }]);
+  const response = await handleSupraApprovalRoute(post("/api/supra/approvals/decide", {
+    requestId: "req-expired", decision: "APPROVE", reason: "Too late"
+  }), { DB: db }, managerB);
+  assert.equal(response.status, 409);
+  assert.equal((await response.json()).error, "APPROVAL_EXPIRED");
+  const expiryInsert = db.calls.find(x => x.sql.includes("event_type='EXPIRED'"));
+  assert.ok(expiryInsert?.sql.includes("NOT EXISTS"));
 });
