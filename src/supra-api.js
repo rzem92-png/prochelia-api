@@ -43,10 +43,12 @@ function isPlainRecord(value) {
 
 async function writeAudit(env, auth, event) {
   if (!env?.DB?.prepare) throw new Error("SUPRA_AUDIT_DATABASE_REQUIRED");
+  const tenantId = typeof auth?.user?.tenant_id === "string" ? auth.user.tenant_id : "";
+  if (!tenantId) throw new Error("SUPRA_AUDIT_TENANT_REQUIRED");
   const result = await env.DB.prepare(`INSERT INTO supra_audit_events
-    (id, actor_user_id, actor_role, event_type, domain, action, risk, approval_required, execution_allowed)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)`)
-    .bind(crypto.randomUUID(), auth.user.id, auth.user.role, event.eventType,
+    (id, tenant_id, actor_user_id, actor_role, event_type, domain, action, risk, approval_required, execution_allowed)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`)
+    .bind(crypto.randomUUID(), tenantId, auth.user.id, auth.user.role, event.eventType,
       event.domain, event.action, event.risk, event.approvalRequired ? 1 : 0).run();
   if (result?.success !== true) throw new Error("SUPRA_AUDIT_WRITE_UNCONFIRMED");
 }
