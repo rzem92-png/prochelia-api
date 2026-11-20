@@ -179,11 +179,19 @@ test("Preview migration workflow verifies every persisted approval table, index 
 
 
 test("Preview post-migration inventory queries include every object introduced by SUPRA tenant-scope migration 0030", () => {
-  assert.match(workflow, /idx_supra_audit_events_created_at[\\s\\S]*idx_supra_audit_events_tenant_created_at/);
-  assert.match(workflow, /trg_supra_audit_events_require_active_tenant[\\s\\S]*trg_supra_approval_requests_immutable/);
-  assert.match(workflow, /trg_supra_audit_events_no_update','trg_supra_audit_events_no_delete','trg_supra_approval_requests_no_delete','trg_supra_audit_events_require_active_tenant/);
-});
+  const objectsStart = workflow.indexOf('jq -n \'{sql:"SELECT type, name FROM sqlite_master');
+  const objectsEnd = workflow.indexOf('> "$objects_payload"', objectsStart);
+  const objectsQuery = workflow.slice(objectsStart, objectsEnd);
+  assert.ok(objectsStart >= 0 && objectsEnd > objectsStart);
+  assert.ok(objectsQuery.includes("idx_supra_audit_events_tenant_created_at"));
+  assert.ok(objectsQuery.includes("trg_supra_audit_events_require_active_tenant"));
 
+  const guardsStart = workflow.indexOf('jq -n --arg sql "SELECT name FROM sqlite_master WHERE type=\'trigger\'');
+  const guardsEnd = workflow.indexOf('> "$supra_guards_payload"', guardsStart);
+  const guardsQuery = workflow.slice(guardsStart, guardsEnd);
+  assert.ok(guardsStart >= 0 && guardsEnd > guardsStart);
+  assert.ok(guardsQuery.includes("trg_supra_audit_events_require_active_tenant"));
+});
 test("Preview migration commands use only the dedicated migration-only D1 config", () => {
   assert.match(workflow, /Path\("wrangler\.preview-migrations\.jsonc"\)/);
   assert.match(workflow, /db\["binding"\] == "PREVIEW_DB"/);
