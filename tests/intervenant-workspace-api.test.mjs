@@ -142,7 +142,7 @@ test("direct opportunity applications recheck assignment conflicts instead of tr
 });
 
 const assignmentStart = source.indexOf("async function intervenantAssignmentsRoute(");
-const assignmentEnd = source.indexOf("\\nasync function intervenantAvailabilityRoute(", assignmentStart);
+const assignmentEnd = source.indexOf("async function intervenantAvailabilityRoute(", assignmentStart);
 assert.ok(assignmentStart >= 0 && assignmentEnd > assignmentStart, "assignment read route must exist");
 const assignmentHandler = source.slice(assignmentStart, assignmentEnd);
 
