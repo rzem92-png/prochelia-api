@@ -1112,15 +1112,87 @@ function constantTimeStringEqual(actual, expected) {
   return difference === 0;
 }
 
+export export async function readBoundedWebhookBody(request, maxBytes = 1_048_576) {
+  if (!Number.isSafeInteger(maxBytes) || maxBytes < 1) return { ok: false, reason: "invalid_limit" };
+  const declaredLength = request.headers.get("content-length");
+  if (declaredLength !== null) {
+    if (!/^\d+$/.test(declaredLength)) return { ok: false, reason: "invalid_length" };
+    if (Number(declaredLength) > maxBytes) return { ok: false, reason: "too_large" };
+  }
+  if (!request.body) return { ok: true, body: "" };
+  const reader = request.body.getReader();
+  const chunks = [];
+  let total = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!(value instanceof Uint8Array)) return { ok: false, reason: "invalid_stream" };
+      total += value.byteLength;
+      if (total > maxBytes) {
+        try { await reader.cancel(); } catch {}
+        return { ok: false, reason: "too_large" };
+      }
+      chunks.push(value);
+    }
+    const bytes = new Uint8Array(total);
+    let offset = 0;
+    for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
+    try {
+      return { ok: true, body: new TextDecoder("utf-8", { fatal: true }).decode(bytes) };
+    } catch {
+      return { ok: false, reason: "invalid_utf8" };
+    }
+  } catch {
+    return { ok: false, reason: "read_failed" };
+  } finally {
+    try { reader.releaseLock(); } catch {}
+  }
+}
+
 export async function verifyWebhookSignature(request, env, rawBody) {
+  // Stripe has its own timestamped signature format and secret. Never fall
+  // back to the generic provider signature when Stripe-Signature is present.
+  const stripeHeader = request.headers.get("stripe-signature");
+  if (stripeHeader !== null) {
+    const secret = env?.STRIPE_WEBHOOK_SECRET;
+    if (typeof secret !== "string" || secret.length < 32 || typeof rawBody !== "string") return false;
+    const fields = stripeHeader.split(",").map(part => {
+      const item = part.trim();
+      const separator = item.indexOf("=");
+      return separator > 0 ? [item.slice(0, separator), item.slice(separator + 1)] : [item, ""];
+    });
+    const timestamps = fields.filter(([name]) => name === "t").map(([, value]) => value);
+    const signatures = fields.filter(([name]) => name === "v1").map(([, value]) => value);
+    if (timestamps.length !== 1 || !/^\d{1,12}$/.test(timestamps[0] || "") ||
+        signatures.length === 0 || signatures.some(value => !/^[0-9a-f]{64}$/i.test(value || ""))) return false;
+    const timestamp = Number(timestamps[0]);
+    const now = Math.floor(Date.now() / 1000);
+    if (!Number.isSafeInteger(timestamp) || Math.abs(now - timestamp) > 300) return false;
+    const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+    const signedPayload = new TextEncoder().encode(timestamps[0] + "." + rawBody);
+    const mac = new Uint8Array(await crypto.subtle.sign("HMAC", key, signedPayload));
+    const expected = Array.from(mac, byte => byte.toString(16).padStart(2, "0")).join("");
+    let matched = 0;
+    for (const signature of signatures) matched |= Number(constantTimeStringEqual(signature.toLowerCase(), expected));
+    return matched === 1;
+  }
+
   const secret = env?.PAYMENT_WEBHOOK_SECRET;
-  if (typeof secret !== 'string' || !secret) return false;
-  const signature = request.headers.get('x-prochelia-signature') || request.headers.get('x-webhook-signature') || '';
-  const supplied = signature.startsWith('sha256=') ? signature.slice(7) : signature;
+  if (typeof secret !== "string" || secret.length < 32 || typeof rawBody !== "string") return false;
+  const signature = request.headers.get("x-prochelia-signature") || request.headers.get("x-webhook-signature") || "";
+  const supplied = signature.startsWith("sha256=") ? signature.slice(7) : signature;
   if (!/^[A-Za-z0-9_-]{43}$/.test(supplied)) return false;
-  const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
-  const mac = new Uint8Array(await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(rawBody)));
+  const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  const mac = new Uint8Array(await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(rawBody)));
   return constantTimeStringEqual(supplied, base64url(mac));
+}
+
+export function webhookProviderForRequest(request, env) {
+  if (request.headers.get("stripe-signature") !== null) return "stripe";
+  const configuredProvider = paymentProvider(env);
+  if (String(configuredProvider).toLowerCase() === "stripe") return null;
+  return configuredProvider;
 }
 
 export function requiresAtomicFinancialSettlement(eventType) {
@@ -1130,61 +1202,41 @@ export function requiresAtomicFinancialSettlement(eventType) {
   ]).has(String(eventType || '').trim());
 }
 
-async function paymentWebhook(request, env) {
-  // Reject unauthenticated and malformed events before any D1 schema access.
-  // This prevents arbitrary callers from triggering CREATE TABLE/INDEX writes.
-  const raw = await request.text();
-  if (!(await verifyWebhookSignature(request, env, raw))) return json({ok:false,error:'INVALID_WEBHOOK_SIGNATURE',version:VERSION},401);
+export async function paymentWebhook(request, env) {
+  if (request.method !== "POST") {
+    return json({ ok: false, error: "METHOD_NOT_ALLOWED", version: VERSION }, 405, { allow: "POST" });
+  }
+  const bodyResult = await readBoundedWebhookBody(request);
+  if (!bodyResult.ok) {
+    const tooLarge = bodyResult.reason === "too_large";
+    return json({ ok: false, error: tooLarge ? "WEBHOOK_BODY_TOO_LARGE" : "INVALID_WEBHOOK_BODY", version: VERSION }, tooLarge ? 413 : 400);
+  }
+  const raw = bodyResult.body;
+  if (!(await verifyWebhookSignature(request, env, raw))) {
+    return json({ ok: false, error: "INVALID_WEBHOOK_SIGNATURE", version: VERSION }, 401);
+  }
   let event;
-  try { event = JSON.parse(raw); } catch { return json({ok:false,error:'INVALID_WEBHOOK_JSON',version:VERSION},400); }
-  const provider = clean(event?.provider) || paymentProvider(env);
-  const eventId = clean(event?.id), type = clean(event?.type);
-  if (!eventId || !type || typeof event !== 'object' || Array.isArray(event)) {
-    return json({ok:false,error:'INVALID_WEBHOOK_EVENT',version:VERSION},400);
+  try { event = JSON.parse(raw); }
+  catch { return json({ ok: false, error: "INVALID_WEBHOOK_JSON", version: VERSION }, 400); }
+  if (!event || typeof event !== "object" || Array.isArray(event)) {
+    return json({ ok: false, error: "INVALID_WEBHOOK_EVENT", version: VERSION }, 400);
   }
-  // Do not accept financial state transitions until the settlement ledger can
-  // atomically deduplicate by transaction/payout, not only by provider event ID.
+  const provider = webhookProviderForRequest(request, env);
+  const eventId = clean(event.id);
+  const type = clean(event.type);
+  if (!provider || !eventId || !type) {
+    return json({ ok: false, error: "INVALID_WEBHOOK_EVENT", version: VERSION }, 400);
+  }
+  // The receiver remains fail-closed until a reviewed PSP adapter, atomic
+  // settlement ledger and Sandbox acceptance are available. No D1 writes,
+  // wallet changes, refunds or payouts occur in this state.
+  if (!paymentsConfigured(env)) {
+    return json({ ok: false, error: "PAYMENT_PROVIDER_NOT_CONFIGURED", version: VERSION, provider, write_enabled: false }, 503);
+  }
   if (requiresAtomicFinancialSettlement(type)) {
-    return json({ok:false,error:'ATOMIC_SETTLEMENT_LEDGER_REQUIRED',version:VERSION,retryable:true},503);
+    return json({ ok: false, error: "ATOMIC_SETTLEMENT_LEDGER_REQUIRED", version: VERSION, retryable: true, write_enabled: false }, 503);
   }
-  await ensurePaymentSchema(env);
-  const payloadHash=await sha256Base64url(raw);
-  const inserted=await env.DB.prepare(`INSERT OR IGNORE INTO payment_webhook_events (id,provider,event_id,event_type,signature_valid,payload_hash) VALUES (?,?,?,?,1,?)`).bind(crypto.randomUUID(),provider,eventId,type,payloadHash).run();
-  if(!inserted.meta?.changes) return json({ok:true,version:VERSION,duplicate:true,event_id:eventId},200);
-  const txId=clean(event?.data?.transaction_id), payoutId=clean(event?.data?.payout_id);
-  if(txId){
-    const tx=await env.DB.prepare('SELECT * FROM payment_transactions WHERE id=? LIMIT 1').bind(txId).first();
-    if(tx){
-      const statusMap={payment_succeeded:'paid',charge_succeeded:'paid',payment_failed:'failed',charge_failed:'failed',payment_refunded:'refunded'};
-      const newStatus=statusMap[type];
-      if(newStatus){
-        const alreadyFinal = ['paid','failed','refunded'].includes(tx.status);
-        if(!alreadyFinal){
-          await env.DB.prepare('UPDATE payment_transactions SET status=?,provider_payment_id=COALESCE(?,provider_payment_id),updated_at=CURRENT_TIMESTAMP WHERE id=?').bind(newStatus,clean(event?.data?.provider_payment_id)||null,txId).run();
-          if(newStatus==='paid'){
-            const wallet=await env.DB.prepare('SELECT * FROM wallets WHERE user_id=? LIMIT 1').bind(tx.intervenant_id).first();
-            if(wallet) await env.DB.prepare('UPDATE wallets SET available_cents=available_cents+?,updated_at=CURRENT_TIMESTAMP WHERE id=?').bind(tx.net_intervenant_cents,wallet.id).run();
-          }
-        }
-      }
-    }
-  }
-  if(payoutId){
-    const payout=await env.DB.prepare('SELECT * FROM payout_requests WHERE id=? LIMIT 1').bind(payoutId).first();
-    const statusMap={payout_processing:'processing',payout_paid:'completed',payout_failed:'failed',payout_canceled:'canceled'};
-    const newStatus=statusMap[type];
-    if(payout&&newStatus){
-      const alreadyFinal=['completed','failed','canceled'].includes(payout.status);
-      if(!alreadyFinal){
-        if(newStatus==='completed') await env.DB.prepare(`UPDATE wallets SET reserved_cents=MAX(0,reserved_cents-?),paid_cents=paid_cents+?,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(payout.amount_cents,payout.amount_cents,payout.wallet_id).run();
-        if(['failed','canceled'].includes(newStatus)) await env.DB.prepare(`UPDATE wallets SET reserved_cents=MAX(0,reserved_cents-?),available_cents=available_cents+?,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(payout.amount_cents,payout.amount_cents,payout.wallet_id).run();
-        await env.DB.prepare(`UPDATE payout_requests SET status=?,provider_payout_id=COALESCE(?,provider_payout_id),failure_code=?,failure_message=?,completed_at=CASE WHEN ?='completed' THEN CURRENT_TIMESTAMP ELSE completed_at END,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(newStatus,clean(event?.data?.provider_payout_id)||null,clean(event?.data?.failure_code)||null,clean(event?.data?.failure_message)||null,newStatus,payoutId).run();
-      }
-    }
-  }
-  await env.DB.prepare('UPDATE payment_webhook_events SET processed=1,processed_at=CURRENT_TIMESTAMP WHERE provider=? AND event_id=?').bind(provider,eventId).run();
-  await paymentAudit(env,'PSP_WEBHOOK_PROCESSED',{transaction_id:txId,payout_id:payoutId,metadata:{provider,event_id:eventId,event_type:type}},'OK');
-  return json({ok:true,version:VERSION,processed:true,event_id:eventId},200);
+  return json({ ok: false, error: "WEBHOOK_PROCESSOR_NOT_IMPLEMENTED", version: VERSION, provider, write_enabled: false }, 503);
 }
 
 async function openPaymentDispute(request, env) {
@@ -3895,6 +3947,7 @@ async function handle(request,env){
   try {
     if(isMutatingMethod(request.method) && !securityOriginAllowed(request,env)) return json({ok:false,error:'ORIGIN_NOT_ALLOWED',version:VERSION},403);
     const url=new URL(request.url);
+    if (url.pathname === '/api/payments/webhook') return paymentWebhook(request, env);
     // Fail closed before any schema helper touches D1: unauthenticated callers
     // must not use mission validation as an existence oracle for private IDs.
     if (url.pathname === '/api/missions/validate') {
