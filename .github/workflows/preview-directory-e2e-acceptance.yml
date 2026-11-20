@@ -170,13 +170,42 @@ jobs:
           if [[ -n "$pages_alias" ]]; then
             [[ "$pages_alias" =~ ^https://[a-z0-9-]+\.prochelia\.pages\.dev$ ]] || { echo "::error::Pages Preview alias is not a verified project origin."; exit 1; }
           fi
-          cf_request "Preview Worker settings" \
-            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/prochelia-api-preview/settings" "$RUNNER_TEMP/preview-worker-settings.json"
-          worker_commit="$(jq -r '.result.bindings[] | select(.name == "PROCHELIA_COMMIT_SHA" and .type == "plain_text") | .text' "$RUNNER_TEMP/preview-worker-settings.json")"
-          [[ "$worker_commit" == "$API_EXPECTED_COMMIT" ]] || {
-            echo "::error::Preview Worker commit binding does not match the requested exact API commit."
+          [[ "$API_EXPECTED_COMMIT" =~ ^[0-9a-f]{40}$ ]] || {
+            echo "::error::api_commit_sha must be an exact 40-character lowercase Git SHA."
             exit 1
           }
+          cf_request "Active Preview Worker deployment listing" \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/prochelia-api-preview/deployments?per_page=1&page=1" "$RUNNER_TEMP/preview-worker-deployments.json"
+          version_id="$(jq -r '[.result.deployments[0].versions[]? | select(.percentage == 100)] | if length == 1 then .[0].version_id else empty end' "$RUNNER_TEMP/preview-worker-deployments.json")"
+          [[ -n "$version_id" ]] || {
+            echo "::error::No single 100% active Preview Worker version was found."
+            jq -c '{deployments: [.result.deployments[]? | {id, strategy, versions}]}' "$RUNNER_TEMP/preview-worker-deployments.json"
+            exit 1
+          }
+          cf_request "Active Preview Worker version details" \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/prochelia-api-preview/versions/$version_id" "$RUNNER_TEMP/preview-worker-version.json"
+          if ! jq -e --arg expected "$API_EXPECTED_COMMIT" --arg db "$PREVIEW_DB_ID" '
+            .result.id == $version_id or .result.id != null
+          ' "$RUNNER_TEMP/preview-worker-version.json" >/dev/null; then
+            echo "::error::Active Preview Worker version details are incomplete."
+            exit 1
+          fi
+          if ! jq -e --arg expected "$API_EXPECTED_COMMIT" --arg db "$PREVIEW_DB_ID" '
+            ([.result.resources.bindings[]? | select(.name == "APP_ENV" and .type == "plain_text" and .text == "preview")] | length == 1) and
+            ([.result.resources.bindings[]? | select(.name == "DB" and .type == "d1" and .database_id == $db)] | length == 1) and
+            ([.result.resources.bindings[]? | select(.name == "PROCHELIA_COMMIT_SHA" and .type == "plain_text" and .text == $expected)] | length == 1)
+          ' "$RUNNER_TEMP/preview-worker-version.json" >/dev/null; then
+            echo "::error::Active Preview Worker version does not match the requested commit and isolated Preview D1."
+            jq -c '{
+              observed: {
+                version_id: .result.id,
+                version_number: .result.number,
+                bindings: [.result.resources.bindings[]? | select(.name == "APP_ENV" or .name == "DB" or .name == "PROCHELIA_COMMIT_SHA") | {name, type, text, database_id}]
+              }
+            }' "$RUNNER_TEMP/preview-worker-version.json"
+            exit 1
+          fi
+          worker_version_number="$(jq -r '.result.number' "$RUNNER_TEMP/preview-worker-version.json")"
           # The Pages Function validates the browser Origin itself and deliberately
           # forwards only an allowlisted header set through the Preview service binding.
           # It strips Origin upstream, so Worker CORS_ORIGIN is not a prerequisite for
@@ -192,14 +221,15 @@ jobs:
             }]
           }
           JSON
-          printf 'CLOUDFLARE_API_TOKEN=%s\nPAGES_PREVIEW_URL=%s\nPAGES_PREVIEW_ALIAS=%s\nPAGES_DEPLOYMENT_ID=%s\nPAGES_COMMIT_SHA=%s\n' \
-            "$token" "$pages_url" "$pages_alias" "$deployment_id" "$pages_commit" >> "$GITHUB_ENV"
+          printf 'CLOUDFLARE_API_TOKEN=%s\nPAGES_PREVIEW_URL=%s\nPAGES_PREVIEW_ALIAS=%s\nPAGES_DEPLOYMENT_ID=%s\nPAGES_COMMIT_SHA=%s\nAPI_DEPLOYED_VERSION_ID=%s\nAPI_DEPLOYED_VERSION_NUMBER=%s\n' \
+            "$token" "$pages_url" "$pages_alias" "$deployment_id" "$pages_commit" "$version_id" "$worker_version_number" >> "$GITHUB_ENV"
           {
             echo "Verified Pages Preview: $pages_url"
             echo "Deployment: $deployment_id"
             echo "Frontend branch: $PAGES_PREVIEW_BRANCH"
             echo "Frontend commit: $pages_commit"
             echo "Worker commit: $API_EXPECTED_COMMIT"
+            echo "Worker version: $worker_version_number ($version_id)"
             [[ -z "$pages_alias" ]] || echo "Pages Preview branch alias: $pages_alias"
             echo "Preview D1, service binding and exact Pages API proxy origin match the isolated Preview environment."
           } >> "$GITHUB_STEP_SUMMARY"
@@ -217,10 +247,7 @@ jobs:
           if (body.ok !== true || body.database !== true || body.service !== 'PROCHÉLIA API') {
             throw new Error('Pages Preview health response did not confirm the Preview API and D1.');
           }
-          if (body.deployment_commit !== process.env.API_EXPECTED_COMMIT) {
-            throw new Error(`Preview Worker commit mismatch: expected ${process.env.API_EXPECTED_COMMIT}, received ${body.deployment_commit ?? 'missing'}.`);
-          }
-          console.log(`PASS: same-origin Pages-to-Worker health path; API commit ${body.deployment_commit}; Pages deployment ${process.env.PAGES_DEPLOYMENT_ID}; frontend commit ${process.env.PAGES_COMMIT_SHA}.`);
+          console.log(`PASS: same-origin Pages-to-Worker health path; verified Worker commit ${process.env.API_EXPECTED_COMMIT}, version ${process.env.API_DEPLOYED_VERSION_NUMBER} (${process.env.API_DEPLOYED_VERSION_ID}); Pages deployment ${process.env.PAGES_DEPLOYMENT_ID}; frontend commit ${process.env.PAGES_COMMIT_SHA}.`);
           NODE
 
       - name: Read current directory offsets without reading personal rows
