@@ -87,6 +87,8 @@ violations = db.execute("PRAGMA foreign_key_check").fetchall()
 assert not violations, f"Canonical migration chain creates foreign-key violations: {violations[:10]}"
 
 tables = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+indexes = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='index'")}
+assert "idx_disponibilites_tenant_intervenant_idempotency" in indexes, "Missing durable availability idempotency index"
 required = {
     "users", "sessions", "clients", "intervenants", "missions",
     "auth_login_rate_limits", "supra_audit_events",
