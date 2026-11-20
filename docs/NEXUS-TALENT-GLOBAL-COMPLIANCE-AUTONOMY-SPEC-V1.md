@@ -161,3 +161,37 @@ Ce registre donne des textes de départ à intégrer dans les Country Compliance
 3. Afficher clairement les frais, taxes connues, commissions, conditions d'annulation et revenus nets estimés ; ne pas promettre de délai de versement avant confirmation du PSP et des règles locales.
 4. Garder les paiements, pourboires, cadeaux, abonnements, contenus payants et versements désactivés pays par pays tant que l'activité, le PSP, les règles de change, les remboursements et les obligations fiscales ne sont pas validés.
 5. Enregistrer pour chaque pays les textes applicables, l'avis du conseil local, les fonctions autorisées/interdites, la version des contrats et la date de réexamen. Une source officielle recensée ne vaut pas validation juridique.
+
+
+## Veille réglementaire vérifiée — 20 novembre 2026
+
+Cette section est une veille documentaire, pas un avis juridique. Le texte consolidé, les actes d'application et la qualification de PROCHÉLIA doivent être validés par un avocat/DPO compétent dans chaque territoire avant commercialisation.
+
+### Union européenne — règlement IA (AI Act)
+
+La FAQ actualisée de la Commission européenne confirme le calendrier suivant :
+
+- Les interdictions de pratiques IA et l'obligation de maîtrise de l'IA s'appliquent depuis le 2 février 2025.
+- Les obligations applicables aux modèles d'IA à usage général (GPAI) s'appliquent depuis le 2 août 2025.
+- Le règlement est généralement applicable depuis le 2 août 2026, sous réserve des dispositions à calendrier spécifique.
+- Après l'AI Omnibus entré en vigueur le 27 juillet 2026, les règles pour les cas à haut risque de l'annexe III — notamment certains usages en emploi, gestion des travailleurs et accès au travail indépendant — sont reportées au 2 décembre 2027. Les systèmes à haut risque intégrés à des produits réglementés suivent l'échéance du 2 août 2028.
+- Les obligations de transparence de l'article 50 concernant certains systèmes interactifs et contenus synthétiques s'appliquent depuis le 2 août 2026.
+
+**Conséquence à instruire pour Nexus Talent :** le ciblage d'annonces, le filtrage de candidatures, l'évaluation de candidats ou l'affectation algorithmique de personnes à des missions peuvent relever des cas d'emploi/gestion des travailleurs selon la finalité réelle, les utilisateurs et le rôle de PROCHÉLIA. Un simple report d'échéance ne dispense pas des obligations déjà applicables. La classification doit être faite fonction par fonction ; ne pas attribuer automatiquement la même qualification à toute recommandation ou mise en relation.
+
+Mesures de conception à conserver : décision humaine pour les décisions ayant un effet significatif sur une personne, traçabilité, information compréhensible, contestation, tests de biais, gestion des risques, contrôle des données et séparation entre recommandation et décision finale.
+
+Source primaire : [Commission européenne — Navigating the AI Act](https://digital-strategy.ec.europa.eu/en/faqs/navigating-ai-act).
+
+### Algérie — données personnelles et services de confiance
+
+- **Loi n° 25-11 du 24 juillet 2025 :** elle modifie et complète la loi n° 18-07 relative à la protection des personnes physiques dans le traitement des données personnelles. La matrice Algérie doit être fondée sur le texte consolidé, les formalités auprès de l'ANPDP, les règles de conservation, les transferts internationaux et les décisions d'application pertinentes. Source officielle de référence : [ARPCE — lois et règlements](https://www.arpce.dz/en/reg/loi) ; [Journal officiel n° 48/2025 — PDF](https://www.joradp.dz/FTP/JO-FRANCAIS/2025/F2025048.pdf).
+- **Loi n° 26-02 du 17 février 2026 :** l'ARPCE la répertorie comme établissant les règles générales relatives aux services de confiance pour les transactions électroniques et à l'identification électronique. Avant d'utiliser une signature, un certificat, un prestataire d'identification ou de revendiquer une équivalence juridique en Algérie, vérifier le texte intégral, les catégories de prestataires, les agréments et les textes d'application avec un conseil local. Source officielle : [ARPCE — présentation de la loi n° 26-02](https://www.arpce.dz/en/pub/n0z6w6).
+
+### Actions de conformité à maintenir
+
+1. Tenir des registres de traitement et journaux d'opérations distincts France/UE et Algérie, avec responsable, finalité, base légale, durée, sous-traitants, localisation et mécanisme de transfert.
+2. Ne pas confondre assurance d'âge, KYC/KYB, vérification de qualification professionnelle et identification électronique qualifiée.
+3. Ne pas collecter de biométrie par défaut ; toute nécessité doit être démontrée, proportionnée et validée localement.
+4. Ne pas faire d'un score Nexus Talent une décision automatique d'accès à une mission, à un revenu ou à une opportunité sans analyse de risque, explication, recours et contrôle humain.
+5. Obtenir une validation écrite d'un conseil français/UE et d'un conseil algérien avant activation des parcours concernés.
