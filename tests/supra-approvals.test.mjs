@@ -39,10 +39,12 @@ function fakeDb(firstRows = []) {
   return db;
 }
 
-function post(path, body, origin = "https://app.example") {
+function post(path, body, origin = "https://app.example", extraHeaders = {}) {
+  const headers = new Headers({ "content-type": "application/json", ...extraHeaders });
+  if (origin) headers.set("origin", origin);
   return new Request("https://app.example" + path, {
     method: "POST",
-    headers: { origin, "content-type": "application/json" },
+    headers,
     body: JSON.stringify(body)
   });
 }
@@ -63,6 +65,32 @@ test("approval mutations require an exact same-origin Origin header", async () =
     post("/api/supra/approvals/request", {}, "https://evil.example"), env, managerA
   );
   assert.equal(response.status, 403);
+});
+
+test("approval mutations accept the Pages proxy marker only when the browser Origin was verified upstream", async () => {
+  const body = {
+    action: "PAYMENT_ENABLE",
+    tenantId: "tenant-1",
+    resourceId: "payments-preview",
+    payload: { enabled: true },
+    reason: "Preview-only approval contract",
+    amountCents: 1000,
+    currency: "EUR"
+  };
+  const env = { DB: fakeDb() };
+  const proxied = await handleSupraApprovalRoute(
+    post("/api/supra/approvals/request", body, null, { "x-prochelia-proxy-verified": "same-origin" }),
+    env,
+    managerA
+  );
+  assert.equal(proxied.status, 201);
+
+  const unverified = await handleSupraApprovalRoute(
+    post("/api/supra/approvals/request", body, null),
+    { DB: fakeDb() },
+    managerA
+  );
+  assert.equal(unverified.status, 403);
 });
 
 test("high-risk requests bind an immutable payload hash and require two distinct approvers", async () => {
