@@ -9,6 +9,7 @@ function fakeDb(firstRows = []) {
     calls,
     failAll: false,
     failBatch: false,
+    failFirst: false,
     prepare(sql) {
       return {
         sql,
@@ -16,6 +17,7 @@ function fakeDb(firstRows = []) {
         bind(...values) { this.values = values; return this; },
         async first() {
           calls.push({ kind: "first", sql: this.sql, values: this.values });
+          if (db.failFirst) throw new Error("D1_READ_FAILED");
           return firstRows.shift() ?? null;
         },
         async run() {
@@ -116,6 +118,19 @@ test("approval decision records distinct approver votes and only approves at the
     assert.ok(eventInsert?.sql.includes("NOT EXISTS"), eventType + " audit event must be idempotent under concurrent votes");
     assert.equal(eventInsert.values.length, 5, eventType + " audit insert must bind every SQL parameter");
   }
+});
+
+test("approval decision fails closed when final confirmation reads fail", async () => {
+  const db = fakeDb([
+    { id: "req-final-read-fail", requester_user_id: "manager-a", tenant_id: "tenant-1",
+      status: "PENDING", expires_at: "2999-01-01T00:00:00.000Z", required_approvals: 2 }
+  ]);
+  db.failFirst = true;
+  const response = await handleSupraApprovalRoute(post("/api/supra/approvals/decide", {
+    requestId: "req-final-read-fail", decision: "APPROVE", reason: "Independent review"
+  }), { DB: db }, managerB);
+  assert.equal(response.status, 503);
+  assert.equal((await response.json()).error, "APPROVAL_LEDGER_UNAVAILABLE");
 });
 
 test("approval consumption is server-only, one-time, and bound to action, tenant, resource, amount and payload hash", async () => {
