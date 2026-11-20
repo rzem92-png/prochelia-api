@@ -622,7 +622,7 @@ except sqlite3.IntegrityError as exc:
 db.execute("INSERT INTO clients(id, user_id, tenant_id) VALUES ('market-client-a-row', 'market-client-a', 'market-tenant-a')")
 db.execute("INSERT INTO intervenants(id, user_id, tenant_id) VALUES ('market-worker-a-row', 'market-worker-a', 'market-tenant-a')")
 db.execute("INSERT INTO clients(id, user_id, tenant_id) VALUES ('market-client-b-row', 'market-client-b', 'market-tenant-b')")
-db.execute("INSERT INTO intervenants(id, user_id, tenant_id) VALUES ('market-worker-b-row', 'market-worker-b', 'market-tenant-b')")
+db.execute("INSERT INTO intervenants(id, user_id, tenant_id, validation_status) VALUES ('market-worker-b-row', 'market-worker-b', 'market-tenant-b', 'approved')")
 db.execute("INSERT INTO prestations(id, name, tenant_id) VALUES ('market-service-a', 'Synthetic service A', 'market-tenant-a')")
 db.execute("INSERT INTO prestations(id, name, tenant_id) VALUES ('market-service-b', 'Synthetic service B', 'market-tenant-b')")
 db.execute("""
@@ -662,3 +662,149 @@ try:
 except sqlite3.IntegrityError as exc:
     assert "TENANT_IMMUTABLE" in str(exc) or "MISSION_RELATIONSHIP_TENANT_MISMATCH" in str(exc), str(exc)
 print("PASS: operational marketplace tables require active tenant membership, tenant-consistent mission relations and immutable tenant ownership.")
+
+# Privacy-safe cross-tenant opportunity publication, application and atomic assignment.
+marketplace_tables = {
+    row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")
+}
+required_marketplace_tables = {
+    "mission_opportunity_consents", "mission_opportunities",
+    "mission_applications", "mission_assignments",
+}
+assert required_marketplace_tables <= marketplace_tables, (
+    f"Missing cross-tenant marketplace tables: {sorted(required_marketplace_tables-marketplace_tables)}"
+)
+for table in required_marketplace_tables:
+    columns = {row[1] for row in db.execute(f"PRAGMA table_info({table})")}
+    assert "owner_tenant_id" in columns or table == "mission_opportunity_consents", f"{table} missing owner tenant scope"
+opportunity_columns = {row[1] for row in db.execute("PRAGMA table_info(mission_opportunities)")}
+assert "address" not in opportunity_columns and "client_user_id" not in opportunity_columns, (
+    "Public opportunity read model must not contain client address or client identity"
+)
+
+db.execute("""
+    INSERT INTO missions(
+      id, client_id, intervenant_id, prestation_id, start_at, end_at,
+      price_client, price_intervenant, commission, status, tenant_id
+    ) VALUES (
+      'market-mission-opportunity', 'market-client-a-row', NULL, 'market-service-a',
+      '2026-11-23T09:00:00Z', '2026-11-23T11:00:00Z',
+      60, 40, 20, 'requested', 'market-tenant-a'
+    )
+""")
+db.execute("""
+    INSERT INTO mission_opportunity_consents(
+      id, owner_tenant_id, mission_id, client_user_id, consent_version, evidence_sha256
+    ) VALUES (
+      'market-consent-a', 'market-tenant-a', 'market-mission-opportunity',
+      'market-client-a', 'privacy-v1', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+    )
+""")
+db.execute("""
+    INSERT INTO mission_opportunities(
+      id, owner_tenant_id, mission_id, consent_id, category_code, public_summary,
+      city, postal_prefix, start_at, end_at, provider_pay_cents, currency,
+      required_skills_json, published_by_user_id, expires_at
+    ) VALUES (
+      'market-opportunity-a', 'market-tenant-a', 'market-mission-opportunity',
+      'market-consent-a', 'CLEANING', 'Nettoyage ponctuel d’un logement',
+      'Aubergenville', '78', '2026-11-23T09:00:00Z', '2026-11-23T11:00:00Z',
+      4000, 'EUR', '["cleaning"]', 'market-client-a', '2026-11-22T23:00:00Z'
+    )
+""")
+db.execute("""
+    INSERT INTO disponibilites(id, intervenant_id, start_at, end_at, status, tenant_id)
+    VALUES (
+      'market-availability-b-opportunity', 'market-worker-b-row',
+      '2026-11-23T08:00:00Z', '2026-11-23T12:00:00Z', 'available', 'market-tenant-b'
+    )
+""")
+db.execute("""
+    INSERT INTO mission_applications(
+      id, opportunity_id, owner_tenant_id, applicant_tenant_id,
+      intervenant_id, applicant_user_id, provider_pay_cents, currency, idempotency_key, public_note
+    ) VALUES (
+      'market-application-b', 'market-opportunity-a', 'market-tenant-a',
+      'market-tenant-b', 'market-worker-b-row', 'market-worker-b',
+      4000, 'EUR', 'market-apply-worker-b-0001', 'Disponible pour cette mission.'
+    )
+""")
+db.execute("""
+    UPDATE mission_applications
+       SET status='ACCEPTED', decided_at=CURRENT_TIMESTAMP,
+           decided_by_user_id='market-client-a', version=version+1
+     WHERE id='market-application-b'
+""")
+assignment = db.execute("""
+    SELECT provider_tenant_id, intervenant_id, status
+      FROM mission_assignments WHERE opportunity_id='market-opportunity-a'
+""").fetchone()
+assert assignment == ("market-tenant-b", "market-worker-b-row", "ASSIGNED"), assignment
+assert db.execute("SELECT status FROM mission_opportunities WHERE id='market-opportunity-a'").fetchone()[0] == "FILLED"
+assert db.execute("SELECT intervenant_id FROM missions WHERE id='market-mission-opportunity'").fetchone()[0] is None, (
+    "Cross-tenant assignment must not be written into the legacy same-tenant mission.intervenant_id field"
+)
+
+# A second provider cannot apply after the opportunity is atomically filled.
+db.execute("UPDATE intervenants SET validation_status='approved' WHERE id='market-worker-a-row'")
+db.execute("""
+    INSERT INTO disponibilites(id, intervenant_id, start_at, end_at, status, tenant_id)
+    VALUES (
+      'market-availability-a-opportunity', 'market-worker-a-row',
+      '2026-11-23T08:00:00Z', '2026-11-23T12:00:00Z', 'available', 'market-tenant-a'
+    )
+""")
+try:
+    db.execute("""
+        INSERT INTO mission_applications(
+          id, opportunity_id, owner_tenant_id, applicant_tenant_id,
+          intervenant_id, applicant_user_id, provider_pay_cents, currency, idempotency_key
+        ) VALUES (
+          'market-application-second', 'market-opportunity-a', 'market-tenant-a',
+          'market-tenant-a', 'market-worker-a-row', 'market-worker-a',
+          4000, 'EUR', 'market-apply-worker-a-0001'
+        )
+    """)
+    raise AssertionError("Application was accepted after opportunity was filled")
+except sqlite3.IntegrityError as exc:
+    assert "MISSION_APPLICATION_ELIGIBILITY_GUARD_FAILED" in str(exc), str(exc)
+
+# A revoked consent cancels an open listing and permanently prevents new applications.
+db.execute("""
+    INSERT INTO missions(
+      id, client_id, intervenant_id, prestation_id, start_at, end_at,
+      price_client, price_intervenant, commission, status, tenant_id
+    ) VALUES (
+      'market-mission-revoke', 'market-client-a-row', NULL, 'market-service-a',
+      '2026-11-24T09:00:00Z', '2026-11-24T11:00:00Z',
+      60, 40, 20, 'requested', 'market-tenant-a'
+    )
+""")
+db.execute("""
+    INSERT INTO mission_opportunity_consents(
+      id, owner_tenant_id, mission_id, client_user_id, consent_version, evidence_sha256
+    ) VALUES (
+      'market-consent-revoke', 'market-tenant-a', 'market-mission-revoke',
+      'market-client-a', 'privacy-v1', 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
+    )
+""")
+db.execute("""
+    INSERT INTO mission_opportunities(
+      id, owner_tenant_id, mission_id, consent_id, category_code, public_summary,
+      city, start_at, end_at, provider_pay_cents, currency, published_by_user_id, expires_at
+    ) VALUES (
+      'market-opportunity-revoke', 'market-tenant-a', 'market-mission-revoke',
+      'market-consent-revoke', 'CLEANING', 'Nettoyage ponctuel d’un logement',
+      'Aubergenville', '2026-11-24T09:00:00Z', '2026-11-24T11:00:00Z',
+      4000, 'EUR', 'market-client-a', '2026-11-23T23:00:00Z'
+    )
+""")
+db.execute("UPDATE mission_opportunity_consents SET revoked_at=CURRENT_TIMESTAMP WHERE id='market-consent-revoke'")
+assert db.execute("SELECT status FROM mission_opportunities WHERE id='market-opportunity-revoke'").fetchone()[0] == "CANCELLED"
+for table in ["mission_opportunity_consents", "mission_opportunities", "mission_applications", "mission_assignments"]:
+    try:
+        db.execute(f"DELETE FROM {table} WHERE id=(SELECT id FROM {table} LIMIT 1)")
+        raise AssertionError(f"{table} history was deletable")
+    except sqlite3.IntegrityError:
+        pass
+print("PASS: privacy-safe cross-tenant marketplace consent, publication, eligibility, atomic acceptance, one-provider assignment, cancellation and append-only history.")
