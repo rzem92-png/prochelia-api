@@ -60,7 +60,10 @@ export async function handleSupraRoute(request, env, auth) {
   if (!["/api/supra/domains", "/api/supra/plan"].includes(url.pathname)) return null;
 
   if (!auth?.user) return reply({ ok: false, error: "UNAUTHENTICATED" }, 401);
-  if (String(auth.user.role || "").toUpperCase() !== "GERANTE") return reply({ ok: false, error: "FORBIDDEN" }, 403);
+  if (String(auth.user.role || "").toUpperCase() !== "GERANTE" ||
+      !["OWNER", "ADMIN", "MANAGER"].includes(String(auth.user.tenant_role || "").toUpperCase())) {
+    return reply({ ok: false, error: "FORBIDDEN" }, 403);
+  }
   if (!env?.DB?.prepare) return reply({ ok: false, error: "DATABASE_UNAVAILABLE" }, 503);
 
   if (url.pathname === "/api/supra/domains") {
