@@ -3038,11 +3038,10 @@ async function handleCommercialRecruitment(request,env){
 
 async function handle(request,env){
   try {
-    if(isMutatingMethod(request.method) && !securityOriginAllowed(request,env)) return json({ok:false,error:'ORIGIN_NOT_ALLOWED',version:VERSION},403);
     const url=new URL(request.url);
     // This legacy outbox route is globally disabled until tenant ownership,
     // action-bound approvals and a verified executor are implemented. Return
-    // before authentication helpers or any D1 schema/business access.
+    // before CORS/session helpers or any D1 schema/business access.
     if(url.pathname==='/api/ops/outbox/process' && request.method==='POST') {
       return json({
         ok:false,
@@ -3053,6 +3052,7 @@ async function handle(request,env){
         automation:'proposal_only_no_background_execution'
       },503);
     }
+    if(isMutatingMethod(request.method) && !securityOriginAllowed(request,env)) return json({ok:false,error:'ORIGIN_NOT_ALLOWED',version:VERSION},403);
     // Fail closed before any schema helper touches D1: unauthenticated callers
     // must not use mission validation as an existence oracle for private IDs.
     if (url.pathname === '/api/missions/validate') {
