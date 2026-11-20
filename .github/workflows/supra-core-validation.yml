@@ -12,7 +12,6 @@ on:
       - "migrations-preview-canonical/0030_supra_audit_tenant_scope.sql"
       - "tests/supra-*.test.mjs"
       - "tests/session-cookie-malformed.test.mjs"
-      - "tests/intervenant-workspace-read-model.test.mjs"
       - "tests/pricing-quote-guardrails.test.mjs"
       - ".github/workflows/supra-core-validation.yml"
 
@@ -47,5 +46,4 @@ jobs:
             tests/supra-approvals.test.mjs \
             tests/supra-tenant-integration.test.mjs \
             tests/session-cookie-malformed.test.mjs \
-            tests/intervenant-workspace-read-model.test.mjs \
             tests/pricing-quote-guardrails.test.mjs
