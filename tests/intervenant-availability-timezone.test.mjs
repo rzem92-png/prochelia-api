@@ -1,0 +1,42 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+
+const worker = await readFile(new URL("../src/index.js", import.meta.url), "utf8");
+const migration = await readFile(new URL("../migrations-preview-canonical/0034_timezone_safe_availability_overlap.sql", import.meta.url), "utf8");
+
+const start = worker.indexOf("async function intervenantAvailabilityRoute(");
+const end = worker.indexOf("\nasync function intervenantOpportunityRoute(", start);
+assert.ok(start >= 0 && end > start, "canonical availability route must exist");
+const route = worker.slice(start, end);
+
+test("availability inputs are normalized to canonical UTC before persistence", () => {
+  assert.match(route, /Date\.parse\(startAt\)/);
+  assert.match(route, /Date\.parse\(endAt\)/);
+  assert.match(route, /new Date\(startMs\)\.toISOString\(\)/);
+  assert.match(route, /new Date\(endMs\)\.toISOString\(\)/);
+  assert.match(route, /canonicalStartAt/);
+  assert.match(route, /canonicalEndAt/);
+});
+
+test("API overlap and duplicate checks compare actual instants across UTC offsets", () => {
+  assert.match(route, /julianday\(start_at\) = julianday\(\?\)/);
+  assert.match(route, /julianday\(end_at\) = julianday\(\?\)/);
+  assert.match(route, /julianday\(start_at\) < julianday\(\?\)/);
+  assert.match(route, /julianday\(end_at\) > julianday\(\?\)/);
+  assert.doesNotMatch(route, /start_at < \? AND end_at > \?/);
+});
+
+test("database INSERT and UPDATE triggers use timezone-aware instant comparisons", () => {
+  assert.match(migration, /DROP TRIGGER IF EXISTS trg_disponibilites_no_overlap_insert/);
+  assert.match(migration, /CREATE TRIGGER trg_disponibilites_no_overlap_insert/);
+  assert.match(migration, /CREATE TRIGGER trg_disponibilites_no_overlap_update/);
+  assert.equal((migration.match(/julianday\(existing\.start_at\) < julianday\(NEW\.end_at\)/g) || []).length, 2);
+  assert.equal((migration.match(/julianday\(existing\.end_at\) > julianday\(NEW\.start_at\)/g) || []).length, 2);
+  assert.equal((migration.match(/RAISE\(ABORT, 'AVAILABILITY_OVERLAP'\)/g) || []).length, 2);
+});
+
+test("availability remains tenant- and intervenant-scoped in database triggers", () => {
+  assert.equal((migration.match(/existing\.tenant_id = NEW\.tenant_id/g) || []).length, 2);
+  assert.equal((migration.match(/existing\.intervenant_id = NEW\.intervenant_id/g) || []).length, 2);
+});
