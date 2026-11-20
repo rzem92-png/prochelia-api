@@ -66,6 +66,13 @@ BEGIN
   SELECT RAISE(ABORT, 'IMMUTABLE_APPROVAL_REQUEST_FIELDS');
 END;
 
+-- Requests may transition state, but may never be erased from the approval history.
+CREATE TRIGGER IF NOT EXISTS trg_supra_approval_requests_no_delete
+BEFORE DELETE ON supra_approval_requests
+BEGIN
+  SELECT RAISE(ABORT, 'APPROVAL_REQUESTS_ARE_APPEND_ONLY');
+END;
+
 CREATE TRIGGER IF NOT EXISTS trg_supra_approval_votes_no_update
 BEFORE UPDATE ON supra_approval_votes
 BEGIN
