@@ -173,13 +173,17 @@ BEFORE INSERT ON mission_opportunities WHEN
     JOIN mission_opportunity_consents c
       ON c.mission_id=m.id AND c.owner_tenant_id=m.tenant_id
     JOIN tenant_memberships tm
-      ON tm.user_id=NEW.published_by_user_id AND tm.tenant_id=NEW.owner_tenant_id AND tm.status='ACTIVE' AND tm.role IN ('OWNER','ADMIN','MANAGER')
+      ON tm.user_id=NEW.published_by_user_id AND tm.tenant_id=NEW.owner_tenant_id AND tm.status='ACTIVE'
     WHERE m.id=NEW.mission_id AND m.tenant_id=NEW.owner_tenant_id
       AND m.status='requested' AND m.intervenant_id IS NULL
       AND m.start_at=NEW.start_at AND COALESCE(m.end_at,'')=NEW.end_at
       AND CAST(ROUND(COALESCE(m.price_intervenant,0)*100) AS INTEGER)=NEW.provider_pay_cents
       AND c.id=NEW.consent_id AND c.revoked_at IS NULL
       AND c.client_user_id=(SELECT cl.user_id FROM clients cl WHERE cl.id=m.client_id AND cl.tenant_id=m.tenant_id)
+      AND (
+        NEW.published_by_user_id=c.client_user_id
+        OR tm.role IN ('OWNER','ADMIN','MANAGER')
+      )
   )
 BEGIN SELECT RAISE(ABORT, 'MISSION_OPPORTUNITY_PUBLISH_GUARD_FAILED'); END;
 
