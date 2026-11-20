@@ -3277,7 +3277,7 @@ async function intervenantWorkspaceReadModel(request, env) {
 
   // Business data is not exposed until every returned domain is tenant-scoped.
   // This deliberately blocks the legacy schema rather than mixing tenants.
-  for (const table of ['intervenants', 'missions', 'disponibilites', 'wallets', 'documents']) {
+  for (const table of ['intervenants', 'missions', 'prestations', 'disponibilites', 'wallets', 'documents']) {
     try {
       const columns = await env.DB.prepare(`PRAGMA table_info(${table})`).all();
       if (!(columns.results || []).some(column => column.name === 'tenant_id')) {
@@ -3305,7 +3305,7 @@ async function intervenantWorkspaceReadModel(request, env) {
     const result = await env.DB.prepare(
       `SELECT m.id, m.prestation_id, p.name AS prestation_name, m.start_at, m.end_at, m.status
          FROM missions m
-         LEFT JOIN prestations p ON p.id = m.prestation_id
+         LEFT JOIN prestations p ON p.id = m.prestation_id AND p.tenant_id = m.tenant_id
         WHERE m.intervenant_id = ? AND m.tenant_id = ?
         ORDER BY m.start_at DESC
         LIMIT 50`
