@@ -15,14 +15,15 @@ concurrency:
 
 jobs:
   backup-preview:
-    name: Exporter et chiffrer la D1 de préproduction
+    name: Exporter, chiffrer et vérifier la D1 de préproduction
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
     env:
       DB_NAME: prochelia-preview-eu-2026-11-17
       DB_ID: e3cf167c-37e1-4d72-9ac6-b3e27c14b97f
-      # Identifiant de compte confirmé depuis le tableau de bord Cloudflare fourni.
       CLOUDFLARE_ACCOUNT_ID: f2a79e9fa41566a8ec80fb24c02c60eb
+      R2_BUCKET: prochelia-preview-backups-eu-v2
+      AWS_DEFAULT_REGION: auto
     steps:
       - name: Checkout exact workflow commit for pinned Preview D1 config
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
@@ -35,9 +36,11 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           BACKUP_ENCRYPTION_KEY: ${{ secrets.BACKUP_ENCRYPTION_KEY }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_EU_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_EU_SECRET_ACCESS_KEY }}
         run: |
           set -euo pipefail
-          for name in CLOUDFLARE_API_TOKEN BACKUP_ENCRYPTION_KEY; do
+          for name in CLOUDFLARE_API_TOKEN BACKUP_ENCRYPTION_KEY R2_ACCESS_KEY_ID R2_SECRET_ACCESS_KEY; do
             if [[ -z "${!name:-}" ]]; then
               echo "::error::Secret requis manquant : $name"
               exit 1
@@ -88,9 +91,20 @@ jobs:
           fi
           if [[ "$match_count" != "1" ]]; then
             actual_ids="$(printf '%s' "$response" | jq -r --arg name "$DB_NAME" '[.result[]? | select(.name == $name) | .uuid] | join(",")')"
-            echo "::error::La liste D1 est accessible, mais la correspondance exacte nom/UUID est absente. Base attendue: $DB_NAME ; UUID configuré: $DB_ID ; UUID trouvé pour ce nom: ${actual_ids:-aucun}. Vérifier DB_ID avant de poursuivre."
+            echo "::error::La correspondance exacte nom/UUID D1 est absente. UUID trouvé : ${actual_ids:-aucun}."
             exit 1
           fi
+
+          r2_status="$(curl --silent --show-error --output "$RUNNER_TEMP/r2-bucket-check.json" --write-out '%{http_code}' -H "Authorization: Bearer $api_token" -H 'cf-r2-jurisdiction: eu' "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/r2/buckets/$R2_BUCKET")"
+          if [[ "$r2_status" != "200" ]]; then
+            echo "::error::Le bucket R2 EU attendu n'est pas accessible (HTTP $r2_status). Aucun export D1 ne sera lancé."
+            exit 1
+          fi
+          jq -e --arg bucket "$R2_BUCKET" '.success == true and .result.name == $bucket and .result.jurisdiction == "eu"' "$RUNNER_TEMP/r2-bucket-check.json" >/dev/null || {
+            echo "::error::Le bucket R2 ne correspond pas exactement au bucket Preview en juridiction EU."
+            exit 1
+          }
+          echo "Bucket R2 dédié confirmé en juridiction EU."
 
       - name: Installer Node.js
         uses: actions/setup-node@v5
@@ -122,10 +136,59 @@ jobs:
           printf '%s' "$BACKUP_ENCRYPTION_KEY" | gpg --batch --yes --pinentry-mode loopback --passphrase-fd 0 --decrypt "$encrypted" > "$RUNNER_TEMP/prochelia-backup/decrypted-check.sql"
           actual="$(sha256sum "$RUNNER_TEMP/prochelia-backup/decrypted-check.sql" | cut -d ' ' -f 1)"
           test "$expected" = "$actual"
+          printf '%s\n' "$expected" > "$RUNNER_TEMP/prochelia-backup/manifest.sha256"
           rm -f "$plaintext" "$RUNNER_TEMP/prochelia-backup/decrypted-check.sql"
           printf 'database=%s\ncreated_utc=%s\nencrypted_file=prochelia-preview.sql.gpg\n' "$DB_NAME" "$(date -u +%FT%TZ)" > "$RUNNER_TEMP/prochelia-backup/README.txt"
 
-      - name: Publier uniquement l'archive chiffrée
+      - name: Installer AWS CLI et SQLite pour le contrôle de restauration
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends sqlite3
+          python3 -m pip install --user --break-system-packages awscli
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Déposer l'archive chiffrée dans le bucket R2 EU dédié
+        id: upload
+        shell: bash
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_EU_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_EU_SECRET_ACCESS_KEY }}
+        run: |
+          set -euo pipefail
+          export PATH="$HOME/.local/bin:$PATH"
+          key="preview-d1/${DB_NAME}/$(date -u +%Y/%m/%d)/${GITHUB_RUN_ID}-${GITHUB_SHA:0:12}.sql.gpg"
+          echo "R2_OBJECT_KEY=$key" >> "$GITHUB_ENV"
+          aws s3 cp "$RUNNER_TEMP/prochelia-backup/prochelia-preview.sql.gpg" "s3://$R2_BUCKET/$key" --endpoint-url "https://$CLOUDFLARE_ACCOUNT_ID.eu.r2.cloudflarestorage.com" --region auto --only-show-errors
+          aws s3 cp "$RUNNER_TEMP/prochelia-backup/manifest.sha256" "s3://$R2_BUCKET/$key.sha256" --endpoint-url "https://$CLOUDFLARE_ACCOUNT_ID.eu.r2.cloudflarestorage.com" --region auto --only-show-errors
+
+      - name: Télécharger, vérifier et restaurer localement la copie R2
+        shell: bash
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_EU_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_EU_SECRET_ACCESS_KEY }}
+        run: |
+          set -euo pipefail
+          export PATH="$HOME/.local/bin:$PATH"
+          endpoint="https://$CLOUDFLARE_ACCOUNT_ID.eu.r2.cloudflarestorage.com"
+          key="$R2_OBJECT_KEY"
+          aws s3 cp "s3://$R2_BUCKET/$key" "$RUNNER_TEMP/prochelia-backup/r2-roundtrip.sql.gpg" --endpoint-url "$endpoint" --region auto --only-show-errors
+          aws s3 cp "s3://$R2_BUCKET/$key.sha256" "$RUNNER_TEMP/prochelia-backup/r2-roundtrip.sha256" --endpoint-url "$endpoint" --region auto --only-show-errors
+          cmp "$RUNNER_TEMP/prochelia-backup/manifest.sha256" "$RUNNER_TEMP/prochelia-backup/r2-roundtrip.sha256"
+          cmp "$RUNNER_TEMP/prochelia-backup/prochelia-preview.sql.gpg" "$RUNNER_TEMP/prochelia-backup/r2-roundtrip.sql.gpg"
+          printf '%s' "$BACKUP_ENCRYPTION_KEY" | gpg --batch --yes --pinentry-mode loopback --passphrase-fd 0 --decrypt "$RUNNER_TEMP/prochelia-backup/r2-roundtrip.sql.gpg" > "$RUNNER_TEMP/prochelia-backup/r2-roundtrip.sql"
+          actual="$(sha256sum "$RUNNER_TEMP/prochelia-backup/r2-roundtrip.sql" | cut -d ' ' -f 1)"
+          expected="$(tr -d '[:space:]' < "$RUNNER_TEMP/prochelia-backup/r2-roundtrip.sha256")"
+          test "$actual" = "$expected"
+          sqlite3 "$RUNNER_TEMP/prochelia-backup/r2-roundtrip.sqlite" < "$RUNNER_TEMP/prochelia-backup/r2-roundtrip.sql"
+          integrity="$(sqlite3 "$RUNNER_TEMP/prochelia-backup/r2-roundtrip.sqlite" 'PRAGMA integrity_check;')"
+          test "$integrity" = "ok"
+          foreign_keys="$(sqlite3 "$RUNNER_TEMP/prochelia-backup/r2-roundtrip.sqlite" 'PRAGMA foreign_key_check;')"
+          test -z "$foreign_keys"
+          echo "PASS: R2 EU upload/download, GPG decryption, SHA-256, SQLite integrity_check and foreign_key_check verified."
+
+      - name: Publier une copie chiffrée de diagnostic à rétention courte
         uses: actions/upload-artifact@v6
         with:
           name: prochelia-preview-d1-encrypted-${{ github.run_id }}
