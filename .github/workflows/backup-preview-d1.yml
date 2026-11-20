@@ -15,17 +15,18 @@ concurrency:
 
 jobs:
   backup-preview:
-    name: Exporter et chiffrer la D1 de préproduction
+    name: Exporter, chiffrer et vérifier la D1 de préproduction
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
     env:
       DB_NAME: prochelia-preview-eu-2026-11-17
       DB_ID: e3cf167c-37e1-4d72-9ac6-b3e27c14b97f
-      # Identifiant de compte confirmé depuis le tableau de bord Cloudflare fourni.
       CLOUDFLARE_ACCOUNT_ID: f2a79e9fa41566a8ec80fb24c02c60eb
+      R2_BUCKET: prochelia-preview-backups-eu-v2
+      AWS_DEFAULT_REGION: auto
     steps:
       - name: Checkout exact workflow commit for pinned Preview D1 config
-        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        uses: actions/checkout@fbc399c6f4c7f6c9c5f4f9c2a9b4b8b6a5f3d2c1 # v5
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
@@ -35,9 +36,11 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           BACKUP_ENCRYPTION_KEY: ${{ secrets.BACKUP_ENCRYPTION_KEY }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
         run: |
           set -euo pipefail
-          for name in CLOUDFLARE_API_TOKEN BACKUP_ENCRYPTION_KEY; do
+          for name in CLOUDFLARE_API_TOKEN BACKUP_ENCRYPTION_KEY R2_ACCESS_KEY_ID R2_SECRET_ACCESS_KEY; do
             if [[ -z "${!name:-}" ]]; then
               echo "::error::Secret requis manquant : $name"
               exit 1
@@ -88,7 +91,7 @@ jobs:
           fi
           if [[ "$match_count" != "1" ]]; then
             actual_ids="$(printf '%s' "$response" | jq -r --arg name "$DB_NAME" '[.result[]? | select(.name == $name) | .uuid] | join(",")')"
-            echo "::error::La liste D1 est accessible, mais la correspondance exacte nom/UUID est absente. Base attendue: $DB_NAME ; UUID configuré: $DB_ID ; UUID trouvé pour ce nom: ${actual_ids:-aucun}. Vérifier DB_ID avant de poursuivre."
+            echo "::error::La correspondance exacte nom/UUID D1 est absente. UUID trouvé : ${actual_ids:-aucun}."
             exit 1
           fi
 
@@ -125,7 +128,46 @@ jobs:
           rm -f "$plaintext" "$RUNNER_TEMP/prochelia-backup/decrypted-check.sql"
           printf 'database=%s\ncreated_utc=%s\nencrypted_file=prochelia-preview.sql.gpg\n' "$DB_NAME" "$(date -u +%FT%TZ)" > "$RUNNER_TEMP/prochelia-backup/README.txt"
 
-      - name: Publier uniquement l'archive chiffrée
+      - name: Déposer l'archive chiffrée dans R2 EU et vérifier la restauration binaire
+        shell: bash
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+        run: |
+          set -euo pipefail
+          encrypted="$RUNNER_TEMP/prochelia-backup/prochelia-preview.sql.gpg"
+          checksum="$(sha256sum "$encrypted" | cut -d ' ' -f 1)"
+          endpoint="https://$CLOUDFLARE_ACCOUNT_ID.eu.r2.cloudflarestorage.com"
+          key="backups/preview/d1/$(date -u +%Y/%m/%d)/prochelia-preview-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.sql.gpg"
+
+          aws --version
+          aws s3api head-bucket --bucket "$R2_BUCKET" --endpoint-url "$endpoint"
+          aws s3api put-object \
+            --bucket "$R2_BUCKET" \
+            --key "$key" \
+            --body "$encrypted" \
+            --content-type "application/octet-stream" \
+            --metadata "sha256=$checksum,database=$DB_NAME,environment=preview" \
+            --endpoint-url "$endpoint" >/dev/null
+
+          remote_metadata="$(aws s3api head-object --bucket "$R2_BUCKET" --key "$key" --endpoint-url "$endpoint" --query '[ContentLength,Metadata.sha256,Metadata.database,Metadata.environment]' --output text)"
+          remote_size="$(printf '%s' "$remote_metadata" | awk '{print $1}')"
+          remote_checksum="$(printf '%s' "$remote_metadata" | awk '{print $2}')"
+          remote_database="$(printf '%s' "$remote_metadata" | awk '{print $3}')"
+          remote_environment="$(printf '%s' "$remote_metadata" | awk '{print $4}')"
+          local_size="$(wc -c < "$encrypted" | tr -d ' ')"
+          test "$remote_size" = "$local_size"
+          test "$remote_checksum" = "$checksum"
+          test "$remote_database" = "$DB_NAME"
+          test "$remote_environment" = "preview"
+
+          aws s3api get-object --bucket "$R2_BUCKET" --key "$key" "$RUNNER_TEMP/prochelia-backup/r2-roundtrip.sql.gpg" --endpoint-url "$endpoint" >/dev/null
+          downloaded_checksum="$(sha256sum "$RUNNER_TEMP/prochelia-backup/r2-roundtrip.sql.gpg" | cut -d ' ' -f 1)"
+          test "$downloaded_checksum" = "$checksum"
+          rm -f "$RUNNER_TEMP/prochelia-backup/r2-roundtrip.sql.gpg"
+          printf 'R2 EU object verified: bucket=%s key=%s sha256=%s\n' "$R2_BUCKET" "$key" "$checksum"
+
+      - name: Publier une copie chiffrée de diagnostic à rétention courte
         uses: actions/upload-artifact@v6
         with:
           name: prochelia-preview-d1-encrypted-${{ github.run_id }}
