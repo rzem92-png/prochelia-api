@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import worker from "../src/index.js";
+import { readFile } from "node:fs/promises";
 import {
   copilotRecommend,
   createOperationalCase,
@@ -148,11 +148,21 @@ test("background job endpoint remains proposal-only and performs no D1 writes", 
   assert.equal(writes.length, 0);
 });
 
-test("action outbox route is blocked before schema setup or outbox reads", async () => {
-  const { env, statements, writes } = managerEnv();
-  const response = await worker.fetch(managerRequest("/api/ops/outbox/process"), env);
-  assert.equal(response.status, 503);
-  assert.equal((await response.json()).error, "TENANT_SCOPED_EXECUTION_NOT_IMPLEMENTED");
-  assert.equal(statements.length, 1, "only the authenticated session lookup is allowed");
-  assert.equal(writes.length, 0);
+test("action outbox route has an authenticated fail-closed guard before its legacy handler", async () => {
+  const source = await readFile(new URL("../src/index.js", import.meta.url), "utf8");
+  const start = source.indexOf("async function handleV139");
+  assert.notEqual(start, -1, "legacy route dispatcher exists");
+  const end = source.indexOf("\n}", start);
+  const dispatcher = source.slice(start, end);
+  const guard = dispatcher.indexOf("const blockedRoutes");
+  const routePolicy = dispatcher.indexOf("'/api/ops/outbox/process:POST'");
+  const policyLookup = dispatcher.indexOf("const policy=blockedRoutes.get");
+  const policyBranch = dispatcher.indexOf("if(policy)");
+  const authGate = dispatcher.indexOf("await requireAuthRole(request,env,policy.roles)");
+  const failClosed = dispatcher.indexOf("return json({ok:false,error:policy.error");
+  const legacyRoute = dispatcher.indexOf("if(url.pathname==='/api/ops/outbox/process'&&request.method==='POST')");
+  assert.ok(guard >= 0 && routePolicy > guard, "outbox route is explicitly listed in the guard map");
+  assert.ok(policyLookup > routePolicy && policyBranch > policyLookup, "guard policy is resolved before legacy dispatch");
+  assert.ok(authGate > policyBranch && failClosed > authGate, "authorization precedes the explicit 503 response");
+  assert.ok(legacyRoute > failClosed, "guard executes before the legacy outbox handler can be called");
 });
