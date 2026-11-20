@@ -167,6 +167,15 @@ test("SUPRA audit trail and approval requests cannot be updated or deleted", asy
   assert.match(approvalSql, /APPROVAL_REQUESTS_ARE_APPEND_ONLY/);
 });
 
+test("additive Preview repair migration installs all missing append-only guards", async () => {
+  const sql = await readFile(new URL("../migrations/0023_supra_append_only_audit_guards.sql", import.meta.url), "utf8");
+  assert.match(sql, /trg_supra_audit_events_no_update/);
+  assert.match(sql, /trg_supra_audit_events_no_delete/);
+  assert.match(sql, /trg_supra_approval_requests_no_delete/);
+  assert.match(sql, /SUPRA_AUDIT_EVENTS_ARE_APPEND_ONLY/);
+  assert.match(sql, /APPROVAL_REQUESTS_ARE_APPEND_ONLY/);
+});
+
 test("all approval endpoints fail closed when the authenticated session has no server-derived tenant", async () => {
   const managerWithoutTenant = { user: { id: "manager-no-tenant", role: "gerante" } };
 
