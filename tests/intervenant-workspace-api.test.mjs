@@ -128,3 +128,12 @@ test("availability API is registered in the canonical Worker and fails closed on
   assert.ok(source.includes("url.pathname === '/api/intervenant/availability'"));
   assert.ok(source.includes("intervenantAvailabilityRoute(request, env, url)"));
 });
+
+
+test("direct opportunity applications recheck assignment conflicts instead of trusting the public feed", () => {
+  assert.match(opportunityHandler, /SELECT ma\\.id[\\s\\S]*FROM mission_assignments ma/);
+  assert.match(opportunityHandler, /ma\\.provider_tenant_id = \\? AND ma\\.intervenant_id = \\?/);
+  assert.match(opportunityHandler, /ma\\.status IN \\('ASSIGNED','IN_PROGRESS','DISPUTED'\\)/);
+  assert.match(opportunityHandler, /assigned\\.start_at < \\? AND assigned\\.end_at > \\?/);
+  assert.match(opportunityHandler, /INTERVENANT_SCHEDULE_CONFLICT/);
+});
