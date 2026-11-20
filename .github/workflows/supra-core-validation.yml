@@ -45,5 +45,5 @@ jobs:
             tests/supra-api.test.mjs \
             tests/supra-approvals.test.mjs \
             tests/supra-tenant-integration.test.mjs \
-            tests/session-cookie-malformed.test.mjs \\
+            tests/session-cookie-malformed.test.mjs \
             tests/intervenant-workspace-read-model.test.mjs
