@@ -95,6 +95,17 @@ jobs:
             exit 1
           fi
 
+          r2_status="$(curl --silent --show-error --output "$RUNNER_TEMP/r2-bucket-check.json" --write-out '%{http_code}' -H "Authorization: Bearer $api_token" -H 'cf-r2-jurisdiction: eu' "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/r2/buckets/$R2_BUCKET")"
+          if [[ "$r2_status" != "200" ]]; then
+            echo "::error::Le bucket R2 EU attendu n'est pas accessible (HTTP $r2_status). Aucun export D1 ne sera lancé."
+            exit 1
+          fi
+          jq -e --arg bucket "$R2_BUCKET" '.success == true and .result.name == $bucket and .result.jurisdiction == "eu"' "$RUNNER_TEMP/r2-bucket-check.json" >/dev/null || {
+            echo "::error::Le bucket R2 ne correspond pas exactement au bucket Preview en juridiction EU."
+            exit 1
+          }
+          echo "Bucket R2 dédié confirmé en juridiction EU."
+
       - name: Installer Node.js
         uses: actions/setup-node@v5
         with:
