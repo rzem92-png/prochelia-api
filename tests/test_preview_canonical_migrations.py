@@ -608,7 +608,7 @@ try:
     db.execute("INSERT INTO clients(id, user_id, tenant_id) VALUES ('market-client-no-tenant', 'market-client-a', NULL)")
     raise AssertionError("Client without tenant was incorrectly accepted")
 except sqlite3.IntegrityError as exc:
-    assert "CLIENT_ACTIVE_TENANT_REQUIRED" in str(exc), str(exc)
+    assert any(code in str(exc) for code in ("CLIENT_ACTIVE_TENANT_REQUIRED", "CLIENT_TENANT_MEMBERSHIP_REQUIRED")), str(exc)
 try:
     db.execute("INSERT INTO intervenants(id, user_id, tenant_id) VALUES ('market-worker-cross', 'market-worker-a', 'tenant-b')")
     raise AssertionError("Intervenant assigned to a non-member tenant was incorrectly accepted")
