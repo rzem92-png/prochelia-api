@@ -389,6 +389,11 @@ export async function selectTenantForSession(request, env) {
               AND t.status = 'ACTIVE'
          )
     `).bind(tenantId, auth.session_id, auth.user.id, tenantId).run();
+    // D1 can return partial metadata alongside an unsuccessful write result.
+    // Never treat a tenant switch as committed unless D1 explicitly confirms success.
+    if (result?.success !== true) {
+      return json({ ok: false, error: "TENANT_CONTEXT_UNAVAILABLE", version: VERSION }, 503);
+    }
     if (Number(result?.meta?.changes || 0) !== 1) {
       return json({ ok: false, error: "TENANT_MEMBERSHIP_REQUIRED", version: VERSION }, 403);
     }
