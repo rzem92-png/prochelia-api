@@ -36,8 +36,7 @@ jobs:
       CLOUDFLARE_ACCOUNT_ID: f2a79e9fa41566a8ec80fb24c02c60eb
       PREVIEW_DB_NAME: prochelia-preview-eu-2026-11-17
       PREVIEW_DB_ID: e3cf167c-37e1-4d72-9ac6-b3e27c14b97f
-      PAGES_PREVIEW_URL: https://83a36d32.prochelia.pages.dev
-      PAGES_DEPLOYMENT_ID: 83a36d32-4880-4417-a684-f9247e42debf
+      FRONTEND_BRANCH: feat/intervenant-secure-pages-integration-2026-11-20
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -84,25 +83,61 @@ jobs:
             jq -c '{result: {name: .result.name, uuid: .result.uuid}, errors}' "$RUNNER_TEMP/preview-d1.json"
             exit 1
           }
+          # Resolve the exact Preview deployment for the current frontend branch HEAD.
+          # Never trust a stale hard-coded Pages deployment URL or ID.
+          frontend_branch_encoded="${FRONTEND_BRANCH//\//%2F}"
+          curl --silent --show-error --fail \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/rzem92-png/-prochelia/branches/${frontend_branch_encoded}" \
+            > "$RUNNER_TEMP/frontend-branch.json"
+          FRONTEND_COMMIT_SHA="$(jq -r '.commit.sha // empty' "$RUNNER_TEMP/frontend-branch.json")"
+          [[ "$FRONTEND_COMMIT_SHA" =~ ^[0-9a-f]{40}$ ]] || {
+            echo "::error::Could not resolve the pinned frontend branch HEAD."
+            exit 1
+          }
+          cf_request "Pages Preview deployment list" \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/pages/projects/prochelia/deployments?env=preview&per_page=100" "$RUNNER_TEMP/pages-previews.json"
+          deployment="$(jq -c --arg branch "$FRONTEND_BRANCH" --arg commit "$FRONTEND_COMMIT_SHA" '
+            (.result.deployments // .result // [])
+            | map(select(.environment == "preview" and
+                         .deployment_trigger.metadata.branch == $branch and
+                         .deployment_trigger.metadata.commit_hash == $commit))
+            | sort_by(.created_on) | last // empty
+          ' "$RUNNER_TEMP/pages-previews.json")"
+          [[ -n "$deployment" ]] || {
+            echo "::error::No Pages Preview deployment matches frontend branch $FRONTEND_BRANCH at $FRONTEND_COMMIT_SHA."
+            exit 1
+          }
+          PAGES_DEPLOYMENT_ID="$(jq -r '.id // empty' <<< "$deployment")"
+          PAGES_PREVIEW_URL="$(jq -r '.url // empty' <<< "$deployment")"
+          [[ -n "$PAGES_DEPLOYMENT_ID" ]] || { echo "::error::Pages deployment ID missing."; exit 1; }
+          case "$PAGES_PREVIEW_URL" in
+            https://????????.prochelia.pages.dev) ;;
+            *) echo "::error::Unexpected Pages Preview hostname."; exit 1 ;;
+          esac
+          printf 'PAGES_DEPLOYMENT_ID=%s\nPAGES_PREVIEW_URL=%s\nFRONTEND_COMMIT_SHA=%s\n' \
+            "$PAGES_DEPLOYMENT_ID" "$PAGES_PREVIEW_URL" "$FRONTEND_COMMIT_SHA" >> "$GITHUB_ENV"
           cf_request "Pages Preview deployment access" \
             "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/pages/projects/prochelia/deployments/$PAGES_DEPLOYMENT_ID" "$RUNNER_TEMP/pages-preview.json"
-          if ! jq -e --arg db "$PREVIEW_DB_ID" --arg worker "prochelia-api-preview" --arg commit "3846562300e97a1816b2aa7e317448449270c2bc" '
+          if ! jq -e --arg db "$PREVIEW_DB_ID" --arg worker "prochelia-api-preview" --arg branch "$FRONTEND_BRANCH" --arg commit "$FRONTEND_COMMIT_SHA" '
             .success == true and
             .result.environment == "preview" and
             .result.uses_functions == true and
             .result.d1_databases.DB.id == $db and
             .result.services.PROCHELIA_API.service == $worker and
+            .result.deployment_trigger.metadata.branch == $branch and
             .result.deployment_trigger.metadata.commit_hash == $commit
           ' "$RUNNER_TEMP/pages-preview.json" >/dev/null; then
-            echo "::error::Pages Preview deployment bindings/commit mismatch. Safe metadata diagnostic follows."
-            jq -c --arg db "$PREVIEW_DB_ID" --arg worker "prochelia-api-preview" --arg commit "e69fde70fb28405aa8117eaf041aed618d3da664" '
+            echo "::error::Pages Preview deployment bindings/branch/commit mismatch. Safe metadata diagnostic follows."
+            jq -c --arg db "$PREVIEW_DB_ID" --arg worker "prochelia-api-preview" --arg branch "$FRONTEND_BRANCH" --arg commit "$FRONTEND_COMMIT_SHA" '
               {
-                expected: {environment: "preview", uses_functions: true, d1_database_id: $db, worker_service: $worker, commit_hash: $commit},
+                expected: {environment: "preview", uses_functions: true, d1_database_id: $db, worker_service: $worker, branch: $branch, commit_hash: $commit},
                 observed: {
                   environment: .result.environment,
                   uses_functions: .result.uses_functions,
                   d1_database_id: .result.d1_databases.DB.id,
                   worker_service: .result.services.PROCHELIA_API.service,
+                  branch: .result.deployment_trigger.metadata.branch,
                   commit_hash: .result.deployment_trigger.metadata.commit_hash
                 }
               }
@@ -123,6 +158,27 @@ jobs:
           JSON
           printf 'CLOUDFLARE_API_TOKEN=%s\n' "$token" >> "$GITHUB_ENV"
           echo "Exact isolated Preview D1 identity verified."
+
+      - name: Exercise same-origin Pages-to-Worker proxy without a session
+        shell: bash
+        run: |
+          set -euo pipefail
+          for route in /api/intervenant/workspace /api/intervenant/opportunities /api/intervenant/assignments /api/intervenant/applications; do
+            status="$(curl --silent --show-error --output "$RUNNER_TEMP/pages-proxy.json" --write-out '%{http_code}' "$PAGES_PREVIEW_URL$route")"
+            if [[ "$status" != "401" ]]; then
+              echo "::error::Pages proxy $route expected HTTP 401 without a session; got $status."
+              jq -c '{ok, error, status}' "$RUNNER_TEMP/pages-proxy.json" 2>/dev/null || true
+              exit 1
+            fi
+          done
+          options_status="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' \
+            -X OPTIONS -H "Origin: $PAGES_PREVIEW_URL" -H "Access-Control-Request-Method: GET" \
+            "$PAGES_PREVIEW_URL/api/intervenant/workspace")"
+          [[ "$options_status" == "204" ]] || {
+            echo "::error::Pages same-origin OPTIONS expected HTTP 204; got $options_status."
+            exit 1
+          }
+          echo "PASS: Pages Function -> Worker service binding, unauthenticated route guards and same-origin preflight verified without data writes."
 
       - name: Read current directory offsets without reading personal rows
         shell: bash
