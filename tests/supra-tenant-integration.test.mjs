@@ -7,7 +7,8 @@ const source = await readFile(new URL("../src/index.js", import.meta.url), "utf8
 test("Nexus Supra dispatch is behind the shared production middleware and uses authenticated tenant authority", () => {
   const dispatch = source.indexOf("if (url.pathname.startsWith('/api/supra/'))");
   const limiter = source.indexOf("const rate=await productionRateLimit(request,env);");
-  assert.ok(dispatch > limiter, "SUPRA must run after the shared production rate limiter");
+  const wrapperCall = source.indexOf("return __procheliaProductionSafetyHandle(request,env);", limiter);
+  assert.ok(limiter > 0 && wrapperCall > limiter, "shared middleware must invoke the canonical handler only after rate limiting");
   const block = source.slice(dispatch, dispatch + 1400);
   assert.match(block, /getSessionUser\(request, env\)/);
   assert.match(block, /resolveTenantContext\(request, env, supraAuth\)/);
