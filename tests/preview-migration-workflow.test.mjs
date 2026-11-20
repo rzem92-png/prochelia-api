@@ -285,6 +285,7 @@ test("Preview migration workflow verifies accounting, tenant and session-revocat
 test("Preview migration verifies operational marketplace tenant scope", () => {
   for (const name of [
     "0031_operational_marketplace_tenant_scope.sql",
+    "idx_clients_id_tenant", "idx_intervenants_id_tenant", "idx_prestations_id_tenant", "idx_missions_id_tenant", "idx_disponibilites_id_tenant",
     "idx_clients_tenant_user", "idx_intervenants_tenant_user",
     "idx_prestations_tenant_active", "idx_missions_tenant_status_start",
     "idx_missions_tenant_intervenant", "idx_tarifs_tenant_prestation_active",
