@@ -584,6 +584,7 @@ for user_id, email, role in [
     ("market-worker-a", "market-worker-a@example.test", "intervenant"),
     ("market-client-b", "market-client-b@example.test", "client"),
     ("market-worker-b", "market-worker-b@example.test", "intervenant"),
+    ("market-manager-b", "market-manager-b@example.test", "gerante"),
 ]:
     db.execute(
         "INSERT INTO users(id, role, email, first_name, last_name, password_hash) VALUES (?, ?, ?, 'Synthetic', 'Marketplace', 'synthetic')",
@@ -663,13 +664,16 @@ except sqlite3.IntegrityError as exc:
     assert "TENANT_IMMUTABLE" in str(exc) or "MISSION_RELATIONSHIP_TENANT_MISMATCH" in str(exc), str(exc)
 print("PASS: operational marketplace tables require active tenant membership, tenant-consistent mission relations and immutable tenant ownership.")
 
+db.execute("""
+    INSERT INTO tenant_memberships(id, tenant_id, user_id, role, status, invited_by_user_id, accepted_at)
+    VALUES ('membership-manager-b', 'market-tenant-b', 'market-manager-b', 'MANAGER', 'ACTIVE', 'user-admin', CURRENT_TIMESTAMP)
+""")
 # Privacy-safe cross-tenant opportunity publication, application and atomic assignment.
 marketplace_tables = {
     row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")
 }
 required_marketplace_tables = {
-    "mission_opportunity_consents", "mission_opportunities",
-    "mission_applications", "mission_assignments",
+    "mission_opportunity_consents", "mission_opportunities", "mission_applications", "mission_assignments", "intervenant_skills",
 }
 assert required_marketplace_tables <= marketplace_tables, (
     f"Missing cross-tenant marketplace tables: {sorted(required_marketplace_tables-marketplace_tables)}"
@@ -717,6 +721,44 @@ db.execute("""
     VALUES (
       'market-availability-b-opportunity', 'market-worker-b-row',
       '2026-11-23T08:00:00Z', '2026-11-23T12:00:00Z', 'available', 'market-tenant-b'
+    )
+""")
+try:
+    db.execute("""
+        INSERT INTO mission_applications(
+          id, opportunity_id, owner_tenant_id, applicant_tenant_id,
+          intervenant_id, applicant_user_id, provider_pay_cents, currency, idempotency_key
+        ) VALUES (
+          'market-application-without-skill', 'market-opportunity-a', 'market-tenant-a',
+          'market-tenant-b', 'market-worker-b-row', 'market-worker-b',
+          4000, 'EUR', 'market-apply-no-skill-0001'
+        )
+    """)
+    raise AssertionError("Application without verified required skill was incorrectly accepted")
+except sqlite3.IntegrityError as exc:
+    assert "MISSION_APPLICATION_ELIGIBILITY_GUARD_FAILED" in str(exc), str(exc)
+try:
+    db.execute("""
+        INSERT INTO intervenant_skills(
+          id, tenant_id, intervenant_id, skill_code, verification_status,
+          evidence_sha256, verified_by_user_id, verified_at
+        ) VALUES (
+          'market-skill-unverified-reviewer', 'market-tenant-b', 'market-worker-b-row',
+          'cleaning', 'VERIFIED', 'cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc',
+          'market-worker-b', CURRENT_TIMESTAMP
+        )
+    """)
+    raise AssertionError("Provider self-verification of a required skill was incorrectly accepted")
+except sqlite3.IntegrityError as exc:
+    assert "INTERVENANT_SKILL_VERIFIER_NOT_AUTHORIZED" in str(exc), str(exc)
+db.execute("""
+    INSERT INTO intervenant_skills(
+      id, tenant_id, intervenant_id, skill_code, verification_status,
+      evidence_sha256, verified_by_user_id, verified_at
+    ) VALUES (
+      'market-skill-b-cleaning', 'market-tenant-b', 'market-worker-b-row',
+      'cleaning', 'VERIFIED', 'dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd',
+      'market-manager-b', CURRENT_TIMESTAMP
     )
 """)
 db.execute("""
