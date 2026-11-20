@@ -160,8 +160,11 @@ test("approval ledger schema protects immutable request identity and append-only
 
 
 test("SUPRA audit trail and approval requests cannot be updated or deleted", async () => {
-  const auditSql = await readFile(new URL("../migrations-preview-canonical/0021_supra_audit_events.sql", import.meta.url), "utf8");
-  const approvalSql = await readFile(new URL("../migrations-preview-canonical/0022_supra_persisted_approvals.sql", import.meta.url), "utf8");
+  const auditSchema = await readFile(new URL("../migrations-preview-canonical/0021_supra_audit_events.sql", import.meta.url), "utf8");
+  const approvalSchema = await readFile(new URL("../migrations-preview-canonical/0022_supra_persisted_approvals.sql", import.meta.url), "utf8");
+  const guards = await readFile(new URL("../migrations-preview-canonical/0029_supra_append_only_audit_guards.sql", import.meta.url), "utf8");
+  const auditSql = auditSchema + "\n" + guards;
+  const approvalSql = approvalSchema + "\n" + guards;
   assert.match(auditSql, /trg_supra_audit_events_no_update/);
   assert.match(auditSql, /trg_supra_audit_events_no_delete/);
   assert.match(approvalSql, /trg_supra_approval_requests_no_delete/);
