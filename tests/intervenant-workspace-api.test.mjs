@@ -115,7 +115,10 @@ test("availability writes reject invalid time windows and overlapping slots", ()
     "isoWithZone.test(startAt)",
     "INVALID_AVAILABILITY_WINDOW",
     "AVAILABILITY_OVERLAP",
-    "start_at < ? AND end_at > ?",
+    "julianday(start_at) < julianday(?)",
+    "julianday(end_at) > julianday(?)",
+    "new Date(startMs).toISOString()",
+    "new Date(endMs).toISOString()",
     "endMs - startMs > 24 * 60 * 60 * 1000"
   ]) assert.ok(availabilityHandler.includes(fragment), "missing availability validation: " + fragment);
 });
