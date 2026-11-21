@@ -89,3 +89,37 @@ test("SUPRA GitHub inspection remains restricted to the owner role", async () =>
   );
   assert.equal(response.status, 403);
 });
+
+
+test("SUPRA GitHub pull request diff rejects invalid PR numbers before credentials", async () => {
+  for (const value of ["0", "-1", "1.5", "NaN", "999999999999999999999"]) {
+    const response = await handleSupraGithubRoute(
+      request("/api/supra/github/pull-request-diff?repository=rzem92-png/prochelia-api&pull_number=" + encodeURIComponent(value)),
+      {}, "/api/supra/github/pull-request-diff", auth
+    );
+    assert.equal(response.status, 400, value);
+    assert.equal((await response.json()).error, "PULL_REQUEST_NUMBER_INVALID");
+  }
+});
+
+test("SUPRA GitHub pull request diff rejects unapproved repositories before credentials", async () => {
+  const response = await handleSupraGithubRoute(
+    request("/api/supra/github/pull-request-diff?repository=attacker/repo&pull_number=42"),
+    {}, "/api/supra/github/pull-request-diff", auth
+  );
+  assert.equal(response.status, 400);
+  assert.equal((await response.json()).error, "REPOSITORY_NOT_ALLOWED");
+});
+
+test("SUPRA GitHub pull request diff remains read-only and owner-only", async () => {
+  const path = "/api/supra/github/pull-request-diff";
+  const write = await handleSupraGithubRoute(
+    request(path + "?repository=rzem92-png/prochelia-api&pull_number=42", "POST"), {}, path, auth
+  );
+  assert.equal(write.status, 405);
+  const forbidden = await handleSupraGithubRoute(
+    request(path + "?repository=rzem92-png/prochelia-api&pull_number=42"), {}, path,
+    { user: { role: "intervenant" } }
+  );
+  assert.equal(forbidden.status, 403);
+});
