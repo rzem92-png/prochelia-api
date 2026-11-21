@@ -9,7 +9,8 @@ CREATE TABLE IF NOT EXISTS accounting_entities (
   status TEXT NOT NULL DEFAULT 'ACTIVE' CHECK (status IN ('ACTIVE', 'SUSPENDED', 'CLOSED')),
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  UNIQUE (id, tenant_id)
+  UNIQUE (id, tenant_id),
+  FOREIGN KEY (tenant_id) REFERENCES tenants(id)
 );
 CREATE INDEX IF NOT EXISTS idx_accounting_entities_tenant
   ON accounting_entities(tenant_id, status);
