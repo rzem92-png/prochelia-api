@@ -191,6 +191,48 @@ async function repositoryFile(env, repository, path) {
   };
 }
 
+async function repositoryCommits(env, repository) {
+  if (!ALLOWED_REPOSITORIES.includes(repository)) throw new Error("REPOSITORY_NOT_ALLOWED");
+  const token = await installationToken(env);
+  const [owner, name] = repository.split("/");
+  const response = await fetch(API + "/repos/" + encodeURIComponent(owner) + "/" + encodeURIComponent(name) +
+    "/commits?per_page=20", { headers: {
+      "authorization": "Bearer " + token, "accept": "application/vnd.github+json",
+      "x-github-api-version": "2022-11-28"
+    }});
+  if (!response.ok) throw new Error("GITHUB_COMMITS_FAILED");
+  const data = await response.json();
+  if (!Array.isArray(data)) throw new Error("GITHUB_COMMITS_RESPONSE_INVALID");
+  return data.slice(0, 20).map(item => ({
+    sha: String(item.sha || ""),
+    message: String(item.commit?.message || "").slice(0, 500),
+    author: String(item.commit?.author?.name || "").slice(0, 120),
+    date: item.commit?.author?.date || null,
+    html_url: String(item.html_url || "")
+  }));
+}
+
+async function repositoryCheckRuns(env, repository, sha) {
+  if (!ALLOWED_REPOSITORIES.includes(repository)) throw new Error("REPOSITORY_NOT_ALLOWED");
+  if (!/^[a-f0-9]{40}$/i.test(sha)) throw new Error("COMMIT_SHA_INVALID");
+  const token = await installationToken(env);
+  const [owner, name] = repository.split("/");
+  const response = await fetch(API + "/repos/" + encodeURIComponent(owner) + "/" + encodeURIComponent(name) +
+    "/commits/" + encodeURIComponent(sha) + "/check-runs?per_page=50", { headers: {
+      "authorization": "Bearer " + token, "accept": "application/vnd.github+json",
+      "x-github-api-version": "2022-11-28"
+    }});
+  if (!response.ok) throw new Error("GITHUB_CHECK_RUNS_FAILED");
+  const data = await response.json();
+  if (!Array.isArray(data?.check_runs)) throw new Error("GITHUB_CHECK_RUNS_RESPONSE_INVALID");
+  return data.check_runs.slice(0, 50).map(run => ({
+    id: Number(run.id), name: String(run.name || "").slice(0, 160),
+    status: String(run.status || ""), conclusion: run.conclusion || null,
+    started_at: run.started_at || null, completed_at: run.completed_at || null,
+    html_url: String(run.html_url || "")
+  }));
+}
+
 async function repositoryPullRequests(env, repository) {
   if (!ALLOWED_REPOSITORIES.includes(repository)) throw new Error("REPOSITORY_NOT_ALLOWED");
   const token = await installationToken(env);
@@ -237,18 +279,18 @@ export async function handleSupraGithubRoute(request, env, path, auth) {
   if (auth.user.role !== "gerante") {
     return Response.json({ ok: false, error: "FORBIDDEN" }, { status: 403, headers: { "cache-control": "no-store" } });
   }
-  const requestedRepository = (path === "/api/supra/github/pull-requests" || path === "/api/supra/github/file")
+  const requestedRepository = (path === "/api/supra/github/pull-requests" || path === "/api/supra/github/commits" || path === "/api/supra/github/check-runs" || path === "/api/supra/github/file")
     ? new URL(request.url).searchParams.get("repository") || ""
     : "";
   const requestedPath = path === "/api/supra/github/file"
     ? new URL(request.url).searchParams.get("path") || ""
     : "";
-  if ((path === "/api/supra/github/pull-requests" || path === "/api/supra/github/file") && !ALLOWED_REPOSITORIES.includes(requestedRepository)) {
+  if ((path === "/api/supra/github/pull-requests" || path === "/api/supra/github/commits" || path === "/api/supra/github/check-runs" || path === "/api/supra/github/file") && !ALLOWED_REPOSITORIES.includes(requestedRepository)) {
     return Response.json({ ok: false, error: "REPOSITORY_NOT_ALLOWED" }, {
       status: 400, headers: { "cache-control": "no-store" }
     });
   }
-  if (path === "/api/supra/github/file" && !safeRepositoryPath(requestedPath)) {
+  if (path === "/api/supra/github/check-runs" && !/^[a-f0-9]{40}$/i.test(requestedSha)) {\n    return Response.json({ ok: false, error: "COMMIT_SHA_INVALID" }, { status: 400, headers: { "cache-control": "no-store" } });\n  }\n  if (path === "/api/supra/github/file" && !safeRepositoryPath(requestedPath)) {
     return Response.json({ ok: false, error: "REPOSITORY_PATH_NOT_ALLOWED" }, {
       status: 400, headers: { "cache-control": "no-store" }
     });
@@ -276,6 +318,17 @@ export async function handleSupraGithubRoute(request, env, path, auth) {
         ok: true, mode: "READ_ONLY", write_enabled: false,
         repository: requestedRepository, file
       }, { headers: { "cache-control": "no-store" } });
+    }
+    if (path === "/api/supra/github/commits" || path === "/api/supra/github/check-runs") {
+      if (!installation.names.includes(requestedRepository)) {
+        return Response.json({ ok: false, error: "REPOSITORY_NOT_INSTALLED" }, { status: 403, headers: { "cache-control": "no-store" } });
+      }
+      if (path === "/api/supra/github/commits") {
+        const commits = await repositoryCommits(env, requestedRepository);
+        return Response.json({ ok: true, mode: "READ_ONLY", write_enabled: false, repository: requestedRepository, count: commits.length, commits }, { headers: { "cache-control": "no-store" } });
+      }
+      const checkRuns = await repositoryCheckRuns(env, requestedRepository, requestedSha);
+      return Response.json({ ok: true, mode: "READ_ONLY", write_enabled: false, repository: requestedRepository, sha: requestedSha, count: checkRuns.length, check_runs: checkRuns }, { headers: { "cache-control": "no-store" } });
     }
     if (path === "/api/supra/github/pull-requests") {
       const repository = requestedRepository;
