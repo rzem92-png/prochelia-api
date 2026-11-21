@@ -117,6 +117,8 @@ accounting_tables = {
     "accounting_journals", "accounting_journal_lines",
 }
 assert accounting_tables <= tables, f"Missing accounting tables: {sorted(accounting_tables-tables)}"
+accounting_entity_fk_targets = {row[2] for row in db.execute("PRAGMA foreign_key_list(accounting_entities)")}
+assert "tenants" in accounting_entity_fk_targets, "Accounting entities must reference the canonical tenants registry"
 # Tenant authority and membership lifecycle fixtures.
 tenant_tables = {"tenants", "tenant_memberships", "tenant_membership_events"}
 assert tenant_tables <= tables, f"Missing tenant authority tables: {sorted(tenant_tables-tables)}"
