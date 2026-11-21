@@ -1071,6 +1071,11 @@ async function payoutRequest(request, env) {
     }
     return json({ok:true,version:VERSION,idempotent_replay:true,payout:existing},200);
   }
+  // Never reserve or lock funds unless a real, validated PSP adapter is configured.
+  // This guard is deliberately before account/wallet reads and the atomic reservation.
+  if (!paymentsConfigured(env)) {
+    return json({ok:false,error:'PAYOUT_PROVIDER_NOT_CONFIGURED',version:VERSION,write_enabled:false},503);
+  }
   const account = await env.DB.prepare('SELECT * FROM payment_accounts WHERE user_id=? LIMIT 1').bind(auth.user.id).first();
   if (!account || Number(account.payouts_enabled) !== 1) {
     return json({ok:false,error:'PAYOUT_ACCOUNT_NOT_READY',version:VERSION,message:'Le compte de paiement de l’intervenant doit être vérifié et activé par le PSP.'},409);
