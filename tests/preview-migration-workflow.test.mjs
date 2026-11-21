@@ -84,6 +84,9 @@ test("Preview post-migration verification checks identity, mission-security and 
     "mission_security_attempts",
     "security_audit",
     "idx_identity_verifications_user",
+    "0038_identity_verification_tenant_scope.sql",
+    "idx_identity_verifications_tenant_user_status",
+    "tenant_id",
     "idx_mission_security_intervenant",
     "idx_security_attempts_security",
     "idx_security_audit_mission",
@@ -118,7 +121,7 @@ test("Preview migration workflow accepts only an empty EU D1, the exact 23-entry
   assert.match(workflow, /SELECT type, name FROM sqlite_master ORDER BY type, name/);
   assert.match(workflow, /registry_present/);
   assert.match(workflow, /non_internal/);
-  assert.match(workflow, /len\(local\) != 38/);
+  assert.match(workflow, /len\(local\) != 39/);
   assert.match(workflow, /remote == base/);
   assert.match(workflow, /differs from the exact reviewed 23-entry baseline and 39-entry target/);
   assert.doesNotMatch(workflow, /legacy=/);
