@@ -12,22 +12,22 @@ const generator = await readFile(new URL("../scripts/generate-preview-wrangler-c
 test("Preview deploy is manual and requires exact confirmation on main", () => {
   assert.match(workflow, /workflow_dispatch:/);
   assert.match(workflow, /DEPLOY_PREVIEW_ONLY/);
-  assert.match(workflow, /github\.ref == 'refs\/heads\/main'/);
+  assert.match(workflow, /github\\.ref == 'refs\\/heads\\/main'/);
 });
 
 test("Preview deploy pins isolated Worker and Preview D1, never production", () => {
-  assert.match(generator, /name:\s*"prochelia-api-preview"/);
+  assert.match(generator, /name:\\s*"prochelia-api-preview"/);
   assert.match(generator, /e3cf167c-37e1-4d72-9ac6-b3e27c14b97f/);
   assert.match(generator, /04f52830-ef5a-4f17-a640-42bbc2381bba/);
-  assert.match(generator, /preview\.name === production\.name/);
-  assert.match(generator, /APP_ENV:\s*"preview"/);
+  assert.match(generator, /preview\\.name === production\\.name/);
+  assert.match(generator, /APP_ENV:\\s*"preview"/);
   assert.doesNotMatch(workflow, /keep_vars|--keep-vars/);
-  assert.match(generator, /r2_buckets:\s*\[\{/);
-  assert.match(generator, /binding:\s*"BACKUP_BUCKET"/);
-  assert.match(generator, /https:\/\/83a36d32\.prochelia\.pages\.dev/);
-  assert.match(generator, /https:\/\/feat-intervenant-secure-page\.prochelia\.pages\.dev/);
-  assert.match(generator, /bucket_name:\s*"prochelia-preview-backups-eu-v2"/);
-  assert.match(generator, /jurisdiction:\s*"eu"/);
+  assert.match(generator, /r2_buckets:\\s*\\[\\{/);
+  assert.match(generator, /binding:\\s*"BACKUP_BUCKET"/);
+  assert.match(generator, /https:\\/\\/83a36d32\\.prochelia\\.pages\\.dev/);
+  assert.match(generator, /https:\\/\\/feat-intervenant-secure-page\\.prochelia\\.pages\\.dev/);
+  assert.match(generator, /bucket_name:\\s*"prochelia-preview-backups-eu-v2"/);
+  assert.match(generator, /jurisdiction:\\s*"eu"/);
   assert.match(workflow, /Verify dedicated Preview R2 bucket has EU jurisdiction/);
   assert.match(workflow, /cf-r2-jurisdiction: eu/);
   assert.match(workflow, /jurisdiction == "eu"/);
@@ -38,20 +38,20 @@ test("Preview deploy runs the complete security suite and dry-run before the onl
   const dryRun = workflow.indexOf("Validate Wrangler bundle without deployment");
   const deploy = workflow.indexOf("Deploy ONLY the isolated Preview Worker");
   assert.ok(tests >= 0 && dryRun > tests && deploy > dryRun);
-  assert.match(workflow, /tests\/directory-api\.test\.js/);
-  assert.match(workflow, /tests\/bootstrap-atomic\.test\.js/);
+  assert.match(workflow, /tests\\/directory-api\\.test\\.js/);
+  assert.match(workflow, /tests\\/bootstrap-atomic\\.test\\.js/);
   assert.match(workflow, /--dry-run/);
-  assert.match(workflow, /wrangler@4 deploy --config wrangler\.preview\.generated\.json/);
-  assert.match(workflow, /node scripts\/generate-preview-wrangler-config\.mjs/);
+  assert.match(workflow, /wrangler@4 deploy --config wrangler\\.preview\\.generated\\.json/);
+  assert.match(workflow, /node scripts\\/generate-preview-wrangler-config\\.mjs/);
   assert.doesNotMatch(workflow, /d1 migrations apply/);
 });
 
 test("checkout and Node setup actions are pinned to immutable SHAs", () => {
-  assert.match(workflow, /actions\/checkout@[0-9a-f]{40}/);
-  assert.match(workflow, /actions\/setup-node@[0-9a-f]{40}/);
+  assert.match(workflow, /actions\\/checkout@[0-9a-f]{40}/);
+  assert.match(workflow, /actions\\/setup-node@[0-9a-f]{40}/);
 });
 
-test("Preview deployment config generator emits only isolated EU Preview bindings", async () => {
+test("Preview deployment config generator emits isolated EU bindings and preserves operational Cron triggers", async () => {
   const directory = await mkdtemp(join(tmpdir(), "prochelia-preview-config-"));
   try {
     await writeFile(join(directory, "wrangler.jsonc"), JSON.stringify({
@@ -66,6 +66,7 @@ test("Preview deployment config generator emits only isolated EU Preview binding
     assert.equal(generated.vars.APP_ENV, "preview");
     assert.equal(generated.d1_databases[0].database_id, "e3cf167c-37e1-4d72-9ac6-b3e27c14b97f");
     assert.equal(generated.r2_buckets[0].jurisdiction, "eu");
+    assert.deepEqual(generated.triggers?.crons, ["*/1 * * * *", "0 3 * * *"]);
     assert.notEqual(generated.d1_databases[0].database_id, "04f52830-ef5a-4f17-a640-42bbc2381bba");
   } finally {
     await rm(directory, { recursive: true, force: true });
