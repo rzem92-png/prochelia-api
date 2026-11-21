@@ -338,30 +338,30 @@ test("intervenant tenant membership uses a role allowed by the canonical tenant 
 
 test("payment onboarding creates wallets only inside the authenticated active tenant", () => {
   const start = source.indexOf("async function paymentOnboard(");
-  const end = source.indexOf("\\nasync function paymentStatus(", start);
+  const end = source.indexOf("\nasync function paymentStatus(", start);
   const handler = source.slice(start, end);
   assert.ok(start >= 0 && end > start);
-  assert.match(handler, /resolveTenantContext\\(request, env, auth\\)/);
-  assert.match(handler, /INSERT INTO wallets \\(id,user_id,tenant_id\\) VALUES \\(\\?,\\?,\\?\\)/);
-  assert.match(handler, /WHERE user_id=\\? AND tenant_id=\\?/);
-  assert.doesNotMatch(handler, /INSERT INTO wallets \\(id,user_id\\)/);
+  assert.match(handler, /resolveTenantContext\(request, env, auth\)/);
+  assert.match(handler, /INSERT INTO wallets \(id,user_id,tenant_id\) VALUES \(\?,\?,\?\)/);
+  assert.match(handler, /WHERE user_id=\? AND tenant_id=\?/);
+  assert.doesNotMatch(handler, /INSERT INTO wallets \(id,user_id\)/);
 });
 
 test("payment status reads and creates a tenant-scoped wallet only after server-side tenant resolution", () => {
   const start = source.indexOf("async function paymentStatus(");
-  const end = source.indexOf("\\nasync function createMissionPayment(", start);
+  const end = source.indexOf("\nasync function createMissionPayment(", start);
   const handler = source.slice(start, end);
-  assert.match(handler, /resolveTenantContext\\(request, env, auth\\)/);
-  assert.match(handler, /SELECT \\* FROM wallets WHERE user_id=\\? AND tenant_id=\\?/);
-  assert.match(handler, /INSERT INTO wallets \\(id,user_id,tenant_id\\)/);
+  assert.match(handler, /resolveTenantContext\(request, env, auth\)/);
+  assert.match(handler, /SELECT \* FROM wallets WHERE user_id=\? AND tenant_id=\?/);
+  assert.match(handler, /INSERT INTO wallets \(id,user_id,tenant_id\)/);
   assert.match(handler, /WALLET_UNAVAILABLE/);
 });
 
 test("payout reservation selects the wallet from the authenticated tenant", () => {
   const start = source.indexOf("async function payoutRequest(");
-  const end = source.indexOf("\\nfunction constantTimeStringEqual(", start);
+  const end = source.indexOf("\nfunction constantTimeStringEqual(", start);
   const handler = source.slice(start, end);
-  assert.match(handler, /resolveTenantContext\\(request, env, auth\\)/);
-  assert.match(handler, /SELECT \\* FROM wallets WHERE user_id=\\? AND tenant_id=\\?/);
-  assert.match(handler, /WHERE id=\\? AND user_id=\\? AND tenant_id=\\?/);
+  assert.match(handler, /resolveTenantContext\(request, env, auth\)/);
+  assert.match(handler, /SELECT \* FROM wallets WHERE user_id=\? AND tenant_id=\?/);
+  assert.match(handler, /WHERE id=\? AND user_id=\? AND tenant_id=\?/);
 });
