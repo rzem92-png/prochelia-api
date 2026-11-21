@@ -327,3 +327,11 @@ test("skills read model exposes verification status but never evidence hashes or
   assert.doesNotMatch(skillsHandler, /evidence_sha256|verified_by_user_id|INSERT INTO|UPDATE\s+intervenant_skills/);
   assert.match(skillsHandler, /SKILLS_SCHEMA_UNAVAILABLE/);
 });
+
+test("intervenant tenant membership uses a role allowed by the canonical tenant schema", () => {
+  const migration = readFileSync(new URL("../migrations-preview-canonical/0024_tenant_membership_authority.sql", import.meta.url), "utf8");
+  assert.match(migration, /role IN \('OWNER', 'ADMIN', 'MANAGER', 'FINANCE', 'OPERATOR', 'SUPPORT', 'MEMBER', 'READ_ONLY'\)/);
+  assert.match(source, /requireRole\(membershipAuth, \['intervenant'\]\)/);
+  assert.match(source, /tenantRoleAllowed\(membershipContext, \['MEMBER'\]\)/);
+  assert.doesNotMatch(source, /membershipContext\.tenant\?\.role[^\n]*intervenant/);
+});
