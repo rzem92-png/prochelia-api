@@ -4270,7 +4270,11 @@ async function supportAuth(request,env){
   if(!auth?.user?.id) return {response:json({ok:false,error:'UNAUTHORIZED',version:VERSION},401)};
   const role=supportRoleNormalize(auth.user.role);
   if(!supportRoleAllowed(role)) return {response:json({ok:false,error:'FORBIDDEN',version:VERSION},403)};
-  return {auth,role};
+  // Support cases can contain personal, operational and financial evidence.
+  // Resolve their visibility exclusively from the authenticated active tenant.
+  const tenantId=auth.session_active_tenant_id;
+  if(!tenantId) return {response:json({ok:false,error:'ACTIVE_TENANT_REQUIRED',version:VERSION},403)};
+  return {auth,role,tenantId};
 }
 
 async function supportEvent(env,caseId,actorRole,actorId,eventType,details={}){
@@ -4316,8 +4320,8 @@ async function supportCreate(request,env){
   const requiresManager=Number(rule?.manager_approval_required||1)===1 || !auto;
   const id=crypto.randomUUID();
   const proposed=rule?JSON.parse(rule.steps_json||'[]'):{steps:['collect_evidence','copilot_analysis','notify','audit']};
-  await env.DB.prepare(`INSERT INTO support_cases(id,source_role,requester_id,company_id,mission_id,complaint_id,category,severity,status,description,proposed_resolution,requires_manager) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`)
-    .bind(id,a.role,a.auth.user.id,b.company_id||null,b.mission_id||null,b.complaint_id||null,category,severity,auto?'PROCESSING':'OPEN',clean(b.description)||null,JSON.stringify({scenario,steps:proposed.steps||proposed}),requiresManager?1:0).run();
+  await env.DB.prepare(`INSERT INTO support_cases(id,source_role,requester_id,company_id,mission_id,complaint_id,category,severity,status,description,proposed_resolution,requires_manager,tenant_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+    .bind(id,a.role,a.auth.user.id,b.company_id||null,b.mission_id||null,b.complaint_id||null,category,severity,auto?'PROCESSING':'OPEN',clean(b.description)||null,JSON.stringify({scenario,steps:proposed.steps||proposed}),requiresManager?1:0,a.tenantId).run();
   await supportEvent(env,id,a.role,a.auth.user.id,'CREATED',{scenario,auto,requiresManager});
   await journal(env,a.role,a.auth.user.id,'SUPPORT_CASE_CREATE','support_cases',id,'OK',{scenario,severity,auto});
   let autoResult=null;
@@ -4354,9 +4358,9 @@ async function supportList(request,env){
   const isManager=['GERANTE','ADMIN'].includes(a.role);
   let r;
   if(isManager){
-    r=status?await env.DB.prepare(`SELECT * FROM support_cases WHERE status=? ORDER BY created_at DESC LIMIT 200`).bind(status).all():await env.DB.prepare(`SELECT * FROM support_cases ORDER BY created_at DESC LIMIT 200`).all();
+    r=status?await env.DB.prepare(`SELECT * FROM support_cases WHERE tenant_id=? AND status=? ORDER BY created_at DESC LIMIT 200`).bind(a.tenantId,status).all():await env.DB.prepare(`SELECT * FROM support_cases WHERE tenant_id=? ORDER BY created_at DESC LIMIT 200`).bind(a.tenantId).all();
   }else{
-    r=status?await env.DB.prepare(`SELECT * FROM support_cases WHERE requester_id=? AND status=? ORDER BY created_at DESC LIMIT 200`).bind(a.auth.user.id,status).all():await env.DB.prepare(`SELECT * FROM support_cases WHERE requester_id=? ORDER BY created_at DESC LIMIT 200`).bind(a.auth.user.id).all();
+    r=status?await env.DB.prepare(`SELECT * FROM support_cases WHERE tenant_id=? AND requester_id=? AND status=? ORDER BY created_at DESC LIMIT 200`).bind(a.tenantId,a.auth.user.id,status).all():await env.DB.prepare(`SELECT * FROM support_cases WHERE tenant_id=? AND requester_id=? ORDER BY created_at DESC LIMIT 200`).bind(a.tenantId,a.auth.user.id).all();
   }
   return json({ok:true,version:VERSION,role:a.role,cases:r.results||[]});
 }
@@ -4367,10 +4371,10 @@ async function supportResolve(request,env){
   await ensureProcheliaMasterComplementSchema(env);
   const b=await readJson(request)||{}; const id=clean(b.case_id);
   if(!id)return json({ok:false,error:'CASE_ID_REQUIRED',version:VERSION},400);
-  const row=await env.DB.prepare(`SELECT * FROM support_cases WHERE id=? LIMIT 1`).bind(id).first();
+  const row=await env.DB.prepare(`SELECT * FROM support_cases WHERE id=? AND tenant_id=? LIMIT 1`).bind(id,a.tenantId).first();
   if(!row)return json({ok:false,error:'CASE_NOT_FOUND',version:VERSION},404);
   const resolution=clean(b.resolution)||'Résolution validée par la Gérante après contrôle du dossier.';
-  await env.DB.prepare(`UPDATE support_cases SET status='RESOLVED',resolution=?,resolved_at=CURRENT_TIMESTAMP,requires_manager=0 WHERE id=?`).bind(resolution,id).run();
+  await env.DB.prepare(`UPDATE support_cases SET status='RESOLVED',resolution=?,resolved_at=CURRENT_TIMESTAMP,requires_manager=0 WHERE id=? AND tenant_id=?`).bind(resolution,id,a.tenantId).run();
   await supportEvent(env,id,a.role,a.auth.user.id,'MANAGER_RESOLVED',{resolution});
   await journal(env,a.role,a.auth.user.id,'SUPPORT_CASE_MANAGER_RESOLVE','support_cases',id,'RESOLVED',{resolution});
   return json({ok:true,version:VERSION,case_id:id,status:'RESOLVED',resolution});
@@ -4380,8 +4384,8 @@ async function supportDashboard(request,env){
   const a=await supportAuth(request,env); if(a.response)return a.response;
   if(a.role!=='GERANTE'&&a.role!=='ADMIN') return json({ok:false,error:'FORBIDDEN'},403);
   await ensureProcheliaMasterComplementSchema(env);
-  const rows=await env.DB.prepare(`SELECT status,severity,COUNT(*) AS n FROM support_cases GROUP BY status,severity ORDER BY status,severity`).all();
-  const recent=await env.DB.prepare(`SELECT id,source_role,category,severity,status,created_at,resolved_at FROM support_cases ORDER BY created_at DESC LIMIT 30`).all();
+  const rows=await env.DB.prepare(`SELECT status,severity,COUNT(*) AS n FROM support_cases WHERE tenant_id=? GROUP BY status,severity ORDER BY status,severity`).bind(a.tenantId).all();
+  const recent=await env.DB.prepare(`SELECT id,source_role,category,severity,status,created_at,resolved_at FROM support_cases WHERE tenant_id=? ORDER BY created_at DESC LIMIT 30`).bind(a.tenantId).all();
   return json({ok:true,version:VERSION,dashboard:{breakdown:rows.results||[],recent:recent.results||[],policy:{simple_low_impact:'AUTOMATIQUE_APRES_CONTROLE',sensitive_or_high_impact:'VALIDATION_GERANTE',security_legal_rgpd:'ESCALADE_IMMEDIATE'}}});
 }
 
