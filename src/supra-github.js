@@ -162,7 +162,7 @@ export function redactRepositoryText(value) {
     .replace(/\b(AKIA[0-9A-Z]{16})\b/g, "[REDACTED_AWS_ACCESS_KEY]")
     .replace(/\b(xox[baprs]-[A-Za-z0-9-]{10,})\b/g, "[REDACTED_SLACK_TOKEN]")
     .replace(/(Bearer\s+)[A-Za-z0-9._~-]{20,}/gi, "$1[REDACTED]")
-    .replace(/((?:api[_-]?key|client[_-]?secret|access[_-]?token|password)\s*[:=]\s*)(["']?)[^\s,"'}]{8,}\2/gi, "$1$2[REDACTED_CREDENTIAL]");
+    .replace(/((?:api[_-]?key|client[_-]?secret|access[_-]?token|password)\s*[:=]\s*)(?:"[^"]*"|\'[^\']*\'|[^\s,;]+)/gi, "$1[REDACTED_CREDENTIAL]");
 }
 
 async function repositoryFile(env, repository, path) {
