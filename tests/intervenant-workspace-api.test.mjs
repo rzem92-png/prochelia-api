@@ -301,3 +301,29 @@ test("assignment feed returns only the minimal operational projection needed by 
   assert.ok(assignmentHandler.includes("LIMIT 100"));
   assert.ok(assignmentHandler.includes("assignments: result.results || []"));
 });
+
+
+const skillsStart = source.indexOf("async function intervenantSkillsRoute(request, env) {");
+const skillsEnd = source.indexOf("\\nasync function intervenantAssignmentsRoute(", skillsStart);
+assert.ok(skillsStart >= 0 && skillsEnd > skillsStart, "skills read route must exist");
+const skillsHandler = source.slice(skillsStart, skillsEnd);
+
+test("intervenant skills are exposed through an authenticated GET-only tenant-scoped read model", () => {
+  for (const fragment of [
+    "request.method !== 'GET'",
+    "getSessionUser(request, env)",
+    "requireRole(auth, ['intervenant'])",
+    "auth.session_active_tenant_id",
+    "WHERE user_id = ? AND tenant_id = ?",
+    "WHERE tenant_id = ? AND intervenant_id = ?",
+    "read_only: true",
+    "skills: result.results || []"
+  ]) assert.ok(skillsHandler.includes(fragment), "missing skills access guard: " + fragment);
+  assert.match(source, /url\.pathname === '\/api\/intervenant\/skills'/);
+});
+
+test("skills read model exposes verification status but never evidence hashes or verifier identity", () => {
+  assert.match(skillsHandler, /SELECT skill_code, verification_status, verified_at, created_at, updated_at/);
+  assert.doesNotMatch(skillsHandler, /evidence_sha256|verified_by_user_id|INSERT INTO|UPDATE\s+intervenant_skills/);
+  assert.match(skillsHandler, /SKILLS_SCHEMA_UNAVAILABLE/);
+});
