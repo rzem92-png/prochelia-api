@@ -117,3 +117,38 @@ Chaque mutation importante produit un événement/outbox transactionnel. Les con
 - Le workspace masque le wallet et n'affiche que des estimations lorsque le PSP n'est pas configuré.
 - Les migrations candidates 0033–0036 sont nécessaires aux contrôles de disponibilité et ne sont pas réputées appliquées à la D1 Preview.
 - Ce document est un plan d'implémentation, pas une preuve de livraison.
+
+## 12. Tranche candidate — enrôlement cryptographique du terminal
+
+Une première implémentation candidate est ajoutée dans `src/device-trust.js` :
+
+- challenge aléatoire de 256 bits lié au tenant, à l'utilisateur, à la session et au but `ENROLL` ;
+- durée de validité courte (5 minutes) et plafond de challenges en attente par session ;
+- clé publique ECDSA P-256 uniquement ; toute clé privée `d` fournie par le navigateur est rejetée ;
+- preuve de possession ECDSA/SHA-256 sur un message canonique qui lie le challenge, le tenant et l'utilisateur ;
+- empreinte de clé calculée selon le JWK thumbprint RFC 7638 ;
+- consommation conditionnelle du challenge et création du credential dans un batch D1 ; rejeu et concurrence doivent échouer ;
+- liste limitée aux terminaux du compte et révocation par l'utilisateur ;
+- routes candidates : `POST /api/security/device/enroll/challenge`, `POST /api/security/device/enroll/complete`, `GET /api/security/device/list`, `POST /api/security/device/revoke`.
+
+Tests unitaires ajoutés pour le format du message, le rejet des clés privées/non P-256 et la vérification de signature. Ils doivent encore passer dans la CI de la branche candidate et être complétés par des tests d'intégration D1 couvrant challenge expiré, rejeu concurrent, révocation, changement de session et isolation tenant.
+
+**Limite explicite :** cet enrôlement ne prouve pas à lui seul la présence au début/à la fin d'une mission. Les endpoints `/api/security/presence` et `/api/security/code/verify` restent bloqués en 503. Aucun démarrage, aucune clôture et aucun paiement ne sont activés par cette tranche. Le déploiement Preview et la migration 0039 ne sont pas exécutés ici.
+
+
+### 12.1. Protection contre la réinscription d'une clé révoquée
+
+La création du credential applique maintenant une condition SQL atomique `NOT EXISTS` sur le triplet tenant/utilisateur/empreinte de clé. Une clé déjà enregistrée, y compris révoquée, ne peut pas être réinscrite silencieusement. En cas de perte ou de révocation, l'intervenant doit générer une nouvelle paire de clés sur un terminal qu'il contrôle ; la clé privée ne quitte jamais le terminal. La contrainte UNIQUE en base reste le dernier garde-fou contre les courses concurrentes.
+
+
+### 12.2. Preuve de possession cryptographique renouvelable
+
+Une deuxième étape candidate ajoute une vérification ponctuelle d'un terminal déjà enrôlé :
+
+- `POST /api/security/device/prove/challenge` reçoit uniquement l'identifiant du terminal ; l'API exige une identité intervenant vérifiée, puis contrôle qu'il appartient à l'utilisateur et au tenant de la session, qu'il est actif et non expiré.
+- Le challenge `PROVE` est aléatoire, lié à la session, au tenant, à l'utilisateur et au credential, à usage unique et valable cinq minutes.
+- `POST /api/security/device/prove/complete` exige également une identité intervenant vérifiée et contrôle la signature ECDSA P-256 avec la clé publique enregistrée ; la révocation et l'expiration sont revérifiées avant consommation.
+- La consommation du challenge et la mise à jour de `last_used_at` sont effectuées dans un batch D1 conditionnel ; le rejeu ou une révocation concurrente doit échouer.
+- La réponse distingue explicitement la preuve de possession de la présence à une mission : elle n'autorise ni démarrage, ni clôture, ni paiement.
+
+Les tests ajoutés couvrent le format canonique du message, le lien au credential et le caractère POST-only des deux routes. Une suite d'intégration D1 et des tests de concurrence/révocation restent nécessaires avant toute activation métier.
