@@ -4017,6 +4017,25 @@ async function handle(request,env){
       return json({ ok: false, error: 'AUTHENTICATED_VALIDATION_REQUIRED', version: VERSION, write_enabled: false }, 403);
     }
     if (/^\/api\/intervenant\/applications\/[^/]+\/withdraw$/.test(url.pathname)) return intervenantApplicationWithdrawRoute(request, env, url);
+    // Central tenant-membership gate for every intervenant API route.
+    // Individual handlers still enforce their own business role and tenant filters;
+    // this guard additionally rejects revoked memberships and suspended tenants.
+    if (url.pathname.startsWith('/api/intervenant/')) {
+      const membershipAuth = await getSessionUser(request, env).catch(() => null);
+      if (!membershipAuth?.user) return json({ ok: false, error: 'UNAUTHENTICATED' }, 401);
+      if (!requireRole(membershipAuth, ['intervenant'])) return json({ ok: false, error: 'FORBIDDEN' }, 403);
+      const membershipContext = await resolveTenantContext(request, env, membershipAuth);
+      if (!membershipContext.ok) {
+        return json({ ok: false, error: membershipContext.error }, membershipContext.status);
+      }
+      if (String(membershipContext.tenant?.role || '').toLowerCase() !== 'intervenant') {
+        return json({ ok: false, error: 'TENANT_ROLE_FORBIDDEN' }, 403);
+      }
+      if (!membershipAuth.session_active_tenant_id ||
+          membershipAuth.session_active_tenant_id !== membershipContext.tenant.id) {
+        return json({ ok: false, error: 'ACTIVE_TENANT_REQUIRED' }, 403);
+      }
+    }
     if (url.pathname === '/api/intervenant/applications') return intervenantApplicationsRoute(request, env);
     if (url.pathname === '/api/intervenant/assignments') return intervenantAssignmentsRoute(request, env);
     if (url.pathname === '/api/intervenant/skills') return intervenantSkillsRoute(request, env);
