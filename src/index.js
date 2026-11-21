@@ -807,8 +807,9 @@ async function securityStatus(request, env) {
   const auth=await getSessionUser(request,env);
   if(!auth) return json({ok:false,error:'UNAUTHENTICATED',version:VERSION},401);
   await ensureSecuritySchema(env);
-  const count=await env.DB.prepare('SELECT COUNT(*) AS total FROM security_audit').first();
-  return json({ok:true,version:VERSION,security:{identity:'verified_required',device:'cryptographic_enrollment_required',presence:'blocked',mission_code_verification:'blocked',arrival_code:'not_verifiable_until_device_enrollment',end_code:'not_verifiable_until_device_enrollment',max_attempts:SECURITY_MAX_ATTEMPTS,code_ttl_seconds:SECURITY_CODE_TTL_SECONDS,audit_events:Number(count?.total||0)},user:auth.user},200);
+  // Return configuration state only. Do not expose global audit volume or
+  // cross-tenant operational metadata to an individual authenticated user.
+  return json({ok:true,version:VERSION,security:{identity:'verified_required',device:'cryptographic_enrollment_required',presence:'blocked',mission_code_verification:'blocked',arrival_code:'not_verifiable_until_device_enrollment',end_code:'not_verifiable_until_device_enrollment',max_attempts:SECURITY_MAX_ATTEMPTS,code_ttl_seconds:SECURITY_CODE_TTL_SECONDS},user:{id:auth.user.id,role:auth.user.role}},200);
 }
 
 
