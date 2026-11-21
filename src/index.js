@@ -3558,6 +3558,39 @@ async function intervenantApplicationsRoute(request, env) {
   }
 }
 
+async function intervenantSkillsRoute(request, env) {
+  if (request.method !== 'GET') {
+    return json({ ok: false, error: 'METHOD_NOT_ALLOWED' }, 405, { allow: 'GET' });
+  }
+  let auth;
+  try {
+    auth = await getSessionUser(request, env);
+  } catch {
+    return json({ ok: false, error: 'AUTHENTICATION_SCHEMA_UNAVAILABLE' }, 503);
+  }
+  if (!auth?.user) return json({ ok: false, error: 'UNAUTHENTICATED' }, 401);
+  if (!requireRole(auth, ['intervenant'])) return json({ ok: false, error: 'FORBIDDEN' }, 403);
+  const tenantId = auth.session_active_tenant_id;
+  if (!tenantId) return json({ ok: false, error: 'ACTIVE_TENANT_REQUIRED' }, 403);
+
+  try {
+    const profile = await env.DB.prepare(
+      'SELECT id FROM intervenants WHERE user_id = ? AND tenant_id = ? LIMIT 1'
+    ).bind(auth.user.id, tenantId).first();
+    if (!profile?.id) return json({ ok: false, error: 'INTERVENANT_PROFILE_NOT_FOUND' }, 404);
+    const result = await env.DB.prepare(
+      `SELECT skill_code, verification_status, verified_at, created_at, updated_at
+         FROM intervenant_skills
+        WHERE tenant_id = ? AND intervenant_id = ?
+        ORDER BY skill_code ASC
+        LIMIT 100`
+    ).bind(tenantId, profile.id).all();
+    return json({ ok: true, read_only: true, skills: result.results || [] });
+  } catch {
+    return json({ ok: false, error: 'SKILLS_SCHEMA_UNAVAILABLE' }, 503);
+  }
+}
+
 async function intervenantAssignmentsRoute(request, env) {
   if (request.method !== 'GET') {
     return json({ ok: false, error: 'METHOD_NOT_ALLOWED' }, 405, { allow: 'GET' });
@@ -3976,6 +4009,7 @@ async function handle(request,env){
     if (/^\/api\/intervenant\/applications\/[^/]+\/withdraw$/.test(url.pathname)) return intervenantApplicationWithdrawRoute(request, env, url);
     if (url.pathname === '/api/intervenant/applications') return intervenantApplicationsRoute(request, env);
     if (url.pathname === '/api/intervenant/assignments') return intervenantAssignmentsRoute(request, env);
+    if (url.pathname === '/api/intervenant/skills') return intervenantSkillsRoute(request, env);
     if (url.pathname === '/api/intervenant/availability') return intervenantAvailabilityRoute(request, env, url);
     if (url.pathname === '/api/intervenant/opportunities' || /^\/api\/intervenant\/opportunities\/[^/]+\/apply$/.test(url.pathname)) return intervenantOpportunityRoute(request, env, url);
     if (url.pathname === '/api/intervenant/profile') return intervenantProfileUpdateRoute(request, env);
