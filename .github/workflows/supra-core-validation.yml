@@ -42,16 +42,15 @@ jobs:
           node --experimental-default-type=module --check src/supra-approvals.js
           node --experimental-default-type=module --check src/index.js
       - name: Run Nexus governance, API, approval and tenant integration tests
-        run: |
-          node --experimental-default-type=module --test \
-            tests/supra-intelligence.test.mjs \
-            tests/supra-orchestrator.test.mjs \
-            tests/supra-api.test.mjs \
-            tests/supra-approvals.test.mjs \
-            tests/supra-tenant-integration.test.mjs \
-            tests/session-cookie-malformed.test.mjs \
-            tests/pricing-quote-guardrails.test.mjs \
-            tests/scheduled-backup-config.test.mjs \
-            tests/intervenant-workspace-api.test.mjs \
-            tests/background-jobs-safety.test.mjs \
-            tests/background-jobs-scheduler.test.mjs
+        run: >-
+          node --experimental-default-type=module --test
+          tests/supra-intelligence.test.mjs
+          tests/supra-orchestrator.test.mjs
+          tests/supra-api.test.mjs
+          tests/supra-approvals.test.mjs
+          tests/supra-tenant-integration.test.mjs
+          tests/session-cookie-malformed.test.mjs
+          tests/pricing-quote-guardrails.test.mjs
+          tests/scheduled-backup-config.test.mjs
+          tests/intervenant-workspace-api.test.mjs
+          tests/background-jobs-scheduler.test.mjs
