@@ -236,6 +236,27 @@ async function repositoryCheckRuns(env, repository, sha) {
   }));
 }
 
+async function readBoundedText(response, maxBytes) {
+  if (!response.body) return "";
+  const reader = response.body.getReader();
+  const chunks = [];
+  let total = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > maxBytes) {
+      await reader.cancel();
+      throw new Error("GITHUB_PULL_REQUEST_DIFF_TOO_LARGE");
+    }
+    chunks.push(value);
+  }
+  const bytes = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
+  return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+}
+
 async function repositoryPullRequestDiff(env, repository, pullNumber) {
   if (!ALLOWED_REPOSITORIES.includes(repository)) throw new Error("REPOSITORY_NOT_ALLOWED");
   if (!Number.isSafeInteger(pullNumber) || pullNumber < 1 || pullNumber > 2147483647) {
