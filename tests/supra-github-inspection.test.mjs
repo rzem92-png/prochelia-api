@@ -123,3 +123,27 @@ test("SUPRA GitHub pull request diff remains read-only and owner-only", async ()
   );
   assert.equal(forbidden.status, 403);
 });
+
+
+test("SUPRA bounded diff reader accepts content within byte limit", async () => {
+  const { readBoundedText } = await import("../src/supra-github.js");
+  const response = new Response(new TextEncoder().encode("diff --git a/a b/a\\n+safe"));
+  assert.equal(await readBoundedText(response, 100), "diff --git a/a b/a\\n+safe");
+});
+
+test("SUPRA bounded diff reader cancels oversized streams before buffering them", async () => {
+  const { readBoundedText } = await import("../src/supra-github.js");
+  let cancelled = false;
+  const stream = new ReadableStream({
+    start(controller) {
+      controller.enqueue(new Uint8Array(40));
+      controller.enqueue(new Uint8Array(40));
+    },
+    cancel() { cancelled = true; }
+  });
+  await assert.rejects(
+    () => readBoundedText(new Response(stream), 64),
+    /GITHUB_PULL_REQUEST_DIFF_TOO_LARGE/
+  );
+  assert.equal(cancelled, true);
+});
