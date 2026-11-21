@@ -13,12 +13,43 @@ function b64url(bytes) {
   return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
 }
 
+function derLength(length) {
+  if (length < 128) return Uint8Array.of(length);
+  const bytes = [];
+  for (let value = length; value > 0; value = Math.floor(value / 256)) bytes.unshift(value & 255);
+  return Uint8Array.of(0x80 | bytes.length, ...bytes);
+}
+
+function der(tag, value) {
+  const length = derLength(value.length);
+  const result = new Uint8Array(1 + length.length + value.length);
+  result[0] = tag;
+  result.set(length, 1);
+  result.set(value, 1 + length.length);
+  return result;
+}
+
+function concatBytes(...parts) {
+  const result = new Uint8Array(parts.reduce((sum, part) => sum + part.length, 0));
+  let offset = 0;
+  for (const part of parts) { result.set(part, offset); offset += part.length; }
+  return result;
+}
+
 function pemToBytes(pem) {
-  const normalized = String(pem || "").replace(/\\n/g, "\n");
-  const body = normalized.replace(/-----BEGIN PRIVATE KEY-----|-----END PRIVATE KEY-----|\s/g, "");
+  const normalized = String(pem || "").replace(/\\n/g, "\n").trim();
+  const isPkcs1 = normalized.includes("-----BEGIN RSA PRIVATE KEY-----");
+  const header = isPkcs1 ? "-----BEGIN RSA PRIVATE KEY-----" : "-----BEGIN PRIVATE KEY-----";
+  const footer = isPkcs1 ? "-----END RSA PRIVATE KEY-----" : "-----END PRIVATE KEY-----";
+  if (!normalized.includes(header) || !normalized.includes(footer)) throw new Error("INVALID_PRIVATE_KEY_FORMAT");
+  const body = normalized.replace(header, "").replace(footer, "").replace(/\\s/g, "");
   if (!body || body.length > 12000) throw new Error("INVALID_PRIVATE_KEY");
   const binary = atob(body);
-  return Uint8Array.from(binary, char => char.charCodeAt(0));
+  const raw = Uint8Array.from(binary, char => char.charCodeAt(0));
+  if (!isPkcs1) return raw;
+  const rsaEncryptionOid = Uint8Array.of(0x30,0x0d,0x06,0x09,0x2a,0x86,0x48,0x86,0xf7,0x0d,0x01,0x01,0x01,0x05,0x00);
+  const privateKeyInfo = concatBytes(Uint8Array.of(0x02,0x01,0x00), rsaEncryptionOid, der(0x04, raw));
+  return der(0x30, privateKeyInfo);
 }
 
 function configured(env) {
