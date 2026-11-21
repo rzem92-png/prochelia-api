@@ -187,6 +187,14 @@ export async function handleSupraGithubRoute(request, env, path, auth) {
   if (auth.user.role !== "gerante") {
     return Response.json({ ok: false, error: "FORBIDDEN" }, { status: 403, headers: { "cache-control": "no-store" } });
   }
+  const requestedRepository = path === "/api/supra/github/pull-requests"
+    ? new URL(request.url).searchParams.get("repository") || ""
+    : "";
+  if (path === "/api/supra/github/pull-requests" && !ALLOWED_REPOSITORIES.includes(requestedRepository)) {
+    return Response.json({ ok: false, error: "REPOSITORY_NOT_ALLOWED" }, {
+      status: 400, headers: { "cache-control": "no-store" }
+    });
+  }
   if (!configured(env)) {
     return Response.json({
       ok: true,
@@ -200,12 +208,7 @@ export async function handleSupraGithubRoute(request, env, path, auth) {
   try {
     const installation = await installationRepositories(env);
     if (path === "/api/supra/github/pull-requests") {
-      const repository = new URL(request.url).searchParams.get("repository") || "";
-      if (!ALLOWED_REPOSITORIES.includes(repository)) {
-        return Response.json({ ok: false, error: "REPOSITORY_NOT_ALLOWED" }, {
-          status: 400, headers: { "cache-control": "no-store" }
-        });
-      }
+      const repository = requestedRepository;
       if (!installation.names.includes(repository)) {
         return Response.json({ ok: false, error: "REPOSITORY_NOT_INSTALLED" }, {
           status: 403, headers: { "cache-control": "no-store" }
