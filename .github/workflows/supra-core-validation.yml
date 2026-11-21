@@ -4,6 +4,8 @@ on:
   pull_request:
     paths:
       - "src/index.js"
+      - "src/device-trust.js"
+      - "tests/device-trust-enrollment.test.mjs"
       - "wrangler.jsonc"
       - "tests/scheduled-backup-config.test.mjs"
       - "tests/background-jobs-scheduler.test.mjs"
@@ -40,6 +42,7 @@ jobs:
           node --experimental-default-type=module --check src/supra-orchestrator.js
           node --experimental-default-type=module --check src/supra-api.js
           node --experimental-default-type=module --check src/supra-approvals.js
+          node --experimental-default-type=module --check src/device-trust.js
           node --experimental-default-type=module --check src/index.js
       - name: Run Nexus governance, API, approval and tenant integration tests
         run: >-
@@ -53,4 +56,5 @@ jobs:
           tests/pricing-quote-guardrails.test.mjs
           tests/scheduled-backup-config.test.mjs
           tests/intervenant-workspace-api.test.mjs
+          tests/device-trust-enrollment.test.mjs
           tests/background-jobs-scheduler.test.mjs
