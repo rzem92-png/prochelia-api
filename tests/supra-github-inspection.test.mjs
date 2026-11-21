@@ -13,15 +13,13 @@ test("SUPRA GitHub inspection refuses write methods", async () => {
   assert.equal(response.status, 405);
 });
 
-test("SUPRA GitHub inspection rejects an unapproved repository before calling GitHub", async () => {
+test("SUPRA GitHub inspection rejects an unapproved repository before requiring credentials", async () => {
   const response = await handleSupraGithubRoute(
     request("/api/supra/github/pull-requests?repository=attacker/repo"),
     {}, "/api/supra/github/pull-requests", auth
   );
-  assert.equal(response.status, 200);
-  const body = await response.json();
-  assert.equal(body.status, "NOT_CONNECTED");
-  assert.equal(body.write_enabled, false);
+  assert.equal(response.status, 400);
+  assert.equal((await response.json()).error, "REPOSITORY_NOT_ALLOWED");
 });
 
 test("SUPRA GitHub connector ignores unknown paths", async () => {
