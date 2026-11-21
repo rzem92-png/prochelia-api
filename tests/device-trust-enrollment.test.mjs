@@ -340,6 +340,51 @@ test("expired device credentials are reported as expired in the device list", as
   assert.equal(state.credentials[0].status, "active", "listing must not mutate persisted credential state");
 });
 
+
+test("device proof messages are cryptographically bound to the device, session challenge scope and PROVE purpose", () => {
+  const message = JSON.parse(buildDeviceProofMessage({
+    challengeId: "123e4567-e89b-12d3-a456-426614174000",
+    challenge: "A".repeat(43),
+    tenantId: "tenant-1",
+    userId: "intervenant-1",
+    credentialId: "123e4567-e89b-12d3-a456-426614174001"
+  }));
+  assert.equal(message.version, 1);
+  assert.equal(message.purpose, "PROVE");
+  assert.equal(message.tenant_id, "tenant-1");
+  assert.equal(message.user_id, "intervenant-1");
+  assert.equal(message.credential_id, "123e4567-e89b-12d3-a456-426614174001");
+});
+
+test("device proof endpoints are POST-only and require the authenticated intervenant tenant context", async () => {
+  const auth = { user: { id: "intervenant-1", role: "intervenant" }, session_id: "session-1" };
+  const tenantContext = { ok: true, tenant: { id: "tenant-1" } };
+  for (const path of [
+    "/api/security/device/prove/challenge",
+    "/api/security/device/prove/complete"
+  ]) {
+    const result = await handleDeviceTrustRoute(
+      new Request("https://example.test" + path, { method: "GET" }),
+      { DB: {} },
+      auth,
+      tenantContext,
+      async () => ({ status: "verified" })
+    );
+    assert.equal(result.status, 405);
+    assert.equal(result.headers.get("allow"), "POST");
+  }
+});
+
+test("device proof challenge is never treated as mission presence or mission authorization", () => {
+  const source = readFileSync(new URL("../src/device-trust.js", import.meta.url), "utf8");
+  assert.match(source, /purpose: "PROVE"/);
+  assert.match(source, /mission_presence: "not_authorized_by_device_proof_alone"/);
+  assert.match(source, /c\.purpose = 'PROVE'/);
+  assert.match(source, /d\.status = 'active'/);
+  assert.match(source, /julianday\(d\.expires_at\) > julianday\('now'\)/);
+  assert.match(source, /SET last_used_at = CURRENT_TIMESTAMP/);
+});
+
 test("revoked device key cannot be silently re-enrolled", async () => {
   const { DB, state } = createDeviceTrustDb();
   const auth = { user: { id: "intervenant-1", role: "intervenant" }, session_id: "session-1" };
