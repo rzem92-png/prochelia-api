@@ -42,6 +42,7 @@ EXPECTED = [
     "0035_validate_availability_intervals.sql",
     "0036_intervenant_availability_idempotency.sql",
     "0037_support_cases_tenant_isolation.sql",
+    "0038_identity_verification_tenant_scope.sql",
 ]
 
 # Keep the manual Preview migration gate synchronized with the canonical chain.
@@ -53,16 +54,16 @@ assert '"0029_supra_append_only_audit_guards.sql"' in workflow_text, (
 assert '"0030_supra_audit_tenant_scope.sql"' in workflow_text, (
     "Preview migration workflow omits tenant-scoped SUPRA audit migration 0030"
 )
-assert "if len(local) != 38:" in workflow_text, (
-    "Preview migration workflow must require exactly 38 canonical migrations"
+assert "if len(local) != 39:" in workflow_text, (
+    "Preview migration workflow must require exactly 39 canonical migrations"
 )
-assert "exact 38-entry registry" in workflow_text, (
+assert "exact 39-entry registry" in workflow_text, (
     "Preview migration workflow target registry count is stale"
 )
-assert "all 38 canonical migrations are pending" in workflow_text, (
+assert "all 39 canonical migrations are pending" in workflow_text, (
     "Preview migration workflow empty-database inventory message is stale"
 )
-assert "only migrations 0023-0037 are pending" in workflow_text, (
+assert "only migrations 0023-0038 are pending" in workflow_text, (
     "Preview migration workflow baseline-to-target range is stale"
 )
 assert '"0036_intervenant_availability_idempotency.sql"' in workflow_text, (
