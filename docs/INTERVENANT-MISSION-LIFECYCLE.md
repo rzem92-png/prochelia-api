@@ -145,9 +145,9 @@ La création du credential applique maintenant une condition SQL atomique `NOT E
 
 Une deuxième étape candidate ajoute une vérification ponctuelle d'un terminal déjà enrôlé :
 
-- `POST /api/security/device/prove/challenge` reçoit uniquement l'identifiant du terminal ; l'API vérifie qu'il appartient à l'utilisateur et au tenant de la session, qu'il est actif et non expiré.
+- `POST /api/security/device/prove/challenge` reçoit uniquement l'identifiant du terminal ; l'API exige une identité intervenant vérifiée, puis contrôle qu'il appartient à l'utilisateur et au tenant de la session, qu'il est actif et non expiré.
 - Le challenge `PROVE` est aléatoire, lié à la session, au tenant, à l'utilisateur et au credential, à usage unique et valable cinq minutes.
-- `POST /api/security/device/prove/complete` vérifie la signature ECDSA P-256 avec la clé publique enregistrée ; la révocation et l'expiration sont revérifiées avant consommation.
+- `POST /api/security/device/prove/complete` exige également une identité intervenant vérifiée et contrôle la signature ECDSA P-256 avec la clé publique enregistrée ; la révocation et l'expiration sont revérifiées avant consommation.
 - La consommation du challenge et la mise à jour de `last_used_at` sont effectuées dans un batch D1 conditionnel ; le rejeu ou une révocation concurrente doit échouer.
 - La réponse distingue explicitement la preuve de possession de la présence à une mission : elle n'autorise ni démarrage, ni clôture, ni paiement.
 
