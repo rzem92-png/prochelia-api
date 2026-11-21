@@ -134,3 +134,8 @@ Une première implémentation candidate est ajoutée dans `src/device-trust.js` 
 Tests unitaires ajoutés pour le format du message, le rejet des clés privées/non P-256 et la vérification de signature. Ils doivent encore passer dans la CI de la branche candidate et être complétés par des tests d'intégration D1 couvrant challenge expiré, rejeu concurrent, révocation, changement de session et isolation tenant.
 
 **Limite explicite :** cet enrôlement ne prouve pas à lui seul la présence au début/à la fin d'une mission. Les endpoints `/api/security/presence` et `/api/security/code/verify` restent bloqués en 503. Aucun démarrage, aucune clôture et aucun paiement ne sont activés par cette tranche. Le déploiement Preview et la migration 0039 ne sont pas exécutés ici.
+
+
+### 12.1. Protection contre la réinscription d'une clé révoquée
+
+La création du credential applique maintenant une condition SQL atomique `NOT EXISTS` sur le triplet tenant/utilisateur/empreinte de clé. Une clé déjà enregistrée, y compris révoquée, ne peut pas être réinscrite silencieusement. En cas de perte ou de révocation, l'intervenant doit générer une nouvelle paire de clés sur un terminal qu'il contrôle ; la clé privée ne quitte jamais le terminal. La contrainte UNIQUE en base reste le dernier garde-fou contre les courses concurrentes.
