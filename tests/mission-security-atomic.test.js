@@ -70,3 +70,14 @@ test("mission presence and code verification fail closed until cryptographic dev
   assert.equal(workerSource.includes("request.headers.get('user-agent')"), false);
   assert.equal(workerSource.includes("request.headers.get('sec-ch-ua')"), false);
 });
+
+test("security status never claims device binding or presence while cryptographic enrollment is blocked", () => {
+  const statusStart = workerSource.indexOf("async function securityStatus(request, env) {");
+  const statusEnd = workerSource.indexOf("\\n\\n/*", statusStart);
+  assert.ok(statusStart >= 0 && statusEnd > statusStart, "security status route must exist");
+  const status = workerSource.slice(statusStart, statusEnd);
+  assert.match(status, /device:'cryptographic_enrollment_required'/);
+  assert.match(status, /presence:'blocked'/);
+  assert.match(status, /mission_code_verification:'blocked'/);
+  assert.doesNotMatch(status, /device:'bound'|presence:'recorded'/);
+});
