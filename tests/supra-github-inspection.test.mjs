@@ -46,3 +46,37 @@ test("SUPRA GitHub file reader rejects path traversal before credentials", async
   assert.equal(response.status, 400);
   assert.equal((await response.json()).error, "REPOSITORY_PATH_NOT_ALLOWED");
 });
+
+
+test("SUPRA GitHub commits route rejects unapproved repositories before credentials", async () => {
+  const response = await handleSupraGithubRoute(
+    request("/api/supra/github/commits?repository=attacker/repo"), {},
+    "/api/supra/github/commits", auth
+  );
+  assert.equal(response.status, 400);
+  assert.equal((await response.json()).error, "REPOSITORY_NOT_ALLOWED");
+});
+
+test("SUPRA GitHub check-runs route validates the commit SHA before credentials", async () => {
+  const response = await handleSupraGithubRoute(
+    request("/api/supra/github/check-runs?repository=rzem92-png/prochelia-api&sha=not-a-sha"), {},
+    "/api/supra/github/check-runs", auth
+  );
+  assert.equal(response.status, 400);
+  assert.equal((await response.json()).error, "COMMIT_SHA_INVALID");
+});
+
+test("SUPRA GitHub commits and check-runs routes remain read-only", async () => {
+  for (const path of ["/api/supra/github/commits", "/api/supra/github/check-runs"]) {
+    const response = await handleSupraGithubRoute(request(path, "POST"), {}, path, auth);
+    assert.equal(response.status, 405);
+  }
+});
+
+test("SUPRA GitHub inspection remains restricted to the owner role", async () => {
+  const response = await handleSupraGithubRoute(
+    request("/api/supra/github/commits?repository=rzem92-png/prochelia-api"), {},
+    "/api/supra/github/commits", { user: { role: "intervenant" } }
+  );
+  assert.equal(response.status, 403);
+});
