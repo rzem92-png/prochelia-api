@@ -156,13 +156,13 @@ function safeRepositoryPath(value) {
 
 export function redactRepositoryText(value) {
   return String(value)
-    .replace(/-----BEGIN [A-Z ]*PRIVATE KEY-----[\\s\\S]*?-----END [A-Z ]*PRIVATE KEY-----/g, "[REDACTED_PRIVATE_KEY]")
-    .replace(/\\b(gh[pousr]_[A-Za-z0-9]{20,})\\b/g, "[REDACTED_GITHUB_TOKEN]")
-    .replace(/\\b(sk_(?:live|test)_[A-Za-z0-9]{16,}|rk_(?:live|test)_[A-Za-z0-9]{16,})\\b/g, "[REDACTED_PAYMENT_SECRET]")
-    .replace(/\\b(AKIA[0-9A-Z]{16})\\b/g, "[REDACTED_AWS_ACCESS_KEY]")
-    .replace(/\\b(xox[baprs]-[A-Za-z0-9-]{10,})\\b/g, "[REDACTED_SLACK_TOKEN]")
-    .replace(/(Bearer\\s+)[A-Za-z0-9._~-]{20,}/gi, "$1[REDACTED]")
-    .replace(/((?:api[_-]?key|client[_-]?secret|access[_-]?token|password)\\s*[:=]\\s*)(["']?)[^\\s,"'}]{8,}\\2/gi, "$1$2[REDACTED_CREDENTIAL]");
+    .replace(/-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/g, "[REDACTED_PRIVATE_KEY]")
+    .replace(/\b(gh[pousr]_[A-Za-z0-9]{20,})\b/g, "[REDACTED_GITHUB_TOKEN]")
+    .replace(/\b(sk_(?:live|test)_[A-Za-z0-9]{16,}|rk_(?:live|test)_[A-Za-z0-9]{16,})\b/g, "[REDACTED_PAYMENT_SECRET]")
+    .replace(/\b(AKIA[0-9A-Z]{16})\b/g, "[REDACTED_AWS_ACCESS_KEY]")
+    .replace(/\b(xox[baprs]-[A-Za-z0-9-]{10,})\b/g, "[REDACTED_SLACK_TOKEN]")
+    .replace(/(Bearer\s+)[A-Za-z0-9._~-]{20,}/gi, "$1[REDACTED]")
+    .replace(/((?:api[_-]?key|client[_-]?secret|access[_-]?token|password)\s*[:=]\s*)(["']?)[^\s,"'}]{8,}\2/gi, "$1$2[REDACTED_CREDENTIAL]");
 }
 
 async function repositoryFile(env, repository, path) {
