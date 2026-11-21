@@ -53,5 +53,5 @@ jobs:
             tests/pricing-quote-guardrails.test.mjs \
             tests/scheduled-backup-config.test.mjs \
             tests/intervenant-workspace-api.test.mjs \
-            tests/background-jobs-safety.test.mjs \\
+            tests/background-jobs-safety.test.mjs \
             tests/background-jobs-scheduler.test.mjs
