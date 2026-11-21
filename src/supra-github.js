@@ -142,6 +142,55 @@ async function installationRepositories(env) {
   };
 }
 
+function safeRepositoryPath(value) {
+  const path = String(value || "").trim();
+  if (!path || path.length > 240 || path.startsWith("/") || path.includes("\\\\") ||
+      path.split("/").some(part => !part || part === "." || part === ".." || part.startsWith("."))) return false;
+  if (!/^(src|tests|docs|\.github\/workflows)\/[A-Za-z0-9._/-]+$/.test(path)) return false;
+  if (/(^|\/)(\.env|secrets?|credentials?)(\.|\/|$)/i.test(path)) return false;
+  return /\.(mjs|cjs|js|ts|json|md|yml|yaml|sql|html|css)$/.test(path);
+}
+
+function redactRepositoryText(value) {
+  return String(value)
+    .replace(/-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/g, "[REDACTED_PRIVATE_KEY]")
+    .replace(/(gh[pousr]_[A-Za-z0-9]{20,})/g, "[REDACTED_GITHUB_TOKEN]")
+    .replace(/(sk_live_[A-Za-z0-9]{16,})/g, "[REDACTED_SECRET]")
+    .replace(/(Bearer\s+)[A-Za-z0-9._~-]{20,}/gi, "$1[REDACTED]");
+}
+
+async function repositoryFile(env, repository, path) {
+  if (!ALLOWED_REPOSITORIES.includes(repository)) throw new Error("REPOSITORY_NOT_ALLOWED");
+  if (!safeRepositoryPath(path)) throw new Error("REPOSITORY_PATH_NOT_ALLOWED");
+  const token = await installationToken(env);
+  const [owner, name] = repository.split("/");
+  const endpoint = API + "/repos/" + encodeURIComponent(owner) + "/" + encodeURIComponent(name) +
+    "/contents/" + path.split("/").map(encodeURIComponent).join("/");
+  const response = await fetch(endpoint, {
+    headers: {
+      "authorization": "Bearer " + token,
+      "accept": "application/vnd.github+json",
+      "x-github-api-version": "2022-11-28"
+    }
+  });
+  if (!response.ok) throw new Error("GITHUB_FILE_READ_FAILED");
+  const data = await response.json();
+  if (data?.type !== "file" || typeof data.content !== "string" || data.encoding !== "base64") {
+    throw new Error("GITHUB_FILE_RESPONSE_INVALID");
+  }
+  const compact = data.content.replace(/\s/g, "");
+  if (compact.length > 24000) throw new Error("GITHUB_FILE_TOO_LARGE");
+  const binary = atob(compact);
+  const bytes = Uint8Array.from(binary, char => char.charCodeAt(0));
+  const decoded = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  return {
+    path,
+    sha: String(data.sha || ""),
+    size: bytes.byteLength,
+    content: redactRepositoryText(decoded).slice(0, 16000)
+  };
+}
+
 async function repositoryPullRequests(env, repository) {
   if (!ALLOWED_REPOSITORIES.includes(repository)) throw new Error("REPOSITORY_NOT_ALLOWED");
   const token = await installationToken(env);
@@ -175,7 +224,8 @@ export async function handleSupraGithubRoute(request, env, path, auth) {
   const supported = [
     "/api/supra/github/status",
     "/api/supra/github/repositories",
-    "/api/supra/github/pull-requests"
+    "/api/supra/github/pull-requests",
+    "/api/supra/github/file"
   ];
   if (!supported.includes(path)) return null;
   if (request.method !== "GET") {
@@ -187,10 +237,13 @@ export async function handleSupraGithubRoute(request, env, path, auth) {
   if (auth.user.role !== "gerante") {
     return Response.json({ ok: false, error: "FORBIDDEN" }, { status: 403, headers: { "cache-control": "no-store" } });
   }
-  const requestedRepository = path === "/api/supra/github/pull-requests"
+  const requestedRepository = (path === "/api/supra/github/pull-requests" || path === "/api/supra/github/file")
     ? new URL(request.url).searchParams.get("repository") || ""
     : "";
-  if (path === "/api/supra/github/pull-requests" && !ALLOWED_REPOSITORIES.includes(requestedRepository)) {
+  const requestedPath = path === "/api/supra/github/file"
+    ? new URL(request.url).searchParams.get("path") || ""
+    : "";
+  if ((path === "/api/supra/github/pull-requests" || path === "/api/supra/github/file") && !ALLOWED_REPOSITORIES.includes(requestedRepository)) {
     return Response.json({ ok: false, error: "REPOSITORY_NOT_ALLOWED" }, {
       status: 400, headers: { "cache-control": "no-store" }
     });
@@ -207,6 +260,18 @@ export async function handleSupraGithubRoute(request, env, path, auth) {
   }
   try {
     const installation = await installationRepositories(env);
+    if (path === "/api/supra/github/file") {
+      if (!installation.names.includes(requestedRepository)) {
+        return Response.json({ ok: false, error: "REPOSITORY_NOT_INSTALLED" }, {
+          status: 403, headers: { "cache-control": "no-store" }
+        });
+      }
+      const file = await repositoryFile(env, requestedRepository, requestedPath);
+      return Response.json({
+        ok: true, mode: "READ_ONLY", write_enabled: false,
+        repository: requestedRepository, file
+      }, { headers: { "cache-control": "no-store" } });
+    }
     if (path === "/api/supra/github/pull-requests") {
       const repository = requestedRepository;
       if (!installation.names.includes(repository)) {
