@@ -1,4 +1,5 @@
 import { handleV7Route } from "./v7-routes.js";
+import { handleSupraGithubRoute } from "./supra-github.js";
 // PROCHÉLIA — INDEX BACKEND CONSOLIDÉ UNIQUE
 // Référence de consolidation : V14.1 Finance + sécurité/RBAC existants.
 // Généré le 19/10/2026. À déployer uniquement après recette avec la vraie base D1.
@@ -3159,6 +3160,11 @@ async function handle(request,env){
       const v7Auth = await getSessionUser(request, env).catch(() => null);
       const v7Response = await handleV7Route(request, env, url.pathname, v7Auth);
       if (v7Response) return v7Response;
+    }
+    if (url.pathname.startsWith('/api/supra/github/')) {
+      const supraGithubAuth = await getSessionUser(request, env).catch(() => null);
+      const supraGithubResponse = await handleSupraGithubRoute(request, env, url.pathname, supraGithubAuth);
+      if (supraGithubResponse) return supraGithubResponse;
     }
     const fw=await handleFinanceWorkspace(request,env); if(fw) return fw;
     const cr=await handleCommercialRecruitment(request,env); if(cr) return cr;
