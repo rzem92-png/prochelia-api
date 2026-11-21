@@ -123,6 +123,15 @@ try:
 except sqlite3.IntegrityError:
     pass
 
+try:
+    db.execute("""
+        INSERT INTO accounting_entities(id, tenant_id, legal_name, country_code, base_currency)
+        VALUES ('entity-missing-tenant', 'tenant-does-not-exist', 'Invalid entity', 'FR', 'EUR')
+    """)
+    raise AssertionError("Accounting entity with a missing tenant was incorrectly accepted")
+except sqlite3.IntegrityError:
+    pass
+
 db.execute("""
     INSERT INTO accounting_entities(id, tenant_id, legal_name, country_code, base_currency)
     VALUES ('entity-a', 'tenant-a', 'PROCHÉLIA France', 'FR', 'EUR')
