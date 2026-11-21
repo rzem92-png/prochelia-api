@@ -42,7 +42,7 @@ function pemToBytes(pem) {
   const header = isPkcs1 ? "-----BEGIN RSA PRIVATE KEY-----" : "-----BEGIN PRIVATE KEY-----";
   const footer = isPkcs1 ? "-----END RSA PRIVATE KEY-----" : "-----END PRIVATE KEY-----";
   if (!normalized.includes(header) || !normalized.includes(footer)) throw new Error("INVALID_PRIVATE_KEY_FORMAT");
-  const body = normalized.replace(header, "").replace(footer, "").replace(/\\s/g, "");
+  const body = normalized.replace(header, "").replace(footer, "").replace(/\s/g, "");
   if (!body || body.length > 12000) throw new Error("INVALID_PRIVATE_KEY");
   const binary = atob(body);
   const raw = Uint8Array.from(binary, char => char.charCodeAt(0));
