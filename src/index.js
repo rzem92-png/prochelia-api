@@ -550,7 +550,6 @@ async function ensureSecuritySchema(env) {
     `CREATE TABLE IF NOT EXISTS identity_verifications (
       id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL,
-      tenant_id TEXT REFERENCES tenants(id),
       status TEXT NOT NULL DEFAULT 'pending',
       level TEXT NOT NULL DEFAULT 'standard',
       provider TEXT,
