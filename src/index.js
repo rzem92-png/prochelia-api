@@ -3483,7 +3483,8 @@ async function intervenantWorkspaceReadModel(request, env) {
     },
     missions,
     availability,
-    finance: { wallet, payout_account: null },
+    // Internal wallet figures are not presented as payable earnings unless a real PSP adapter is configured.
+    finance: { payments_configured: paymentsConfigured(env), wallet: paymentsConfigured(env) ? wallet : null, payout_account: null },
     documents: documentCounts,
     partial_data: partial
   });
