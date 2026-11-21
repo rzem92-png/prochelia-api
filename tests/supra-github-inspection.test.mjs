@@ -155,7 +155,7 @@ test("SUPRA GitHub inspection redacts credential assignments and bearer values",
     "client_secret=synthetic-placeholder-value",
     "api_key: synthetic-placeholder-value",
     "Bearer synthetic-placeholder-value-123456789"
-  ].join("\\n");
+  ].join("\n");
   const output = redactRepositoryText(input);
   assert.equal(output.includes("synthetic-placeholder-value"), false);
   assert.match(output, /REDACTED_CREDENTIAL/);
