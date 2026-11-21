@@ -41,6 +41,7 @@ EXPECTED = [
     "0034_timezone_safe_availability_overlap.sql",
     "0035_validate_availability_intervals.sql",
     "0036_intervenant_availability_idempotency.sql",
+    "0037_support_cases_tenant_isolation.sql",
 ]
 
 # Keep the manual Preview migration gate synchronized with the canonical chain.
@@ -52,16 +53,16 @@ assert '"0029_supra_append_only_audit_guards.sql"' in workflow_text, (
 assert '"0030_supra_audit_tenant_scope.sql"' in workflow_text, (
     "Preview migration workflow omits tenant-scoped SUPRA audit migration 0030"
 )
-assert "if len(local) != 37:" in workflow_text, (
+assert "if len(local) != 38:" in workflow_text, (
     "Preview migration workflow must require exactly 36 canonical migrations"
 )
-assert "exact 37-entry registry" in workflow_text, (
+assert "exact 38-entry registry" in workflow_text, (
     "Preview migration workflow target registry count is stale"
 )
-assert "all 37 canonical migrations are pending" in workflow_text, (
+assert "all 38 canonical migrations are pending" in workflow_text, (
     "Preview migration workflow empty-database inventory message is stale"
 )
-assert "only migrations 0023-0036 are pending" in workflow_text, (
+assert "only migrations 0023-0037 are pending" in workflow_text, (
     "Preview migration workflow baseline-to-target range is stale"
 )
 assert '"0036_intervenant_availability_idempotency.sql"' in workflow_text, (
@@ -89,6 +90,9 @@ assert not violations, f"Canonical migration chain creates foreign-key violation
 tables = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
 indexes = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='index'")}
 assert "idx_disponibilites_tenant_intervenant_idempotency" in indexes, "Missing durable availability idempotency index"
+assert "idx_support_cases_tenant_status_created" in indexes, "Missing tenant-scoped support status index"
+assert "idx_support_cases_tenant_requester_created" in indexes, "Missing tenant-scoped support requester index"
+assert "support_cases" in tables, "Missing tenant-scoped support case table"
 required = {
     "users", "sessions", "clients", "intervenants", "missions",
     "auth_login_rate_limits", "supra_audit_events",
