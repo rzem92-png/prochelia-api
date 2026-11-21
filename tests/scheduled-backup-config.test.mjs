@@ -25,3 +25,32 @@ test("automatic backup validates D1, R2 and encryption key before any schema wri
   assert.ok(schemaWrite > keyGuard,
     "D1 schema initialization must not run before backup dependencies are verified");
 });
+
+test("backup and scale status endpoints are read-only and never initialize D1 schema", () => {
+  const scaleStart = worker.indexOf("async function nationalScaleStatus");
+  const backupStart = worker.indexOf("async function backupStatus", scaleStart);
+  const routeStart = worker.indexOf("const __procheliaNationalHandle", backupStart);
+  assert.ok(scaleStart >= 0 && backupStart > scaleStart && routeStart > backupStart);
+  const scaleStatus = worker.slice(scaleStart, backupStart);
+  const backupStatus = worker.slice(backupStart, routeStart);
+  assert.doesNotMatch(scaleStatus, /ensureNationalContinuitySchema/);
+  assert.doesNotMatch(backupStatus, /ensureNationalContinuitySchema/);
+  assert.match(scaleStatus, /sqlite_master/);
+  assert.match(backupStatus, /sqlite_master/);
+});
+
+test("backup status does not claim an unverified schedule, encryption or retention policy", () => {
+  const scaleStart = worker.indexOf("async function nationalScaleStatus");
+  const backupStart = worker.indexOf("async function backupStatus", scaleStart);
+  const routeStart = worker.indexOf("const __procheliaNationalHandle", backupStart);
+  const scaleStatus = worker.slice(scaleStart, backupStart);
+  const backupStatus = worker.slice(backupStart, routeStart);
+  assert.match(scaleStatus, /automatic:false/);
+  assert.match(scaleStatus, /scheduleStatus:'NOT_ATTESTED'/);
+  assert.match(scaleStatus, /encrypted:false/);
+  assert.match(scaleStatus, /retentionStatus:'UNVERIFIED'/);
+  assert.match(backupStatus, /automatic:false/);
+  assert.match(backupStatus, /frequency:null/);
+  assert.match(backupStatus, /retentionDays:null/);
+  assert.match(backupStatus, /schemaReady/);
+});
