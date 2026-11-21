@@ -2843,8 +2843,13 @@ async function enqueueBackgroundJob(env, jobType, payload={}, maxAttempts=5) {
   return id;
 }
 
-async function processBackgroundJobs(request,env) {
-  const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
+async function processBackgroundJobs(request,env,{scheduler=false}={}) {
+  // The scheduler flag is only supplied by the Worker's scheduled() handler; it is
+  // never derived from an HTTP header, query parameter, or client-controlled body.
+  const gate=scheduler
+    ? {auth:{user:{id:'cloudflare-cron',role:'GERANTE'}}}
+    : await requireAuthRole(request,env,['gerante']);
+  if(gate.error)return gate.error;
   await ensureFinalHardeningSchema(env); await ensureOperationalSchema(env);
   // Recover abandoned leases after a worker crash. A bounded retry delay
   // prevents a hot loop while keeping exhausted jobs visible as FAILED.
@@ -4053,8 +4058,16 @@ async function handle(request,env){
 export default {
   fetch(request,env){ return handle(request,env); },
   async scheduled(event,env,ctx){
-    if(event?.cron && (event.cron==='0 3 * * *' || event.cron==='0 3 * * 0')){
-      ctx.waitUntil(runNationalBackup(env,'AUTOMATIC'));
+    if(event?.cron === '*/1 * * * *'){
+      const internalRequest = new Request('https://prochelia.internal/api/jobs/process', { method: 'POST' });
+      ctx.waitUntil(processBackgroundJobs(internalRequest,env,{scheduler:true}).catch(error => {
+        console.error('PROCHELIA_SCHEDULER_TICK_FAILED', String(error?.message || error));
+      }));
+    }
+    if(event?.cron === '0 3 * * *' || event?.cron === '0 3 * * 0'){
+      ctx.waitUntil(runNationalBackup(env,'AUTOMATIC').catch(error => {
+        console.error('PROCHELIA_AUTOMATIC_BACKUP_FAILED', String(error?.message || error));
+      }));
     }
   }
 };
