@@ -2839,6 +2839,18 @@ async function enqueueBackgroundJob(env, jobType, payload={}, maxAttempts=5) {
 async function processBackgroundJobs(request,env) {
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
   await ensureFinalHardeningSchema(env); await ensureOperationalSchema(env);
+  // Recover abandoned leases after a worker crash. A bounded retry delay
+  // prevents a hot loop while keeping exhausted jobs visible as FAILED.
+  const stale=await env.DB.prepare(`SELECT id,attempts,max_attempts FROM background_jobs WHERE status='RUNNING' AND locked_at<=datetime(CURRENT_TIMESTAMP,'-10 minutes') ORDER BY locked_at LIMIT 50`).all();
+  const recovered=[];
+  for(const job of stale.results||[]) {
+    const attempts=Number(job.attempts||0)+1;
+    const exhausted=attempts>=Number(job.max_attempts||5);
+    const delaySeconds=Math.min(3600,30*Math.pow(2,Math.min(attempts-1,7)));
+    const moved=await env.DB.prepare(`UPDATE background_jobs SET status=?,attempts=?,run_after=datetime(CURRENT_TIMESTAMP,?),locked_at=NULL,last_error='STALE_LEASE_RECOVERED',updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='RUNNING'`)
+      .bind(exhausted?'FAILED':'PENDING',attempts,`+${delaySeconds} seconds`,job.id).run();
+    if(Number(moved?.meta?.changes||0)===1) recovered.push({id:job.id,status:exhausted?'FAILED':'PENDING',retry_after_seconds:exhausted?null:delaySeconds});
+  }
   const rows=await env.DB.prepare(`SELECT * FROM background_jobs WHERE status='PENDING' AND run_after<=CURRENT_TIMESTAMP ORDER BY created_at LIMIT 25`).all();
   const results=[];
   for(const job of rows.results||[]) {
@@ -2860,13 +2872,16 @@ async function processBackgroundJobs(request,env) {
       results.push({id:job.id,status:done?'DONE':'WAITING_PROVIDER',result});
     } catch(e) {
       const attempts=Number(job.attempts||0)+1;
-      const status=attempts>=Number(job.max_attempts||5)?'FAILED':'PENDING';
-      await env.DB.prepare(`UPDATE background_jobs SET status=?,attempts=?,last_error=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(status,attempts,String(e.message||e),job.id).run();
-      results.push({id:job.id,status,error:String(e.message||e)});
+      const exhausted=attempts>=Number(job.max_attempts||5);
+      const status=exhausted?'FAILED':'PENDING';
+      const delaySeconds=Math.min(3600,30*Math.pow(2,Math.min(attempts-1,7)));
+      await env.DB.prepare(`UPDATE background_jobs SET status=?,attempts=?,run_after=datetime(CURRENT_TIMESTAMP,?),locked_at=NULL,last_error=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='RUNNING'`)
+        .bind(status,attempts,`+${delaySeconds} seconds`,String(e.message||e),job.id).run();
+      results.push({id:job.id,status,retry_after_seconds:exhausted?null:delaySeconds,error:String(e.message||e)});
     }
   }
   await journal(env,'gerante',gate.auth.user.id,'BACKGROUND_JOBS_PROCESSED','system',null,'OK',{count:results.length});
-  return json({ok:true,version:VERSION,processed:results.length,results});
+  return json({ok:true,version:VERSION,recovered_leases:recovered.length,recovered,processed:results.length,results});
 }
 
 function isMutatingMethod(method){ return ['POST','PUT','PATCH','DELETE'].includes(method); }
