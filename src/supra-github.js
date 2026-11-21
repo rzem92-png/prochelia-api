@@ -144,8 +144,11 @@ async function installationRepositories(env) {
 
 function safeRepositoryPath(value) {
   const path = String(value || "").trim();
-  if (!path || path.length > 240 || path.startsWith("/") || path.includes("\\\\") ||
-      path.split("/").some(part => !part || part === "." || part === ".." || part.startsWith("."))) return false;
+  const parts = path.split("/");
+  const allowGithubWorkflow = parts.length >= 3 && parts[0] === ".github" && parts[1] === "workflows";
+  if (!path || path.length > 240 || path.startsWith("/") || path.includes("\\") ||
+      parts.some((part, index) => !part || part === "." || part === ".." ||
+        (part.startsWith(".") && !(allowGithubWorkflow && index === 0)))) return false;
   if (!/^(src|tests|docs|\.github\/workflows)\/[A-Za-z0-9._/-]+$/.test(path)) return false;
   if (/(^|\/)(\.env|secrets?|credentials?)(\.|\/|$)/i.test(path)) return false;
   return /\.(mjs|cjs|js|ts|json|md|yml|yaml|sql|html|css)$/.test(path);
@@ -269,6 +272,7 @@ export async function handleSupraGithubRoute(request, env, path, auth) {
     "/api/supra/github/pull-requests",
     "/api/supra/github/commits",
     "/api/supra/github/check-runs",
+    "/api/supra/github/file",
   ];
   if (!supported.includes(path)) return null;
   if (request.method !== "GET") {
