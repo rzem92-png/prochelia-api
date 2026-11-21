@@ -4182,10 +4182,13 @@ async function backupTables(env){
   return (r.results||[]).map(x=>String(x.name));
 }
 async function runNationalBackup(env,trigger='MANUAL'){
-  await ensureNationalContinuitySchema(env);
-  if(!env.BACKUP_BUCKET) throw new Error('BACKUP_R2_NOT_CONFIGURED');
+  // Validate every external dependency before schema helpers can write to D1.
+  // A missing key or bucket must leave Preview data untouched.
+  if(!env?.DB?.prepare) throw new Error('DATABASE_REQUIRED');
+  if(!env?.BACKUP_BUCKET || typeof env.BACKUP_BUCKET.put !== 'function') throw new Error('BACKUP_R2_NOT_CONFIGURED');
   const secret=env.BACKUP_ENCRYPTION_KEY;
-  if(!secret) throw new Error('BACKUP_ENCRYPTION_KEY_REQUIRED');
+  if(typeof secret !== 'string' || secret.length === 0) throw new Error('BACKUP_ENCRYPTION_KEY_REQUIRED');
+  await ensureNationalContinuitySchema(env);
   const runId=crypto.randomUUID(), day=new Date().toISOString().slice(0,10);
   await env.DB.prepare(`INSERT INTO backup_runs(id,status,trigger_type,storage_provider,metadata_json) VALUES(?,?,?,?,?)`).bind(runId,'RUNNING',trigger,'R2',JSON.stringify({version:VERSION,scope:'FULL_LOGICAL_DB'})).run();
   let objects=0,rowsTotal=0;
