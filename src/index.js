@@ -2748,6 +2748,13 @@ async function ensureFinalHardeningSchema(env) {
       completed_at TEXT
     )`,
     `CREATE INDEX IF NOT EXISTS idx_background_jobs_ready ON background_jobs(status,run_after,created_at)`,
+    `CREATE TABLE IF NOT EXISTS background_jobs_dead_letter (
+      id TEXT PRIMARY KEY, source_job_id TEXT NOT NULL UNIQUE, job_type TEXT NOT NULL,
+      payload_json TEXT NOT NULL DEFAULT '{}', attempts INTEGER NOT NULL DEFAULT 0,
+      last_error TEXT, failed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      resolution_status TEXT NOT NULL DEFAULT 'OPEN', resolved_at TEXT, resolution_note TEXT
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_background_jobs_dead_letter_open ON background_jobs_dead_letter(resolution_status,failed_at)`,
     `CREATE TABLE IF NOT EXISTS security_rate_limits (
       id TEXT PRIMARY KEY, bucket TEXT NOT NULL, subject_hash TEXT NOT NULL,
       window_start TEXT NOT NULL, request_count INTEGER NOT NULL DEFAULT 0,
@@ -2849,7 +2856,15 @@ async function processBackgroundJobs(request,env) {
     const delaySeconds=Math.min(3600,30*Math.pow(2,Math.min(attempts-1,7)));
     const moved=await env.DB.prepare(`UPDATE background_jobs SET status=?,attempts=?,run_after=datetime(CURRENT_TIMESTAMP,?),locked_at=NULL,last_error='STALE_LEASE_RECOVERED',updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='RUNNING'`)
       .bind(exhausted?'FAILED':'PENDING',attempts,`+${delaySeconds} seconds`,job.id).run();
-    if(Number(moved?.meta?.changes||0)===1) recovered.push({id:job.id,status:exhausted?'FAILED':'PENDING',retry_after_seconds:exhausted?null:delaySeconds});
+    if(Number(moved?.meta?.changes||0)===1) {
+      if(exhausted) {
+        await env.DB.prepare(`INSERT OR IGNORE INTO background_jobs_dead_letter
+          (id,source_job_id,job_type,payload_json,attempts,last_error)
+          SELECT ?,id,job_type,payload_json,?,'STALE_LEASE_RETRY_LIMIT_REACHED' FROM background_jobs WHERE id=?`)
+          .bind(crypto.randomUUID(),attempts,job.id).run();
+      }
+      recovered.push({id:job.id,status:exhausted?'FAILED':'PENDING',retry_after_seconds:exhausted?null:delaySeconds});
+    }
   }
   const rows=await env.DB.prepare(`SELECT * FROM background_jobs WHERE status='PENDING' AND run_after<=CURRENT_TIMESTAMP ORDER BY created_at LIMIT 25`).all();
   const results=[];
@@ -2877,6 +2892,12 @@ async function processBackgroundJobs(request,env) {
       const delaySeconds=Math.min(3600,30*Math.pow(2,Math.min(attempts-1,7)));
       await env.DB.prepare(`UPDATE background_jobs SET status=?,attempts=?,run_after=datetime(CURRENT_TIMESTAMP,?),locked_at=NULL,last_error=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='RUNNING'`)
         .bind(status,attempts,`+${delaySeconds} seconds`,String(e.message||e),job.id).run();
+      if(exhausted) {
+        await env.DB.prepare(`INSERT OR IGNORE INTO background_jobs_dead_letter
+          (id,source_job_id,job_type,payload_json,attempts,last_error)
+          SELECT ?,id,job_type,payload_json,?,? FROM background_jobs WHERE id=?`)
+          .bind(crypto.randomUUID(),attempts,String(e.message||e),job.id).run();
+      }
       results.push({id:job.id,status,retry_after_seconds:exhausted?null:delaySeconds,error:String(e.message||e)});
     }
   }
