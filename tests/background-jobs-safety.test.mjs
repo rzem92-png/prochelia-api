@@ -24,3 +24,15 @@ test("only a real processor result can transition a job to DONE", () => {
   assert.match(processor, /const done=result\.performed===true \|\| result\.overall===true/);
   assert.match(processor, /done\?'DONE':'WAITING_PROVIDER'/);
 });
+
+test("abandoned RUNNING leases are recovered or exhausted safely", () => {
+  assert.match(processor, /status='RUNNING' AND locked_at<=datetime\(CURRENT_TIMESTAMP,'-10 minutes'\)/);
+  assert.match(processor, /STALE_LEASE_RECOVERED/);
+  assert.match(processor, /recovered_leases:recovered\.length/);
+});
+
+test("failed jobs use bounded exponential retry and clear their lease", () => {
+  assert.match(processor, /Math\.min\(3600,30\*Math\.pow\(2,Math\.min\(attempts-1,7\)\)\)/);
+  assert.match(processor, /run_after=datetime\(CURRENT_TIMESTAMP,\?\),locked_at=NULL,last_error=\?/);
+  assert.match(processor, /exhausted\?'FAILED':'PENDING'/);
+});
