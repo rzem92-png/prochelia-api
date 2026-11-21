@@ -58,7 +58,8 @@ test("Preview migration workflow validates the full canonical migration chain", 
     "0035_validate_availability_intervals.sql",
     "0036_intervenant_availability_idempotency.sql",
     "0037_support_cases_tenant_isolation.sql",
-    "0038_identity_verification_tenant_scope.sql"
+    "0038_identity_verification_tenant_scope.sql",
+    "0039_cryptographic_device_enrollment.sql"
   ];
   for (const migration of expected) assert.ok(workflow.includes(`"${migration}"`), `missing canonical migration ${migration}`);
 });
@@ -85,6 +86,10 @@ test("Preview post-migration verification checks identity, mission-security and 
     "security_audit",
     "idx_identity_verifications_user",
     "0038_identity_verification_tenant_scope.sql",
+    "0039_cryptographic_device_enrollment.sql",
+    "trusted_device_credentials", "device_auth_challenges",
+    "idx_trusted_device_credentials_tenant_user_status",
+    "idx_device_auth_challenges_session_expiry", "idx_device_auth_challenges_pending",
     "idx_identity_verifications_tenant_user_status",
     "tenant_id",
     "idx_mission_security_intervenant",
@@ -117,13 +122,13 @@ test("Preview post-migration verification checks identity, mission-security and 
   ]) assert.ok(workflow.includes(name), `missing post-migration verification for ${name}`);
 });
 
-test("Preview migration workflow accepts only an empty EU D1, the exact 23-entry reviewed baseline or the exact 39-entry target", () => {
+test("Preview migration workflow accepts only an empty EU D1, the exact 23-entry reviewed baseline or the exact 40-entry target", () => {
   assert.match(workflow, /SELECT type, name FROM sqlite_master ORDER BY type, name/);
   assert.match(workflow, /registry_present/);
   assert.match(workflow, /non_internal/);
-  assert.match(workflow, /len\(local\) != 39/);
+  assert.match(workflow, /len\(local\) != 40/);
   assert.match(workflow, /remote == base/);
-  assert.match(workflow, /differs from the exact reviewed 23-entry baseline and 39-entry target/);
+  assert.match(workflow, /differs from the exact reviewed 23-entry baseline and 40-entry target/);
   assert.doesNotMatch(workflow, /legacy=/);
   assert.doesNotMatch(workflow, /baseline=\(local-pending\)\|legacy/);
 });
@@ -289,6 +294,8 @@ test("Preview migration workflow verifies accounting, tenant and session-revocat
   for (const name of [
     "accounting_entities","accounting_accounts","accounting_journals","accounting_journal_lines",
     "tenants","tenant_memberships","tenant_membership_events",
+    "trusted_device_credentials","device_auth_challenges",
+    "idx_trusted_device_credentials_tenant_user_status","idx_device_auth_challenges_session_expiry","idx_device_auth_challenges_pending",
     "idx_tenant_membership_one_nonrevoked_per_user","idx_tenant_membership_one_owner",
     "trg_tenant_membership_revocation_terminal","trg_tenant_membership_identity_immutable","trg_session_revocation_terminal",
     "revoked_at","revoked_reason","revoked_by_user_id","last_seen_at"
