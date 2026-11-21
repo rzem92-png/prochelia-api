@@ -683,3 +683,10 @@ test("device proof verifies the enrolled private key, is session-bound and rejec
   );
   assert.equal(wrongSession.status, 409);
 });
+
+test("canonical API entrypoint wires device trust through authenticated session and tenant context", () => {
+  const source = readFileSync(new URL("../src/index.js", import.meta.url), "utf8");
+  assert.match(source, /import \{ handleDeviceTrustRoute \} from "\.\/device-trust\.js"/);
+  assert.match(source, /url\.pathname\.startsWith\('\/api\/security\/device\/'\)/);
+  assert.match(source, /return handleDeviceTrustRoute\(request, env, deviceAuth, deviceTenantContext, requireVerifiedIntervenant\)/);
+});
