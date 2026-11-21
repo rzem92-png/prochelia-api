@@ -298,8 +298,8 @@ export async function handleDeviceTrustRoute(request, env, auth, tenantContext, 
     "/api/security/device/revoke"
   ]);
   if (!routes.has(path)) return null;
-  if (!env?.DB) return response({ ok: false, error: "DATABASE_REQUIRED", write_enabled: false }, 503);
   if (!auth?.user) return response({ ok: false, error: "UNAUTHENTICATED" }, 401);
+  if (!env?.DB) return response({ ok: false, error: "DATABASE_REQUIRED", write_enabled: false }, 503);
   if (auth.user.role !== "intervenant") return response({ ok: false, error: "FORBIDDEN" }, 403);
   if (!tenantContext?.ok || !tenantContext.tenant?.id) {
     return response({ ok: false, error: tenantContext?.error || "TENANT_CONTEXT_REQUIRED" }, tenantContext?.status || 403);
