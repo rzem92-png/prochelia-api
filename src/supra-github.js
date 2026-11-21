@@ -291,10 +291,13 @@ export async function handleSupraGithubRoute(request, env, path, auth) {
     return Response.json({ ok: false, error: "REPOSITORY_NOT_ALLOWED" }, {
       status: 400, headers: { "cache-control": "no-store" }
     });
-  if (path === "/api/supra/github/check-runs" && !/^[a-f0-9]{40}$/i.test(requestedSha)) {
-    return Response.json({ ok: false, error: "COMMIT_SHA_INVALID" }, { status: 400, headers: { "cache-control": "no-store" } });
   }
-  if (path === "/api/supra/github/check-runs" && !/^[a-f0-9]{40}$/i.test(requestedSha)) {\n    return Response.json({ ok: false, error: "COMMIT_SHA_INVALID" }, { status: 400, headers: { "cache-control": "no-store" } });\n  }\n  if (path === "/api/supra/github/file" && !safeRepositoryPath(requestedPath)) {
+  if (path === "/api/supra/github/check-runs" && !/^[a-f0-9]{40}$/i.test(requestedSha)) {
+    return Response.json({ ok: false, error: "COMMIT_SHA_INVALID" }, {
+      status: 400, headers: { "cache-control": "no-store" }
+    });
+  }
+  if (path === "/api/supra/github/file" && !safeRepositoryPath(requestedPath)) {
     return Response.json({ ok: false, error: "REPOSITORY_PATH_NOT_ALLOWED" }, {
       status: 400, headers: { "cache-control": "no-store" }
     });
