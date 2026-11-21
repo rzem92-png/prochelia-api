@@ -83,3 +83,19 @@ test("security status never claims device binding or presence while cryptographi
   assert.doesNotMatch(status, /SELECT COUNT\(\*\).*security_audit|audit_events/);
   assert.match(status, /user:\{id:auth\.user\.id,role:auth\.user\.role\}/);
 });
+
+
+test("mission security preparation is tenant-scoped and verifies the intervenant user identity", () => {
+  const start = workerSource.indexOf("async function securityPrepareMission(request, env) {");
+  const end = workerSource.indexOf("async function securityPresence(request, env) {", start);
+  assert.ok(start >= 0 && end > start, "mission preparation route must exist");
+  const handler = workerSource.slice(start, end);
+  assert.match(handler, /resolveTenantContext\(request, env, auth\)/);
+  assert.match(handler, /tenantContext\.tenant\.id/);
+  assert.match(handler, /JOIN clients c ON c\.id=m\.client_id AND c\.tenant_id=m\.tenant_id/);
+  assert.match(handler, /JOIN intervenants i ON i\.id=m\.intervenant_id AND i\.tenant_id=m\.tenant_id/);
+  assert.match(handler, /WHERE m\.id=\? AND m\.tenant_id=\? AND m\.client_id=\? AND m\.intervenant_id=\?/);
+  assert.match(handler, /requireVerifiedIntervenant\(env,assignment\.intervenant_user_id\)/);
+  assert.doesNotMatch(handler, /requireVerifiedIntervenant\(env,intervenantId\)/);
+  assert.match(handler, /MISSION_TENANT_ASSIGNMENT_NOT_FOUND/);
+});
