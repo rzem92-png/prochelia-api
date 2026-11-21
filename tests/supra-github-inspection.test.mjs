@@ -28,3 +28,21 @@ test("SUPRA GitHub connector ignores unknown paths", async () => {
   );
   assert.equal(response, null);
 });
+
+test("SUPRA GitHub file reader rejects paths outside approved source areas", async () => {
+  const response = await handleSupraGithubRoute(
+    request("/api/supra/github/file?repository=rzem92-png/prochelia-api&path=.env"),
+    {}, "/api/supra/github/file", auth
+  );
+  assert.equal(response.status, 400);
+  assert.equal((await response.json()).error, "REPOSITORY_NOT_ALLOWED");
+});
+
+test("SUPRA GitHub file reader rejects path traversal before credentials", async () => {
+  const response = await handleSupraGithubRoute(
+    request("/api/supra/github/file?repository=rzem92-png/prochelia-api&path=src%2F..%2F.env"),
+    {}, "/api/supra/github/file", auth
+  );
+  assert.equal(response.status, 400);
+  assert.equal((await response.json()).error, "REPOSITORY_PATH_NOT_ALLOWED");
+});
