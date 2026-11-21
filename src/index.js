@@ -1,6 +1,6 @@
 import { handleV7Route } from "./v7-routes.js";
 import { handleSupraRoute } from "./supra-api.js";
-import { resolveTenantContext } from "./tenant-context.js";
+import { resolveTenantContext, tenantRoleAllowed } from "./tenant-context.js";
 import { handleSupraApprovalRoute } from "./supra-approvals.js";
 // PROCHÉLIA — INDEX BACKEND CONSOLIDÉ UNIQUE
 // Référence de consolidation : V14.1 Finance + sécurité/RBAC existants.
@@ -550,6 +550,7 @@ async function ensureSecuritySchema(env) {
     `CREATE TABLE IF NOT EXISTS identity_verifications (
       id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL,
+      tenant_id TEXT REFERENCES tenants(id),
       status TEXT NOT NULL DEFAULT 'pending',
       level TEXT NOT NULL DEFAULT 'standard',
       provider TEXT,
@@ -621,48 +622,58 @@ async function securityAudit(env, eventType, missionId, userId, role, result, me
   ).bind(crypto.randomUUID(), eventType, missionId || null, userId || null, role || null, result, JSON.stringify(metadata)).run();
 }
 
-async function requireVerifiedIntervenant(env, userId) {
+async function requireVerifiedIntervenant(env, userId, tenantId) {
+  if (!userId || !tenantId) return null;
   const row = await env.DB.prepare(
     `SELECT id,status,level,verified_at,expires_at FROM identity_verifications
-     WHERE user_id=? AND status='verified'
+     WHERE user_id=? AND tenant_id=? AND status='verified'
        AND (expires_at IS NULL OR expires_at > CURRENT_TIMESTAMP)
      ORDER BY verified_at DESC LIMIT 1`
-  ).bind(userId).first();
+  ).bind(userId, tenantId).first();
   return row || null;
 }
 
 async function securityIdentityStart(request, env) {
   const auth = await getSessionUser(request, env);
   if (!requireRole(auth, ['intervenant'])) return json({ok:false,error:auth?.user?'FORBIDDEN':'UNAUTHENTICATED',version:VERSION}, auth?.user?403:401);
+  const tenantContext = await resolveTenantContext(request, env, auth);
+  if (!tenantContext.ok) return json({ok:false,error:tenantContext.error,version:VERSION},tenantContext.status);
+  const tenantId = tenantContext.tenant.id;
   await ensureSecuritySchema(env);
   const id = crypto.randomUUID();
   await env.DB.prepare(
-    `INSERT INTO identity_verifications (id,user_id,status,level) VALUES (?,?, 'pending','standard')`
-  ).bind(id, auth.user.id).run();
-  await securityAudit(env,'IDENTITY_VERIFICATION_REQUESTED',null,auth.user.id,auth.user.role,'PENDING',{verification_id:id});
+    `INSERT INTO identity_verifications (id,user_id,tenant_id,status,level) VALUES (?,?,?, 'pending','standard')`
+  ).bind(id, auth.user.id, tenantId).run();
+  await securityAudit(env,'IDENTITY_VERIFICATION_REQUESTED',null,auth.user.id,auth.user.role,'PENDING',{verification_id:id,tenant_id:tenantId});
   return json({ok:true,version:VERSION,verification_id:id,status:'pending',message:'Vérification d’identité requise avant l’accès aux missions.'},201);
 }
 
 async function securityIdentityApprove(request, env) {
   const auth = await getSessionUser(request, env);
   if (!requireRole(auth, ['gerante'])) return json({ok:false,error:auth?.user?'FORBIDDEN':'UNAUTHENTICATED',version:VERSION}, auth?.user?403:401);
+  const tenantContext = await resolveTenantContext(request, env, auth);
+  if (!tenantContext.ok) return json({ok:false,error:tenantContext.error,version:VERSION},tenantContext.status);
+  if (!tenantRoleAllowed(tenantContext, ['OWNER','ADMIN','MANAGER'])) return json({ok:false,error:'TENANT_PERMISSION_REQUIRED',version:VERSION},403);
+  const tenantId = tenantContext.tenant.id;
   await ensureSecuritySchema(env);
   const body = await readJson(request);
   const verificationId = clean(body?.verification_id);
   const status = clean(body?.status);
   const level = clean(body?.level) || 'standard';
   if (!verificationId || !['verified','rejected','pending'].includes(status)) return json({ok:false,error:'INVALID_IDENTITY_DECISION',version:VERSION},400);
-  const row = await env.DB.prepare('SELECT * FROM identity_verifications WHERE id=? LIMIT 1').bind(verificationId).first();
+  const row = await env.DB.prepare('SELECT id,user_id,status FROM identity_verifications WHERE id=? AND tenant_id=? LIMIT 1').bind(verificationId,tenantId).first();
   if (!row) return json({ok:false,error:'VERIFICATION_NOT_FOUND',version:VERSION},404);
+  if (row.status !== 'pending') return json({ok:false,error:'IDENTITY_DECISION_ALREADY_FINAL',version:VERSION},409);
   const provider = clean(body?.provider) || 'manual_control';
   const providerReference = clean(body?.provider_reference) || null;
   const reason = clean(body?.rejection_reason) || null;
   const verifiedAt = status === 'verified' ? new Date().toISOString() : null;
   const expiresAt = status === 'verified' ? new Date(Date.now()+30*24*60*60*1000).toISOString() : null;
-  await env.DB.prepare(
-    `UPDATE identity_verifications SET status=?,level=?,provider=?,provider_reference=?,verified_at=?,expires_at=?,rejection_reason=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`
-  ).bind(status,level,provider,providerReference,verifiedAt,expiresAt,reason,verificationId).run();
-  await securityAudit(env,'IDENTITY_VERIFICATION_DECISION',null,auth.user.id,auth.user.role,status,{verification_id:verificationId,subject_user_id:row.user_id,level});
+  const result = await env.DB.prepare(
+    `UPDATE identity_verifications SET status=?,level=?,provider=?,provider_reference=?,verified_at=?,expires_at=?,rejection_reason=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND tenant_id=? AND status='pending'`
+  ).bind(status,level,provider,providerReference,verifiedAt,expiresAt,reason,verificationId,tenantId).run();
+  if (Number(result?.meta?.changes || 0) !== 1) return json({ok:false,error:'IDENTITY_DECISION_CONFLICT',version:VERSION},409);
+  await securityAudit(env,'IDENTITY_VERIFICATION_DECISION',null,auth.user.id,auth.user.role,status,{verification_id:verificationId,subject_user_id:row.user_id,tenant_id:tenantId,level});
   return json({ok:true,version:VERSION,verification_id:verificationId,user_id:row.user_id,status,level,verified_at:verifiedAt},200);
 }
 
@@ -712,7 +723,7 @@ async function securityPrepareMission(request, env) {
       LIMIT 1`
   ).bind(missionId,tenantId,clientId,intervenantId).first();
   if (!assignment) return json({ok:false,error:'MISSION_TENANT_ASSIGNMENT_NOT_FOUND',version:VERSION},404);
-  const verified = await requireVerifiedIntervenant(env,assignment.intervenant_user_id);
+  const verified = await requireVerifiedIntervenant(env,assignment.intervenant_user_id,tenantId);
   if(!verified) return json({ok:false,error:'INTERVENANT_IDENTITY_NOT_VERIFIED',version:VERSION},409);
   const existing=await env.DB.prepare('SELECT id,status FROM mission_security WHERE mission_id=? LIMIT 1').bind(missionId).first();
   if(existing) return json({ok:false,error:'MISSION_SECURITY_ALREADY_PREPARED',version:VERSION,status:existing.status},409);
