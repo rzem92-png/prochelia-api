@@ -913,6 +913,7 @@ invitation_indexes = {
 assert invitation_indexes <= indexes, f"Missing invitation indexes: {sorted(invitation_indexes-indexes)}"
 invitation_triggers = {
     "trg_tenant_invitation_requires_pending_member",
+    "trg_tenant_invitation_initial_pending",
     "trg_tenant_invitation_identity_immutable",
     "trg_tenant_invitation_terminal",
     "trg_tenant_invitation_events_no_update",
@@ -939,6 +940,25 @@ db.execute("""
     INSERT INTO tenant_invitation_events(id, invitation_id, tenant_id, actor_user_id, event_type, reason_code)
     VALUES ('invite-event-a', 'invite-a', 'invite-tenant', 'invite-admin', 'CREATED', 'INVITATION_CREATED')
 """)
+
+for status, accepted_at, revoked_at, email, token, key in [
+    ("ACCEPTED", "CURRENT_TIMESTAMP", "NULL", "accepted-at-create@example.test", "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "invite-initial-accepted-0001"),
+    ("REVOKED", "NULL", "CURRENT_TIMESTAMP", "revoked-at-create@example.test", "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "invite-initial-revoked-0001"),
+]:
+    try:
+        db.execute(f"""
+            INSERT INTO tenant_invitations(
+              id, tenant_id, membership_id, email_normalized, token_sha256,
+              idempotency_key, invited_by_user_id, expires_at, status, accepted_at, revoked_at
+            ) VALUES (
+              'invite-initial-' || lower('{status}'), 'invite-tenant', 'invite-member', '{email}', '{token}',
+              '{key}', 'invite-admin', '2026-12-01T00:00:00Z', '{status}', {accepted_at}, {revoked_at}
+            )
+        """)
+        raise AssertionError(f"Invitation was incorrectly allowed to start in terminal state: {status}")
+    except sqlite3.IntegrityError as exc:
+        assert "TENANT_INVITATION_MUST_START_PENDING" in str(exc), str(exc)
+
 for sql in [
     "UPDATE tenant_invitations SET token_sha256='bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb' WHERE id='invite-a'",
     "UPDATE tenant_invitations SET email_normalized='attacker@example.test' WHERE id='invite-a'",
