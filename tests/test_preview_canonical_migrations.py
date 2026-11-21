@@ -43,6 +43,7 @@ EXPECTED = [
     "0036_intervenant_availability_idempotency.sql",
     "0037_support_cases_tenant_isolation.sql",
     "0038_identity_verification_tenant_scope.sql",
+    "0039_cryptographic_device_enrollment.sql",
 ]
 
 # Keep the manual Preview migration gate synchronized with the canonical chain.
@@ -54,16 +55,16 @@ assert '"0029_supra_append_only_audit_guards.sql"' in workflow_text, (
 assert '"0030_supra_audit_tenant_scope.sql"' in workflow_text, (
     "Preview migration workflow omits tenant-scoped SUPRA audit migration 0030"
 )
-assert "if len(local) != 39:" in workflow_text, (
+assert "if len(local) != 40:" in workflow_text, (
     "Preview migration workflow must require exactly 39 canonical migrations"
 )
-assert "exact 39-entry registry" in workflow_text, (
+assert "exact 40-entry registry" in workflow_text, (
     "Preview migration workflow target registry count is stale"
 )
-assert "all 39 canonical migrations are pending" in workflow_text, (
+assert "all 40 canonical migrations are pending" in workflow_text, (
     "Preview migration workflow empty-database inventory message is stale"
 )
-assert "only migrations 0023-0038 are pending" in workflow_text, (
+assert "only migrations 0023-0039 are pending" in workflow_text, (
     "Preview migration workflow baseline-to-target range is stale"
 )
 assert '"0038_identity_verification_tenant_scope.sql"' in workflow_text, (
@@ -97,6 +98,8 @@ assert "idx_disponibilites_tenant_intervenant_idempotency" in indexes, "Missing 
 assert "idx_support_cases_tenant_status_created" in indexes, "Missing tenant-scoped support status index"
 assert "idx_support_cases_tenant_requester_created" in indexes, "Missing tenant-scoped support requester index"
 assert "support_cases" in tables, "Missing tenant-scoped support case table"
+assert {"trusted_device_credentials", "device_auth_challenges"} <= tables, "Missing cryptographic device enrollment tables"
+assert {"idx_trusted_device_credentials_tenant_user_status", "idx_device_auth_challenges_session_expiry", "idx_device_auth_challenges_pending"} <= indexes, "Missing cryptographic device enrollment indexes"
 required = {
     "users", "sessions", "clients", "intervenants", "missions",
     "auth_login_rate_limits", "supra_audit_events",
