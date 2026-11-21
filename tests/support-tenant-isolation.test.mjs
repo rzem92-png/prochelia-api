@@ -81,3 +81,12 @@ test("client-supplied execution_verified cannot auto-close a support case", () =
   assert.equal(resolver.includes("context.execution_verified"), false);
   assert.match(resolver, /NO_VERIFIED_DOWNSTREAM_ACTION/);
 });
+
+test("support manager powers come from tenant membership, not a global ADMIN user label", () => {
+  assert.match(list, /tenantRoleAllowed\(a\.tenantContext,\['OWNER','ADMIN','MANAGER'\]\)/);
+  assert.match(resolve, /tenantRoleAllowed\(a\.tenantContext,\['OWNER','ADMIN','MANAGER'\]\)/);
+  assert.match(dashboard, /tenantRoleAllowed\(a\.tenantContext,\['OWNER','ADMIN','MANAGER'\]\)/);
+  assert.doesNotMatch(list, /\['GERANTE','ADMIN'\]\.includes\(a\.role\)/);
+  assert.doesNotMatch(resolve, /a\.role!=='GERANTE'&&a\.role!=='ADMIN'/);
+  assert.doesNotMatch(dashboard, /a\.role!=='GERANTE'&&a\.role!=='ADMIN'/);
+});
