@@ -290,7 +290,8 @@ export async function handleSupraGithubRoute(request, env, path, auth) {
   const supported = [
     "/api/supra/github/status",
     "/api/supra/github/repositories",
-    "/api/supra/github/pull-requests",\n    "/api/supra/github/pull-request-diff",
+    "/api/supra/github/pull-requests",
+    "/api/supra/github/pull-request-diff",
     "/api/supra/github/commits",
     "/api/supra/github/check-runs",
     "/api/supra/github/file",
@@ -308,7 +309,8 @@ export async function handleSupraGithubRoute(request, env, path, auth) {
   const requestedRepository = (path === "/api/supra/github/pull-requests" || path === "/api/supra/github/commits" || path === "/api/supra/github/check-runs" || path === "/api/supra/github/file" || path === "/api/supra/github/pull-request-diff")
     ? new URL(request.url).searchParams.get("repository") || ""
     : "";
-  const requestedSha = path === "/api/supra/github/check-runs" ? new URL(request.url).searchParams.get("sha") || "" : "";\n  const requestedPullNumber = path === "/api/supra/github/pull-request-diff" ? Number(new URL(request.url).searchParams.get("pull_number")) : 0;
+  const requestedSha = path === "/api/supra/github/check-runs" ? new URL(request.url).searchParams.get("sha") || "" : "";
+  const requestedPullNumber = path === "/api/supra/github/pull-request-diff" ? Number(new URL(request.url).searchParams.get("pull_number")) : 0;
   const requestedPath = path === "/api/supra/github/file"
     ? new URL(request.url).searchParams.get("path") || ""
     : "";
