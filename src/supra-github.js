@@ -85,7 +85,8 @@ async function createAppJwt(env) {
 }
 
 async function installationToken(env) {
-  if (installationTokenCache && installationTokenCache.expiresAt > Date.now() + 60000) {
+  const cacheKey = String(env.SUPRA_GITHUB_APP_ID) + ":" + String(env.SUPRA_GITHUB_INSTALLATION_ID);
+  if (installationTokenCache && installationTokenCache.key === cacheKey && installationTokenCache.expiresAt > Date.now() + 60000) {
     return installationTokenCache.value;
   }
   const jwt = await createAppJwt(env);
@@ -117,7 +118,7 @@ async function installationToken(env) {
   if (!data?.token || !data?.expires_at) throw new Error("GITHUB_TOKEN_RESPONSE_INVALID");
   const expiry = Date.parse(data.expires_at);
   if (!Number.isFinite(expiry) || expiry <= Date.now()) throw new Error("GITHUB_TOKEN_EXPIRY_INVALID");
-  installationTokenCache = { value: data.token, expiresAt: expiry };
+  installationTokenCache = { key: cacheKey, value: data.token, expiresAt: expiry };
   return data.token;
 }
 
@@ -141,8 +142,42 @@ async function installationRepositories(env) {
   };
 }
 
+async function repositoryPullRequests(env, repository) {
+  if (!ALLOWED_REPOSITORIES.includes(repository)) throw new Error("REPOSITORY_NOT_ALLOWED");
+  const token = await installationToken(env);
+  const [owner, name] = repository.split("/");
+  const endpoint = API + "/repos/" + encodeURIComponent(owner) + "/" + encodeURIComponent(name) +
+    "/pulls?state=open&per_page=20&sort=updated&direction=desc";
+  const response = await fetch(endpoint, {
+    headers: {
+      "authorization": "Bearer " + token,
+      "accept": "application/vnd.github+json",
+      "x-github-api-version": "2022-11-28"
+    }
+  });
+  if (!response.ok) throw new Error("GITHUB_PULL_REQUESTS_FAILED");
+  const data = await response.json();
+  if (!Array.isArray(data)) throw new Error("GITHUB_PULL_REQUESTS_RESPONSE_INVALID");
+  return data.slice(0, 20).map(pr => ({
+    number: Number(pr.number),
+    title: String(pr.title || "").slice(0, 240),
+    state: String(pr.state || ""),
+    draft: Boolean(pr.draft),
+    created_at: pr.created_at || null,
+    updated_at: pr.updated_at || null,
+    head_sha: String(pr.head?.sha || ""),
+    base_ref: String(pr.base?.ref || ""),
+    html_url: String(pr.html_url || "")
+  }));
+}
+
 export async function handleSupraGithubRoute(request, env, path, auth) {
-  if (path !== "/api/supra/github/status" && path !== "/api/supra/github/repositories") return null;
+  const supported = [
+    "/api/supra/github/status",
+    "/api/supra/github/repositories",
+    "/api/supra/github/pull-requests"
+  ];
+  if (!supported.includes(path)) return null;
   if (request.method !== "GET") {
     return Response.json({ ok: false, error: "METHOD_NOT_ALLOWED" }, { status: 405, headers: { "cache-control": "no-store" } });
   }
@@ -164,6 +199,24 @@ export async function handleSupraGithubRoute(request, env, path, auth) {
   }
   try {
     const installation = await installationRepositories(env);
+    if (path === "/api/supra/github/pull-requests") {
+      const repository = new URL(request.url).searchParams.get("repository") || "";
+      if (!ALLOWED_REPOSITORIES.includes(repository)) {
+        return Response.json({ ok: false, error: "REPOSITORY_NOT_ALLOWED" }, {
+          status: 400, headers: { "cache-control": "no-store" }
+        });
+      }
+      if (!installation.names.includes(repository)) {
+        return Response.json({ ok: false, error: "REPOSITORY_NOT_INSTALLED" }, {
+          status: 403, headers: { "cache-control": "no-store" }
+        });
+      }
+      const pullRequests = await repositoryPullRequests(env, repository);
+      return Response.json({
+        ok: true, mode: "READ_ONLY", write_enabled: false,
+        repository, count: pullRequests.length, pull_requests: pullRequests
+      }, { headers: { "cache-control": "no-store" } });
+    }
     const payload = {
       ok: installation.complete,
       status: installation.complete ? "CONNECTED_READ_ONLY" : "PARTIALLY_CONNECTED",
