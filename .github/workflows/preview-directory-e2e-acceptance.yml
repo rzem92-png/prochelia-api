@@ -36,7 +36,7 @@ jobs:
       CLOUDFLARE_ACCOUNT_ID: f2a79e9fa41566a8ec80fb24c02c60eb
       PREVIEW_DB_NAME: prochelia-preview-eu-2026-11-17
       PREVIEW_DB_ID: e3cf167c-37e1-4d72-9ac6-b3e27c14b97f
-      FRONTEND_BRANCH: feat/intervenant-secure-pages-integration-2026-11-20
+      FRONTEND_BRANCH: feat/intervenant-workspace-api-ui-2026-11-21
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:

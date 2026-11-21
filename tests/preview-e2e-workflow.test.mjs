@@ -14,7 +14,7 @@ test("Preview E2E is gated by explicit confirmation or a successful isolated Pre
 
 test("Preview E2E resolves the current matching Pages Preview deployment dynamically", () => {
   assert.match(workflow, /PREVIEW_DB_ID: e3cf167c-37e1-4d72-9ac6-b3e27c14b97f/);
-  assert.match(workflow, /FRONTEND_BRANCH: feat\/intervenant-secure-pages-integration-2026-11-20/);
+  assert.match(workflow, /FRONTEND_BRANCH: feat\/intervenant-workspace-api-ui-2026-11-21/);
   assert.match(workflow, /api\.github\.com\/repos\/rzem92-png\/-prochelia\/branches/);
   assert.match(workflow, /pages\/projects\/prochelia\/deployments\?env=preview&per_page=100/);
   assert.match(workflow, /deployment_trigger\.metadata\.branch/);
