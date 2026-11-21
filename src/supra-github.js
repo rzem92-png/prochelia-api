@@ -312,7 +312,7 @@ export async function handleSupraGithubRoute(request, env, path, auth) {
   const requestedPath = path === "/api/supra/github/file"
     ? new URL(request.url).searchParams.get("path") || ""
     : "";
-  if ((path === "/api/supra/github/pull-requests" || path === "/api/supra/github/commits" || path === "/api/supra/github/check-runs" || path === "/api/supra/github/file") && !ALLOWED_REPOSITORIES.includes(requestedRepository)) {
+  if ((path === "/api/supra/github/pull-requests" || path === "/api/supra/github/commits" || path === "/api/supra/github/check-runs" || path === "/api/supra/github/file" || path === "/api/supra/github/pull-request-diff") && !ALLOWED_REPOSITORIES.includes(requestedRepository)) {
     return Response.json({ ok: false, error: "REPOSITORY_NOT_ALLOWED" }, {
       status: 400, headers: { "cache-control": "no-store" }
     });
