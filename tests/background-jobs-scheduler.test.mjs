@@ -12,7 +12,7 @@ test("Worker declares a minute-level scheduler and preserves the daily backup cr
 test("only the scheduled handler supplies the internal scheduler capability", () => {
   assert.match(worker, /async function processBackgroundJobs\(request,env,\{scheduler=false\}=\{\}\)/);
   assert.match(worker, /scheduler\s*\?\s*\{auth:\{user:\{id:'cloudflare-cron',role:'GERANTE'\}\}\}/);
-  assert.match(worker, /event\?\.cron === 'もし/);
+  assert.match(worker, /event\\?\\.cron === '\\*\\/1 \\* \\* \\* \\*'/);
 });
 
 test("minute tick runs bounded processing; daily cron still starts automatic backup", () => {
