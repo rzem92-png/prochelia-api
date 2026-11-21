@@ -315,6 +315,62 @@ test("device enrollment is session- and tenant-bound, stores only public key mat
   assert.equal(state.credentials[0].status, "revoked");
 });
 
+test("expired enrollment challenges cannot be completed or create a device credential", async () => {
+  const { DB, state } = createDeviceTrustDb();
+  const auth = { user: { id: "intervenant-1", role: "intervenant" }, session_id: "session-1" };
+  const tenantContext = { ok: true, tenant: { id: "tenant-1" } };
+  const identityCheck = async (_env, userId, tenantId) =>
+    userId === "intervenant-1" && tenantId === "tenant-1" ? { status: "verified" } : null;
+
+  const challengeResponse = await handleDeviceTrustRoute(
+    new Request("https://example.test/api/security/device/enroll/challenge", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: "{}"
+    }),
+    { DB },
+    auth,
+    tenantContext,
+    identityCheck
+  );
+  assert.equal(challengeResponse.status, 201);
+  const challenge = await challengeResponse.json();
+  state.challenge.expired = true;
+
+  const pair = await webcrypto.subtle.generateKey(
+    { name: "ECDSA", namedCurve: "P-256" },
+    false,
+    ["sign", "verify"]
+  );
+  const publicJwk = await webcrypto.subtle.exportKey("jwk", pair.publicKey);
+  const signature = await webcrypto.subtle.sign(
+    { name: "ECDSA", hash: "SHA-256" },
+    pair.privateKey,
+    new TextEncoder().encode(challenge.signing_message)
+  );
+
+  const result = await handleDeviceTrustRoute(
+    new Request("https://example.test/api/security/device/enroll/complete", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        challenge_id: challenge.challenge_id,
+        challenge: challenge.challenge,
+        public_key_jwk: publicJwk,
+        signature: Buffer.from(signature).toString("base64url")
+      })
+    }),
+    { DB },
+    auth,
+    tenantContext,
+    identityCheck
+  );
+
+  assert.equal(result.status, 409);
+  assert.equal((await result.json()).error, "DEVICE_ENROLLMENT_CHALLENGE_INVALID_OR_EXPIRED");
+  assert.equal(state.credentials.length, 0, "an expired challenge must not create a credential");
+});
+
 test("expired device credentials are reported as expired in the device list", async () => {
   const { DB, state } = createDeviceTrustDb();
   state.credentials.push({
