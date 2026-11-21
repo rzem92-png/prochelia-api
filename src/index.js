@@ -4222,15 +4222,26 @@ async function runNationalBackup(env,trigger='MANUAL'){
   }
 }
 async function nationalScaleStatus(env){
-  await ensureNationalContinuitySchema(env);
-  const c=await env.DB.prepare(`SELECT key,value_json FROM platform_scale_config ORDER BY key`).all();
+  if(!env?.DB?.prepare) throw new Error('DATABASE_REQUIRED');
   const t=await env.DB.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name`).all();
-  return {ok:true,mode:'NATIONAL_SCALE',artificialUserCap:false,unlimitedInBusinessRules:true,database:'D1',documents:'R2_RECOMMENDED',backups:{provider:'R2',automatic:true,encrypted:true},pagination:{cursorRecommended:true,maxPageSize:100},tables:(t.results||[]).map(x=>x.name),config:(c.results||[])};
+  const tableNames=(t.results||[]).map(x=>String(x.name));
+  const c=tableNames.includes('platform_scale_config')
+    ? await env.DB.prepare(`SELECT key,value_json FROM platform_scale_config ORDER BY key`).all()
+    : {results:[]};
+  const encryptionConfigured=typeof env.BACKUP_ENCRYPTION_KEY==='string'&&env.BACKUP_ENCRYPTION_KEY.trim().length>0;
+  const backupConfigured=!!env.BACKUP_BUCKET&&typeof env.BACKUP_BUCKET.put==='function'&&encryptionConfigured;
+  return {ok:true,mode:'NATIONAL_SCALE',artificialUserCap:false,unlimitedInBusinessRules:true,database:'D1',documents:'R2_RECOMMENDED',backups:{provider:'R2',configured:backupConfigured,automatic:false,scheduleStatus:'NOT_ATTESTED',encryptionConfigured,encrypted:false,retentionDays:null,retentionStatus:'UNVERIFIED'},pagination:{cursorRecommended:true,maxPageSize:100},tables:tableNames,config:(c.results||[])};
 }
 async function backupStatus(env){
-  await ensureNationalContinuitySchema(env);
-  const r=await env.DB.prepare(`SELECT * FROM backup_runs ORDER BY started_at DESC LIMIT 20`).all();
-  return {ok:true,configured:!!env.BACKUP_BUCKET&&!!env.BACKUP_ENCRYPTION_KEY,automatic:true,frequency:'DAILY',retentionDays:90,runs:r.results||[]};
+  if(!env?.DB?.prepare) throw new Error('DATABASE_REQUIRED');
+  const schema=await env.DB.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name='backup_runs'`).all();
+  const schemaReady=(schema.results||[]).length>0;
+  const r=schemaReady
+    ? await env.DB.prepare(`SELECT * FROM backup_runs ORDER BY started_at DESC LIMIT 20`).all()
+    : {results:[]};
+  const encryptionConfigured=typeof env.BACKUP_ENCRYPTION_KEY==='string'&&env.BACKUP_ENCRYPTION_KEY.trim().length>0;
+  const configured=!!env.BACKUP_BUCKET&&typeof env.BACKUP_BUCKET.put==='function'&&encryptionConfigured;
+  return {ok:true,schemaReady,configured,encryptionConfigured,automatic:false,frequency:null,scheduleStatus:'NOT_ATTESTED',retentionDays:null,retentionStatus:'UNVERIFIED',runs:r.results||[]};
 }
 
 const __procheliaNationalHandle = handle;
