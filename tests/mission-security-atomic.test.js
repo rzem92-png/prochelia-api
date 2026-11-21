@@ -73,7 +73,7 @@ test("mission presence and code verification fail closed until cryptographic dev
 
 test("security status never claims device binding or presence while cryptographic enrollment is blocked", () => {
   const statusStart = workerSource.indexOf("async function securityStatus(request, env) {");
-  const statusEnd = workerSource.indexOf("\\n\\n/*", statusStart);
+  const statusEnd = workerSource.indexOf("/*", statusStart);
   assert.ok(statusStart >= 0 && statusEnd > statusStart, "security status route must exist");
   const status = workerSource.slice(statusStart, statusEnd);
   assert.match(status, /device:'cryptographic_enrollment_required'/);
