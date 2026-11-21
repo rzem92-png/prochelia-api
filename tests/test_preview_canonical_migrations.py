@@ -32,6 +32,7 @@ EXPECTED = [
     "0025_session_revocation.sql",
     "0026_accounting_currency_consistency.sql",
     "0027_tenant_membership_identity_immutable.sql",
+    "0028_tenant_accounting_entity_delete_guard.sql",
 ]
 
 actual = sorted(path.name for path in MIGRATIONS.glob("*.sql"))
@@ -445,3 +446,15 @@ BEGIN SELECT RAISE(ABORT, 'ACCOUNTING_JOURNAL_LINE_CURRENCY_MISMATCH'); END;
 db.execute("UPDATE accounting_journals SET status='POSTED', posted_by='user-a', posted_at=CURRENT_TIMESTAMP WHERE id='journal-currency-guard'")
 assert db.execute("SELECT status FROM accounting_journals WHERE id='journal-currency-guard'").fetchone()[0] == "POSTED"
 print("PASS: journal currency cannot change after lines exist; posting rejects any header/line currency mismatch.")
+
+
+# Tenant deletion must not orphan accounting entities, even without memberships.
+db.execute("INSERT INTO tenants(id, slug, display_name) VALUES ('tenant-orphan-guard', 'tenant-orphan-guard', 'Orphan Guard')")
+db.execute("INSERT INTO accounting_entities(id, tenant_id, legal_name, country_code, base_currency) VALUES ('entity-orphan-guard', 'tenant-orphan-guard', 'Guard Entity', 'FR', 'EUR')")
+try:
+    db.execute("DELETE FROM tenants WHERE id='tenant-orphan-guard'")
+    raise AssertionError("Tenant with an accounting entity and no memberships was incorrectly deletable")
+except sqlite3.IntegrityError as exc:
+    assert "TENANT_HAS_ACCOUNTING_ENTITIES" in str(exc), str(exc)
+assert db.execute("SELECT tenant_id FROM accounting_entities WHERE id='entity-orphan-guard'").fetchone()[0] == "tenant-orphan-guard"
+print("PASS: tenant deletion cannot orphan accounting entities even when no membership rows exist.")
