@@ -555,6 +555,28 @@ jobs:
           print("PASS: sessions contains explicit revocation and activity columns.")
           PY
 
+      - name: Verify tenant-scoped identity verification schema
+        shell: bash
+        run: |
+          set -euo pipefail
+          request="$RUNNER_TEMP/verify-identity-tenant-request.json"
+          response="$RUNNER_TEMP/verify-identity-tenant-response.json"
+          sql="SELECT type,name FROM sqlite_master WHERE name='idx_identity_verifications_tenant_user_status' UNION ALL SELECT 'column',name FROM pragma_table_info('identity_verifications') WHERE name='tenant_id'"
+          jq -n --arg sql "$sql" '{sql:$sql,params:[]}' > "$request"
+          status="$(curl --silent --show-error --output "$response" --write-out '%{http_code}' -X POST -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -H "Content-Type: application/json" --data-binary @"$request" "https://api.cloudflare.com/client/v4/accounts/$EXPECTED_ACCOUNT_ID/d1/database/$EXPECTED_DB_ID/query")"
+          test "$status" = "200" || { echo "::error::Identity tenant schema verification failed (HTTP $status)."; exit 1; }
+          jq -e '.success == true' "$response" >/dev/null
+          python3 - "$response" <<'PY'
+          import json, pathlib, sys
+          rows=json.loads(pathlib.Path(sys.argv[1]).read_text())["result"][0]["results"]
+          found={(r["type"],r["name"]) for r in rows}
+          required={("index","idx_identity_verifications_tenant_user_status"),("column","tenant_id")}
+          if not required <= found:
+            print("::error::Tenant-scoped identity verification schema is incomplete:", sorted(required-found))
+            raise SystemExit(1)
+          print("PASS: identity verification tenant_id column and tenant/user/status index verified.")
+          PY
+
       - name: Verify exact reviewed Preview migration registry after apply
         shell: bash
         run: |
