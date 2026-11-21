@@ -53,7 +53,7 @@ jobs:
         run: |
           set -euo pipefail
           export CLOUDFLARE_API_TOKEN="${CLOUDFLARE_API_TOKEN#Bearer }"
-          BUCKET="prochelia-preview-backups-eu-locked"
+          BUCKET="prochelia-preview-backups-eu-v2"
           # Never reuse or relabel the existing default-jurisdiction bucket.
           if npx --yes wrangler@4 r2 bucket info "$BUCKET" --jurisdiction eu --json > "$RUNNER_TEMP/existing.json" 2>/dev/null; then
             echo "The dedicated EU bucket already exists; skip creation and verify it."
@@ -64,7 +64,7 @@ jobs:
             "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/r2/buckets/$BUCKET" \
             -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -H "cf-r2-jurisdiction: eu")"
           test "$status" = "200"
-          jq -e '.success == true and .result.name == "prochelia-preview-backups-eu-locked" and .result.jurisdiction == "eu"' "$RUNNER_TEMP/bucket.json" >/dev/null
+          jq -e '.success == true and .result.name == "prochelia-preview-backups-eu-v2" and .result.jurisdiction == "eu"' "$RUNNER_TEMP/bucket.json" >/dev/null
           echo "Verified: new bucket jurisdiction is exactly eu."
           {
             echo "Created/verified Preview-only R2 bucket: $BUCKET."
