@@ -232,9 +232,15 @@ async function handleComplete(request, env, auth, tenantId, requireVerifiedInter
          FROM device_auth_challenges
          WHERE id = ? AND tenant_id = ? AND user_id = ? AND session_id = ?
            AND purpose = 'ENROLL' AND challenge_hash = ? AND consumed_at = ?
-           AND julianday(expires_at) > julianday('now')`
+           AND julianday(expires_at) > julianday('now')
+           AND NOT EXISTS (
+             SELECT 1 FROM trusted_device_credentials existing
+             WHERE existing.tenant_id = device_auth_challenges.tenant_id
+               AND existing.user_id = device_auth_challenges.user_id
+               AND existing.key_thumbprint = ?
+           )`
       ).bind(credentialId, JSON.stringify(publicJwk), thumbprint, credentialExpiry,
-        challengeId, tenantId, auth.user.id, auth.session_id, challengeHash, consumedMarker)
+        challengeId, tenantId, auth.user.id, auth.session_id, challengeHash, consumedMarker, thumbprint)
     ]);
     const consumed = Number(results?.[0]?.meta?.changes || 0);
     const inserted = Number(results?.[1]?.meta?.changes || 0);
