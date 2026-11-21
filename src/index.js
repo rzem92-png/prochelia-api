@@ -4469,7 +4469,7 @@ async function supportResolve(request,env){
 
 async function supportDashboard(request,env){
   const a=await supportAuth(request,env); if(a.response)return a.response;
-  if(a.role!=='GERANTE'&&a.role!=='ADMIN') return json({ok:false,error:'FORBIDDEN'},403);
+  if(a.role!=='GERANTE'&&!tenantRoleAllowed(a.tenantContext,['OWNER','ADMIN','MANAGER'])) return json({ok:false,error:'FORBIDDEN'},403);
   await ensureProcheliaMasterComplementSchema(env);
   const rows=await env.DB.prepare(`SELECT status,severity,COUNT(*) AS n FROM support_cases WHERE tenant_id=? GROUP BY status,severity ORDER BY status,severity`).bind(a.tenantId).all();
   const recent=await env.DB.prepare(`SELECT id,source_role,category,severity,status,created_at,resolved_at FROM support_cases WHERE tenant_id=? ORDER BY created_at DESC LIMIT 30`).bind(a.tenantId).all();
