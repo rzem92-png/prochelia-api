@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createHmac, webcrypto } from "node:crypto";
-import worker, { paymentWebhook, readBoundedWebhookBody, verifyWebhookSignature } from "../src/index.js";
+import { createHash, createHmac, webcrypto } from "node:crypto";
+import worker, { deliverSecurityCodes, paymentWebhook, readBoundedWebhookBody, verifyWebhookSignature } from "../src/index.js";
 
 globalThis.crypto ??= webcrypto;
 
@@ -107,4 +107,40 @@ test("the canonical Worker router exposes the webhook endpoint as POST-only", as
   const response = await worker.fetch(new Request("https://example.test/api/payments/webhook"), {});
   assert.equal(response.status, 405);
   assert.equal(response.headers.get("allow"), "POST");
+});
+
+
+test("mission-code delivery webhook uses a keyed HMAC-SHA256 over the exact JSON body", async () => {
+  const deliverySecret = "a-distinct-test-secret-for-mission-code-webhook";
+  const payload = {
+    mission_id: "mission-synthetic-001",
+    client_id: "client-synthetic-001",
+    arrival_code: "123456",
+    arrival_expires_at: "2026-11-21T08:00:00.000Z",
+    end_code: "654321",
+    end_expires_at: "2026-11-21T08:15:00.000Z"
+  };
+  const originalFetch = globalThis.fetch;
+  let captured = null;
+  globalThis.fetch = async (url, init) => {
+    captured = { url: String(url), init };
+    return new Response(null, { status: 204 });
+  };
+  try {
+    const result = await deliverSecurityCodes({
+      SECURITY_CODE_WEBHOOK: "https://receiver.example.test/security-codes",
+      SECURITY_CODE_WEBHOOK_SECRET: deliverySecret
+    }, payload);
+    assert.deepEqual(result, { ok: true, channel: "authenticated_notification_webhook" });
+    assert.ok(captured);
+    assert.equal(captured.url, "https://receiver.example.test/security-codes");
+    assert.equal(captured.init.headers["content-type"], "application/json");
+    const expected = createHmac("sha256", deliverySecret).update(captured.init.body).digest("base64url");
+    const legacyUnkeyedDigest = createHash("sha256").update(deliverySecret + "." + captured.init.body).digest("base64url");
+    assert.equal(captured.init.headers["x-prochelia-signature"], expected);
+    assert.notEqual(captured.init.headers["x-prochelia-signature"], legacyUnkeyedDigest);
+    assert.equal(captured.init.body.includes(deliverySecret), false);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
