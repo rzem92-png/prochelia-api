@@ -12,7 +12,6 @@ const VERSION = 'V14.3.0-PREPRODUCTION-2026-10-19';
 const SECURITY_CODE_TTL_SECONDS = 15 * 60;
 const SECURITY_MAX_ATTEMPTS = 5;
 const SECURITY_LOCK_SECONDS = 15 * 60;
-const SECURITY_DEVICE_TTL_SECONDS = 60 * 60 * 24 * 30;
 const SESSION_COOKIE = 'prochelia_session';
 const PBKDF2_ITERATIONS = 100000;
 const SESSION_TTL_SECONDS = 60 * 60 * 24 * 7; // 7 days
@@ -562,17 +561,6 @@ async function ensureSecuritySchema(env) {
       updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     )`,
     `CREATE INDEX IF NOT EXISTS idx_identity_verifications_user ON identity_verifications(user_id, status, updated_at)`,
-    `CREATE TABLE IF NOT EXISTS trusted_devices (
-      id TEXT PRIMARY KEY,
-      user_id TEXT NOT NULL,
-      device_hash TEXT NOT NULL,
-      status TEXT NOT NULL DEFAULT 'active',
-      first_seen_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      last_seen_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      expires_at TEXT NOT NULL,
-      revoked_at TEXT,
-      UNIQUE(user_id, device_hash)
-    )`,
     `CREATE TABLE IF NOT EXISTS mission_security (
       id TEXT PRIMARY KEY,
       mission_id TEXT NOT NULL UNIQUE,
@@ -641,11 +629,6 @@ async function requireVerifiedIntervenant(env, userId) {
      ORDER BY verified_at DESC LIMIT 1`
   ).bind(userId).first();
   return row || null;
-}
-
-async function deviceHash(request, userId) {
-  const raw = [userId, request.headers.get('user-agent') || '', request.headers.get('sec-ch-ua') || ''].join('|');
-  return sha256Base64url(raw);
 }
 
 async function securityIdentityStart(request, env) {
@@ -744,21 +727,21 @@ async function securityPrepareMission(request, env) {
 }
 
 async function securityPresence(request, env) {
-  const auth=await getSessionUser(request,env);
-  if(!requireRole(auth,['intervenant'])) return json({ok:false,error:auth?.user?'FORBIDDEN':'UNAUTHENTICATED',version:VERSION},auth?.user?403:401);
-  await ensureSecuritySchema(env);
-  const identity = await requireVerifiedIntervenant(env, auth.user.id);
-  if(!identity) return json({ok:false,error:'INTERVENANT_IDENTITY_NOT_VERIFIED',version:VERSION},403);
-  const body=await readJson(request), missionId=clean(body?.mission_id);
-  if(!missionId) return json({ok:false,error:'MISSION_ID_REQUIRED',version:VERSION},400);
-  const sec=await env.DB.prepare('SELECT * FROM mission_security WHERE mission_id=? AND intervenant_id=? LIMIT 1').bind(missionId,auth.user.id).first();
-  if(!sec) return json({ok:false,error:'MISSION_NOT_ASSIGNED_OR_NOT_PREPARED',version:VERSION},404);
-  const device=await deviceHash(request,auth.user.id);
-  await env.DB.prepare(`INSERT INTO trusted_devices (id,user_id,device_hash,expires_at) VALUES (?,?,?,datetime('now',?)) ON CONFLICT(user_id,device_hash) DO UPDATE SET last_seen_at=CURRENT_TIMESTAMP,expires_at=excluded.expires_at,status='active'`)
-    .bind(crypto.randomUUID(),auth.user.id,device,`+${SECURITY_DEVICE_TTL_SECONDS} seconds`).run();
-  await env.DB.prepare(`UPDATE mission_security SET last_presence_at=CURRENT_TIMESTAMP,last_device_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(device,sec.id).run();
-  await securityAudit(env,'MISSION_PRESENCE_RECORDED',missionId,auth.user.id,auth.user.role,'OK',{device_bound:true});
-  return json({ok:true,version:VERSION,mission_id:missionId,presence:'RECORDED',device_bound:true},200);
+  const auth = await getSessionUser(request, env);
+  if (!requireRole(auth, ['intervenant'])) {
+    return json({ ok: false, error: auth?.user ? 'FORBIDDEN' : 'UNAUTHENTICATED', version: VERSION }, auth?.user ? 403 : 401);
+  }
+
+  // User-Agent and Client Hints are browser-controlled and can be spoofed.
+  // Do not auto-enroll them as trusted devices or record mission presence.
+  // Keep mission execution blocked until cryptographic enrollment and
+  // server-verified proof-of-possession are implemented and tested.
+  return json({
+    ok: false,
+    error: 'CRYPTOGRAPHIC_DEVICE_ENROLLMENT_REQUIRED',
+    version: VERSION,
+    write_enabled: false
+  }, 503);
 }
 
 export async function consumeMissionSecurityCode(env, securityId, purpose, expectedHash) {
@@ -784,58 +767,20 @@ export async function consumeMissionSecurityCode(env, securityId, purpose, expec
 }
 
 async function securityVerifyCode(request, env) {
-  const auth=await getSessionUser(request,env);
-  if(!requireRole(auth,['intervenant'])) return json({ok:false,error:auth?.user?'FORBIDDEN':'UNAUTHENTICATED',version:VERSION},auth?.user?403:401);
-  await ensureSecuritySchema(env);
-  const body=await readJson(request), missionId=clean(body?.mission_id), purpose=clean(body?.purpose), code=clean(body?.code);
-  if(!missionId||!['ARRIVAL','END'].includes(purpose)||!/^[0-9]{6}$/.test(code)) return json({ok:false,error:'INVALID_SECURITY_CODE_REQUEST',version:VERSION},400);
-  const sec=await env.DB.prepare('SELECT * FROM mission_security WHERE mission_id=? AND intervenant_id=? LIMIT 1').bind(missionId,auth.user.id).first();
-  if(!sec) return json({ok:false,error:'MISSION_NOT_ASSIGNED_OR_NOT_PREPARED',version:VERSION},404);
-  const identity = await requireVerifiedIntervenant(env, auth.user.id);
-  if(!identity) {
-    await securityAudit(env,'SECURITY_IDENTITY_RECHECK_FAILED',missionId,auth.user.id,auth.user.role,'DENIED',{});
-    return json({ok:false,error:'INTERVENANT_IDENTITY_NOT_VERIFIED',version:VERSION},403);
+  const auth = await getSessionUser(request, env);
+  if (!requireRole(auth, ['intervenant'])) {
+    return json({ ok: false, error: auth?.user ? 'FORBIDDEN' : 'UNAUTHENTICATED', version: VERSION }, auth?.user ? 403 : 401);
   }
-  if(!sec.last_presence_at) {
-    await securityAudit(env,'SECURITY_PRESENCE_REQUIRED',missionId,auth.user.id,auth.user.role,'DENIED',{purpose});
-    return json({ok:false,error:'PRESENCE_CHECK_REQUIRED',version:VERSION,message:'La présence de l’intervenant doit être enregistrée avant la validation du code.'},428);
-  }
-  const device=await deviceHash(request,auth.user.id);
-  const trusted = await env.DB.prepare(`SELECT id,status,expires_at FROM trusted_devices WHERE user_id=? AND device_hash=? AND status='active' AND expires_at>CURRENT_TIMESTAMP LIMIT 1`).bind(auth.user.id,device).first();
-  if(!trusted || sec.last_device_id !== device) {
-    await securityAudit(env,'SECURITY_DEVICE_RECHECK_FAILED',missionId,auth.user.id,auth.user.role,'DENIED',{purpose});
-    return json({ok:false,error:'DEVICE_NOT_TRUSTED_FOR_MISSION',version:VERSION},403);
-  }
-  const now=new Date().toISOString();
-  if(sec.locked_until && sec.locked_until>now) return json({ok:false,error:'SECURITY_TEMPORARILY_LOCKED',version:VERSION,locked_until:sec.locked_until},423);
-  const used=purpose==='ARRIVAL'?sec.arrival_used_at:sec.end_used_at;
-  const expires=purpose==='ARRIVAL'?sec.arrival_expires_at:sec.end_expires_at;
-  const stored=purpose==='ARRIVAL'?sec.arrival_code_hash:sec.end_code_hash;
-  if(used) return json({ok:false,error:'SECURITY_CODE_ALREADY_USED',version:VERSION},409);
-  if(purpose==='END' && sec.status !== 'in_progress') return json({ok:false,error:'MISSION_NOT_IN_PROGRESS',version:VERSION},409);
-  if(purpose==='ARRIVAL' && sec.status !== 'prepared') return json({ok:false,error:'MISSION_NOT_READY_FOR_ARRIVAL',version:VERSION},409);
-  if(!expires||expires<=now) return json({ok:false,error:'SECURITY_CODE_EXPIRED',version:VERSION},410);
-  const expected=await sha256Base64url(code), ok=expected===stored;
-  await env.DB.prepare(`INSERT INTO mission_security_attempts (id,security_id,purpose,actor_user_id,device_id,result,reason) VALUES (?,?,?,?,?,?,?)`).bind(crypto.randomUUID(),sec.id,purpose,auth.user.id,device,ok?'SUCCESS':'FAIL',ok?'CODE_MATCH':'CODE_MISMATCH').run();
-  if(!ok){
-    const attempts=await env.DB.prepare(`SELECT COUNT(*) AS total FROM mission_security_attempts WHERE security_id=? AND purpose=? AND result='FAIL' AND created_at >= datetime('now','-15 minutes')`).bind(sec.id,purpose).first();
-    const count=Number(attempts?.total||0);
-    if(count>=SECURITY_MAX_ATTEMPTS){
-      const locked=new Date(Date.now()+SECURITY_LOCK_SECONDS*1000).toISOString();
-      await env.DB.prepare('UPDATE mission_security SET locked_until=?,updated_at=CURRENT_TIMESTAMP WHERE id=?').bind(locked,sec.id).run();
-      await securityAudit(env,'SECURITY_CODE_LOCK',missionId,auth.user.id,auth.user.role,'BLOCKED',{purpose,attempts:count});
-      return json({ok:false,error:'SECURITY_TOO_MANY_ATTEMPTS',version:VERSION,locked_until:locked},423);
-    }
-    await securityAudit(env,'SECURITY_CODE_FAILED',missionId,auth.user.id,auth.user.role,'DENIED',{purpose,attempts:count});
-    return json({ok:false,error:'SECURITY_CODE_INVALID',version:VERSION,remaining_attempts:Math.max(0,SECURITY_MAX_ATTEMPTS-count)},401);
-  }
-  const consumed = await consumeMissionSecurityCode(env, sec.id, purpose, expected);
-  if (!consumed) {
-    await securityAudit(env,'SECURITY_CODE_CONSUMPTION_CONFLICT',missionId,auth.user.id,auth.user.role,'DENIED',{purpose});
-    return json({ok:false,error:'SECURITY_CODE_ALREADY_USED_OR_STATE_CHANGED',version:VERSION},409);
-  }
-  await securityAudit(env,`SECURITY_CODE_${purpose}_SUCCESS`,missionId,auth.user.id,auth.user.role,'OK',{purpose,device_bound:true});
-  return json({ok:true,version:VERSION,mission_id:missionId,purpose,status:purpose==='ARRIVAL'?'in_progress':'completed',identity_control:'VERIFIED_ACCOUNT_REQUIRED',presence_control:'RECORDED',code:'CONSUMED'},200);
+
+  // A six-digit mission code is not sufficient device authentication.
+  // No code attempt is recorded and no mission-security state is changed
+  // until a cryptographic device proof is available.
+  return json({
+    ok: false,
+    error: 'CRYPTOGRAPHIC_DEVICE_ENROLLMENT_REQUIRED',
+    version: VERSION,
+    write_enabled: false
+  }, 503);
 }
 
 async function securityResendCodes(request, env) {
