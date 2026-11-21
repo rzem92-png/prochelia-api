@@ -141,7 +141,7 @@ test("device challenge and enrollment endpoints are POST-only", async () => {
 
 
 function createDeviceTrustDb() {
-  const state = { challenge: null, credentials: [] };
+  const state = { challenge: null, proofChallenge: null, credentials: [] };
   const sameChallengeScope = (row, tenantId, userId, sessionId) =>
     row && row.tenantId === tenantId && row.userId === userId && row.sessionId === sessionId && !row.consumedAt && !row.expired;
   const DB = {
@@ -161,9 +161,40 @@ function createDeviceTrustDb() {
             return row && row.id === id && row.challengeHash === hash &&
               sameChallengeScope(row, tenantId, userId, sessionId) ? { id } : null;
           }
+          if (sql.includes("SELECT id FROM trusted_device_credentials")) {
+            const [id, tenantId, userId] = this.params;
+            const credential = state.credentials.find(item =>
+              item.id === id && item.tenantId === tenantId && item.userId === userId &&
+              item.status === "active" && Date.parse(item.expires_at) > Date.now()
+            );
+            return credential ? { id: credential.id } : null;
+          }
+          if (sql.includes("SELECT c.id, c.credential_id, d.public_key_jwk")) {
+            const [id, tenantId, userId, sessionId, credentialId, hash] = this.params;
+            const row = state.proofChallenge;
+            const credential = state.credentials.find(item =>
+              item.id === credentialId && item.tenantId === tenantId &&
+              item.userId === userId && item.status === "active" &&
+              Date.parse(item.expires_at) > Date.now()
+            );
+            return row && row.id === id && row.tenantId === tenantId &&
+              row.userId === userId && row.sessionId === sessionId &&
+              row.credentialId === credentialId && row.challengeHash === hash &&
+              !row.consumedAt && !row.expired && credential
+              ? { id: row.id, credential_id: credential.id, public_key_jwk: credential.public_key_jwk }
+              : null;
+          }
           return null;
         },
         async run() {
+          if (sql.includes("INSERT INTO device_auth_challenges") && sql.includes("'PROVE'")) {
+            const [id, tenantId, userId, sessionId, credentialId, challengeHash] = this.params;
+            state.proofChallenge = {
+              id, tenantId, userId, sessionId, credentialId, challengeHash,
+              consumedAt: null, expired: false
+            };
+            return { meta: { changes: 1 } };
+          }
           if (sql.includes("INSERT INTO device_auth_challenges")) {
             const [id, tenantId, userId, sessionId, challengeHash] = this.params;
             state.challenge = { id, tenantId, userId, sessionId, challengeHash, consumedAt: null, expired: false };
@@ -196,7 +227,35 @@ function createDeviceTrustDb() {
       return statement;
     },
     async batch(statements) {
-      const [update, insert] = statements;
+      const [update, second] = statements;
+      if (update.sql.includes("purpose = 'PROVE'")) {
+        const [marker, id, tenantId, userId, sessionId, credentialId, challengeHash] = update.params;
+        const row = state.proofChallenge;
+        let consumed = 0;
+        if (row && row.id === id && row.tenantId === tenantId && row.userId === userId &&
+            row.sessionId === sessionId && row.credentialId === credentialId &&
+            row.challengeHash === challengeHash && !row.consumedAt && !row.expired) {
+          row.consumedAt = marker;
+          consumed = 1;
+        }
+        const [deviceId, updateTenantId, updateUserId, challengeId,
+          challengeTenantId, challengeUserId, challengeSessionId,
+          challengeCredentialId, updateHash, updateMarker] = second.params;
+        const credential = state.credentials.find(item =>
+          item.id === deviceId && item.tenantId === updateTenantId &&
+          item.userId === updateUserId && item.status === "active" &&
+          Date.parse(item.expires_at) > Date.now()
+        );
+        let updated = 0;
+        if (consumed === 1 && row.consumedAt === updateMarker && row.id === challengeId &&
+            row.tenantId === challengeTenantId && row.userId === challengeUserId &&
+            row.sessionId === challengeSessionId && row.credentialId === challengeCredentialId &&
+            row.challengeHash === updateHash && credential) {
+          credential.last_used_at = new Date().toISOString();
+          updated = 1;
+        }
+        return [{ meta: { changes: consumed } }, { meta: { changes: updated } }];
+      }
       const [marker, id, tenantId, userId, sessionId, challengeHash] = update.params;
       const row = state.challenge;
       let consumed = 0;
@@ -206,7 +265,7 @@ function createDeviceTrustDb() {
         consumed = 1;
       }
       const [credentialId, publicJwk, thumbprint, credentialExpiry,
-        challengeId, insertTenantId, insertUserId, insertSessionId, insertHash, insertMarker] = insert.params;
+        challengeId, insertTenantId, insertUserId, insertSessionId, insertHash, insertMarker] = second.params;
       let inserted = 0;
       const duplicateKey = state.credentials.some(item =>
         item.tenantId === insertTenantId &&
@@ -522,4 +581,105 @@ test("revoked device key cannot be silently re-enrolled", async () => {
   assert.equal((await reEnroll.json()).error, "DEVICE_ENROLLMENT_CONFLICT");
   assert.equal(state.credentials.length, 1);
   assert.equal(state.credentials[0].status, "revoked");
+});
+
+test("device proof verifies the enrolled private key, is session-bound and rejects replay without authorizing mission presence", async () => {
+  const { DB, state } = createDeviceTrustDb();
+  const auth = { user: { id: "intervenant-1", role: "intervenant" }, session_id: "session-1" };
+  const tenantContext = { ok: true, tenant: { id: "tenant-1" } };
+  const identityCheck = async (_env, userId, tenantId) =>
+    userId === "intervenant-1" && tenantId === "tenant-1" ? { status: "verified" } : null;
+
+  const pair = await webcrypto.subtle.generateKey(
+    { name: "ECDSA", namedCurve: "P-256" }, false, ["sign", "verify"]
+  );
+  const publicJwk = await webcrypto.subtle.exportKey("jwk", pair.publicKey);
+  const enrollChallengeResponse = await handleDeviceTrustRoute(
+    new Request("https://example.test/api/security/device/enroll/challenge", { method: "POST", body: "{}" }),
+    { DB }, auth, tenantContext, identityCheck
+  );
+  const enrollChallenge = await enrollChallengeResponse.json();
+  const enrollSignature = await webcrypto.subtle.sign(
+    { name: "ECDSA", hash: "SHA-256" }, pair.privateKey,
+    new TextEncoder().encode(enrollChallenge.signing_message)
+  );
+  const enrolled = await handleDeviceTrustRoute(
+    new Request("https://example.test/api/security/device/enroll/complete", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        challenge_id: enrollChallenge.challenge_id,
+        challenge: enrollChallenge.challenge,
+        public_key_jwk: publicJwk,
+        signature: Buffer.from(enrollSignature).toString("base64url")
+      })
+    }),
+    { DB }, auth, tenantContext, identityCheck
+  );
+  assert.equal(enrolled.status, 201);
+  const deviceId = (await enrolled.json()).device.id;
+
+  const proofChallengeResponse = await handleDeviceTrustRoute(
+    new Request("https://example.test/api/security/device/prove/challenge", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ device_id: deviceId })
+    }),
+    { DB }, auth, tenantContext, identityCheck
+  );
+  assert.equal(proofChallengeResponse.status, 201);
+  const proofChallenge = await proofChallengeResponse.json();
+  const proofSignature = await webcrypto.subtle.sign(
+    { name: "ECDSA", hash: "SHA-256" }, pair.privateKey,
+    new TextEncoder().encode(proofChallenge.signing_message)
+  );
+  const proofPayload = {
+    device_id: deviceId,
+    challenge_id: proofChallenge.challenge_id,
+    challenge: proofChallenge.challenge,
+    signature: Buffer.from(proofSignature).toString("base64url")
+  };
+  const completeProof = () => handleDeviceTrustRoute(
+    new Request("https://example.test/api/security/device/prove/complete", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify(proofPayload)
+    }),
+    { DB }, auth, tenantContext, identityCheck
+  );
+
+  const verified = await completeProof();
+  assert.equal(verified.status, 200);
+  const verifiedBody = await verified.json();
+  assert.equal(verifiedBody.proof_of_possession, "verified");
+  assert.equal(verifiedBody.mission_presence, "not_authorized_by_device_proof_alone");
+  assert.ok(state.credentials[0].last_used_at, "successful proof updates last_used_at");
+
+  const replay = await completeProof();
+  assert.equal(replay.status, 409);
+  assert.equal((await replay.json()).error, "DEVICE_PROOF_CHALLENGE_INVALID_OR_EXPIRED");
+
+  const otherSession = {
+    user: auth.user,
+    session_id: "session-2"
+  };
+  const sessionBoundChallenge = await handleDeviceTrustRoute(
+    new Request("https://example.test/api/security/device/prove/challenge", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ device_id: deviceId })
+    }),
+    { DB }, otherSession, tenantContext, identityCheck
+  );
+  assert.equal(sessionBoundChallenge.status, 201);
+  const sessionBoundBody = await sessionBoundChallenge.json();
+  const wrongSession = await handleDeviceTrustRoute(
+    new Request("https://example.test/api/security/device/prove/complete", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        device_id: deviceId,
+        challenge_id: sessionBoundBody.challenge_id,
+        challenge: sessionBoundBody.challenge,
+        signature: proofPayload.signature
+      })
+    }),
+    { DB }, auth, tenantContext, identityCheck
+  );
+  assert.equal(wrongSession.status, 409);
 });
