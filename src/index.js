@@ -1,4 +1,5 @@
 import { handleV7Route } from "./v7-routes.js";
+import { resolveTenantContext } from "./tenant-context.js";
 // PROCHÉLIA — INDEX BACKEND CONSOLIDÉ UNIQUE
 // Référence de consolidation : V14.1 Finance + sécurité/RBAC existants.
 // Généré le 19/10/2026. À déployer uniquement après recette avec la vraie base D1.
@@ -158,23 +159,24 @@ async function createSession(env, userId) {
   return token;
 }
 
-async function getSessionUser(request, env) {
+export async function getSessionUser(request, env) {
   if (!env.DB) return null;
   const token = getCookie(request, SESSION_COOKIE);
   if (!token) return null;
   const tokenHash = await sha256Base64url(token);
   const row = await env.DB.prepare(
     `SELECT u.id, u.role, u.email, u.first_name, u.last_name, u.phone, u.status, u.created_at, u.updated_at,
-            s.id AS session_id
+            s.id AS session_id, s.active_tenant_id AS session_active_tenant_id
        FROM sessions s
        JOIN users u ON u.id = s.user_id
       WHERE s.token_hash = ?
         AND s.expires_at > CURRENT_TIMESTAMP
+        AND s.revoked_at IS NULL
       LIMIT 1`
   ).bind(tokenHash).first();
   if (!row) return null;
   if (row.status !== 'active') return null;
-  return { user: safeUser(row), session_id: row.session_id, token_hash: tokenHash };
+  return { user: safeUser(row), session_id: row.session_id, session_active_tenant_id: row.session_active_tenant_id || null, token_hash: tokenHash };
 }
 
 function requireRole(auth, roles) {
@@ -322,15 +324,97 @@ async function login(request, env) {
   );
 }
 
-async function logout(request, env) {
+export async function logout(request, env) {
   if (!env.DB) return json({ ok: false, database: false, version: VERSION }, 503);
   const token = getCookie(request, SESSION_COOKIE);
-  const headers = { 'set-cookie': sessionCookie('', 0) };
   if (token) {
-    const tokenHash = await sha256Base64url(token);
-    await env.DB.prepare('DELETE FROM sessions WHERE token_hash = ?').bind(tokenHash).run();
+    try {
+      const tokenHash = await sha256Base64url(token);
+      const result = await env.DB.prepare(`UPDATE sessions
+        SET revoked_at = CURRENT_TIMESTAMP, revoked_reason = 'USER_LOGOUT'
+        WHERE token_hash = ? AND revoked_at IS NULL`).bind(tokenHash).run();
+      if (result?.success !== true) {
+        return json({ ok: false, error: 'SESSION_REVOCATION_UNCONFIRMED', version: VERSION }, 503);
+      }
+    } catch {
+      return json({ ok: false, error: 'SESSION_REVOCATION_UNCONFIRMED', version: VERSION }, 503);
+    }
   }
-  return json({ ok: true, version: VERSION, authenticated: false }, 200, headers);
+  return json(
+    { ok: true, version: VERSION, authenticated: false },
+    200,
+    { 'set-cookie': sessionCookie('', 0) }
+  );
+}
+
+export async function tenantContextRoute(request, env) {
+  if (request.method !== "GET") {
+    return json({ ok: false, error: "METHOD_NOT_ALLOWED", version: VERSION }, 405, { allow: "GET" });
+  }
+  const auth = await getSessionUser(request, env);
+  if (!auth) return json({ ok: false, error: "UNAUTHENTICATED", version: VERSION }, 401);
+  const context = await resolveTenantContext(request, env, auth);
+  if (!context.ok) {
+    return json({ ok: false, error: context.error, version: VERSION }, context.status);
+  }
+  return json({ ok: true, version: VERSION, tenant: context.tenant });
+}
+
+export async function selectTenantForSession(request, env) {
+  if (request.method !== "POST") {
+    return json({ ok: false, error: "METHOD_NOT_ALLOWED", version: VERSION }, 405, { allow: "POST" });
+  }
+  // This endpoint changes server-side session context. Require a real, allowlisted browser Origin.
+  if (!request.headers.get("origin") || !securityOriginAllowed(request, env)) {
+    return json({ ok: false, error: "ORIGIN_NOT_ALLOWED", version: VERSION }, 403);
+  }
+  if (!(request.headers.get("content-type") || "").toLowerCase().startsWith("application/json")) {
+    return json({ ok: false, error: "JSON_REQUIRED", version: VERSION }, 415);
+  }
+  const auth = await getSessionUser(request, env);
+  if (!auth) return json({ ok: false, error: "UNAUTHENTICATED", version: VERSION }, 401);
+  let body;
+  try { body = await request.json(); } catch {
+    return json({ ok: false, error: "INVALID_JSON", version: VERSION }, 400);
+  }
+  const tenantId = typeof body?.tenant_id === "string" ? body.tenant_id.trim() : "";
+  if (!tenantId || tenantId.length > 128) {
+    return json({ ok: false, error: "TENANT_ID_REQUIRED", version: VERSION }, 400);
+  }
+  try {
+    const result = await env.DB.prepare(`
+      UPDATE sessions
+         SET active_tenant_id = ?, last_seen_at = CURRENT_TIMESTAMP
+       WHERE id = ?
+         AND user_id = ?
+         AND expires_at > CURRENT_TIMESTAMP
+         AND revoked_at IS NULL
+         AND EXISTS (
+           SELECT 1
+             FROM tenant_memberships m
+             JOIN tenants t ON t.id = m.tenant_id
+            WHERE m.user_id = sessions.user_id
+              AND m.tenant_id = ?
+              AND m.status = 'ACTIVE'
+              AND t.status = 'ACTIVE'
+         )
+    `).bind(tenantId, auth.session_id, auth.user.id, tenantId).run();
+    // D1 can return partial metadata alongside an unsuccessful write result.
+    // Never treat a tenant switch as committed unless D1 explicitly confirms success.
+    if (result?.success !== true) {
+      return json({ ok: false, error: "TENANT_CONTEXT_UNAVAILABLE", version: VERSION }, 503);
+    }
+    if (Number(result?.meta?.changes || 0) !== 1) {
+      return json({ ok: false, error: "TENANT_MEMBERSHIP_REQUIRED", version: VERSION }, 403);
+    }
+    const context = await resolveTenantContext(request, env, {
+      ...auth, session_active_tenant_id: tenantId
+    });
+    if (!context.ok) return json({ ok: false, error: context.error, version: VERSION }, context.status);
+    return json({ ok: true, version: VERSION, tenant: context.tenant });
+  } catch {
+    return json({ ok: false, error: "TENANT_CONTEXT_UNAVAILABLE", version: VERSION }, 503);
+  }
 }
 
 async function me(request, env) {
@@ -1297,6 +1381,14 @@ async function handleBase(request, env) {
     return bootstrap(request, env);
   }
 
+  if (url.pathname === '/api/tenant/context') {
+    return tenantContextRoute(request, env);
+  }
+
+  if (url.pathname === '/api/tenant/select') {
+    return selectTenantForSession(request, env);
+  }
+
   if (url.pathname === '/api/readiness') {
     if (request.method !== 'GET') return json({ ok: false, ready: false, database: false, version: VERSION }, 503);
     if (!env.DB) return json({ ok: false, ready: false, database: false, version: VERSION }, 503);
@@ -1324,9 +1416,9 @@ async function handleBase(request, env) {
         '/api/health','/api/prestations','/api/core/schema',
         '/api/missions/schema','/api/missions/validate','/api/missions',
         '/api/auth/status','/api/auth/login','/api/auth/logout','/api/auth/me',
-        '/api/auth/bootstrap','/api/security/identity/start','/api/security/identity/approve','/api/security/mission/prepare','/api/security/presence','/api/security/code/verify','/api/security/resend','/api/security/client-code','/api/security/status','/api/payments/onboard','/api/payments/status','/api/payments/mission/create','/api/payments/mission/finalize','/api/payments/payout','/api/payments/webhook','/api/payments/dispute','/api/payments/dispute/resolve','/api/readiness','/api/info'
+        '/api/auth/bootstrap','/api/tenant/context','/api/tenant/select','/api/security/identity/start','/api/security/identity/approve','/api/security/mission/prepare','/api/security/presence','/api/security/code/verify','/api/security/resend','/api/security/client-code','/api/security/status','/api/payments/onboard','/api/payments/status','/api/payments/mission/create','/api/payments/mission/finalize','/api/payments/payout','/api/payments/webhook','/api/payments/dispute','/api/payments/dispute/resolve','/api/readiness','/api/info'
       ],
-      writes: { missions: false, bootstrap: true },
+      writes: { missions: false, bootstrap: true, tenant_selection: true },
       status: 'AUTH_RBAC_IDENTITY_PRESENCE_SECURITY_HARDENED_FOR_TEST'
     });
   }

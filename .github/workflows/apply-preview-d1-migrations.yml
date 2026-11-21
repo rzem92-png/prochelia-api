@@ -34,10 +34,10 @@ jobs:
       EXPECTED_ACCOUNT_ID: f2a79e9fa41566a8ec80fb24c02c60eb
       FORBIDDEN_PRODUCTION_DB_ID: 04f52830-ef5a-4f17-a640-42bbc2381bba
     steps:
-      - name: Checkout pinned canonical preproduction migration chain
+      - name: Checkout exact reviewed migration source commit
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
-          ref: 1fc258c9c8d25e5e7b89241504218bf102afbf27
+          ref: ${{ github.sha }}
 
       - name: Verify credentials, exact Preview target and complete migration chain
         shell: bash
@@ -85,6 +85,11 @@ jobs:
             "0020_auth_login_rate_limits.sql",
             "0021_supra_audit_events.sql",
             "0022_supra_persisted_approvals.sql",
+            "0023_tenant_double_entry_accounting.sql",
+            "0024_tenant_membership_authority.sql",
+            "0025_session_revocation.sql",
+            "0026_accounting_currency_consistency.sql",
+            "0027_tenant_membership_identity_immutable.sql"
           ]
           actual = sorted(p.name for p in Path("migrations-preview-canonical").glob("*.sql"))
           assert actual == sorted(expected), (
@@ -273,16 +278,60 @@ jobs:
           registry_present=any(row["type"]=="table" and row["name"]=="d1_migrations" for row in objects)
           remote=set(row["name"] for row in registry)
           local=set(p.name for p in pathlib.Path("migrations-preview-canonical").glob("*.sql"))
-          if len(local) != 23:
-              print(f"::error::Expected exactly 23 canonical migrations; found {len(local)}.")
+          base = {
+              "0000_auth_foundation.sql",
+              "0001_core_business_schema.sql",
+              "0002_server_pricing.sql",
+              "0003_route_address_provenance.sql",
+              "0004_atomic_wallet_ledger.sql",
+              "0005_security_rate_limits.sql",
+              "0006_copilot_schema.sql",
+              "0007_trust_passport_schema.sql",
+              "0008_commercial_recruitment_schema.sql",
+              "0009_finance_workspace_schema.sql",
+              "0010_strategic_schema.sql",
+              "0011_final_hardening_schema.sql",
+              "0012_national_continuity_schema.sql",
+              "0013_master_complement_schema.sql",
+              "0014_operational_schema.sql",
+              "0015_production_security_events.sql",
+              "0016_security_identity_schema.sql",
+              "0017_document_security_scans.sql",
+              "0018_consolidated_business_schema.sql",
+              "0019_backup_verifications.sql",
+              "0020_auth_login_rate_limits.sql",
+              "0021_supra_audit_events.sql",
+              "0022_supra_persisted_approvals.sql",
+          }
+          if len(local) != 28:
+              print(f"::error::Expected exactly 28 canonical migrations; found {len(local)}.")
               raise SystemExit(1)
           non_internal=[row for row in objects if row["name"] not in {"_cf_KV","d1_migrations"} and not row["name"].startswith("sqlite_")]
+          import sqlite3
+          def schema_for(names):
+              db=sqlite3.connect(":memory:")
+              db.execute("PRAGMA foreign_keys=ON")
+              for name in sorted(names):
+                  db.executescript((pathlib.Path("migrations-preview-canonical") / name).read_text())
+              violations=db.execute("PRAGMA foreign_key_check").fetchall()
+              if violations:
+                  raise SystemExit(f"Canonical local schema has foreign-key violations: {violations[:10]}")
+              result={(row[0],row[1]) for row in db.execute(
+                  "SELECT type,name FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY type,name"
+              ) if row[1] not in {"d1_migrations","_cf_KV"}}
+              db.close()
+              return result
+          remote_schema={(row["type"],row["name"]) for row in non_internal}
+          base_schema=schema_for(base)
+          target_schema=schema_for(local)
           if not remote and not non_internal:
-              print("PASS: new EU Preview D1 has no application schema or applied migrations; all 23 canonical migrations are pending.")
-          elif registry_present and remote == local:
-              print("PASS: exact 23-entry canonical migration registry is already applied; rerun is idempotent.")
+              print("PASS: new EU Preview D1 is empty; all 28 canonical migrations are pending.")
+          elif registry_present and remote == base and remote_schema == base_schema:
+              print("PASS: exact 23-entry registry AND exact schema inventory match the reviewed Preview baseline; only migrations 0023-0027 are pending.")
+          elif registry_present and remote == local and remote_schema == target_schema:
+              print("PASS: exact 28-entry registry AND exact schema inventory match the canonical target; rerun is idempotent.")
           else:
-              print("::error::Preview migration registry differs from both reviewed safe states; no migration will run.")
+              print("::error::Preview migration registry differs from the exact reviewed 23-entry baseline and 28-entry target; no migration will run.")
               print("Unexpected remote names:", ", ".join(sorted(remote-local)) or "(none)")
               print("Missing expected names:", ", ".join(sorted(local-remote)) or "(none)")
               raise SystemExit(1)
@@ -383,6 +432,96 @@ jobs:
           PY
           npx --yes wrangler@4 d1 migrations list "$EXPECTED_DB_NAME" --remote --config wrangler.preview-migrations.jsonc
           echo "PASS: identity, rate-limit and Nexus audit/approval migrations 0016/0020/0021/0022 schemas and triggers are present on Preview D1."
+
+      - name: Verify new accounting, tenant and session-revocation schema
+        shell: bash
+        run: |
+          set -euo pipefail
+          request="$RUNNER_TEMP/verify-new-schema-request.json"
+          response="$RUNNER_TEMP/verify-new-schema-response.json"
+          sql="$(cat <<'SQL'
+          SELECT type, name FROM sqlite_master WHERE name IN (
+          'accounting_entities','accounting_accounts','accounting_journals','accounting_journal_lines',
+          'tenants','tenant_memberships','tenant_membership_events',
+          'idx_accounting_entities_tenant','idx_accounting_accounts_tenant_entity','idx_accounting_journals_tenant_date',
+          'idx_accounting_journals_source','idx_accounting_journals_one_reversal','idx_accounting_lines_journal','idx_accounting_lines_account',
+          'idx_tenant_membership_one_nonrevoked_per_user','idx_tenant_membership_one_owner','idx_tenant_memberships_user_status',
+          'idx_tenant_memberships_tenant_role_status','idx_tenant_membership_events_tenant_time','idx_sessions_user_active_expiry','idx_sessions_revoked_at',
+          'trg_accounting_journal_insert_draft_only','trg_accounting_line_draft_only','trg_accounting_lines_no_update_posted','trg_accounting_lines_no_delete_posted',
+          'trg_accounting_journal_post_guard','trg_accounting_posted_journal_immutable','trg_accounting_posted_journal_no_delete',
+          'trg_accounting_entity_identity_immutable_after_posting','trg_accounting_account_classification_immutable_after_posting',
+          'trg_accounting_journal_currency_immutable_with_lines','trg_accounting_journal_post_currency_match',
+          'trg_tenant_membership_events_no_update','trg_tenant_membership_events_no_delete','trg_tenant_membership_revocation_terminal',
+          'trg_tenant_membership_identity_immutable',
+          'trg_tenant_membership_event_tenant_match','trg_accounting_entity_requires_active_tenant','trg_accounting_entity_tenant_stable',
+          'trg_session_identity_immutable','trg_session_revocation_terminal','trg_session_revocation_metadata_required',
+          'trg_session_active_tenant_requires_membership_insert','trg_session_active_tenant_requires_membership'
+          ) ORDER BY type, name
+          SQL
+          )"
+                    jq -n --arg sql "$sql" '{sql:$sql,params:[]}' > "$request"
+          status="$(curl --silent --show-error --output "$response" --write-out '%{http_code}' \
+            -X POST -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            -H "Content-Type: application/json" --data-binary @"$request" \
+            "https://api.cloudflare.com/client/v4/accounts/$EXPECTED_ACCOUNT_ID/d1/database/$EXPECTED_DB_ID/query")"
+          test "$status" = "200" || { echo "::error::New schema inventory request failed (HTTP $status)."; exit 1; }
+          jq -e '.success == true' "$response" >/dev/null
+          python3 - "$response" <<'PY'
+          import json, pathlib, sys
+          rows=json.loads(pathlib.Path(sys.argv[1]).read_text())["result"][0]["results"]
+          actual={(row["type"],row["name"]) for row in rows}
+          expected_tables={
+            "accounting_entities","accounting_accounts","accounting_journals","accounting_journal_lines",
+            "tenants","tenant_memberships","tenant_membership_events"
+          }
+          expected_indexes={
+            "idx_accounting_entities_tenant","idx_accounting_accounts_tenant_entity",
+            "idx_accounting_journals_tenant_date","idx_accounting_journals_source",
+            "idx_accounting_journals_one_reversal","idx_accounting_lines_journal",
+            "idx_accounting_lines_account","idx_tenant_membership_one_nonrevoked_per_user",
+            "idx_tenant_membership_one_owner","idx_tenant_memberships_user_status",
+            "idx_tenant_memberships_tenant_role_status","idx_tenant_membership_events_tenant_time",
+            "idx_sessions_user_active_expiry","idx_sessions_revoked_at"
+          }
+          expected_triggers={
+            "trg_accounting_journal_insert_draft_only","trg_accounting_line_draft_only",
+            "trg_accounting_lines_no_update_posted","trg_accounting_lines_no_delete_posted",
+            "trg_accounting_journal_post_guard","trg_accounting_posted_journal_immutable",
+            "trg_accounting_posted_journal_no_delete","trg_accounting_entity_identity_immutable_after_posting",
+            "trg_accounting_account_classification_immutable_after_posting",
+            "trg_accounting_journal_currency_immutable_with_lines","trg_accounting_journal_post_currency_match",
+            "trg_tenant_membership_events_no_update","trg_tenant_membership_events_no_delete",
+            "trg_tenant_membership_revocation_terminal","trg_tenant_membership_event_tenant_match",
+            "trg_accounting_entity_requires_active_tenant","trg_accounting_entity_tenant_stable",
+            "trg_session_identity_immutable","trg_session_revocation_terminal",
+            "trg_session_revocation_metadata_required","trg_session_active_tenant_requires_membership_insert","trg_session_active_tenant_requires_membership"
+          }
+          missing = (
+            {("table",x) for x in expected_tables} |
+            {("index",x) for x in expected_indexes} |
+            {("trigger",x) for x in expected_triggers}
+          ) - actual
+          if missing:
+            print("::error::New accounting/tenant/session schema is incomplete:", sorted(missing))
+            raise SystemExit(1)
+          print("PASS: 7 accounting/tenant tables, 14 indexes and 22 immutability/scope triggers verified.")
+          PY
+          jq -n '{sql:"SELECT name FROM pragma_table_info('"'"'sessions'"'"')",params:[]}' > "$request"
+          status="$(curl --silent --show-error --output "$response" --write-out '%{http_code}' \
+            -X POST -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            -H "Content-Type: application/json" --data-binary @"$request" \
+            "https://api.cloudflare.com/client/v4/accounts/$EXPECTED_ACCOUNT_ID/d1/database/$EXPECTED_DB_ID/query")"
+          test "$status" = "200" || { echo "::error::Session column verification failed (HTTP $status)."; exit 1; }
+          jq -e '.success == true' "$response" >/dev/null
+          python3 - "$response" <<'PY'
+          import json, pathlib, sys
+          columns={row["name"] for row in json.loads(pathlib.Path(sys.argv[1]).read_text())["result"][0]["results"]}
+          required={"revoked_at","revoked_reason","revoked_by_user_id","last_seen_at","active_tenant_id"}
+          if not required <= columns:
+            print("::error::Session revocation columns are missing:", sorted(required-columns))
+            raise SystemExit(1)
+          print("PASS: sessions contains explicit revocation and activity columns.")
+          PY
 
       - name: Verify exact reviewed Preview migration registry after apply
         shell: bash
