@@ -273,8 +273,7 @@ async function repositoryPullRequestDiff(env, repository, pullNumber) {
       }
     });
   if (!response.ok) throw new Error("GITHUB_PULL_REQUEST_DIFF_FAILED");
-  const diff = await response.text();
-  if (new TextEncoder().encode(diff).byteLength > 48000) throw new Error("GITHUB_PULL_REQUEST_DIFF_TOO_LARGE");
+  const diff = await readBoundedText(response, 48000);
   return redactRepositoryText(diff).slice(0, 48000);
 }
 
