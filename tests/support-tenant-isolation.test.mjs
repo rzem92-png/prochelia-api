@@ -29,9 +29,12 @@ const dashboard = source.slice(dashboardStart, dashboardEnd);
 
 test("support APIs require an authenticated active tenant", () => {
   assert.match(auth, /getSessionUser\(request,env\)/);
-  assert.match(auth, /auth\.session_active_tenant_id/);
+  assert.match(auth, /resolveTenantContext\(request,env,auth\)/);
+  assert.match(auth, /tenantContext\.tenant\.id/);
+  assert.match(auth, /auth\.session_active_tenant_id!==tenantId/);
   assert.match(auth, /ACTIVE_TENANT_REQUIRED/);
-  assert.match(auth, /return \{auth,role,tenantId\}/);
+  assert.match(auth, /return \{auth,role,tenantId,tenantContext\}/);
+  assert.doesNotMatch(auth, /const tenantId=auth\.session_active_tenant_id/);
 });
 
 test("new support cases persist the server-resolved tenant, never a client tenant", () => {
