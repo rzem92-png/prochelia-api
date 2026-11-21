@@ -4378,7 +4378,7 @@ async function brandIdentityEndpoint(request,env){
 
 async function brandClearanceRecord(request,env){
   const a=await supportAuth(request,env); if(a.response)return a.response;
-  if(a.role!=='GERANTE'&&a.role!=='ADMIN') return json({ok:false,error:'FORBIDDEN'},403);
+  if(a.role!=='GERANTE'&&!tenantRoleAllowed(a.tenantContext,['OWNER','ADMIN','MANAGER'])) return json({ok:false,error:'FORBIDDEN'},403);
   await ensureProcheliaMasterComplementSchema(env);
   const b=await readJson(request)||{};
   const id=crypto.randomUUID();
@@ -4442,7 +4442,7 @@ async function supportList(request,env){
   const a=await supportAuth(request,env); if(a.response)return a.response;
   await ensureProcheliaMasterComplementSchema(env);
   const u=new URL(request.url),status=clean(u.searchParams.get('status')||'');
-  const isManager=['GERANTE','ADMIN'].includes(a.role);
+  const isManager=a.role==='GERANTE'||tenantRoleAllowed(a.tenantContext,['OWNER','ADMIN','MANAGER']);
   let r;
   if(isManager){
     r=status?await env.DB.prepare(`SELECT * FROM support_cases WHERE tenant_id=? AND status=? ORDER BY created_at DESC LIMIT 200`).bind(a.tenantId,status).all():await env.DB.prepare(`SELECT * FROM support_cases WHERE tenant_id=? ORDER BY created_at DESC LIMIT 200`).bind(a.tenantId).all();
@@ -4454,7 +4454,7 @@ async function supportList(request,env){
 
 async function supportResolve(request,env){
   const a=await supportAuth(request,env); if(a.response)return a.response;
-  if(a.role!=='GERANTE'&&a.role!=='ADMIN') return json({ok:false,error:'MANAGER_APPROVAL_REQUIRED',version:VERSION},403);
+  if(a.role!=='GERANTE'&&!tenantRoleAllowed(a.tenantContext,['OWNER','ADMIN','MANAGER'])) return json({ok:false,error:'MANAGER_APPROVAL_REQUIRED',version:VERSION},403);
   await ensureProcheliaMasterComplementSchema(env);
   const b=await readJson(request)||{}; const id=clean(b.case_id);
   if(!id)return json({ok:false,error:'CASE_ID_REQUIRED',version:VERSION},400);
