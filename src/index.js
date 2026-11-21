@@ -4027,7 +4027,9 @@ async function handle(request,env){
       if (!membershipContext.ok) {
         return json({ ok: false, error: membershipContext.error }, membershipContext.status);
       }
-      if (String(membershipContext.tenant?.role || '').toLowerCase() !== 'intervenant') {
+      // User role identifies the person as an intervenant; tenant membership
+      // uses the least-privileged generic MEMBER role from migration 0024.
+      if (!tenantRoleAllowed(membershipContext, ['MEMBER'])) {
         return json({ ok: false, error: 'TENANT_ROLE_FORBIDDEN' }, 403);
       }
       if (!membershipAuth.session_active_tenant_id ||
