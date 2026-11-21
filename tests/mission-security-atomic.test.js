@@ -95,7 +95,7 @@ test("mission security preparation is tenant-scoped and verifies the intervenant
   assert.match(handler, /JOIN clients c ON c\.id=m\.client_id AND c\.tenant_id=m\.tenant_id/);
   assert.match(handler, /JOIN intervenants i ON i\.id=m\.intervenant_id AND i\.tenant_id=m\.tenant_id/);
   assert.match(handler, /WHERE m\.id=\? AND m\.tenant_id=\? AND m\.client_id=\? AND m\.intervenant_id=\?/);
-  assert.match(handler, /requireVerifiedIntervenant\(env,assignment\.intervenant_user_id\)/);
+  assert.match(handler, /requireVerifiedIntervenant\\(env,assignment\\.intervenant_user_id,tenantId\\)/);
   assert.doesNotMatch(handler, /requireVerifiedIntervenant\(env,intervenantId\)/);
   assert.match(handler, /MISSION_TENANT_ASSIGNMENT_NOT_FOUND/);
 });
