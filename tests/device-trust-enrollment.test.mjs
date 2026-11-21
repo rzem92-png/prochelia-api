@@ -5,7 +5,8 @@ import {
   buildDeviceEnrollmentMessage,
   validateDevicePublicJwk,
   deviceKeyThumbprint,
-  verifyDeviceEnrollmentSignature
+  verifyDeviceEnrollmentSignature,
+  handleDeviceTrustRoute
 } from "../src/device-trust.js";
 
 if (!globalThis.crypto) globalThis.crypto = webcrypto;
@@ -73,4 +74,64 @@ test("malformed and non-64-byte signatures fail closed", async () => {
     signature: "not-a-signature",
     message: "test"
   }), false);
+});
+
+test("device routes fail closed before database access when unauthenticated", async () => {
+  const request = new Request("https://example.test/api/security/device/list");
+  const result = await handleDeviceTrustRoute(request, {}, null, null, async () => false);
+  assert.equal(result.status, 401);
+  assert.equal((await result.json()).error, "UNAUTHENTICATED");
+});
+
+test("device routes are restricted to intervenant accounts", async () => {
+  const request = new Request("https://example.test/api/security/device/list");
+  const result = await handleDeviceTrustRoute(
+    request,
+    { DB: {} },
+    { user: { id: "user-1", role: "client" } },
+    { ok: true, tenant: { id: "tenant-1" } },
+    async () => true
+  );
+  assert.equal(result.status, 403);
+  assert.equal((await result.json()).error, "FORBIDDEN");
+});
+
+test("device routes require an authoritative tenant context", async () => {
+  const request = new Request("https://example.test/api/security/device/list");
+  const result = await handleDeviceTrustRoute(
+    request,
+    { DB: {} },
+    { user: { id: "user-1", role: "intervenant" } },
+    { ok: false, error: "TENANT_CONTEXT_REQUIRED", status: 403 },
+    async () => true
+  );
+  assert.equal(result.status, 403);
+  assert.equal((await result.json()).error, "TENANT_CONTEXT_REQUIRED");
+});
+
+test("unknown device paths are not consumed by this router", async () => {
+  const request = new Request("https://example.test/api/security/device/unknown");
+  const result = await handleDeviceTrustRoute(
+    request,
+    { DB: {} },
+    { user: { id: "user-1", role: "intervenant" } },
+    { ok: true, tenant: { id: "tenant-1" } },
+    async () => true
+  );
+  assert.equal(result, null);
+});
+
+test("device challenge and enrollment endpoints are POST-only", async () => {
+  const request = new Request("https://example.test/api/security/device/enroll/challenge", {
+    method: "GET"
+  });
+  const result = await handleDeviceTrustRoute(
+    request,
+    { DB: {} },
+    { user: { id: "user-1", role: "intervenant" } },
+    { ok: true, tenant: { id: "tenant-1" } },
+    async () => true
+  );
+  assert.equal(result.status, 405);
+  assert.equal(result.headers.get("allow"), "POST");
 });
