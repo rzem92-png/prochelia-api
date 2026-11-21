@@ -16,7 +16,7 @@ function response(data, status = 200, headers = {}) {
 function base64url(bytes) {
   let binary = "";
   for (const byte of bytes) binary += String.fromCharCode(byte);
-  return btoa(binary).replace(/\\+/g, "-").replace(/\\//g, "_").replace(/=+$/g, "");
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
 }
 
 function fromBase64url(value) {
@@ -41,7 +41,7 @@ function randomChallenge() {
 
 async function readLimitedJson(request, maxBytes = 8192) {
   const declaredLength = request.headers.get("content-length");
-  if (declaredLength && /^\\d+$/.test(declaredLength) && Number(declaredLength) > maxBytes) {
+  if (declaredLength && /^\d+$/.test(declaredLength) && Number(declaredLength) > maxBytes) {
     return { ok: false, tooLarge: true };
   }
   if (!request.body) return { ok: false, tooLarge: false };
