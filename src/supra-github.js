@@ -248,6 +248,11 @@ export async function handleSupraGithubRoute(request, env, path, auth) {
       status: 400, headers: { "cache-control": "no-store" }
     });
   }
+  if (path === "/api/supra/github/file" && !safeRepositoryPath(requestedPath)) {
+    return Response.json({ ok: false, error: "REPOSITORY_PATH_NOT_ALLOWED" }, {
+      status: 400, headers: { "cache-control": "no-store" }
+    });
+  }
   if (!configured(env)) {
     return Response.json({
       ok: true,
