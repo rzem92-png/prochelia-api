@@ -80,6 +80,18 @@ export function buildDeviceEnrollmentMessage({ challengeId, challenge, tenantId,
   });
 }
 
+export function buildDeviceProofMessage({ challengeId, challenge, tenantId, userId, credentialId }) {
+  return JSON.stringify({
+    version: 1,
+    purpose: "PROVE",
+    challenge_id: challengeId,
+    challenge,
+    tenant_id: tenantId,
+    user_id: userId,
+    credential_id: credentialId
+  });
+}
+
 export function validateDevicePublicJwk(jwk) {
   if (!jwk || typeof jwk !== "object" || Array.isArray(jwk)) return null;
   if (jwk.kty !== "EC" || jwk.crv !== "P-256" || typeof jwk.d === "string") return null;
@@ -264,6 +276,129 @@ async function handleComplete(request, env, auth, tenantId, requireVerifiedInter
   }
 }
 
+async function handleProofChallenge(request, env, auth, tenantId) {
+  const parsed = await readLimitedJson(request, 2048);
+  if (!parsed.ok) return response({ ok: false, error: parsed.tooLarge ? "PAYLOAD_TOO_LARGE" : "INVALID_JSON" }, parsed.tooLarge ? 413 : 400);
+  const deviceId = typeof parsed.value?.device_id === "string" ? parsed.value.device_id : "";
+  if (!/^[0-9a-f-]{36}$/i.test(deviceId)) return response({ ok: false, error: "INVALID_DEVICE_ID" }, 400);
+  try {
+    const credential = await env.DB.prepare(
+      `SELECT id FROM trusted_device_credentials
+       WHERE id = ? AND tenant_id = ? AND user_id = ? AND status = 'active'
+         AND julianday(expires_at) > julianday('now') LIMIT 1`
+    ).bind(deviceId, tenantId, auth.user.id).first();
+    if (!credential) return response({ ok: false, error: "DEVICE_NOT_FOUND_OR_INACTIVE" }, 404);
+
+    const challengeId = crypto.randomUUID();
+    const challenge = randomChallenge();
+    const challengeHash = await sha256Base64url(challenge);
+    const inserted = await env.DB.prepare(
+      `INSERT INTO device_auth_challenges
+       (id, tenant_id, user_id, session_id, credential_id, purpose, challenge_hash, expires_at)
+       SELECT ?, ?, ?, ?, ?, 'PROVE', ?, datetime('now', '+5 minutes')
+       WHERE (
+         SELECT COUNT(*) FROM device_auth_challenges
+         WHERE tenant_id = ? AND user_id = ? AND session_id = ? AND purpose = 'PROVE'
+           AND consumed_at IS NULL AND julianday(expires_at) > julianday('now')
+       ) < ?`
+    ).bind(
+      challengeId, tenantId, auth.user.id, auth.session_id, deviceId, challengeHash,
+      tenantId, auth.user.id, auth.session_id, MAX_PENDING_CHALLENGES
+    ).run();
+    if (Number(inserted?.meta?.changes || 0) !== 1) {
+      return response({ ok: false, error: "TOO_MANY_PENDING_DEVICE_CHALLENGES" }, 429);
+    }
+    const signingMessage = buildDeviceProofMessage({
+      challengeId, challenge, tenantId, userId: auth.user.id, credentialId: deviceId
+    });
+    return response({
+      ok: true,
+      purpose: "PROVE",
+      algorithm: "ECDSA_P256_SHA256",
+      device_id: deviceId,
+      challenge_id: challengeId,
+      challenge,
+      signing_message: signingMessage,
+      expires_in_seconds: DEVICE_CHALLENGE_TTL_SECONDS
+    }, 201);
+  } catch {
+    return response({ ok: false, error: "DEVICE_TRUST_SCHEMA_UNAVAILABLE", write_enabled: false }, 503);
+  }
+}
+
+async function handleProofComplete(request, env, auth, tenantId) {
+  const parsed = await readLimitedJson(request, 8192);
+  if (!parsed.ok) return response({ ok: false, error: parsed.tooLarge ? "PAYLOAD_TOO_LARGE" : "INVALID_JSON" }, parsed.tooLarge ? 413 : 400);
+  const body = parsed.value;
+  const challengeId = typeof body?.challenge_id === "string" ? body.challenge_id : "";
+  const challenge = typeof body?.challenge === "string" ? body.challenge : "";
+  const deviceId = typeof body?.device_id === "string" ? body.device_id : "";
+  const signature = typeof body?.signature === "string" ? body.signature : "";
+  if (!/^[0-9a-f-]{36}$/i.test(challengeId) || !/^[0-9a-f-]{36}$/i.test(deviceId) ||
+      !/^[A-Za-z0-9_-]{43}$/.test(challenge) || signature.length !== 86) {
+    return response({ ok: false, error: "INVALID_DEVICE_PROOF_PAYLOAD" }, 400);
+  }
+  try {
+    const challengeHash = await sha256Base64url(challenge);
+    const row = await env.DB.prepare(
+      `SELECT c.id, c.credential_id, d.public_key_jwk
+         FROM device_auth_challenges c
+         JOIN trusted_device_credentials d
+           ON d.id = c.credential_id AND d.tenant_id = c.tenant_id AND d.user_id = c.user_id
+        WHERE c.id = ? AND c.tenant_id = ? AND c.user_id = ? AND c.session_id = ?
+          AND c.purpose = 'PROVE' AND c.credential_id = ? AND c.challenge_hash = ?
+          AND c.consumed_at IS NULL AND julianday(c.expires_at) > julianday('now')
+          AND d.status = 'active' AND julianday(d.expires_at) > julianday('now')
+        LIMIT 1`
+    ).bind(challengeId, tenantId, auth.user.id, auth.session_id, deviceId, challengeHash).first();
+    if (!row) return response({ ok: false, error: "DEVICE_PROOF_CHALLENGE_INVALID_OR_EXPIRED" }, 409);
+
+    const publicJwk = validateDevicePublicJwk(JSON.parse(row.public_key_jwk));
+    const signingMessage = buildDeviceProofMessage({
+      challengeId, challenge, tenantId, userId: auth.user.id, credentialId: deviceId
+    });
+    const validSignature = await verifyDeviceEnrollmentSignature({
+      publicJwk, signature, message: signingMessage
+    });
+    if (!validSignature) return response({ ok: false, error: "DEVICE_PROOF_INVALID" }, 401);
+
+    const consumedMarker = `${new Date().toISOString()}:${crypto.randomUUID()}`;
+    const results = await env.DB.batch([
+      env.DB.prepare(
+        `UPDATE device_auth_challenges SET consumed_at = ?
+         WHERE id = ? AND tenant_id = ? AND user_id = ? AND session_id = ?
+           AND credential_id = ? AND purpose = 'PROVE' AND challenge_hash = ?
+           AND consumed_at IS NULL AND julianday(expires_at) > julianday('now')`
+      ).bind(consumedMarker, challengeId, tenantId, auth.user.id, auth.session_id, deviceId, challengeHash),
+      env.DB.prepare(
+        `UPDATE trusted_device_credentials SET last_used_at = CURRENT_TIMESTAMP
+         WHERE id = ? AND tenant_id = ? AND user_id = ? AND status = 'active'
+           AND julianday(expires_at) > julianday('now')
+           AND EXISTS (
+             SELECT 1 FROM device_auth_challenges c
+             WHERE c.id = ? AND c.tenant_id = ? AND c.user_id = ? AND c.session_id = ?
+               AND c.credential_id = ? AND c.purpose = 'PROVE'
+               AND c.challenge_hash = ? AND c.consumed_at = ?
+           )`
+      ).bind(deviceId, tenantId, auth.user.id, challengeId, tenantId, auth.user.id,
+        auth.session_id, deviceId, challengeHash, consumedMarker)
+    ]);
+    if (Number(results?.[0]?.meta?.changes || 0) !== 1 ||
+        Number(results?.[1]?.meta?.changes || 0) !== 1) {
+      return response({ ok: false, error: "DEVICE_PROOF_CONFLICT" }, 409);
+    }
+    return response({
+      ok: true,
+      device_id: deviceId,
+      proof_of_possession: "verified",
+      verified_at: new Date().toISOString(),
+      mission_presence: "not_authorized_by_device_proof_alone"
+    }, 200);
+  } catch {
+    return response({ ok: false, error: "DEVICE_TRUST_SCHEMA_UNAVAILABLE", write_enabled: false }, 503);
+  }
+}
+
 async function handleList(request, env, auth, tenantId) {
   try {
     const result = await env.DB.prepare(
@@ -305,6 +440,8 @@ export async function handleDeviceTrustRoute(request, env, auth, tenantContext, 
   const routes = new Set([
     "/api/security/device/enroll/challenge",
     "/api/security/device/enroll/complete",
+    "/api/security/device/prove/challenge",
+    "/api/security/device/prove/complete",
     "/api/security/device/list",
     "/api/security/device/revoke"
   ]);
@@ -324,6 +461,14 @@ export async function handleDeviceTrustRoute(request, env, auth, tenantContext, 
   if (path === "/api/security/device/enroll/complete") {
     if (request.method !== "POST") return response({ ok: false, error: "METHOD_NOT_ALLOWED" }, 405, { allow: "POST" });
     return handleComplete(request, env, auth, tenantId, requireVerifiedIntervenant);
+  }
+  if (path === "/api/security/device/prove/challenge") {
+    if (request.method !== "POST") return response({ ok: false, error: "METHOD_NOT_ALLOWED" }, 405, { allow: "POST" });
+    return handleProofChallenge(request, env, auth, tenantId);
+  }
+  if (path === "/api/security/device/prove/complete") {
+    if (request.method !== "POST") return response({ ok: false, error: "METHOD_NOT_ALLOWED" }, 405, { allow: "POST" });
+    return handleProofComplete(request, env, auth, tenantId);
   }
   if (path === "/api/security/device/list") {
     if (request.method !== "GET") return response({ ok: false, error: "METHOD_NOT_ALLOWED" }, 405, { allow: "GET" });
