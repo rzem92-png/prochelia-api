@@ -236,7 +236,7 @@ async function repositoryCheckRuns(env, repository, sha) {
   }));
 }
 
-async function readBoundedText(response, maxBytes) {
+export async function readBoundedText(response, maxBytes) {
   if (!response.body) return "";
   const reader = response.body.getReader();
   const chunks = [];
