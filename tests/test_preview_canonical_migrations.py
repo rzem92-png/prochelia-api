@@ -66,6 +66,9 @@ assert "all 39 canonical migrations are pending" in workflow_text, (
 assert "only migrations 0023-0038 are pending" in workflow_text, (
     "Preview migration workflow baseline-to-target range is stale"
 )
+assert '"0038_identity_verification_tenant_scope.sql"' in workflow_text, (
+    "Preview migration workflow omits tenant-scoped identity migration 0038"
+)
 assert '"0036_intervenant_availability_idempotency.sql"' in workflow_text, (
     "Preview migration workflow omits availability idempotency migration 0036"
 )
