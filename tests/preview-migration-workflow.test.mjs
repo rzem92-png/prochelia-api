@@ -49,7 +49,17 @@ test("Preview migration workflow validates the full canonical migration chain", 
     "0026_accounting_currency_consistency.sql",
     "0027_tenant_membership_identity_immutable.sql",
     "0028_tenant_accounting_entity_delete_guard.sql",
-    "0029_supra_append_only_audit_guards.sql"
+    "0029_supra_append_only_audit_guards.sql",
+    "0030_supra_audit_tenant_scope.sql",
+    "0031_operational_marketplace_tenant_scope.sql",
+    "0032_privacy_safe_cross_tenant_mission_marketplace.sql",
+    "0033_intervenant_availability_overlap_guard.sql",
+    "0034_timezone_safe_availability_overlap.sql",
+    "0035_validate_availability_intervals.sql",
+    "0036_intervenant_availability_idempotency.sql",
+    "0037_support_cases_tenant_isolation.sql",
+    "0038_identity_verification_tenant_scope.sql",
+    "0039_cryptographic_device_enrollment.sql"
   ];
   for (const migration of expected) assert.ok(workflow.includes(`"${migration}"`), `missing canonical migration ${migration}`);
 });
@@ -75,6 +85,13 @@ test("Preview post-migration verification checks identity, mission-security and 
     "mission_security_attempts",
     "security_audit",
     "idx_identity_verifications_user",
+    "0038_identity_verification_tenant_scope.sql",
+    "0039_cryptographic_device_enrollment.sql",
+    "trusted_device_credentials", "device_auth_challenges",
+    "idx_trusted_device_credentials_tenant_user_status",
+    "idx_device_auth_challenges_session_expiry", "idx_device_auth_challenges_pending",
+    "idx_identity_verifications_tenant_user_status",
+    "tenant_id",
     "idx_mission_security_intervenant",
     "idx_security_attempts_security",
     "idx_security_audit_mission",
@@ -85,6 +102,9 @@ test("Preview post-migration verification checks identity, mission-security and 
     "supra_audit_events",
     "idx_supra_audit_events_created_at",
     "idx_supra_audit_events_actor",
+    "0030_supra_audit_tenant_scope.sql",
+    "idx_supra_audit_events_tenant_created_at",
+    "trg_supra_audit_events_require_active_tenant",
     "0022_supra_persisted_approvals.sql",
     "supra_approval_requests", "supra_approval_votes", "supra_approval_events",
     "idx_supra_approval_requests_status_expiry", "idx_supra_approval_requests_tenant_resource",
@@ -95,17 +115,20 @@ test("Preview post-migration verification checks identity, mission-security and 
     "trg_supra_approval_status_evidence",
     "trg_supra_audit_events_no_update",
     "trg_supra_audit_events_no_delete",
-    "trg_supra_approval_requests_no_delete"
+    "trg_supra_approval_requests_no_delete",
+    "support_cases",
+    "idx_support_cases_tenant_status_created",
+    "idx_support_cases_tenant_requester_created"
   ]) assert.ok(workflow.includes(name), `missing post-migration verification for ${name}`);
 });
 
-test("Preview migration workflow accepts only an empty EU D1, the exact 23-entry reviewed baseline or the exact 30-entry target", () => {
+test("Preview migration workflow accepts only an empty EU D1, the exact 23-entry reviewed baseline or the exact 40-entry target", () => {
   assert.match(workflow, /SELECT type, name FROM sqlite_master ORDER BY type, name/);
   assert.match(workflow, /registry_present/);
   assert.match(workflow, /non_internal/);
-  assert.match(workflow, /len\(local\) != 30/);
+  assert.match(workflow, /len\(local\) != 40/);
   assert.match(workflow, /remote == base/);
-  assert.match(workflow, /differs from the exact reviewed 23-entry baseline and 30-entry target/);
+  assert.match(workflow, /differs from the exact reviewed 23-entry baseline and 40-entry target/);
   assert.doesNotMatch(workflow, /legacy=/);
   assert.doesNotMatch(workflow, /baseline=\(local-pending\)\|legacy/);
 });
@@ -173,6 +196,21 @@ test("Preview migration workflow verifies every persisted approval table, index 
   assert.match(workflow, /actual_triggers != expected_triggers/);
 });
 
+
+test("Preview post-migration inventory queries include every object introduced by SUPRA tenant-scope migration 0030", () => {
+  const objectsStart = workflow.indexOf('jq -n \'{sql:"SELECT type, name FROM sqlite_master');
+  const objectsEnd = workflow.indexOf('> "$objects_payload"', objectsStart);
+  const objectsQuery = workflow.slice(objectsStart, objectsEnd);
+  assert.ok(objectsStart >= 0 && objectsEnd > objectsStart);
+  assert.ok(objectsQuery.includes("idx_supra_audit_events_tenant_created_at"));
+  assert.ok(objectsQuery.includes("trg_supra_audit_events_require_active_tenant"));
+
+  const guardsStart = workflow.indexOf('jq -n --arg sql "SELECT name FROM sqlite_master WHERE type=\'trigger\'');
+  const guardsEnd = workflow.indexOf('> "$supra_guards_payload"', guardsStart);
+  const guardsQuery = workflow.slice(guardsStart, guardsEnd);
+  assert.ok(guardsStart >= 0 && guardsEnd > guardsStart);
+  assert.ok(guardsQuery.includes("trg_supra_audit_events_require_active_tenant"));
+});
 test("Preview migration commands use only the dedicated migration-only D1 config", () => {
   assert.match(workflow, /Path\("wrangler\.preview-migrations\.jsonc"\)/);
   assert.match(workflow, /db\["binding"\] == "PREVIEW_DB"/);
@@ -256,8 +294,43 @@ test("Preview migration workflow verifies accounting, tenant and session-revocat
   for (const name of [
     "accounting_entities","accounting_accounts","accounting_journals","accounting_journal_lines",
     "tenants","tenant_memberships","tenant_membership_events",
+    "trusted_device_credentials","device_auth_challenges",
+    "idx_trusted_device_credentials_tenant_user_status","idx_device_auth_challenges_session_expiry","idx_device_auth_challenges_pending",
     "idx_tenant_membership_one_nonrevoked_per_user","idx_tenant_membership_one_owner",
     "trg_tenant_membership_revocation_terminal","trg_tenant_membership_identity_immutable","trg_session_revocation_terminal",
     "revoked_at","revoked_reason","revoked_by_user_id","last_seen_at"
   ]) assert.ok(workflow.includes(name), `missing post-migration verification for ${name}`);
+});
+
+test("Preview migration verifies operational marketplace tenant scope", () => {
+  for (const name of [
+    "0031_operational_marketplace_tenant_scope.sql",
+    "idx_clients_id_tenant", "idx_intervenants_id_tenant", "idx_prestations_id_tenant", "idx_missions_id_tenant", "idx_disponibilites_id_tenant",
+    "idx_clients_tenant_user", "idx_intervenants_tenant_user",
+    "idx_prestations_tenant_active", "idx_missions_tenant_status_start",
+    "idx_missions_tenant_intervenant", "idx_tarifs_tenant_prestation_active",
+    "idx_paiements_tenant_mission", "idx_disponibilites_tenant_intervenant_start",
+    "idx_evaluations_tenant_mission", "idx_documents_tenant_user",
+    "idx_conflits_tenant_mission", "idx_journal_tenant_created", "idx_wallets_tenant_user",
+    "trg_missions_relationship_scope_insert", "trg_missions_relationship_scope_update",
+    "trg_availability_intervenant_scope", "trg_payment_mission_scope",
+    "trg_tarif_prestation_scope", "trg_evaluation_mission_scope", "trg_conflict_mission_scope",
+    "Verify operational marketplace tenant boundary",
+    "tenant_id columns verified on all 12 operational marketplace tables"
+  ]) assert.ok(workflow.includes(name), `missing operational marketplace tenant verification: ${name}`);
+});
+
+test("Preview migration verifies privacy-safe cross-tenant mission opportunities and atomic assignments", () => {
+  for (const name of [
+    "0032_privacy_safe_cross_tenant_mission_marketplace.sql",
+    "0033_intervenant_availability_overlap_guard.sql",
+    "mission_opportunity_consents", "mission_opportunities", "mission_applications", "mission_assignments", "intervenant_skills", "idx_intervenant_skills_verified",
+    "trg_intervenant_skill_insert_scope", "trg_intervenant_skill_verification_guard", "trg_intervenant_skill_identity_immutable", "trg_intervenant_skill_update_verification_guard", "trg_intervenant_skills_no_delete",
+    "privacy-safe cross-tenant marketplace and assignment guards",
+    "idx_mission_opportunities_public_feed", "idx_mission_applications_opportunity_status",
+    "idx_mission_applications_provider", "idx_mission_assignments_provider_status",
+    "trg_mission_opportunity_publish_guard", "trg_mission_application_submit_guard",
+    "trg_mission_application_accept_guard", "trg_mission_application_accepted_create_assignment",
+    "trg_mission_assignment_insert_guard", "public_summary", "postal_prefix", "provider_pay_cents"
+  ]) assert.ok(workflow.includes(name), `missing marketplace opportunity verification: ${name}`);
 });

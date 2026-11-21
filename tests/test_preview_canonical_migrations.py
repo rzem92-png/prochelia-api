@@ -34,25 +34,47 @@ EXPECTED = [
     "0027_tenant_membership_identity_immutable.sql",
     "0028_tenant_accounting_entity_delete_guard.sql",
     "0029_supra_append_only_audit_guards.sql",
+    "0030_supra_audit_tenant_scope.sql",
+    "0031_operational_marketplace_tenant_scope.sql",
+    "0032_privacy_safe_cross_tenant_mission_marketplace.sql",
+    "0033_intervenant_availability_overlap_guard.sql",
+    "0034_timezone_safe_availability_overlap.sql",
+    "0035_validate_availability_intervals.sql",
+    "0036_intervenant_availability_idempotency.sql",
+    "0037_support_cases_tenant_isolation.sql",
+    "0038_identity_verification_tenant_scope.sql",
+    "0039_cryptographic_device_enrollment.sql",
 ]
 
 # Keep the manual Preview migration gate synchronized with the canonical chain.
 WORKFLOW = ROOT / ".github" / "workflows" / "apply-preview-d1-migrations.yml"
 workflow_text = WORKFLOW.read_text(encoding="utf-8")
 assert '"0029_supra_append_only_audit_guards.sql"' in workflow_text, (
-    "Preview migration workflow omits the latest canonical migration 0029"
+    "Preview migration workflow omits the latest canonical migration 0029/0030"
 )
-assert "if len(local) != 30:" in workflow_text, (
-    "Preview migration workflow must require exactly 30 canonical migrations"
+assert '"0030_supra_audit_tenant_scope.sql"' in workflow_text, (
+    "Preview migration workflow omits tenant-scoped SUPRA audit migration 0030"
 )
-assert "exact 30-entry registry" in workflow_text, (
+assert "if len(local) != 40:" in workflow_text, (
+    "Preview migration workflow must require exactly 39 canonical migrations"
+)
+assert "exact 40-entry registry" in workflow_text, (
     "Preview migration workflow target registry count is stale"
 )
-assert "all 30 canonical migrations are pending" in workflow_text, (
+assert "all 40 canonical migrations are pending" in workflow_text, (
     "Preview migration workflow empty-database inventory message is stale"
 )
-assert "only migrations 0023-0029 are pending" in workflow_text, (
+assert "only migrations 0023-0039 are pending" in workflow_text, (
     "Preview migration workflow baseline-to-target range is stale"
+)
+assert '"0038_identity_verification_tenant_scope.sql"' in workflow_text, (
+    "Preview migration workflow omits tenant-scoped identity migration 0038"
+)
+assert '"0036_intervenant_availability_idempotency.sql"' in workflow_text, (
+    "Preview migration workflow omits availability idempotency migration 0036"
+)
+assert '"0035_validate_availability_intervals.sql"' in workflow_text, (
+    "Preview migration workflow omits availability interval validation migration 0035"
 )
 
 actual = sorted(path.name for path in MIGRATIONS.glob("*.sql"))
@@ -71,6 +93,13 @@ violations = db.execute("PRAGMA foreign_key_check").fetchall()
 assert not violations, f"Canonical migration chain creates foreign-key violations: {violations[:10]}"
 
 tables = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+indexes = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='index'")}
+assert "idx_disponibilites_tenant_intervenant_idempotency" in indexes, "Missing durable availability idempotency index"
+assert "idx_support_cases_tenant_status_created" in indexes, "Missing tenant-scoped support status index"
+assert "idx_support_cases_tenant_requester_created" in indexes, "Missing tenant-scoped support requester index"
+assert "support_cases" in tables, "Missing tenant-scoped support case table"
+assert {"trusted_device_credentials", "device_auth_challenges"} <= tables, "Missing cryptographic device enrollment tables"
+assert {"idx_trusted_device_credentials_tenant_user_status", "idx_device_auth_challenges_session_expiry", "idx_device_auth_challenges_pending"} <= indexes, "Missing cryptographic device enrollment indexes"
 required = {
     "users", "sessions", "clients", "intervenants", "missions",
     "auth_login_rate_limits", "supra_audit_events",
@@ -88,6 +117,8 @@ accounting_tables = {
     "accounting_journals", "accounting_journal_lines",
 }
 assert accounting_tables <= tables, f"Missing accounting tables: {sorted(accounting_tables-tables)}"
+accounting_entity_fk_targets = {row[2] for row in db.execute("PRAGMA foreign_key_list(accounting_entities)")}
+assert "tenants" in accounting_entity_fk_targets, "Accounting entities must reference the canonical tenants registry"
 # Tenant authority and membership lifecycle fixtures.
 tenant_tables = {"tenants", "tenant_memberships", "tenant_membership_events"}
 assert tenant_tables <= tables, f"Missing tenant authority tables: {sorted(tenant_tables-tables)}"
@@ -486,10 +517,10 @@ assert required_supra_guards <= supra_triggers, (
 
 db.execute("""
     INSERT INTO supra_audit_events(
-      id, actor_user_id, actor_role, event_type, domain, action, risk,
+      id, tenant_id, actor_user_id, actor_role, event_type, domain, action, risk,
       approval_required, execution_allowed
     ) VALUES (
-      'supra-audit-synthetic', 'user-a', 'gerante', 'PLAN_CREATED',
+      'supra-audit-synthetic', 'tenant-a', 'user-a', 'gerante', 'PLAN_CREATED',
       'GOVERNANCE', 'RECOMMEND_ONLY', 'LOW', 0, 0
     )
 """)
@@ -518,3 +549,353 @@ try:
 except sqlite3.IntegrityError as exc:
     assert "APPROVAL_REQUESTS_ARE_APPEND_ONLY" in str(exc), str(exc)
 print("PASS: SUPRA audit events and approval requests reject UPDATE/DELETE under migration 0029.")
+
+
+# Nexus Supra audit events are attributed to an active tenant at the database boundary.
+audit_columns = {row[1] for row in db.execute("PRAGMA table_info(supra_audit_events)")}
+assert "tenant_id" in audit_columns, "SUPRA audit table must include tenant_id"
+try:
+    db.execute("INSERT INTO supra_audit_events(id, actor_user_id, actor_role, event_type, domain, action, risk, approval_required) VALUES ('bad-audit', 'user-a', 'GERANTE', 'TEST', 'security', 'TEST', 'LOW', 0)")
+    raise AssertionError("SUPRA audit event without tenant was incorrectly accepted")
+except sqlite3.IntegrityError as exc:
+    assert "SUPRA_AUDIT_ACTIVE_TENANT_REQUIRED" in str(exc), str(exc)
+db.execute("INSERT INTO supra_audit_events(id, tenant_id, actor_user_id, actor_role, event_type, domain, action, risk, approval_required) VALUES ('good-audit', 'tenant-a', 'user-a', 'GERANTE', 'TEST', 'security', 'TEST', 'LOW', 0)")
+try:
+    db.execute("INSERT INTO supra_audit_events(id, tenant_id, actor_user_id, actor_role, event_type, domain, action, risk, approval_required) VALUES ('inactive-audit', 'unknown-tenant', 'user-a', 'GERANTE', 'TEST', 'security', 'TEST', 'LOW', 0)")
+    raise AssertionError("SUPRA audit event for an unknown tenant was incorrectly accepted")
+except sqlite3.IntegrityError as exc:
+    assert "SUPRA_AUDIT_ACTIVE_TENANT_REQUIRED" in str(exc), str(exc)
+
+# Operational marketplace rows are tenant-scoped at the database boundary.
+marketplace_columns = {
+    "clients", "intervenants", "prestations", "missions", "tarifs", "paiements",
+    "disponibilites", "evaluations", "documents", "conflits", "journal", "wallets",
+}
+for table in sorted(marketplace_columns):
+    columns = {row[1] for row in db.execute(f"PRAGMA table_info({table})")}
+    assert "tenant_id" in columns, f"{table} is missing tenant_id"
+marketplace_triggers = {
+    row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='trigger'")
+}
+required_marketplace_triggers = {
+    "trg_clients_require_active_tenant", "trg_intervenants_require_active_tenant",
+    "trg_prestations_require_active_tenant", "trg_missions_require_active_tenant",
+    "trg_tarifs_require_active_tenant", "trg_paiements_require_active_tenant",
+    "trg_disponibilites_require_active_tenant", "trg_evaluations_require_active_tenant",
+    "trg_documents_require_active_tenant", "trg_conflits_require_active_tenant",
+    "trg_journal_require_active_tenant", "trg_wallets_require_active_tenant",
+    "trg_clients_membership_scope", "trg_intervenants_membership_scope",
+    "trg_wallets_membership_scope", "trg_documents_membership_scope",
+    "trg_missions_relationship_scope_insert", "trg_missions_relationship_scope_update",
+    "trg_availability_intervenant_scope", "trg_availability_intervenant_scope_update",
+    "trg_tarif_prestation_scope", "trg_tarif_prestation_scope_update",
+    "trg_payment_mission_scope", "trg_payment_mission_scope_update",
+    "trg_evaluation_mission_scope", "trg_evaluation_mission_scope_update",
+    "trg_conflict_mission_scope", "trg_conflict_mission_scope_update",
+}
+required_marketplace_indexes = {"idx_clients_id_tenant", "idx_intervenants_id_tenant", "idx_prestations_id_tenant", "idx_missions_id_tenant", "idx_disponibilites_id_tenant"}
+marketplace_indexes = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='index'")}
+assert required_marketplace_indexes <= marketplace_indexes, f"Missing composite tenant indexes: {sorted(required_marketplace_indexes-marketplace_indexes)}"
+required_marketplace_triggers |= {
+    f"trg_{table}_tenant_immutable" for table in marketplace_columns
+}
+assert required_marketplace_triggers <= marketplace_triggers, (
+    f"Missing operational marketplace tenant guards: {sorted(required_marketplace_triggers-marketplace_triggers)}"
+)
+
+# Create two isolated tenants and active memberships for synthetic users.
+for user_id, email, role in [
+    ("market-client-a", "market-client-a@example.test", "client"),
+    ("market-worker-a", "market-worker-a@example.test", "intervenant"),
+    ("market-client-b", "market-client-b@example.test", "client"),
+    ("market-worker-b", "market-worker-b@example.test", "intervenant"),
+    ("market-manager-a", "market-manager-a@example.test", "gerante"),
+    ("market-manager-b", "market-manager-b@example.test", "gerante"),
+]:
+    db.execute(
+        "INSERT INTO users(id, role, email, first_name, last_name, password_hash) VALUES (?, ?, ?, 'Synthetic', 'Marketplace', 'synthetic')",
+        (user_id, role, email),
+    )
+for tenant_id, slug in [("market-tenant-a", "market-tenant-a"), ("market-tenant-b", "market-tenant-b")]:
+    db.execute("INSERT INTO tenants(id, slug, display_name) VALUES (?, ?, ?)", (tenant_id, slug, slug))
+for suffix, tenant_id, user_id in [
+    ("client-a", "market-tenant-a", "market-client-a"),
+    ("worker-a", "market-tenant-a", "market-worker-a"),
+    ("client-b", "market-tenant-b", "market-client-b"),
+    ("worker-b", "market-tenant-b", "market-worker-b"),
+]:
+    membership_id = f"membership-{suffix}"
+    db.execute(
+        "INSERT INTO tenant_memberships(id, tenant_id, user_id, role, status, invited_by_user_id) VALUES (?, ?, ?, 'MEMBER', 'INVITED', 'user-admin')",
+        (membership_id, tenant_id, user_id),
+    )
+    db.execute(
+        "UPDATE tenant_memberships SET status='ACTIVE', accepted_at=CURRENT_TIMESTAMP WHERE id=?",
+        (membership_id,),
+    )
+
+# Missing tenant, inactive tenant, or non-member owner must be rejected.
+try:
+    db.execute("INSERT INTO clients(id, user_id, tenant_id) VALUES ('market-client-no-tenant', 'market-client-a', NULL)")
+    raise AssertionError("Client without tenant was incorrectly accepted")
+except sqlite3.IntegrityError as exc:
+    assert any(code in str(exc) for code in ("CLIENT_ACTIVE_TENANT_REQUIRED", "CLIENT_TENANT_MEMBERSHIP_REQUIRED")), str(exc)
+try:
+    db.execute("INSERT INTO intervenants(id, user_id, tenant_id) VALUES ('market-worker-cross', 'market-worker-a', 'tenant-b')")
+    raise AssertionError("Intervenant assigned to a non-member tenant was incorrectly accepted")
+except sqlite3.IntegrityError as exc:
+    assert "INTERVENANT_TENANT_MEMBERSHIP_REQUIRED" in str(exc), str(exc)
+
+db.execute("INSERT INTO clients(id, user_id, tenant_id) VALUES ('market-client-a-row', 'market-client-a', 'market-tenant-a')")
+db.execute("INSERT INTO intervenants(id, user_id, tenant_id) VALUES ('market-worker-a-row', 'market-worker-a', 'market-tenant-a')")
+db.execute("INSERT INTO clients(id, user_id, tenant_id) VALUES ('market-client-b-row', 'market-client-b', 'market-tenant-b')")
+db.execute("INSERT INTO intervenants(id, user_id, tenant_id, validation_status) VALUES ('market-worker-b-row', 'market-worker-b', 'market-tenant-b', 'approved')")
+db.execute("INSERT INTO prestations(id, name, tenant_id) VALUES ('market-service-a', 'Synthetic service A', 'market-tenant-a')")
+db.execute("INSERT INTO prestations(id, name, tenant_id) VALUES ('market-service-b', 'Synthetic service B', 'market-tenant-b')")
+db.execute("""
+    INSERT INTO missions(id, client_id, intervenant_id, prestation_id, start_at, tenant_id)
+    VALUES ('market-mission-a', 'market-client-a-row', 'market-worker-a-row', 'market-service-a', '2026-11-21T09:00:00Z', 'market-tenant-a')
+""")
+try:
+    db.execute("""
+        INSERT INTO missions(id, client_id, intervenant_id, prestation_id, start_at, tenant_id)
+        VALUES ('market-mission-cross', 'market-client-a-row', 'market-worker-b-row', 'market-service-a', '2026-11-21T09:00:00Z', 'market-tenant-a')
+    """)
+    raise AssertionError("Cross-tenant mission assignment was incorrectly accepted")
+except sqlite3.IntegrityError as exc:
+    assert "MISSION_RELATIONSHIP_TENANT_MISMATCH" in str(exc), str(exc)
+try:
+    db.execute("""
+        INSERT INTO disponibilites(id, intervenant_id, start_at, end_at, tenant_id)
+        VALUES ('market-availability-cross', 'market-worker-b-row', '2026-11-21T09:00:00Z', '2026-11-21T12:00:00Z', 'market-tenant-a')
+    """)
+    raise AssertionError("Cross-tenant availability was incorrectly accepted")
+except sqlite3.IntegrityError as exc:
+    assert "AVAILABILITY_INTERVENANT_TENANT_MISMATCH" in str(exc), str(exc)
+db.execute("""
+    INSERT INTO disponibilites(id, intervenant_id, start_at, end_at, tenant_id)
+    VALUES ('market-availability-a', 'market-worker-a-row', '2026-11-21T09:00:00Z', '2026-11-21T12:00:00Z', 'market-tenant-a')
+""")
+
+# Offsets are compared as instants: 08:00Z-09:00Z ends exactly when the
+# existing 09:00Z-12:00Z slot begins and must not be rejected as overlapping.
+db.execute("""
+    INSERT INTO disponibilites(id, intervenant_id, start_at, end_at, status, tenant_id)
+    VALUES ('market-availability-offset-adjacent', 'market-worker-a-row',
+            '2026-11-21T10:00:00+02:00', '2026-11-21T11:00:00+02:00',
+            'available', 'market-tenant-a')
+""")
+try:
+    db.execute("""
+        INSERT INTO disponibilites(id, intervenant_id, start_at, end_at, status, tenant_id)
+        VALUES ('market-availability-offset-overlap', 'market-worker-a-row',
+                '2026-11-21T11:30:00+02:00', '2026-11-21T12:30:00+02:00',
+                'available', 'market-tenant-a')
+    """)
+    raise AssertionError("Timezone-offset overlapping availability was incorrectly accepted")
+except sqlite3.IntegrityError as exc:
+    assert "AVAILABILITY_OVERLAP" in str(exc), str(exc)
+db.execute("""
+    INSERT INTO wallets(id, user_id, tenant_id, currency) VALUES ('market-wallet-a', 'market-worker-a', 'market-tenant-a', 'EUR')
+""")
+db.execute("""
+    INSERT INTO documents(id, user_id, document_type, file_reference, tenant_id)
+    VALUES ('market-document-a', 'market-worker-a', 'IDENTITY', 'synthetic://document', 'market-tenant-a')
+""")
+try:
+    db.execute("UPDATE missions SET tenant_id='market-tenant-b' WHERE id='market-mission-a'")
+    raise AssertionError("Mission tenant reassignment was incorrectly accepted")
+except sqlite3.IntegrityError as exc:
+    assert "TENANT_IMMUTABLE" in str(exc) or "MISSION_RELATIONSHIP_TENANT_MISMATCH" in str(exc), str(exc)
+print("PASS: operational marketplace tables require active tenant membership, tenant-consistent mission relations and immutable tenant ownership.")
+
+db.execute("""
+    INSERT INTO tenant_memberships(id, tenant_id, user_id, role, status, invited_by_user_id, accepted_at)
+    VALUES ('membership-manager-b', 'market-tenant-b', 'market-manager-b', 'MANAGER', 'ACTIVE', 'user-admin', CURRENT_TIMESTAMP)
+""")
+db.execute("""
+    INSERT INTO tenant_memberships(id, tenant_id, user_id, role, status, invited_by_user_id, accepted_at)
+    VALUES ('membership-manager-a', 'market-tenant-a', 'market-manager-a', 'MANAGER', 'ACTIVE', 'user-admin', CURRENT_TIMESTAMP)
+""")
+# Privacy-safe cross-tenant opportunity publication, application and atomic assignment.
+marketplace_tables = {
+    row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")
+}
+required_marketplace_tables = {
+    "mission_opportunity_consents", "mission_opportunities", "mission_applications", "mission_assignments", "intervenant_skills",
+}
+assert required_marketplace_tables <= marketplace_tables, (
+    f"Missing cross-tenant marketplace tables: {sorted(required_marketplace_tables-marketplace_tables)}"
+)
+for table in required_marketplace_tables:
+    columns = {row[1] for row in db.execute(f"PRAGMA table_info({table})")}
+    assert "owner_tenant_id" in columns or "tenant_id" in columns, f"{table} missing tenant scope"
+opportunity_columns = {row[1] for row in db.execute("PRAGMA table_info(mission_opportunities)")}
+assert "address" not in opportunity_columns and "client_user_id" not in opportunity_columns, (
+    "Public opportunity read model must not contain client address or client identity"
+)
+
+db.execute("""
+    INSERT INTO missions(
+      id, client_id, intervenant_id, prestation_id, start_at, end_at,
+      price_client, price_intervenant, commission, status, tenant_id
+    ) VALUES (
+      'market-mission-opportunity', 'market-client-a-row', NULL, 'market-service-a',
+      '2026-11-23T09:00:00Z', '2026-11-23T11:00:00Z',
+      60, 40, 20, 'requested', 'market-tenant-a'
+    )
+""")
+db.execute("""
+    INSERT INTO mission_opportunity_consents(
+      id, owner_tenant_id, mission_id, client_user_id, consent_version, evidence_sha256
+    ) VALUES (
+      'market-consent-a', 'market-tenant-a', 'market-mission-opportunity',
+      'market-client-a', 'privacy-v1', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+    )
+""")
+db.execute("""
+    INSERT INTO mission_opportunities(
+      id, owner_tenant_id, mission_id, consent_id, category_code, public_summary,
+      city, postal_prefix, start_at, end_at, provider_pay_cents, currency,
+      required_skills_json, published_by_user_id, expires_at
+    ) VALUES (
+      'market-opportunity-a', 'market-tenant-a', 'market-mission-opportunity',
+      'market-consent-a', 'CLEANING', 'Nettoyage ponctuel d’un logement',
+      'Aubergenville', '78', '2026-11-23T09:00:00Z', '2026-11-23T11:00:00Z',
+      4000, 'EUR', '["cleaning"]', 'market-client-a', '2026-11-22T23:00:00Z'
+    )
+""")
+db.execute("""
+    INSERT INTO disponibilites(id, intervenant_id, start_at, end_at, status, tenant_id)
+    VALUES (
+      'market-availability-b-opportunity', 'market-worker-b-row',
+      '2026-11-23T08:00:00Z', '2026-11-23T12:00:00Z', 'available', 'market-tenant-b'
+    )
+""")
+try:
+    db.execute("""
+        INSERT INTO mission_applications(
+          id, opportunity_id, owner_tenant_id, applicant_tenant_id,
+          intervenant_id, applicant_user_id, provider_pay_cents, currency, idempotency_key
+        ) VALUES (
+          'market-application-without-skill', 'market-opportunity-a', 'market-tenant-a',
+          'market-tenant-b', 'market-worker-b-row', 'market-worker-b',
+          4000, 'EUR', 'market-apply-no-skill-0001'
+        )
+    """)
+    raise AssertionError("Application without verified required skill was incorrectly accepted")
+except sqlite3.IntegrityError as exc:
+    assert "MISSION_APPLICATION_ELIGIBILITY_GUARD_FAILED" in str(exc), str(exc)
+try:
+    db.execute("""
+        INSERT INTO intervenant_skills(
+          id, tenant_id, intervenant_id, skill_code, verification_status,
+          evidence_sha256, verified_by_user_id, verified_at
+        ) VALUES (
+          'market-skill-unverified-reviewer', 'market-tenant-b', 'market-worker-b-row',
+          'cleaning', 'VERIFIED', 'cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc',
+          'market-worker-b', CURRENT_TIMESTAMP
+        )
+    """)
+    raise AssertionError("Provider self-verification of a required skill was incorrectly accepted")
+except sqlite3.IntegrityError as exc:
+    assert "INTERVENANT_SKILL_VERIFIER_NOT_AUTHORIZED" in str(exc), str(exc)
+db.execute("""
+    INSERT INTO intervenant_skills(
+      id, tenant_id, intervenant_id, skill_code, verification_status,
+      evidence_sha256, verified_by_user_id, verified_at
+    ) VALUES (
+      'market-skill-b-cleaning', 'market-tenant-b', 'market-worker-b-row',
+      'cleaning', 'VERIFIED', 'dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd',
+      'market-manager-b', CURRENT_TIMESTAMP
+    )
+""")
+db.execute("""
+    INSERT INTO mission_applications(
+      id, opportunity_id, owner_tenant_id, applicant_tenant_id,
+      intervenant_id, applicant_user_id, provider_pay_cents, currency, idempotency_key, public_note
+    ) VALUES (
+      'market-application-b', 'market-opportunity-a', 'market-tenant-a',
+      'market-tenant-b', 'market-worker-b-row', 'market-worker-b',
+      4000, 'EUR', 'market-apply-worker-b-0001', 'Disponible pour cette mission.'
+    )
+""")
+db.execute("""
+    UPDATE mission_applications
+       SET status='ACCEPTED', decided_at=CURRENT_TIMESTAMP,
+           decided_by_user_id='market-manager-a', version=version+1
+     WHERE id='market-application-b'
+""")
+assignment = db.execute("""
+    SELECT provider_tenant_id, intervenant_id, status
+      FROM mission_assignments WHERE opportunity_id='market-opportunity-a'
+""").fetchone()
+assert assignment == ("market-tenant-b", "market-worker-b-row", "ASSIGNED"), assignment
+assert db.execute("SELECT status FROM mission_opportunities WHERE id='market-opportunity-a'").fetchone()[0] == "FILLED"
+assert db.execute("SELECT intervenant_id FROM missions WHERE id='market-mission-opportunity'").fetchone()[0] is None, (
+    "Cross-tenant assignment must not be written into the legacy same-tenant mission.intervenant_id field"
+)
+
+# A second provider cannot apply after the opportunity is atomically filled.
+db.execute("UPDATE intervenants SET validation_status='approved' WHERE id='market-worker-a-row'")
+db.execute("""
+    INSERT INTO disponibilites(id, intervenant_id, start_at, end_at, status, tenant_id)
+    VALUES (
+      'market-availability-a-opportunity', 'market-worker-a-row',
+      '2026-11-23T08:00:00Z', '2026-11-23T12:00:00Z', 'available', 'market-tenant-a'
+    )
+""")
+try:
+    db.execute("""
+        INSERT INTO mission_applications(
+          id, opportunity_id, owner_tenant_id, applicant_tenant_id,
+          intervenant_id, applicant_user_id, provider_pay_cents, currency, idempotency_key
+        ) VALUES (
+          'market-application-second', 'market-opportunity-a', 'market-tenant-a',
+          'market-tenant-a', 'market-worker-a-row', 'market-worker-a',
+          4000, 'EUR', 'market-apply-worker-a-0001'
+        )
+    """)
+    raise AssertionError("Application was accepted after opportunity was filled")
+except sqlite3.IntegrityError as exc:
+    assert "MISSION_APPLICATION_ELIGIBILITY_GUARD_FAILED" in str(exc), str(exc)
+
+# A revoked consent cancels an open listing and permanently prevents new applications.
+db.execute("""
+    INSERT INTO missions(
+      id, client_id, intervenant_id, prestation_id, start_at, end_at,
+      price_client, price_intervenant, commission, status, tenant_id
+    ) VALUES (
+      'market-mission-revoke', 'market-client-a-row', NULL, 'market-service-a',
+      '2026-11-24T09:00:00Z', '2026-11-24T11:00:00Z',
+      60, 40, 20, 'requested', 'market-tenant-a'
+    )
+""")
+db.execute("""
+    INSERT INTO mission_opportunity_consents(
+      id, owner_tenant_id, mission_id, client_user_id, consent_version, evidence_sha256
+    ) VALUES (
+      'market-consent-revoke', 'market-tenant-a', 'market-mission-revoke',
+      'market-client-a', 'privacy-v1', 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
+    )
+""")
+db.execute("""
+    INSERT INTO mission_opportunities(
+      id, owner_tenant_id, mission_id, consent_id, category_code, public_summary,
+      city, start_at, end_at, provider_pay_cents, currency, published_by_user_id, expires_at
+    ) VALUES (
+      'market-opportunity-revoke', 'market-tenant-a', 'market-mission-revoke',
+      'market-consent-revoke', 'CLEANING', 'Nettoyage ponctuel d’un logement',
+      'Aubergenville', '2026-11-24T09:00:00Z', '2026-11-24T11:00:00Z',
+      4000, 'EUR', 'market-client-a', '2026-11-23T23:00:00Z'
+    )
+""")
+db.execute("UPDATE mission_opportunity_consents SET revoked_at=CURRENT_TIMESTAMP WHERE id='market-consent-revoke'")
+assert db.execute("SELECT status FROM mission_opportunities WHERE id='market-opportunity-revoke'").fetchone()[0] == "CANCELLED"
+for table in ["mission_opportunity_consents", "mission_opportunities", "mission_applications", "mission_assignments"]:
+    try:
+        db.execute(f"DELETE FROM {table} WHERE id=(SELECT id FROM {table} LIMIT 1)")
+        raise AssertionError(f"{table} history was deletable")
+    except sqlite3.IntegrityError:
+        pass
+print("PASS: privacy-safe cross-tenant marketplace consent, publication, eligibility, atomic acceptance, one-provider assignment, cancellation and append-only history.")

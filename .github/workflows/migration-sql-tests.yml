@@ -37,4 +37,5 @@ jobs:
         run: |
           python3 tests/test_migrations_sqlite.py
           python3 tests/test_preview_canonical_migrations.py
+          python3 tests/test_availability_interval_validation.py
           python3 tests/test_prepare_d1_restore.py

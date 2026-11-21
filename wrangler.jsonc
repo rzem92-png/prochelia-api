@@ -22,5 +22,11 @@
       "enabled": true,
       "invocation_logs": true
     }
+  },
+  "triggers": {
+    "crons": [
+      "*/1 * * * *",
+      "0 3 * * *"
+    ]
   }
 }
