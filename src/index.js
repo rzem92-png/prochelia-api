@@ -4352,10 +4352,16 @@ async function supportAuth(request,env){
   const role=supportRoleNormalize(auth.user.role);
   if(!supportRoleAllowed(role)) return {response:json({ok:false,error:'FORBIDDEN',version:VERSION},403)};
   // Support cases can contain personal, operational and financial evidence.
-  // Resolve their visibility exclusively from the authenticated active tenant.
-  const tenantId=auth.session_active_tenant_id;
-  if(!tenantId) return {response:json({ok:false,error:'ACTIVE_TENANT_REQUIRED',version:VERSION},403)};
-  return {auth,role,tenantId};
+  // Revalidate session, membership and tenant status against D1 on every request.
+  const tenantContext=await resolveTenantContext(request,env,auth);
+  if(!tenantContext.ok) {
+    return {response:json({ok:false,error:tenantContext.error,version:VERSION},tenantContext.status)};
+  }
+  const tenantId=tenantContext.tenant.id;
+  if(!auth.session_active_tenant_id || auth.session_active_tenant_id!==tenantId) {
+    return {response:json({ok:false,error:'ACTIVE_TENANT_REQUIRED',version:VERSION},403)};
+  }
+  return {auth,role,tenantId,tenantContext};
 }
 
 async function supportEvent(env,caseId,actorRole,actorId,eventType,details={}){
