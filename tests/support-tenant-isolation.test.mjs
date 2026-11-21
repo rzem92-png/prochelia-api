@@ -70,10 +70,11 @@ test("migration adds tenant scope and indexes without assigning legacy cases to 
 
 test("client-supplied execution_verified cannot auto-close a support case", () => {
   const start = source.indexOf("async function supportAutoResolve(");
-  const end = source.indexOf("\\n}", start) + 2;
+  const end = source.indexOf("\n}", start) + 2;
   assert.ok(start >= 0 && end > start);
   const resolver = source.slice(start, end);
   assert.match(resolver, /const verified=false/);
-  assert.doesNotMatch(resolver, /context\\?\.execution_verified|context\.execution_verified/);
+  assert.equal(resolver.includes("context?.execution_verified"), false);
+  assert.equal(resolver.includes("context.execution_verified"), false);
   assert.match(resolver, /NO_VERIFIED_DOWNSTREAM_ACTION/);
 });
