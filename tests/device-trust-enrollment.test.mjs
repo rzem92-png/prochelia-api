@@ -377,6 +377,30 @@ test("device proof endpoints are POST-only and require the authenticated interve
   }
 });
 
+
+test("device proof endpoints require verified intervenant identity before accepting proof operations", async () => {
+  const auth = { user: { id: "intervenant-1", role: "intervenant" }, session_id: "session-1" };
+  const tenantContext = { ok: true, tenant: { id: "tenant-1" } };
+  for (const path of [
+    "/api/security/device/prove/challenge",
+    "/api/security/device/prove/complete"
+  ]) {
+    const result = await handleDeviceTrustRoute(
+      new Request("https://example.test" + path, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({})
+      }),
+      { DB: {} },
+      auth,
+      tenantContext,
+      async () => false
+    );
+    assert.equal(result.status, 403);
+    assert.equal((await result.json()).error, "IDENTITY_VERIFICATION_REQUIRED");
+  }
+});
+
 test("device proof challenge is never treated as mission presence or mission authorization", () => {
   const source = readFileSync(new URL("../src/device-trust.js", import.meta.url), "utf8");
   assert.match(source, /purpose: "PROVE"/);
