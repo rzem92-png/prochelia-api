@@ -183,7 +183,11 @@ function createDeviceTrustDb() {
             results: state.credentials
               .filter(item => item.tenantId === tenantId && item.userId === userId)
               .map(({ id, algorithm, key_thumbprint, status, created_at, last_used_at, expires_at, revoked_at }) =>
-                ({ id, algorithm, key_thumbprint, status, created_at, last_used_at, expires_at, revoked_at }))
+                ({
+                  id, algorithm, key_thumbprint,
+                  status: status === "active" && Date.parse(expires_at) <= Date.now() ? "expired" : status,
+                  created_at, last_used_at, expires_at, revoked_at
+                }))
           };
         }
       };
@@ -307,6 +311,33 @@ test("device enrollment is session- and tenant-bound, stores only public key mat
   );
   assert.equal(revoke.status, 200);
   assert.equal(state.credentials[0].status, "revoked");
+});
+
+test("expired device credentials are reported as expired in the device list", async () => {
+  const { DB, state } = createDeviceTrustDb();
+  state.credentials.push({
+    id: "expired-device-0001",
+    tenantId: "tenant-1",
+    userId: "intervenant-1",
+    key_thumbprint: "thumbprint-expired",
+    algorithm: "ECDSA_P256_SHA256",
+    status: "active",
+    created_at: "2026-01-01T00:00:00.000Z",
+    last_used_at: null,
+    expires_at: "2026-01-02T00:00:00.000Z",
+    revoked_at: null
+  });
+  const result = await handleDeviceTrustRoute(
+    new Request("https://example.test/api/security/device/list"),
+    { DB },
+    { user: { id: "intervenant-1", role: "intervenant" }, session_id: "session-1" },
+    { ok: true, tenant: { id: "tenant-1" } },
+    async () => true
+  );
+  assert.equal(result.status, 200);
+  const body = await result.json();
+  assert.equal(body.devices[0].status, "expired");
+  assert.equal(state.credentials[0].status, "active", "listing must not mutate persisted credential state");
 });
 
 test("revoked device key cannot be silently re-enrolled", async () => {
