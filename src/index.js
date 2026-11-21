@@ -2,6 +2,7 @@ import { handleV7Route } from "./v7-routes.js";
 import { handleSupraRoute } from "./supra-api.js";
 import { resolveTenantContext, tenantRoleAllowed } from "./tenant-context.js";
 import { handleSupraApprovalRoute } from "./supra-approvals.js";
+import { handleDeviceTrustRoute } from "./device-trust.js";
 // PROCHÉLIA — INDEX BACKEND CONSOLIDÉ UNIQUE
 // Référence de consolidation : V14.1 Finance + sécurité/RBAC existants.
 // Généré le 19/10/2026. À déployer uniquement après recette avec la vraie base D1.
@@ -1343,6 +1344,18 @@ export async function directoryList(request, env, kind, resolveSession = getSess
 async function handleBase(request, env) {
   const url = new URL(request.url);
 
+
+  if (url.pathname.startsWith('/api/security/device/')) {
+    const deviceAuth = await getSessionUser(request, env);
+    if (!deviceAuth) return json({ ok: false, error: 'UNAUTHENTICATED', version: VERSION }, 401);
+    let deviceTenantContext;
+    try {
+      deviceTenantContext = await resolveTenantContext(request, env, deviceAuth);
+    } catch {
+      return json({ ok: false, error: 'TENANT_CONTEXT_UNAVAILABLE', version: VERSION, write_enabled: false }, 503);
+    }
+    return handleDeviceTrustRoute(request, env, deviceAuth, deviceTenantContext, requireVerifiedIntervenant);
+  }
 
   if (url.pathname === '/api/clients') {
     if (request.method !== 'GET') return json({ok:false,error:'METHOD_NOT_ALLOWED',version:VERSION},405,{'allow':'GET'});
