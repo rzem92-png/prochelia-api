@@ -8,7 +8,7 @@ const migration = await readFile(new URL("../migrations-preview-canonical/0038_i
 test("identity verification schema carries tenant ownership and an indexed tenant lookup", () => {
   assert.match(migration, /ADD COLUMN tenant_id TEXT REFERENCES tenants\(id\)/);
   assert.match(migration, /idx_identity_verifications_tenant_user_status/);
-  assert.match(source, /user_id TEXT NOT NULL,\s*tenant_id TEXT REFERENCES tenants\(id\)/);
+  assert.match(source, /INSERT INTO identity_verifications \\(id,user_id,tenant_id,status,level\\)/);
 });
 
 test("intervenant identity requests are created only in the authenticated session tenant", () => {
