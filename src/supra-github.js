@@ -236,6 +236,27 @@ async function repositoryCheckRuns(env, repository, sha) {
   }));
 }
 
+async function repositoryPullRequestDiff(env, repository, pullNumber) {
+  if (!ALLOWED_REPOSITORIES.includes(repository)) throw new Error("REPOSITORY_NOT_ALLOWED");
+  if (!Number.isSafeInteger(pullNumber) || pullNumber < 1 || pullNumber > 2147483647) {
+    throw new Error("PULL_REQUEST_NUMBER_INVALID");
+  }
+  const token = await installationToken(env);
+  const [owner, name] = repository.split("/");
+  const response = await fetch(API + "/repos/" + encodeURIComponent(owner) + "/" +
+    encodeURIComponent(name) + "/pulls/" + String(pullNumber), {
+      headers: {
+        "authorization": "Bearer " + token,
+        "accept": "application/vnd.github.diff",
+        "x-github-api-version": "2022-11-28"
+      }
+    });
+  if (!response.ok) throw new Error("GITHUB_PULL_REQUEST_DIFF_FAILED");
+  const diff = await response.text();
+  if (new TextEncoder().encode(diff).byteLength > 48000) throw new Error("GITHUB_PULL_REQUEST_DIFF_TOO_LARGE");
+  return redactRepositoryText(diff).slice(0, 48000);
+}
+
 async function repositoryPullRequests(env, repository) {
   if (!ALLOWED_REPOSITORIES.includes(repository)) throw new Error("REPOSITORY_NOT_ALLOWED");
   const token = await installationToken(env);
@@ -269,7 +290,7 @@ export async function handleSupraGithubRoute(request, env, path, auth) {
   const supported = [
     "/api/supra/github/status",
     "/api/supra/github/repositories",
-    "/api/supra/github/pull-requests",
+    "/api/supra/github/pull-requests",\n    "/api/supra/github/pull-request-diff",
     "/api/supra/github/commits",
     "/api/supra/github/check-runs",
     "/api/supra/github/file",
@@ -284,15 +305,20 @@ export async function handleSupraGithubRoute(request, env, path, auth) {
   if (auth.user.role !== "gerante") {
     return Response.json({ ok: false, error: "FORBIDDEN" }, { status: 403, headers: { "cache-control": "no-store" } });
   }
-  const requestedRepository = (path === "/api/supra/github/pull-requests" || path === "/api/supra/github/commits" || path === "/api/supra/github/check-runs" || path === "/api/supra/github/file")
+  const requestedRepository = (path === "/api/supra/github/pull-requests" || path === "/api/supra/github/commits" || path === "/api/supra/github/check-runs" || path === "/api/supra/github/file" || path === "/api/supra/github/pull-request-diff")
     ? new URL(request.url).searchParams.get("repository") || ""
     : "";
-  const requestedSha = path === "/api/supra/github/check-runs" ? new URL(request.url).searchParams.get("sha") || "" : "";
+  const requestedSha = path === "/api/supra/github/check-runs" ? new URL(request.url).searchParams.get("sha") || "" : "";\n  const requestedPullNumber = path === "/api/supra/github/pull-request-diff" ? Number(new URL(request.url).searchParams.get("pull_number")) : 0;
   const requestedPath = path === "/api/supra/github/file"
     ? new URL(request.url).searchParams.get("path") || ""
     : "";
   if ((path === "/api/supra/github/pull-requests" || path === "/api/supra/github/commits" || path === "/api/supra/github/check-runs" || path === "/api/supra/github/file") && !ALLOWED_REPOSITORIES.includes(requestedRepository)) {
     return Response.json({ ok: false, error: "REPOSITORY_NOT_ALLOWED" }, {
+      status: 400, headers: { "cache-control": "no-store" }
+    });
+  }
+  if (path === "/api/supra/github/pull-request-diff" && (!Number.isSafeInteger(requestedPullNumber) || requestedPullNumber < 1 || requestedPullNumber > 2147483647)) {
+    return Response.json({ ok: false, error: "PULL_REQUEST_NUMBER_INVALID" }, {
       status: 400, headers: { "cache-control": "no-store" }
     });
   }
@@ -328,6 +354,17 @@ export async function handleSupraGithubRoute(request, env, path, auth) {
       return Response.json({
         ok: true, mode: "READ_ONLY", write_enabled: false,
         repository: requestedRepository, file
+      }, { headers: { "cache-control": "no-store" } });
+    }
+    if (path === "/api/supra/github/pull-request-diff") {
+      if (!installation.names.includes(requestedRepository)) {
+        return Response.json({ ok: false, error: "REPOSITORY_NOT_INSTALLED" }, { status: 403, headers: { "cache-control": "no-store" } });
+      }
+      const diff = await repositoryPullRequestDiff(env, requestedRepository, requestedPullNumber);
+      return Response.json({
+        ok: true, mode: "READ_ONLY", write_enabled: false,
+        repository: requestedRepository, pull_number: requestedPullNumber,
+        diff
       }, { headers: { "cache-control": "no-store" } });
     }
     if (path === "/api/supra/github/commits" || path === "/api/supra/github/check-runs") {
