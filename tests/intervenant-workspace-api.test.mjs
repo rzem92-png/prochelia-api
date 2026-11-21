@@ -304,7 +304,7 @@ test("assignment feed returns only the minimal operational projection needed by 
 
 
 const skillsStart = source.indexOf("async function intervenantSkillsRoute(request, env) {");
-const skillsEnd = source.indexOf("\\nasync function intervenantAssignmentsRoute(", skillsStart);
+const skillsEnd = source.indexOf("\nasync function intervenantAssignmentsRoute(", skillsStart);
 assert.ok(skillsStart >= 0 && skillsEnd > skillsStart, "skills read route must exist");
 const skillsHandler = source.slice(skillsStart, skillsEnd);
 
