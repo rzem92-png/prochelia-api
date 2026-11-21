@@ -118,6 +118,19 @@ async function sha256Base64url(value) {
   return base64url(new Uint8Array(digest));
 }
 
+async function hmacSha256Base64url(secret, value) {
+  if (typeof secret !== 'string' || !secret) throw new Error('HMAC_SECRET_REQUIRED');
+  const key = await crypto.subtle.importKey(
+    'raw',
+    new TextEncoder().encode(secret),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign']
+  );
+  const signature = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(value));
+  return base64url(new Uint8Array(signature));
+}
+
 async function hashPassword(password) {
   const salt = randomBytes(16);
   const key = await crypto.subtle.importKey(
@@ -670,7 +683,7 @@ async function securityIdentityApprove(request, env) {
   return json({ok:true,version:VERSION,verification_id:verificationId,user_id:row.user_id,status,level,verified_at:verifiedAt},200);
 }
 
-async function deliverSecurityCodes(env, payload) {
+export async function deliverSecurityCodes(env, payload) {
   const webhook = clean(env.SECURITY_CODE_WEBHOOK);
   if (!webhook) return {ok:false,error:'SECURITY_CODE_WEBHOOK_NOT_CONFIGURED'};
   const secret = clean(env.SECURITY_CODE_WEBHOOK_SECRET);
@@ -684,7 +697,7 @@ async function deliverSecurityCodes(env, payload) {
     end_code:payload.end_code,
     end_expires_at:payload.end_expires_at
   });
-  const signature = await sha256Base64url(secret + '.' + body);
+  const signature = await hmacSha256Base64url(secret, body);
   const response = await fetch(webhook,{
     method:'POST',
     headers:{'content-type':'application/json','x-prochelia-signature':signature},
