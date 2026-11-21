@@ -197,3 +197,80 @@ Source primaire : [Commission européenne — Navigating the AI Act](https://dig
 3. Ne pas collecter de biométrie par défaut ; toute nécessité doit être démontrée, proportionnée et validée localement.
 4. Ne pas faire d'un score Nexus Talent une décision automatique d'accès à une mission, à un revenu ou à une opportunité sans analyse de risque, explication, recours et contrôle humain.
 5. Obtenir une validation écrite d'un conseil français/UE et d'un conseil algérien avant activation des parcours concernés.
+
+## 12. Exigences intégrales de pilotage PROCHÉLIA par NEXUS SUPRA
+
+NEXUS SUPRA est le plan de contrôle transversal de PROCHÉLIA, et non un chatbot ni une collection d'agents indépendants sans gouvernance. Il coordonne les domaines Client, Intervenant, Gérant/Entreprise, Talent, LIVE, marketplace de services, finance, support, conformité, sécurité, administration et infrastructure. Chaque domaine conserve ses propres permissions, données, règles métier et responsables.
+
+### 12.1 Cycle opérationnel commun
+
+Pour chaque événement ou demande, le système doit suivre un cycle traçable :
+1. recevoir l'événement depuis une source authentifiée ;
+2. vérifier l'identité, le tenant, les permissions, le pays et le contexte ;
+3. valider les données et leur fraîcheur ;
+4. qualifier le fait, l'hypothèse, l'incertitude et la source ;
+5. analyser les impacts métier, humains, juridiques, financiers et techniques ;
+6. calculer la priorité, la gravité et les options de résolution ;
+7. appliquer une politique versionnée et vérifier les autorisations ;
+8. exécuter uniquement les actions permises, avec idempotence et limites ;
+9. contrôler le résultat réel et les effets secondaires ;
+10. notifier les personnes habilitées, ouvrir un recours si nécessaire et conserver la preuve ;
+11. réévaluer la situation jusqu'à résolution ou transfert explicite à un responsable humain.
+
+Une intention, une recommandation ou une réponse HTTP positive ne constitue pas une preuve suffisante d'exécution réussie. Les états « proposé », « approuvé », « exécuté », « vérifié », « échoué » et « annulé » doivent être distincts.
+
+### 12.2 Matrice d'autonomie et d'approbation
+
+- Automatisable après tests : surveillance, alertes, classement d'incidents, recommandations explicables, contrôles de cohérence, relances non sensibles et opérations techniques réversibles sous politique approuvée.
+- Autorisation conditionnelle : suspension temporaire d'une action ou d'un compte en présence d'un signal grave, avec proportionnalité, information, durée limitée, journalisation et recours.
+- Validation humaine obligatoire : transfert ou remboursement hors règles préapprouvées, changement de coordonnées bancaires, engagement contractuel, modification des tarifs/commissions, décision définitive de sanction, décision ayant un effet significatif sur une personne, avis juridique définitif, déclaration réglementaire, migration destructive, déploiement production et suppression irréversible.
+- Interdit : contourner les contrôles, falsifier une preuve, inventer un statut de conformité, masquer un incident ou utiliser des données sans base légale.
+
+Chaque action doit porter un identifiant de corrélation, l'acteur ou agent, la politique/version, le motif, les sources, les permissions vérifiées, l'approbateur éventuel, l'horodatage, le résultat et le lien vers les éléments de preuve. Les journaux critiques doivent être append-only avec contrôle d'intégrité et accès restreint.
+
+### 12.3 Espace Intervenant — parcours professionnel de bout en bout
+
+L'interface intervenant doit être une application opérationnelle responsive et accessible, pas un tableau de bord décoratif. Elle doit couvrir : inscription sur invitation ou parcours validé, majorité et identité selon nécessité, profil, compétences et justificatifs, vérifications et recours, disponibilités, opportunités, candidatures, affectations, planning, instructions de mission, démarrage/fin avec preuve proportionnée, incidents terrain, messagerie sécurisée, documents, factures, revenus estimés/disponibles/en attente, demandes de versement via PSP autorisé, historique, support, sécurité des appareils, formation et évolution professionnelle.
+
+Chaque transition doit être autorisée côté serveur, tenant-scoped, idempotente et auditée. La preuve d'appareil ne vaut pas preuve de présence. Aucune mission ne peut être démarrée ou clôturée sur la seule base d'un signal client non vérifié. Les justificatifs sensibles sont déposés dans un flux sécurisé, avec accès minimal et durée de conservation définie.
+
+### 12.4 Talent, créateurs et PROCHÉLIA LIVE
+
+Le domaine Talent doit permettre un profil public contrôlé, portfolio, studio de publication, live, calendrier, communauté, modération, ateliers, événements, réservations, contenus payants facultatifs, offres et partenariats. Les spectateurs peuvent accéder gratuitement aux contenus annoncés comme gratuits. Les outils de croissance doivent aider les talents émergents sans promettre de portée ni de revenus.
+
+SUPRA peut recommander des horaires, formats, sujets, collaborations, prix et canaux de distribution à partir de données licites et mesurables. Il doit distinguer audience organique, sponsorisée, artificielle et frauduleuse ; expliquer les recommandations ; mesurer les résultats ; détecter les manipulations et permettre la contestation. La monétisation doit afficher avant engagement le prix, frais, taxes connues, commission, net estimé, conditions et délai réellement confirmé par le PSP. Aucun paiement, cadeau, pourboire, abonnement ou versement n'est activé avant les validations pays/PSP/fiscales/juridiques correspondantes.
+
+### 12.5 Protection anti-fraude et cybersécurité transversales
+
+Le dispositif doit traiter les risques de faux comptes client/intervenant/talent/entreprise, usurpation, documents falsifiés, bots, faux avis, faux abonnés, détournement de session, credential stuffing, force brute, CSRF, XSS, injection, SSRF, abus d'API, DDoS, fraude au paiement, remboursements abusifs, faux justificatifs, détournement de mission, compromission administrateur, exfiltration et rançongiciel.
+
+Contrôles requis : MFA pour rôles sensibles, sessions HttpOnly avec rotation/révocation, séparation stricte des tenants, moindre privilège, limites de débit, validation serveur, protection des secrets, chiffrement, surveillance, détection d'anomalies, sauvegardes testées, réponse à incident, notification légale lorsque requise et tests d'intrusion indépendants. Les scores antifraude sont des signaux, non une preuve définitive ; prévoir contrôle humain et recours avant sanction durable.
+
+### 12.6 Juridique, conformité et protection des personnes
+
+Toute évolution produit, tarif, partenariat, modèle de revenu, collecte de données ou nouveau pays déclenche une analyse d'impact juridique et conformité. Le résultat référence les textes officiels, leur version/date, le pays, le rôle de PROCHÉLIA, les faits connus, les incertitudes, les documents concernés, l'avis du conseil local requis, le responsable et la date de réexamen. Les CGU/CGV, contrats, politique de confidentialité, cookies, règles LIVE, modération, remboursement, réclamation et politiques de sécurité sont versionnés et liés aux parcours réels.
+
+Les documents contractuels ne peuvent pas supprimer les responsabilités légales ni les droits impératifs des personnes. NEXUS SUPRA ne garantit aucune immunité personnelle ou sociale : il réduit les risques par la prévention, les preuves, la gouvernance, les assurances adaptées et la revue par avocats, DPO, experts-comptables et spécialistes locaux.
+
+### 12.7 Continuité H24/7J7 et résilience
+
+L'objectif 24/7 exige des SLO mesurés, supervision indépendante, alertes, astreinte humaine, budgets de capacité, files de reprise, redondance adaptée, sauvegardes chiffrées, exercices de restauration, objectifs RPO/RTO approuvés, tests de charge, tests de panne, déploiements progressifs, rollback et kill switch. L'IA ne remplace ni l'astreinte ni les procédures de secours. Les incidents doivent être détectés, classés, contenus, résolus, vérifiés et faire l'objet d'un retour d'expérience.
+
+## 13. Critères de recette intégrale — preuves exigées avant production
+
+La recette est menée par parcours et par rôle, sur un environnement isolé représentatif :
+- parcours complets Client, Intervenant, Gérant/Entreprise et Talent, sur mobile et ordinateur ;
+- séparation des données entre tenants et tests d'accès croisés négatifs ;
+- authentification, MFA, révocation de session, récupération et protection anti-abus ;
+- invitations, vérification d'âge/identité proportionnée, compétences et recours ;
+- réservation, candidature, affectation, démarrage, clôture, preuves, incident et litige ;
+- publication, live, modération, signalement, droits médias, achats facultatifs et reversements Sandbox ;
+- idempotence, concurrence, ledger, rapprochement, remboursements et webhooks PSP ;
+- RGPD : registre, bases légales, information, consentements lorsqu'exigés, droits, conservation, suppression, sous-traitants, transferts et procédure de violation ;
+- conformité par pays, avis juridiques locaux, contrats et assurances ;
+- tests de sécurité, intrusion, charge, accessibilité, compatibilité navigateur et mobile ;
+- sauvegarde fraîche, intégrité, restauration isolée et preuve de reprise ;
+- supervision, alertes, astreinte, SLO, RPO/RTO et exercices d'incident ;
+- audit des actions SUPRA, permissions, approbations, kill switch et recours.
+
+Chaque preuve doit identifier le commit, l'environnement, la date, le test, le résultat, les écarts et le responsable. Les contrôles non exécutés sont « non vérifiés », jamais « réussis ». Production reste NO-GO tant qu'un gate critique est ouvert ou qu'une validation humaine requise manque.
