@@ -202,9 +202,14 @@ function createDeviceTrustDb() {
       const [credentialId, publicJwk, thumbprint, credentialExpiry,
         challengeId, insertTenantId, insertUserId, insertSessionId, insertHash, insertMarker] = insert.params;
       let inserted = 0;
+      const duplicateKey = state.credentials.some(item =>
+        item.tenantId === insertTenantId &&
+        item.userId === insertUserId &&
+        item.key_thumbprint === thumbprint
+      );
       if (consumed === 1 && row.consumedAt === insertMarker && row.id === challengeId &&
           row.tenantId === insertTenantId && row.userId === insertUserId &&
-          row.sessionId === insertSessionId && row.challengeHash === insertHash) {
+          row.sessionId === insertSessionId && row.challengeHash === insertHash && !duplicateKey) {
         state.credentials.push({
           id: credentialId,
           tenantId: insertTenantId,
@@ -301,5 +306,62 @@ test("device enrollment is session- and tenant-bound, stores only public key mat
     identityCheck
   );
   assert.equal(revoke.status, 200);
+  assert.equal(state.credentials[0].status, "revoked");
+});
+
+test("revoked device key cannot be silently re-enrolled", async () => {
+  const { DB, state } = createDeviceTrustDb();
+  const auth = { user: { id: "intervenant-1", role: "intervenant" }, session_id: "session-1" };
+  const tenantContext = { ok: true, tenant: { id: "tenant-1" } };
+  const identityCheck = async () => ({ status: "verified" });
+  const pair = await webcrypto.subtle.generateKey(
+    { name: "ECDSA", namedCurve: "P-256" }, false, ["sign", "verify"]
+  );
+  const publicJwk = await webcrypto.subtle.exportKey("jwk", pair.publicKey);
+
+  async function enrollOnce() {
+    const challengeResponse = await handleDeviceTrustRoute(
+      new Request("https://example.test/api/security/device/enroll/challenge", { method: "POST", body: "{}" }),
+      { DB }, auth, tenantContext, identityCheck
+    );
+    assert.equal(challengeResponse.status, 201);
+    const challenge = await challengeResponse.json();
+    const signature = await webcrypto.subtle.sign(
+      { name: "ECDSA", hash: "SHA-256" },
+      pair.privateKey,
+      new TextEncoder().encode(challenge.signing_message)
+    );
+    return handleDeviceTrustRoute(
+      new Request("https://example.test/api/security/device/enroll/complete", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          challenge_id: challenge.challenge_id,
+          challenge: challenge.challenge,
+          public_key_jwk: publicJwk,
+          signature: Buffer.from(signature).toString("base64url")
+        })
+      }),
+      { DB }, auth, tenantContext, identityCheck
+    );
+  }
+
+  const first = await enrollOnce();
+  assert.equal(first.status, 201);
+  const deviceId = (await first.json()).device.id;
+  const revoked = await handleDeviceTrustRoute(
+    new Request("https://example.test/api/security/device/revoke", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ device_id: deviceId })
+    }),
+    { DB }, auth, tenantContext, identityCheck
+  );
+  assert.equal(revoked.status, 200);
+
+  const reEnroll = await enrollOnce();
+  assert.equal(reEnroll.status, 409);
+  assert.equal((await reEnroll.json()).error, "DEVICE_ENROLLMENT_CONFLICT");
+  assert.equal(state.credentials.length, 1);
   assert.equal(state.credentials[0].status, "revoked");
 });
