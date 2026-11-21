@@ -267,7 +267,8 @@ export async function handleSupraGithubRoute(request, env, path, auth) {
     "/api/supra/github/status",
     "/api/supra/github/repositories",
     "/api/supra/github/pull-requests",
-    "/api/supra/github/file"
+    "/api/supra/github/commits",
+    "/api/supra/github/check-runs",
   ];
   if (!supported.includes(path)) return null;
   if (request.method !== "GET") {
@@ -282,6 +283,7 @@ export async function handleSupraGithubRoute(request, env, path, auth) {
   const requestedRepository = (path === "/api/supra/github/pull-requests" || path === "/api/supra/github/commits" || path === "/api/supra/github/check-runs" || path === "/api/supra/github/file")
     ? new URL(request.url).searchParams.get("repository") || ""
     : "";
+  const requestedSha = path === "/api/supra/github/check-runs" ? new URL(request.url).searchParams.get("sha") || "" : "";
   const requestedPath = path === "/api/supra/github/file"
     ? new URL(request.url).searchParams.get("path") || ""
     : "";
@@ -289,6 +291,8 @@ export async function handleSupraGithubRoute(request, env, path, auth) {
     return Response.json({ ok: false, error: "REPOSITORY_NOT_ALLOWED" }, {
       status: 400, headers: { "cache-control": "no-store" }
     });
+  if (path === "/api/supra/github/check-runs" && !/^[a-f0-9]{40}$/i.test(requestedSha)) {
+    return Response.json({ ok: false, error: "COMMIT_SHA_INVALID" }, { status: 400, headers: { "cache-control": "no-store" } });
   }
   if (path === "/api/supra/github/check-runs" && !/^[a-f0-9]{40}$/i.test(requestedSha)) {\n    return Response.json({ ok: false, error: "COMMIT_SHA_INVALID" }, { status: 400, headers: { "cache-control": "no-store" } });\n  }\n  if (path === "/api/supra/github/file" && !safeRepositoryPath(requestedPath)) {
     return Response.json({ ok: false, error: "REPOSITORY_PATH_NOT_ALLOWED" }, {
