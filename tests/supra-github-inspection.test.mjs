@@ -48,6 +48,15 @@ test("SUPRA GitHub file reader rejects path traversal before credentials", async
 });
 
 
+test("SUPRA GitHub file reader allows an approved workflow path before credentials", async () => {
+  const response = await handleSupraGithubRoute(
+    request("/api/supra/github/file?repository=rzem92-png/prochelia-api&path=.github%2Fworkflows%2Fv7-security-tests.yml"),
+    {}, "/api/supra/github/file", auth
+  );
+  assert.equal(response.status, 200);
+  assert.equal((await response.json()).status, "NOT_CONNECTED");
+});
+
 test("SUPRA GitHub commits route rejects unapproved repositories before credentials", async () => {
   const response = await handleSupraGithubRoute(
     request("/api/supra/github/commits?repository=attacker/repo"), {},
