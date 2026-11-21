@@ -67,3 +67,13 @@ test("migration adds tenant scope and indexes without assigning legacy cases to 
   assert.match(migration, /tenant_id NULL/);
   assert.doesNotMatch(migration, /UPDATE support_cases SET tenant_id/);
 });
+
+test("client-supplied execution_verified cannot auto-close a support case", () => {
+  const start = source.indexOf("async function supportAutoResolve(");
+  const end = source.indexOf("\\n}", start) + 2;
+  assert.ok(start >= 0 && end > start);
+  const resolver = source.slice(start, end);
+  assert.match(resolver, /const verified=false/);
+  assert.doesNotMatch(resolver, /context\\?\.execution_verified|context\.execution_verified/);
+  assert.match(resolver, /NO_VERIFIED_DOWNSTREAM_ACTION/);
+});
