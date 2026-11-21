@@ -30,7 +30,7 @@ CREATE TABLE IF NOT EXISTS tenant_invitations (
   CHECK (
     (status = 'PENDING' AND accepted_at IS NULL AND revoked_at IS NULL) OR
     (status = 'ACCEPTED' AND accepted_at IS NOT NULL AND revoked_at IS NULL) OR
-    (status = 'REVOKED' AND revoked_at IS NOT NULL)
+    (status = 'REVOKED' AND accepted_at IS NULL AND revoked_at IS NOT NULL)
   )
 );
 
@@ -71,6 +71,13 @@ WHEN NOT EXISTS (
 )
 BEGIN
   SELECT RAISE(ABORT, 'TENANT_INVITATION_REQUIRES_ACTIVE_TENANT_PENDING_MEMBER');
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_tenant_invitation_initial_pending
+BEFORE INSERT ON tenant_invitations
+WHEN NEW.status <> 'PENDING' OR NEW.accepted_at IS NOT NULL OR NEW.revoked_at IS NOT NULL
+BEGIN
+  SELECT RAISE(ABORT, 'TENANT_INVITATION_MUST_START_PENDING');
 END;
 
 CREATE TRIGGER IF NOT EXISTS trg_tenant_invitation_identity_immutable
