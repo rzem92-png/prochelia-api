@@ -693,11 +693,26 @@ export async function deliverSecurityCodes(env, payload) {
 async function securityPrepareMission(request, env) {
   const auth = await getSessionUser(request, env);
   if (!requireRole(auth, ['gerante'])) return json({ok:false,error:auth?.user?'FORBIDDEN':'UNAUTHENTICATED',version:VERSION}, auth?.user?403:401);
+  const tenantContext = await resolveTenantContext(request, env, auth);
+  if (!tenantContext.ok) return json({ok:false,error:tenantContext.error,version:VERSION},tenantContext.status);
+  const tenantId = tenantContext.tenant.id;
   await ensureSecuritySchema(env);
   const body = await readJson(request);
   const missionId=clean(body?.mission_id), clientId=clean(body?.client_id), intervenantId=clean(body?.intervenant_id);
   if(!missionId||!clientId||!intervenantId) return json({ok:false,error:'MISSION_SECURITY_FIELDS_REQUIRED',version:VERSION},400);
-  const verified = await requireVerifiedIntervenant(env,intervenantId);
+  // Resolve all three business identities inside the authenticated manager's active tenant.
+  // Never verify an intervenant using an intervenant-row ID: identity_verifications is keyed by user_id.
+  const assignment = await env.DB.prepare(
+    `SELECT m.id, m.client_id, m.intervenant_id, m.tenant_id,
+            c.user_id AS client_user_id, i.user_id AS intervenant_user_id
+       FROM missions m
+       JOIN clients c ON c.id=m.client_id AND c.tenant_id=m.tenant_id
+       JOIN intervenants i ON i.id=m.intervenant_id AND i.tenant_id=m.tenant_id
+      WHERE m.id=? AND m.tenant_id=? AND m.client_id=? AND m.intervenant_id=?
+      LIMIT 1`
+  ).bind(missionId,tenantId,clientId,intervenantId).first();
+  if (!assignment) return json({ok:false,error:'MISSION_TENANT_ASSIGNMENT_NOT_FOUND',version:VERSION},404);
+  const verified = await requireVerifiedIntervenant(env,assignment.intervenant_user_id);
   if(!verified) return json({ok:false,error:'INTERVENANT_IDENTITY_NOT_VERIFIED',version:VERSION},409);
   const existing=await env.DB.prepare('SELECT id,status FROM mission_security WHERE mission_id=? LIMIT 1').bind(missionId).first();
   if(existing) return json({ok:false,error:'MISSION_SECURITY_ALREADY_PREPARED',version:VERSION,status:existing.status},409);
