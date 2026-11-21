@@ -276,7 +276,11 @@ async function handleComplete(request, env, auth, tenantId, requireVerifiedInter
   }
 }
 
-async function handleProofChallenge(request, env, auth, tenantId) {
+async function handleProofChallenge(request, env, auth, tenantId, requireVerifiedIntervenant) {
+  let verified;
+  try { verified = await requireVerifiedIntervenant(env, auth.user.id, tenantId); }
+  catch { return response({ ok: false, error: "IDENTITY_SCHEMA_UNAVAILABLE", write_enabled: false }, 503); }
+  if (!verified) return response({ ok: false, error: "IDENTITY_VERIFICATION_REQUIRED" }, 403);
   const parsed = await readLimitedJson(request, 2048);
   if (!parsed.ok) return response({ ok: false, error: parsed.tooLarge ? "PAYLOAD_TOO_LARGE" : "INVALID_JSON" }, parsed.tooLarge ? 413 : 400);
   const deviceId = typeof parsed.value?.device_id === "string" ? parsed.value.device_id : "";
@@ -326,7 +330,11 @@ async function handleProofChallenge(request, env, auth, tenantId) {
   }
 }
 
-async function handleProofComplete(request, env, auth, tenantId) {
+async function handleProofComplete(request, env, auth, tenantId, requireVerifiedIntervenant) {
+  let verified;
+  try { verified = await requireVerifiedIntervenant(env, auth.user.id, tenantId); }
+  catch { return response({ ok: false, error: "IDENTITY_SCHEMA_UNAVAILABLE", write_enabled: false }, 503); }
+  if (!verified) return response({ ok: false, error: "IDENTITY_VERIFICATION_REQUIRED" }, 403);
   const parsed = await readLimitedJson(request, 8192);
   if (!parsed.ok) return response({ ok: false, error: parsed.tooLarge ? "PAYLOAD_TOO_LARGE" : "INVALID_JSON" }, parsed.tooLarge ? 413 : 400);
   const body = parsed.value;
@@ -464,11 +472,11 @@ export async function handleDeviceTrustRoute(request, env, auth, tenantContext, 
   }
   if (path === "/api/security/device/prove/challenge") {
     if (request.method !== "POST") return response({ ok: false, error: "METHOD_NOT_ALLOWED" }, 405, { allow: "POST" });
-    return handleProofChallenge(request, env, auth, tenantId);
+    return handleProofChallenge(request, env, auth, tenantId, requireVerifiedIntervenant);
   }
   if (path === "/api/security/device/prove/complete") {
     if (request.method !== "POST") return response({ ok: false, error: "METHOD_NOT_ALLOWED" }, 405, { allow: "POST" });
-    return handleProofComplete(request, env, auth, tenantId);
+    return handleProofComplete(request, env, auth, tenantId, requireVerifiedIntervenant);
   }
   if (path === "/api/security/device/list") {
     if (request.method !== "GET") return response({ ok: false, error: "METHOD_NOT_ALLOWED" }, 405, { allow: "GET" });
