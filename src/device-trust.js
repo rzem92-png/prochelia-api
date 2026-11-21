@@ -267,7 +267,12 @@ async function handleComplete(request, env, auth, tenantId, requireVerifiedInter
 async function handleList(request, env, auth, tenantId) {
   try {
     const result = await env.DB.prepare(
-      `SELECT id, algorithm, key_thumbprint, status, created_at, last_used_at, expires_at, revoked_at
+      `SELECT id, algorithm, key_thumbprint,
+              CASE
+                WHEN status = 'active' AND julianday(expires_at) <= julianday('now') THEN 'expired'
+                ELSE status
+              END AS status,
+              created_at, last_used_at, expires_at, revoked_at
        FROM trusted_device_credentials
        WHERE tenant_id = ? AND user_id = ? ORDER BY created_at DESC LIMIT 20`
     ).bind(tenantId, auth.user.id).all();
