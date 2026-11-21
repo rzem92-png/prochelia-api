@@ -6,6 +6,7 @@ on:
       - "src/index.js"
       - "wrangler.jsonc"
       - "tests/scheduled-backup-config.test.mjs"
+      - "tests/background-jobs-scheduler.test.mjs"
       - "src/tenant-context.js"
       - "src/supra-*.js"
       - "migrations-preview-canonical/0021_supra_audit_events.sql"
