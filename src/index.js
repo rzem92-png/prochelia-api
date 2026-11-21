@@ -2843,12 +2843,17 @@ async function processBackgroundJobs(request,env) {
   const results=[];
   for(const job of rows.results||[]) {
     try {
-      await env.DB.prepare(`UPDATE background_jobs SET status='RUNNING',locked_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='PENDING'`).bind(job.id).run();
+      const claim=await env.DB.prepare(`UPDATE background_jobs SET status='RUNNING',locked_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='PENDING'`).bind(job.id).run();
+      // A concurrent scheduler/request may have claimed this job already.
+      // Never execute a job unless this invocation owns the conditional claim.
+      if(Number(claim?.meta?.changes||0)!==1) continue;
       let result={performed:false,reason:'JOB_TYPE_NOT_IMPLEMENTED'};
       const payload=JSON.parse(job.payload_json||'{}');
-      if(job.job_type==='PROCESS_ACTION_OUTBOX') result={performed:true,delegation:'Use /api/ops/outbox/process'};
+      // Delegation labels are not execution. Keep these jobs visible for an
+      // implemented provider rather than falsely recording them as completed.
+      if(job.job_type==='PROCESS_ACTION_OUTBOX') result={performed:false,reason:'OUTBOX_PROCESSOR_NOT_INTEGRATED',next:'/api/ops/outbox/process'};
       else if(job.job_type==='PRODUCTION_AUDIT') result=await productionConfigCheck(env,{persist:true});
-      else if(job.job_type==='COPILOT_BRIEFING') result={performed:true,delegation:'Use /api/copilot/briefing'};
+      else if(job.job_type==='COPILOT_BRIEFING') result={performed:false,reason:'BRIEFING_PROVIDER_NOT_INTEGRATED',next:'/api/copilot/briefing'};
       const done=result.performed===true || result.overall===true;
       await env.DB.prepare(`UPDATE background_jobs SET status=?,result_json=?,attempts=attempts+1,updated_at=CURRENT_TIMESTAMP,completed_at=? WHERE id=?`)
         .bind(done?'DONE':'WAITING_PROVIDER',JSON.stringify(result),done?new Date().toISOString():null,job.id).run();
