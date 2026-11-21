@@ -38,6 +38,11 @@ const preview = {
     bucket_name: "prochelia-preview-backups-eu-v2",
     jurisdiction: "eu"
   }],
+  triggers: {
+    // Keep the deployed Preview Worker schedule aligned with the reviewed
+    // source config: durable background jobs every minute and daily backup.
+    crons: ["*/1 * * * *", "0 3 * * *"]
+  },
   observability: { logs: { enabled: true, invocation_logs: true } }
 };
 
@@ -49,4 +54,4 @@ if (preview.name === production.name ||
 }
 
 fs.writeFileSync("wrangler.preview.generated.json", JSON.stringify(preview, null, 2));
-console.log("Verified isolated Preview Worker, EU D1 and EU R2 bindings.");
+console.log("Verified isolated Preview Worker, EU D1, EU R2 and scheduled triggers.");
