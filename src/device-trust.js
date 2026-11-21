@@ -146,11 +146,22 @@ async function handleChallenge(request, env, auth, tenantId, requireVerifiedInte
     const challengeId = crypto.randomUUID();
     const challenge = randomChallenge();
     const challengeHash = await sha256Base64url(challenge);
-    await env.DB.prepare(
+    const inserted = await env.DB.prepare(
       `INSERT INTO device_auth_challenges
        (id, tenant_id, user_id, session_id, purpose, challenge_hash, expires_at)
-       VALUES (?, ?, ?, ?, 'ENROLL', ?, datetime('now', '+5 minutes'))`
-    ).bind(challengeId, tenantId, auth.user.id, auth.session_id, challengeHash).run();
+       SELECT ?, ?, ?, ?, 'ENROLL', ?, datetime('now', '+5 minutes')
+       WHERE (
+         SELECT COUNT(*) FROM device_auth_challenges
+         WHERE tenant_id = ? AND user_id = ? AND session_id = ? AND purpose = 'ENROLL'
+           AND consumed_at IS NULL AND julianday(expires_at) > julianday('now')
+       ) < ?`
+    ).bind(
+      challengeId, tenantId, auth.user.id, auth.session_id, challengeHash,
+      tenantId, auth.user.id, auth.session_id, MAX_PENDING_CHALLENGES
+    ).run();
+    if (Number(inserted?.meta?.changes || 0) !== 1) {
+      return response({ ok: false, error: "TOO_MANY_PENDING_DEVICE_CHALLENGES" }, 429);
+    }
 
     const signingMessage = buildDeviceEnrollmentMessage({
       challengeId, challenge, tenantId, userId: auth.user.id
