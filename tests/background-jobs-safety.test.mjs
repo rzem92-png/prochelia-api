@@ -36,3 +36,11 @@ test("failed jobs use bounded exponential retry and clear their lease", () => {
   assert.match(processor, /run_after=datetime\(CURRENT_TIMESTAMP,\?\),locked_at=NULL,last_error=\?/);
   assert.match(processor, /exhausted\?'FAILED':'PENDING'/);
 });
+
+test("exhausted jobs are retained in a dedicated dead-letter queue", () => {
+  assert.match(source, /CREATE TABLE IF NOT EXISTS background_jobs_dead_letter/);
+  assert.match(source, /source_job_id TEXT NOT NULL UNIQUE/);
+  assert.match(processor, /INSERT OR IGNORE INTO background_jobs_dead_letter/);
+  assert.match(processor, /STALE_LEASE_RETRY_LIMIT_REACHED/);
+  assert.match(processor, /resolution_status TEXT NOT NULL DEFAULT 'OPEN'/);
+});
