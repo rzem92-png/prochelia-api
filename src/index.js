@@ -943,6 +943,8 @@ export function paymentsConfigured(env) {
 async function paymentOnboard(request, env) {
   const auth = await getSessionUser(request, env);
   if (!requireRole(auth, ['intervenant'])) return json({ok:false,error:auth?.user?'FORBIDDEN':'UNAUTHENTICATED',version:VERSION},auth?.user?403:401);
+  const tenantContext = await resolveTenantContext(request, env, auth);
+  if (!tenantContext.ok) return json({ok:false,error:tenantContext.error,version:VERSION},tenantContext.status);
   await ensurePaymentSchema(env);
   const body = await readJson(request);
   const provider = paymentProvider(env);
@@ -953,7 +955,8 @@ async function paymentOnboard(request, env) {
   await env.DB.prepare(`INSERT INTO payment_accounts
     (id,user_id,provider,provider_account_id,status,onboarding_status)
     VALUES (?,?,?,?, 'pending','required')`).bind(id,auth.user.id,provider,accountId).run();
-  await env.DB.prepare(`INSERT INTO wallets (id,user_id) VALUES (?,?)`).bind(crypto.randomUUID(),auth.user.id).run();
+  const wallet = await env.DB.prepare('SELECT id FROM wallets WHERE user_id=? AND tenant_id=? LIMIT 1').bind(auth.user.id,tenantContext.tenant.id).first();
+  if (!wallet) await env.DB.prepare(`INSERT INTO wallets (id,user_id,tenant_id) VALUES (?,?,?)`).bind(crypto.randomUUID(),auth.user.id,tenantContext.tenant.id).run();
   await paymentAudit(env,'PAYOUT_ACCOUNT_CREATED',{user_id:auth.user.id,metadata:{provider}},'OK');
   return json({ok:true,version:VERSION,account_id:id,provider,onboarding_status:'required',next:'PSP_ONBOARDING_REQUIRED'},201);
 }
@@ -961,9 +964,15 @@ async function paymentOnboard(request, env) {
 async function paymentStatus(request, env) {
   const auth=await getSessionUser(request,env);
   if(!auth) return json({ok:false,error:'UNAUTHENTICATED',version:VERSION},401);
+  const tenantContext = await resolveTenantContext(request, env, auth);
+  if (!tenantContext.ok) return json({ok:false,error:tenantContext.error,version:VERSION},tenantContext.status);
   await ensurePaymentSchema(env);
-  let wallet=await env.DB.prepare('SELECT * FROM wallets WHERE user_id=? LIMIT 1').bind(auth.user.id).first();
-  if(!wallet){ await env.DB.prepare('INSERT INTO wallets (id,user_id) VALUES (?,?)').bind(crypto.randomUUID(),auth.user.id).run(); wallet=await env.DB.prepare('SELECT * FROM wallets WHERE user_id=? LIMIT 1').bind(auth.user.id).first(); }
+  let wallet=await env.DB.prepare('SELECT * FROM wallets WHERE user_id=? AND tenant_id=? LIMIT 1').bind(auth.user.id,tenantContext.tenant.id).first();
+  if(!wallet){
+    await env.DB.prepare('INSERT INTO wallets (id,user_id,tenant_id) VALUES (?,?,?)').bind(crypto.randomUUID(),auth.user.id,tenantContext.tenant.id).run();
+    wallet=await env.DB.prepare('SELECT * FROM wallets WHERE user_id=? AND tenant_id=? LIMIT 1').bind(auth.user.id,tenantContext.tenant.id).first();
+  }
+  if (!wallet) return json({ok:false,error:'WALLET_UNAVAILABLE',version:VERSION},503);
   const account=await env.DB.prepare('SELECT * FROM payment_accounts WHERE user_id=? LIMIT 1').bind(auth.user.id).first();
   const pending=await env.DB.prepare(`SELECT COUNT(*) total FROM payout_requests WHERE user_id=? AND status IN ('requested','processing')`).bind(auth.user.id).first();
   return json({ok:true,version:VERSION,provider:paymentProvider(env),payments_configured:paymentsConfigured(env),wallet:{currency:wallet.currency,available_cents:wallet.available_cents,pending_cents:wallet.pending_cents,paid_cents:wallet.paid_cents,reserved_cents:wallet.reserved_cents},payout_account:account?{status:account.status,onboarding_status:account.onboarding_status,payouts_enabled:!!account.payouts_enabled}:null,pending_payouts:Number(pending?.total||0)},200);
@@ -1056,6 +1065,8 @@ async function payoutRequest(request, env) {
     }
     return json({ok:true,version:VERSION,idempotent_replay:true,payout:existing},200);
   }
+  const tenantContext = await resolveTenantContext(request, env, auth);
+  if (!tenantContext.ok) return json({ok:false,error:tenantContext.error,version:VERSION},tenantContext.status);
   // Never reserve or lock funds unless a real, validated PSP adapter is configured.
   // This guard is deliberately before account/wallet reads and the atomic reservation.
   if (!paymentsConfigured(env)) {
@@ -1065,7 +1076,7 @@ async function payoutRequest(request, env) {
   if (!account || Number(account.payouts_enabled) !== 1) {
     return json({ok:false,error:'PAYOUT_ACCOUNT_NOT_READY',version:VERSION,message:'Le compte de paiement de l’intervenant doit être vérifié et activé par le PSP.'},409);
   }
-  const wallet = await env.DB.prepare('SELECT * FROM wallets WHERE user_id=? LIMIT 1').bind(auth.user.id).first();
+  const wallet = await env.DB.prepare('SELECT * FROM wallets WHERE user_id=? AND tenant_id=? LIMIT 1').bind(auth.user.id,tenantContext.tenant.id).first();
   if (!wallet) return json({ok:false,error:'WALLET_NOT_FOUND',version:VERSION},409);
 
   const payoutId = crypto.randomUUID();
@@ -1089,7 +1100,7 @@ async function payoutRequest(request, env) {
     }
     const collision = await env.DB.prepare('SELECT 1 AS used FROM payout_requests WHERE idempotency_key=? LIMIT 1').bind(idem).first();
     if (collision) return json({ok:false,error:'IDEMPOTENCY_KEY_CONFLICT',version:VERSION},409);
-    const latestWallet = await env.DB.prepare('SELECT available_cents FROM wallets WHERE id=? AND user_id=? LIMIT 1').bind(wallet.id,auth.user.id).first();
+    const latestWallet = await env.DB.prepare('SELECT available_cents FROM wallets WHERE id=? AND user_id=? AND tenant_id=? LIMIT 1').bind(wallet.id,auth.user.id,tenantContext.tenant.id).first();
     return json({ok:false,error:'INSUFFICIENT_AVAILABLE_BALANCE',version:VERSION,available_cents:Number(latestWallet?.available_cents || 0)},409);
   }
   return json({ok:true,version:VERSION,payout_id:payoutId,status:'requested',amount_cents:amount,mode,provider:paymentProvider(env),next:paymentsConfigured(env)?'PSP_PAYOUT_REQUIRED':'PAYMENT_PROVIDER_NOT_CONFIGURED'},201);
