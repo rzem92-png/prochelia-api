@@ -282,3 +282,20 @@ test("profile update endpoint is registered exactly in the canonical Worker", ()
   assert.ok(source.includes("url.pathname === '/api/intervenant/profile'"));
   assert.ok(source.includes("intervenantProfileUpdateRoute(request, env)"));
 });
+
+
+test("assignment feed joins the opportunity through its owner tenant and never leaks client identity or address", () => {
+  assert.match(assignmentHandler, /JOIN mission_opportunities o[\\s\\S]*ON o\\.id = a\\.opportunity_id AND o\\.owner_tenant_id = a\\.owner_tenant_id/);
+  assert.match(assignmentHandler, /WHERE a\\.provider_tenant_id = \\? AND a\\.intervenant_id = \\?/);
+  assert.match(assignmentHandler, /o\\.category_code, o\\.public_summary, o\\.city/);
+  assert.doesNotMatch(assignmentHandler, /client_user_id|client_id|o\\.address|o\\.private_|owner_tenant_id,|provider_tenant_id,/);
+  assert.doesNotMatch(assignmentHandler, /request\\.json\\(\\)|payload\\.|INSERT INTO|UPDATE\\s+mission_assignments/);
+});
+
+test("assignment feed returns only the minimal operational projection needed by the intervenant", () => {
+  for (const field of ["a.id", "a.status", "a.assigned_at", "a.started_at", "a.completed_at", "a.version", "o.category_code", "o.public_summary", "o.city", "o.start_at", "o.end_at", "o.provider_pay_cents", "o.currency"]) {
+    assert.ok(assignmentHandler.includes(field), "missing assignment workspace field: " + field);
+  }
+  assert.match(assignmentHandler, /ORDER BY a\\.assigned_at DESC[\\s\\S]*LIMIT 100/);
+  assert.match(assignmentHandler, /assignments: result\\.results \\|\\| \\[\\]/);
+});
