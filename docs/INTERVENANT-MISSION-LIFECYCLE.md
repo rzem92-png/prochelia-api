@@ -139,3 +139,16 @@ Tests unitaires ajoutés pour le format du message, le rejet des clés privées/
 ### 12.1. Protection contre la réinscription d'une clé révoquée
 
 La création du credential applique maintenant une condition SQL atomique `NOT EXISTS` sur le triplet tenant/utilisateur/empreinte de clé. Une clé déjà enregistrée, y compris révoquée, ne peut pas être réinscrite silencieusement. En cas de perte ou de révocation, l'intervenant doit générer une nouvelle paire de clés sur un terminal qu'il contrôle ; la clé privée ne quitte jamais le terminal. La contrainte UNIQUE en base reste le dernier garde-fou contre les courses concurrentes.
+
+
+### 12.2. Preuve de possession cryptographique renouvelable
+
+Une deuxième étape candidate ajoute une vérification ponctuelle d'un terminal déjà enrôlé :
+
+- `POST /api/security/device/prove/challenge` reçoit uniquement l'identifiant du terminal ; l'API vérifie qu'il appartient à l'utilisateur et au tenant de la session, qu'il est actif et non expiré.
+- Le challenge `PROVE` est aléatoire, lié à la session, au tenant, à l'utilisateur et au credential, à usage unique et valable cinq minutes.
+- `POST /api/security/device/prove/complete` vérifie la signature ECDSA P-256 avec la clé publique enregistrée ; la révocation et l'expiration sont revérifiées avant consommation.
+- La consommation du challenge et la mise à jour de `last_used_at` sont effectuées dans un batch D1 conditionnel ; le rejeu ou une révocation concurrente doit échouer.
+- La réponse distingue explicitement la preuve de possession de la présence à une mission : elle n'autorise ni démarrage, ni clôture, ni paiement.
+
+Les tests ajoutés couvrent le format canonique du message, le lien au credential et le caractère POST-only des deux routes. Une suite d'intégration D1 et des tests de concurrence/révocation restent nécessaires avant toute activation métier.
