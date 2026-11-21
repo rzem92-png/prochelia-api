@@ -19,7 +19,7 @@ test("SUPRA GitHub inspection rejects an unapproved repository before requiring 
     {}, "/api/supra/github/pull-requests", auth
   );
   assert.equal(response.status, 400);
-  assert.equal((await response.json()).error, "REPOSITORY_PATH_NOT_ALLOWED");
+  assert.equal((await response.json()).error, "REPOSITORY_NOT_ALLOWED");
 });
 
 test("SUPRA GitHub connector ignores unknown paths", async () => {
@@ -35,7 +35,7 @@ test("SUPRA GitHub file reader rejects secret-like paths before credentials", as
     {}, "/api/supra/github/file", auth
   );
   assert.equal(response.status, 400);
-  assert.equal((await response.json()).error, "REPOSITORY_NOT_ALLOWED");
+  assert.equal((await response.json()).error, "REPOSITORY_PATH_NOT_ALLOWED");
 });
 
 test("SUPRA GitHub file reader rejects path traversal before credentials", async () => {
