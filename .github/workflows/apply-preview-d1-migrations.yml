@@ -752,7 +752,15 @@ jobs:
           'trg_payment_account_tenant_immutable','trg_payment_transaction_identity_immutable',
           'trg_payout_request_identity_immutable','trg_payment_dispute_identity_immutable',
           'trg_payment_reconciliation_identity_immutable','trg_payment_webhook_tenant_immutable',
-          'trg_payment_audit_no_update','trg_payment_audit_no_delete'
+          'trg_payment_audit_no_update','trg_payment_audit_no_delete',
+          'idx_finance_workspace_tenant_created','idx_finance_workspace_tenant_user_created',
+          'idx_finance_export_tenant_created','idx_finance_resolution_tenant_status_created',
+          'trg_finance_workspace_entry_tenant_insert','trg_finance_workspace_entry_tenant_update',
+          'trg_finance_workspace_entry_no_update','trg_finance_workspace_entry_no_delete',
+          'trg_finance_export_tenant_insert','trg_finance_export_tenant_update',
+          'trg_finance_export_no_update','trg_finance_export_no_delete',
+          'trg_finance_resolution_tenant_insert','trg_finance_resolution_tenant_update',
+          'trg_finance_resolution_identity_immutable','trg_finance_resolution_no_delete'
           ) ORDER BY type, name
           SQL
           )"
