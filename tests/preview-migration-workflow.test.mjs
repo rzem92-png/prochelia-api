@@ -59,7 +59,8 @@ test("Preview migration workflow validates the full canonical migration chain", 
     "0036_intervenant_availability_idempotency.sql",
     "0037_support_cases_tenant_isolation.sql",
     "0038_identity_verification_tenant_scope.sql",
-    "0039_cryptographic_device_enrollment.sql"
+    "0039_cryptographic_device_enrollment.sql",
+    "0040_accounting_active_state_at_posting.sql"
   ];
   for (const migration of expected) assert.ok(workflow.includes(`"${migration}"`), `missing canonical migration ${migration}`);
 });
