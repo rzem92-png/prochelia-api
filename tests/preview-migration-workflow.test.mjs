@@ -10,6 +10,49 @@ test("Preview migration is manually gated on main only", () => {
   assert.match(workflow, /inputs\.confirm_preview == 'APPLY_PREVIEW_ONLY'/);
   assert.match(workflow, /EXPECTED_DB_ID:\s*e3cf167c-37e1-4d72-9ac6-b3e27c14b97f/);
 });
+test("Preview migration restores the exact encrypted R2 backup into a distinct EU D1 before applying migrations", () => {
+  const targetGate = workflow.indexOf("Verify dedicated isolated restore D1 identity and EU jurisdiction");
+  const exportStep = workflow.indexOf("Export only Preview D1 before migration");
+  const roundTrip = workflow.indexOf("Download R2 backup and verify HMAC, encryption and full round-trip");
+  const restoreStep = workflow.indexOf("Restore exact R2 backup into isolated D1 and verify integrity before Preview migration");
+  const publish = workflow.indexOf("Publish encrypted backup before any schema write");
+  const applyStep = workflow.indexOf("Apply migrations to Preview D1 only");
+  assert.ok(targetGate >= 0 && exportStep > targetGate && roundTrip > exportStep);
+  assert.ok(restoreStep > roundTrip && publish > restoreStep && applyStep > publish);
+  assert.match(workflow, /restore_test_db_name:[\s\S]*required: true/);
+  assert.match(workflow, /restore_test_db_id:[\s\S]*required: true/);
+  assert.match(workflow, /restore-test-\[a-z0-9-\]\{3,50\}/);
+  assert.match(workflow, /RESTORE_TEST_DB_NAME: \$\{\{ inputs\.restore_test_db_name \}\}/);
+  assert.match(workflow, /\.result\.jurisdiction == "eu"/);
+  assert.ok(workflow.includes('[[ "$RESTORE_TEST_DB_ID" != "$EXPECTED_DB_ID"'), "restore D1 must be distinct from Preview D1");
+  assert.match(workflow, /PRAGMA quick_check/);
+  assert.match(workflow, /PRAGMA foreign_key_check/);
+  assert.match(workflow, /migration_count == 23/);
+  assert.match(workflow, /0022_supra_persisted_approvals\.sql/);
+  assert.match(workflow, /unique \| length == 9/);
+  assert.match(workflow, /Restore-test D1 is not empty/);
+  assert.match(workflow, /wrangler\.restore-test\.json/);
+  assert.match(workflow, /database_name": "\$RESTORE_TEST_DB_NAME"/);
+  assert.match(workflow, /database_id": "\$RESTORE_TEST_DB_ID"/);
+  assert.match(workflow, /--config "\$RUNNER_TEMP\/wrangler\.restore-test\.json"/);
+});
+
+test("R2 backup requires EU retention lock and a separate HMAC attestation key", () => {
+  assert.match(workflow, /BACKUP_ATTESTATION_HMAC_KEY: \$\{\{ secrets\.BACKUP_ATTESTATION_HMAC_KEY \}\}/);
+  assert.match(workflow, /R2_EXPECTED_RETENTION_SECONDS: \$\{\{ vars\.R2_EXPECTED_RETENTION_SECONDS \}\}/);
+  assert.match(workflow, /BACKUP_ATTESTATION_HMAC_KEY must contain at least 32 UTF-8 bytes/);
+  assert.match(workflow, /Backup HMAC and encryption keys must be distinct/);
+  assert.match(workflow, /r2\/buckets\/\$R2_BUCKET\/lock/);
+  assert.match(workflow, /\.condition\.maxAgeSeconds >= \$retention/);
+  assert.match(workflow, /Prepare canonical HMAC-signed backup attestation/);
+  assert.match(workflow, /r2-backup-attestation\.mjs sign/);
+  assert.match(workflow, /attestation\.json/);
+  assert.match(workflow, /attestation\.hmac/);
+  assert.match(workflow, /r2-backup-attestation\.mjs verify/);
+  assert.match(workflow, /provenance\.commit_sha == env\.GITHUB_SHA/);
+  assert.match(workflow, /R2 backup object key already exists/);
+});
+
 test("Preview migration workflow pins the dedicated Preview database and forbids production", () => {
   assert.match(workflow, /EXPECTED_DB_NAME:\s*prochelia-preview-eu-2026-11-17/);
   assert.match(workflow, /EXPECTED_DB_ID:\s*e3cf167c-37e1-4d72-9ac6-b3e27c14b97f/);
@@ -49,7 +92,18 @@ test("Preview migration workflow validates the full canonical migration chain", 
     "0026_accounting_currency_consistency.sql",
     "0027_tenant_membership_identity_immutable.sql",
     "0028_tenant_accounting_entity_delete_guard.sql",
-    "0029_supra_append_only_audit_guards.sql"
+    "0029_supra_append_only_audit_guards.sql",
+    "0030_supra_audit_tenant_scope.sql",
+    "0031_operational_marketplace_tenant_scope.sql",
+    "0032_privacy_safe_cross_tenant_mission_marketplace.sql",
+    "0033_intervenant_availability_overlap_guard.sql",
+    "0034_timezone_safe_availability_overlap.sql",
+    "0035_validate_availability_intervals.sql",
+    "0036_intervenant_availability_idempotency.sql",
+    "0037_support_cases_tenant_isolation.sql",
+    "0038_identity_verification_tenant_scope.sql",
+    "0039_cryptographic_device_enrollment.sql",
+    "0040_accounting_active_state_at_posting.sql"
   ];
   for (const migration of expected) assert.ok(workflow.includes(`"${migration}"`), `missing canonical migration ${migration}`);
 });
@@ -75,6 +129,15 @@ test("Preview post-migration verification checks identity, mission-security and 
     "mission_security_attempts",
     "security_audit",
     "idx_identity_verifications_user",
+    "0038_identity_verification_tenant_scope.sql",
+    "0039_cryptographic_device_enrollment.sql",
+    "0040_accounting_active_state_at_posting.sql",
+    "trg_accounting_journal_post_active_scope",
+    "trusted_device_credentials", "device_auth_challenges",
+    "idx_trusted_device_credentials_tenant_user_status",
+    "idx_device_auth_challenges_session_expiry", "idx_device_auth_challenges_pending",
+    "idx_identity_verifications_tenant_user_status",
+    "tenant_id",
     "idx_mission_security_intervenant",
     "idx_security_attempts_security",
     "idx_security_audit_mission",
@@ -85,6 +148,9 @@ test("Preview post-migration verification checks identity, mission-security and 
     "supra_audit_events",
     "idx_supra_audit_events_created_at",
     "idx_supra_audit_events_actor",
+    "0030_supra_audit_tenant_scope.sql",
+    "idx_supra_audit_events_tenant_created_at",
+    "trg_supra_audit_events_require_active_tenant",
     "0022_supra_persisted_approvals.sql",
     "supra_approval_requests", "supra_approval_votes", "supra_approval_events",
     "idx_supra_approval_requests_status_expiry", "idx_supra_approval_requests_tenant_resource",
@@ -95,17 +161,20 @@ test("Preview post-migration verification checks identity, mission-security and 
     "trg_supra_approval_status_evidence",
     "trg_supra_audit_events_no_update",
     "trg_supra_audit_events_no_delete",
-    "trg_supra_approval_requests_no_delete"
+    "trg_supra_approval_requests_no_delete",
+    "support_cases",
+    "idx_support_cases_tenant_status_created",
+    "idx_support_cases_tenant_requester_created"
   ]) assert.ok(workflow.includes(name), `missing post-migration verification for ${name}`);
 });
 
-test("Preview migration workflow accepts only an empty EU D1, the exact 23-entry reviewed baseline or the exact 30-entry target", () => {
+test("Preview migration workflow accepts only an empty EU D1, the exact 23-entry reviewed baseline or the exact 41-entry target", () => {
   assert.match(workflow, /SELECT type, name FROM sqlite_master ORDER BY type, name/);
   assert.match(workflow, /registry_present/);
   assert.match(workflow, /non_internal/);
-  assert.match(workflow, /len\(local\) != 30/);
+  assert.match(workflow, /len\(local\) != 41/);
   assert.match(workflow, /remote == base/);
-  assert.match(workflow, /differs from the exact reviewed 23-entry baseline and 30-entry target/);
+  assert.match(workflow, /differs from the exact reviewed 23-entry baseline and 41-entry target/);
   assert.doesNotMatch(workflow, /legacy=/);
   assert.doesNotMatch(workflow, /baseline=\(local-pending\)\|legacy/);
 });
@@ -123,19 +192,19 @@ test("Preview D1 migration requires an encrypted R2 EU backup round-trip before 
   assert.match(workflow, /AWS_SECRET_ACCESS_KEY: \$\{\{ secrets\.R2_EU_SECRET_ACCESS_KEY \}\}/);
   assert.match(workflow, /R2_BUCKET: prochelia-preview-backups-eu-v2/);
   assert.match(workflow, /R2_ENDPOINT: https:\/\/f2a79e9fa41566a8ec80fb24c02c60eb\.eu\.r2\.cloudflarestorage\.com/);
-  const upload = workflow.indexOf("Upload encrypted backup and manifest to private R2 EU bucket");
-  const verify = workflow.indexOf("Download R2 backup and verify encrypted round-trip");
+  const upload = workflow.indexOf("Upload encrypted backup and HMAC attestation to private R2 EU bucket");
+  const verify = workflow.indexOf("Download R2 backup and verify HMAC, encryption and full round-trip");
   const artifact = workflow.indexOf("Publish encrypted backup before any schema write");
   const apply = workflow.indexOf("Apply migrations to Preview D1 only");
   assert.ok(upload >= 0 && verify > upload && artifact > verify && apply > artifact);
   assert.match(workflow, /PRAGMA integrity_check/);
-  assert.match(workflow, /R2 round-trip checksum mismatch/);
+  assert.match(workflow, /Decrypted R2 backup checksum differs from the HMAC-attested manifest/);
 });
 
 test("Preview migration refuses to export D1 unless R2 bucket jurisdiction is verified as EU", () => {
   const eu = workflow.indexOf("Verify R2 backup bucket EU jurisdiction before exporting sensitive D1 data");
   const exportStep = workflow.indexOf("Export only Preview D1 before migration");
-  const upload = workflow.indexOf("Upload encrypted backup and manifest to private R2 EU bucket");
+  const upload = workflow.indexOf("Upload encrypted backup and HMAC attestation to private R2 EU bucket");
   const apply = workflow.indexOf("Apply migrations to Preview D1 only");
   assert.ok(eu >= 0 && exportStep > eu && upload > exportStep && apply > upload);
   assert.match(workflow, /cf-r2-jurisdiction: eu/);
@@ -173,6 +242,21 @@ test("Preview migration workflow verifies every persisted approval table, index 
   assert.match(workflow, /actual_triggers != expected_triggers/);
 });
 
+
+test("Preview post-migration inventory queries include every object introduced by SUPRA tenant-scope migration 0030", () => {
+  const objectsStart = workflow.indexOf('jq -n \'{sql:"SELECT type, name FROM sqlite_master');
+  const objectsEnd = workflow.indexOf('> "$objects_payload"', objectsStart);
+  const objectsQuery = workflow.slice(objectsStart, objectsEnd);
+  assert.ok(objectsStart >= 0 && objectsEnd > objectsStart);
+  assert.ok(objectsQuery.includes("idx_supra_audit_events_tenant_created_at"));
+  assert.ok(objectsQuery.includes("trg_supra_audit_events_require_active_tenant"));
+
+  const guardsStart = workflow.indexOf('jq -n --arg sql "SELECT name FROM sqlite_master WHERE type=\'trigger\'');
+  const guardsEnd = workflow.indexOf('> "$supra_guards_payload"', guardsStart);
+  const guardsQuery = workflow.slice(guardsStart, guardsEnd);
+  assert.ok(guardsStart >= 0 && guardsEnd > guardsStart);
+  assert.ok(guardsQuery.includes("trg_supra_audit_events_require_active_tenant"));
+});
 test("Preview migration commands use only the dedicated migration-only D1 config", () => {
   assert.match(workflow, /Path\("wrangler\.preview-migrations\.jsonc"\)/);
   assert.match(workflow, /db\["binding"\] == "PREVIEW_DB"/);
@@ -256,8 +340,43 @@ test("Preview migration workflow verifies accounting, tenant and session-revocat
   for (const name of [
     "accounting_entities","accounting_accounts","accounting_journals","accounting_journal_lines",
     "tenants","tenant_memberships","tenant_membership_events",
+    "trusted_device_credentials","device_auth_challenges",
+    "idx_trusted_device_credentials_tenant_user_status","idx_device_auth_challenges_session_expiry","idx_device_auth_challenges_pending",
     "idx_tenant_membership_one_nonrevoked_per_user","idx_tenant_membership_one_owner",
     "trg_tenant_membership_revocation_terminal","trg_tenant_membership_identity_immutable","trg_session_revocation_terminal",
     "revoked_at","revoked_reason","revoked_by_user_id","last_seen_at"
   ]) assert.ok(workflow.includes(name), `missing post-migration verification for ${name}`);
+});
+
+test("Preview migration verifies operational marketplace tenant scope", () => {
+  for (const name of [
+    "0031_operational_marketplace_tenant_scope.sql",
+    "idx_clients_id_tenant", "idx_intervenants_id_tenant", "idx_prestations_id_tenant", "idx_missions_id_tenant", "idx_disponibilites_id_tenant",
+    "idx_clients_tenant_user", "idx_intervenants_tenant_user",
+    "idx_prestations_tenant_active", "idx_missions_tenant_status_start",
+    "idx_missions_tenant_intervenant", "idx_tarifs_tenant_prestation_active",
+    "idx_paiements_tenant_mission", "idx_disponibilites_tenant_intervenant_start",
+    "idx_evaluations_tenant_mission", "idx_documents_tenant_user",
+    "idx_conflits_tenant_mission", "idx_journal_tenant_created", "idx_wallets_tenant_user",
+    "trg_missions_relationship_scope_insert", "trg_missions_relationship_scope_update",
+    "trg_availability_intervenant_scope", "trg_payment_mission_scope",
+    "trg_tarif_prestation_scope", "trg_evaluation_mission_scope", "trg_conflict_mission_scope",
+    "Verify operational marketplace tenant boundary",
+    "tenant_id columns verified on all 12 operational marketplace tables"
+  ]) assert.ok(workflow.includes(name), `missing operational marketplace tenant verification: ${name}`);
+});
+
+test("Preview migration verifies privacy-safe cross-tenant mission opportunities and atomic assignments", () => {
+  for (const name of [
+    "0032_privacy_safe_cross_tenant_mission_marketplace.sql",
+    "0033_intervenant_availability_overlap_guard.sql",
+    "mission_opportunity_consents", "mission_opportunities", "mission_applications", "mission_assignments", "intervenant_skills", "idx_intervenant_skills_verified",
+    "trg_intervenant_skill_insert_scope", "trg_intervenant_skill_verification_guard", "trg_intervenant_skill_identity_immutable", "trg_intervenant_skill_update_verification_guard", "trg_intervenant_skills_no_delete",
+    "privacy-safe cross-tenant marketplace and assignment guards",
+    "idx_mission_opportunities_public_feed", "idx_mission_applications_opportunity_status",
+    "idx_mission_applications_provider", "idx_mission_assignments_provider_status",
+    "trg_mission_opportunity_publish_guard", "trg_mission_application_submit_guard",
+    "trg_mission_application_accept_guard", "trg_mission_application_accepted_create_assignment",
+    "trg_mission_assignment_insert_guard", "public_summary", "postal_prefix", "provider_pay_cents"
+  ]) assert.ok(workflow.includes(name), `missing marketplace opportunity verification: ${name}`);
 });

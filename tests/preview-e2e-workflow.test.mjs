@@ -4,21 +4,53 @@ import { readFile } from "node:fs/promises";
 
 const workflow = await readFile(new URL("../.github/workflows/preview-directory-e2e-acceptance.yml", import.meta.url), "utf8");
 
-test("Preview E2E is gated by explicit confirmation or a successful isolated Preview deployment", () => {
+test("Preview E2E is limited to the audited API candidate push or explicit manual confirmation", () => {
   assert.match(workflow, /workflow_dispatch:/);
   assert.match(workflow, /RUN_PREVIEW_DIRECTORY_E2E/);
-  assert.match(workflow, /workflow_run:/);
-  assert.match(workflow, /github\.event\.workflow_run\.conclusion == 'success'/);
+  assert.match(workflow, /github\.event_name == 'push'/);
+  assert.match(workflow, /github\.ref == 'refs\/heads\/feat\/supra-canonical-tenant-integration-2026-11-20'/);
+  assert.match(workflow, /github\.event_name == 'workflow_dispatch'/);
   assert.match(workflow, /github\.ref == 'refs\/heads\/main'/);
 });
 
-test("Preview E2E pins its own D1, Worker and Pages deployment", () => {
+test("Preview E2E pins the current private frontend branch and exact Pages commit", () => {
   assert.match(workflow, /PREVIEW_DB_ID: e3cf167c-37e1-4d72-9ac6-b3e27c14b97f/);
-  assert.match(workflow, /PAGES_DEPLOYMENT_ID: 83a36d32-4880-4417-a684-f9247e42debf/);
-  assert.match(workflow, /PAGES_PREVIEW_URL: https:\/\/83a36d32\.prochelia\.pages\.dev/);
+  assert.match(workflow, /FRONTEND_BRANCH: feat\/intervenant-secure-pages-integration-2026-11-20/);
+  assert.match(workflow, /FRONTEND_COMMIT_SHA: \$\{\{ inputs\.frontend_commit_sha/);
+  assert.match(workflow, /f7a1a2015083043ec2d4f35c914f7c38e785853a/);
+  assert.match(workflow, /pages\/projects\/prochelia\/deployments\?env=preview&per_page=10/);
+  assert.match(workflow, /deployment_trigger\.metadata\.branch/);
+  assert.match(workflow, /deployment_trigger\.metadata\.commit_hash/);
   assert.match(workflow, /prochelia-api-preview/);
-  assert.match(workflow, /3846562300e97a1816b2aa7e317448449270c2bc/);
+  assert.doesNotMatch(workflow, /api\.github\.com\/repos\/rzem92-png\/-prochelia\/branches/);
   assert.doesNotMatch(workflow, /PREVIEW_DB_ID: 04f52830-ef5a-4f17-a640-42bbc2381bba/);
+});
+
+test("synthetic SQL and GITHUB_ENV use real newline escapes, and cleanup sends valid JSON", () => {
+  assert.match(workflow, /\.join\(',\\n'\)/);
+  assert.match(workflow, /E2E_MANAGER_TOKEN=\$\{managerToken\}\\nE2E_CLIENT_TOKEN=/);
+  assert.match(workflow, /payload="\$\(cat <<EOF/);
+  assert.match(workflow, /\{"sql":"SELECT \(SELECT COUNT\(\*\) FROM users/);
+  assert.doesNotMatch(workflow, /\\\\n/);
+});
+
+test("Cloudflare Pages list response supports its array result shape", () => {
+  assert.ok(workflow.includes('(if type == "array" then . else (.deployments // []) end)'));
+});
+
+test("Pages proxy final gate runs after unconditional synthetic fixture cleanup", () => {
+  const cleanup = workflow.indexOf("Always remove synthetic Preview fixtures and verify cleanup");
+  const gate = workflow.indexOf("Enforce Pages proxy acceptance after synthetic Preview cleanup");
+  assert.ok(cleanup >= 0 && gate > cleanup, "cleanup must precede the final Pages proxy gate");
+});
+
+test("Pages proxy gaps are reported without skipping independent synthetic Worker tests", () => {
+  assert.ok(workflow.includes("id: pages_proxy"));
+  assert.ok(workflow.includes("continue-on-error: true"));
+  assert.ok(workflow.includes("proxy_gap=1"));
+  assert.ok(workflow.includes("Enforce Pages proxy acceptance after synthetic Preview cleanup"));
+  assert.ok(workflow.includes("${{ steps.pages_proxy.outcome }}"));
+  assert.ok(workflow.includes("Always remove synthetic Preview fixtures and verify cleanup"));
 });
 
 test("Pages binding mismatch diagnostics expose only non-secret deployment metadata", () => {
@@ -40,9 +72,9 @@ test("Preview E2E synthetic users provide every required users field, including 
 test("Synthetic Preview E2E fixtures are cleaned up and cleanup is verified", () => {
   assert.match(workflow, /Generate synthetic test fixtures and guaranteed cleanup SQL/);
   assert.match(workflow, /Always remove synthetic Preview fixtures and verify cleanup/);
+  assert.match(workflow, /if: always\(\)/);
   assert.match(workflow, /all synthetic Preview test rows and sessions removed/);
 });
-
 
 test("Preview directory acceptance exercises the deployed Worker and deterministic synthetic ordering", () => {
   assert.match(workflow, /https:\/\/prochelia-api-preview\.rzem92\.workers\.dev/);
@@ -50,4 +82,15 @@ test("Preview directory acceptance exercises the deployed Worker and determinist
   assert.match(workflow, /9999-12-31 23:59:59/);
   assert.match(workflow, /offset=not-a-number/);
   assert.doesNotMatch(workflow, /offset=50001/);
+});
+
+test("Preview E2E exercises the real same-origin Pages-to-Worker proxy without session or data writes", () => {
+  assert.match(workflow, /Exercise same-origin Pages-to-Worker proxy without a session/);
+  for (const route of ["workspace","opportunities","assignments","applications"]) {
+    assert.match(workflow, new RegExp("/api/intervenant/" + route));
+  }
+  assert.match(workflow, /expected HTTP 401/);
+  assert.match(workflow, /options_status/);
+  assert.match(workflow, /expected HTTP 204/);
+  assert.match(workflow, /service binding/);
 });
