@@ -7,9 +7,18 @@ on:
         description: "Saisir exactement APPLY_PREVIEW_ONLY pour autoriser la migration de préproduction"
         required: true
         type: string
+      restore_run_id:
+        description: "ID d'une restauration isolée v2 réussie sur la même révision main"
+        required: true
+        type: string
+      restore_verification_run_id:
+        description: "ID du contrôle d'intégrité en lecture seule réussi après cette restauration"
+        required: true
+        type: string
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
   group: prochelia-preview-d1-migrations
@@ -129,6 +138,46 @@ jobs:
         uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
           node-version: "22"
+
+      - name: Require successful isolated restore and read-only integrity proof
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RESTORE_RUN_ID: ${{ inputs.restore_run_id }}
+          RESTORE_VERIFY_RUN_ID: ${{ inputs.restore_verification_run_id }}
+        run: |
+          set -euo pipefail
+          [[ "$RESTORE_RUN_ID" =~ ^[0-9]+$ ]] || { echo "::error::Restore run ID must be numeric."; exit 1; }
+          [[ "$RESTORE_VERIFY_RUN_ID" =~ ^[0-9]+$ ]] || { echo "::error::Restore verification run ID must be numeric."; exit 1; }
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RESTORE_RUN_ID" > "$RUNNER_TEMP/restore-run.json"
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RESTORE_VERIFY_RUN_ID" > "$RUNNER_TEMP/restore-verification-run.json"
+          jq -e --arg sha "$GITHUB_SHA" '
+            .path == ".github/workflows/restore-preview-d1-test-v2.yml" and
+            .event == "workflow_dispatch" and
+            .head_branch == "main" and .head_sha == $sha and
+            .conclusion == "success"
+          ' "$RUNNER_TEMP/restore-run.json" >/dev/null || {
+            echo "::error::No successful isolated restore-v2 run for this exact main revision; refusing Preview migration."
+            exit 1
+          }
+          jq -e --arg sha "$GITHUB_SHA" '
+            .path == ".github/workflows/verify-restore-v2-integrity.yml" and
+            .event == "workflow_dispatch" and
+            .head_branch == "main" and .head_sha == $sha and
+            .conclusion == "success"
+          ' "$RUNNER_TEMP/restore-verification-run.json" >/dev/null || {
+            echo "::error::No successful read-only restore integrity verification for this exact main revision; refusing Preview migration."
+            exit 1
+          }
+          restore_created="$(jq -r '.created_at' "$RUNNER_TEMP/restore-run.json")"
+          verify_created="$(jq -r '.created_at' "$RUNNER_TEMP/restore-verification-run.json")"
+          restore_epoch="$(date -u -d "$restore_created" +%s)"
+          verify_epoch="$(date -u -d "$verify_created" +%s)"
+          (( verify_epoch > restore_epoch )) || {
+            echo "::error::Restore integrity verification must occur after the restore run."
+            exit 1
+          }
+          echo "PASS: isolated restore and subsequent read-only integrity proof are successful on this exact main revision."
 
       - name: Verify Cloudflare account identity
         shell: bash
