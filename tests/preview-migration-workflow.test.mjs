@@ -22,7 +22,7 @@ test("Preview migration restores the exact encrypted R2 backup into a distinct E
   assert.match(workflow, /restore_test_db_name:[\s\S]*required: true/);
   assert.match(workflow, /restore_test_db_id:[\s\S]*required: true/);
   assert.match(workflow, /prochelia-restore-test-\[a-z0-9-\]/);
-  assert.match(workflow, /RESTORE_TEST_DB_NAME: \\${{ inputs.restore_test_db_name }}/);
+  assert.match(workflow, /RESTORE_TEST_DB_NAME: \$\{\{ inputs\.restore_test_db_name \}\}/);
   assert.match(workflow, /\.result\.jurisdiction == "eu"/);
   assert.ok(workflow.includes('[[ "$RESTORE_TEST_DB_ID" != "$EXPECTED_DB_ID"'), "restore D1 must be distinct from Preview D1");
   assert.match(workflow, /PRAGMA quick_check/);
