@@ -36,8 +36,14 @@ test("backup and scale status endpoints remain read-only and fail honestly", () 
   assert.match(scaleStatus, /scheduleStatus:'NOT_ATTESTED'/);
   assert.match(scaleStatus, /encrypted:false/);
   assert.match(scaleStatus, /retentionStatus:'UNVERIFIED'/);
+  assert.match(scaleStatus, /bindingPresent:bucketBindingPresent/);
+  assert.match(scaleStatus, /configured:false/);
+  assert.match(scaleStatus, /verificationStatus:'UNVERIFIED'/);
   assert.match(backupStatus, /automatic:false/);
   assert.match(backupStatus, /frequency:null/);
   assert.match(backupStatus, /retentionDays:null/);
+  assert.match(backupStatus, /bindingPresent/);
+  assert.match(backupStatus, /configured:false/);
+  assert.match(backupStatus, /verificationStatus:'UNVERIFIED'/);
   assert.match(backupStatus, /schemaReady/);
 });
