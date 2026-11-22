@@ -88,6 +88,8 @@ test("Preview post-migration verification checks identity, mission-security and 
     "idx_identity_verifications_user",
     "0038_identity_verification_tenant_scope.sql",
     "0039_cryptographic_device_enrollment.sql",
+    "0040_accounting_active_state_at_posting.sql",
+    "trg_accounting_journal_post_active_scope",
     "trusted_device_credentials", "device_auth_challenges",
     "idx_trusted_device_credentials_tenant_user_status",
     "idx_device_auth_challenges_session_expiry", "idx_device_auth_challenges_pending",
