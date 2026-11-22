@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import { SUPRA_ACTION_POLICIES, evaluateSupraActionPolicy } from "../src/supra-action-policy.mjs";
 
 const source = readFileSync(new URL("../src/index.js", import.meta.url), "utf8");
+const supraApi = readFileSync(new URL("../src/supra-api.js", import.meta.url), "utf8");
 const executorStart = source.indexOf("async function executeQueuedAction(");
 const executorEnd = source.indexOf("\nasync function operationalExecute(", executorStart);
 assert.ok(executorStart >= 0 && executorEnd > executorStart, "canonical queued action executor must exist");
@@ -152,4 +153,20 @@ test("all registered policies declare risk, executor, verification, tenant and i
     assert.equal(policy.tenantScopeRequired, true, name);
     assert.equal(policy.idempotencyRequired, true, name);
   }
+});
+
+test("action policy catalogue is read-only and remains behind the NEXUS direction authorization gate", () => {
+  assert.match(supraApi, /import \{ SUPRA_ACTION_POLICIES \} from "\.\/supra-action-policy\.mjs"/);
+  assert.match(supraApi, /"\/api\/supra\/action-policies"/);
+  const start = supraApi.indexOf('if (url.pathname === "/api/supra/action-policies")');
+  const end = supraApi.indexOf('if (url.pathname === "/api/supra/domains")', start);
+  assert.ok(start >= 0 && end > start);
+  const route = supraApi.slice(start, end);
+  assert.match(route, /request\.method !== "GET"/);
+  assert.match(route, /executionAllowed: false/);
+  assert.match(route, /Object\.entries\(SUPRA_ACTION_POLICIES\)/);
+  assert.doesNotMatch(route, /\.prepare\(|\.run\(|fetch\(/);
+  const authGate = supraApi.slice(0, start);
+  assert.match(authGate, /UNAUTHENTICATED/);
+  assert.match(authGate, /FORBIDDEN/);
 });
