@@ -3862,7 +3862,7 @@ async function intervenantAvailabilityRoute(request, env, url) {
   const canonicalStartAt = new Date(startMs).toISOString();
   const canonicalEndAt = new Date(endMs).toISOString();
   // The persisted key is scoped to the authenticated tenant/profile; retries after a lost response must replay the same slot.
-  const idempotencyKey = String(request.headers.get('Idempotency-Key') || '').trim();
+  const idempotencyKey = String(request.headers.get('Idempotency-Key') || request.headers.get('X-Idempotency-Key') || '').trim();
   if (!/^[A-Za-z0-9._:-]{8,160}$/.test(idempotencyKey)) {
     return json({ ok: false, error: 'IDEMPOTENCY_KEY_REQUIRED' }, 400);
   }
@@ -4036,7 +4036,7 @@ async function intervenantOpportunityRoute(request, env, url) {
     return json({ ok: false, error: 'PROFILE_VALIDATION_REQUIRED' }, 403);
   }
   const opportunityId = decodeURIComponent(applyMatch[1]);
-  const idempotencyKey = String(request.headers.get('Idempotency-Key') || '').trim();
+  const idempotencyKey = String(request.headers.get('Idempotency-Key') || request.headers.get('X-Idempotency-Key') || '').trim();
   if (!/^[A-Za-z0-9._:-]{8,160}$/.test(idempotencyKey)) {
     return json({ ok: false, error: 'IDEMPOTENCY_KEY_REQUIRED' }, 400);
   }
