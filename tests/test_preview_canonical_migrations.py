@@ -1260,3 +1260,7 @@ assert "intervenants WHERE user_id=? AND tenant_id=?" in source
 assert "clients WHERE user_id=? AND tenant_id=?" in source
 assert "WHERE id=? AND tenant_id=? LIMIT 1" in source
 print("PASS: finance dashboard/export/ledger/cases are tenant-scoped, legacy unassigned rows fail closed, ledger/export append-only and resolution identity immutable.")
+
+assert "finance_workspace_entries','finance_export_log','finance_resolution_cases" in source
+assert "FINANCIAL_TENANT_SCOPE" in source
+assert "FINANCIAL_AUXILIARY_TENANT_COLUMNS" in source
