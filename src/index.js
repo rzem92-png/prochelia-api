@@ -4,6 +4,7 @@ import { handleSupraRoute } from "./supra-api.js";
 import { resolveTenantContext, tenantRoleAllowed } from "./tenant-context.js";
 import { handleSupraApprovalRoute } from "./supra-approvals.js";
 import { handleDeviceTrustRoute } from "./device-trust.js";
+import { handleAccountingRoute } from "./accounting-api.js";
 // PROCHÉLIA — INDEX BACKEND CONSOLIDÉ UNIQUE
 // Référence de consolidation : V14.1 Finance + sécurité/RBAC existants.
 // Généré le 19/10/2026. À déployer uniquement après recette avec la vraie base D1.
@@ -4196,6 +4197,19 @@ async function handle(request,env){
     if (url.pathname === '/api/intervenant/opportunities' || /^\/api\/intervenant\/opportunities\/[^/]+\/apply$/.test(url.pathname)) return intervenantOpportunityRoute(request, env, url);
     if (url.pathname === '/api/intervenant/profile') return intervenantProfileUpdateRoute(request, env);
     if (url.pathname === '/api/intervenant/workspace') return intervenantWorkspaceReadModel(request, env);
+    if (url.pathname.startsWith('/api/accounting/')) {
+      const accountingAuth = await getSessionUser(request, env).catch(() => null);
+      if (!accountingAuth?.user) return json({ ok: false, error: 'UNAUTHENTICATED', version: VERSION }, 401);
+      const accountingContext = await resolveTenantContext(request, env, accountingAuth);
+      if (!accountingContext.ok) {
+        return json({ ok: false, error: accountingContext.error, version: VERSION }, accountingContext.status);
+      }
+      const accountingResponse = await handleAccountingRoute(request, env, {
+        ...accountingAuth,
+        tenant: accountingContext.tenant
+      });
+      if (accountingResponse) return accountingResponse;
+    }
     if (url.pathname.startsWith('/api/supra/')) {
       let supraAuth = await getSessionUser(request, env).catch(() => null);
       if (supraAuth?.user) {
