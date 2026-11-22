@@ -46,5 +46,6 @@ test("payment routes cannot enable money movement by configuration alone", () =>
     const body = source.slice(start, end < 0 ? source.length : end);
     assert.match(body, /if \(!paymentsConfigured\(env\)\)/, `${name} must fail closed before writes`);
   }
-  assert.match(base, /PAYMENT_PROVIDER_NOT_CONFIGURED/);
+  assert.match(source, /PAYMENT_PROVIDER_NOT_CONFIGURED/);
+  assert.match(source, /PAYOUT_PROVIDER_NOT_CONFIGURED/);
 });
