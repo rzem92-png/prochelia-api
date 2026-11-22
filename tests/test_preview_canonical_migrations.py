@@ -44,6 +44,7 @@ EXPECTED = [
     "0037_support_cases_tenant_isolation.sql",
     "0038_identity_verification_tenant_scope.sql",
     "0039_cryptographic_device_enrollment.sql",
+    "0040_accounting_active_state_at_posting.sql",
 ]
 
 # Keep the manual Preview migration gate synchronized with the canonical chain.
@@ -219,6 +220,58 @@ db.execute("""
 """)
 try:
     db.execute("UPDATE accounting_journals SET status='POSTED', posted_by='user-a', posted_at=CURRENT_TIMESTAMP WHERE id='journal-a'")
+
+# Posting must re-check current entity/account activity, not only insertion-time state.
+db.execute("""
+    INSERT INTO accounting_accounts(id, tenant_id, entity_id, account_code, account_name, account_type, normal_balance)
+    VALUES ('cash-inactive-a', 'tenant-a', 'entity-a', '512001', 'Inactive test bank', 'ASSET', 'DEBIT')
+""")
+db.execute("""
+    INSERT INTO accounting_journals(
+      id, tenant_id, entity_id, journal_code, journal_date, currency,
+      source_type, source_id, idempotency_key, created_by
+    ) VALUES ('journal-inactive-account', 'tenant-a', 'entity-a', 'VE', '2026-11-18', 'EUR',
+              'TEST', 'inactive-account', 'tenant-a:inactive-account:1', 'user-a')
+""")
+db.execute("""
+    INSERT INTO accounting_journal_lines(id, tenant_id, entity_id, journal_id, account_id, line_number, side, amount_cents, currency)
+    VALUES ('line-inactive-account-debit', 'tenant-a', 'entity-a', 'journal-inactive-account', 'cash-inactive-a', 1, 'DEBIT', 2500, 'EUR')
+""")
+db.execute("""
+    INSERT INTO accounting_journal_lines(id, tenant_id, entity_id, journal_id, account_id, line_number, side, amount_cents, currency)
+    VALUES ('line-inactive-account-credit', 'tenant-a', 'entity-a', 'journal-inactive-account', 'revenue-a', 2, 'CREDIT', 2500, 'EUR')
+""")
+db.execute("UPDATE accounting_accounts SET is_active=0 WHERE id='cash-inactive-a'")
+try:
+    db.execute("UPDATE accounting_journals SET status='POSTED', posted_by='user-a', posted_at=CURRENT_TIMESTAMP WHERE id='journal-inactive-account'")
+    raise AssertionError("Journal using an account deactivated after line creation was incorrectly posted")
+except sqlite3.IntegrityError as exc:
+    assert "ACCOUNT_INACTIVE_AT_POSTING" in str(exc), str(exc)
+db.execute("UPDATE accounting_accounts SET is_active=1 WHERE id='cash-inactive-a'")
+
+db.execute("""
+    INSERT INTO accounting_journals(
+      id, tenant_id, entity_id, journal_code, journal_date, currency,
+      source_type, source_id, idempotency_key, created_by
+    ) VALUES ('journal-inactive-entity', 'tenant-a', 'entity-a', 'VE', '2026-11-18', 'EUR',
+              'TEST', 'inactive-entity', 'tenant-a:inactive-entity:1', 'user-a')
+""")
+db.execute("""
+    INSERT INTO accounting_journal_lines(id, tenant_id, entity_id, journal_id, account_id, line_number, side, amount_cents, currency)
+    VALUES ('line-inactive-entity-debit', 'tenant-a', 'entity-a', 'journal-inactive-entity', 'cash-a', 1, 'DEBIT', 3500, 'EUR')
+""")
+db.execute("""
+    INSERT INTO accounting_journal_lines(id, tenant_id, entity_id, journal_id, account_id, line_number, side, amount_cents, currency)
+    VALUES ('line-inactive-entity-credit', 'tenant-a', 'entity-a', 'journal-inactive-entity', 'revenue-a', 2, 'CREDIT', 3500, 'EUR')
+""")
+db.execute("UPDATE accounting_entities SET status='SUSPENDED' WHERE id='entity-a'")
+try:
+    db.execute("UPDATE accounting_journals SET status='POSTED', posted_by='user-a', posted_at=CURRENT_TIMESTAMP WHERE id='journal-inactive-entity'")
+    raise AssertionError("Journal for a suspended accounting entity was incorrectly posted")
+except sqlite3.IntegrityError as exc:
+    assert "ACCOUNTING_ENTITY_INACTIVE_AT_POSTING" in str(exc), str(exc)
+db.execute("UPDATE accounting_entities SET status='ACTIVE' WHERE id='entity-a'")
+print("PASS: posting revalidates active accounting entity and every referenced account at commit time.")
     raise AssertionError("Unbalanced journal was incorrectly posted")
 except sqlite3.IntegrityError as exc:
     assert "AT_LEAST_TWO_LINES" in str(exc) or "NOT_BALANCED" in str(exc), str(exc)
