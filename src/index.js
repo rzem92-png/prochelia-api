@@ -4,6 +4,7 @@ import { handleSupraRoute } from "./supra-api.js";
 import { resolveTenantContext, tenantRoleAllowed } from "./tenant-context.js";
 import { handleSupraApprovalRoute } from "./supra-approvals.js";
 import { handleDeviceTrustRoute } from "./device-trust.js";
+import { handleAccountingRoute } from "./accounting-api.js";
 // PROCHÉLIA — INDEX BACKEND CONSOLIDÉ UNIQUE
 // Référence de consolidation : V14.1 Finance + sécurité/RBAC existants.
 // Généré le 19/10/2026. À déployer uniquement après recette avec la vraie base D1.
@@ -1405,6 +1406,24 @@ async function handleBase(request, env) {
       return json({ ok: false, error: 'TENANT_CONTEXT_UNAVAILABLE', version: VERSION, write_enabled: false }, 503);
     }
     return handleDeviceTrustRoute(request, env, deviceAuth, deviceTenantContext, requireVerifiedIntervenant);
+  }
+
+  if (url.pathname.startsWith('/api/accounting/')) {
+    const accountingAuth = await getSessionUser(request, env).catch(() => null);
+    if (!accountingAuth?.user) return json({ ok: false, error: 'UNAUTHENTICATED', version: VERSION }, 401);
+    let accountingTenantContext;
+    try {
+      accountingTenantContext = await resolveTenantContext(request, env, accountingAuth);
+    } catch {
+      return json({ ok: false, error: 'TENANT_CONTEXT_UNAVAILABLE', version: VERSION, write_enabled: false }, 503);
+    }
+    if (!accountingTenantContext.ok) {
+      return json({ ok: false, error: accountingTenantContext.error, version: VERSION }, accountingTenantContext.status);
+    }
+    return handleAccountingRoute(request, env, {
+      ...accountingAuth,
+      tenant: accountingTenantContext.tenant
+    });
   }
 
   if (url.pathname === '/api/clients') {
