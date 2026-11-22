@@ -211,3 +211,20 @@ The claim is accepted only when evidence demonstrates:
 - dashboards and incident records showing actual operation over a sustained observation window.
 
 Until then, “24/7 autonomous operation” is a target architecture, not a proven live capability.
+
+
+## 18. Candidate implementation update — action policy enforcement
+
+The candidate branch now contains:
+- `src/supra-action-policy.mjs`: a deny-by-default registry for ten action classes, including notifications, mission rescheduling, replacement assignment, refunds, payouts, accounting entries, production releases/migrations, account sanctions and account deletion.
+- `evaluateSupraActionPolicy`: deterministic checks for registered action type, role, jurisdiction, autonomy level, human approval, tenant scope and idempotency.
+- `GET /api/supra/action-policies`: read-only policy catalogue for an authenticated direction user; response explicitly sets `executionAllowed: false`.
+- A policy gate at the queued-action execution boundary. The current caller deliberately supplies no trusted jurisdiction, approval, autonomy grant or tenant-scope proof, so execution is blocked until server-side tenant resolution, approval-ledger lookup and a verified executor are integrated.
+- Regression tests for policy denial, forbidden high-risk actions, read-only catalogue access and runtime enforcement.
+
+This is an intentional fail-closed integration stage, not a claim that all actions are now executable. The next implementation must resolve tenant and jurisdiction from authoritative database/session context, bind approvals to a specific action and payload hash, and only then enable individually verified executors. Never trust request-body claims for role, tenant, jurisdiction, autonomy or approval.
+
+Validation status for this update:
+- Static source inspection and JavaScript syntax parsing succeeded for the candidate source, policy module, API module and test file.
+- The GitHub workflow-run lookup returned no PR-triggered runs for the latest candidate commit. The regression suite has therefore not been reported as executed or passed.
+- No remote migration, deployment, production mutation, payment activation or merge was performed.
