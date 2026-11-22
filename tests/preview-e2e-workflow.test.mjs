@@ -26,6 +26,10 @@ test("Preview E2E pins the current private frontend branch and exact Pages commi
   assert.doesNotMatch(workflow, /PREVIEW_DB_ID: 04f52830-ef5a-4f17-a640-42bbc2381bba/);
 });
 
+test("Cloudflare Pages list response supports its array result shape", () => {
+  assert.ok(workflow.includes('(if type == "array" then . else (.deployments // []) end)'));
+});
+
 test("Pages binding mismatch diagnostics expose only non-secret deployment metadata", () => {
   const marker = "Safe metadata diagnostic follows.";
   const start = workflow.indexOf(marker);
