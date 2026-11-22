@@ -461,8 +461,8 @@ async function trialBalance(request, env, auth) {
   if (!entity.ok) return entity.response;
   const result = await env.DB.prepare(`
     SELECT a.id AS account_id,a.account_code,a.account_name,a.account_type,a.normal_balance,
-           COALESCE(SUM(CASE WHEN l.side='DEBIT' THEN l.amount_cents ELSE 0 END),0) AS debit_cents,
-           COALESCE(SUM(CASE WHEN l.side='CREDIT' THEN l.amount_cents ELSE 0 END),0) AS credit_cents
+           COALESCE(SUM(CASE WHEN j.id IS NOT NULL AND l.side='DEBIT' THEN l.amount_cents ELSE 0 END),0) AS debit_cents,
+           COALESCE(SUM(CASE WHEN j.id IS NOT NULL AND l.side='CREDIT' THEN l.amount_cents ELSE 0 END),0) AS credit_cents
       FROM accounting_accounts a
       LEFT JOIN accounting_journal_lines l
         ON l.account_id=a.id AND l.tenant_id=a.tenant_id AND l.entity_id=a.entity_id
