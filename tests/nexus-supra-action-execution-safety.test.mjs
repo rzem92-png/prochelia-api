@@ -194,3 +194,16 @@ test("operational execution does not trust caller-supplied tenant, jurisdiction,
   assert.match(handler, /tenantScoped: false/);
   assert.doesNotMatch(handler, /b\.tenantScoped|b\.jurisdiction|b\.autonomyLevel|b\.approvedAction/);
 });
+
+test("denied operational actions are blocked before any outbox enqueue", () => {
+  const start = source.indexOf("async function operationalExecute(");
+  const end = source.indexOf("\nasync function scoreClients(", start);
+  assert.ok(start >= 0 && end > start);
+  const handler = source.slice(start, end);
+  const preflightAt = handler.indexOf("const preflight = evaluateSupraActionPolicy(");
+  const queueAt = handler.indexOf("const q=await queueAction(");
+  assert.ok(preflightAt >= 0 && queueAt > preflightAt);
+  assert.match(handler, /queued: false/);
+  assert.match(handler, /if \(!preflight\.allowed\)/);
+  assert.match(handler, /continue;/);
+});
