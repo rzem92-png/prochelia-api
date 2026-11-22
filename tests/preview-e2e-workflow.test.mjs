@@ -38,6 +38,12 @@ test("Cloudflare Pages list response supports its array result shape", () => {
   assert.ok(workflow.includes('(if type == "array" then . else (.deployments // []) end)'));
 });
 
+test("Pages proxy final gate runs after unconditional synthetic fixture cleanup", () => {
+  const cleanup = workflow.indexOf("Always remove synthetic Preview fixtures and verify cleanup");
+  const gate = workflow.indexOf("Enforce Pages proxy acceptance after synthetic Preview cleanup");
+  assert.ok(cleanup >= 0 && gate > cleanup, "cleanup must precede the final Pages proxy gate");
+});
+
 test("Pages proxy gaps are reported without skipping independent synthetic Worker tests", () => {
   assert.ok(workflow.includes("id: pages_proxy"));
   assert.ok(workflow.includes("continue-on-error: true"));
