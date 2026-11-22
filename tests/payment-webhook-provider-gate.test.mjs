@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createHmac, webcrypto } from "node:crypto";
-import { paymentWebhook, webhookProviderForRequest, requiresAtomicFinancialSettlement } from "../src/index.js";
+import { paymentWebhook, webhookProviderForRequest, requiresAtomicFinancialSettlement, verifyWebhookSignature } from "../src/index.js";
 
 globalThis.crypto ??= webcrypto;
 
@@ -130,4 +130,28 @@ test("native Stripe financial event types remain blocked until atomic settlement
   }
   assert.equal(requiresAtomicFinancialSettlement("customer.updated"), false);
   assert.equal(requiresAtomicFinancialSettlement("PAYMENT_INTENT.SUCCEEDED"), true);
+});
+
+
+test("webhook signature verifier rejects short secrets and non-string raw bodies", async () => {
+  const timestamp = Math.floor(Date.now() / 1000);
+  const shortSecret = "too-short";
+  const payload = "{}";
+  const shortSignature = createHmac("sha256", shortSecret)
+    .update(String(timestamp) + "." + payload)
+    .digest("hex");
+  const stripeRequest = new Request("https://api.example.test/webhook", {
+    method: "POST",
+    headers: { "stripe-signature": `t=${timestamp},v1=${shortSignature}` }
+  });
+  assert.equal(await verifyWebhookSignature(stripeRequest, { STRIPE_WEBHOOK_SECRET: shortSecret }, payload), false);
+  assert.equal(await verifyWebhookSignature(stripeRequest, { STRIPE_WEBHOOK_SECRET: "x".repeat(32) }, null), false);
+
+  const genericSecret = "generic-secret-with-at-least-thirty-two-characters";
+  const genericRequest = new Request("https://api.example.test/webhook", {
+    method: "POST",
+    headers: { "x-prochelia-signature": createHmac("sha256", genericSecret).update(payload).digest("base64url") }
+  });
+  assert.equal(await verifyWebhookSignature(genericRequest, { PAYMENT_WEBHOOK_SECRET: "short" }, payload), false);
+  assert.equal(await verifyWebhookSignature(genericRequest, { PAYMENT_WEBHOOK_SECRET: genericSecret }, null), false);
 });
