@@ -3,10 +3,11 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
 const workflow = await readFile(new URL("../.github/workflows/restore-preview-r2-backup-isolated-test.yml", import.meta.url), "utf8");
+const backupWorkflow = await readFile(new URL("../.github/workflows/backup-preview-d1-to-r2-eu.yml", import.meta.url), "utf8");
 
-test("Preview R2 restore is manually gated to the reviewed main branch", () => {
-  assert.match(workflow, /github\.ref == 'refs\/heads\/main'/);
-  assert.match(workflow, /RESTORE_PREVIEW_R2_TO_ISOLATED_TEST_ONLY/);
+test("Preview R2 restore is manually gated to main only", () => {
+  assert.ok(workflow.includes("github.ref == 'refs/heads/main'"));
+  assert.ok(workflow.includes("RESTORE_PREVIEW_R2_TO_ISOLATED_TEST_ONLY"));
 });
 
 test("Restore source is pinned to the new EU Preview D1 and matching R2 object prefix", () => {
@@ -20,7 +21,7 @@ test("Both source and isolated restore D1 identities and EU jurisdictions are ch
   assert.match(workflow, /source-d1\.json/);
   assert.match(workflow, /restore-d1\.json/);
   assert.match(workflow, /result\.jurisdiction == "eu"/);
-  assert.match(workflow, /RESTORE_DB_ID: 3caebbc6-982a-4562-96a7-e509185e9e9a/);
+  assert.match(workflow, /RESTORE_DB_ID: 6b9a2659-53b7-499a-a53c-eeae64166508/);
   assert.match(workflow, /RESTORE_DB_ID.*!=.*PRODUCTION_DB_ID/);
   assert.match(workflow, /RESTORE_DB_ID.*!=.*PREVIEW_DB_ID/);
 });
@@ -44,4 +45,36 @@ test("Restore workflow pins third-party actions and restricts the generated obje
   assert.match(workflow, /actions\/checkout@[0-9a-f]{40}/);
   assert.match(workflow, /actions\/setup-node@[0-9a-f]{40}/);
   assert.match(workflow, /\[0-9\]\{4\}\/\[0-9\]\{2\}\/\[0-9\]\{2\}/);
+});
+
+test("Restore target is the newly provisioned empty EU-only validation database", () => {
+  assert.match(workflow, /RESTORE_DB_NAME: prochelia-r2-restore-validation-2026-11-18/);
+  assert.match(workflow, /RESTORE_DB_ID: 6b9a2659-53b7-499a-a53c-eeae64166508/);
+  assert.doesNotMatch(workflow, /3caebbc6-982a-4562-96a7-e509185e9e9a/);
+  assert.match(workflow, /RESTORE_DB_ID.*!=.*PREVIEW_DB_ID/);
+  assert.match(workflow, /RESTORE_DB_ID.*!=.*PRODUCTION_DB_ID/);
+  assert.match(workflow, /Confirm isolated restore database is empty before any remote write/);
+});
+
+test("Restore requires and verifies the HMAC attestation before decrypting or writing D1", () => {
+  assert.match(workflow, /BACKUP_ATTESTATION_HMAC_KEY: \$\{\{ secrets\.BACKUP_ATTESTATION_HMAC_KEY \}\}/);
+  assert.match(workflow, /BACKUP_ATTESTATION_HMAC_KEY.*32 UTF-8 bytes/s);
+  assert.match(workflow, /\.attestation\.json/);
+  assert.match(workflow, /\.attestation\.hmac/);
+  const verify = workflow.indexOf("Verify HMAC attestation and exact Preview source before decryption");
+  const decrypt = workflow.indexOf("Decrypt, verify checksum and test local SQLite restoration");
+  const remoteWrite = workflow.indexOf("Restore only into the isolated D1 database");
+  assert.ok(verify >= 0 && decrypt > verify && remoteWrite > decrypt);
+  assert.match(workflow, /r2-backup-attestation\.mjs verify/);
+  assert.match(workflow, /cipher_expected/);
+  assert.match(workflow, /attested_plain/);
+});
+
+test("Restore refuses to reuse the encryption secret as the HMAC attestation key", () => {
+  assert.match(workflow, /BACKUP_ATTESTATION_HMAC_KEY.*BACKUP_ENCRYPTION_KEY/s);
+});
+test("Isolated restore accepts only main provenance", () => {
+  assert.match(workflow, /\.provenance\.ref == "refs\/heads\/main"/);
+  assert.doesNotMatch(workflow, /fix\/r2-preview-backup-signed-attestation|fix\/restore-preview-fresh-eu-d1/);
+  assert.match(workflow, /r2-backup-attestation\.mjs verify/);
 });
