@@ -4260,6 +4260,11 @@ async function handle(request,env){
 
 async function handleCors(request, env) {
   const origin = request.headers.get('origin');
+  // Les opérations authentifiées par cookie doivent porter Origin :
+  // sans cette preuve, un POST cross-site ne doit pas être accepté.
+  if (isMutatingMethod(request.method) && getCookie(request, SESSION_COOKIE) && !origin) {
+    return json({ ok: false, error: 'ORIGIN_REQUIRED', version: VERSION }, 403);
+  }
   if (origin && !securityOriginAllowed(request, env)) {
     return json({ ok: false, error: 'ORIGIN_NOT_ALLOWED', version: VERSION }, 403);
   }
