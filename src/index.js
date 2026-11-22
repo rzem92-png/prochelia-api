@@ -198,7 +198,7 @@ function getCookie(request, name) {
 }
 
 function sessionCookie(token, maxAge = SESSION_TTL_SECONDS) {
-  return `${SESSION_COOKIE}=${encodeURIComponent(token)}; Max-Age=${maxAge}; Path=/; HttpOnly; Secure; SameSite=Lax`;
+  return `${SESSION_COOKIE}=${encodeURIComponent(token)}; Max-Age=${maxAge}; Path=/; HttpOnly; Secure; SameSite=None`;
 }
 
 async function createSession(env, userId) {
@@ -4258,8 +4258,34 @@ async function handle(request,env){
   }
 }
 
+async function handleCors(request, env) {
+  const origin = request.headers.get('origin');
+  if (origin && !securityOriginAllowed(request, env)) {
+    return json({ ok: false, error: 'ORIGIN_NOT_ALLOWED', version: VERSION }, 403);
+  }
+  if (request.method === 'OPTIONS') {
+    if (!origin) return json({ ok: false, error: 'CORS_ORIGIN_REQUIRED', version: VERSION }, 403);
+    return new Response(null, { status: 204, headers: {
+      'access-control-allow-origin': origin,
+      'access-control-allow-credentials': 'true',
+      'access-control-allow-methods': 'GET, HEAD, POST, PUT, PATCH, DELETE, OPTIONS',
+      'access-control-allow-headers': 'Content-Type, Authorization, X-CSRF-Token',
+      'access-control-max-age': '600',
+      'vary': 'Origin',
+      'cache-control': 'no-store'
+    }});
+  }
+  const response = await handle(request, env);
+  if (!origin) return response;
+  const headers = new Headers(response.headers);
+  headers.set('access-control-allow-origin', origin);
+  headers.set('access-control-allow-credentials', 'true');
+  headers.append('vary', 'Origin');
+  return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
+}
+
 export default {
-  fetch(request,env){ return handle(request,env); },
+  fetch(request,env){ return handleCors(request,env); },
   async scheduled(event,env,ctx){
     if(event?.cron === '*/1 * * * *'){
       const internalRequest = new Request('https://prochelia.internal/api/jobs/process', { method: 'POST' });
