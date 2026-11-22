@@ -183,7 +183,6 @@ jobs:
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: "22"
-          package-manager-cache: false
 
       - name: Confirm isolated target is empty before restoration
         shell: bash
@@ -214,12 +213,12 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         run: |
           set -euo pipefail
-          npx --yes wrangler@4 d1 execute "$RESTORE_DB_NAME" --remote --command="PRAGMA quick_check;" --json > "$RUNNER_TEMP/quick-check.json"
+          npx --yes wrangler@4 d1 execute "$RESTORE_DB_NAME" --remote --config "$RUNNER_TEMP/wrangler.restore.json" --command="PRAGMA quick_check;" --json > "$RUNNER_TEMP/quick-check.json"
           jq -e '[.. | strings] | any(. == "ok")' "$RUNNER_TEMP/quick-check.json" >/dev/null || { echo "::error::Remote SQLite quick_check failed."; exit 1; }
-          npx --yes wrangler@4 d1 execute "$RESTORE_DB_NAME" --remote --command="PRAGMA foreign_key_check;" --json > "$RUNNER_TEMP/foreign-key-check.json"
+          npx --yes wrangler@4 d1 execute "$RESTORE_DB_NAME" --remote --config "$RUNNER_TEMP/wrangler.restore.json" --command="PRAGMA foreign_key_check;" --json > "$RUNNER_TEMP/foreign-key-check.json"
           violations="$(jq '[.. | objects | select(has("results")) | .results[]?] | length' "$RUNNER_TEMP/foreign-key-check.json")"
           [[ "$violations" == "0" ]] || { echo "::error::Remote foreign-key violations detected."; exit 1; }
-          npx --yes wrangler@4 d1 execute "$RESTORE_DB_NAME" --remote --command="SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT GLOB '_cf_*' ORDER BY name;" --json > "$RUNNER_TEMP/tables.json"
+          npx --yes wrangler@4 d1 execute "$RESTORE_DB_NAME" --remote --config "$RUNNER_TEMP/wrangler.restore.json" --command="SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT GLOB '_cf_*' ORDER BY name;" --json > "$RUNNER_TEMP/tables.json"
           jq -e '[.. | objects | select(has("results")) | .results[]? | .name? // empty] | map(select(type == "string")) | index("users") != null and index("sessions") != null and index("clients") != null and index("intervenants") != null and index("missions") != null' "$RUNNER_TEMP/tables.json" >/dev/null || { echo "::error::Required tables missing after remote restore."; exit 1; }
           table_count="$(jq '[.. | objects | select(has("results")) | .results[]? | .name? // empty] | map(select(type == "string")) | unique | length' "$RUNNER_TEMP/tables.json")"
           echo "SUCCESS: remote restore integrity OK; foreign-key violations 0; required tables present; table count $table_count."
