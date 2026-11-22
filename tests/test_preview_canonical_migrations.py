@@ -45,6 +45,7 @@ EXPECTED = [
     "0038_identity_verification_tenant_scope.sql",
     "0039_cryptographic_device_enrollment.sql",
     "0040_accounting_active_state_at_posting.sql",
+    "0041_tenant_invitation_onboarding.sql",
 ]
 
 # Keep the manual Preview migration gate synchronized with the canonical chain.
@@ -56,16 +57,16 @@ assert '"0029_supra_append_only_audit_guards.sql"' in workflow_text, (
 assert '"0030_supra_audit_tenant_scope.sql"' in workflow_text, (
     "Preview migration workflow omits tenant-scoped SUPRA audit migration 0030"
 )
-assert "if len(local) != 41:" in workflow_text, (
+assert "if len(local) != 42:" in workflow_text, (
     "Preview migration workflow must require exactly 39 canonical migrations"
 )
-assert "exact 41-entry registry" in workflow_text, (
+assert "exact 42-entry registry" in workflow_text, (
     "Preview migration workflow target registry count is stale"
 )
-assert "all 41 canonical migrations are pending" in workflow_text, (
+assert "all 42 canonical migrations are pending" in workflow_text, (
     "Preview migration workflow empty-database inventory message is stale"
 )
-assert "only migrations 0023-0040 are pending" in workflow_text, (
+assert "only migrations 0023-0041 are pending" in workflow_text, (
     "Preview migration workflow baseline-to-target range is stale"
 )
 assert '"0038_identity_verification_tenant_scope.sql"' in workflow_text, (
@@ -105,8 +106,34 @@ required = {
     "users", "sessions", "clients", "intervenants", "missions",
     "auth_login_rate_limits", "supra_audit_events",
     "supra_approval_requests", "supra_approval_votes", "supra_approval_events",
+    "tenant_invitations", "tenant_invitation_events",
 }
 assert required <= tables, f"Canonical migration chain missing tables: {sorted(required-tables)}"
+
+invitation_indexes = {
+    "idx_tenant_invitations_one_pending_email",
+    "idx_tenant_invitations_expiry",
+    "idx_tenant_invitations_membership",
+    "idx_tenant_invitation_events_tenant_time",
+}
+assert invitation_indexes <= indexes, f"Missing tenant invitation indexes: {sorted(invitation_indexes-indexes)}"
+invitation_triggers = {
+    "trg_tenant_invitation_requires_pending_member",
+    "trg_tenant_invitation_initial_pending",
+    "trg_tenant_invitation_identity_immutable",
+    "trg_tenant_invitation_terminal",
+    "trg_tenant_invitation_events_no_update",
+    "trg_tenant_invitation_events_no_delete",
+    "trg_tenant_invitation_authorized_inviter",
+    "trg_tenant_invitation_event_actor_tenant",
+    "trg_tenant_invitation_email_matches_member",
+}
+triggers = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='trigger'")}
+assert invitation_triggers <= triggers, f"Missing tenant invitation triggers: {sorted(invitation_triggers-triggers)}"
+invitation_fk_targets = {row[2] for row in db.execute("PRAGMA foreign_key_list(tenant_invitations)")}
+assert {"tenants", "tenant_memberships", "users"} <= invitation_fk_targets, "Tenant invitations must reference canonical tenant, membership and user identities"
+invitation_columns = {row[1] for row in db.execute("PRAGMA table_info(tenant_invitations)")}
+assert "token_sha256" in invitation_columns and "token" not in invitation_columns, "Only token digests may be persisted"
 
 print(f"PASS: all {len(EXPECTED)} canonical Preview migrations apply from an empty D1 database, creating users/sessions first; foreign_key_check=0.")
 
@@ -175,6 +202,65 @@ try:
     raise AssertionError("A second non-revoked tenant owner was incorrectly accepted")
 except sqlite3.IntegrityError:
     pass
+
+# Tenant invitation invariants: only an active tenant manager may invite a pre-provisioned pending member.
+db.execute("UPDATE tenant_memberships SET status='ACTIVE', accepted_at=CURRENT_TIMESTAMP WHERE id='membership-owner-a2'")
+db.execute("""
+    INSERT INTO tenant_invitations(
+      id, tenant_id, membership_id, email_normalized, token_sha256,
+      idempotency_key, invited_by_user_id, expires_at
+    ) VALUES (
+      'invitation-a', 'tenant-a', 'membership-a-reinvite', 'user-a@example.test',
+      'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+      'invite-idem-1', 'user-b', datetime('now', '+1 day')
+    )
+""")
+try:
+    db.execute("""
+        INSERT INTO tenant_invitations(
+          id, tenant_id, membership_id, email_normalized, token_sha256,
+          idempotency_key, invited_by_user_id, expires_at
+        ) VALUES (
+          'invitation-a-duplicate', 'tenant-a', 'membership-a-reinvite', 'user-a@example.test',
+          'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+          'invite-idem-2', 'user-b', datetime('now', '+1 day')
+        )
+    """)
+    raise AssertionError("Duplicate pending tenant invitation was incorrectly accepted")
+except sqlite3.IntegrityError:
+    pass
+try:
+    db.execute("UPDATE tenant_invitations SET email_normalized='other@example.test' WHERE id='invitation-a'")
+    raise AssertionError("Tenant invitation identity was mutable")
+except sqlite3.IntegrityError as exc:
+    assert "TENANT_INVITATION_IDENTITY_IMMUTABLE" in str(exc), str(exc)
+try:
+    db.execute("""
+        INSERT INTO tenant_invitation_events(id, invitation_id, tenant_id, actor_user_id, event_type, reason_code)
+        VALUES ('invitation-event-cross-tenant', 'invitation-a', 'tenant-a', 'user-admin', 'CREATED', 'CROSS_TENANT')
+    """)
+    raise AssertionError("Cross-tenant invitation event actor was incorrectly accepted")
+except sqlite3.IntegrityError as exc:
+    assert "TENANT_INVITATION_EVENT_ACTOR_TENANT_MISMATCH" in str(exc), str(exc)
+db.execute("""
+    INSERT INTO tenant_invitation_events(id, invitation_id, tenant_id, actor_user_id, event_type, reason_code)
+    VALUES ('invitation-event-a', 'invitation-a', 'tenant-a', 'user-b', 'CREATED', 'TEST_CREATED')
+""")
+for sql in [
+    "UPDATE tenant_invitation_events SET reason_code='tampered' WHERE id='invitation-event-a'",
+    "DELETE FROM tenant_invitation_events WHERE id='invitation-event-a'",
+]:
+    try:
+        db.execute(sql)
+        raise AssertionError(f"Tenant invitation event history was mutable: {sql}")
+    except sqlite3.IntegrityError as exc:
+        assert "APPEND_ONLY" in str(exc), str(exc)
+db.execute("UPDATE tenant_invitations SET status='ACCEPTED', accepted_at=CURRENT_TIMESTAMP WHERE id='invitation-a'")
+try:
+    db.execute("UPDATE tenant_invitations SET status='REVOKED', accepted_at=NULL, revoked_at=CURRENT_TIMESTAMP WHERE id='invitation-a'")
+    raise AssertionError("Terminal tenant invitation was incorrectly changed")
+except sqlite3.IntegrityError as exc:
+    assert "TENANT_INVITATION_TERMINAL" in str(exc), str(exc)
 
 db.execute("""
     INSERT INTO accounting_entities(id, tenant_id, legal_name, country_code, base_currency)
