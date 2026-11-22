@@ -336,32 +336,41 @@ test("intervenant tenant membership uses a role allowed by the canonical tenant 
   assert.doesNotMatch(source, /membershipContext\.tenant\?\.role[^\n]*intervenant/);
 });
 
-test("payment onboarding creates wallets only inside the authenticated active tenant", () => {
+test("payment onboarding refuses before tenant resolution or wallet creation when no PSP adapter exists", () => {
   const start = source.indexOf("async function paymentOnboard(");
   const end = source.indexOf("\nasync function paymentStatus(", start);
   const handler = source.slice(start, end);
   assert.ok(start >= 0 && end > start);
-  assert.match(handler, /resolveTenantContext\(request, env, auth\)/);
-  assert.match(handler, /INSERT INTO wallets \(id,user_id,tenant_id\) VALUES \(\?,\?,\?\)/);
-  assert.match(handler, /WHERE user_id=\? AND tenant_id=\?/);
-  assert.doesNotMatch(handler, /INSERT INTO wallets \(id,user_id\)/);
+  const guard = handler.indexOf("if (!paymentsConfigured(env))");
+  assert.ok(guard >= 0);
+  const tenant = handler.indexOf("resolveTenantContext(request, env, auth)");
+  assert.ok(tenant > guard);
+  assert.match(handler.slice(guard, tenant), /PAYMENT_PROVIDER_NOT_CONFIGURED/);
+  assert.match(handler.slice(guard, tenant), /write_enabled:false/);
+  assert.doesNotMatch(handler, /INSERT INTO wallets|INSERT INTO payment_accounts/);
 });
 
-test("payment status reads and creates a tenant-scoped wallet only after server-side tenant resolution", () => {
+test("payment status is read-only and never initializes a wallet or schema", () => {
   const start = source.indexOf("async function paymentStatus(");
   const end = source.indexOf("\nasync function createMissionPayment(", start);
   const handler = source.slice(start, end);
   assert.match(handler, /resolveTenantContext\(request, env, auth\)/);
+  assert.match(handler, /read_only:true/);
+  assert.match(handler, /payments_configured:false/);
+  assert.match(handler, /wallet:null/);
   assert.match(handler, /SELECT \* FROM wallets WHERE user_id=\? AND tenant_id=\?/);
-  assert.match(handler, /INSERT INTO wallets \(id,user_id,tenant_id\)/);
-  assert.match(handler, /WALLET_UNAVAILABLE/);
+  assert.doesNotMatch(handler, /ensurePaymentSchema|INSERT INTO|UPDATE wallets|DELETE FROM/);
 });
 
-test("payout reservation selects the wallet from the authenticated tenant", () => {
+test("payout requests fail closed before D1 access when no PSP adapter exists", () => {
   const start = source.indexOf("async function payoutRequest(");
   const end = source.indexOf("\nfunction constantTimeStringEqual(", start);
   const handler = source.slice(start, end);
-  assert.match(handler, /resolveTenantContext\(request, env, auth\)/);
-  assert.match(handler, /SELECT \* FROM wallets WHERE user_id=\? AND tenant_id=\?/);
-  assert.match(handler, /WHERE id=\? AND user_id=\? AND tenant_id=\?/);
+  const guard = handler.indexOf("if (!paymentsConfigured(env))");
+  assert.ok(guard >= 0);
+  for (const operation of ["ensurePaymentSchema(env)", "resolveTenantContext(request, env, auth)", "SELECT * FROM payment_accounts", "SELECT * FROM wallets", "reservePayoutAtomically(env"]) {
+    const position = handler.indexOf(operation);
+    assert.ok(position < 0 || position > guard, `${operation} must follow the PSP guard`);
+  }
+  assert.match(handler.slice(guard), /PAYOUT_PROVIDER_NOT_CONFIGURED/);
 });
