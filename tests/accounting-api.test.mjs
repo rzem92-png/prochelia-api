@@ -110,3 +110,49 @@ test("accounting routes are wired through authenticated server-side tenant conte
   assert.ok(source.includes("resolveTenantContext(request, env, accountingAuth)"));
   assert.ok(source.includes("tenant: accountingContext.tenant"));
 });
+
+
+test("trial balance sums only lines belonging to posted journals on or before the as-of date", async () => {
+  let trialBalanceSql = "";
+  const required = [
+    "accounting_entities", "accounting_accounts",
+    "accounting_journals", "accounting_journal_lines"
+  ];
+  const DB = {
+    prepare(sql) {
+      return {
+        sql,
+        bind() { return this; },
+        async all() {
+          if (sql.includes("sqlite_master")) {
+            return { success: true, results: required.map(name => ({ name })) };
+          }
+          if (sql.includes("SELECT a.id AS account_id")) {
+            trialBalanceSql = sql;
+            return { success: true, results: [{
+              account_id: "cash", account_code: "512000", account_name: "Bank",
+              account_type: "ASSET", normal_balance: "DEBIT",
+              debit_cents: 10000, credit_cents: 0
+            }] };
+          }
+          throw new Error("Unexpected accounting query: " + sql);
+        },
+        async first() {
+          return { id: "entity-a", tenant_id: "tenant-a", status: "ACTIVE", base_currency: "EUR" };
+        }
+      };
+    },
+    batch: async () => []
+  };
+  const response = await handleAccountingRoute(
+    new Request("https://api.example.test/api/accounting/trial-balance?entity_id=entity-a&as_of=2026-11-22"),
+    { DB },
+    { user: { id: "reader-a" }, tenant: { id: "tenant-a", role: "READ_ONLY" } }
+  );
+  assert.equal(response.status, 200);
+  const payload = await response.json();
+  assert.equal(payload.accounts[0].debit_cents, 10000);
+  assert.match(trialBalanceSql, /CASE WHEN j\\.id IS NOT NULL AND l\\.side='DEBIT'/);
+  assert.match(trialBalanceSql, /CASE WHEN j\\.id IS NOT NULL AND l\\.side='CREDIT'/);
+  assert.match(trialBalanceSql, /j\\.status='POSTED' AND j\\.journal_date<=\\?/);
+});
