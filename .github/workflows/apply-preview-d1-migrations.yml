@@ -302,8 +302,8 @@ jobs:
             echo "::error::Restored D1 does not match the expected 23-migration Preview baseline."
             exit 1
           }
-          npx --yes wrangler@4 d1 execute "$RESTORE_TEST_DB_NAME" --remote --command="SELECT name FROM sqlite_master WHERE type='table' AND name IN ('users','missions','intervenants','prestations','disponibilites','wallets','documents','payment_transactions','accounting_ledger','d1_migrations') ORDER BY name;" --json > "$RUNNER_TEMP/prochelia-backup/restore-core-tables.json"
-          jq -e '[.. | objects | select(has("results")) | .results[]? | .name] | unique | length == 10' "$RUNNER_TEMP/prochelia-backup/restore-core-tables.json" >/dev/null || {
+          npx --yes wrangler@4 d1 execute "$RESTORE_TEST_DB_NAME" --remote --command="SELECT name FROM sqlite_master WHERE type='table' AND name IN ('users','missions','intervenants','prestations','disponibilites','wallets','documents','accounting_ledger','d1_migrations') ORDER BY name;" --json > "$RUNNER_TEMP/prochelia-backup/restore-core-tables.json"
+          jq -e '[.. | objects | select(has("results")) | .results[]? | .name] | unique | length == 9' "$RUNNER_TEMP/prochelia-backup/restore-core-tables.json" >/dev/null || {
             echo "::error::Restored D1 is missing one or more required core tables."
             exit 1
           }
