@@ -45,3 +45,9 @@ test("Restore workflow pins third-party actions and restricts the generated obje
   assert.match(workflow, /actions\/setup-node@[0-9a-f]{40}/);
   assert.match(workflow, /\[0-9\]\{4\}\/\[0-9\]\{2\}\/\[0-9\]\{2\}/);
 });
+
+test("Restore uses the dedicated, explicitly EU-jurisdiction Preview bucket provisioned for this project", () => {
+  assert.match(workflow, /R2_BUCKET: prochelia-preview-backups-eu-v2/);
+  assert.match(workflow, /prochelia-preview-backups-eu-v2/);
+  assert.doesNotMatch(workflow, /prochelia-preview-backups-eu-locked/);
+});
