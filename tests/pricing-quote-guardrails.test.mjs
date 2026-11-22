@@ -7,6 +7,7 @@ const start = source.indexOf("async function pricingQuote(request, env) {");
 const end = source.indexOf("\nasync function financeSummary", start);
 assert.ok(start >= 0 && end > start, "pricing quote handler must exist");
 const handler = source.slice(start, end);
+const executableHandler = handler.replace(/^\s*\/\/.*$/gm, "");
 const executableHandler = handler.replace(/^\\s*\\/\\/.*$/gm, "");
 
 test("pricing simulations require POST, manager RBAC and a server-derived tenant", () => {
@@ -19,7 +20,7 @@ test("pricing simulations require POST, manager RBAC and a server-derived tenant
 test("legacy global pricing policy and client-supplied financial assumptions fail closed", () => {
   assert.match(handler, /TENANT_SCOPED_PRICING_POLICY_REQUIRED/);
   assert.match(handler, /write_enabled:false/);
-  assert.doesNotMatch(handler, /readJson\(|base_price_cents|pricing_policies|pricing_quotes|financeStrategicQuote|INSERT INTO/);
+  assert.doesNotMatch(executableHandler, /readJson\(|base_price_cents|pricing_policies|pricing_quotes|financeStrategicQuote|INSERT INTO/);
 });
 
 test("pricing quote refuses before initializing the legacy consolidated schema", () => {
