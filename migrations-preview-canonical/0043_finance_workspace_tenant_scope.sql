@@ -1,5 +1,6 @@
 -- PROCHÉLIA — tenant scope for finance workspace, exports and resolution cases.
 -- Legacy records stay unassigned until a valid user/tenant membership is verified.
+-- CI covers the complete 44-migration chain and finance workspace tenant constraints.
 -- Runtime finance schema helpers validate this migration and never create tables.
 
 CREATE TABLE IF NOT EXISTS finance_workspace_entries (
