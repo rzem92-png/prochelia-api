@@ -81,15 +81,22 @@ NEXUS SUPRA peut fonctionner en continu comme système de supervision et d'orche
 ### Garde-fous techniques
 RBAC/ABAC et moindre privilège; séparation des tâches; secrets gérés hors code; journaux append-only; preuve de chaque décision (entrée, règle, version modèle, sortie, approbation); idempotence; quotas; circuit breakers; kill switch; files de reprise; sauvegardes chiffrées et restauration testée; alertes humaines; mode dégradé sûr; tests de reprise et exercices d'incident.
 
-## 5. Protection des mineurs et vérification d'âge/identité
+## 5. Protection des mineurs et parcours « Jeunes Talents » protégés
 
-Règle produit demandée: accès réservé aux personnes de 18 ans et plus, pour les comptes et fonctionnalités PROCHÉLIA. Cette règle doit être traduite en contrôles serveur et en parcours de recours:
-- vérification de majorité avant activation des fonctionnalités réservées; ne pas se fier à une date de naissance saisie ou au navigateur;
-- fournisseur de vérification choisi après analyse d'impact, sécurité, couverture pays, coûts et conformité; privilégier un jeton/attribut « majorité vérifiée » plutôt que conserver une copie de pièce;
-- ne collecter que les attributs nécessaires; chiffrement, durée de conservation courte, accès restreint, traçabilité et suppression selon les obligations applicables;
-- échec, document douteux ou contrôle indisponible => accès limité, aucune mission ni paiement; voie de recours humaine;
-- contrôles de l'âge adaptés au risque et au droit local; l'interdiction des mineurs ne dispense pas d'étudier les risques de contenus accessibles publiquement.
-La vérification d'identité des professionnels/entreprises et les contrôles KYC/AML sont distincts de la simple vérification de majorité.
+PROCHÉLIA doit pouvoir accueillir un parcours Jeunes Talents distinct du marché professionnel adulte, mais uniquement dans les pays et catégories où une analyse juridique locale a confirmé les conditions de participation. Ce parcours n'est jamais activé par défaut. Il ne donne pas automatiquement accès aux missions de services, au travail indépendant, aux contrats professionnels, aux lives publics ni aux paiements.
+
+- Parcours séparé par tranche d'âge et pays, avec âge vérifié par un prestataire proportionné; ne pas se fier à une date de naissance déclarée. Conserver un jeton/attribut d'âge plutôt que la copie d'une pièce lorsque possible.
+- Consentement et implication du titulaire de l'autorité parentale lorsque le droit l'exige; vérification proportionnée du lien et procédure de retrait. Ne pas demander plus de données familiales que nécessaire.
+- Profil privé par défaut, pseudonyme public, aucune adresse/école/localisation précise, aucune géolocalisation en direct, aucune indexation externe par défaut et aucune publicité comportementale ciblée.
+- Messagerie privée adulte-mineur désactivée par défaut; aucun contact privé non sollicité, aucun partage de coordonnées, aucune rencontre hors plateforme sans procédure et encadrement légal spécifiques.
+- Commentaires, lives, cadeaux, contenus sponsorisés et interactions soumis à des restrictions adaptées à l'âge; modération renforcée, filtres de contact, blocage immédiat et signalement accessible.
+- Pas de mécanismes de pression, de classement humiliant, de récompenses aléatoires payantes, de compte à rebours manipulatoire ni de sollicitation financière directe.
+- Aucun versement direct à un mineur par défaut. Toute rémunération éventuelle doit être désactivée jusqu'à validation écrite du droit local, du statut, des règles de travail des enfants, de la fiscalité, des contrats, du PSP et du rôle du représentant légal. Si un modèle autorisé existe, le bénéficiaire, le compte de paiement et les justificatifs doivent être définis conformément au droit applicable; l'accord parental seul ne suffit pas à rendre une activité licite.
+- Les adultes et les mineurs ne partagent pas les mêmes règles d'accès, de découverte, de recommandation, de monétisation et de contact. Les décisions d'éligibilité ou de sanction sont explicables et contestables.
+- Si l'âge est incertain, si le contrôle échoue ou si le pays n'est pas validé, le compte reste en mode restreint sans publication publique, contact ni monétisation. Prévoir recours humain.
+- Les signalements de mise en danger, grooming, exploitation, sextorsion ou contenu sexuel impliquant un mineur suivent une procédure urgente dédiée, avec conservation minimale et sécurisée des éléments, escalade vers les personnes compétentes et signalement aux autorités lorsque requis. Ne jamais demander à l'utilisateur de renvoyer ou télécharger un contenu sexuel impliquant un mineur.
+
+La vérification d'âge, l'identité, le statut professionnel, les qualifications et le KYC/AML sont des contrôles distincts. Aucun mineur n'est utilisé comme main-d'œuvre sur le marché des missions tant que le cadre légal applicable n'a pas été qualifié et autorisé.
 
 ## 6. Architecture juridique multi-pays — France, Algérie et extension internationale
 
@@ -317,3 +324,30 @@ Aucun KPI ne doit être simulé ou présenté comme réel. Les seuils et objecti
 Ce blueprint est une cible produit. Une fonctionnalité n'est considérée « construite » que si le code est présent, relié aux routes et données réelles, protégé par les permissions, testé en CI et validé sur un parcours Preview représentatif. Une fonctionnalité n'est « opérationnelle » qu'après preuve d'exploitation et de supervision. Une fonctionnalité n'est « autorisée dans un pays » qu'après validation réglementaire et opérationnelle locale.
 
 Les PR existantes restent séparées et non fusionnées jusqu'à résolution des dépendances et des tests. Aucun déploiement Production, migration distante, paiement réel ou activation de pays n'est autorisé par ce document.
+
+
+## 14. NEXUS SHIELD — confiance, anti-harcèlement, anti-escroquerie, anti-piratage et cybersécurité
+
+NEXUS SHIELD est le dispositif transversal de confiance et de sécurité, coordonné par NEXUS SUPRA. Il couvre les comptes, profils, messages, contenus, lives, réservations, missions, paiements, entreprises, intervenants et espaces Jeunes Talents. Il s'appuie sur les contrôles serveur et des opérateurs humains; une IA ou un score de risque n'est jamais une preuve définitive.
+
+### Prévention et détection
+- Défense des comptes: passkeys/MFA pour les rôles sensibles, limitation des tentatives, détection du credential stuffing, protection contre phishing, sessions révocables, alertes de connexion inhabituelle et récupération de compte renforcée.
+- Défense applicative: validation serveur, moindre privilège, isolation des tenants, protection XSS/CSRF/SSRF/injection, contrôle des fichiers, secrets hors code, chiffrement, rotation, sauvegardes restaurables, surveillance des API et protections anti-bot/DDoS adaptées.
+- Anti-escroquerie: détection des faux profils, usurpations, documents incohérents, faux avis, faux abonnés, demandes de paiement hors plateforme, fausses preuves de mission, fraude au remboursement, manipulation des commissions et abus de promotions.
+- Anti-harcèlement: détection du harcèlement répété, menaces, chantage, discrimination, doxxing, stalking, spam, raids coordonnés et sollicitations sexuelles non désirées; outils bloquer, masquer, limiter, filtrer et signaler.
+- Anti-piratage et droits: procédure de signalement de contenus contrefaisants, preuve de titularité ou mandat, retrait/suspension selon procédure, contre-notification lorsque requise, gestion des récidivistes et traçabilité. Aucun retrait automatique irréversible sur une simple détection de similarité.
+- Protection des mineurs: contrôles renforcés, prévention du grooming, séparation des espaces et contacts, modération prioritaire et escalade urgente.
+
+### Réponse graduée et équitable
+1. Un signal ou score déclenche une analyse; il ne suffit pas à conclure à une fraude ou à bannir.
+2. En cas de risque immédiat, SUPRA peut appliquer une mesure temporaire, proportionnée et réversible préautorisée: masquer un contenu, couper un contact, ralentir une action, bloquer temporairement un paiement suspect via le PSP ou geler une session compromise.
+3. L'utilisateur reçoit une information adaptée, un motif compréhensible, la durée ou le statut de la mesure et un canal de contestation, sauf exception légale de confidentialité.
+4. Les sanctions durables, fermetures définitives, confiscations, accusations publiques et décisions contestées exigent une revue humaine habilitée et une preuve suffisante.
+5. Les signalements urgents liés à une menace physique ou à un mineur sont priorisés et escaladés selon une procédure documentée.
+6. Prévoir contrôle des faux positifs, protection contre les signalements malveillants et recours accessible aux personnes visées.
+
+### Gouvernance SUPRA et preuves
+Chaque décision enregistre: identifiant d'événement, tenant, compte/ressource concerné, source du signal, faits observés séparés des hypothèses, règle et version, niveau de confiance, mesure, durée, acteur automatique/humain, approbation, notification, résultat et recours. Accès aux preuves limité, conservation définie, intégrité protégée et suppression à échéance. Les données sensibles ne sont pas utilisées pour inférer un diagnostic ou profiler la vulnérabilité psychologique d'une personne.
+
+### Conditions de mise en service
+Avant activation: tests adversariaux, scénarios de faux positifs, abus coordonnés, récupération de compte, compromission d'administrateur, fraude au paiement, signalement/retrait/recours, protection mineurs, tests d'isolation multi-tenant, plan d'incident, astreinte et audit indépendant. Sans preuve d'exécution, la fonction est marquée « spécifiée, non vérifiée » et ne doit pas être présentée comme opérationnelle.
