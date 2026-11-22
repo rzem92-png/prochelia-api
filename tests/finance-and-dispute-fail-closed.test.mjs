@@ -61,6 +61,7 @@ test("finance workspace refuses legacy unscoped tables and derives every read fr
   const rowsEnd = source.indexOf("\\nfunction financeSummaryFromRows", rowsStart);
   const rows = source.slice(rowsStart, rowsEnd);
   assert.match(rows, /let where = 'tenant_id=\\?'/);
+  assert.match(rows, /const manager = \\['GERANTE','ADMIN','FINANCE','SUPPORT','SOCIETE','COMPANY'\\]/);
   assert.match(rows, /intervenants WHERE user_id=\\? AND tenant_id=\\?/);
   assert.match(rows, /clients WHERE user_id=\\? AND tenant_id=\\?/);
   assert.match(rows, /FROM finance_workspace_entries WHERE tenant_id=\\?/);
