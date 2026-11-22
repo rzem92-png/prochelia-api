@@ -13,7 +13,7 @@ test("Preview migration is manually gated on main only", () => {
 test("Preview migration restores the exact encrypted R2 backup into a distinct EU D1 before applying migrations", () => {
   const targetGate = workflow.indexOf("Verify dedicated isolated restore D1 identity and EU jurisdiction");
   const exportStep = workflow.indexOf("Export only Preview D1 before migration");
-  const roundTrip = workflow.indexOf("Download R2 backup and verify encrypted round-trip");
+  const roundTrip = workflow.indexOf("Download R2 backup and verify HMAC, encryption and full round-trip");
   const restoreStep = workflow.indexOf("Restore exact R2 backup into isolated D1 and verify integrity before Preview migration");
   const publish = workflow.indexOf("Publish encrypted backup before any schema write");
   const applyStep = workflow.indexOf("Apply migrations to Preview D1 only");
@@ -22,7 +22,7 @@ test("Preview migration restores the exact encrypted R2 backup into a distinct E
   assert.match(workflow, /restore_test_db_name:[\s\S]*required: true/);
   assert.match(workflow, /restore_test_db_id:[\s\S]*required: true/);
   assert.match(workflow, /prochelia-restore-test-\[a-z0-9-\]/);
-  assert.match(workflow, /RESTORE_TEST_DB_NAME: prochelia-r2-restore-validation-2026-11-18/);
+  assert.match(workflow, /RESTORE_TEST_DB_NAME: \\${{ inputs.restore_test_db_name }}/);
   assert.match(workflow, /\.result\.jurisdiction == "eu"/);
   assert.ok(workflow.includes('[[ "$RESTORE_TEST_DB_ID" != "$EXPECTED_DB_ID"'), "restore D1 must be distinct from Preview D1");
   assert.match(workflow, /PRAGMA quick_check/);
@@ -192,19 +192,19 @@ test("Preview D1 migration requires an encrypted R2 EU backup round-trip before 
   assert.match(workflow, /AWS_SECRET_ACCESS_KEY: \$\{\{ secrets\.R2_EU_SECRET_ACCESS_KEY \}\}/);
   assert.match(workflow, /R2_BUCKET: prochelia-preview-backups-eu-v2/);
   assert.match(workflow, /R2_ENDPOINT: https:\/\/f2a79e9fa41566a8ec80fb24c02c60eb\.eu\.r2\.cloudflarestorage\.com/);
-  const upload = workflow.indexOf("Upload encrypted backup and manifest to private R2 EU bucket");
-  const verify = workflow.indexOf("Download R2 backup and verify encrypted round-trip");
+  const upload = workflow.indexOf("Upload encrypted backup and HMAC attestation to private R2 EU bucket");
+  const verify = workflow.indexOf("Download R2 backup and verify HMAC, encryption and full round-trip");
   const artifact = workflow.indexOf("Publish encrypted backup before any schema write");
   const apply = workflow.indexOf("Apply migrations to Preview D1 only");
   assert.ok(upload >= 0 && verify > upload && artifact > verify && apply > artifact);
   assert.match(workflow, /PRAGMA integrity_check/);
-  assert.match(workflow, /R2 round-trip checksum mismatch/);
+  assert.match(workflow, /Decrypted R2 backup checksum differs from the HMAC-attested manifest/);
 });
 
 test("Preview migration refuses to export D1 unless R2 bucket jurisdiction is verified as EU", () => {
   const eu = workflow.indexOf("Verify R2 backup bucket EU jurisdiction before exporting sensitive D1 data");
   const exportStep = workflow.indexOf("Export only Preview D1 before migration");
-  const upload = workflow.indexOf("Upload encrypted backup and manifest to private R2 EU bucket");
+  const upload = workflow.indexOf("Upload encrypted backup and HMAC attestation to private R2 EU bucket");
   const apply = workflow.indexOf("Apply migrations to Preview D1 only");
   assert.ok(eu >= 0 && exportStep > eu && upload > exportStep && apply > upload);
   assert.match(workflow, /cf-r2-jurisdiction: eu/);
