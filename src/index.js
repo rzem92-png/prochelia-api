@@ -1,4 +1,5 @@
 import { handleV7Route } from "./v7-routes.js";
+import { handleSupraRoute } from "./supra-api.js";
 // PROCHÉLIA — INDEX BACKEND CONSOLIDÉ UNIQUE
 // Référence de consolidation : V14.1 Finance + sécurité/RBAC existants.
 // Généré le 19/10/2026. À déployer uniquement après recette avec la vraie base D1.
@@ -3593,6 +3594,7 @@ async function productionRateLimit(request,env){
     path.startsWith('/api/security/') ||
     path.startsWith('/api/payments/') ||
     path.startsWith('/api/support/') ||
+    path.startsWith('/api/supra/') ||
     path==='/api/complaints' ||
     path==='/api/jobs/process' ||
     path==='/api/system/backup/run';
@@ -3667,6 +3669,27 @@ handle = async function(request,env){
     if (isMutatingMethod(preflightMethod) && !securityOriginAllowed(request,env)) {
       return json({ok:false,error:'ORIGIN_NOT_ALLOWED',version:VERSION},403);
     }
+    // Explicit CORS preflight for the authenticated Nexus browser API.
+    // Only configured origins are reflected; no wildcard is permitted.
+    if (preflightPath.startsWith('/api/supra/') && preflightMethod === 'OPTIONS') {
+      const origin = request.headers.get('origin');
+      if (origin && !securityOriginAllowed(request,env)) {
+        return json({ok:false,error:'ORIGIN_NOT_ALLOWED',version:VERSION},403);
+      }
+      const headers = new Headers({
+        'allow': 'GET, POST, OPTIONS',
+        'access-control-allow-methods': 'GET, POST, OPTIONS',
+        'access-control-allow-headers': 'content-type',
+        'access-control-max-age': '600',
+        'cache-control': 'no-store',
+        'vary': 'Origin'
+      });
+      if (origin) {
+        headers.set('access-control-allow-origin', origin);
+        headers.set('access-control-allow-credentials', 'true');
+      }
+      return new Response(null,{status:204,headers});
+    }
     // Block anonymous mission validation before rate limiting touches D1.
     if (preflightPath === '/api/missions/validate') {
       if (preflightMethod !== 'POST') return json({ok:false,error:'METHOD_NOT_ALLOWED',version:VERSION},405,{'allow':'POST'});
@@ -3687,6 +3710,11 @@ handle = async function(request,env){
     const rate=await productionRateLimit(request,env);
     if(!rate.ok) return rate.response;
     const u=new URL(request.url);
+    if (u.pathname.startsWith('/api/supra/')) {
+      const auth = await getSessionUser(request,env).catch(() => null);
+      const supraResponse = await handleSupraRoute(request,env,auth);
+      if (supraResponse) return supraResponse;
+    }
     if(u.pathname==='/api/system/final-audit' && request.method==='GET') return strictProductionAudit(request,env);
     if(u.pathname==='/api/system/production-check' && request.method==='GET') return strictProductionAudit(request,env);
     return __procheliaProductionSafetyHandle(request,env);
