@@ -1,5 +1,6 @@
 -- PROCHÉLIA — tenant boundary for the payment runtime.
 -- Additive only: legacy financial rows remain NULL until individually attributed
+-- CI runs the full 43-migration chain and synthetic two-tenant financial isolation fixtures.
 -- from auditable source records. New financial writes must carry an active tenant.
 -- Webhook inbox events remain globally keyed by provider/event ID; tenant binding
 -- is attached only after the signed event is matched to an internal transaction.
