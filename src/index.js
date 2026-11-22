@@ -2598,17 +2598,38 @@ async function operationalExecute(request, env) {
   if(!actions.length)return json({ok:false,error:'NO_ACTIONS_DEFINED',version:VERSION},400);
   const results=[];
   for(const a of actions){
-    const q=await queueAction(env,a.action_type||a.type,c.mission_id?'MISSION':'CASE',a.entity_id||c.mission_id,{...a},a.idempotency_key);
-    // No caller-supplied approval, autonomy, jurisdiction or tenant assertion is trusted.
-    // Until a verified tenant-context resolver and approval ledger are wired here,
-    // the execution gate intentionally denies actions lacking those server-side facts.
-    results.push(await executeQueuedAction(env,q,{
+    // Preflight before creating any outbox row: denied actions must not become
+    // apparently executable pending work. All authority fields are server-derived
+    // or deliberately absent until their authoritative resolvers are integrated.
+    const actorContext = {
       role: gate.auth.user.role,
       jurisdiction: null,
       autonomyLevel: "A0",
       approvedAction: null,
       tenantScoped: false
-    }));
+    };
+    const actionType = a.action_type || a.type;
+    const preflight = evaluateSupraActionPolicy({
+      actionType,
+      role: actorContext.role,
+      jurisdiction: actorContext.jurisdiction,
+      autonomyLevel: actorContext.autonomyLevel,
+      hasApproval: false,
+      tenantScoped: actorContext.tenantScoped,
+      idempotencyKey: a.idempotency_key
+    });
+    if (!preflight.allowed) {
+      results.push({
+        ok: false, status: "BLOCKED", performed: false,
+        error: "SUPRA_ACTION_POLICY_DENIED",
+        action: String(actionType || "").toUpperCase(),
+        policy: { risk: preflight.risk, reasons: preflight.reasons },
+        queued: false
+      });
+      continue;
+    }
+    const q=await queueAction(env,actionType,c.mission_id?'MISSION':'CASE',a.entity_id||c.mission_id,{...a},a.idempotency_key);
+    results.push(await executeQueuedAction(env,q,actorContext));
   }
   // DONE only means that an executor reported a side effect. Resolution
   // requires a separate verifier to return VERIFIED for every requested action.
