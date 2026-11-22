@@ -718,6 +718,8 @@ jobs:
           'accounting_entities','accounting_accounts','accounting_journals','accounting_journal_lines',
           'trusted_device_credentials','device_auth_challenges',
           'tenants','tenant_memberships','tenant_membership_events','tenant_invitations','tenant_invitation_events',
+          'payment_accounts','payment_transactions','payout_requests','payment_disputes','payment_reconciliation',
+          'payment_audit','payment_webhook_events','payment_wallet_ledger','wallets',
           'idx_accounting_entities_tenant','idx_accounting_accounts_tenant_entity','idx_accounting_journals_tenant_date',
           'idx_accounting_journals_source','idx_accounting_journals_one_reversal','idx_accounting_lines_journal','idx_accounting_lines_account',
           'idx_tenant_membership_one_nonrevoked_per_user','idx_tenant_membership_one_owner','idx_tenant_memberships_user_status',
@@ -734,7 +736,20 @@ jobs:
           'trg_tenant_invitation_events_no_update','trg_tenant_invitation_events_no_delete','trg_tenant_invitation_authorized_inviter','trg_tenant_invitation_event_actor_tenant','trg_tenant_invitation_email_matches_member',
           'trg_tenant_membership_event_tenant_match','trg_accounting_entity_requires_active_tenant','trg_accounting_entity_tenant_stable',
           'trg_session_identity_immutable','trg_session_revocation_terminal','trg_session_revocation_metadata_required',
-          'trg_session_active_tenant_requires_membership_insert','trg_session_active_tenant_requires_membership'
+          'trg_session_active_tenant_requires_membership_insert','trg_session_active_tenant_requires_membership',
+          'idx_payment_accounts_tenant_user','idx_payment_tx_tenant_mission_created','idx_payment_tx_tenant_intervenant_status',
+          'idx_payout_tenant_user_status','idx_payment_disputes_tenant_mission','idx_wallet_ledger_tenant_user_date',
+          'idx_payment_reconciliation_tenant_status','idx_payment_audit_tenant_created',
+          'trg_payment_account_tenant_insert','trg_payment_account_tenant_update',
+          'trg_payment_transaction_tenant_insert','trg_payment_transaction_tenant_update',
+          'trg_payout_request_tenant_insert','trg_payout_request_tenant_update',
+          'trg_payment_dispute_tenant_insert','trg_payment_dispute_tenant_update',
+          'trg_wallet_ledger_tenant_insert','trg_wallet_ledger_tenant_update',
+          'trg_payment_reconciliation_tenant_insert','trg_payment_wallet_ledger_apply',
+          'trg_payment_account_tenant_immutable','trg_payment_transaction_identity_immutable',
+          'trg_payout_request_identity_immutable','trg_payment_dispute_identity_immutable',
+          'trg_payment_reconciliation_identity_immutable','trg_payment_webhook_tenant_immutable',
+          'trg_payment_audit_no_update','trg_payment_audit_no_delete'
           ) ORDER BY type, name
           SQL
           )"
@@ -753,7 +768,9 @@ jobs:
             "accounting_entities","accounting_accounts","accounting_journals","accounting_journal_lines",
             "tenants","tenant_memberships","tenant_membership_events",
             "tenant_invitations","tenant_invitation_events",
-            "trusted_device_credentials","device_auth_challenges"
+            "trusted_device_credentials","device_auth_challenges",
+            "payment_accounts","payment_transactions","payout_requests","payment_disputes",
+            "payment_reconciliation","payment_audit","payment_webhook_events","payment_wallet_ledger","wallets"
           }
           expected_indexes={
             "idx_accounting_entities_tenant","idx_accounting_accounts_tenant_entity",
@@ -764,7 +781,11 @@ jobs:
             "idx_tenant_memberships_tenant_role_status","idx_tenant_membership_events_tenant_time",
             "idx_tenant_invitations_one_pending_email","idx_tenant_invitations_expiry","idx_tenant_invitations_membership","idx_tenant_invitation_events_tenant_time",
             "idx_trusted_device_credentials_tenant_user_status","idx_device_auth_challenges_session_expiry","idx_device_auth_challenges_pending",
-            "idx_sessions_user_active_expiry","idx_sessions_revoked_at"
+            "idx_sessions_user_active_expiry","idx_sessions_revoked_at",
+            "idx_payment_accounts_tenant_user","idx_payment_tx_tenant_mission_created",
+            "idx_payment_tx_tenant_intervenant_status","idx_payout_tenant_user_status",
+            "idx_payment_disputes_tenant_mission","idx_wallet_ledger_tenant_user_date",
+            "idx_payment_reconciliation_tenant_status","idx_payment_audit_tenant_created"
           }
           expected_triggers={
             "trg_accounting_journal_insert_draft_only","trg_accounting_line_draft_only",
@@ -780,7 +801,17 @@ jobs:
             "trg_tenant_membership_event_tenant_match",
             "trg_accounting_entity_requires_active_tenant","trg_accounting_entity_tenant_stable",
             "trg_session_identity_immutable","trg_session_revocation_terminal",
-            "trg_session_revocation_metadata_required","trg_session_active_tenant_requires_membership_insert","trg_session_active_tenant_requires_membership"
+            "trg_session_revocation_metadata_required","trg_session_active_tenant_requires_membership_insert","trg_session_active_tenant_requires_membership",
+            "trg_payment_account_tenant_insert","trg_payment_account_tenant_update",
+            "trg_payment_transaction_tenant_insert","trg_payment_transaction_tenant_update",
+            "trg_payout_request_tenant_insert","trg_payout_request_tenant_update",
+            "trg_payment_dispute_tenant_insert","trg_payment_dispute_tenant_update",
+            "trg_wallet_ledger_tenant_insert","trg_wallet_ledger_tenant_update",
+            "trg_payment_reconciliation_tenant_insert","trg_payment_wallet_ledger_apply",
+            "trg_payment_account_tenant_immutable","trg_payment_transaction_identity_immutable",
+            "trg_payout_request_identity_immutable","trg_payment_dispute_identity_immutable",
+            "trg_payment_reconciliation_identity_immutable","trg_payment_webhook_tenant_immutable",
+            "trg_payment_audit_no_update","trg_payment_audit_no_delete"
           }
           missing = (
             {("table",x) for x in expected_tables} |
@@ -790,7 +821,7 @@ jobs:
           if missing:
             print("::error::New accounting/tenant/session schema is incomplete:", sorted(missing))
             raise SystemExit(1)
-          print("PASS: 11 accounting/tenant/invitation/device-trust tables, 21 indexes and 33 immutability/scope triggers verified.")
+          print("PASS: accounting, tenant, device-trust and financial tables, indexes and immutable tenant-scope triggers verified.")
           PY
           jq -n '{sql:"SELECT name FROM pragma_table_info('"'"'sessions'"'"')",params:[]}' > "$request"
           status="$(curl --silent --show-error --output "$response" --write-out '%{http_code}' \
