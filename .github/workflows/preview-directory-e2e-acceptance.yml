@@ -257,15 +257,15 @@ jobs:
           ];
           // The users schema requires password_hash even for synthetic E2E accounts.
           // The E2E authenticates via independently generated session tokens and hashes.
-          const userValues = users.map(u=>'('+[...u.map(q),q('active'),q(hash(randomBytes(48).toString('base64url')))].join(',')+')').join(',\\n');
+          const userValues = users.map(u=>'('+[...u.map(q),q('active'),q(hash(randomBytes(48).toString('base64url')))].join(',')+')').join(',\n');
           const clientValues = clientUsers.map((u,i)=>'('+[
             q(prefix+'client-'+String(i).padStart(3,'0')),q(u.id),
             q('Synthetic address '+i),q('E2E Test City'),q('00000'),q('Synthetic test fixture'),q('9999-12-31 23:59:59'),q('9999-12-31 23:59:59')
-          ].join(',')+')').join(',\\n');
+          ].join(',')+')').join(',\n');
           const sessionValues = [
             [prefix+'manager-session',managerId,hash(managerToken)],
             [prefix+'client-session',clientUsers[0].id,hash(clientToken)]
-          ].map(x=>'('+[...x.map(q),"datetime('now','+2 hours')"].join(',')+')').join(',\\n');
+          ].map(x=>'('+[...x.map(q),"datetime('now','+2 hours')"].join(',')+')').join(',\n');
           const seed = [
             'INSERT INTO users (id,role,email,first_name,last_name,status,password_hash) VALUES',
             userValues + ';',
@@ -275,19 +275,19 @@ jobs:
             '('+[q(prefix+'intervenant'),q(providerId),q('independent'),q('Synthetic E2E provider'),q('E2E Test City'),'20',q('approved'),q('9999-12-31 23:59:59'),q('9999-12-31 23:59:59')].join(',')+');',
             'INSERT INTO sessions (id,user_id,token_hash,expires_at) VALUES',
             sessionValues + ';'
-          ].join('\\n');
+          ].join('\n');
           const cleanup = [
             `DELETE FROM sessions WHERE id LIKE ${q(prefix+'%')};`,
             `DELETE FROM clients WHERE id LIKE ${q(prefix+'%')};`,
             `DELETE FROM intervenants WHERE id LIKE ${q(prefix+'%')};`,
             `DELETE FROM users WHERE id LIKE ${q(prefix+'%')};`
-          ].join('\\n');
+          ].join('\n');
           const seedPath = process.env.RUNNER_TEMP + '/preview-e2e-seed.sql';
           const cleanupPath = process.env.RUNNER_TEMP + '/preview-e2e-cleanup.sql';
           writeFileSync(seedPath,seed,{mode:0o600});
           writeFileSync(cleanupPath,cleanup,{mode:0o600});
           appendFileSync(process.env.GITHUB_ENV,
-            `E2E_MANAGER_TOKEN=${managerToken}\\nE2E_CLIENT_TOKEN=${clientToken}\\nE2E_PREFIX=${prefix}\\n`);
+            `E2E_MANAGER_TOKEN=${managerToken}\nE2E_CLIENT_TOKEN=${clientToken}\nE2E_PREFIX=${prefix}\n`);
           console.log('::add-mask::' + managerToken);
           console.log('::add-mask::' + clientToken);
           console.log('Synthetic fixture SQL and cleanup SQL prepared; no credentials or personal data printed.');
@@ -377,7 +377,10 @@ jobs:
           fi
           [[ "$PREVIEW_DB_ID" == "e3cf167c-37e1-4d72-9ac6-b3e27c14b97f" ]]
           npx --yes wrangler@4 d1 execute "$PREVIEW_DB_NAME" --remote --config "$RUNNER_TEMP/wrangler.preview.json" --file="$RUNNER_TEMP/preview-e2e-cleanup.sql" --yes
-          payload="{\\\"sql\\\":\\\"SELECT (SELECT COUNT(*) FROM users WHERE id LIKE 'e2e-$GITHUB_RUN_ID-%') AS users, (SELECT COUNT(*) FROM sessions WHERE id LIKE 'e2e-$GITHUB_RUN_ID-%') AS sessions, (SELECT COUNT(*) FROM clients WHERE id LIKE 'e2e-$GITHUB_RUN_ID-%') AS clients, (SELECT COUNT(*) FROM intervenants WHERE id LIKE 'e2e-$GITHUB_RUN_ID-%') AS intervenants\\\"}"
+          payload="$(cat <<EOF
+          {"sql":"SELECT (SELECT COUNT(*) FROM users WHERE id LIKE 'e2e-${GITHUB_RUN_ID}-%') AS users, (SELECT COUNT(*) FROM sessions WHERE id LIKE 'e2e-${GITHUB_RUN_ID}-%') AS sessions, (SELECT COUNT(*) FROM clients WHERE id LIKE 'e2e-${GITHUB_RUN_ID}-%') AS clients, (SELECT COUNT(*) FROM intervenants WHERE id LIKE 'e2e-${GITHUB_RUN_ID}-%') AS intervenants"}
+          EOF
+          )"
           status="$(curl --silent --show-error --output "$RUNNER_TEMP/cleanup-check.json" --write-out '%{http_code}' \
             -X POST -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -H "Content-Type: application/json" \
             --data "$payload" "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/d1/database/$PREVIEW_DB_ID/query")"
