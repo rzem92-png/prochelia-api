@@ -59,3 +59,13 @@ test("operational cases remain open until every business effect is explicitly ve
   assert.match(handler, /businessResults\.every\(x => x\?\.status === 'VERIFIED'\)/);
   assert.match(handler, /verified \? 'RESOLVED' : 'IN_PROGRESS'/);
 });
+
+test("case actions never mutate mission assignment or schedule without the verified workflow", () => {
+  const start = source.indexOf("async function executeCaseBusinessAction(");
+  const end = source.indexOf("\nasync function processActionOutbox(", start);
+  assert.ok(start >= 0 && end > start);
+  const handler = source.slice(start, end);
+  assert.match(handler, /VERIFIED_ASSIGNMENT_WORKFLOW_REQUIRED/);
+  assert.match(handler, /TENANT_SCOPED_MISSION_EXECUTOR_REQUIRED/);
+  assert.doesNotMatch(handler, /UPDATE missions SET/);
+});
