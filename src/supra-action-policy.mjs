@@ -75,7 +75,7 @@ export function evaluateSupraActionPolicy(input = {}) {
   const autonomy = String(input.autonomyLevel || "A0").toUpperCase();
   if (!policy.roles.includes(role)) reasons.push("ROLE_NOT_AUTHORIZED");
   if (!policy.jurisdictions.includes(jurisdiction)) reasons.push("JURISDICTION_NOT_ALLOWED");
-  if (!(autonomy in AUTONOMY_RANK) || AUTONOMY_RANK[autonomy] < AUTONOMY_RANK[policy.minimumAutonomy]) reasons.push("AUTONOMY_LEVEL_INSUFFICIENT");
+  if (!Object.hasOwn(AUTONOMY_RANK, autonomy) || AUTONOMY_RANK[autonomy] < AUTONOMY_RANK[policy.minimumAutonomy]) reasons.push("AUTONOMY_LEVEL_INSUFFICIENT");
   if (policy.approvalRequired && input.hasApproval !== true) reasons.push("HUMAN_APPROVAL_REQUIRED");
   if (policy.tenantScopeRequired && input.tenantScoped !== true) reasons.push("TENANT_SCOPE_REQUIRED");
   if (policy.idempotencyRequired && !String(input.idempotencyKey || "").trim()) reasons.push("IDEMPOTENCY_KEY_REQUIRED");
