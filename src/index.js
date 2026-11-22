@@ -1261,6 +1261,11 @@ export async function paymentWebhook(request, env) {
 async function openPaymentDispute(request, env) {
   const auth = await getSessionUser(request, env);
   if (!requireRole(auth, ['client','gerante'])) return json({ok:false,error:auth?.user?'FORBIDDEN':'UNAUTHENTICATED',version:VERSION}, auth?.user ? 403 : 401);
+  // Disputes can freeze or otherwise alter financial state; no state transition
+  // is allowed until a real PSP and its settlement/reconciliation path exist.
+  if (!paymentsConfigured(env)) {
+    return json({ok:false,error:'PAYMENT_PROVIDER_NOT_CONFIGURED',version:VERSION,write_enabled:false},503);
+  }
   await ensurePaymentSchema(env);
   const body = await readJson(request);
   const missionId = clean(body?.mission_id);
@@ -2003,7 +2008,15 @@ async function pricingQuote(request, env) {
 
 async function financeSummary(request, env) {
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
-  const tx=await env.DB.prepare(`SELECT COALESCE(SUM(gross_cents),0) gross,COALESCE(SUM(commission_cents),0) commission,COALESCE(SUM(provider_fee_cents),0) provider_fee,COALESCE(SUM(refund_cents),0) refunds,COALESCE(SUM(net_intervenant_cents),0) intervenant FROM payment_transactions`).first();
+  let tenantContext;
+  try { tenantContext = await resolveTenantContext(request, env, gate.auth); }
+  catch { return json({ok:false,error:'TENANT_CONTEXT_UNAVAILABLE',version:VERSION,read_only:true},503); }
+  if (!tenantContext?.ok) return json({ok:false,error:tenantContext?.error || 'TENANT_CONTEXT_REQUIRED',version:VERSION,read_only:true},tenantContext?.status || 403);
+  // Legacy payment_transactions, accounting_ledger and business_expenses are
+  // not consistently tenant-keyed. Never aggregate them globally into a tenant
+  // dashboard; use the canonical tenant-scoped journal once its read model lands.
+  return json({ok:false,error:'TENANT_SCOPED_FINANCE_READ_MODEL_REQUIRED',version:VERSION,read_only:true,write_enabled:false},503);
+}
   const ledger=await env.DB.prepare(`SELECT COALESCE(SUM(CASE WHEN direction='CREDIT' THEN amount_cents ELSE -amount_cents END),0) balance FROM accounting_ledger`).first();
   const expenses=await env.DB.prepare(`SELECT COALESCE(SUM(amount_cents),0) total FROM business_expenses`).first();
   const pending=await env.DB.prepare(`SELECT COALESCE(SUM(gross_cents),0) total,COUNT(*) n FROM payment_transactions WHERE status IN ('pending','processing','held')`).first();
@@ -2039,7 +2052,7 @@ async function consolidatedInfo(env) {
 
 async function handleConsolidated(request, env) {
   const url=new URL(request.url);
-  const consolidatedPath = ['/api/consolidated/info','/api/ops/dashboard','/api/journal','/api/cases','/api/cases/approve','/api/metiers','/api/metiers/suggest','/api/pricing/quote','/api/finance/summary','/api/complaints','/api/settings/phase'].includes(url.pathname);
+  const consolidatedPath = ['/api/consolidated/info','/api/ops/dashboard','/api/journal','/api/cases','/api/cases/approve','/api/metiers','/api/metiers/suggest','/api/pricing/quote','/api/complaints','/api/settings/phase'].includes(url.pathname);
   if (consolidatedPath) {
     try { await ensureConsolidatedSchema(env); } catch (e) { return json({ok:false,error:'CONSOLIDATED_SCHEMA_ERROR',version:VERSION,message:e.message},500); }
   }
