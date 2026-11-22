@@ -2540,15 +2540,19 @@ async function executeQueuedAction(env, action) {
         if (usable.length) {
           const sql=`INSERT INTO notification_outbox(${usable.map(x=>x[0]).join(',')}) VALUES(${usable.map(()=>'?').join(',')})`;
           await env.DB.prepare(sql).bind(...usable.map(x=>x[1])).run();
-          result={performed:true,channel,notification_queued:true};
+          // Enqueueing is not delivery: keep the action pending until a delivery
+          // adapter records a provider receipt and a separate verifier confirms it.
+          result={performed:false,requires_provider:true,channel,notification_queued:true,reason:'DELIVERY_RECEIPT_REQUIRED'};
         } else result={performed:false,reason:'NOTIFICATION_SCHEMA_INCOMPATIBLE'};
       } else result={performed:false,reason:'NOTIFICATION_TABLE_MISSING'};
     } else if (action.action_type === 'RESCHEDULE_MISSION') {
-      result = await dynamicUpdate(env,'missions',action.entity_id,{scheduled_at:payload.scheduled_at,date:payload.date,time:payload.time,status:payload.status||'RESCHEDULED'});
-      result.action='RESCHEDULE_MISSION';
+      // This generic executor has no tenant-scoped authorization and post-write
+      // verifier. Never mutate a mission by unscoped entity ID.
+      result={performed:false,requires_provider:true,reason:'TENANT_SCOPED_MISSION_EXECUTOR_REQUIRED'};
     } else if (action.action_type === 'ASSIGN_REPLACEMENT') {
-      result = await dynamicUpdate(env,'missions',action.entity_id,{intervenant_id:payload.intervenant_id,assigned_intervenant_id:payload.intervenant_id,status:payload.status||'ASSIGNED'});
-      result.action='ASSIGN_REPLACEMENT';
+      // Assignment changes require qualification, availability, tenant ownership,
+      // conflict checks and an auditable transactional transition.
+      result={performed:false,requires_provider:true,reason:'VERIFIED_ASSIGNMENT_WORKFLOW_REQUIRED'};
     } else if (action.action_type === 'REFUND') {
       result={performed:false,requires_provider:true,reason:'PSP_EXECUTION_REQUIRED',payload};
     } else if (action.action_type === 'PAYOUT') {
