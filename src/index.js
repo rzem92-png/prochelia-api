@@ -4143,13 +4143,15 @@ export default {
    - déclenchement manuel + automatique par Cron
    - journal des sauvegardes
    ============================================================================ */
-const NATIONAL_SCALE_DEFAULTS = Object.freeze({
-  maxPageSize:100, defaultPageSize:50, importBatchSize:500,
-  noArtificialUserCap:true, cursorPaginationRecommended:true,
-  documentsStorage:'R2', backupFrequency:'DAILY', backupRetentionDays:90
-});
-
-asNames=(t.results||[]).map(x=>String(x.name));
+/* ============================================================================
+   PROCHÉLIA — CONTINUITY STATUS
+   Backup execution is intentionally delegated to the signed EU R2 workflow.
+   Worker status routes are read-only and never create D1 schema.
+   ============================================================================ */
+async function nationalScaleStatus(env){
+  if(!env?.DB?.prepare) throw new Error('DATABASE_REQUIRED');
+  const t=await env.DB.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name`).all();
+  const tableNames=(t.results||[]).map(x=>String(x.name));
   const c=tableNames.includes('platform_scale_config')
     ? await env.DB.prepare(`SELECT key,value_json FROM platform_scale_config ORDER BY key`).all()
     : {results:[]};
