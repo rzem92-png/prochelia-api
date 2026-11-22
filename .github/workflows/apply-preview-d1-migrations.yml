@@ -200,7 +200,24 @@ jobs:
             echo "::error::Restore-test D1 identity or EU jurisdiction is not confirmed."
             exit 1
           }
-          echo "PASS: exact isolated restore-test D1 and EU jurisdiction confirmed."
+          cat > "$RUNNER_TEMP/wrangler.restore-test.json" <<JSON
+          {
+            "name": "prochelia-restore-test",
+            "compatibility_date": "2026-11-22",
+            "d1_databases": [{
+              "binding": "RESTORE_TEST_DB",
+              "database_name": "$RESTORE_TEST_DB_NAME",
+              "database_id": "$RESTORE_TEST_DB_ID"
+            }]
+          }
+          JSON
+          jq -e --arg name "$RESTORE_TEST_DB_NAME" --arg id "$RESTORE_TEST_DB_ID" '.name == "prochelia-restore-test" and .d1_databases | length == 1' "$RUNNER_TEMP/wrangler.restore-test.json" >/dev/null
+          npx --yes wrangler@4 d1 execute "$RESTORE_TEST_DB_NAME" --remote --config "$RUNNER_TEMP/wrangler.restore-test.json" --command="SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT GLOB '_cf_*' ORDER BY name;" --json > "$RUNNER_TEMP/restore-test-before-export.json"
+          jq -e '[.. | objects | select(has("results")) | .results[]?] | length == 0' "$RUNNER_TEMP/restore-test-before-export.json" >/dev/null || {
+            echo "::error::Restore-test D1 is not empty; refusing to export/upload a backup for a target that cannot be restored safely."
+            exit 1
+          }
+          echo "PASS: exact isolated EU restore-test D1 confirmed, separately configured in Wrangler, and empty before export."
 
       - name: Export only Preview D1 before migration
         shell: bash
@@ -279,30 +296,30 @@ jobs:
           set -euo pipefail
           [[ "$RESTORE_TEST_DB_NAME" == "prochelia-r2-restore-validation-2026-11-18" ]]
           [[ "$RESTORE_TEST_DB_ID" != "$EXPECTED_DB_ID" && "$RESTORE_TEST_DB_ID" != "$FORBIDDEN_PRODUCTION_DB_ID" ]]
-          npx --yes wrangler@4 d1 execute "$RESTORE_TEST_DB_NAME" --remote --command="SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT GLOB '_cf_*' ORDER BY name;" --json > "$RUNNER_TEMP/prochelia-backup/restore-target-before.json"
+          npx --yes wrangler@4 d1 execute "$RESTORE_TEST_DB_NAME" --remote --config "$RUNNER_TEMP/wrangler.restore-test.json" --command="SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT GLOB '_cf_*' ORDER BY name;" --json > "$RUNNER_TEMP/prochelia-backup/restore-target-before.json"
           jq -e . "$RUNNER_TEMP/prochelia-backup/restore-target-before.json" >/dev/null
           empty_count="$(jq -r '[.. | objects | select(has("results")) | .results[]? | .name? // empty] | map(select(type == "string")) | unique | length' "$RUNNER_TEMP/prochelia-backup/restore-target-before.json")"
           [[ "$empty_count" == "0" ]] || {
             echo "::error::Restore-test D1 is not empty; no existing test data will be overwritten."
             exit 1
           }
-          npx --yes wrangler@4 d1 execute "$RESTORE_TEST_DB_NAME" --remote --file="$RUNNER_TEMP/prochelia-backup/roundtrip.sql" --yes
-          npx --yes wrangler@4 d1 execute "$RESTORE_TEST_DB_NAME" --remote --command="PRAGMA quick_check;" --json > "$RUNNER_TEMP/prochelia-backup/restore-quick-check.json"
+          npx --yes wrangler@4 d1 execute "$RESTORE_TEST_DB_NAME" --remote --config "$RUNNER_TEMP/wrangler.restore-test.json" --file="$RUNNER_TEMP/prochelia-backup/roundtrip.sql" --yes
+          npx --yes wrangler@4 d1 execute "$RESTORE_TEST_DB_NAME" --remote --config "$RUNNER_TEMP/wrangler.restore-test.json" --command="PRAGMA quick_check;" --json > "$RUNNER_TEMP/prochelia-backup/restore-quick-check.json"
           jq -e '[.. | strings] | any(. == "ok")' "$RUNNER_TEMP/prochelia-backup/restore-quick-check.json" >/dev/null || {
             echo "::error::Cloudflare D1 restore quick_check failed."
             exit 1
           }
-          npx --yes wrangler@4 d1 execute "$RESTORE_TEST_DB_NAME" --remote --command="PRAGMA foreign_key_check;" --json > "$RUNNER_TEMP/prochelia-backup/restore-fk-check.json"
+          npx --yes wrangler@4 d1 execute "$RESTORE_TEST_DB_NAME" --remote --config "$RUNNER_TEMP/wrangler.restore-test.json" --command="PRAGMA foreign_key_check;" --json > "$RUNNER_TEMP/prochelia-backup/restore-fk-check.json"
           jq -e '[.. | objects | select(has("results")) | .results[]?] | length == 0' "$RUNNER_TEMP/prochelia-backup/restore-fk-check.json" >/dev/null || {
             echo "::error::Cloudflare D1 restore contains foreign-key violations."
             exit 1
           }
-          npx --yes wrangler@4 d1 execute "$RESTORE_TEST_DB_NAME" --remote --command="SELECT COUNT(*) AS migration_count, MAX(name) AS latest FROM d1_migrations;" --json > "$RUNNER_TEMP/prochelia-backup/restore-migrations.json"
+          npx --yes wrangler@4 d1 execute "$RESTORE_TEST_DB_NAME" --remote --config "$RUNNER_TEMP/wrangler.restore-test.json" --command="SELECT COUNT(*) AS migration_count, MAX(name) AS latest FROM d1_migrations;" --json > "$RUNNER_TEMP/prochelia-backup/restore-migrations.json"
           jq -e '[.. | objects | select(has("results")) | .results[]? | select(.migration_count == 23 and .latest == "0022_supra_persisted_approvals.sql")] | length == 1' "$RUNNER_TEMP/prochelia-backup/restore-migrations.json" >/dev/null || {
             echo "::error::Restored D1 does not match the expected 23-migration Preview baseline."
             exit 1
           }
-          npx --yes wrangler@4 d1 execute "$RESTORE_TEST_DB_NAME" --remote --command="SELECT name FROM sqlite_master WHERE type='table' AND name IN ('users','missions','intervenants','prestations','disponibilites','wallets','documents','accounting_ledger','d1_migrations') ORDER BY name;" --json > "$RUNNER_TEMP/prochelia-backup/restore-core-tables.json"
+          npx --yes wrangler@4 d1 execute "$RESTORE_TEST_DB_NAME" --remote --config "$RUNNER_TEMP/wrangler.restore-test.json" --command="SELECT name FROM sqlite_master WHERE type='table' AND name IN ('users','missions','intervenants','prestations','disponibilites','wallets','documents','accounting_ledger','d1_migrations') ORDER BY name;" --json > "$RUNNER_TEMP/prochelia-backup/restore-core-tables.json"
           jq -e '[.. | objects | select(has("results")) | .results[]? | .name] | unique | length == 9' "$RUNNER_TEMP/prochelia-backup/restore-core-tables.json" >/dev/null || {
             echo "::error::Restored D1 is missing one or more required core tables."
             exit 1
