@@ -32,6 +32,8 @@ jobs:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       BACKUP_ENCRYPTION_KEY: ${{ secrets.BACKUP_ENCRYPTION_KEY }}
+      BACKUP_ATTESTATION_HMAC_KEY: ${{ secrets.BACKUP_ATTESTATION_HMAC_KEY }}
+      R2_EXPECTED_RETENTION_SECONDS: ${{ vars.R2_EXPECTED_RETENTION_SECONDS }}
       AWS_ACCESS_KEY_ID: ${{ secrets.R2_EU_ACCESS_KEY_ID }}
       AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_EU_SECRET_ACCESS_KEY }}
       AWS_DEFAULT_REGION: auto
@@ -53,7 +55,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          for name in CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID BACKUP_ENCRYPTION_KEY AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY; do
+          for name in CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID BACKUP_ENCRYPTION_KEY BACKUP_ATTESTATION_HMAC_KEY AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY; do
             test -n "${!name:-}" || { echo "::error::Required secret missing: $name"; exit 1; }
           done
           python3 - <<'PY'
@@ -134,6 +136,18 @@ jobs:
             exit 1
           }
           test "$R2_BUCKET" = "prochelia-preview-backups-eu-v2"
+          test "${#BACKUP_ATTESTATION_HMAC_KEY}" -ge 32 || {
+            echo "::error::BACKUP_ATTESTATION_HMAC_KEY must contain at least 32 UTF-8 bytes."
+            exit 1
+          }
+          test "$BACKUP_ATTESTATION_HMAC_KEY" != "$BACKUP_ENCRYPTION_KEY" || {
+            echo "::error::Backup HMAC and encryption keys must be distinct."
+            exit 1
+          }
+          [[ "$R2_EXPECTED_RETENTION_SECONDS" =~ ^[1-9][0-9]*$ ]] || {
+            echo "::error::R2_EXPECTED_RETENTION_SECONDS must be a positive integer approved by the data-retention owner."
+            exit 1
+          }
 
       - name: Install Node.js
         uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
