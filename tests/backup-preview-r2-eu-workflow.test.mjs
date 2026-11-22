@@ -57,3 +57,20 @@ test("Preview backup token assignments close the command substitution and quoted
   assert.equal(lines.length, 2);
   for (const line of lines) assert.ok(line.endsWith(")\""), line);
 });
+
+const scheduledWorkflow = await readFile(new URL("../.github/workflows/backup-preview-d1.yml", import.meta.url), "utf8");
+
+test("Scheduled Preview D1 backup checks out the exact workflow commit before reading Wrangler config", () => {
+  const checkout = scheduledWorkflow.indexOf("actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09");
+  const secretCheck = scheduledWorkflow.indexOf("Vérifier les secrets requis et la cible Cloudflare");
+  const exportStep = scheduledWorkflow.indexOf("wrangler@4 d1 export");
+  assert.ok(checkout >= 0 && secretCheck > checkout && exportStep > secretCheck);
+  assert.match(scheduledWorkflow, /ref: \$\{\{ github\.sha \}\}/);
+  assert.match(scheduledWorkflow, /persist-credentials: false/);
+  assert.match(scheduledWorkflow, /wrangler\.preview-migrations\.jsonc/);
+});
+
+test("Scheduled Preview backup pins setup-node and remains read-only", () => {
+  assert.match(scheduledWorkflow, /actions\/setup-node@[0-9a-f]{40}/);
+  assert.doesNotMatch(scheduledWorkflow, /wrangler@4 deploy|d1 migrations apply/);
+});
