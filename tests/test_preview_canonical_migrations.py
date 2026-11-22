@@ -914,6 +914,7 @@ assert invitation_indexes <= indexes, f"Missing invitation indexes: {sorted(invi
 invitation_triggers = {
     "trg_tenant_invitation_requires_pending_member",
     "trg_tenant_invitation_authorized_inviter",
+    "trg_tenant_invitation_email_matches_member",
     "trg_tenant_invitation_event_actor_tenant",
     "trg_tenant_invitation_initial_pending",
     "trg_tenant_invitation_identity_immutable",
@@ -930,7 +931,8 @@ db.execute("INSERT INTO tenants(id, slug, display_name) VALUES ('invite-tenant',
 db.execute("INSERT INTO tenant_memberships(id, tenant_id, user_id, role, status, invited_by_user_id, accepted_at) VALUES ('invite-owner', 'invite-tenant', 'invite-admin', 'OWNER', 'ACTIVE', 'invite-admin', CURRENT_TIMESTAMP)")
 db.execute("INSERT INTO users(id, role, email, first_name, last_name, password_hash) VALUES ('invite-ordinary', 'client', 'ordinary@example.test', 'Ordinary', 'Member', 'synthetic')")
 db.execute("INSERT INTO tenant_memberships(id, tenant_id, user_id, role, status, invited_by_user_id, accepted_at) VALUES ('invite-ordinary-membership', 'invite-tenant', 'invite-ordinary', 'MEMBER', 'ACTIVE', 'invite-admin', CURRENT_TIMESTAMP)")
-db.execute("INSERT INTO tenant_memberships(id, tenant_id, user_id, role, status, invited_by_user_id) VALUES ('invite-member', 'invite-tenant', 'user-a', 'MEMBER', 'INVITED', 'invite-admin')")
+db.execute("INSERT INTO users(id, role, email, first_name, last_name, password_hash, status) VALUES ('invite-worker', 'intervenant', 'new-worker@example.test', 'New', 'Worker', 'unusable-placeholder-hash', 'pending_invitation')")
+db.execute("INSERT INTO tenant_memberships(id, tenant_id, user_id, role, status, invited_by_user_id) VALUES ('invite-member', 'invite-tenant', 'invite-worker', 'MEMBER', 'INVITED', 'invite-admin')")
 db.execute("""
     INSERT INTO tenant_invitations(
       id, tenant_id, membership_id, email_normalized, intended_role, token_sha256,
@@ -945,6 +947,22 @@ db.execute("""
     INSERT INTO tenant_invitation_events(id, invitation_id, tenant_id, actor_user_id, event_type, reason_code)
     VALUES ('invite-event-a', 'invite-a', 'invite-tenant', 'invite-admin', 'CREATED', 'INVITATION_CREATED')
 """)
+
+# The invitation address must be the exact normalized email of the pending user.
+try:
+    db.execute("""
+        INSERT INTO tenant_invitations(
+          id, tenant_id, membership_id, email_normalized, token_sha256,
+          idempotency_key, invited_by_user_id, expires_at
+        ) VALUES (
+          'invite-email-mismatch', 'invite-tenant', 'invite-member', 'attacker@example.test',
+          'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee',
+          'invite-email-mismatch-key', 'invite-admin', '2026-12-01T00:00:00Z'
+        )
+    """)
+    raise AssertionError("Invitation email was allowed to differ from the pending member account")
+except sqlite3.IntegrityError as exc:
+    assert "TENANT_INVITATION_EMAIL_MEMBER_MISMATCH" in str(exc), str(exc)
 
 # Invitation authority is enforced at the database boundary as well as in API code.
 db.execute("INSERT INTO tenant_memberships(id, tenant_id, user_id, role, status, invited_by_user_id) VALUES ('invite-member-unauthorized', 'invite-tenant', 'user-b', 'MEMBER', 'INVITED', 'invite-admin')")
