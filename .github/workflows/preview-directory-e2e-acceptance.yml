@@ -178,13 +178,22 @@ jobs:
           echo "Exact isolated Preview D1 identity verified."
 
       - name: Exercise same-origin Pages-to-Worker proxy without a session
+        id: pages_proxy
+        continue-on-error: true
         shell: bash
         run: |
           set -euo pipefail
+          proxy_gap=0
           for route in /api/intervenant/workspace /api/intervenant/opportunities /api/intervenant/assignments /api/intervenant/applications; do
             status="$(curl --silent --show-error --output "$RUNNER_TEMP/pages-proxy.json" --write-out '%{http_code}' "$PAGES_PREVIEW_URL$route")"
-            if [[ "$status" != "401" ]]; then
-              echo "::error::Pages proxy $route expected HTTP 401 without a session; got $status."
+            if [[ "$status" == "401" ]]; then
+              echo "PASS: $route rejects unauthenticated access (HTTP 401)."
+            elif [[ "$status" == "404" ]]; then
+              echo "::warning::$route is allowlisted by Pages but is not implemented by the active Preview Worker (HTTP 404)."
+              jq -c '{ok, error, status}' "$RUNNER_TEMP/pages-proxy.json" 2>/dev/null || true
+              proxy_gap=1
+            else
+              echo "::error::Pages proxy $route expected HTTP 401; got $status."
               jq -c '{ok, error, status}' "$RUNNER_TEMP/pages-proxy.json" 2>/dev/null || true
               exit 1
             fi
@@ -196,6 +205,10 @@ jobs:
             echo "::error::Pages same-origin OPTIONS expected HTTP 204; got $options_status."
             exit 1
           }
+          if [[ "$proxy_gap" == "1" ]]; then
+            echo "::error::Pages proxy readiness is incomplete; continue with independent Worker directory tests, then fail the final acceptance gate."
+            exit 1
+          fi
           echo "PASS: Pages Function -> Worker service binding, unauthenticated route guards and same-origin preflight verified without data writes."
 
       - name: Read current directory offsets without reading personal rows
@@ -340,6 +353,16 @@ jobs:
           }
           console.log('PASS: Preview Worker endpoints; unauthenticated 401; client role 403; invalid offset 400; manager directory pagination and provider listing verified.');
           NODE
+
+      - name: Enforce Pages proxy acceptance after Preview data cleanup
+        if: always()
+        shell: bash
+        run: |
+          if [[ "${{ steps.pages_proxy.outcome }}" != "success" ]]; then
+            echo "::error::Pages-to-Worker workspace routes are not yet accepted. Review the proxy step; the Worker Preview must implement every allowlisted route before promotion."
+            exit 1
+          fi
+          echo "PASS: all Pages-to-Worker workspace routes passed the unauthenticated access gate."
 
       - name: Always remove synthetic Preview fixtures and verify cleanup
         if: always()
