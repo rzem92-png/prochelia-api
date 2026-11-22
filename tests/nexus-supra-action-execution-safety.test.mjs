@@ -96,7 +96,8 @@ test("background jobs use conditional claims and recover stale leases with bound
 test("scheduled automation is explicit and does not expose scheduler privilege to HTTP callers", () => {
   assert.match(source, /scheduler\s*\?\s*\{auth:\{user:\{id:'cloudflare-cron',role:'GERANTE'\}\}\}\s*:\s*await requireAuthRole/);
   assert.match(source, /event\?\.cron === '\*\/1 \* \* \* \*'/);
-  assert.match(source, /event\?\.cron === '0 3 \* \* \*' \|\| event\?\.cron === '0 3 \* \* 0'/);
+  assert.doesNotMatch(source, /event\?\.cron === '0 3 \* \* \*'/);
+  assert.doesNotMatch(source, /runNationalBackup/);
 });
 
 test("NEXUS SUPRA action policy denies unknown actions and missing execution controls", () => {
