@@ -3180,8 +3180,61 @@ async function handle(request,env){
   }
 }
 
+function appendCorsVary(headers) {
+  const values = new Set((headers.get('vary') || '').split(',').map(value => value.trim()).filter(Boolean));
+  values.add('Origin');
+  headers.set('vary', [...values].join(', '));
+}
+
+const CORS_ALLOWED_METHODS = new Set(['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE']);
+const CORS_ALLOWED_HEADERS = new Set(['accept', 'content-type', 'authorization', 'x-idempotency-key', 'idempotency-key']);
+
+async function handleWithCors(request, env) {
+  const origin = request.headers.get('origin');
+  if (origin && !securityOriginAllowed(request, env)) {
+    return json({ ok: false, error: 'ORIGIN_NOT_ALLOWED', version: VERSION }, 403);
+  }
+
+  if (request.method === 'OPTIONS') {
+    const requestedMethod = String(request.headers.get('access-control-request-method') || '').toUpperCase();
+    if (requestedMethod && !CORS_ALLOWED_METHODS.has(requestedMethod)) {
+      return json({ ok: false, error: 'CORS_METHOD_NOT_ALLOWED', version: VERSION }, 403);
+    }
+    const requestedHeaders = String(request.headers.get('access-control-request-headers') || '')
+      .split(',').map(value => value.trim().toLowerCase()).filter(Boolean);
+    if (requestedHeaders.some(header => !CORS_ALLOWED_HEADERS.has(header))) {
+      return json({ ok: false, error: 'CORS_HEADER_NOT_ALLOWED', version: VERSION }, 403);
+    }
+
+    const headers = new Headers({
+      'access-control-allow-methods': 'GET, HEAD, POST, PUT, PATCH, DELETE, OPTIONS',
+      'access-control-allow-headers': 'Accept, Content-Type, Authorization, X-Idempotency-Key, Idempotency-Key',
+      'access-control-max-age': '600',
+      'cache-control': 'no-store',
+      'vary': 'Origin, Access-Control-Request-Method, Access-Control-Request-Headers'
+    });
+    if (origin) {
+      headers.set('access-control-allow-origin', origin);
+      headers.set('access-control-allow-credentials', 'true');
+    }
+    return new Response(null, { status: 204, headers });
+  }
+
+  const response = await handle(request, env);
+  if (!origin) return response;
+  const headers = new Headers(response.headers);
+  headers.set('access-control-allow-origin', origin);
+  headers.set('access-control-allow-credentials', 'true');
+  appendCorsVary(headers);
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers
+  });
+}
+
 export default {
-  fetch(request,env){ return handle(request,env); },
+  fetch(request,env){ return handleWithCors(request,env); },
   async scheduled(event,env,ctx){
     if(event?.cron && (event.cron==='0 3 * * *' || event.cron==='0 3 * * 0')){
       ctx.waitUntil(runNationalBackup(env,'AUTOMATIC'));
