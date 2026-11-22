@@ -100,6 +100,9 @@ test("scheduled automation is explicit and does not expose scheduler privilege t
 
 test("NEXUS SUPRA action policy denies unknown actions and missing execution controls", () => {
   assert.equal(evaluateSupraActionPolicy({ actionType: "UNKNOWN" }).allowed, false);
+  const invalidAutonomy = evaluateSupraActionPolicy({ actionType: "NOTIFY", role: "GERANTE", jurisdiction: "FR", autonomyLevel: "toString", tenantScoped: true, idempotencyKey: "x" });
+  assert.equal(invalidAutonomy.allowed, false);
+  assert.ok(invalidAutonomy.reasons.includes("AUTONOMY_LEVEL_INSUFFICIENT"));
   const missing = evaluateSupraActionPolicy({
     actionType: "NOTIFY", role: "GERANTE", jurisdiction: "FR", autonomyLevel: "A3"
   });
