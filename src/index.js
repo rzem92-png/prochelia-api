@@ -1103,10 +1103,17 @@ export function webhookReplayDecision(existingPayloadHash, incomingPayloadHash, 
 }
 
 export function requiresAtomicFinancialSettlement(eventType) {
+  // Internal event names and Stripe's native event.type values must both be
+  // gated. Otherwise a signed native financial event could be marked processed
+  // without a corresponding atomic ledger settlement.
   return new Set([
     'payment_succeeded','charge_succeeded','payment_failed','charge_failed',
-    'payment_refunded','payout_paid','payout_failed','payout_canceled'
-  ]).has(String(eventType || '').trim());
+    'payment_refunded','payout_paid','payout_failed','payout_canceled',
+    'payment_intent.succeeded','payment_intent.payment_failed',
+    'charge.succeeded','charge.failed','charge.refunded',
+    'refund.created','refund.updated','refund.failed',
+    'payout.paid','payout.failed','payout.canceled'
+  ]).has(String(eventType || '').trim().toLowerCase());
 }
 
 export async function readBoundedWebhookBody(request, maxBytes = 1_048_576) {
