@@ -1082,13 +1082,24 @@ for tenant_id, suffix in [("tenant-a", "a"), ("tenant-b", "b")]:
          WHERE id=?
     """, (membership_id,))
 
+# The marketplace fixture uses its own tenant identifier; grant the synthetic finance user
+# a real membership there so the transaction-to-mission relation is valid.
+db.execute("""
+    INSERT INTO tenant_memberships(id,tenant_id,user_id,role,status,invited_by_user_id)
+    VALUES ('finance-membership-market-a','market-tenant-a','finance-user-a','MEMBER','INVITED','user-admin')
+""")
+db.execute("""
+    UPDATE tenant_memberships SET status='ACTIVE',accepted_at=CURRENT_TIMESTAMP
+     WHERE id='finance-membership-market-a'
+""")
+
 db.execute("""
     INSERT INTO wallets(id,user_id,tenant_id,currency)
-    VALUES ('finance-wallet-a','finance-user-a','tenant-a','EUR')
+    VALUES ('finance-wallet-a','finance-user-a','market-tenant-a','EUR')
 """)
 db.execute("""
     INSERT INTO payment_accounts(id,user_id,provider,tenant_id)
-    VALUES ('finance-account-a','finance-user-a','sandbox','tenant-a')
+    VALUES ('finance-account-a','finance-user-a','sandbox','market-tenant-a')
 """)
 db.execute("""
     INSERT INTO payment_transactions(
@@ -1096,31 +1107,31 @@ db.execute("""
       gross_cents,commission_cents,net_intervenant_cents,currency,tenant_id
     ) VALUES (
       'finance-tx-a','finance-idem-a','market-mission-opportunity','market-client-a-row',
-      NULL,'MISSION_CHARGE','paid',10000,1000,9000,'EUR','tenant-a'
+      NULL,'MISSION_CHARGE','paid',10000,1000,9000,'EUR','market-tenant-a'
     )
 """)
 db.execute("""
     INSERT INTO payout_requests(
       id,idempotency_key,wallet_id,user_id,amount_cents,tenant_id
-    ) VALUES ('finance-payout-a','finance-payout-idem-a','finance-wallet-a','finance-user-a',2500,'tenant-a')
+    ) VALUES ('finance-payout-a','finance-payout-idem-a','finance-wallet-a','finance-user-a',2500,'market-tenant-a')
 """)
 db.execute("""
     INSERT INTO payment_disputes(
       id,mission_id,transaction_id,client_id,intervenant_id,reason,amount_cents,tenant_id
     ) VALUES (
       'finance-dispute-a','market-mission-opportunity','finance-tx-a','market-client-a-row',
-      NULL,'synthetic test dispute',1000,'tenant-a'
+      NULL,'synthetic test dispute',1000,'market-tenant-a'
     )
 """)
 db.execute("""
     INSERT INTO payment_wallet_ledger(
       id,idempotency_key,user_id,entry_type,currency,tenant_id
-    ) VALUES ('finance-ledger-a','finance-ledger-idem-a','finance-user-a','TEST_NOOP','EUR','tenant-a')
+    ) VALUES ('finance-ledger-a','finance-ledger-idem-a','finance-user-a','TEST_NOOP','EUR','market-tenant-a')
 """)
 db.execute("""
     INSERT INTO payment_reconciliation(
       id,provider,external_id,internal_transaction_id,tenant_id
-    ) VALUES ('finance-recon-a','sandbox','external-a','finance-tx-a','tenant-a')
+    ) VALUES ('finance-recon-a','sandbox','external-a','finance-tx-a','market-tenant-a')
 """)
 assert db.execute("SELECT available_cents FROM wallets WHERE id='finance-wallet-a'").fetchone()[0] == 0
 
