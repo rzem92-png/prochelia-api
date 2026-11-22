@@ -182,3 +182,138 @@ Autorisation écrite, PR approuvées, protections de branches, migrations revues
 
 ## 12. Limites explicites
 Ce document fixe une cible produit et des contrôles à construire. Il ne prouve pas que ces fonctions sont déjà codées, testées, déployées, autorisées ou conformes. Il ne remplace pas un avis juridique, fiscal, paiement ou assurance. Toute fonction qui n'a pas de preuve vérifiable reste « non validée » et doit échouer de façon sûre.
+
+
+## 12. Architecture transverse — les dix piliers Nexus complémentaires
+
+Cette section complète les domaines existants sans créer dix applications ni dupliquer les fonctions déjà présentes. Chaque capacité réutilise l'identité, les permissions, les événements, le support, le référentiel pays, les journaux et les services communs existants. Avant toute implémentation, vérifier les routes, tables, composants et règles déjà présents.
+
+### 12.1 NEXUS SENTINEL — anticipation et prévention
+- Corréler les signaux de sécurité, fraude, disponibilité, qualité et abus sans transformer une simple corrélation en accusation.
+- Détecter les scénarios de comptes coordonnés, faux avis, usurpation, tentatives de prise de compte, anomalies de réservation et paiements atypiques.
+- Attribuer un niveau de confiance, une gravité, une durée de validité et les éléments justificatifs à chaque alerte.
+- Autoriser uniquement des mesures temporaires, réversibles et préapprouvées; revue humaine rapide pour les impacts élevés.
+- Mesurer les faux positifs et permettre contestation et correction.
+
+### 12.2 NEXUS CARE — assistance et résolution
+- Un dossier unique suit demande, réclamation, médiation, pièces utiles, responsable, échéance et résolution.
+- Classer les urgences et acheminer vers une personne compétente; le support automatisé ne prétend pas remplacer les secours ou les professionnels.
+- Accuser réception, informer sur les étapes et délais réels, conserver une piste d'audit et proposer un recours.
+- Protéger les personnes vulnérables et limiter l'accès aux données strictement nécessaires.
+
+### 12.3 NEXUS QUALITY — qualité vérifiable
+- Relier les évaluations aux prestations réellement terminées et aux utilisateurs authentifiés.
+- Séparer faits observables, avis subjectifs, contestations et décisions de modération.
+- Suivre ponctualité, conformité au devis, récurrence des incidents, satisfaction et résolution.
+- Détecter les faux avis et représailles; permettre réponse, correction et appel.
+- Ne jamais faire d'une note isolée ou d'un signal non vérifié un motif automatique de bannissement.
+
+### 12.4 NEXUS FAIR OPPORTUNITY — accès équitable aux opportunités
+- Recommander missions, formations et collaborations selon compétences, disponibilité, zone, langue et critères annoncés.
+- Donner une exposition mesurée aux nouveaux profils qualifiés; surveiller concentration et biais des recommandations.
+- Expliquer les critères principaux et offrir des contrôles de préférences.
+- Ne pas vendre un meilleur classement de confiance; distinguer publicité sponsorisée et pertinence organique.
+- Auditer périodiquement les écarts de distribution et les résultats.
+
+### 12.5 NEXUS INTELLIGENCE — parcours personnalisés
+- Proposer une navigation adaptée aux objectifs déclarés: trouver un service, exercer, apprendre, créer, collaborer ou développer une activité.
+- Permettre à un même compte d'avoir plusieurs rôles, avec permissions séparées et bascule explicite.
+- Recommander des actions utiles plutôt que maximiser le temps passé ou les notifications.
+- Donner accès aux réglages de personnalisation, à la désactivation des recommandations et à une recherche non personnalisée.
+- Ne pas inférer de catégories sensibles pour profiler ou tarifer les personnes.
+
+### 12.6 NEXUS ACCESSIBILITY — accessibilité et inclusion
+- Concevoir mobile-first, navigation clavier, focus visible, contrastes suffisants, libellés accessibles et compatibilité lecteurs d'écran.
+- Prévoir zoom, textes clairs, messages d'erreur compréhensibles, sous-titres/transcriptions et réduction des animations.
+- Tester avec des outils automatisés et des personnes ayant des besoins divers; documenter les écarts et corrections.
+- Proposer plusieurs langues sans altérer les conditions contractuelles ni les montants.
+- Cible d'ingénierie: WCAG 2.2 AA, à vérifier par audit et tests réels; ne pas déclarer la conformité sans preuve.
+
+### 12.7 NEXUS GLOBAL — expansion contrôlée
+- Le Country Compliance Pack est l'autorité serveur pour l'activation d'un pays, d'un métier, d'un paiement et d'une fonctionnalité.
+- Chaque lancement exige responsable local, analyse juridique/fiscale/paiement/données, support linguistique, assurance et capacité opérationnelle.
+- Déployer d'abord en environnement isolé, puis pilote limité avec critères d'arrêt et retour arrière.
+- Bloquer par défaut les activités, flux financiers et transferts de données non validés.
+- Mesurer qualité, incidents, rentabilité, délais de support et satisfaction avant extension.
+
+### 12.8 NEXUS BUSINESS INTELLIGENCE — intelligence économique
+- Consolider des indicateurs traçables: demande, offre disponible, conversion, rétention, coût d'acquisition, marge contributive, revenus intervenants, remboursements et fraude.
+- Comparer scénarios de prix et commissions avant proposition; afficher hypothèses, intervalles d'incertitude et impacts sur clients, intervenants et plateforme.
+- Distinguer données réelles, estimations, hypothèses et prévisions.
+- Ne jamais inventer de KPI lorsque les données sources sont absentes ou non fiables.
+- Soumettre les changements de commission, tarification réglementée et décisions à fort impact à validation humaine.
+
+### 12.9 NEXUS DATA VAULT — gouvernance des données
+- Inventorier données, finalités, bases légales, catégories, destinataires, transferts, durées et responsables.
+- Appliquer minimisation, chiffrement, séparation des tenants, contrôle d'accès, rotation des clés et journalisation.
+- Fournir les parcours d'accès, rectification, export, opposition et suppression lorsque le droit le prévoit, avec gestion des obligations de conservation.
+- Séparer données d'identité, vérification d'âge, qualification professionnelle, KYC/AML et données de paiement.
+- Tester restauration, suppression effective, sauvegardes et gestion des incidents; aucune promesse d'effacement d'une sauvegarde avant vérification technique et légale.
+
+### 12.10 NEXUS EVOLUTION — amélioration continue contrôlée
+- Collecter les retours, incidents, métriques et demandes de fonctionnalités avec consentement et minimisation adaptés.
+- Détecter doublons et régressions avant de proposer une nouvelle brique.
+- Produire une fiche de changement: problème, utilisateurs concernés, valeur attendue, risques, dépendances, coût, critères d'acceptation et plan de retour arrière.
+- Développer dans une branche isolée, tests automatisés, revue de sécurité, Preview et validation humaine.
+- Aucun déploiement Production, migration destructive, modification financière ou changement de politique critique par autonomie non approuvée.
+
+## 13. NEXUS CYBER SHIELD et NEXUS PROTECT — sécurité unifiée
+
+Les capacités anti-piratage, anti-escroquerie, anti-usurpation, anti-harcèlement et protection des personnes forment une défense en profondeur, réutilisant les contrôles de sécurité existants:
+- MFA/passkeys pour comptes sensibles; protection contre credential stuffing, phishing, réinitialisation abusive et détournement de session.
+- Autorisation serveur à chaque ressource et opération; isolation tenant testée contre accès croisés; limitation de débit, validation stricte des entrées et protection API.
+- WAF/DDoS, CSP et en-têtes sûrs, protections XSS/CSRF/SSRF/SQLi, analyse des dépendances, secrets hors dépôt, SBOM et CI protégée.
+- Détection de profils fictifs, faux justificatifs, usurpation, faux avis, escroqueries, paiements anormaux, liens malveillants et demandes de sortie de plateforme à risque.
+- Outils de signalement, blocage, preuve horodatée, suivi du dossier, notification, modération et recours.
+- Restrictions temporaires proportionnées pour contenir un danger; bannissement définitif, accusation publique, transfert de fonds ou décision juridique réservés à une procédure habilitée.
+- Exercices d'incident, tests d'intrusion autorisés, restauration, rotation de secrets, revue des accès et post-mortems.
+
+Aucun système n'est inviolable. Les objectifs mesurables sont réduction du risque, détection rapide, confinement, restauration vérifiée et transparence des incidents.
+
+## 14. Parcours unifié et promesse de valeur
+
+Le produit doit organiser une boucle utile, sans devenir un flux social conçu pour maximiser artificiellement l'attention:
+
+**Découvrir → Apprendre → Créer → Collaborer → Travailler → Gagner → Évoluer.**
+
+Chaque écran doit conduire à une action utile et compréhensible:
+- Client: trouver, comparer, réserver, suivre, payer via PSP autorisé, évaluer et demander assistance.
+- Intervenant: créer un profil, prouver ses compétences, choisir ses disponibilités, recevoir des opportunités, répondre, réaliser, facturer et suivre ses revenus.
+- Créateur: publier, gérer droits et audience, proposer une offre, réserver ou vendre si autorisé, suivre les revenus nets et exporter ses données.
+- Apprenant: identifier un objectif, suivre un parcours, mesurer ses progrès et accéder à des opportunités adaptées.
+- Entreprise: vérifier son organisation, publier des besoins, sélectionner des compétences, contractualiser et suivre les résultats.
+- Administrateur/support: traiter les dossiers avec séparation des rôles, journalisation, priorités et délais.
+
+La navigation doit être cohérente sur mobile et ordinateur, accessible, multilingue et explicable. Les fonctionnalités non disponibles dans un pays ou pour un rôle ne doivent pas être présentées comme actives.
+
+## 15. Indicateurs de pilotage et critères d'acceptation
+
+Les tableaux de bord doivent afficher la source, la période, la définition et la fraîcheur de chaque indicateur. Cibles à fixer après mesure initiale:
+- sécurité: tentatives bloquées, comptes compromis confirmés, faux positifs, délai de détection et de confinement, vulnérabilités ouvertes par ancienneté;
+- confiance: délai de traitement des signalements, taux de résolution, recours acceptés, faux avis confirmés;
+- qualité: missions terminées, annulations, litiges, ponctualité et satisfaction vérifiée;
+- équité: distribution des opportunités, exposition des nouveaux profils, concentration des revenus et écarts inexpliqués;
+- économie: marge contributive, frais PSP, remboursements, revenus nets intervenants, coûts de support et trésorerie réellement rapprochée;
+- fiabilité: disponibilité mesurée, latence, erreurs, RPO/RTO observés, succès des restaurations et résultats des exercices;
+- accessibilité: défauts WCAG ouverts, parcours clavier et lecteur d'écran testés;
+- produit: activation utile, accomplissement des parcours, rétention volontaire et satisfaction, sans optimiser le temps d'écran comme objectif isolé.
+
+Aucun KPI ne doit être simulé ou présenté comme réel. Les seuils et objectifs sont versionnés, approuvés et adaptés au pilote.
+
+## 16. Plan de construction sans doublons
+
+1. Cartographier le code, les routes, tables, composants et PR existants; dresser une matrice capacité → implémentation → tests → preuve.
+2. Stabiliser l'identité, rôles, isolation tenant, sessions, journal d'audit et permissions SUPRA.
+3. Achever les parcours marketplace et l'espace intervenant connecté; valider les parcours clients et entreprises.
+4. Valider signalement, modération, recours, anti-fraude, anti-piratage et support.
+5. Valider ledger, PSP Sandbox E2E, remboursements, rapprochement et revenus intervenants.
+6. Livrer les expériences Talent, apprentissage et collaboration seulement après droits, modération, paiements et conformité pays.
+7. Réaliser audits accessibilité, sécurité, charge, sauvegarde/restauration et conformité.
+8. Pilote limité France après validation écrite; Algérie et autres pays restent désactivés jusqu'à validation locale complète.
+9. GO Production uniquement après preuve de chaque gate, revue humaine et autorisation explicite.
+
+## 17. Statut de réalisation et règle de vérité
+
+Ce blueprint est une cible produit. Une fonctionnalité n'est considérée « construite » que si le code est présent, relié aux routes et données réelles, protégé par les permissions, testé en CI et validé sur un parcours Preview représentatif. Une fonctionnalité n'est « opérationnelle » qu'après preuve d'exploitation et de supervision. Une fonctionnalité n'est « autorisée dans un pays » qu'après validation réglementaire et opérationnelle locale.
+
+Les PR existantes restent séparées et non fusionnées jusqu'à résolution des dépendances et des tests. Aucun déploiement Production, migration distante, paiement réel ou activation de pays n'est autorisé par ce document.
