@@ -211,13 +211,13 @@ test("denied operational actions are blocked before any outbox enqueue", () => {
 
 test("background scheduler never bootstraps DDL and waits for the reviewed migration chain", () => {
   const start = source.indexOf("async function processBackgroundJobs(");
-  const end = source.indexOf("\\nfunction isMutatingMethod", start);
+  const end = source.indexOf("\nfunction isMutatingMethod", start);
   assert.ok(start >= 0 && end > start);
   const handler = source.slice(start, end);
   assert.match(handler, /BACKGROUND_JOB_SCHEMA_NOT_MIGRATED/);
   assert.match(handler, /background_jobs_dead_letter/);
   assert.match(handler, /activity_journal/);
   assert.doesNotMatch(handler, /ensureFinalHardeningSchema|ensureOperationalSchema/);
-  assert.match(handler, /productionConfigCheck\\(env,\\{persist:false\\}\\)/);
-  assert.doesNotMatch(handler, /productionConfigCheck\\(env,\\{persist:true\\}\\)/);
+  assert.match(handler, /productionConfigCheck\(env,\{persist:false\}\)/);
+  assert.doesNotMatch(handler, /productionConfigCheck\(env,\{persist:true\}\)/);
 });
