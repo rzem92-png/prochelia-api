@@ -124,7 +124,7 @@ test("Preview post-migration verification checks identity, mission-security and 
     "tenant_invitations", "tenant_invitation_events",
     "idx_tenant_invitations_one_pending_email", "idx_tenant_invitations_expiry",
     "idx_tenant_invitations_membership", "idx_tenant_invitation_events_tenant_time",
-    "trg_tenant_invitation_requires_pending_member", "trg_tenant_invitation_authorized_inviter",
+    "trg_tenant_invitation_requires_pending_member", "trg_tenant_invitation_authorized_inviter", "trg_tenant_invitation_email_matches_member",
     "trg_tenant_invitation_event_actor_tenant", "trg_tenant_invitation_identity_immutable",
     "trg_tenant_invitation_terminal", "trg_tenant_invitation_events_no_update",
     "trg_tenant_invitation_events_no_delete"
