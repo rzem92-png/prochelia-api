@@ -16,3 +16,8 @@ def test_production_gate_requires_wallet_and_payout_schema():
     assert "'payment_accounts'" in required_tables
     assert "'wallets'" in required_tables
     assert "'payout_requests'" in required_tables
+
+    assert "'finance_workspace_entries'" in required_tables
+    assert "'finance_export_log'" in required_tables
+    assert "'finance_resolution_cases'" in required_tables
+    assert "'finance_workspace_entries','finance_export_log','finance_resolution_cases'" in SOURCE
