@@ -48,7 +48,7 @@ test("Pages proxy gaps are reported without skipping independent synthetic Worke
   assert.ok(workflow.includes("id: pages_proxy"));
   assert.ok(workflow.includes("continue-on-error: true"));
   assert.ok(workflow.includes("proxy_gap=1"));
-  assert.ok(workflow.includes("Enforce Pages proxy acceptance after Preview data cleanup"));
+  assert.ok(workflow.includes("Enforce Pages proxy acceptance after synthetic Preview cleanup"));
   assert.ok(workflow.includes("${{ steps.pages_proxy.outcome }}"));
   assert.ok(workflow.includes("Always remove synthetic Preview fixtures and verify cleanup"));
 });
