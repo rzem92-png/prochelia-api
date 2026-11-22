@@ -1039,6 +1039,14 @@ financial_tenant_triggers = {
     "trg_payment_dispute_tenant_insert",
     "trg_wallet_ledger_tenant_insert",
     "trg_payment_reconciliation_tenant_insert",
+    "trg_payment_account_tenant_immutable",
+    "trg_payment_transaction_identity_immutable",
+    "trg_payout_request_identity_immutable",
+    "trg_payment_dispute_identity_immutable",
+    "trg_payment_reconciliation_identity_immutable",
+    "trg_payment_webhook_tenant_immutable",
+    "trg_payment_audit_no_update",
+    "trg_payment_audit_no_delete",
 }
 triggers = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='trigger'")}
 assert financial_tenant_triggers <= triggers, (
