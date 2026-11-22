@@ -1,3 +1,4 @@
+import { evaluateSupraActionPolicy } from "./supra-action-policy.mjs";
 import { handleV7Route } from "./v7-routes.js";
 import { handleSupraRoute } from "./supra-api.js";
 import { resolveTenantContext, tenantRoleAllowed } from "./tenant-context.js";
@@ -1728,14 +1729,11 @@ async function executeCaseBusinessAction(env, c, rec, actorId=null, automatic=fa
   if (action === 'SEARCH_REPLACEMENT' || c.case_type === 'absence_intervenant' || c.case_type === 'retard_intervenant') {
     const replacementId = clean(context.replacement_intervenant_id || context.replacement_id);
     if (replacementId && c.mission_id) {
-      const cols = await getTableColumns(env,'missions');
-      if (cols.includes('intervenant_id')) {
-        await env.DB.prepare('UPDATE missions SET intervenant_id=? WHERE id=?').bind(replacementId,c.mission_id).run();
-        results.push({action:'ASSIGN_REPLACEMENT',mission_id:c.mission_id,intervenant_id:replacementId,status:'EXECUTED'});
-      } else {
-        const queued=await enqueueAction(env,c.id,'ASSIGN_REPLACEMENT',{mission_id:c.mission_id,intervenant_id:replacementId},`${c.id}:replacement:${replacementId}`);
-        results.push({action:'ASSIGN_REPLACEMENT',...queued,reason:'MISSION_SCHEMA_NEEDS_REVIEW'});
-      }
+      // Do not write mission assignment directly: this path has not yet proven
+      // tenant ownership, qualification, availability, conflict-free scheduling,
+      // and a transactional mission-state transition.
+      const queued=await enqueueAction(env,c.id,'ASSIGN_REPLACEMENT',{mission_id:c.mission_id,intervenant_id:replacementId},`${c.id}:replacement:${replacementId}`);
+      results.push({action:'ASSIGN_REPLACEMENT',...queued,reason:'VERIFIED_ASSIGNMENT_WORKFLOW_REQUIRED'});
     } else {
       const queued=await enqueueAction(env,c.id,'SEARCH_REPLACEMENT',{mission_id:c.mission_id||null,criteria:context.replacement_criteria||{},case_type:c.case_type},`${c.id}:search-replacement`);
       results.push({action:'SEARCH_REPLACEMENT',...queued});
@@ -1743,15 +1741,10 @@ async function executeCaseBusinessAction(env, c, rec, actorId=null, automatic=fa
   }
 
   if (context.reschedule_start_at && c.mission_id) {
-    const cols=await getTableColumns(env,'missions');
-    const target = cols.includes('start_at') ? 'start_at' : (cols.includes('scheduled_at') ? 'scheduled_at' : null);
-    if (target) {
-      await env.DB.prepare(`UPDATE missions SET ${target}=? WHERE id=?`).bind(String(context.reschedule_start_at),c.mission_id).run();
-      results.push({action:'RESCHEDULE_MISSION',mission_id:c.mission_id,field:target,status:'EXECUTED'});
-    } else {
-      const queued=await enqueueAction(env,c.id,'RESCHEDULE_MISSION',{mission_id:c.mission_id,start_at:context.reschedule_start_at},`${c.id}:reschedule:${context.reschedule_start_at}`);
-      results.push({action:'RESCHEDULE_MISSION',...queued,reason:'MISSION_SCHEMA_NEEDS_REVIEW'});
-    }
+    // Rescheduling remains queued until the tenant-scoped mission executor
+    // validates ownership, allowed state transition and conflict checks.
+    const queued=await enqueueAction(env,c.id,'RESCHEDULE_MISSION',{mission_id:c.mission_id,start_at:context.reschedule_start_at},`${c.id}:reschedule:${context.reschedule_start_at}`);
+    results.push({action:'RESCHEDULE_MISSION',...queued,reason:'TENANT_SCOPED_MISSION_EXECUTOR_REQUIRED'});
   }
 
   if (context.client_notification || c.client_id || c.company_id) {
@@ -1775,18 +1768,16 @@ async function processActionOutbox(request, env) {
   const rows=await env.DB.prepare(`SELECT * FROM action_outbox WHERE status='PENDING' ORDER BY created_at ASC LIMIT 50`).all();
   const processed=[];
   for(const row of (rows.results||[])) {
-    const payload=row.payload_json?JSON.parse(row.payload_json):{};
-    // Provider-dependent actions stay queued until the corresponding adapter/secret is configured.
-    const external = ['PSP_REFUND_REVIEW','NOTIFY_CLIENT','SEARCH_REPLACEMENT','RESCHEDULE_MISSION','ASSIGN_REPLACEMENT'].includes(String(row.action_type));
-    if(external) {
-      await env.DB.prepare(`UPDATE action_outbox SET status='WAITING_PROVIDER',last_error=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind('External adapter/provider required for final execution.',row.id).run();
-      processed.push({id:row.id,status:'WAITING_PROVIDER',action_type:row.action_type});
-      continue;
-    }
-    await env.DB.prepare(`UPDATE action_outbox SET status='COMPLETED',processed_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(row.id).run();
-    processed.push({id:row.id,status:'COMPLETED',action_type:row.action_type,payload});
+    // No action type is considered complete merely because it was read from the
+    // outbox. A dedicated executor must perform the side effect and a verifier
+    // must persist VERIFIED before this row can become COMPLETED.
+    const status='WAITING_IMPLEMENTATION';
+    const reason='NO_VERIFIED_EXECUTOR_REGISTERED';
+    await env.DB.prepare(`UPDATE action_outbox SET status=?,last_error=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='PENDING'`)
+      .bind(status,reason,row.id).run();
+    processed.push({id:row.id,status,action_type:row.action_type,reason});
   }
-  await journal(env,'gerante',gate.auth.user.id,'ACTION_OUTBOX_PROCESSED','system',null,'OK',{count:processed.length});
+  await journal(env,'gerante',gate.auth.user.id,'ACTION_OUTBOX_PROCESSED','system',null,'WAITING_IMPLEMENTATION',{count:processed.length});
   return json({ok:true,version:VERSION,processed},200);
 }
 
@@ -1797,13 +1788,18 @@ async function executeOperationalCase(env, caseId, approverId=null, automatic=fa
   const rec=c.proposed_solution_json?JSON.parse(c.proposed_solution_json):{};
   if(c.requires_manager && !automatic && !approverId) return {ok:false,error:'MANAGER_APPROVAL_REQUIRED'};
   const businessResults = await executeCaseBusinessAction(env,c,rec,approverId,automatic);
-  const resolution={executed:true,automatic,action:rec.action||'RESOLVE',steps:rec.solution?.steps||[],business_results:businessResults,executed_at:new Date().toISOString()};
-  await env.DB.prepare(`INSERT INTO case_actions(id,case_id,action_code,mode,status,payload_json,result_json,completed_at) VALUES(?,?,?,?,?,?,?,CURRENT_TIMESTAMP)`)
-    .bind(crypto.randomUUID(),caseId,rec.action||'RESOLVE',automatic?'AUTO':'MANAGER','COMPLETED',JSON.stringify(rec),JSON.stringify(resolution)).run();
-  await env.DB.prepare(`UPDATE operational_cases SET status='RESOLVED',resolution_json=?,requires_manager=0,updated_at=CURRENT_TIMESTAMP,resolved_at=CURRENT_TIMESTAMP WHERE id=?`).bind(JSON.stringify(resolution),caseId).run();
+  // Queue acceptance or a direct write is not independent proof of completion.
+  // Close only when every requested effect has an explicit VERIFIED result.
+  const verified = businessResults.length > 0 && businessResults.every(x => x?.status === 'VERIFIED');
+  const nextStatus = verified ? 'RESOLVED' : 'IN_PROGRESS';
+  const resolution={executed:verified,automatic,action:rec.action||'RESOLVE',steps:rec.solution?.steps||[],business_results:businessResults,verification_required:!verified,executed_at:new Date().toISOString()};
+  await env.DB.prepare(`INSERT INTO case_actions(id,case_id,action_code,mode,status,payload_json,result_json,completed_at) VALUES(?,?,?,?,?,?,?,?)`)
+    .bind(crypto.randomUUID(),caseId,rec.action||'RESOLVE',automatic?'AUTO':'MANAGER',verified?'VERIFIED':'PENDING',JSON.stringify(rec),JSON.stringify(resolution),verified?new Date().toISOString():null).run();
+  await env.DB.prepare(`UPDATE operational_cases SET status=?,resolution_json=?,requires_manager=CASE WHEN ?='RESOLVED' THEN 0 ELSE requires_manager END,updated_at=CURRENT_TIMESTAMP,resolved_at=? WHERE id=?`)
+    .bind(nextStatus,JSON.stringify(resolution),nextStatus,verified?new Date().toISOString():null,caseId).run();
   await env.DB.prepare(`UPDATE copilot_log SET approved_by=COALESCE(?,approved_by),result=? WHERE case_id=? AND id=(SELECT id FROM copilot_log WHERE case_id=? ORDER BY created_at DESC LIMIT 1)`).bind(approverId,JSON.stringify(resolution),caseId,caseId).run();
-  await journal(env,automatic?'copilot':'gerante',approverId,automatic?'AUTO_CASE_RESOLVED':'CASE_RESOLVED','operational_case',caseId,'OK',resolution);
-  return {ok:true,case_id:caseId,resolution};
+  await journal(env,automatic?'copilot':'gerante',approverId,verified?'CASE_RESOLVED':'CASE_ACTIONS_PENDING','operational_case',caseId,verified?'OK':'PENDING_VERIFICATION',resolution);
+  return {ok:true,case_id:caseId,status:nextStatus,resolution};
 }
 
 async function approveOperationalCase(request, env) {
@@ -2519,9 +2515,26 @@ async function queueAction(env, actionType, entityType, entityId, payload, idem)
   return await env.DB.prepare('SELECT * FROM action_outbox WHERE id=?').bind(id).first();
 }
 
-async function executeQueuedAction(env, action) {
+async function executeQueuedAction(env, action, actorContext = {}) {
   if (!action) return {ok:false,error:'ACTION_NOT_FOUND'};
   const payload = JSON.parse(action.payload_json||'{}');
+  const policyDecision = evaluateSupraActionPolicy({
+    actionType: action.action_type,
+    role: actorContext.role,
+    jurisdiction: actorContext.jurisdiction,
+    autonomyLevel: actorContext.autonomyLevel || "A0",
+    hasApproval: actorContext.approvedAction === action.action_type,
+    tenantScoped: actorContext.tenantScoped === true,
+    idempotencyKey: action.idempotency_key
+  });
+  if (!policyDecision.allowed) {
+    return {
+      ok: false, status: "BLOCKED", performed: false,
+      error: "SUPRA_ACTION_POLICY_DENIED",
+      action: action.action_type,
+      policy: { risk: policyDecision.risk, reasons: policyDecision.reasons }
+    };
+  }
   const now = new Date().toISOString();
   try {
     let result = {performed:false,action:action.action_type};
@@ -2537,15 +2550,19 @@ async function executeQueuedAction(env, action) {
         if (usable.length) {
           const sql=`INSERT INTO notification_outbox(${usable.map(x=>x[0]).join(',')}) VALUES(${usable.map(()=>'?').join(',')})`;
           await env.DB.prepare(sql).bind(...usable.map(x=>x[1])).run();
-          result={performed:true,channel,notification_queued:true};
+          // Enqueueing is not delivery: keep the action pending until a delivery
+          // adapter records a provider receipt and a separate verifier confirms it.
+          result={performed:false,requires_provider:true,channel,notification_queued:true,reason:'DELIVERY_RECEIPT_REQUIRED'};
         } else result={performed:false,reason:'NOTIFICATION_SCHEMA_INCOMPATIBLE'};
       } else result={performed:false,reason:'NOTIFICATION_TABLE_MISSING'};
     } else if (action.action_type === 'RESCHEDULE_MISSION') {
-      result = await dynamicUpdate(env,'missions',action.entity_id,{scheduled_at:payload.scheduled_at,date:payload.date,time:payload.time,status:payload.status||'RESCHEDULED'});
-      result.action='RESCHEDULE_MISSION';
+      // This generic executor has no tenant-scoped authorization and post-write
+      // verifier. Never mutate a mission by unscoped entity ID.
+      result={performed:false,requires_provider:true,reason:'TENANT_SCOPED_MISSION_EXECUTOR_REQUIRED'};
     } else if (action.action_type === 'ASSIGN_REPLACEMENT') {
-      result = await dynamicUpdate(env,'missions',action.entity_id,{intervenant_id:payload.intervenant_id,assigned_intervenant_id:payload.intervenant_id,status:payload.status||'ASSIGNED'});
-      result.action='ASSIGN_REPLACEMENT';
+      // Assignment changes require qualification, availability, tenant ownership,
+      // conflict checks and an auditable transactional transition.
+      result={performed:false,requires_provider:true,reason:'VERIFIED_ASSIGNMENT_WORKFLOW_REQUIRED'};
     } else if (action.action_type === 'REFUND') {
       result={performed:false,requires_provider:true,reason:'PSP_EXECUTION_REQUIRED',payload};
     } else if (action.action_type === 'PAYOUT') {
@@ -2581,14 +2598,47 @@ async function operationalExecute(request, env) {
   if(!actions.length)return json({ok:false,error:'NO_ACTIONS_DEFINED',version:VERSION},400);
   const results=[];
   for(const a of actions){
-    const q=await queueAction(env,a.action_type||a.type,c.mission_id?'MISSION':'CASE',a.entity_id||c.mission_id,{...a},a.idempotency_key);
-    results.push(await executeQueuedAction(env,q));
+    // Preflight before creating any outbox row: denied actions must not become
+    // apparently executable pending work. All authority fields are server-derived
+    // or deliberately absent until their authoritative resolvers are integrated.
+    const actorContext = {
+      role: gate.auth.user.role,
+      jurisdiction: null,
+      autonomyLevel: "A0",
+      approvedAction: null,
+      tenantScoped: false
+    };
+    const actionType = a.action_type || a.type;
+    const preflight = evaluateSupraActionPolicy({
+      actionType,
+      role: actorContext.role,
+      jurisdiction: actorContext.jurisdiction,
+      autonomyLevel: actorContext.autonomyLevel,
+      hasApproval: false,
+      tenantScoped: actorContext.tenantScoped,
+      idempotencyKey: a.idempotency_key
+    });
+    if (!preflight.allowed) {
+      results.push({
+        ok: false, status: "BLOCKED", performed: false,
+        error: "SUPRA_ACTION_POLICY_DENIED",
+        action: String(actionType || "").toUpperCase(),
+        policy: { risk: preflight.risk, reasons: preflight.reasons },
+        queued: false
+      });
+      continue;
+    }
+    const q=await queueAction(env,actionType,c.mission_id?'MISSION':'CASE',a.entity_id||c.mission_id,{...a},a.idempotency_key);
+    results.push(await executeQueuedAction(env,q,actorContext));
   }
-  const allDone=results.every(x=>x.ok && ['DONE'].includes(x.status));
+  // DONE only means that an executor reported a side effect. Resolution
+  // requires a separate verifier to return VERIFIED for every requested action.
+  const allVerified=results.length>0 && results.every(x=>x.ok && x.status==='VERIFIED');
+  const caseStatus=allVerified?'RESOLVED':'IN_PROGRESS';
   await env.DB.prepare(`UPDATE operational_cases SET status=?,resolution_json=?,updated_at=CURRENT_TIMESTAMP,resolved_at=? WHERE id=?`)
-    .bind(allDone?'RESOLVED':'IN_PROGRESS',JSON.stringify({approved_by:gate.auth.user.id,results}),allDone?new Date().toISOString():null,c.id).run();
-  await journal(env,'gerante',gate.auth.user.id,'CASE_EXECUTED','operational_case',c.id,allDone?'OK':'PARTIAL',{results});
-  return json({ok:true,version:VERSION,case_id:c.id,status:allDone?'RESOLVED':'IN_PROGRESS',results});
+    .bind(caseStatus,JSON.stringify({approved_by:gate.auth.user.id,results,verification_required:!allVerified}),allVerified?new Date().toISOString():null,c.id).run();
+  await journal(env,'gerante',gate.auth.user.id,allVerified?'CASE_VERIFIED_AND_RESOLVED':'CASE_ACTIONS_PENDING_VERIFICATION','operational_case',c.id,allVerified?'OK':'PENDING_VERIFICATION',{results});
+  return json({ok:true,version:VERSION,case_id:c.id,status:caseStatus,verification_required:!allVerified,results});
 }
 
 async function scoreClients(request, env) {
@@ -2855,7 +2905,14 @@ async function processBackgroundJobs(request,env,{scheduler=false}={}) {
     ? {auth:{user:{id:'cloudflare-cron',role:'GERANTE'}}}
     : await requireAuthRole(request,env,['gerante']);
   if(gate.error)return gate.error;
-  await ensureFinalHardeningSchema(env); await ensureOperationalSchema(env);
+  if (!env?.DB?.prepare) return json({ok:false,error:'DATABASE_REQUIRED'},503);
+  // Runtime schedulers must never create or alter schema outside the reviewed
+  // migration chain. Readiness is read-only and fails closed until every table
+  // needed for claims, dead letters and audit journaling has been migrated.
+  const requiredTables=['background_jobs','background_jobs_dead_letter','activity_journal'];
+  const missingTables=[];
+  for(const table of requiredTables) if(!await tableExists(env,table)) missingTables.push(table);
+  if(missingTables.length) return json({ok:false,error:'BACKGROUND_JOB_SCHEMA_NOT_MIGRATED',missing:missingTables,write_enabled:false},503);
   // Recover abandoned leases after a worker crash. A bounded retry delay
   // prevents a hot loop while keeping exhausted jobs visible as FAILED.
   const stale=await env.DB.prepare(`SELECT id,attempts,max_attempts FROM background_jobs WHERE status='RUNNING' AND locked_at<=datetime(CURRENT_TIMESTAMP,'-10 minutes') ORDER BY locked_at LIMIT 50`).all();
@@ -2889,7 +2946,7 @@ async function processBackgroundJobs(request,env,{scheduler=false}={}) {
       // Delegation labels are not execution. Keep these jobs visible for an
       // implemented provider rather than falsely recording them as completed.
       if(job.job_type==='PROCESS_ACTION_OUTBOX') result={performed:false,reason:'OUTBOX_PROCESSOR_NOT_INTEGRATED',next:'/api/ops/outbox/process'};
-      else if(job.job_type==='PRODUCTION_AUDIT') result=await productionConfigCheck(env,{persist:true});
+      else if(job.job_type==='PRODUCTION_AUDIT') result=await productionConfigCheck(env,{persist:false});
       else if(job.job_type==='COPILOT_BRIEFING') result={performed:false,reason:'BRIEFING_PROVIDER_NOT_INTEGRATED',next:'/api/copilot/briefing'};
       const done=result.performed===true || result.overall===true;
       await env.DB.prepare(`UPDATE background_jobs SET status=?,result_json=?,attempts=attempts+1,updated_at=CURRENT_TIMESTAMP,completed_at=? WHERE id=?`)

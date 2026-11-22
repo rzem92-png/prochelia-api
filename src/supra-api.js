@@ -1,6 +1,7 @@
 import { assessSupraDecision } from "./supra-intelligence.js";
 import { buildSupraPlan, getSupraDomainRegistry } from "./supra-orchestrator.js";
 import { handleSupraApprovalRoute } from "./supra-approvals.js";
+import { SUPRA_ACTION_POLICIES } from "./supra-action-policy.mjs";
 
 const MAX_BODY_BYTES = 16 * 1024;
 
@@ -57,7 +58,7 @@ export async function handleSupraRoute(request, env, auth) {
   const approvalResponse = await handleSupraApprovalRoute(request, env, auth);
   if (approvalResponse) return approvalResponse;
   const url = new URL(request.url);
-  if (!["/api/supra/domains", "/api/supra/plan"].includes(url.pathname)) return null;
+  if (!["/api/supra/domains", "/api/supra/plan", "/api/supra/action-policies"].includes(url.pathname)) return null;
 
   if (!auth?.user) return reply({ ok: false, error: "UNAUTHENTICATED" }, 401);
   if (String(auth.user.role || "").toUpperCase() !== "GERANTE" ||
@@ -65,6 +66,26 @@ export async function handleSupraRoute(request, env, auth) {
     return reply({ ok: false, error: "FORBIDDEN" }, 403);
   }
   if (!env?.DB?.prepare) return reply({ ok: false, error: "DATABASE_UNAVAILABLE" }, 503);
+
+  if (url.pathname === "/api/supra/action-policies") {
+    if (request.method !== "GET") return reply({ ok: false, error: "METHOD_NOT_ALLOWED" }, 405);
+    // Read-only policy catalogue: never grants execution permission.
+    return reply({
+      ok: true,
+      executionAllowed: false,
+      policies: Object.entries(SUPRA_ACTION_POLICIES).map(([actionType, policy]) => ({
+        actionType,
+        risk: policy.risk,
+        minimumAutonomy: policy.minimumAutonomy,
+        approvalRequired: policy.approvalRequired,
+        executor: policy.executor,
+        verification: policy.verification,
+        tenantScopeRequired: policy.tenantScopeRequired,
+        idempotencyRequired: policy.idempotencyRequired,
+        reversible: policy.reversible
+      }))
+    });
+  }
 
   if (url.pathname === "/api/supra/domains") {
     if (request.method !== "GET") return reply({ ok: false, error: "METHOD_NOT_ALLOWED" }, 405);
