@@ -1072,7 +1072,7 @@ export async function reservePayoutAtomically(env, input) {
 async function payoutRequest(request, env) {
   const auth=await getSessionUser(request,env);
   if(!requireRole(auth,['intervenant'])) return json({ok:false,error:auth?.user?'FORBIDDEN':'UNAUTHENTICATED',version:VERSION},auth?.user?403:401);
-  if(!paymentsConfigured(env)) return json({ok:false,error:'PAYOUT_PROVIDER_NOT_CONFIGURED',version:VERSION,write_enabled:false},503);
+  if (!paymentsConfigured(env)) return json({ok:false,error:'PAYOUT_PROVIDER_NOT_CONFIGURED',version:VERSION,write_enabled:false},503);
   const tenantContext=await resolveTenantContext(request,env,auth);
   if(!tenantContext.ok) return json({ok:false,error:tenantContext.error,version:VERSION},tenantContext.status);
   await ensurePaymentSchema(env);
