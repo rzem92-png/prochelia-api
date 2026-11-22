@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - feat/supra-canonical-tenant-integration-2026-11-20
+      - fix/tenant-accounting-api-readonly-gate-2026-11-22
     paths:
       - ".github/workflows/preview-directory-e2e-acceptance.yml"
       - "tests/preview-e2e-workflow.test.mjs"
@@ -16,7 +17,7 @@ on:
       frontend_commit_sha:
         description: "Exact 40-character HEAD of the selected frontend Preview branch"
         required: false
-        default: "f7a1a2015083043ec2d4f35c914f7c38e785853a"
+        default: "a916165be5fd3f431115e0a2e9d6ce67163c889d"
         type: string
   workflow_run:
     workflows:
@@ -35,14 +36,18 @@ jobs:
     if: >-
       (
         github.event_name == 'push' &&
-        github.ref == 'refs/heads/feat/supra-canonical-tenant-integration-2026-11-20'
+        (
+          github.ref == 'refs/heads/feat/supra-canonical-tenant-integration-2026-11-20' ||
+          github.ref == 'refs/heads/fix/tenant-accounting-api-readonly-gate-2026-11-22'
+        )
       ) ||
       (
         github.event_name == 'workflow_dispatch' &&
         inputs.confirmation == 'RUN_PREVIEW_DIRECTORY_E2E' &&
         (
           github.ref == 'refs/heads/main' ||
-          github.ref == 'refs/heads/feat/supra-canonical-tenant-integration-2026-11-20'
+          github.ref == 'refs/heads/feat/supra-canonical-tenant-integration-2026-11-20' ||
+          github.ref == 'refs/heads/fix/tenant-accounting-api-readonly-gate-2026-11-22'
         )
       ) ||
       (
@@ -59,7 +64,7 @@ jobs:
       PREVIEW_DB_NAME: prochelia-preview-eu-2026-11-17
       PREVIEW_DB_ID: e3cf167c-37e1-4d72-9ac6-b3e27c14b97f
       FRONTEND_BRANCH: feat/intervenant-secure-pages-integration-2026-11-20
-      FRONTEND_COMMIT_SHA: ${{ inputs.frontend_commit_sha || 'f7a1a2015083043ec2d4f35c914f7c38e785853a' }}
+      FRONTEND_COMMIT_SHA: ${{ inputs.frontend_commit_sha || 'a916165be5fd3f431115e0a2e9d6ce67163c889d' }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
