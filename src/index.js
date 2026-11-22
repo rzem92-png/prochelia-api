@@ -3574,6 +3574,12 @@ async function intervenantApplicationWithdrawRoute(request, env, url) {
       'SELECT status FROM mission_applications WHERE id = ? AND applicant_tenant_id = ? AND intervenant_id = ? LIMIT 1'
     ).bind(applicationId, tenantId, profile.id).first();
     if (!existing) return json({ ok: false, error: 'APPLICATION_NOT_FOUND' }, 404);
+    // State-idempotent retry: if the first response was lost, repeating the
+    // same withdrawal request returns the already-committed result without
+    // another mutation. The conditional UPDATE above remains tenant-scoped.
+    if (existing.status === 'WITHDRAWN') {
+      return json({ ok: true, replayed: true, application: { id: applicationId, status: 'WITHDRAWN' } });
+    }
     return json({ ok: false, error: 'APPLICATION_NOT_WITHDRAWABLE', status: existing.status }, 409);
   } catch {
     return json({ ok: false, error: 'APPLICATION_WITHDRAWAL_REJECTED' }, 409);
