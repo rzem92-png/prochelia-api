@@ -46,6 +46,7 @@ EXPECTED = [
     "0039_cryptographic_device_enrollment.sql",
     "0040_accounting_active_state_at_posting.sql",
     "0041_tenant_invitation_onboarding.sql",
+    "0042_financial_tenant_scope.sql",
 ]
 
 # Keep the manual Preview migration gate synchronized with the canonical chain.
@@ -57,16 +58,16 @@ assert '"0029_supra_append_only_audit_guards.sql"' in workflow_text, (
 assert '"0030_supra_audit_tenant_scope.sql"' in workflow_text, (
     "Preview migration workflow omits tenant-scoped SUPRA audit migration 0030"
 )
-assert "if len(local) != 42:" in workflow_text, (
+assert "if len(local) != 43:" in workflow_text, (
     "Preview migration workflow must require exactly 39 canonical migrations"
 )
-assert "exact 42-entry registry" in workflow_text, (
+assert "exact 43-entry registry" in workflow_text, (
     "Preview migration workflow target registry count is stale"
 )
-assert "all 42 canonical migrations are pending" in workflow_text, (
+assert "all 43 canonical migrations are pending" in workflow_text, (
     "Preview migration workflow empty-database inventory message is stale"
 )
-assert "only migrations 0023-0041 are pending" in workflow_text, (
+assert "only migrations 0023-0042 are pending" in workflow_text, (
     "Preview migration workflow baseline-to-target range is stale"
 )
 assert '"0038_identity_verification_tenant_scope.sql"' in workflow_text, (
@@ -1020,3 +1021,26 @@ for table in ["mission_opportunity_consents", "mission_opportunities", "mission_
     except sqlite3.IntegrityError:
         pass
 print("PASS: privacy-safe cross-tenant marketplace consent, publication, eligibility, atomic acceptance, one-provider assignment, cancellation and append-only history.")
+
+
+# Financial runtime schema must be tenant-bound before any PSP activation.
+financial_tenant_tables = {
+    "payment_accounts", "payment_transactions", "payout_requests",
+    "payment_disputes", "payment_wallet_ledger", "payment_reconciliation",
+    "payment_audit", "payment_webhook_events", "wallets",
+}
+for table in financial_tenant_tables:
+    columns = {row[1] for row in db.execute(f"PRAGMA table_info({table})")}
+    assert "tenant_id" in columns, f"{table} missing tenant_id"
+financial_tenant_triggers = {
+    "trg_payment_account_tenant_insert",
+    "trg_payment_transaction_tenant_insert",
+    "trg_payout_request_tenant_insert",
+    "trg_payment_dispute_tenant_insert",
+    "trg_wallet_ledger_tenant_insert",
+    "trg_payment_reconciliation_tenant_insert",
+}
+triggers = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='trigger'")}
+assert financial_tenant_triggers <= triggers, (
+    f"Missing financial tenant guards: {sorted(financial_tenant_triggers-triggers)}"
+)
