@@ -44,6 +44,7 @@ EXPECTED = [
     "0037_support_cases_tenant_isolation.sql",
     "0038_identity_verification_tenant_scope.sql",
     "0039_cryptographic_device_enrollment.sql",
+    "0040_accounting_active_state_at_posting.sql",
 ]
 
 # Keep the manual Preview migration gate synchronized with the canonical chain.
@@ -55,16 +56,16 @@ assert '"0029_supra_append_only_audit_guards.sql"' in workflow_text, (
 assert '"0030_supra_audit_tenant_scope.sql"' in workflow_text, (
     "Preview migration workflow omits tenant-scoped SUPRA audit migration 0030"
 )
-assert "if len(local) != 40:" in workflow_text, (
+assert "if len(local) != 41:" in workflow_text, (
     "Preview migration workflow must require exactly 39 canonical migrations"
 )
-assert "exact 40-entry registry" in workflow_text, (
+assert "exact 41-entry registry" in workflow_text, (
     "Preview migration workflow target registry count is stale"
 )
-assert "all 40 canonical migrations are pending" in workflow_text, (
+assert "all 41 canonical migrations are pending" in workflow_text, (
     "Preview migration workflow empty-database inventory message is stale"
 )
-assert "only migrations 0023-0039 are pending" in workflow_text, (
+assert "only migrations 0023-0040 are pending" in workflow_text, (
     "Preview migration workflow baseline-to-target range is stale"
 )
 assert '"0038_identity_verification_tenant_scope.sql"' in workflow_text, (
@@ -234,6 +235,40 @@ try:
     raise AssertionError("Cross-tenant accounting line was incorrectly accepted")
 except sqlite3.IntegrityError:
     pass
+
+# Posting must re-check the current state, not rely only on account state
+# when draft lines were inserted.
+db.execute("""
+    INSERT INTO accounting_journals(
+      id, tenant_id, entity_id, journal_code, journal_date, currency,
+      source_type, source_id, idempotency_key, created_by
+    ) VALUES ('journal-account-state', 'tenant-a', 'entity-a', 'VE', '2026-11-18', 'EUR',
+              'TEST', 'account-state', 'tenant-a:account-state:1', 'user-a')
+""")
+for line_id, account_id, line_number, side in [
+    ("state-line-1", "cash-a", 1, "DEBIT"),
+    ("state-line-2", "revenue-a", 2, "CREDIT"),
+]:
+    db.execute("""
+        INSERT INTO accounting_journal_lines(id, tenant_id, entity_id, journal_id, account_id, line_number, side, amount_cents, currency)
+        VALUES (?, 'tenant-a', 'entity-a', 'journal-account-state', ?, ?, ?, 2500, 'EUR')
+    """, (line_id, account_id, line_number, side))
+db.execute("UPDATE accounting_accounts SET is_active=0 WHERE id='revenue-a'")
+try:
+    db.execute("UPDATE accounting_journals SET status='POSTED', posted_by='user-a', posted_at=CURRENT_TIMESTAMP WHERE id='journal-account-state'")
+    raise AssertionError("Journal posted with an account deactivated after draft-line insertion")
+except sqlite3.IntegrityError as exc:
+    assert "ACCOUNT_INACTIVE_AT_POSTING" in str(exc), str(exc)
+db.execute("UPDATE accounting_accounts SET is_active=1 WHERE id='revenue-a'")
+db.execute("UPDATE accounting_entities SET status='SUSPENDED' WHERE id='entity-a'")
+try:
+    db.execute("UPDATE accounting_journals SET status='POSTED', posted_by='user-a', posted_at=CURRENT_TIMESTAMP WHERE id='journal-account-state'")
+    raise AssertionError("Journal posted for a suspended accounting entity")
+except sqlite3.IntegrityError as exc:
+    assert "ENTITY_INACTIVE_AT_POSTING" in str(exc), str(exc)
+db.execute("UPDATE accounting_entities SET status='ACTIVE' WHERE id='entity-a'")
+db.execute("UPDATE accounting_journals SET status='POSTED', posted_by='user-a', posted_at=CURRENT_TIMESTAMP WHERE id='journal-account-state'")
+
 db.execute("UPDATE accounting_journals SET status='POSTED', posted_by='user-a', posted_at=CURRENT_TIMESTAMP WHERE id='journal-a'")
 try:
     db.execute("UPDATE accounting_journal_lines SET amount_cents=9999 WHERE id='line-a1'")
