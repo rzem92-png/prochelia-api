@@ -228,3 +228,16 @@ Validation status for this update:
 - Static source inspection and JavaScript syntax parsing succeeded for the candidate source, policy module, API module and test file.
 - The GitHub workflow-run lookup returned no PR-triggered runs for the latest candidate commit. The regression suite has therefore not been reported as executed or passed.
 - No remote migration, deployment, production mutation, payment activation or merge was performed.
+
+
+## 19. Outbox preflight hardening
+
+The operational case handler now evaluates the deny-by-default policy **before** inserting an action into `action_outbox`. If policy preflight denies the request, the handler returns `BLOCKED` with `queued: false` and continues without creating pending work. The execution boundary retains its own second policy check as defense in depth.
+
+This closes a queue-hygiene gap: a denied action must not remain in the outbox looking like work that may later be executed by a background consumer.
+
+Validation:
+- Static JavaScript syntax parsing succeeded for `src/index.js` and the regression test file.
+- The regression test file now declares 19 tests, including an ordering assertion proving policy preflight precedes `queueAction`.
+- No PR-triggered GitHub Actions runs were returned for commit `e20b13711a2bd88e10e6127c4d33778988496ad9`; the tests are not claimed as executed.
+- The current handler still deliberately denies operations because authoritative tenant scope, jurisdiction and approval consumption have not yet been integrated. No outbox row is created for these denied actions.
