@@ -26,6 +26,14 @@ test("Preview E2E pins the current private frontend branch and exact Pages commi
   assert.doesNotMatch(workflow, /PREVIEW_DB_ID: 04f52830-ef5a-4f17-a640-42bbc2381bba/);
 });
 
+test("synthetic SQL and GITHUB_ENV use real newline escapes, and cleanup sends valid JSON", () => {
+  assert.match(workflow, /\.join\(',\\n'\)/);
+  assert.match(workflow, /E2E_MANAGER_TOKEN=\$\{managerToken\}\\nE2E_CLIENT_TOKEN=/);
+  assert.match(workflow, /payload="\$\(cat <<EOF/);
+  assert.match(workflow, /\{"sql":"SELECT \(SELECT COUNT\(\*\) FROM users/);
+  assert.doesNotMatch(workflow, /\\\\n/);
+});
+
 test("Cloudflare Pages list response supports its array result shape", () => {
   assert.ok(workflow.includes('(if type == "array" then . else (.deployments // []) end)'));
 });
