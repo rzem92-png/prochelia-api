@@ -293,6 +293,52 @@ jobs:
           rm -f "$plaintext" "$RUNNER_TEMP/prochelia-backup/decrypted-check.sql"
           printf 'database=%s\\ncreated_utc=%s\\nencrypted_file=prochelia-preview.sql.gpg\\nbucket=%s\\n' "$EXPECTED_DB_NAME" "$(date -u +%FT%TZ)" "$R2_BUCKET" > "$RUNNER_TEMP/prochelia-backup/README.txt"
 
+      - name: Prepare canonical HMAC-signed backup attestation
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          key="preview-d1/${EXPECTED_DB_NAME}/$(date -u +%Y/%m/%d)/${GITHUB_RUN_ID}-${GITHUB_SHA:0:12}.sql.gpg"
+          plain_sha="$(cat "$RUNNER_TEMP/prochelia-backup/manifest.sha256")"
+          cipher_sha="$(sha256sum "$RUNNER_TEMP/prochelia-backup/prochelia-preview.sql.gpg" | awk '{print $1}')"
+          printf 'R2_OBJECT_KEY=%s\\n' "$key" >> "$GITHUB_ENV"
+          R2_OBJECT_KEY="$key" PLAIN_SHA256="$plain_sha" CIPHER_SHA256="$cipher_sha" node --input-type=module <<'NODE'
+          import fs from "node:fs";
+          const manifest = {
+            schema_version: 1,
+            attestation_type: "prochelia.preview-d1-backup",
+            created_at: new Date().toISOString(),
+            source: {
+              account_id: process.env.EXPECTED_ACCOUNT_ID,
+              database_id: process.env.EXPECTED_DB_ID,
+              database_name: process.env.EXPECTED_DB_NAME,
+              jurisdiction: "eu"
+            },
+            object: {
+              bucket: process.env.R2_BUCKET,
+              key: process.env.R2_OBJECT_KEY,
+              sha256_manifest_key: process.env.R2_OBJECT_KEY + ".sha256",
+              plaintext_sha256: process.env.PLAIN_SHA256,
+              ciphertext_sha256: process.env.CIPHER_SHA256
+            },
+            provenance: {
+              repository: process.env.GITHUB_REPOSITORY,
+              workflow: process.env.GITHUB_WORKFLOW,
+              run_id: process.env.GITHUB_RUN_ID,
+              commit_sha: process.env.GITHUB_SHA,
+              ref: process.env.GITHUB_REF,
+              migration_source_sha: process.env.GITHUB_SHA
+            },
+            validation: {
+              encryption: "OpenPGP-AES256",
+              sqlite_integrity_check: "ok",
+              foreign_key_check: "empty"
+            }
+          };
+          fs.writeFileSync(process.env.RUNNER_TEMP + "/prochelia-backup/attestation.json", JSON.stringify(manifest, null, 2) + "\\n", { mode: 0o600 });
+          NODE
+          R2_OBJECT_KEY="$key" node scripts/r2-backup-attestation.mjs sign "$RUNNER_TEMP/prochelia-backup/attestation.json" "$RUNNER_TEMP/prochelia-backup/attestation.hmac"
+
       - name: Install AWS CLI for private R2 EU backup
         shell: bash
         run: |
