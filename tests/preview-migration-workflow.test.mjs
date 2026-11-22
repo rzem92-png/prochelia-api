@@ -37,6 +37,22 @@ test("Preview migration restores the exact encrypted R2 backup into a distinct E
   assert.match(workflow, /--config "\$RUNNER_TEMP\/wrangler\.restore-test\.json"/);
 });
 
+test("R2 backup requires EU retention lock and a separate HMAC attestation key", () => {
+  assert.match(workflow, /BACKUP_ATTESTATION_HMAC_KEY: \$\{\{ secrets\.BACKUP_ATTESTATION_HMAC_KEY \}\}/);
+  assert.match(workflow, /R2_EXPECTED_RETENTION_SECONDS: \$\{\{ vars\.R2_EXPECTED_RETENTION_SECONDS \}\}/);
+  assert.match(workflow, /BACKUP_ATTESTATION_HMAC_KEY must contain at least 32 UTF-8 bytes/);
+  assert.match(workflow, /Backup HMAC and encryption keys must be distinct/);
+  assert.match(workflow, /r2\/buckets\/\$R2_BUCKET\/lock/);
+  assert.match(workflow, /\.condition\.maxAgeSeconds >= \$retention/);
+  assert.match(workflow, /Prepare canonical HMAC-signed backup attestation/);
+  assert.match(workflow, /r2-backup-attestation\.mjs sign/);
+  assert.match(workflow, /attestation\.json/);
+  assert.match(workflow, /attestation\.hmac/);
+  assert.match(workflow, /r2-backup-attestation\.mjs verify/);
+  assert.match(workflow, /provenance\.commit_sha == env\.GITHUB_SHA/);
+  assert.match(workflow, /R2 backup object key already exists/);
+});
+
 test("Preview migration workflow pins the dedicated Preview database and forbids production", () => {
   assert.match(workflow, /EXPECTED_DB_NAME:\s*prochelia-preview-eu-2026-11-17/);
   assert.match(workflow, /EXPECTED_DB_ID:\s*e3cf167c-37e1-4d72-9ac6-b3e27c14b97f/);
