@@ -4269,7 +4269,7 @@ async function handleCors(request, env) {
       'access-control-allow-origin': origin,
       'access-control-allow-credentials': 'true',
       'access-control-allow-methods': 'GET, HEAD, POST, PUT, PATCH, DELETE, OPTIONS',
-      'access-control-allow-headers': 'Content-Type, Authorization, X-CSRF-Token',
+      'access-control-allow-headers': 'Content-Type, Authorization, X-CSRF-Token, X-Idempotency-Key',
       'access-control-max-age': '600',
       'vary': 'Origin',
       'cache-control': 'no-store'
