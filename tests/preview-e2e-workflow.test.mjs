@@ -4,28 +4,25 @@ import { readFile } from "node:fs/promises";
 
 const workflow = await readFile(new URL("../.github/workflows/preview-directory-e2e-acceptance.yml", import.meta.url), "utf8");
 
-test("Preview E2E is gated by explicit confirmation and restricted to main or the audited candidate branch", () => {
+test("Preview E2E is limited to the audited API candidate push or explicit manual confirmation", () => {
   assert.match(workflow, /workflow_dispatch:/);
   assert.match(workflow, /RUN_PREVIEW_DIRECTORY_E2E/);
-  assert.match(workflow, /workflow_run:/);
-  assert.match(workflow, /github\.event\.workflow_run\.conclusion == 'success'/);
-  assert.match(workflow, /github\.ref == 'refs\/heads\/main'/);
+  assert.match(workflow, /github\.event_name == 'push'/);
   assert.match(workflow, /github\.ref == 'refs\/heads\/feat\/supra-canonical-tenant-integration-2026-11-20'/);
   assert.match(workflow, /github\.event_name == 'workflow_dispatch'/);
-  assert.match(workflow, /github\.event_name == 'workflow_run'/);
+  assert.match(workflow, /github\.ref == 'refs\/heads\/main'/);
 });
 
-test("Preview E2E resolves the exact current Pages Preview deployment and pinned Preview D1", () => {
+test("Preview E2E pins the current private frontend branch and exact Pages commit", () => {
   assert.match(workflow, /PREVIEW_DB_ID: e3cf167c-37e1-4d72-9ac6-b3e27c14b97f/);
   assert.match(workflow, /FRONTEND_BRANCH: feat\/intervenant-secure-pages-integration-2026-11-20/);
-  assert.match(workflow, /api\.github\.com\/repos\/rzem92-png\/-prochelia\/branches/);
+  assert.match(workflow, /FRONTEND_COMMIT_SHA: \$\{\{ inputs\.frontend_commit_sha/);
+  assert.match(workflow, /f7a1a2015083043ec2d4f35c914f7c38e785853a/);
   assert.match(workflow, /pages\/projects\/prochelia\/deployments\?env=preview&per_page=100/);
   assert.match(workflow, /deployment_trigger\.metadata\.branch/);
   assert.match(workflow, /deployment_trigger\.metadata\.commit_hash/);
-  assert.match(workflow, /PAGES_DEPLOYMENT_ID=%s/);
-  assert.match(workflow, /PAGES_PREVIEW_URL=%s/);
   assert.match(workflow, /prochelia-api-preview/);
-  assert.doesNotMatch(workflow, /83a36d32|3846562300e97a1816b2aa7e317448449270c2bc|e69fde70fb28405aa8117eaf041aed618d3da664/);
+  assert.doesNotMatch(workflow, /api\.github\.com\/repos\/rzem92-png\/-prochelia\/branches/);
   assert.doesNotMatch(workflow, /PREVIEW_DB_ID: 04f52830-ef5a-4f17-a640-42bbc2381bba/);
 });
 
