@@ -1848,7 +1848,7 @@ function financeStrategicTravel({distanceKm=0,fuelMode='normal',fuelPriceCentsPe
   };
 }
 
-function financeStrategicQuote({basePriceCents=0,phaseFactor=1,urgency='normal',evening=false,night=false,saturday=false,sunday=false,holiday=false,lastMinute=false,distanceKm=0,fuelMode='normal',commissionRate=0.20,discountCents=0,regulatedMaxCents=null,intervenantFloorCents=0,pspPercent=0,pspFixedCents=0,softwareCostCents=0,targetMarginPercent=12}={}) {
+function financeStrategicQuote({basePriceCents=0,phaseFactor=1,urgency='normal',evening=false,night=false,saturday=false,sunday=false,holiday=false,lastMinute=false,distanceKm=0,fuelMode='normal',commissionRate=0.20,commissionFixedCents=0,discountCents=0,regulatedMaxCents=null,intervenantFloorCents=0,pspPercent=0,pspFixedCents=0,softwareCostCents=0,targetMarginPercent=12}={}) {
   let service=Math.max(0,Math.round((Number(basePriceCents)||0)*(Number(phaseFactor)||1)));
   const u=String(urgency||'normal').toLowerCase();
   service=Math.round(service*(FINANCE_STRATEGIC.multipliers.urgency[u] ?? 1));
@@ -1862,8 +1862,12 @@ function financeStrategicQuote({basePriceCents=0,phaseFactor=1,urgency='normal',
   if(regulatedMaxCents!=null)service=Math.min(service,Math.max(0,Math.round(Number(regulatedMaxCents)||0)));
   const travel=financeStrategicTravel({distanceKm,fuelMode});
   const rate=Math.max(0,Number(commissionRate)||0);
-  const commission=Math.round(service*rate);
+  const percentageCommission=Math.round(service*rate);
+  const fixedCommission=Math.max(0,Math.round(Number(commissionFixedCents)||0));
+  const commission=percentageCommission+fixedCommission;
   let clientPrice=service+travel.total_cost_cents;
+  // The configured ceiling applies to the final customer total, including travel.
+  if(regulatedMaxCents!=null) clientPrice=Math.min(clientPrice,Math.max(0,Math.round(Number(regulatedMaxCents)||0)));
   const intervenant=Math.max(0,Math.round(Number(intervenantFloorCents)||0));
   const psp=Math.round(clientPrice*(Math.max(0,Number(pspPercent)||0)/100))+Math.max(0,Math.round(Number(pspFixedCents)||0));
   const software=Math.max(0,Math.round(Number(softwareCostCents)||0));
@@ -1886,6 +1890,8 @@ function financeStrategicQuote({basePriceCents=0,phaseFactor=1,urgency='normal',
     client_price_cents:clientPrice,
     intervenant_amount_cents:intervenant,
     commission_cents:commission,
+    commission_percent_cents:percentageCommission,
+    commission_fixed_cents:fixedCommission,
     psp_cost_cents:Math.round(clientPrice*(Math.max(0,Number(pspPercent)||0)/100))+Math.max(0,Math.round(Number(pspFixedCents)||0)),
     software_cost_cents:software,
     estimated_margin_cents:margin,
@@ -1937,11 +1943,13 @@ async function pricingQuote(request, env) {
   const pspFixed=Number(policy.psp_fixed_cents||0);
   const targetMargin=Number(policy.target_margin_percent||0);
   const commissionRate=Number(policy.platform_fee_percent||0)/100;
+  const platformFeeFixed=Number(policy.platform_fee_fixed_cents||0);
   const intervenantFloor=Number(policy.intervenant_floor_cents||0);
   const regulatedMax=Number(policy.client_ceiling_cents)>0?Number(policy.client_ceiling_cents):null;
   if (!Number.isFinite(targetMargin) || targetMargin<=0 ||
       !Number.isFinite(intervenantFloor) || intervenantFloor<=0 ||
       !Number.isFinite(commissionRate) || commissionRate<0 ||
+      !Number.isFinite(platformFeeFixed) || platformFeeFixed<0 ||
       !Number.isFinite(pspPercent) || pspPercent<0 ||
       !Number.isFinite(pspFixed) || pspFixed<0 ||
       !Number.isFinite(software) || software<0) {
@@ -1953,7 +1961,7 @@ async function pricingQuote(request, env) {
     phaseFactor:cfg.pricingFactor,
     urgency:b.urgency||'normal',
     evening:Boolean(b.evening),night:Boolean(b.night),saturday:Boolean(b.saturday),sunday:Boolean(b.sunday),holiday:Boolean(b.holiday),lastMinute:Boolean(b.last_minute||b.lastMinute),
-    distanceKm:distance,fuelMode,fuelPriceCentsPerLitre,commissionRate,discountCents:0,regulatedMaxCents:regulatedMax,
+    distanceKm:distance,fuelMode,fuelPriceCentsPerLitre,commissionRate,commissionFixedCents:platformFeeFixed,discountCents:0,regulatedMaxCents:regulatedMax,
     intervenantFloorCents:intervenantFloor,pspPercent,pspFixedCents:pspFixed,softwareCostCents:software,targetMarginPercent:targetMargin
   });
   const legacyFuel=Math.max(0,Math.round(distance*fuelRateLegacy));
@@ -1968,7 +1976,7 @@ async function pricingQuote(request, env) {
     estimated_margin_cents:strategic.estimated_margin_cents,
     strategic_finance:strategic,
     financial_validation_status:paymentsConfigured(env)?'PSP_CONFIGURED_SANDBOX_VALIDATION_REQUIRED':'ESTIMATE_ONLY_PSP_NOT_CONFIGURED',
-    assumptions:{market_position:'strategic',fuel_included:true,fuel_mode:fuelMode,fuel_reference_price_cents_per_litre:fuelPriceCentsPerLitre,legacy_fuel_cost_per_km_cents:legacyFuel,software_included:true,target_margin_percent:targetMargin,commission_rate_percent:commissionRate*100,b2b_rule:'company_pays_intervenant_platform_bills_commission',single_finance_engine:true,discounts_excluded_until_server_authorized}
+    assumptions:{market_position:'strategic',fuel_included:true,fuel_mode:fuelMode,fuel_reference_price_cents_per_litre:fuelPriceCentsPerLitre,legacy_fuel_cost_per_km_cents:legacyFuel,software_included:true,target_margin_percent:targetMargin,commission_rate_percent:commissionRate*100,commission_fixed_cents:platformFeeFixed,b2b_rule:'company_pays_intervenant_platform_bills_commission',single_finance_engine:true,discounts_excluded_until_server_authorized}
   };
   await env.DB.prepare(`INSERT INTO pricing_quotes(id,phase,client_type,service_code,distance_km,duration_minutes,client_price_cents,intervenant_amount_cents,platform_commission_cents,psp_cost_cents,software_cost_cents,fuel_cost_cents,estimated_margin_cents,assumptions_json) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
     .bind(crypto.randomUUID(),phase,clientType,serviceCode,distance,duration,quote.client_price_cents,quote.intervenant_amount_cents,quote.platform_commission_cents,quote.psp_cost_cents,quote.software_cost_cents,quote.fuel_cost_cents,quote.estimated_margin_cents,JSON.stringify(quote.assumptions)).run();
