@@ -2854,6 +2854,14 @@ async function productionConfigCheck(env, { persist = false } = {}) {
     tenantScopeChecks.push({table,status:missing.length||unassigned?'INCOMPLETE':'OK',missing,unassigned});
   }
   checks.push({code:'FINANCIAL_TENANT_SCOPE',status:tenantScopeChecks.every(x=>x.status==='OK')?'OK':'INCOMPLETE',tables:tenantScopeChecks,missing:tenantScopeChecks.filter(x=>x.status!=='OK').map(x=>x.table)});
+  const auxiliaryTenantTables=['payment_audit','payment_webhook_events'];
+  const auxiliaryTenantChecks=[];
+  for(const table of auxiliaryTenantTables){
+    const cols=await tableColumns(env,table);
+    const missing=cols.includes('tenant_id')?[]:['tenant_id'];
+    auxiliaryTenantChecks.push({table,status:missing.length?'INCOMPLETE':'OK',missing});
+  }
+  checks.push({code:'FINANCIAL_AUXILIARY_TENANT_COLUMNS',status:auxiliaryTenantChecks.every(x=>x.status==='OK')?'OK':'INCOMPLETE',tables:auxiliaryTenantChecks,missing:auxiliaryTenantChecks.filter(x=>x.status!=='OK').map(x=>x.table)});
   if (persist) {
     await registerIntegration(env,'PSP','PAYMENT',['PAYMENT_PROVIDER','PAYMENT_WEBHOOK_SECRET'],['charge','refund','payout','webhook','reconciliation'],finalSecretConfigured(env,'PAYMENT_PROVIDER')&&finalSecretConfigured(env,'PAYMENT_WEBHOOK_SECRET')?'CONFIGURED':'NOT_CONFIGURED');
     await registerIntegration(env,'NOTIFICATIONS','MESSAGING',['NOTIFICATION_PROVIDER'],['email','sms','push'],finalSecretConfigured(env,'NOTIFICATION_PROVIDER')?'CONFIGURED':'NOT_CONFIGURED');
