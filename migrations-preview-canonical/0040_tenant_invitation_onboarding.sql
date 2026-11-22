@@ -105,3 +105,36 @@ BEFORE DELETE ON tenant_invitation_events
 BEGIN
   SELECT RAISE(ABORT, 'TENANT_INVITATION_EVENTS_APPEND_ONLY');
 END;
+
+
+-- Only an active tenant OWNER, ADMIN or MANAGER may issue invitations.
+-- The application must still authorize the actor on every request; this trigger
+-- is a database-level invariant against accidental or bypassed writes.
+CREATE TRIGGER IF NOT EXISTS trg_tenant_invitation_authorized_inviter
+BEFORE INSERT ON tenant_invitations
+WHEN NOT EXISTS (
+  SELECT 1
+  FROM tenant_memberships actor_membership
+  WHERE actor_membership.tenant_id = NEW.tenant_id
+    AND actor_membership.user_id = NEW.invited_by_user_id
+    AND actor_membership.role IN ('OWNER', 'ADMIN', 'MANAGER')
+    AND actor_membership.status = 'ACTIVE'
+)
+BEGIN
+  SELECT RAISE(ABORT, 'TENANT_INVITATION_ACTOR_NOT_AUTHORIZED');
+END;
+
+-- Human-attributed invitation events must be scoped to a user belonging to
+-- the same tenant. A NULL actor is reserved for trusted system expiry events.
+CREATE TRIGGER IF NOT EXISTS trg_tenant_invitation_event_actor_tenant
+BEFORE INSERT ON tenant_invitation_events
+WHEN NEW.actor_user_id IS NOT NULL
+ AND NOT EXISTS (
+   SELECT 1
+   FROM tenant_memberships actor_membership
+   WHERE actor_membership.tenant_id = NEW.tenant_id
+     AND actor_membership.user_id = NEW.actor_user_id
+ )
+BEGIN
+  SELECT RAISE(ABORT, 'TENANT_INVITATION_EVENT_ACTOR_TENANT_MISMATCH');
+END;
