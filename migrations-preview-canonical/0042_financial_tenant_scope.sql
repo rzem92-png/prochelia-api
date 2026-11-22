@@ -154,6 +154,28 @@ WHEN NEW.tenant_id IS NULL OR NOT EXISTS (
 )
 BEGIN SELECT RAISE(ABORT,'PAYMENT_WALLET_LEDGER_TENANT_MISMATCH'); END;
 
+-- Legacy ledger rows may be attributed once after an audited wallet match.
+-- All economic fields remain immutable; after tenant attribution, every UPDATE is rejected.
+DROP TRIGGER IF EXISTS trg_payment_wallet_ledger_no_update;
+CREATE TRIGGER trg_payment_wallet_ledger_no_update
+BEFORE UPDATE ON payment_wallet_ledger
+WHEN OLD.tenant_id IS NOT NULL
+  OR NEW.id IS NOT OLD.id
+  OR NEW.idempotency_key IS NOT OLD.idempotency_key
+  OR NEW.transaction_id IS NOT OLD.transaction_id
+  OR NEW.payout_id IS NOT OLD.payout_id
+  OR NEW.user_id IS NOT OLD.user_id
+  OR NEW.entry_type IS NOT OLD.entry_type
+  OR NEW.available_delta_cents IS NOT OLD.available_delta_cents
+  OR NEW.pending_delta_cents IS NOT OLD.pending_delta_cents
+  OR NEW.reserved_delta_cents IS NOT OLD.reserved_delta_cents
+  OR NEW.paid_delta_cents IS NOT OLD.paid_delta_cents
+  OR NEW.currency IS NOT OLD.currency
+  OR NEW.metadata_json IS NOT OLD.metadata_json
+  OR NEW.created_at IS NOT OLD.created_at
+  OR NEW.tenant_id IS NULL
+BEGIN SELECT RAISE(ABORT,'PAYMENT_WALLET_LEDGER_IMMUTABLE'); END;
+
 CREATE TRIGGER IF NOT EXISTS trg_payment_reconciliation_tenant_insert
 BEFORE INSERT ON payment_reconciliation
 WHEN NEW.tenant_id IS NULL OR (
