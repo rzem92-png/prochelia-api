@@ -1517,6 +1517,37 @@ async function handleBase(request, env) {
     });
   }
 
+  // Payment endpoints are explicitly routed, but money movement remains fail-closed
+  // until a reviewed PSP adapter and reconciled double-entry settlement are delivered.
+  if (url.pathname === '/api/payments/status') {
+    if (request.method !== 'GET') return json({ ok:false, error:'METHOD_NOT_ALLOWED', version:VERSION },405,{allow:'GET'});
+    return paymentStatus(request, env);
+  }
+  if (url.pathname === '/api/payments/onboard') {
+    if (request.method !== 'POST') return json({ ok:false, error:'METHOD_NOT_ALLOWED', version:VERSION },405,{allow:'POST'});
+    return paymentOnboard(request, env);
+  }
+  if (url.pathname === '/api/payments/mission/create') {
+    if (request.method !== 'POST') return json({ ok:false, error:'METHOD_NOT_ALLOWED', version:VERSION },405,{allow:'POST'});
+    return createMissionPayment(request, env);
+  }
+  if (url.pathname === '/api/payments/mission/finalize') {
+    if (request.method !== 'POST') return json({ ok:false, error:'METHOD_NOT_ALLOWED', version:VERSION },405,{allow:'POST'});
+    return finalizeMissionPayment(request, env);
+  }
+  if (url.pathname === '/api/payments/payout') {
+    if (request.method !== 'POST') return json({ ok:false, error:'METHOD_NOT_ALLOWED', version:VERSION },405,{allow:'POST'});
+    return payoutRequest(request, env);
+  }
+  if (url.pathname === '/api/payments/dispute') {
+    if (request.method !== 'POST') return json({ ok:false, error:'METHOD_NOT_ALLOWED', version:VERSION },405,{allow:'POST'});
+    return openPaymentDispute(request, env);
+  }
+  if (url.pathname === '/api/payments/dispute/resolve') {
+    if (request.method !== 'POST') return json({ ok:false, error:'METHOD_NOT_ALLOWED', version:VERSION },405,{allow:'POST'});
+    return paymentAdminResolve(request, env);
+  }
+
   if (url.pathname === '/api/info') {
     return json({
       ok: true,
