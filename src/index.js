@@ -1775,18 +1775,16 @@ async function processActionOutbox(request, env) {
   const rows=await env.DB.prepare(`SELECT * FROM action_outbox WHERE status='PENDING' ORDER BY created_at ASC LIMIT 50`).all();
   const processed=[];
   for(const row of (rows.results||[])) {
-    const payload=row.payload_json?JSON.parse(row.payload_json):{};
-    // Provider-dependent actions stay queued until the corresponding adapter/secret is configured.
-    const external = ['PSP_REFUND_REVIEW','NOTIFY_CLIENT','SEARCH_REPLACEMENT','RESCHEDULE_MISSION','ASSIGN_REPLACEMENT'].includes(String(row.action_type));
-    if(external) {
-      await env.DB.prepare(`UPDATE action_outbox SET status='WAITING_PROVIDER',last_error=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind('External adapter/provider required for final execution.',row.id).run();
-      processed.push({id:row.id,status:'WAITING_PROVIDER',action_type:row.action_type});
-      continue;
-    }
-    await env.DB.prepare(`UPDATE action_outbox SET status='COMPLETED',processed_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(row.id).run();
-    processed.push({id:row.id,status:'COMPLETED',action_type:row.action_type,payload});
+    // No action type is considered complete merely because it was read from the
+    // outbox. A dedicated executor must perform the side effect and a verifier
+    // must persist VERIFIED before this row can become COMPLETED.
+    const status='WAITING_IMPLEMENTATION';
+    const reason='NO_VERIFIED_EXECUTOR_REGISTERED';
+    await env.DB.prepare(`UPDATE action_outbox SET status=?,last_error=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='PENDING'`)
+      .bind(status,reason,row.id).run();
+    processed.push({id:row.id,status,action_type:row.action_type,reason});
   }
-  await journal(env,'gerante',gate.auth.user.id,'ACTION_OUTBOX_PROCESSED','system',null,'OK',{count:processed.length});
+  await journal(env,'gerante',gate.auth.user.id,'ACTION_OUTBOX_PROCESSED','system',null,'WAITING_IMPLEMENTATION',{count:processed.length});
   return json({ok:true,version:VERSION,processed},200);
 }
 
@@ -1797,13 +1795,18 @@ async function executeOperationalCase(env, caseId, approverId=null, automatic=fa
   const rec=c.proposed_solution_json?JSON.parse(c.proposed_solution_json):{};
   if(c.requires_manager && !automatic && !approverId) return {ok:false,error:'MANAGER_APPROVAL_REQUIRED'};
   const businessResults = await executeCaseBusinessAction(env,c,rec,approverId,automatic);
-  const resolution={executed:true,automatic,action:rec.action||'RESOLVE',steps:rec.solution?.steps||[],business_results:businessResults,executed_at:new Date().toISOString()};
-  await env.DB.prepare(`INSERT INTO case_actions(id,case_id,action_code,mode,status,payload_json,result_json,completed_at) VALUES(?,?,?,?,?,?,?,CURRENT_TIMESTAMP)`)
-    .bind(crypto.randomUUID(),caseId,rec.action||'RESOLVE',automatic?'AUTO':'MANAGER','COMPLETED',JSON.stringify(rec),JSON.stringify(resolution)).run();
-  await env.DB.prepare(`UPDATE operational_cases SET status='RESOLVED',resolution_json=?,requires_manager=0,updated_at=CURRENT_TIMESTAMP,resolved_at=CURRENT_TIMESTAMP WHERE id=?`).bind(JSON.stringify(resolution),caseId).run();
+  // Queue acceptance or a direct write is not independent proof of completion.
+  // Close only when every requested effect has an explicit VERIFIED result.
+  const verified = businessResults.length > 0 && businessResults.every(x => x?.status === 'VERIFIED');
+  const nextStatus = verified ? 'RESOLVED' : 'IN_PROGRESS';
+  const resolution={executed:verified,automatic,action:rec.action||'RESOLVE',steps:rec.solution?.steps||[],business_results:businessResults,verification_required:!verified,executed_at:new Date().toISOString()};
+  await env.DB.prepare(`INSERT INTO case_actions(id,case_id,action_code,mode,status,payload_json,result_json,completed_at) VALUES(?,?,?,?,?,?,?,?)`)
+    .bind(crypto.randomUUID(),caseId,rec.action||'RESOLVE',automatic?'AUTO':'MANAGER',verified?'VERIFIED':'PENDING',JSON.stringify(rec),JSON.stringify(resolution),verified?new Date().toISOString():null).run();
+  await env.DB.prepare(`UPDATE operational_cases SET status=?,resolution_json=?,requires_manager=CASE WHEN ?='RESOLVED' THEN 0 ELSE requires_manager END,updated_at=CURRENT_TIMESTAMP,resolved_at=? WHERE id=?`)
+    .bind(nextStatus,JSON.stringify(resolution),nextStatus,verified?new Date().toISOString():null,caseId).run();
   await env.DB.prepare(`UPDATE copilot_log SET approved_by=COALESCE(?,approved_by),result=? WHERE case_id=? AND id=(SELECT id FROM copilot_log WHERE case_id=? ORDER BY created_at DESC LIMIT 1)`).bind(approverId,JSON.stringify(resolution),caseId,caseId).run();
-  await journal(env,automatic?'copilot':'gerante',approverId,automatic?'AUTO_CASE_RESOLVED':'CASE_RESOLVED','operational_case',caseId,'OK',resolution);
-  return {ok:true,case_id:caseId,resolution};
+  await journal(env,automatic?'copilot':'gerante',approverId,verified?'CASE_RESOLVED':'CASE_ACTIONS_PENDING','operational_case',caseId,verified?'OK':'PENDING_VERIFICATION',resolution);
+  return {ok:true,case_id:caseId,status:nextStatus,resolution};
 }
 
 async function approveOperationalCase(request, env) {
