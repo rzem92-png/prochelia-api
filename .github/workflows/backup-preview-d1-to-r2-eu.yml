@@ -17,13 +17,18 @@ concurrency:
 
 jobs:
   backup-preview:
-    if: ${{ github.ref == 'refs/heads/main' && inputs.confirm_preview_backup == 'BACKUP_PREVIEW_TO_R2_EU' }}
+    if: >-
+      (
+        github.ref == 'refs/heads/main'
+      ) &&
+      inputs.confirm_preview_backup == 'BACKUP_PREVIEW_TO_R2_EU'
     runs-on: ubuntu-latest
     timeout-minutes: 25
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       BACKUP_ENCRYPTION_KEY: ${{ secrets.BACKUP_ENCRYPTION_KEY }}
+      BACKUP_ATTESTATION_HMAC_KEY: ${{ secrets.BACKUP_ATTESTATION_HMAC_KEY }}
       AWS_ACCESS_KEY_ID: ${{ secrets.R2_EU_ACCESS_KEY_ID }}
       AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_EU_SECRET_ACCESS_KEY }}
       AWS_DEFAULT_REGION: auto
@@ -32,6 +37,7 @@ jobs:
       EXPECTED_DB_ID: e3cf167c-37e1-4d72-9ac6-b3e27c14b97f
       FORBIDDEN_PRODUCTION_DB_ID: 04f52830-ef5a-4f17-a640-42bbc2381bba
       R2_BUCKET: prochelia-preview-backups-eu-v2
+      R2_EXPECTED_RETENTION_SECONDS: ${{ vars.R2_EXPECTED_RETENTION_SECONDS }}
       R2_ENDPOINT: https://f2a79e9fa41566a8ec80fb24c02c60eb.eu.r2.cloudflarestorage.com
     steps:
       - name: Enforce preview-only branch and exact workflow commit
@@ -40,13 +46,22 @@ jobs:
           set -euo pipefail
           case "$GITHUB_REF" in
             refs/heads/main) ;;
-            *) echo "::error::Preview backup dispatch is restricted to the reviewed main workflow."; exit 1 ;;
+            *) echo "::error::Preview backup dispatch is restricted to the main branch only."; exit 1 ;;
           esac
           test "$CLOUDFLARE_ACCOUNT_ID" = "$EXPECTED_ACCOUNT_ID"
           test "$EXPECTED_DB_ID" != "$FORBIDDEN_PRODUCTION_DB_ID"
-          for name in CLOUDFLARE_API_TOKEN BACKUP_ENCRYPTION_KEY AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY; do
+          for name in CLOUDFLARE_API_TOKEN BACKUP_ENCRYPTION_KEY BACKUP_ATTESTATION_HMAC_KEY AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY; do
             test -n "${!name:-}" || { echo "::error::Required secret missing: $name"; exit 1; }
           done
+          attestation_key_length="${#BACKUP_ATTESTATION_HMAC_KEY}"
+          if [[ "$attestation_key_length" -lt 32 ]]; then
+            echo "::error::BACKUP_ATTESTATION_HMAC_KEY must contain at least 32 UTF-8 bytes."
+            exit 1
+          fi
+          if [[ "$BACKUP_ATTESTATION_HMAC_KEY" == "$BACKUP_ENCRYPTION_KEY" ]]; then
+            echo "::error::Backup attestation and encryption keys must be distinct secrets."
+            exit 1
+          fi
           # R2 S3 Access Key IDs are 32 characters. Check shape early without ever printing secret values.
           access_key_length="${#AWS_ACCESS_KEY_ID}"
           if [[ "$access_key_length" -ne 32 ]]; then
@@ -58,6 +73,13 @@ jobs:
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           ref: 1fc258c9c8d25e5e7b89241504218bf102afbf27
+
+      - name: Checkout current workflow tooling for backup attestation
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ github.sha }}
+          path: .workflow-tools
+          persist-credentials: false
 
       - name: Setup Node.js
         uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
@@ -103,6 +125,42 @@ jobs:
           status="$(curl --silent --show-error --output "$RUNNER_TEMP/preview-r2-eu.json" --write-out '%{http_code}' "https://api.cloudflare.com/client/v4/accounts/$EXPECTED_ACCOUNT_ID/r2/buckets/$R2_BUCKET" -H "Authorization: Bearer $token" -H 'cf-r2-jurisdiction: eu')"
           test "$status" = "200" || { echo "::error::EU R2 bucket lookup failed (HTTP $status); no export performed."; exit 1; }
           jq -e --arg bucket "$R2_BUCKET" '.success == true and .result.name == $bucket and .result.jurisdiction == "eu"' "$RUNNER_TEMP/preview-r2-eu.json" >/dev/null || { echo "::error::R2 bucket jurisdiction is not explicitly EU."; exit 1; }
+          prefix="preview-d1/${EXPECTED_DB_NAME}/"
+          status="$(curl --silent --show-error --output "$RUNNER_TEMP/r2-lock-rules.json" --write-out '%{http_code}' "https://api.cloudflare.com/client/v4/accounts/$EXPECTED_ACCOUNT_ID/r2/buckets/$R2_BUCKET/lock" -H "Authorization: Bearer $token" -H 'cf-r2-jurisdiction: eu')"
+          test "$status" = "200" || { echo "::error::EU R2 bucket lock rules lookup failed (HTTP $status); refusing backup upload."; exit 1; }
+          jq -e --arg prefix "$prefix" '
+            .success == true and
+            (.result.rules | type == "array") and
+            any(.result.rules[]?;
+              .enabled == true and
+              .prefix == $prefix and
+              .condition.type == "Age" and
+              (.condition.maxAgeSeconds | type == "number" and . > 0)
+            )
+          ' "$RUNNER_TEMP/r2-lock-rules.json" >/dev/null || {
+            echo "::error::No enabled EU R2 lock rule with a positive age was found for the exact Preview backup prefix; refusing backup upload."
+            exit 1
+          }
+          actual_retention="$(jq -r --arg prefix "$prefix" '[.result.rules[]? | select(.enabled == true and .prefix == $prefix and .condition.type == "Age" and (.condition.maxAgeSeconds | type == "number" and . > 0)) | .condition.maxAgeSeconds] | max // empty' "$RUNNER_TEMP/r2-lock-rules.json")"
+          expected_retention="${R2_EXPECTED_RETENTION_SECONDS:-}"
+          if ! [[ "$expected_retention" =~ ^[1-9][0-9]*$ ]]; then
+            echo "::error::Set repository variable R2_EXPECTED_RETENTION_SECONDS to the retention duration approved by the data-retention owner; verified EU lock age is ${actual_retention} seconds; refusing backup upload."
+            exit 1
+          fi
+          jq -e --arg prefix "$prefix" --argjson retention "$expected_retention" '
+            .success == true and
+            any(.result.rules[]?;
+              .enabled == true and
+              .prefix == $prefix and
+              .condition.type == "Age" and
+              (.condition.maxAgeSeconds | type == "number") and
+              (.condition.maxAgeSeconds >= $retention)
+            )
+          ' "$RUNNER_TEMP/r2-lock-rules.json" >/dev/null || {
+            echo "::error::No enabled EU R2 lock rule matches the exact Preview backup prefix and approved retention duration."
+            exit 1
+          }
+          echo "PASS: exact Preview backup prefix has an enabled R2 retention rule meeting the approved duration."
           status="$(curl --silent --show-error --output "$RUNNER_TEMP/preview-d1-eu.json" --write-out '%{http_code}' "https://api.cloudflare.com/client/v4/accounts/$EXPECTED_ACCOUNT_ID/d1/database/$EXPECTED_DB_ID" -H "Authorization: Bearer $token")"
           test "$status" = "200" || { echo "::error::Preview D1 metadata lookup failed (HTTP $status); no export performed."; exit 1; }
           jq -e --arg id "$EXPECTED_DB_ID" --arg name "$EXPECTED_DB_NAME" '.success == true and .result.uuid == $id and .result.name == $name and .result.jurisdiction == "eu"' "$RUNNER_TEMP/preview-d1-eu.json" >/dev/null || { echo "::error::Preview D1 is not the exact EU database."; exit 1; }
@@ -141,6 +199,52 @@ jobs:
           cp "$RUNNER_TEMP/prochelia-r2/plain.sha256" "$RUNNER_TEMP/prochelia-r2/manifest.sha256"
           rm -f "$RUNNER_TEMP/prochelia-r2/preview.sql"
 
+      - name: Prepare signed Preview backup attestation
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          key="preview-d1/${EXPECTED_DB_NAME}/$(date -u +%Y/%m/%d)/${GITHUB_RUN_ID}-${GITHUB_SHA:0:12}.sql.gpg"
+          plain_sha="$(cat "$RUNNER_TEMP/prochelia-r2/plain.sha256")"
+          cipher_sha="$(sha256sum "$RUNNER_TEMP/prochelia-r2/preview.sql.gpg" | awk '{print $1}')"
+          printf 'R2_OBJECT_KEY=%s\n' "$key" >> "$GITHUB_ENV"
+          R2_OBJECT_KEY="$key" PLAIN_SHA256="$plain_sha" CIPHER_SHA256="$cipher_sha" node --input-type=module <<'NODE'
+          import fs from "node:fs";
+          const manifest = {
+            schema_version: 1,
+            attestation_type: "prochelia.preview-d1-backup",
+            created_at: new Date().toISOString(),
+            source: {
+              account_id: process.env.EXPECTED_ACCOUNT_ID,
+              database_id: process.env.EXPECTED_DB_ID,
+              database_name: process.env.EXPECTED_DB_NAME,
+              jurisdiction: "eu"
+            },
+            object: {
+              bucket: process.env.R2_BUCKET,
+              key: process.env.R2_OBJECT_KEY,
+              sha256_manifest_key: process.env.R2_OBJECT_KEY + ".sha256",
+              plaintext_sha256: process.env.PLAIN_SHA256,
+              ciphertext_sha256: process.env.CIPHER_SHA256
+            },
+            provenance: {
+              repository: process.env.GITHUB_REPOSITORY,
+              workflow: process.env.GITHUB_WORKFLOW,
+              run_id: process.env.GITHUB_RUN_ID,
+              commit_sha: process.env.GITHUB_SHA,
+              ref: process.env.GITHUB_REF,
+              migration_source_sha: "1fc258c9c8d25e5e7b89241504218bf102afbf27"
+            },
+            validation: {
+              encryption: "OpenPGP-AES256",
+              sqlite_integrity_check: "ok",
+              foreign_key_check: "empty"
+            }
+          };
+          fs.writeFileSync(process.env.RUNNER_TEMP + "/prochelia-r2/attestation.json", JSON.stringify(manifest, null, 2) + "\n", { mode: 0o600 });
+          NODE
+          node .workflow-tools/scripts/r2-backup-attestation.mjs sign "$RUNNER_TEMP/prochelia-r2/attestation.json" "$RUNNER_TEMP/prochelia-r2/attestation.hmac"
+
       - name: Install AWS CLI for S3-compatible Cloudflare R2
         shell: bash
         run: |
@@ -148,32 +252,66 @@ jobs:
           python3 -m pip install --user --break-system-packages awscli
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
-      - name: Upload encrypted backup to private R2 EU bucket
+      - name: Upload encrypted backup and signed attestation to private R2 EU bucket
         shell: bash
         run: |
           set -euo pipefail
           export PATH="$HOME/.local/bin:$PATH"
-          key="preview-d1/${EXPECTED_DB_NAME}/$(date -u +%Y/%m/%d)/${GITHUB_RUN_ID}-${GITHUB_SHA:0:12}.sql.gpg"
-          echo "R2_OBJECT_KEY=$key" >> "$GITHUB_ENV"
+          key="$R2_OBJECT_KEY"
+          test -n "$key"
+          aws s3api list-objects-v2 --bucket "$R2_BUCKET" --prefix "$key" --max-keys 10 --endpoint-url "$R2_ENDPOINT" --region auto --output json > "$RUNNER_TEMP/prochelia-r2/existing-objects.json"
+          jq -e --arg key "$key" '[.Contents[]?.Key | select(. == $key or . == ($key + ".sha256") or . == ($key + ".attestation.json") or . == ($key + ".attestation.hmac"))] | length == 0' "$RUNNER_TEMP/prochelia-r2/existing-objects.json" >/dev/null || {
+            echo "::error::R2 backup object key already exists; refusing to overwrite an earlier attestation."
+            exit 1
+          }
           aws s3 cp "$RUNNER_TEMP/prochelia-r2/preview.sql.gpg" "s3://$R2_BUCKET/$key" --endpoint-url "$R2_ENDPOINT" --region auto --only-show-errors
           aws s3 cp "$RUNNER_TEMP/prochelia-r2/manifest.sha256" "s3://$R2_BUCKET/$key.sha256" --endpoint-url "$R2_ENDPOINT" --region auto --only-show-errors
+          aws s3 cp "$RUNNER_TEMP/prochelia-r2/attestation.json" "s3://$R2_BUCKET/$key.attestation.json" --endpoint-url "$R2_ENDPOINT" --region auto --only-show-errors
+          aws s3 cp "$RUNNER_TEMP/prochelia-r2/attestation.hmac" "s3://$R2_BUCKET/$key.attestation.hmac" --endpoint-url "$R2_ENDPOINT" --region auto --only-show-errors
           echo "R2_OBJECT_KEY=$key" >> "$GITHUB_OUTPUT"
         id: upload
 
-      - name: Download backup and verify encryption/checksum
+      - name: Download backup and verify HMAC attestation, encryption and checksum
         shell: bash
         run: |
           set -euo pipefail
           key="$R2_OBJECT_KEY"
           aws s3 cp "s3://$R2_BUCKET/$key" "$RUNNER_TEMP/prochelia-r2/roundtrip.sql.gpg" --endpoint-url "$R2_ENDPOINT" --region auto --only-show-errors
           aws s3 cp "s3://$R2_BUCKET/$key.sha256" "$RUNNER_TEMP/prochelia-r2/roundtrip.manifest.sha256" --endpoint-url "$R2_ENDPOINT" --region auto --only-show-errors
+          aws s3 cp "s3://$R2_BUCKET/$key.attestation.json" "$RUNNER_TEMP/prochelia-r2/roundtrip.attestation.json" --endpoint-url "$R2_ENDPOINT" --region auto --only-show-errors
+          aws s3 cp "s3://$R2_BUCKET/$key.attestation.hmac" "$RUNNER_TEMP/prochelia-r2/roundtrip.attestation.hmac" --endpoint-url "$R2_ENDPOINT" --region auto --only-show-errors
           cmp "$RUNNER_TEMP/prochelia-r2/manifest.sha256" "$RUNNER_TEMP/prochelia-r2/roundtrip.manifest.sha256"
           cmp "$RUNNER_TEMP/prochelia-r2/preview.sql.gpg" "$RUNNER_TEMP/prochelia-r2/roundtrip.sql.gpg"
+          cmp "$RUNNER_TEMP/prochelia-r2/attestation.json" "$RUNNER_TEMP/prochelia-r2/roundtrip.attestation.json"
+          cmp "$RUNNER_TEMP/prochelia-r2/attestation.hmac" "$RUNNER_TEMP/prochelia-r2/roundtrip.attestation.hmac"
+          node .workflow-tools/scripts/r2-backup-attestation.mjs verify "$RUNNER_TEMP/prochelia-r2/roundtrip.attestation.json" "$RUNNER_TEMP/prochelia-r2/roundtrip.attestation.hmac"
+          jq -e --arg key "$key" --arg bucket "$R2_BUCKET" --arg db "$EXPECTED_DB_ID" --arg name "$EXPECTED_DB_NAME" --arg account "$EXPECTED_ACCOUNT_ID" '
+            .schema_version == 1 and
+            .attestation_type == "prochelia.preview-d1-backup" and
+            .source.account_id == $account and
+            .source.database_id == $db and
+            .source.database_name == $name and
+            .source.jurisdiction == "eu" and
+            .object.bucket == $bucket and
+            .object.key == $key and
+            .object.sha256_manifest_key == ($key + ".sha256") and
+            .provenance.repository == "rzem92-png/prochelia-api" and
+            .provenance.ref == "refs/heads/main" and
+            (.provenance.migration_source_sha | test("^[0-9a-f]{40}$")) and
+            .validation.sqlite_integrity_check == "ok" and
+            .validation.foreign_key_check == "empty" and
+            .validation.encryption == "OpenPGP-AES256" and
+            (.provenance.commit_sha | test("^[0-9a-f]{40}$"))
+          ' "$RUNNER_TEMP/prochelia-r2/roundtrip.attestation.json" >/dev/null
+          cipher_actual="$(sha256sum "$RUNNER_TEMP/prochelia-r2/roundtrip.sql.gpg" | awk '{print $1}')"
+          cipher_expected="$(jq -r '.object.ciphertext_sha256' "$RUNNER_TEMP/prochelia-r2/roundtrip.attestation.json")"
+          test "$cipher_actual" = "$cipher_expected"
           printf '%s' "$BACKUP_ENCRYPTION_KEY" | gpg --batch --yes --pinentry-mode loopback --passphrase-fd 0 --decrypt "$RUNNER_TEMP/prochelia-r2/roundtrip.sql.gpg" > "$RUNNER_TEMP/prochelia-r2/roundtrip.sql"
           actual="$(sha256sum "$RUNNER_TEMP/prochelia-r2/roundtrip.sql" | awk '{print $1}')"
           expected="$(cat "$RUNNER_TEMP/prochelia-r2/manifest.sha256")"
-          test "$actual" = "$expected" || {
-            echo "::error::Decrypted SQL checksum does not match the pre-encryption manifest."
+          attested_plain="$(jq -r '.object.plaintext_sha256' "$RUNNER_TEMP/prochelia-r2/roundtrip.attestation.json")"
+          test "$actual" = "$expected" && test "$actual" = "$attested_plain" || {
+            echo "::error::Decrypted SQL checksum does not match the HMAC-attested manifest."
             exit 1
           }
           sqlite3 "$RUNNER_TEMP/prochelia-r2/roundtrip-validation.sqlite" < "$RUNNER_TEMP/prochelia-r2/roundtrip.sql"
@@ -181,4 +319,14 @@ jobs:
           test "$roundtrip_integrity" = "ok" || { echo "::error::Downloaded backup restore integrity_check failed: $roundtrip_integrity"; exit 1; }
           roundtrip_foreign_keys="$(sqlite3 "$RUNNER_TEMP/prochelia-r2/roundtrip-validation.sqlite" 'PRAGMA foreign_key_check;')"
           test -z "$roundtrip_foreign_keys" || { echo "::error::Downloaded backup restore foreign_key_check found violations."; exit 1; }
-          echo "PASS: private R2 upload/download, decryption, checksum, integrity_check and foreign_key_check verified."
+          echo "PASS: R2 round-trip, HMAC attestation, ciphertext/plaintext checksums, decryption, integrity_check and foreign_key_check verified."
+
+      - name: Record non-secret backup attestation evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            printf 'Preview R2 object: %s\n' "$R2_OBJECT_KEY"
+            printf 'HMAC attestation objects: %s.attestation.json and .attestation.hmac\n' "$R2_OBJECT_KEY"
+            printf 'Attestation manifest SHA-256: %s\n' "$(sha256sum "$RUNNER_TEMP/prochelia-r2/attestation.json" | awk '{print $1}')"
+          } >> "$GITHUB_STEP_SUMMARY"
