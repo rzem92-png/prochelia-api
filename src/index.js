@@ -4139,9 +4139,9 @@ export default {
    PROCHÉLIA — CONSOLIDATION NATIONALE / SAUVEGARDES / SCALABILITÉ
    - aucune limite métier artificielle sur Clients / Intervenants / Sociétés
    - pagination et traitement par lots
-   - sauvegardes logiques chiffrées vers R2 si le binding est configuré
-   - déclenchement manuel + automatique par Cron
-   - journal des sauvegardes
+   - sauvegarde chiffrée exclusivement par le workflow EU signé et attesté
+   - Worker sans exécution de sauvegarde ni Cron de sauvegarde
+   - statuts en lecture seule, sans fausse déclaration de disponibilité
    ============================================================================ */
 /* ============================================================================
    PROCHÉLIA — CONTINUITY STATUS
@@ -4156,8 +4156,8 @@ async function nationalScaleStatus(env){
     ? await env.DB.prepare(`SELECT key,value_json FROM platform_scale_config ORDER BY key`).all()
     : {results:[]};
   const encryptionConfigured=typeof env.BACKUP_ENCRYPTION_KEY==='string'&&env.BACKUP_ENCRYPTION_KEY.trim().length>0;
-  const backupConfigured=!!env.BACKUP_BUCKET&&typeof env.BACKUP_BUCKET.put==='function'&&encryptionConfigured;
-  return {ok:true,mode:'NATIONAL_SCALE',artificialUserCap:false,unlimitedInBusinessRules:true,database:'D1',documents:'R2_RECOMMENDED',backups:{provider:'R2',configured:backupConfigured,automatic:false,scheduleStatus:'NOT_ATTESTED',encryptionConfigured,encrypted:false,retentionDays:null,retentionStatus:'UNVERIFIED'},pagination:{cursorRecommended:true,maxPageSize:100},tables:tableNames,config:(c.results||[])};
+  const bucketBindingPresent=!!env.BACKUP_BUCKET&&typeof env.BACKUP_BUCKET.put==='function';
+  return {ok:true,mode:'NATIONAL_SCALE',artificialUserCap:false,unlimitedInBusinessRules:true,database:'D1',documents:'R2_RECOMMENDED',backups:{provider:'R2',bindingPresent:bucketBindingPresent,configured:false,verificationStatus:'UNVERIFIED',automatic:false,scheduleStatus:'NOT_ATTESTED',encryptionConfigured,encrypted:false,retentionDays:null,retentionStatus:'UNVERIFIED'},pagination:{cursorRecommended:true,maxPageSize:100},tables:tableNames,config:(c.results||[])};
 }
 async function backupStatus(env){
   if(!env?.DB?.prepare) throw new Error('DATABASE_REQUIRED');
@@ -4167,8 +4167,8 @@ async function backupStatus(env){
     ? await env.DB.prepare(`SELECT * FROM backup_runs ORDER BY started_at DESC LIMIT 20`).all()
     : {results:[]};
   const encryptionConfigured=typeof env.BACKUP_ENCRYPTION_KEY==='string'&&env.BACKUP_ENCRYPTION_KEY.trim().length>0;
-  const configured=!!env.BACKUP_BUCKET&&typeof env.BACKUP_BUCKET.put==='function'&&encryptionConfigured;
-  return {ok:true,schemaReady,configured,encryptionConfigured,automatic:false,frequency:null,scheduleStatus:'NOT_ATTESTED',retentionDays:null,retentionStatus:'UNVERIFIED',runs:r.results||[]};
+  const bindingPresent=!!env.BACKUP_BUCKET&&typeof env.BACKUP_BUCKET.put==='function';
+  return {ok:true,schemaReady,bindingPresent,configured:false,verificationStatus:'UNVERIFIED',encryptionConfigured,automatic:false,frequency:null,scheduleStatus:'NOT_ATTESTED',retentionDays:null,retentionStatus:'UNVERIFIED',runs:r.results||[]};
 }
 
 const __procheliaNationalHandle = handle;
