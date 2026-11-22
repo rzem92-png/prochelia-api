@@ -10,6 +10,20 @@ test("Preview migration is manually gated on main only", () => {
   assert.match(workflow, /inputs\.confirm_preview == 'APPLY_PREVIEW_ONLY'/);
   assert.match(workflow, /EXPECTED_DB_ID:\s*e3cf167c-37e1-4d72-9ac6-b3e27c14b97f/);
 });
+test("Preview migration requires a successful isolated restore and subsequent integrity proof on the exact main revision", () => {
+  const restoreGate = workflow.indexOf("Require successful isolated restore and read-only integrity proof");
+  const exportStep = workflow.indexOf("Export only Preview D1 before migration");
+  const applyStep = workflow.indexOf("Apply migrations to Preview D1 only");
+  assert.ok(restoreGate >= 0 && exportStep > restoreGate && applyStep > exportStep);
+  assert.match(workflow, /restore_run_id:[\s\S]*required: true/);
+  assert.match(workflow, /restore_verification_run_id:[\s\S]*required: true/);
+  assert.match(workflow, /actions: read/);
+  assert.match(workflow, /\.github\/workflows\/restore-preview-d1-test-v2\.yml/);
+  assert.match(workflow, /\.github\/workflows\/verify-restore-v2-integrity\.yml/);
+  assert.match(workflow, /\.head_sha == \$sha/);
+  assert.match(workflow, /verify_epoch > restore_epoch/);
+});
+
 test("Preview migration workflow pins the dedicated Preview database and forbids production", () => {
   assert.match(workflow, /EXPECTED_DB_NAME:\s*prochelia-preview-eu-2026-11-17/);
   assert.match(workflow, /EXPECTED_DB_ID:\s*e3cf167c-37e1-4d72-9ac6-b3e27c14b97f/);
