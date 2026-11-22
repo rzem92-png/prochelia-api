@@ -408,6 +408,12 @@ jobs:
               "0032_privacy_safe_cross_tenant_mission_marketplace.sql",
               "0033_intervenant_availability_overlap_guard.sql",
               "0034_timezone_safe_availability_overlap.sql",
+              "0035_validate_availability_intervals.sql",
+              "0036_intervenant_availability_idempotency.sql",
+              "0037_support_cases_tenant_isolation.sql",
+              "0038_identity_verification_tenant_scope.sql",
+              "0039_cryptographic_device_enrollment.sql",
+              "0040_accounting_active_state_at_posting.sql",
           ])
           actual_tables=sorted(row["name"] for row in objects if row["type"] == "table")
           expected_tables=sorted([
@@ -416,6 +422,9 @@ jobs:
               "mission_security",
               "mission_security_attempts",
               "security_audit",
+              "trusted_device_credentials",
+              "device_auth_challenges",
+              "support_cases",
               "auth_login_rate_limits",
               "supra_audit_events",
               "supra_approval_requests",
@@ -443,6 +452,10 @@ jobs:
           ])
           expected_indexes=sorted([
               "idx_identity_verifications_user",
+              "idx_identity_verifications_tenant_user_status",
+              "idx_trusted_device_credentials_tenant_user_status",
+              "idx_device_auth_challenges_session_expiry",
+              "idx_device_auth_challenges_pending",
               "idx_mission_security_intervenant",
               "idx_security_attempts_security",
               "idx_security_audit_mission",
@@ -454,6 +467,8 @@ jobs:
               "idx_supra_approval_requests_tenant_resource",
               "idx_supra_approval_votes_request",
               "idx_supra_approval_events_request",
+              "idx_support_cases_tenant_status_created",
+              "idx_support_cases_tenant_requester_created",
           ])
           if (actual_migrations != expected_migrations or
               actual_tables != expected_tables or
@@ -467,7 +482,7 @@ jobs:
               print("Triggers:", actual_triggers)
               print("SUPRA append-only guards:", actual_supra_guards)
               raise SystemExit(1)
-          print("PASS: seven migrations, all ten security tables, all eleven indexes, eight existing approval/audit triggers and four SUPRA tenant/append-only guards are present on Preview D1.")
+          print("PASS: all 15 explicitly queried migrations, 13 security tables, 17 indexes, eight approval/audit triggers and four SUPRA tenant/append-only guards are present on Preview D1.")
           PY
           npx --yes wrangler@4 d1 migrations list "$EXPECTED_DB_NAME" --remote --config wrangler.preview-migrations.jsonc
           echo "PASS: identity, rate-limit and Nexus audit/approval migrations 0016/0020/0021/0022/0029/0030 schemas and triggers are present on Preview D1."
