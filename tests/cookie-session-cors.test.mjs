@@ -37,6 +37,20 @@ test('CORS rejects an untrusted origin before routing', async () => {
   assert.equal((await response.json()).error, 'ORIGIN_NOT_ALLOWED');
 });
 
+test('cookie-authenticated mutations without Origin are rejected', async () => {
+  const response = await worker.fetch(new Request('https://api.example.test/api/auth/logout', {
+    method: 'POST',
+    headers: {
+      Cookie: 'prochelia_session=test-session',
+      'Content-Type': 'application/json'
+    },
+    body: '{}'
+  }), env);
+
+  assert.equal(response.status, 403);
+  assert.equal((await response.json()).error, 'ORIGIN_REQUIRED');
+});
+
 test('mutating requests from an untrusted origin are rejected', async () => {
   const response = await worker.fetch(new Request('https://api.example.test/api/auth/logout', {
     method: 'POST',
