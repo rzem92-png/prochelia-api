@@ -186,7 +186,27 @@ jobs:
             echo "::error::The configured R2 bucket is not confirmed in EU jurisdiction; refusing D1 export and migration."
             exit 1
           }
-          echo "PASS: R2 bucket identity and EU jurisdiction confirmed before D1 export."
+          prefix="preview-d1/${EXPECTED_DB_NAME}/"
+          lock_status="$(curl --silent --show-error --output "$RUNNER_TEMP/r2-lock-rules.json" --write-out '%{http_code}' "https://api.cloudflare.com/client/v4/accounts/$EXPECTED_ACCOUNT_ID/r2/buckets/$R2_BUCKET/lock" -H "Authorization: Bearer $token" -H 'cf-r2-jurisdiction: eu')"
+          test "$lock_status" = "200" || {
+            echo "::error::R2 lock rules lookup failed (HTTP $lock_status); refusing backup upload and migration."
+            exit 1
+          }
+          jq -e --arg prefix "$prefix" --argjson retention "$R2_EXPECTED_RETENTION_SECONDS" '
+            .success == true and
+            (.result.rules | type == "array") and
+            any(.result.rules[]?;
+              .enabled == true and
+              .prefix == $prefix and
+              .condition.type == "Age" and
+              (.condition.maxAgeSeconds | type == "number") and
+              (.condition.maxAgeSeconds >= $retention)
+            )
+          ' "$RUNNER_TEMP/r2-lock-rules.json" >/dev/null || {
+            echo "::error::No enabled R2 lock rule for the exact Preview prefix meets the approved retention duration."
+            exit 1
+          }
+          echo "PASS: exact R2 bucket is EU and its lock rule meets the approved Preview retention duration."
       - name: Verify Preview D1 identity and EU jurisdiction before export
         shell: bash
         run: |
