@@ -4,6 +4,8 @@ on:
   pull_request:
     paths:
       - "src/index.js"
+      - "src/accounting-api.js"
+      - "tests/accounting-api.test.mjs"
       - "src/device-trust.js"
       - "tests/device-trust-enrollment.test.mjs"
       - "wrangler.jsonc"
@@ -62,3 +64,4 @@ jobs:
           tests/device-trust-enrollment.test.mjs
           tests/background-jobs-scheduler.test.mjs
           tests/nexus-supra-action-execution-safety.test.mjs
+          tests/accounting-api.test.mjs

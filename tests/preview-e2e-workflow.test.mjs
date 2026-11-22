@@ -4,11 +4,12 @@ import { readFile } from "node:fs/promises";
 
 const workflow = await readFile(new URL("../.github/workflows/preview-directory-e2e-acceptance.yml", import.meta.url), "utf8");
 
-test("Preview E2E is limited to the audited API candidate push or explicit manual confirmation", () => {
+test("Preview E2E is limited to the audited API candidate or accounting integration branch and explicit manual confirmation", () => {
   assert.match(workflow, /workflow_dispatch:/);
   assert.match(workflow, /RUN_PREVIEW_DIRECTORY_E2E/);
   assert.match(workflow, /github\.event_name == 'push'/);
   assert.match(workflow, /github\.ref == 'refs\/heads\/feat\/supra-canonical-tenant-integration-2026-11-20'/);
+  assert.match(workflow, /github\.ref == 'refs\/heads\/fix\/tenant-accounting-api-readonly-gate-2026-11-22'/);
   assert.match(workflow, /github\.event_name == 'workflow_dispatch'/);
   assert.match(workflow, /github\.ref == 'refs\/heads\/main'/);
 });
@@ -17,7 +18,9 @@ test("Preview E2E pins the current private frontend branch and exact Pages commi
   assert.match(workflow, /PREVIEW_DB_ID: e3cf167c-37e1-4d72-9ac6-b3e27c14b97f/);
   assert.match(workflow, /FRONTEND_BRANCH: feat\/intervenant-secure-pages-integration-2026-11-20/);
   assert.match(workflow, /FRONTEND_COMMIT_SHA: \$\{\{ inputs\.frontend_commit_sha/);
-  assert.match(workflow, /f7a1a2015083043ec2d4f35c914f7c38e785853a/);
+  assert.match(workflow, /a916165be5fd3f431115e0a2e9d6ce67163c889d/);
+  assert.match(workflow, /FRONTEND_COMMIT_SHA: \$\{\{ inputs\.frontend_commit_sha \|\| 'a916165be5fd3f431115e0a2e9d6ce67163c889d'/);
+  assert.match(workflow, /FRONTEND_COMMIT_SHA: \\$\\{\\{ inputs\\.frontend_commit_sha \\|\\| 'a916165be5fd3f431115e0a2e9d6ce67163c889d'/);
   assert.match(workflow, /pages\/projects\/prochelia\/deployments\?env=preview&per_page=10/);
   assert.match(workflow, /deployment_trigger\.metadata\.branch/);
   assert.match(workflow, /deployment_trigger\.metadata\.commit_hash/);
