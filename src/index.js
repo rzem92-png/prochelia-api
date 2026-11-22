@@ -1042,7 +1042,7 @@ export async function verifyWebhookSignature(request, env, rawBody) {
   const stripeHeader = request.headers.get('stripe-signature');
   if (stripeHeader !== null) {
     const secret = env?.STRIPE_WEBHOOK_SECRET;
-    if (typeof secret !== 'string' || !secret) return false;
+    if (typeof secret !== 'string' || secret.length < 32 || typeof rawBody !== 'string') return false;
     const fields = stripeHeader.split(',').map(part => {
       const item = part.trim();
       const separator = item.indexOf('=');
@@ -1070,7 +1070,7 @@ export async function verifyWebhookSignature(request, env, rawBody) {
   }
 
   const secret = env?.PAYMENT_WEBHOOK_SECRET;
-  if (typeof secret !== 'string' || !secret) return false;
+  if (typeof secret !== 'string' || secret.length < 32 || typeof rawBody !== 'string') return false;
   const signature = request.headers.get('x-prochelia-signature') || request.headers.get('x-webhook-signature') || '';
   const supplied = signature.startsWith('sha256=') ? signature.slice(7) : signature;
   if (!/^[A-Za-z0-9_-]{43}$/.test(supplied)) return false;
