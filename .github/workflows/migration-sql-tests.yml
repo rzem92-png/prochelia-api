@@ -9,9 +9,12 @@ on:
       - "tests/test_preview_canonical_migrations.py"
       - "scripts/prepare-d1-restore.py"
       - "tests/test_prepare_d1_restore.py"
+      - "tests/test_preview_backup_workflow_guards.py"
+      - ".github/workflows/apply-preview-d1-migrations.yml"
       - ".github/workflows/preview-directory-e2e-acceptance.yml"
       - ".github/workflows/restore-production-backup-isolated-test.yml"
       - ".github/workflows/migration-sql-tests.yml"
+      - ".github/workflows/apply-preview-d1-migrations.yml"
   push:
     branches: [main]
     paths:
@@ -32,10 +35,11 @@ jobs:
           go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
           "$HOME/go/bin/actionlint" .github/workflows/restore-production-backup-isolated-test.yml
           "$HOME/go/bin/actionlint" .github/workflows/preview-directory-e2e-acceptance.yml
-          "$HOME/go/bin/actionlint" .github/workflows/restore-production-backup-isolated-test.yml
+          "$HOME/go/bin/actionlint" .github/workflows/apply-preview-d1-migrations.yml
       - name: Validate migration SQL and payment ledger invariants in isolated SQLite
         run: |
           python3 tests/test_migrations_sqlite.py
           python3 tests/test_preview_canonical_migrations.py
           python3 tests/test_availability_interval_validation.py
           python3 tests/test_prepare_d1_restore.py
+          python3 tests/test_preview_backup_workflow_guards.py
