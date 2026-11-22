@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { SUPRA_ACTION_POLICIES, evaluateSupraActionPolicy } from "../src/supra-action-policy.mjs";
 
 const source = readFileSync(new URL("../src/index.js", import.meta.url), "utf8");
 const executorStart = source.indexOf("async function executeQueuedAction(");
@@ -95,4 +96,57 @@ test("scheduled automation is explicit and does not expose scheduler privilege t
   assert.match(source, /scheduler\s*\?\s*\{auth:\{user:\{id:'cloudflare-cron',role:'GERANTE'\}\}\}\s*:\s*await requireAuthRole/);
   assert.match(source, /event\?\.cron === '\*\/1 \* \* \* \*'/);
   assert.match(source, /event\?\.cron === '0 3 \* \* \*' \|\| event\?\.cron === '0 3 \* \* 0'/);
+});
+
+test("NEXUS SUPRA action policy denies unknown actions and missing execution controls", () => {
+  assert.equal(evaluateSupraActionPolicy({ actionType: "UNKNOWN" }).allowed, false);
+  const missing = evaluateSupraActionPolicy({
+    actionType: "NOTIFY", role: "GERANTE", jurisdiction: "FR", autonomyLevel: "A3"
+  });
+  assert.equal(missing.allowed, false);
+  assert.ok(missing.reasons.includes("TENANT_SCOPE_REQUIRED"));
+  assert.ok(missing.reasons.includes("IDEMPOTENCY_KEY_REQUIRED"));
+});
+
+test("NEXUS SUPRA only permits notification enqueue with tenant scope and idempotency", () => {
+  const result = evaluateSupraActionPolicy({
+    actionType: "NOTIFY", role: "GERANTE", jurisdiction: "FR",
+    autonomyLevel: "A3", tenantScoped: true, idempotencyKey: "notify-123"
+  });
+  assert.equal(result.allowed, true);
+  assert.equal(result.executor, "ENQUEUE_ONLY");
+  assert.equal(result.verification, "PROVIDER_DELIVERY_RECEIPT");
+});
+
+test("financial actions require human approval and remain blocked without verified executors", () => {
+  for (const actionType of ["REFUND", "PAYOUT", "ACCOUNTING_ENTRY"]) {
+    const result = evaluateSupraActionPolicy({
+      actionType, role: "GERANTE", jurisdiction: "FR", autonomyLevel: "A4",
+      tenantScoped: true, idempotencyKey: "finance-123", hasApproval: true
+    });
+    assert.equal(result.allowed, false);
+    assert.ok(result.reasons.includes("VERIFIED_EXECUTOR_NOT_IMPLEMENTED"));
+    assert.equal(result.approvalRequired, true);
+  }
+});
+
+test("production releases, production migrations, sanctions and deletion are never autonomous", () => {
+  for (const actionType of ["PRODUCTION_RELEASE", "PRODUCTION_MIGRATION", "ACCOUNT_SANCTION", "ACCOUNT_DELETE"]) {
+    const result = evaluateSupraActionPolicy({
+      actionType, role: "GERANTE", jurisdiction: "GLOBAL", autonomyLevel: "A5",
+      tenantScoped: true, idempotencyKey: "protected-123", hasApproval: true
+    });
+    assert.equal(result.allowed, false);
+    assert.ok(result.reasons.includes("ACTION_PROHIBITED_FROM_AUTONOMOUS_EXECUTION"));
+  }
+});
+
+test("all registered policies declare risk, executor, verification, tenant and idempotency contracts", () => {
+  for (const [name, policy] of Object.entries(SUPRA_ACTION_POLICIES)) {
+    assert.ok(policy.risk, name);
+    assert.ok(policy.executor, name);
+    assert.ok(policy.verification, name);
+    assert.equal(policy.tenantScopeRequired, true, name);
+    assert.equal(policy.idempotencyRequired, true, name);
+  }
 });
