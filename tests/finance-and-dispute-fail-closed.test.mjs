@@ -54,6 +54,7 @@ test("finance workspace refuses legacy unscoped tables and derives every read fr
   const auth = source.slice(authStart, authEnd);
   assert.match(auth, /resolveTenantContext\\(request,env,auth\\)/);
   assert.match(auth, /FINANCE_WORKSPACE_TENANT_SCOPE_REQUIRED/);
+  assert.match(auth, /ACTIVE_TENANT_REQUIRED/);
   assert.match(auth, /return \\{ auth, tenantId:tenantContext\\.tenant\\.id \\}/);
 
   const rowsStart = source.indexOf("async function financeRowsForUser(env, user, tenantId) {");
