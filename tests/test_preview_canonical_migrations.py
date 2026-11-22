@@ -1058,6 +1058,7 @@ assert financial_tenant_triggers <= triggers, (
 # Runtime routes and the production readiness gate must use the same tenant boundary.
 source = (ROOT / "src" / "index.js").read_text(encoding="utf-8")
 assert "code:'FINANCIAL_TENANT_SCOPE'" in source
+assert "code:'FINANCIAL_AUXILIARY_TENANT_COLUMNS'" in source
 assert "tenant_id=? AND status IN ('requested','processing')" in source
 assert "WHERE mission_id=? AND tenant_id=?" in source
 assert "payment_wallet_ledger','payment_reconciliation" in source
