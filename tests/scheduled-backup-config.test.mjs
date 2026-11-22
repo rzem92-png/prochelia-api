@@ -46,4 +46,10 @@ test("backup and scale status endpoints remain read-only and fail honestly", () 
   assert.match(backupStatus, /configured:false/);
   assert.match(backupStatus, /verificationStatus:'UNVERIFIED'/);
   assert.match(backupStatus, /schemaReady/);
+  const readinessStart = worker.indexOf("async function strictProductionAudit");
+  const readinessEnd = worker.indexOf("const __procheliaProductionSafetyHandle", readinessStart);
+  assert.ok(readinessStart >= 0 && readinessEnd > readinessStart, "production readiness audit must remain inspectable");
+  const readiness = worker.slice(readinessStart, readinessEnd);
+  assert.match(readiness, /code:'BACKUP_R2',status:'NOT_VERIFIED'/);
+  assert.doesNotMatch(readiness, /code:'BACKUP_R2',status:env\.BACKUP_BUCKET/);
 });
