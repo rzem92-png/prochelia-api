@@ -60,7 +60,8 @@ test("Preview migration workflow validates the full canonical migration chain", 
     "0037_support_cases_tenant_isolation.sql",
     "0038_identity_verification_tenant_scope.sql",
     "0039_cryptographic_device_enrollment.sql",
-    "0040_accounting_active_state_at_posting.sql"
+    "0040_accounting_active_state_at_posting.sql",
+    "0041_tenant_invitation_onboarding.sql"
   ];
   for (const migration of expected) assert.ok(workflow.includes(`"${migration}"`), `missing canonical migration ${migration}`);
 });
@@ -90,6 +91,10 @@ test("Preview post-migration verification checks identity, mission-security and 
     "0039_cryptographic_device_enrollment.sql",
     "0040_accounting_active_state_at_posting.sql",
     "trg_accounting_journal_post_active_scope",
+    "tenant_invitations", "tenant_invitation_events",
+    "idx_tenant_invitations_one_pending_email", "idx_tenant_invitations_expiry", "idx_tenant_invitations_membership", "idx_tenant_invitation_events_tenant_time",
+    "trg_tenant_invitation_requires_pending_member", "trg_tenant_invitation_initial_pending", "trg_tenant_invitation_identity_immutable", "trg_tenant_invitation_terminal",
+    "trg_tenant_invitation_events_no_update", "trg_tenant_invitation_events_no_delete", "trg_tenant_invitation_authorized_inviter", "trg_tenant_invitation_event_actor_tenant", "trg_tenant_invitation_email_matches_member",
     "trusted_device_credentials", "device_auth_challenges",
     "idx_trusted_device_credentials_tenant_user_status",
     "idx_device_auth_challenges_session_expiry", "idx_device_auth_challenges_pending",
@@ -125,13 +130,13 @@ test("Preview post-migration verification checks identity, mission-security and 
   ]) assert.ok(workflow.includes(name), `missing post-migration verification for ${name}`);
 });
 
-test("Preview migration workflow accepts only an empty EU D1, the exact 23-entry reviewed baseline or the exact 41-entry target", () => {
+test("Preview migration workflow accepts only an empty EU D1, the exact 23-entry reviewed baseline or the exact 42-entry target", () => {
   assert.match(workflow, /SELECT type, name FROM sqlite_master ORDER BY type, name/);
   assert.match(workflow, /registry_present/);
   assert.match(workflow, /non_internal/);
-  assert.match(workflow, /len\(local\) != 41/);
+  assert.match(workflow, /len\(local\) != 42/);
   assert.match(workflow, /remote == base/);
-  assert.match(workflow, /differs from the exact reviewed 23-entry baseline and 41-entry target/);
+  assert.match(workflow, /differs from the exact reviewed 23-entry baseline and 42-entry target/);
   assert.doesNotMatch(workflow, /legacy=/);
   assert.doesNotMatch(workflow, /baseline=\(local-pending\)\|legacy/);
 });
@@ -241,7 +246,13 @@ test("all canonical migrations required by the remote apply gate physically exis
     "0026_accounting_currency_consistency.sql",
     "0027_tenant_membership_identity_immutable.sql",
     "0028_tenant_accounting_entity_delete_guard.sql",
-    "0029_supra_append_only_audit_guards.sql"
+    "0029_supra_append_only_audit_guards.sql",
+    "0030_supra_audit_tenant_scope.sql", "0031_operational_marketplace_tenant_scope.sql",
+    "0032_privacy_safe_cross_tenant_mission_marketplace.sql", "0033_intervenant_availability_overlap_guard.sql",
+    "0034_timezone_safe_availability_overlap.sql", "0035_validate_availability_intervals.sql",
+    "0036_intervenant_availability_idempotency.sql", "0037_support_cases_tenant_isolation.sql",
+    "0038_identity_verification_tenant_scope.sql", "0039_cryptographic_device_enrollment.sql",
+    "0040_accounting_active_state_at_posting.sql", "0041_tenant_invitation_onboarding.sql"
   ];
   const actual = new Set(await readdir(new URL("../migrations-preview-canonical/", import.meta.url)));
   const missing = expected.filter(name => !actual.has(name));
