@@ -36,3 +36,23 @@ test("pricing inputs are bounded and the quote is marked as estimate-only withou
   assert.match(handler, /ESTIMATE_ONLY_PSP_NOT_CONFIGURED/);
   assert.doesNotMatch(handler, /b\.psp_percent|b\.psp_fixed_cents|b\.target_margin_percent|b\.platform_fee_percent|b\.discount_cents/);
 });
+
+test("fixed platform commission is loaded from the server policy and included in the quote", () => {
+  assert.match(handler, /Number\(policy\.platform_fee_fixed_cents\|\|0\)/);
+  assert.match(handler, /commissionFixedCents:platformFeeFixed/);
+  assert.match(handler, /commission_fixed_cents:platformFeeFixed/);
+  const quoteStart = source.indexOf("function financeStrategicQuote(");
+  const quoteEnd = source.indexOf("\nasync function pricingQuote", quoteStart);
+  const quoteEngine = source.slice(quoteStart, quoteEnd);
+  assert.match(quoteEngine, /percentageCommission=Math\.round\(service\*rate\)/);
+  assert.match(quoteEngine, /fixedCommission=Math\.max\(0,Math\.round\(Number\(commissionFixedCents\)\|\|0\)\)/);
+  assert.match(quoteEngine, /commission_percent_cents:percentageCommission/);
+  assert.match(quoteEngine, /commission_fixed_cents:fixedCommission/);
+});
+
+test("regulated customer ceiling caps the final price including travel", () => {
+  const quoteStart = source.indexOf("function financeStrategicQuote(");
+  const quoteEnd = source.indexOf("\nasync function pricingQuote", quoteStart);
+  const quoteEngine = source.slice(quoteStart, quoteEnd);
+  assert.match(quoteEngine, /let clientPrice=service\+travel\.total_cost_cents;[\s\S]*?clientPrice=Math\.min\(clientPrice,Math\.max\(0,Math\.round\(Number\(regulatedMaxCents\)\|\|0\)\)\)/);
+});
