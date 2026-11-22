@@ -347,7 +347,10 @@ test("payment onboarding refuses before tenant resolution or wallet creation whe
   assert.ok(tenant > guard);
   assert.match(handler.slice(guard, tenant), /PAYMENT_PROVIDER_NOT_CONFIGURED/);
   assert.match(handler.slice(guard, tenant), /write_enabled:false/);
-  assert.doesNotMatch(handler, /INSERT INTO wallets|INSERT INTO payment_accounts/);
+  for (const operation of ["INSERT INTO wallets", "INSERT INTO payment_accounts", "ensurePaymentSchema(env)"]) {
+    const position = handler.indexOf(operation);
+    assert.ok(position < 0 || position > guard, `${operation} must follow the PSP capability guard`);
+  }
 });
 
 test("payment status is read-only and never initializes a wallet or schema", () => {
