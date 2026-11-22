@@ -913,6 +913,8 @@ invitation_indexes = {
 assert invitation_indexes <= indexes, f"Missing invitation indexes: {sorted(invitation_indexes-indexes)}"
 invitation_triggers = {
     "trg_tenant_invitation_requires_pending_member",
+    "trg_tenant_invitation_authorized_inviter",
+    "trg_tenant_invitation_event_actor_tenant",
     "trg_tenant_invitation_initial_pending",
     "trg_tenant_invitation_identity_immutable",
     "trg_tenant_invitation_terminal",
@@ -925,6 +927,9 @@ assert invitation_triggers <= {row[0] for row in db.execute("SELECT name FROM sq
 
 db.execute("INSERT INTO users(id, role, email, first_name, last_name, password_hash) VALUES ('invite-admin', 'gerante', 'invite-admin@example.test', 'Invite', 'Admin', 'synthetic')")
 db.execute("INSERT INTO tenants(id, slug, display_name) VALUES ('invite-tenant', 'invite-tenant', 'Invite Tenant')")
+db.execute("INSERT INTO tenant_memberships(id, tenant_id, user_id, role, status, invited_by_user_id, accepted_at) VALUES ('invite-owner', 'invite-tenant', 'invite-admin', 'OWNER', 'ACTIVE', 'invite-admin', CURRENT_TIMESTAMP)")
+db.execute("INSERT INTO users(id, role, email, first_name, last_name, password_hash) VALUES ('invite-ordinary', 'client', 'ordinary@example.test', 'Ordinary', 'Member', 'synthetic')")
+db.execute("INSERT INTO tenant_memberships(id, tenant_id, user_id, role, status, invited_by_user_id, accepted_at) VALUES ('invite-ordinary-membership', 'invite-tenant', 'invite-ordinary', 'MEMBER', 'ACTIVE', 'invite-admin', CURRENT_TIMESTAMP)")
 db.execute("INSERT INTO tenant_memberships(id, tenant_id, user_id, role, status, invited_by_user_id) VALUES ('invite-member', 'invite-tenant', 'user-a', 'MEMBER', 'INVITED', 'invite-admin')")
 db.execute("""
     INSERT INTO tenant_invitations(
@@ -940,6 +945,33 @@ db.execute("""
     INSERT INTO tenant_invitation_events(id, invitation_id, tenant_id, actor_user_id, event_type, reason_code)
     VALUES ('invite-event-a', 'invite-a', 'invite-tenant', 'invite-admin', 'CREATED', 'INVITATION_CREATED')
 """)
+
+# Invitation authority is enforced at the database boundary as well as in API code.
+db.execute("INSERT INTO tenant_memberships(id, tenant_id, user_id, role, status, invited_by_user_id) VALUES ('invite-member-unauthorized', 'invite-tenant', 'user-b', 'MEMBER', 'INVITED', 'invite-admin')")
+try:
+    db.execute("""
+        INSERT INTO tenant_invitations(
+          id, tenant_id, membership_id, email_normalized, token_sha256,
+          idempotency_key, invited_by_user_id, expires_at
+        ) VALUES (
+          'invite-unauthorized-actor', 'invite-tenant', 'invite-member-unauthorized',
+          'user-b@example.test',
+          'dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd',
+          'invite-unauthorized-key', 'invite-ordinary', '2026-12-01T00:00:00Z'
+        )
+    """)
+    raise AssertionError("An active MEMBER was allowed to issue a tenant invitation")
+except sqlite3.IntegrityError as exc:
+    assert "TENANT_INVITATION_ACTOR_NOT_AUTHORIZED" in str(exc), str(exc)
+
+try:
+    db.execute("""
+        INSERT INTO tenant_invitation_events(id, invitation_id, tenant_id, actor_user_id, event_type, reason_code)
+        VALUES ('invite-event-cross-tenant', 'invite-a', 'invite-tenant', 'user-b', 'RESENT', 'CROSS_TENANT_ACTOR')
+    """)
+    raise AssertionError("Cross-tenant invitation event actor was accepted")
+except sqlite3.IntegrityError as exc:
+    assert "TENANT_INVITATION_EVENT_ACTOR_TENANT_MISMATCH" in str(exc), str(exc)
 
 for status, accepted_at, revoked_at, email, token, key in [
     ("ACCEPTED", "CURRENT_TIMESTAMP", "NULL", "accepted-at-create@example.test", "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "invite-initial-accepted-0001"),
