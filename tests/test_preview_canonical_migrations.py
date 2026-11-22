@@ -46,6 +46,8 @@ EXPECTED = [
     "0039_cryptographic_device_enrollment.sql",
     "0040_accounting_active_state_at_posting.sql",
     "0041_tenant_invitation_onboarding.sql",
+    "0042_financial_tenant_scope.sql",
+    "0043_finance_workspace_tenant_scope.sql",
 ]
 
 # Keep the manual Preview migration gate synchronized with the canonical chain.
@@ -57,16 +59,16 @@ assert '"0029_supra_append_only_audit_guards.sql"' in workflow_text, (
 assert '"0030_supra_audit_tenant_scope.sql"' in workflow_text, (
     "Preview migration workflow omits tenant-scoped SUPRA audit migration 0030"
 )
-assert "if len(local) != 42:" in workflow_text, (
-    "Preview migration workflow must require exactly 39 canonical migrations"
+assert "if len(local) != 44:" in workflow_text, (
+    "Preview migration workflow must require exactly 44 canonical migrations"
 )
-assert "exact 42-entry registry" in workflow_text, (
+assert "exact 44-entry registry" in workflow_text, (
     "Preview migration workflow target registry count is stale"
 )
-assert "all 42 canonical migrations are pending" in workflow_text, (
+assert "all 44 canonical migrations are pending" in workflow_text, (
     "Preview migration workflow empty-database inventory message is stale"
 )
-assert "only migrations 0023-0041 are pending" in workflow_text, (
+assert "only migrations 0023-0043 are pending" in workflow_text, (
     "Preview migration workflow baseline-to-target range is stale"
 )
 assert '"0038_identity_verification_tenant_scope.sql"' in workflow_text, (
@@ -1020,3 +1022,245 @@ for table in ["mission_opportunity_consents", "mission_opportunities", "mission_
     except sqlite3.IntegrityError:
         pass
 print("PASS: privacy-safe cross-tenant marketplace consent, publication, eligibility, atomic acceptance, one-provider assignment, cancellation and append-only history.")
+
+
+# Financial runtime schema must be tenant-bound before any PSP activation.
+financial_tenant_tables = {
+    "payment_accounts", "payment_transactions", "payout_requests",
+    "payment_disputes", "payment_wallet_ledger", "payment_reconciliation",
+    "payment_audit", "payment_webhook_events", "wallets",
+}
+for table in financial_tenant_tables:
+    columns = {row[1] for row in db.execute(f"PRAGMA table_info({table})")}
+    assert "tenant_id" in columns, f"{table} missing tenant_id"
+financial_tenant_triggers = {
+    "trg_payment_account_tenant_insert",
+    "trg_payment_transaction_tenant_insert",
+    "trg_payout_request_tenant_insert",
+    "trg_payment_dispute_tenant_insert",
+    "trg_wallet_ledger_tenant_insert",
+    "trg_payment_reconciliation_tenant_insert",
+    "trg_payment_reconciliation_tenant_update",
+    "trg_payment_account_tenant_immutable",
+    "trg_payment_transaction_identity_immutable",
+    "trg_payout_request_identity_immutable",
+    "trg_payment_dispute_identity_immutable",
+    "trg_payment_reconciliation_identity_immutable",
+    "trg_payment_webhook_tenant_immutable",
+    "trg_payment_audit_no_update",
+    "trg_payment_audit_no_delete",
+}
+triggers = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='trigger'")}
+assert financial_tenant_triggers <= triggers, (
+    f"Missing financial tenant guards: {sorted(financial_tenant_triggers-triggers)}"
+)
+
+
+# Runtime routes and the production readiness gate must use the same tenant boundary.
+source = (ROOT / "src" / "index.js").read_text(encoding="utf-8")
+assert "code:'FINANCIAL_TENANT_SCOPE'" in source
+assert "code:'FINANCIAL_AUXILIARY_TENANT_COLUMNS'" in source
+assert "tenant_id=? AND status IN ('requested','processing')" in source
+assert "WHERE mission_id=? AND tenant_id=?" in source
+assert "payment_wallet_ledger','payment_reconciliation" in source
+
+
+# Two-tenant financial isolation: valid tenant-A links work; forged tenant-B links fail.
+db.execute("""
+    INSERT INTO users(id, role, email, first_name, last_name, password_hash)
+    VALUES ('finance-user-a', 'intervenant', 'finance-a@example.test', 'Finance', 'A', 'synthetic-test-hash')
+""")
+for tenant_id, suffix in [("tenant-a", "a"), ("tenant-b", "b")]:
+    membership_id = f"finance-membership-{suffix}"
+    db.execute("""
+        INSERT INTO tenant_memberships(id,tenant_id,user_id,role,status,invited_by_user_id)
+        VALUES (?,?,'finance-user-a','MEMBER','INVITED','user-admin')
+    """, (membership_id, tenant_id))
+    db.execute("""
+        UPDATE tenant_memberships
+           SET status='ACTIVE', accepted_at=CURRENT_TIMESTAMP
+         WHERE id=?
+    """, (membership_id,))
+
+# The marketplace fixture uses its own tenant identifier; grant the synthetic finance user
+# a real membership there so the transaction-to-mission relation is valid.
+db.execute("""
+    INSERT INTO tenant_memberships(id,tenant_id,user_id,role,status,invited_by_user_id)
+    VALUES ('finance-membership-market-a','market-tenant-a','finance-user-a','MEMBER','INVITED','user-admin')
+""")
+db.execute("""
+    UPDATE tenant_memberships SET status='ACTIVE',accepted_at=CURRENT_TIMESTAMP
+     WHERE id='finance-membership-market-a'
+""")
+
+db.execute("""
+    INSERT INTO wallets(id,user_id,tenant_id,currency)
+    VALUES ('finance-wallet-a','finance-user-a','market-tenant-a','EUR')
+""")
+db.execute("""
+    INSERT INTO payment_accounts(id,user_id,provider,tenant_id)
+    VALUES ('finance-account-a','finance-user-a','sandbox','market-tenant-a')
+""")
+db.execute("""
+    INSERT INTO payment_transactions(
+      id,idempotency_key,mission_id,client_id,intervenant_id,type,status,
+      gross_cents,commission_cents,net_intervenant_cents,currency,tenant_id
+    ) VALUES (
+      'finance-tx-a','finance-idem-a','market-mission-opportunity','market-client-a-row',
+      NULL,'MISSION_CHARGE','paid',10000,1000,9000,'EUR','market-tenant-a'
+    )
+""")
+db.execute("""
+    INSERT INTO payout_requests(
+      id,idempotency_key,wallet_id,user_id,amount_cents,tenant_id
+    ) VALUES ('finance-payout-a','finance-payout-idem-a','finance-wallet-a','finance-user-a',2500,'market-tenant-a')
+""")
+db.execute("""
+    INSERT INTO payment_disputes(
+      id,mission_id,transaction_id,client_id,intervenant_id,reason,amount_cents,tenant_id
+    ) VALUES (
+      'finance-dispute-a','market-mission-opportunity','finance-tx-a','market-client-a-row',
+      NULL,'synthetic test dispute',1000,'market-tenant-a'
+    )
+""")
+db.execute("""
+    INSERT INTO payment_wallet_ledger(
+      id,idempotency_key,user_id,entry_type,currency,tenant_id
+    ) VALUES ('finance-ledger-a','finance-ledger-idem-a','finance-user-a','TEST_NOOP','EUR','market-tenant-a')
+""")
+db.execute("""
+    INSERT INTO payment_reconciliation(
+      id,provider,external_id,internal_transaction_id,tenant_id
+    ) VALUES ('finance-recon-a','sandbox','external-a','finance-tx-a','market-tenant-a')
+""")
+assert db.execute("SELECT available_cents FROM wallets WHERE id='finance-wallet-a'").fetchone()[0] == 0
+
+cross_tenant_financial_writes = [
+    """INSERT INTO payment_transactions(
+         id,idempotency_key,mission_id,client_id,type,status,tenant_id
+       ) VALUES ('finance-tx-cross','finance-idem-cross','market-mission-opportunity',
+         'market-client-a-row','MISSION_CHARGE','pending','tenant-b')""",
+    """INSERT INTO payout_requests(
+         id,idempotency_key,wallet_id,user_id,amount_cents,tenant_id
+       ) VALUES ('finance-payout-cross','finance-payout-idem-cross',
+         'finance-wallet-a','finance-user-a',1000,'tenant-b')""",
+    """INSERT INTO payment_disputes(
+         id,mission_id,transaction_id,client_id,reason,amount_cents,tenant_id
+       ) VALUES ('finance-dispute-cross','market-mission-opportunity','finance-tx-a',
+         'market-client-a-row','cross tenant',1000,'tenant-b')""",
+    """INSERT INTO payment_wallet_ledger(
+         id,idempotency_key,user_id,entry_type,currency,tenant_id
+       ) VALUES ('finance-ledger-cross','finance-ledger-idem-cross',
+         'finance-user-a','TEST_NOOP','EUR','tenant-b')""",
+    """INSERT INTO payment_reconciliation(
+         id,provider,external_id,internal_transaction_id,tenant_id
+       ) VALUES ('finance-recon-cross','sandbox','external-cross','finance-tx-a','tenant-b')""",
+]
+for sql in cross_tenant_financial_writes:
+    try:
+        db.execute(sql)
+        raise AssertionError(f"Cross-tenant financial write was incorrectly accepted: {sql}")
+    except sqlite3.IntegrityError:
+        pass
+
+# A user with active memberships in both tenants still cannot move an existing PSP account.
+try:
+    db.execute("UPDATE payment_accounts SET tenant_id='tenant-b' WHERE id='finance-account-a'")
+    raise AssertionError("Financial account tenant reassignment was incorrectly accepted")
+except sqlite3.IntegrityError as exc:
+    assert "PAYMENT_ACCOUNT_TENANT_IMMUTABLE" in str(exc), str(exc)
+
+# Financial audit is append-only.
+db.execute("""
+    INSERT INTO payment_audit(id,event_type,user_id,result,tenant_id)
+    VALUES ('finance-audit-a','FINANCE_TEST','finance-user-a','OK','tenant-a')
+""")
+for sql in [
+    "UPDATE payment_audit SET result='TAMPERED' WHERE id='finance-audit-a'",
+    "DELETE FROM payment_audit WHERE id='finance-audit-a'",
+]:
+    try:
+        db.execute(sql)
+        raise AssertionError("Financial audit history was mutable")
+    except sqlite3.IntegrityError as exc:
+        assert "PAYMENT_AUDIT_APPEND_ONLY" in str(exc), str(exc)
+
+print("PASS: financial tenant isolation, wallet/mission linkage, cross-tenant write rejection, immutable attribution and append-only audit.")
+
+
+# Finance workspace tables are tenant-bound and cannot be used as a cross-company ledger.
+finance_workspace_tables = {
+    "finance_workspace_entries", "finance_export_log", "finance_resolution_cases",
+}
+for table in finance_workspace_tables:
+    columns = {row[1] for row in db.execute(f"PRAGMA table_info({table})")}
+    assert "tenant_id" in columns, f"{table} missing tenant_id"
+finance_workspace_triggers = {
+    "trg_finance_workspace_entry_tenant_insert",
+    "trg_finance_workspace_entry_tenant_update",
+    "trg_finance_workspace_entry_no_update",
+    "trg_finance_workspace_entry_no_delete",
+    "trg_finance_export_tenant_insert",
+    "trg_finance_export_tenant_update",
+    "trg_finance_export_no_update",
+    "trg_finance_export_no_delete",
+    "trg_finance_resolution_tenant_insert",
+    "trg_finance_resolution_tenant_update",
+    "trg_finance_resolution_identity_immutable",
+    "trg_finance_resolution_no_delete",
+}
+triggers = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='trigger'")}
+assert finance_workspace_triggers <= triggers, (
+    f"Missing finance workspace tenant guards: {sorted(finance_workspace_triggers-triggers)}"
+)
+
+db.execute("""
+    INSERT INTO finance_workspace_entries(
+      id,user_id,role,entry_type,direction,amount_cents,currency,tenant_id
+    ) VALUES ('finance-entry-a','finance-user-a','intervenant','ADJUSTMENT','IN',1200,'EUR','tenant-a')
+""")
+db.execute("""
+    INSERT INTO finance_export_log(
+      id,user_id,role,format,row_count,tenant_id
+    ) VALUES ('finance-export-a','finance-user-a','intervenant','csv',1,'tenant-a')
+""")
+db.execute("""
+    INSERT INTO finance_resolution_cases(
+      id,user_id,role,issue_type,status,severity,description,tenant_id
+    ) VALUES ('finance-case-a','finance-user-a','intervenant','UNKNOWN','OPEN','LOW','synthetic test','tenant-a')
+""")
+for sql in [
+    "UPDATE finance_workspace_entries SET amount_cents=9999 WHERE id='finance-entry-a'",
+    "DELETE FROM finance_workspace_entries WHERE id='finance-entry-a'",
+    "UPDATE finance_export_log SET row_count=999 WHERE id='finance-export-a'",
+    "DELETE FROM finance_export_log WHERE id='finance-export-a'",
+]:
+    try:
+        db.execute(sql)
+        raise AssertionError("Finance ledger/export history was mutable")
+    except sqlite3.IntegrityError:
+        pass
+try:
+    db.execute("UPDATE finance_resolution_cases SET tenant_id='tenant-b' WHERE id='finance-case-a'")
+    raise AssertionError("Finance resolution case tenant reassignment was accepted")
+except sqlite3.IntegrityError as exc:
+    assert "FINANCE_CASE_IDENTITY_IMMUTABLE" in str(exc), str(exc)
+db.execute("UPDATE finance_resolution_cases SET status='RESOLVED',resolved_at=CURRENT_TIMESTAMP WHERE id='finance-case-a'")
+try:
+    db.execute("DELETE FROM finance_resolution_cases WHERE id='finance-case-a'")
+    raise AssertionError("Finance resolution case history was deletable")
+except sqlite3.IntegrityError:
+    pass
+
+# The API's finance read model must bind every domain query to the server-derived tenant.
+assert "FINANCE_WORKSPACE_TENANT_SCOPE_REQUIRED" in source
+assert "WHERE tenant_id=? ORDER BY created_at DESC LIMIT 5000" in source
+assert "WHERE tenant_id=? AND user_id=? ORDER BY created_at DESC LIMIT 5000" in source
+assert "intervenants WHERE user_id=? AND tenant_id=?" in source
+assert "clients WHERE user_id=? AND tenant_id=?" in source
+assert "WHERE id=? AND tenant_id=? LIMIT 1" in source
+print("PASS: finance dashboard/export/ledger/cases are tenant-scoped, legacy unassigned rows fail closed, ledger/export append-only and resolution identity immutable.")
+
+assert "finance_workspace_entries','finance_export_log','finance_resolution_cases" in source
+assert "FINANCIAL_TENANT_SCOPE" in source
+assert "FINANCIAL_AUXILIARY_TENANT_COLUMNS" in source

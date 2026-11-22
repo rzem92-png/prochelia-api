@@ -36,3 +36,34 @@ test("finance summary GET does not run the legacy consolidated schema initialize
   assert.ok(consolidatedPathLine);
   assert.doesNotMatch(consolidatedPathLine, /\/api\/finance\/summary/);
 });
+
+
+test("finance workspace refuses legacy unscoped tables and derives every read from the active tenant", () => {
+  const schemaStart = source.indexOf("async function ensureFinanceWorkspaceSchema(env) {");
+  const schemaEnd = source.indexOf("function financeRoleAllowed", schemaStart);
+  assert.ok(schemaStart >= 0 && schemaEnd > schemaStart);
+  const schema = source.slice(schemaStart, schemaEnd);
+  assert.ok(schema.includes("finance_workspace_entries: ['id','user_id','tenant_id'"));
+  assert.ok(schema.includes("finance_export_log: ['id','user_id','tenant_id'"));
+  assert.ok(schema.includes("finance_resolution_cases: ['id','user_id','tenant_id'"));
+  assert.ok(schema.includes("tenant_id IS NULL"));
+  assert.doesNotMatch(schema, /CREATE TABLE|CREATE INDEX/);
+
+  const authStart = source.indexOf("async function financeAuth(request, env) {");
+  const authEnd = source.indexOf("function financeMoney", authStart);
+  const auth = source.slice(authStart, authEnd);
+  assert.ok(auth.includes("resolveTenantContext(request,env,auth)"));
+  assert.ok(auth.includes("FINANCE_WORKSPACE_TENANT_SCOPE_REQUIRED"));
+  assert.ok(auth.includes("ACTIVE_TENANT_REQUIRED"));
+  assert.ok(auth.includes("return { auth, tenantId:tenantContext.tenant.id }"));
+
+  const rowsStart = source.indexOf("async function financeRowsForUser(env, user, tenantId) {");
+  const rowsEnd = source.indexOf("function financeSummaryFromRows", rowsStart);
+  const rows = source.slice(rowsStart, rowsEnd);
+  assert.ok(rows.includes("let where = 'tenant_id=?'"));
+  assert.ok(rows.includes("intervenants WHERE user_id=? AND tenant_id=?"));
+  assert.ok(rows.includes("clients WHERE user_id=? AND tenant_id=?"));
+  assert.ok(rows.includes("FROM finance_workspace_entries WHERE tenant_id=?"));
+  assert.ok(rows.includes("FROM payout_requests WHERE tenant_id=?"));
+  assert.ok(rows.includes("const manager = ['GERANTE','ADMIN','FINANCE','SUPPORT','SOCIETE','COMPANY'].includes(role)"));
+});

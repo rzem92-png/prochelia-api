@@ -104,7 +104,9 @@ test("Preview migration workflow validates the full canonical migration chain", 
     "0038_identity_verification_tenant_scope.sql",
     "0039_cryptographic_device_enrollment.sql",
     "0040_accounting_active_state_at_posting.sql",
-    "0041_tenant_invitation_onboarding.sql"
+    "0041_tenant_invitation_onboarding.sql",
+    "0042_financial_tenant_scope.sql",
+    "0043_finance_workspace_tenant_scope.sql"
   ];
   for (const migration of expected) assert.ok(workflow.includes(`"${migration}"`), `missing canonical migration ${migration}`);
 });
@@ -134,6 +136,8 @@ test("Preview post-migration verification checks identity, mission-security and 
     "0039_cryptographic_device_enrollment.sql",
     "0040_accounting_active_state_at_posting.sql",
     "0041_tenant_invitation_onboarding.sql",
+    "0042_financial_tenant_scope.sql",
+    "0043_finance_workspace_tenant_scope.sql",
     "trg_accounting_journal_post_active_scope",
     "trusted_device_credentials", "device_auth_challenges",
     "idx_trusted_device_credentials_tenant_user_status",
@@ -166,17 +170,42 @@ test("Preview post-migration verification checks identity, mission-security and 
     "trg_supra_approval_requests_no_delete",
     "support_cases",
     "idx_support_cases_tenant_status_created",
-    "idx_support_cases_tenant_requester_created"
+    "idx_support_cases_tenant_requester_created",
+    "payment_accounts","payment_transactions","payout_requests","payment_disputes",
+    "payment_reconciliation","payment_audit","payment_webhook_events","payment_wallet_ledger","wallets",
+    "idx_payment_accounts_tenant_user","idx_payment_tx_tenant_mission_created",
+    "idx_payment_tx_tenant_intervenant_status","idx_payout_tenant_user_status",
+    "idx_payment_disputes_tenant_mission","idx_wallet_ledger_tenant_user_date",
+    "idx_payment_reconciliation_tenant_status","idx_payment_audit_tenant_created",
+    "trg_payment_account_tenant_insert","trg_payment_account_tenant_update",
+    "trg_payment_transaction_tenant_insert","trg_payment_transaction_tenant_update",
+    "trg_payout_request_tenant_insert","trg_payout_request_tenant_update",
+    "trg_payment_dispute_tenant_insert","trg_payment_dispute_tenant_update",
+    "trg_wallet_ledger_tenant_insert","trg_wallet_ledger_tenant_update",
+    "trg_payment_reconciliation_tenant_insert","trg_payment_reconciliation_tenant_update","trg_payment_wallet_ledger_apply",
+    "trg_payment_account_tenant_immutable","trg_payment_transaction_identity_immutable",
+    "trg_payout_request_identity_immutable","trg_payment_dispute_identity_immutable",
+    "trg_payment_reconciliation_identity_immutable","trg_payment_webhook_tenant_immutable",
+    "trg_payment_audit_no_update","trg_payment_audit_no_delete",
+    "finance_workspace_entries","finance_export_log","finance_resolution_cases",
+    "idx_finance_workspace_tenant_created","idx_finance_workspace_tenant_user_created",
+    "idx_finance_export_tenant_created","idx_finance_resolution_tenant_status_created",
+    "trg_finance_workspace_entry_tenant_insert","trg_finance_workspace_entry_tenant_update",
+    "trg_finance_workspace_entry_no_update","trg_finance_workspace_entry_no_delete",
+    "trg_finance_export_tenant_insert","trg_finance_export_tenant_update",
+    "trg_finance_export_no_update","trg_finance_export_no_delete",
+    "trg_finance_resolution_tenant_insert","trg_finance_resolution_tenant_update",
+    "trg_finance_resolution_identity_immutable","trg_finance_resolution_no_delete"
   ]) assert.ok(workflow.includes(name), `missing post-migration verification for ${name}`);
 });
 
-test("Preview migration workflow accepts only an empty EU D1, the exact 23-entry reviewed baseline or the exact 42-entry target", () => {
+test("Preview migration workflow accepts only an empty EU D1, the exact 23-entry reviewed baseline or the exact 44-entry target", () => {
   assert.match(workflow, /SELECT type, name FROM sqlite_master ORDER BY type, name/);
   assert.match(workflow, /registry_present/);
   assert.match(workflow, /non_internal/);
-  assert.match(workflow, /len\(local\) != 42/);
+  assert.ok(workflow.includes("if len(local) != 44:"), "workflow must enforce the exact 44-entry chain");
   assert.match(workflow, /remote == base/);
-  assert.match(workflow, /differs from the exact reviewed 23-entry baseline and 42-entry target/);
+  assert.match(workflow, /differs from the exact reviewed 23-entry baseline and 44-entry target/);
   assert.doesNotMatch(workflow, /legacy=/);
   assert.doesNotMatch(workflow, /baseline=\(local-pending\)\|legacy/);
 });

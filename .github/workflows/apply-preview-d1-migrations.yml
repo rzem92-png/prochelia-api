@@ -115,7 +115,9 @@ jobs:
             "0038_identity_verification_tenant_scope.sql",
             "0039_cryptographic_device_enrollment.sql",
             "0040_accounting_active_state_at_posting.sql",
-            "0041_tenant_invitation_onboarding.sql"
+            "0041_tenant_invitation_onboarding.sql",
+            "0042_financial_tenant_scope.sql",
+            "0043_finance_workspace_tenant_scope.sql"
           ]
           actual = sorted(p.name for p in Path("migrations-preview-canonical").glob("*.sql"))
           assert actual == sorted(expected), (
@@ -538,8 +540,8 @@ jobs:
               "0021_supra_audit_events.sql",
               "0022_supra_persisted_approvals.sql",
           }
-          if len(local) != 42:
-              print(f"::error::Expected exactly 42 canonical migrations; found {len(local)}.")
+          if len(local) != 44:
+              print(f"::error::Expected exactly 44 canonical migrations; found {len(local)}.")
               raise SystemExit(1)
           non_internal=[row for row in objects if row["name"] not in {"_cf_KV","d1_migrations"} and not row["name"].startswith("sqlite_")]
           import sqlite3
@@ -560,13 +562,13 @@ jobs:
           base_schema=schema_for(base)
           target_schema=schema_for(local)
           if not remote and not non_internal:
-              print("PASS: new EU Preview D1 is empty; all 42 canonical migrations are pending.")
+              print("PASS: new EU Preview D1 is empty; all 44 canonical migrations are pending.")
           elif registry_present and remote == base and remote_schema == base_schema:
-              print("PASS: exact 23-entry registry AND exact schema inventory match the reviewed Preview baseline; only migrations 0023-0041 are pending.")
+              print("PASS: exact 23-entry registry AND exact schema inventory match the reviewed Preview baseline; only migrations 0023-0043 are pending.")
           elif registry_present and remote == local and remote_schema == target_schema:
-              print("PASS: exact 42-entry registry AND exact schema inventory match the canonical target; rerun is idempotent.")
+              print("PASS: exact 44-entry registry AND exact schema inventory match the canonical target; rerun is idempotent.")
           else:
-              print("::error::Preview migration registry differs from the exact reviewed 23-entry baseline and 42-entry target; no migration will run.")
+              print("::error::Preview migration registry differs from the exact reviewed 23-entry baseline and 44-entry target; no migration will run.")
               print("Unexpected remote names:", ", ".join(sorted(remote-local)) or "(none)")
               print("Missing expected names:", ", ".join(sorted(local-remote)) or "(none)")
               raise SystemExit(1)
@@ -592,7 +594,7 @@ jobs:
           supra_guards_payload="$RUNNER_TEMP/verify-supra-guards-request.json"
 
           # Keep each SELECT below Cloudflare D1's compound-SELECT term limit.
-          jq -n --arg sql "SELECT name FROM d1_migrations WHERE name IN ('0016_security_identity_schema.sql','0020_auth_login_rate_limits.sql','0021_supra_audit_events.sql','0022_supra_persisted_approvals.sql','0029_supra_append_only_audit_guards.sql','0030_supra_audit_tenant_scope.sql','0031_operational_marketplace_tenant_scope.sql','0032_privacy_safe_cross_tenant_mission_marketplace.sql','0033_intervenant_availability_overlap_guard.sql','0034_timezone_safe_availability_overlap.sql','0035_validate_availability_intervals.sql','0036_intervenant_availability_idempotency.sql','0037_support_cases_tenant_isolation.sql','0038_identity_verification_tenant_scope.sql','0039_cryptographic_device_enrollment.sql','0040_accounting_active_state_at_posting.sql','0041_tenant_invitation_onboarding.sql') ORDER BY name" '{sql:$sql,params:[]}' > "$migrations_payload"
+          jq -n --arg sql "SELECT name FROM d1_migrations WHERE name IN ('0016_security_identity_schema.sql','0020_auth_login_rate_limits.sql','0021_supra_audit_events.sql','0022_supra_persisted_approvals.sql','0029_supra_append_only_audit_guards.sql','0030_supra_audit_tenant_scope.sql','0031_operational_marketplace_tenant_scope.sql','0032_privacy_safe_cross_tenant_mission_marketplace.sql','0033_intervenant_availability_overlap_guard.sql','0034_timezone_safe_availability_overlap.sql','0035_validate_availability_intervals.sql','0036_intervenant_availability_idempotency.sql','0037_support_cases_tenant_isolation.sql','0038_identity_verification_tenant_scope.sql','0039_cryptographic_device_enrollment.sql','0040_accounting_active_state_at_posting.sql','0041_tenant_invitation_onboarding.sql','0042_financial_tenant_scope.sql','0043_finance_workspace_tenant_scope.sql') ORDER BY name" '{sql:$sql,params:[]}' > "$migrations_payload"
           jq -n '{sql:"SELECT type, name FROM sqlite_master WHERE (type = '"'"'table'"'"' AND name IN ('"'"'identity_verifications'"'"','"'"'trusted_devices'"'"','"'"'mission_security'"'"','"'"'mission_security_attempts'"'"','"'"'security_audit'"'"','"'"'trusted_device_credentials'"'"','"'"'device_auth_challenges'"'"','"'"'auth_login_rate_limits'"'"','"'"'supra_audit_events'"'"','"'"'supra_approval_requests'"'"','"'"'supra_approval_votes'"'"','"'"'support_cases','supra_approval_events'"'"')) OR (type = '"'"'index'"'"' AND name IN ('"'"'idx_identity_verifications_user'"'"','"'"'idx_identity_verifications_tenant_user_status'"'"','"'"'idx_trusted_device_credentials_tenant_user_status'"'"','"'"'idx_device_auth_challenges_session_expiry'"'"','"'"'idx_device_auth_challenges_pending'"'"','"'"'idx_mission_security_intervenant'"'"','"'"'idx_security_attempts_security'"'"','"'"'idx_security_audit_mission'"'"','"'"'idx_auth_login_rate_limits_window'"'"','"'"'idx_supra_audit_events_created_at'"'"','"'"'idx_supra_audit_events_tenant_created_at'"'"','"'"'idx_supra_audit_events_actor'"'"','"'"'idx_supra_approval_requests_status_expiry'"'"','"'"'idx_supra_approval_requests_tenant_resource'"'"','"'"'idx_supra_approval_votes_request'"'"','"'"'idx_supra_approval_events_request','idx_support_cases_tenant_status_created','idx_support_cases_tenant_requester_created'"'"')) OR (type = '"'"'trigger'"'"' AND name IN ('"'"'trg_supra_audit_events_require_active_tenant'"'"','"'"'trg_supra_approval_requests_immutable'"'"','"'"'trg_supra_approval_votes_no_update'"'"','"'"'trg_supra_approval_votes_no_delete'"'"','"'"'trg_supra_approval_events_no_update'"'"','"'"'trg_supra_approval_events_no_delete'"'"','"'"'trg_supra_approval_status_transitions'"'"','"'"'trg_supra_approval_status_evidence'"'"')) ORDER BY type, name",params:[]}' > "$objects_payload"
           jq -n --arg sql "SELECT name FROM sqlite_master WHERE type='trigger' AND name IN ('trg_supra_audit_events_no_update','trg_supra_audit_events_no_delete','trg_supra_approval_requests_no_delete','trg_supra_audit_events_require_active_tenant') ORDER BY name" '{sql:$sql,params:[]}' > "$supra_guards_payload"
 
@@ -632,6 +634,8 @@ jobs:
               "0039_cryptographic_device_enrollment.sql",
               "0040_accounting_active_state_at_posting.sql",
               "0041_tenant_invitation_onboarding.sql",
+              "0042_financial_tenant_scope.sql",
+              "0043_finance_workspace_tenant_scope.sql",
           ])
           actual_tables=sorted(row["name"] for row in objects if row["type"] == "table")
           expected_tables=sorted([
@@ -716,6 +720,9 @@ jobs:
           'accounting_entities','accounting_accounts','accounting_journals','accounting_journal_lines',
           'trusted_device_credentials','device_auth_challenges',
           'tenants','tenant_memberships','tenant_membership_events','tenant_invitations','tenant_invitation_events',
+          'payment_accounts','payment_transactions','payout_requests','payment_disputes','payment_reconciliation',
+          'payment_audit','payment_webhook_events','payment_wallet_ledger','wallets',
+          'finance_workspace_entries','finance_export_log','finance_resolution_cases',
           'idx_accounting_entities_tenant','idx_accounting_accounts_tenant_entity','idx_accounting_journals_tenant_date',
           'idx_accounting_journals_source','idx_accounting_journals_one_reversal','idx_accounting_lines_journal','idx_accounting_lines_account',
           'idx_tenant_membership_one_nonrevoked_per_user','idx_tenant_membership_one_owner','idx_tenant_memberships_user_status',
@@ -732,7 +739,28 @@ jobs:
           'trg_tenant_invitation_events_no_update','trg_tenant_invitation_events_no_delete','trg_tenant_invitation_authorized_inviter','trg_tenant_invitation_event_actor_tenant','trg_tenant_invitation_email_matches_member',
           'trg_tenant_membership_event_tenant_match','trg_accounting_entity_requires_active_tenant','trg_accounting_entity_tenant_stable',
           'trg_session_identity_immutable','trg_session_revocation_terminal','trg_session_revocation_metadata_required',
-          'trg_session_active_tenant_requires_membership_insert','trg_session_active_tenant_requires_membership'
+          'trg_session_active_tenant_requires_membership_insert','trg_session_active_tenant_requires_membership',
+          'idx_payment_accounts_tenant_user','idx_payment_tx_tenant_mission_created','idx_payment_tx_tenant_intervenant_status',
+          'idx_payout_tenant_user_status','idx_payment_disputes_tenant_mission','idx_wallet_ledger_tenant_user_date',
+          'idx_payment_reconciliation_tenant_status','idx_payment_audit_tenant_created',
+          'trg_payment_account_tenant_insert','trg_payment_account_tenant_update',
+          'trg_payment_transaction_tenant_insert','trg_payment_transaction_tenant_update',
+          'trg_payout_request_tenant_insert','trg_payout_request_tenant_update',
+          'trg_payment_dispute_tenant_insert','trg_payment_dispute_tenant_update',
+          'trg_wallet_ledger_tenant_insert','trg_wallet_ledger_tenant_update',
+          'trg_payment_reconciliation_tenant_insert','trg_payment_reconciliation_tenant_update','trg_payment_wallet_ledger_apply',
+          'trg_payment_account_tenant_immutable','trg_payment_transaction_identity_immutable',
+          'trg_payout_request_identity_immutable','trg_payment_dispute_identity_immutable',
+          'trg_payment_reconciliation_identity_immutable','trg_payment_webhook_tenant_immutable',
+          'trg_payment_audit_no_update','trg_payment_audit_no_delete',
+          'idx_finance_workspace_tenant_created','idx_finance_workspace_tenant_user_created',
+          'idx_finance_export_tenant_created','idx_finance_resolution_tenant_status_created',
+          'trg_finance_workspace_entry_tenant_insert','trg_finance_workspace_entry_tenant_update',
+          'trg_finance_workspace_entry_no_update','trg_finance_workspace_entry_no_delete',
+          'trg_finance_export_tenant_insert','trg_finance_export_tenant_update',
+          'trg_finance_export_no_update','trg_finance_export_no_delete',
+          'trg_finance_resolution_tenant_insert','trg_finance_resolution_tenant_update',
+          'trg_finance_resolution_identity_immutable','trg_finance_resolution_no_delete'
           ) ORDER BY type, name
           SQL
           )"
@@ -751,7 +779,10 @@ jobs:
             "accounting_entities","accounting_accounts","accounting_journals","accounting_journal_lines",
             "tenants","tenant_memberships","tenant_membership_events",
             "tenant_invitations","tenant_invitation_events",
-            "trusted_device_credentials","device_auth_challenges"
+            "trusted_device_credentials","device_auth_challenges",
+            "payment_accounts","payment_transactions","payout_requests","payment_disputes",
+            "payment_reconciliation","payment_audit","payment_webhook_events","payment_wallet_ledger","wallets",
+            "finance_workspace_entries","finance_export_log","finance_resolution_cases"
           }
           expected_indexes={
             "idx_accounting_entities_tenant","idx_accounting_accounts_tenant_entity",
@@ -762,7 +793,13 @@ jobs:
             "idx_tenant_memberships_tenant_role_status","idx_tenant_membership_events_tenant_time",
             "idx_tenant_invitations_one_pending_email","idx_tenant_invitations_expiry","idx_tenant_invitations_membership","idx_tenant_invitation_events_tenant_time",
             "idx_trusted_device_credentials_tenant_user_status","idx_device_auth_challenges_session_expiry","idx_device_auth_challenges_pending",
-            "idx_sessions_user_active_expiry","idx_sessions_revoked_at"
+            "idx_sessions_user_active_expiry","idx_sessions_revoked_at",
+            "idx_payment_accounts_tenant_user","idx_payment_tx_tenant_mission_created",
+            "idx_payment_tx_tenant_intervenant_status","idx_payout_tenant_user_status",
+            "idx_payment_disputes_tenant_mission","idx_wallet_ledger_tenant_user_date",
+            "idx_payment_reconciliation_tenant_status","idx_payment_audit_tenant_created",
+            "idx_finance_workspace_tenant_created","idx_finance_workspace_tenant_user_created",
+            "idx_finance_export_tenant_created","idx_finance_resolution_tenant_status_created"
           }
           expected_triggers={
             "trg_accounting_journal_insert_draft_only","trg_accounting_line_draft_only",
@@ -778,7 +815,23 @@ jobs:
             "trg_tenant_membership_event_tenant_match",
             "trg_accounting_entity_requires_active_tenant","trg_accounting_entity_tenant_stable",
             "trg_session_identity_immutable","trg_session_revocation_terminal",
-            "trg_session_revocation_metadata_required","trg_session_active_tenant_requires_membership_insert","trg_session_active_tenant_requires_membership"
+            "trg_session_revocation_metadata_required","trg_session_active_tenant_requires_membership_insert","trg_session_active_tenant_requires_membership",
+            "trg_payment_account_tenant_insert","trg_payment_account_tenant_update",
+            "trg_payment_transaction_tenant_insert","trg_payment_transaction_tenant_update",
+            "trg_payout_request_tenant_insert","trg_payout_request_tenant_update",
+            "trg_payment_dispute_tenant_insert","trg_payment_dispute_tenant_update",
+            "trg_wallet_ledger_tenant_insert","trg_wallet_ledger_tenant_update",
+            "trg_payment_reconciliation_tenant_insert","trg_payment_reconciliation_tenant_update","trg_payment_wallet_ledger_apply",
+            "trg_payment_account_tenant_immutable","trg_payment_transaction_identity_immutable",
+            "trg_payout_request_identity_immutable","trg_payment_dispute_identity_immutable",
+            "trg_payment_reconciliation_identity_immutable","trg_payment_webhook_tenant_immutable",
+            "trg_payment_audit_no_update","trg_payment_audit_no_delete",
+            "trg_finance_workspace_entry_tenant_insert","trg_finance_workspace_entry_tenant_update",
+            "trg_finance_workspace_entry_no_update","trg_finance_workspace_entry_no_delete",
+            "trg_finance_export_tenant_insert","trg_finance_export_tenant_update",
+            "trg_finance_export_no_update","trg_finance_export_no_delete",
+            "trg_finance_resolution_tenant_insert","trg_finance_resolution_tenant_update",
+            "trg_finance_resolution_identity_immutable","trg_finance_resolution_no_delete"
           }
           missing = (
             {("table",x) for x in expected_tables} |
@@ -788,7 +841,7 @@ jobs:
           if missing:
             print("::error::New accounting/tenant/session schema is incomplete:", sorted(missing))
             raise SystemExit(1)
-          print("PASS: 11 accounting/tenant/invitation/device-trust tables, 21 indexes and 33 immutability/scope triggers verified.")
+          print("PASS: accounting, tenant, device-trust and financial tables, indexes and immutable tenant-scope triggers verified.")
           PY
           jq -n '{sql:"SELECT name FROM pragma_table_info('"'"'sessions'"'"')",params:[]}' > "$request"
           status="$(curl --silent --show-error --output "$response" --write-out '%{http_code}' \

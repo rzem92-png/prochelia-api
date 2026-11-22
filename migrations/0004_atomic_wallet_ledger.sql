@@ -2,7 +2,7 @@
 -- Chaque mouvement financier est append-only. Le trigger applique les deltas au portefeuille
 -- dans la même transaction SQLite que l'insertion du mouvement.
 -- The wallet table is part of the migration contract, not an implicit runtime prerequisite.
--- Keep this definition aligned with ensurePaymentSchema() in src/index.js.
+-- Runtime ensurePaymentSchema() in src/index.js validates migrated columns only; it performs no DDL.
 CREATE TABLE IF NOT EXISTS wallets (
   id TEXT PRIMARY KEY,
   user_id TEXT NOT NULL UNIQUE,

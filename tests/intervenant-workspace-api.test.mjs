@@ -80,6 +80,7 @@ test("opportunity feed returns a sanitized public projection with availability a
 test("applications are POST-only, idempotent and never accept client-controlled pay or tenant identity", () => {
   assert.match(opportunityHandler, /request\.method !== 'POST'[\s\S]{0,100}METHOD_NOT_ALLOWED/);
   assert.match(opportunityHandler, /Idempotency-Key/);
+  assert.match(opportunityHandler, /request\.headers\.get\('X-Idempotency-Key'\)/);
   assert.match(opportunityHandler, /IDEMPOTENCY_KEY_CONFLICT/);
   assert.match(opportunityHandler, /INSERT INTO mission_applications/);
   assert.match(opportunityHandler, /opportunity\.provider_pay_cents/);
@@ -112,6 +113,7 @@ test("intervenant availability reads and writes only the authenticated user's ac
 
 test("availability writes require a stable idempotency key before persistence", () => {
   assert.match(availabilityHandler, /Idempotency-Key/);
+  assert.match(availabilityHandler, /request\.headers\.get\('X-Idempotency-Key'\)/);
   assert.match(availabilityHandler, /IDEMPOTENCY_KEY_REQUIRED/);
   assert.match(availabilityHandler, /IDEMPOTENCY_KEY_CONFLICT/);
   assert.match(availabilityHandler, /idempotent_replay: true/);

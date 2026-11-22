@@ -39,9 +39,10 @@ const preview = {
     jurisdiction: "eu"
   }],
   triggers: {
-    // Keep the deployed Preview Worker schedule aligned with the reviewed
-    // source config: durable background jobs every minute and daily backup.
-    crons: ["*/1 * * * *", "0 3 * * *"]
+    // Preview runs only the durable background queue processor.
+    // Backups are handled exclusively by the signed, manually approved
+    // GitHub Actions workflow; never by an unsigned Worker cron.
+    crons: ["*/1 * * * *"]
   },
   observability: { logs: { enabled: true, invocation_logs: true } }
 };
