@@ -36,3 +36,32 @@ test("finance summary GET does not run the legacy consolidated schema initialize
   assert.ok(consolidatedPathLine);
   assert.doesNotMatch(consolidatedPathLine, /\/api\/finance\/summary/);
 });
+
+
+test("finance workspace refuses legacy unscoped tables and derives every read from the active tenant", () => {
+  const schemaStart = source.indexOf("async function ensureFinanceWorkspaceSchema(env) {");
+  const schemaEnd = source.indexOf("\\nfunction financeRoleAllowed", schemaStart);
+  assert.ok(schemaStart >= 0 && schemaEnd > schemaStart);
+  const schema = source.slice(schemaStart, schemaEnd);
+  assert.match(schema, /finance_workspace_entries:[^\\n]*tenant_id/);
+  assert.match(schema, /finance_export_log:[^\\n]*tenant_id/);
+  assert.match(schema, /finance_resolution_cases:[^\\n]*tenant_id/);
+  assert.match(schema, /tenant_id IS NULL/);
+  assert.doesNotMatch(schema, /CREATE TABLE|CREATE INDEX/);
+
+  const authStart = source.indexOf("async function financeAuth(request, env) {");
+  const authEnd = source.indexOf("\\nfunction financeMoney", authStart);
+  const auth = source.slice(authStart, authEnd);
+  assert.match(auth, /resolveTenantContext\\(request,env,auth\\)/);
+  assert.match(auth, /FINANCE_WORKSPACE_TENANT_SCOPE_REQUIRED/);
+  assert.match(auth, /return \\{ auth, tenantId:tenantContext\\.tenant\\.id \\}/);
+
+  const rowsStart = source.indexOf("async function financeRowsForUser(env, user, tenantId) {");
+  const rowsEnd = source.indexOf("\\nfunction financeSummaryFromRows", rowsStart);
+  const rows = source.slice(rowsStart, rowsEnd);
+  assert.match(rows, /let where = 'tenant_id=\\?'/);
+  assert.match(rows, /intervenants WHERE user_id=\\? AND tenant_id=\\?/);
+  assert.match(rows, /clients WHERE user_id=\\? AND tenant_id=\\?/);
+  assert.match(rows, /FROM finance_workspace_entries WHERE tenant_id=\\?/);
+  assert.match(rows, /FROM payout_requests WHERE tenant_id=\\?/);
+});
