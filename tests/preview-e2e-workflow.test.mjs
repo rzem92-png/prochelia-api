@@ -30,6 +30,15 @@ test("Cloudflare Pages list response supports its array result shape", () => {
   assert.ok(workflow.includes('(if type == "array" then . else (.deployments // []) end)'));
 });
 
+test("Pages proxy gaps are reported without skipping independent synthetic Worker tests", () => {
+  assert.ok(workflow.includes("id: pages_proxy"));
+  assert.ok(workflow.includes("continue-on-error: true"));
+  assert.ok(workflow.includes("proxy_gap=1"));
+  assert.ok(workflow.includes("Enforce Pages proxy acceptance after Preview data cleanup"));
+  assert.ok(workflow.includes("${{ steps.pages_proxy.outcome }}"));
+  assert.ok(workflow.includes("Always remove synthetic Preview fixtures and verify cleanup"));
+});
+
 test("Pages binding mismatch diagnostics expose only non-secret deployment metadata", () => {
   const marker = "Safe metadata diagnostic follows.";
   const start = workflow.indexOf(marker);
