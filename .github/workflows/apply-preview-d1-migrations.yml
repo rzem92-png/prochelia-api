@@ -239,7 +239,12 @@ jobs:
           actual="$(sha256sum "$RUNNER_TEMP/prochelia-backup/roundtrip.sql" | cut -d ' ' -f 1)"
           expected="$(cat "$RUNNER_TEMP/prochelia-backup/manifest.sha256")"
           test "$actual" = "$expected" || { echo "::error::R2 round-trip checksum mismatch."; exit 1; }
-          echo "PASS: encrypted Preview backup uploaded to and restored from private R2 EU bucket."
+          # Verify the bytes downloaded from R2 can recreate a valid SQLite database.
+          # A checksum/decryption check alone does not prove the exported SQL is restorable.
+          sqlite3 "$RUNNER_TEMP/prochelia-backup/restore-validation-r2.sqlite" < "$RUNNER_TEMP/prochelia-backup/roundtrip.sql"
+          integrity="$(sqlite3 "$RUNNER_TEMP/prochelia-backup/restore-validation-r2.sqlite" 'PRAGMA integrity_check;')"
+          test "$integrity" = "ok" || { echo "::error::R2-restored SQLite integrity_check failed: $integrity"; exit 1; }
+          echo "PASS: encrypted Preview backup downloaded from R2, decrypted, restored into fresh SQLite, and integrity-checked."
 
       - name: Publish encrypted backup before any schema write
         uses: actions/upload-artifact@v4
