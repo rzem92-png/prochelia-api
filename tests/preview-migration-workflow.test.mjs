@@ -168,7 +168,23 @@ test("Preview post-migration verification checks identity, mission-security and 
     "trg_supra_approval_requests_no_delete",
     "support_cases",
     "idx_support_cases_tenant_status_created",
-    "idx_support_cases_tenant_requester_created"
+    "idx_support_cases_tenant_requester_created",
+    "payment_accounts","payment_transactions","payout_requests","payment_disputes",
+    "payment_reconciliation","payment_audit","payment_webhook_events","payment_wallet_ledger","wallets",
+    "idx_payment_accounts_tenant_user","idx_payment_tx_tenant_mission_created",
+    "idx_payment_tx_tenant_intervenant_status","idx_payout_tenant_user_status",
+    "idx_payment_disputes_tenant_mission","idx_wallet_ledger_tenant_user_date",
+    "idx_payment_reconciliation_tenant_status","idx_payment_audit_tenant_created",
+    "trg_payment_account_tenant_insert","trg_payment_account_tenant_update",
+    "trg_payment_transaction_tenant_insert","trg_payment_transaction_tenant_update",
+    "trg_payout_request_tenant_insert","trg_payout_request_tenant_update",
+    "trg_payment_dispute_tenant_insert","trg_payment_dispute_tenant_update",
+    "trg_wallet_ledger_tenant_insert","trg_wallet_ledger_tenant_update",
+    "trg_payment_reconciliation_tenant_insert","trg_payment_wallet_ledger_apply",
+    "trg_payment_account_tenant_immutable","trg_payment_transaction_identity_immutable",
+    "trg_payout_request_identity_immutable","trg_payment_dispute_identity_immutable",
+    "trg_payment_reconciliation_identity_immutable","trg_payment_webhook_tenant_immutable",
+    "trg_payment_audit_no_update","trg_payment_audit_no_delete"
   ]) assert.ok(workflow.includes(name), `missing post-migration verification for ${name}`);
 });
 
