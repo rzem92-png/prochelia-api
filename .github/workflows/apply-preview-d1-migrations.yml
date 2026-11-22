@@ -346,17 +346,24 @@ jobs:
           python3 -m pip install --user --break-system-packages awscli
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
-      - name: Upload encrypted backup and manifest to private R2 EU bucket
+      - name: Upload encrypted backup and HMAC attestation to private R2 EU bucket
         shell: bash
         run: |
           set -euo pipefail
           export PATH="$HOME/.local/bin:$PATH"
-          key="preview-d1/${EXPECTED_DB_NAME}/$(date -u +%Y/%m/%d)/${GITHUB_RUN_ID}-${GITHUB_SHA:0:12}.sql.gpg"
-          echo "R2_OBJECT_KEY=$key" >> "$GITHUB_ENV"
+          key="$R2_OBJECT_KEY"
+          test -n "$key"
+          aws s3api list-objects-v2 --bucket "$R2_BUCKET" --prefix "$key" --max-keys 10 --endpoint-url "$R2_ENDPOINT" --region auto --output json > "$RUNNER_TEMP/prochelia-backup/existing-objects.json"
+          jq -e --arg key "$key" '[.Contents[]?.Key | select(. == $key or . == ($key + ".sha256") or . == ($key + ".attestation.json") or . == ($key + ".attestation.hmac"))] | length == 0' "$RUNNER_TEMP/prochelia-backup/existing-objects.json" >/dev/null || {
+            echo "::error::R2 backup object key already exists; refusing to overwrite an earlier backup."
+            exit 1
+          }
           aws s3 cp "$RUNNER_TEMP/prochelia-backup/prochelia-preview.sql.gpg" "s3://$R2_BUCKET/$key" --endpoint-url "$R2_ENDPOINT" --region auto --only-show-errors
           aws s3 cp "$RUNNER_TEMP/prochelia-backup/manifest.sha256" "s3://$R2_BUCKET/$key.sha256" --endpoint-url "$R2_ENDPOINT" --region auto --only-show-errors
+          aws s3 cp "$RUNNER_TEMP/prochelia-backup/attestation.json" "s3://$R2_BUCKET/$key.attestation.json" --endpoint-url "$R2_ENDPOINT" --region auto --only-show-errors
+          aws s3 cp "$RUNNER_TEMP/prochelia-backup/attestation.hmac" "s3://$R2_BUCKET/$key.attestation.hmac" --endpoint-url "$R2_ENDPOINT" --region auto --only-show-errors
 
-      - name: Download R2 backup and verify encrypted round-trip
+      - name: Download R2 backup and verify HMAC, encryption and full round-trip
         shell: bash
         run: |
           set -euo pipefail
@@ -364,19 +371,56 @@ jobs:
           key="$R2_OBJECT_KEY"
           aws s3 cp "s3://$R2_BUCKET/$key" "$RUNNER_TEMP/prochelia-backup/roundtrip.sql.gpg" --endpoint-url "$R2_ENDPOINT" --region auto --only-show-errors
           aws s3 cp "s3://$R2_BUCKET/$key.sha256" "$RUNNER_TEMP/prochelia-backup/roundtrip.manifest.sha256" --endpoint-url "$R2_ENDPOINT" --region auto --only-show-errors
+          aws s3 cp "s3://$R2_BUCKET/$key.attestation.json" "$RUNNER_TEMP/prochelia-backup/roundtrip.attestation.json" --endpoint-url "$R2_ENDPOINT" --region auto --only-show-errors
+          aws s3 cp "s3://$R2_BUCKET/$key.attestation.hmac" "$RUNNER_TEMP/prochelia-backup/roundtrip.attestation.hmac" --endpoint-url "$R2_ENDPOINT" --region auto --only-show-errors
           cmp "$RUNNER_TEMP/prochelia-backup/manifest.sha256" "$RUNNER_TEMP/prochelia-backup/roundtrip.manifest.sha256"
           cmp "$RUNNER_TEMP/prochelia-backup/prochelia-preview.sql.gpg" "$RUNNER_TEMP/prochelia-backup/roundtrip.sql.gpg"
+          cmp "$RUNNER_TEMP/prochelia-backup/attestation.json" "$RUNNER_TEMP/prochelia-backup/roundtrip.attestation.json"
+          cmp "$RUNNER_TEMP/prochelia-backup/attestation.hmac" "$RUNNER_TEMP/prochelia-backup/roundtrip.attestation.hmac"
+          node scripts/r2-backup-attestation.mjs verify "$RUNNER_TEMP/prochelia-backup/roundtrip.attestation.json" "$RUNNER_TEMP/prochelia-backup/roundtrip.attestation.hmac"
+          jq -e --arg key "$key" --arg bucket "$R2_BUCKET" --arg db "$EXPECTED_DB_ID" --arg name "$EXPECTED_DB_NAME" --arg account "$EXPECTED_ACCOUNT_ID" '
+            .schema_version == 1 and
+            .attestation_type == "prochelia.preview-d1-backup" and
+            .source.account_id == $account and
+            .source.database_id == $db and
+            .source.database_name == $name and
+            .source.jurisdiction == "eu" and
+            .object.bucket == $bucket and
+            .object.key == $key and
+            .object.sha256_manifest_key == ($key + ".sha256") and
+            .provenance.repository == "rzem92-png/prochelia-api" and
+            .provenance.ref == "refs/heads/main" and
+            .provenance.commit_sha == env.GITHUB_SHA and
+            .provenance.run_id == env.GITHUB_RUN_ID and
+            .provenance.migration_source_sha == env.GITHUB_SHA and
+            .validation.sqlite_integrity_check == "ok" and
+            .validation.foreign_key_check == "empty" and
+            .validation.encryption == "OpenPGP-AES256"
+          ' "$RUNNER_TEMP/prochelia-backup/roundtrip.attestation.json" >/dev/null || {
+            echo "::error::HMAC manifest does not bind this exact EU Preview backup and workflow run."
+            exit 1
+          }
+          cipher_actual="$(sha256sum "$RUNNER_TEMP/prochelia-backup/roundtrip.sql.gpg" | awk '{print $1}')"
+          cipher_expected="$(jq -r '.object.ciphertext_sha256' "$RUNNER_TEMP/prochelia-backup/roundtrip.attestation.json")"
+          test "$cipher_actual" = "$cipher_expected" || {
+            echo "::error::Encrypted backup digest differs from HMAC attestation."
+            exit 1
+          }
           printf '%s' "$BACKUP_ENCRYPTION_KEY" | gpg --batch --yes --pinentry-mode loopback --passphrase-fd 0 --decrypt "$RUNNER_TEMP/prochelia-backup/roundtrip.sql.gpg" > "$RUNNER_TEMP/prochelia-backup/roundtrip.sql"
-          actual="$(sha256sum "$RUNNER_TEMP/prochelia-backup/roundtrip.sql" | cut -d ' ' -f 1)"
+          actual="$(sha256sum "$RUNNER_TEMP/prochelia-backup/roundtrip.sql" | awk '{print $1}')"
           expected="$(cat "$RUNNER_TEMP/prochelia-backup/manifest.sha256")"
-          test "$actual" = "$expected" || { echo "::error::R2 round-trip checksum mismatch."; exit 1; }
-          # Verify the bytes downloaded from R2 can recreate a valid SQLite database.
-          # A checksum/decryption check alone does not prove the exported SQL is restorable.
+          attested_plain="$(jq -r '.object.plaintext_sha256' "$RUNNER_TEMP/prochelia-backup/roundtrip.attestation.json")"
+          test "$actual" = "$expected" && test "$actual" = "$attested_plain" || {
+            echo "::error::Decrypted R2 backup checksum differs from the HMAC-attested manifest."
+            exit 1
+          }
           sqlite3 "$RUNNER_TEMP/prochelia-backup/restore-validation-r2.sqlite" < "$RUNNER_TEMP/prochelia-backup/roundtrip.sql"
           integrity="$(sqlite3 "$RUNNER_TEMP/prochelia-backup/restore-validation-r2.sqlite" 'PRAGMA integrity_check;')"
           test "$integrity" = "ok" || { echo "::error::R2-restored SQLite integrity_check failed: $integrity"; exit 1; }
-          echo "PASS: encrypted Preview backup downloaded from R2, decrypted, restored into fresh SQLite, and integrity-checked."
-
+          foreign_keys="$(sqlite3 "$RUNNER_TEMP/prochelia-backup/restore-validation-r2.sqlite" 'PRAGMA foreign_key_check;')"
+          test -z "$foreign_keys" || { echo "::error::R2-restored SQLite foreign_key_check found violations."; exit 1; }
+          echo "PASS: HMAC attestation, ciphertext/plaintext checksums, decryption, local restore, integrity_check and foreign_key_check verified."
+      
       - name: Restore exact R2 backup into isolated D1 and verify integrity before Preview migration
         shell: bash
         env:
