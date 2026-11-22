@@ -69,3 +69,13 @@ test("case actions never mutate mission assignment or schedule without the verif
   assert.match(handler, /TENANT_SCOPED_MISSION_EXECUTOR_REQUIRED/);
   assert.doesNotMatch(handler, /UPDATE missions SET/);
 });
+
+test("manual operational execution cannot resolve a case on DONE alone", () => {
+  const start = source.indexOf("async function operationalExecute(");
+  const end = source.indexOf("\nasync function scoreClients(", start);
+  assert.ok(start >= 0 && end > start);
+  const handler = source.slice(start, end);
+  assert.match(handler, /x\.status==='VERIFIED'/);
+  assert.match(handler, /verification_required:!allVerified/);
+  assert.doesNotMatch(handler, /\['DONE'\]\.includes\(x\.status\)/);
+});
