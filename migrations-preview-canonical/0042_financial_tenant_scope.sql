@@ -180,3 +180,50 @@ BEGIN
     updated_at=CURRENT_TIMESTAMP
   WHERE user_id=NEW.user_id AND tenant_id=NEW.tenant_id;
 END;
+
+-- Tenant and financial identity may be attributed once from NULL, but never moved
+-- to another tenant after attribution. Mutable status fields remain available.
+CREATE TRIGGER IF NOT EXISTS trg_payment_account_tenant_immutable
+BEFORE UPDATE OF tenant_id ON payment_accounts
+WHEN OLD.tenant_id IS NOT NULL AND NEW.tenant_id <> OLD.tenant_id
+BEGIN SELECT RAISE(ABORT,'PAYMENT_ACCOUNT_TENANT_IMMUTABLE'); END;
+
+CREATE TRIGGER IF NOT EXISTS trg_payment_transaction_identity_immutable
+BEFORE UPDATE OF tenant_id,mission_id,client_id ON payment_transactions
+WHEN (OLD.tenant_id IS NOT NULL AND NEW.tenant_id <> OLD.tenant_id)
+  OR NEW.mission_id <> OLD.mission_id OR NEW.client_id <> OLD.client_id
+BEGIN SELECT RAISE(ABORT,'PAYMENT_TRANSACTION_IDENTITY_IMMUTABLE'); END;
+
+CREATE TRIGGER IF NOT EXISTS trg_payout_request_identity_immutable
+BEFORE UPDATE OF tenant_id,wallet_id,user_id,idempotency_key,amount_cents ON payout_requests
+WHEN (OLD.tenant_id IS NOT NULL AND NEW.tenant_id <> OLD.tenant_id)
+  OR NEW.wallet_id <> OLD.wallet_id OR NEW.user_id <> OLD.user_id
+  OR NEW.idempotency_key <> OLD.idempotency_key OR NEW.amount_cents <> OLD.amount_cents
+BEGIN SELECT RAISE(ABORT,'PAYOUT_REQUEST_IDENTITY_IMMUTABLE'); END;
+
+CREATE TRIGGER IF NOT EXISTS trg_payment_dispute_identity_immutable
+BEFORE UPDATE OF tenant_id,transaction_id,mission_id,client_id,intervenant_id ON payment_disputes
+WHEN (OLD.tenant_id IS NOT NULL AND NEW.tenant_id <> OLD.tenant_id)
+  OR NEW.transaction_id <> OLD.transaction_id OR NEW.mission_id <> OLD.mission_id
+  OR NEW.client_id <> OLD.client_id OR NEW.intervenant_id <> OLD.intervenant_id
+BEGIN SELECT RAISE(ABORT,'PAYMENT_DISPUTE_IDENTITY_IMMUTABLE'); END;
+
+CREATE TRIGGER IF NOT EXISTS trg_payment_reconciliation_identity_immutable
+BEFORE UPDATE OF tenant_id,provider,external_id,internal_transaction_id,internal_payout_id ON payment_reconciliation
+WHEN (OLD.tenant_id IS NOT NULL AND NEW.tenant_id <> OLD.tenant_id)
+  OR NEW.provider <> OLD.provider OR NEW.external_id <> OLD.external_id
+  OR NEW.internal_transaction_id IS NOT OLD.internal_transaction_id
+  OR NEW.internal_payout_id IS NOT OLD.internal_payout_id
+BEGIN SELECT RAISE(ABORT,'PAYMENT_RECONCILIATION_IDENTITY_IMMUTABLE'); END;
+
+CREATE TRIGGER IF NOT EXISTS trg_payment_webhook_tenant_immutable
+BEFORE UPDATE OF tenant_id ON payment_webhook_events
+WHEN OLD.tenant_id IS NOT NULL AND NEW.tenant_id <> OLD.tenant_id
+BEGIN SELECT RAISE(ABORT,'PAYMENT_WEBHOOK_TENANT_IMMUTABLE'); END;
+
+CREATE TRIGGER IF NOT EXISTS trg_payment_audit_no_update
+BEFORE UPDATE ON payment_audit
+BEGIN SELECT RAISE(ABORT,'PAYMENT_AUDIT_APPEND_ONLY'); END;
+CREATE TRIGGER IF NOT EXISTS trg_payment_audit_no_delete
+BEFORE DELETE ON payment_audit
+BEGIN SELECT RAISE(ABORT,'PAYMENT_AUDIT_APPEND_ONLY'); END;
