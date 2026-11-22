@@ -943,6 +943,10 @@ export function paymentsConfigured(env) {
 async function paymentOnboard(request, env) {
   const auth = await getSessionUser(request, env);
   if (!requireRole(auth, ['intervenant'])) return json({ok:false,error:auth?.user?'FORBIDDEN':'UNAUTHENTICATED',version:VERSION},auth?.user?403:401);
+  // No placeholder PSP account or wallet may be created before a real adapter exists.
+  if (!paymentsConfigured(env)) {
+    return json({ok:false,error:'PAYMENT_PROVIDER_NOT_CONFIGURED',version:VERSION,write_enabled:false},503);
+  }
   const tenantContext = await resolveTenantContext(request, env, auth);
   if (!tenantContext.ok) return json({ok:false,error:tenantContext.error,version:VERSION},tenantContext.status);
   await ensurePaymentSchema(env);
@@ -966,21 +970,36 @@ async function paymentStatus(request, env) {
   if(!auth) return json({ok:false,error:'UNAUTHENTICATED',version:VERSION},401);
   const tenantContext = await resolveTenantContext(request, env, auth);
   if (!tenantContext.ok) return json({ok:false,error:tenantContext.error,version:VERSION},tenantContext.status);
-  await ensurePaymentSchema(env);
-  let wallet=await env.DB.prepare('SELECT * FROM wallets WHERE user_id=? AND tenant_id=? LIMIT 1').bind(auth.user.id,tenantContext.tenant.id).first();
-  if(!wallet){
-    await env.DB.prepare('INSERT INTO wallets (id,user_id,tenant_id) VALUES (?,?,?)').bind(crypto.randomUUID(),auth.user.id,tenantContext.tenant.id).run();
-    wallet=await env.DB.prepare('SELECT * FROM wallets WHERE user_id=? AND tenant_id=? LIMIT 1').bind(auth.user.id,tenantContext.tenant.id).first();
+  // A status GET must never initialize schema, create wallets, or imply that a
+  // configured provider name is a functioning payment adapter.
+  if (!paymentsConfigured(env)) {
+    return json({
+      ok:true, read_only:true, version:VERSION, provider:null,
+      payments_configured:false, wallet:null, payout_account:null, pending_payouts:0
+    },200);
   }
-  if (!wallet) return json({ok:false,error:'WALLET_UNAVAILABLE',version:VERSION},503);
-  const account=await env.DB.prepare('SELECT * FROM payment_accounts WHERE user_id=? LIMIT 1').bind(auth.user.id).first();
-  const pending=await env.DB.prepare(`SELECT COUNT(*) total FROM payout_requests WHERE user_id=? AND status IN ('requested','processing')`).bind(auth.user.id).first();
-  return json({ok:true,version:VERSION,provider:paymentProvider(env),payments_configured:paymentsConfigured(env),wallet:{currency:wallet.currency,available_cents:wallet.available_cents,pending_cents:wallet.pending_cents,paid_cents:wallet.paid_cents,reserved_cents:wallet.reserved_cents},payout_account:account?{status:account.status,onboarding_status:account.onboarding_status,payouts_enabled:!!account.payouts_enabled}:null,pending_payouts:Number(pending?.total||0)},200);
+  try {
+    const wallet=await env.DB.prepare('SELECT * FROM wallets WHERE user_id=? AND tenant_id=? LIMIT 1').bind(auth.user.id,tenantContext.tenant.id).first();
+    const account=await env.DB.prepare('SELECT * FROM payment_accounts WHERE user_id=? LIMIT 1').bind(auth.user.id).first();
+    const pending=await env.DB.prepare(`SELECT COUNT(*) total FROM payout_requests WHERE user_id=? AND status IN ('requested','processing')`).bind(auth.user.id).first();
+    return json({
+      ok:true, read_only:true, version:VERSION, provider:paymentProvider(env), payments_configured:true,
+      wallet:wallet?{currency:wallet.currency,available_cents:wallet.available_cents,pending_cents:wallet.pending_cents,paid_cents:wallet.paid_cents,reserved_cents:wallet.reserved_cents}:null,
+      payout_account:account?{status:account.status,onboarding_status:account.onboarding_status,payouts_enabled:!!account.payouts_enabled}:null,
+      pending_payouts:Number(pending?.total||0)
+    },200);
+  } catch {
+    return json({ok:false,error:'PAYMENT_STATUS_UNAVAILABLE',version:VERSION},503);
+  }
 }
 
 async function createMissionPayment(request, env) {
   const auth=await getSessionUser(request,env);
   if(!requireRole(auth,['gerante'])) return json({ok:false,error:auth?.user?'FORBIDDEN':'UNAUTHENTICATED',version:VERSION},auth?.user?403:401);
+  // Do not create a pending financial transaction without a reviewed PSP adapter.
+  if (!paymentsConfigured(env)) {
+    return json({ok:false,error:'PAYMENT_PROVIDER_NOT_CONFIGURED',version:VERSION,write_enabled:false},503);
+  }
   await ensurePaymentSchema(env);
   const body=await readJson(request);
   const missionId=clean(body?.mission_id), clientId=clean(body?.client_id), intervenantId=clean(body?.intervenant_id);
@@ -1048,6 +1067,10 @@ export async function reservePayoutAtomically(env, input) {
 async function payoutRequest(request, env) {
   const auth = await getSessionUser(request, env);
   if (!requireRole(auth, ['intervenant'])) return json({ok:false,error:auth?.user?'FORBIDDEN':'UNAUTHENTICATED',version:VERSION}, auth?.user ? 403 : 401);
+  // Refuse before schema setup, account reads, wallet reads, or reservations.
+  if (!paymentsConfigured(env)) {
+    return json({ok:false,error:'PAYOUT_PROVIDER_NOT_CONFIGURED',version:VERSION,write_enabled:false},503);
+  }
   await ensurePaymentSchema(env);
   const body = await readJson(request);
   const amount = moneyCents(body?.amount_eur);
@@ -1067,11 +1090,6 @@ async function payoutRequest(request, env) {
   }
   const tenantContext = await resolveTenantContext(request, env, auth);
   if (!tenantContext.ok) return json({ok:false,error:tenantContext.error,version:VERSION},tenantContext.status);
-  // Never reserve or lock funds unless a real, validated PSP adapter is configured.
-  // This guard is deliberately before account/wallet reads and the atomic reservation.
-  if (!paymentsConfigured(env)) {
-    return json({ok:false,error:'PAYOUT_PROVIDER_NOT_CONFIGURED',version:VERSION,write_enabled:false},503);
-  }
   const account = await env.DB.prepare('SELECT * FROM payment_accounts WHERE user_id=? LIMIT 1').bind(auth.user.id).first();
   if (!account || Number(account.payouts_enabled) !== 1) {
     return json({ok:false,error:'PAYOUT_ACCOUNT_NOT_READY',version:VERSION,message:'Le compte de paiement de l’intervenant doit être vérifié et activé par le PSP.'},409);
