@@ -52,7 +52,7 @@ jobs:
           set -euo pipefail
           case "$GITHUB_REF" in
             refs/heads/main) ;;
-            *) echo "::error::Restore is restricted to main or the dedicated isolated-restore branch."; exit 1 ;;
+            *) echo "::error::Restore is restricted to the main branch only."; exit 1 ;;
           esac
           test "$CLOUDFLARE_ACCOUNT_ID" = "$EXPECTED_ACCOUNT_ID"
           for name in CLOUDFLARE_API_TOKEN BACKUP_ENCRYPTION_KEY BACKUP_ATTESTATION_HMAC_KEY AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY; do
