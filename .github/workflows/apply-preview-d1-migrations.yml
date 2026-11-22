@@ -211,7 +211,7 @@ jobs:
             }]
           }
           JSON
-          jq -e --arg name "$RESTORE_TEST_DB_NAME" --arg id "$RESTORE_TEST_DB_ID" '.name == "prochelia-restore-test" and .d1_databases | length == 1' "$RUNNER_TEMP/wrangler.restore-test.json" >/dev/null
+          jq -e --arg name "$RESTORE_TEST_DB_NAME" --arg id "$RESTORE_TEST_DB_ID" '.name == "prochelia-restore-test" and (.d1_databases | length == 1) and .d1_databases[0].database_name == $name and .d1_databases[0].database_id == $id' "$RUNNER_TEMP/wrangler.restore-test.json" >/dev/null
           npx --yes wrangler@4 d1 execute "$RESTORE_TEST_DB_NAME" --remote --config "$RUNNER_TEMP/wrangler.restore-test.json" --command="SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT GLOB '_cf_*' ORDER BY name;" --json > "$RUNNER_TEMP/restore-test-before-export.json"
           jq -e '[.. | objects | select(has("results")) | .results[]?] | length == 0' "$RUNNER_TEMP/restore-test-before-export.json" >/dev/null || {
             echo "::error::Restore-test D1 is not empty; refusing to export/upload a backup for a target that cannot be restored safely."
