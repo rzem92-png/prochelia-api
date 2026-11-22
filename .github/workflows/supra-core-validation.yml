@@ -1,4 +1,4 @@
-name: Nexus Supra canonical integration validation
+name: Nexus Supra canonical integration validation (policy safety)
 
 on:
   pull_request:
@@ -11,6 +11,8 @@ on:
       - "tests/background-jobs-scheduler.test.mjs"
       - "src/tenant-context.js"
       - "src/supra-*.js"
+      - "src/supra-action-policy.mjs"
+      - "tests/nexus-supra-action-execution-safety.test.mjs"
       - "migrations-preview-canonical/0021_supra_audit_events.sql"
       - "migrations-preview-canonical/0022_supra_persisted_approvals.sql"
       - "migrations-preview-canonical/0029_supra_append_only_audit_guards.sql"
@@ -42,6 +44,7 @@ jobs:
           node --experimental-default-type=module --check src/supra-orchestrator.js
           node --experimental-default-type=module --check src/supra-api.js
           node --experimental-default-type=module --check src/supra-approvals.js
+          node --experimental-default-type=module --check src/supra-action-policy.mjs
           node --experimental-default-type=module --check src/device-trust.js
           node --experimental-default-type=module --check src/index.js
       - name: Run Nexus governance, API, approval and tenant integration tests
@@ -58,3 +61,4 @@ jobs:
           tests/intervenant-workspace-api.test.mjs
           tests/device-trust-enrollment.test.mjs
           tests/background-jobs-scheduler.test.mjs
+          tests/nexus-supra-action-execution-safety.test.mjs
