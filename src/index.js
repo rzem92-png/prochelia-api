@@ -2671,6 +2671,7 @@ async function scoreClients(request, env) {
 
 async function loyaltyUpdate(request, env) {
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
+  return legacyTenantScopeBlocked();
   await ensureOperationalSchema(env);
   const b=await readJson(request)||{}; if(!b.client_id&&!b.company_id)return json({ok:false,error:'CLIENT_OR_COMPANY_REQUIRED',version:VERSION},400);
   const points=Math.max(-100000,Math.min(100000,Number(b.points||0)));
