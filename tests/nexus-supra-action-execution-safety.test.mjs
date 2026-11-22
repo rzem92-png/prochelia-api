@@ -170,3 +170,27 @@ test("action policy catalogue is read-only and remains behind the NEXUS directio
   assert.match(authGate, /UNAUTHENTICATED/);
   assert.match(authGate, /FORBIDDEN/);
 });
+
+test("queued action execution is gated by the deny-by-default NEXUS policy", () => {
+  assert.match(source, /import \{ evaluateSupraActionPolicy \} from "\.\/supra-action-policy\.mjs"/);
+  const start = source.indexOf("async function executeQueuedAction(");
+  const end = source.indexOf("\nasync function operationalExecute(", start);
+  assert.ok(start >= 0 && end > start);
+  const executor = source.slice(start, end);
+  assert.match(executor, /evaluateSupraActionPolicy\(/);
+  assert.match(executor, /if \(!policyDecision\.allowed\)/);
+  assert.match(executor, /SUPRA_ACTION_POLICY_DENIED/);
+  assert.match(executor, /status: "BLOCKED"/);
+});
+
+test("operational execution does not trust caller-supplied tenant, jurisdiction, autonomy or approval assertions", () => {
+  const start = source.indexOf("async function operationalExecute(");
+  const end = source.indexOf("\nasync function scoreClients(", start);
+  assert.ok(start >= 0 && end > start);
+  const handler = source.slice(start, end);
+  assert.match(handler, /jurisdiction: null/);
+  assert.match(handler, /autonomyLevel: "A0"/);
+  assert.match(handler, /approvedAction: null/);
+  assert.match(handler, /tenantScoped: false/);
+  assert.doesNotMatch(handler, /b\.tenantScoped|b\.jurisdiction|b\.autonomyLevel|b\.approvedAction/);
+});
