@@ -20,6 +20,7 @@ test('CORS preflight allows only the configured origin and credentials', async (
   assert.equal(response.headers.get('access-control-allow-credentials'), 'true');
   assert.match(response.headers.get('access-control-allow-methods') || '', /POST/);
   assert.match(response.headers.get('access-control-allow-headers') || '', /X-Idempotency-Key/i);
+  assert.doesNotMatch(response.headers.get('access-control-allow-headers') || '', /X-CSRF-Token/i);
   assert.notEqual(response.headers.get('access-control-allow-origin'), '*');
 });
 
