@@ -10,7 +10,6 @@ test("pricing quote requires a server-derived tenant and refuses unscoped legacy
   assert.ok(start >= 0 && end > start);
   const body = source.slice(start, end);
   const executableBody = body.replace(/^\s*\/\/.*$/gm, "");
-  const executableBody = body.replace(/^\\s*\\/\\/.*$/gm, "");
   assert.match(body, /request\.method !== 'POST'/);
   assert.match(body, /requireAuthRole\(request,env,\['gerante'\]\)/);
   assert.match(body, /resolveTenantContext\(request, env, gate\.auth\)/);
