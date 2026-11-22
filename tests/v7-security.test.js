@@ -88,32 +88,69 @@ test("directory listing rejects anonymous and non-manager callers before databas
   assert.equal(requests.length,0);
 });
 
-test("directory listing validates offsets and returns a bounded pagination contract", async () => {
+function directoryDb(rows = [], includeTenant = true) {
+  let query = null;
+  let boundValues = null;
+  let executed = false;
+  const DB = {
+    prepare(sql) {
+      if (sql.startsWith("SELECT name FROM sqlite_master")) {
+        return { bind() { return this; }, async first() { return {name:sql.includes("'clients'") ? "clients" : "intervenants"}; } };
+      }
+      if (sql.startsWith("PRAGMA table_info")) {
+        return { async all() { return {results:includeTenant ? [{name:"id"},{name:"tenant_id"}] : [{name:"id"}]}; } };
+      }
+      query = sql;
+      return {
+        bind(...values) { boundValues=values; return this; },
+        async all() { executed=true; return {results:rows}; }
+      };
+    }
+  };
+  return {DB,get query(){return query;},get boundValues(){return boundValues;},get executed(){return executed;}};
+}
+const managerSession = async () => ({user:{id:"manager",role:"gerante"}});
+const activeTenant = async () => ({ok:true,tenant:{id:"tenant-a"}});
+
+test("directory listing validates offsets and returns only active-tenant rows", async () => {
   const rows=Array.from({length:101},(_,i)=>({id:"client-"+i}));
-  let boundValues;
-  const env={DB:{prepare(){return {bind(...values){boundValues=values;return this;},async all(){return {results:rows};}};}}};
-  const invalid=await directoryList(new Request("https://example.test/api/clients?offset=not-a-number"),env,"clients",async()=>({user:{id:"manager",role:"gerante"}}));
+  const fake=directoryDb(rows);
+  const env={DB:fake.DB};
+  const invalid=await directoryList(new Request("https://example.test/api/clients?offset=not-a-number"),env,"clients",managerSession,activeTenant);
   assert.equal(invalid.status,400);
-  const response=await directoryList(new Request("https://example.test/api/clients"),env,"clients",async()=>({user:{id:"manager",role:"gerante"}}));
+  const response=await directoryList(new Request("https://example.test/api/clients"),env,"clients",managerSession,activeTenant);
   assert.equal(response.status,200);
   const body=await response.json();
   assert.equal(body.items.length,100);
   assert.equal(body.has_more,true);
   assert.equal(body.next_offset,100);
-  assert.deepEqual(boundValues,[101,0]);
-  const large=await directoryList(new Request("https://example.test/api/clients?offset=50001"),env,"clients",async()=>({user:{id:"manager",role:"gerante"}}));
+  assert.deepEqual(fake.boundValues,["tenant-a",101,0]);
+  assert.match(fake.query,/WHERE c\.tenant_id=\?/);
+  const large=await directoryList(new Request("https://example.test/api/clients?offset=50001"),env,"clients",managerSession,activeTenant);
   assert.equal(large.status,200);
-  assert.deepEqual(boundValues,[101,50001]);
+  assert.deepEqual(fake.boundValues,["tenant-a",101,50001]);
 });
 
-test("intervenant directory returns the deterministic final-page contract", async () => {
-  let query;
-  const env={DB:{prepare(sql){query=sql;return {bind(){return this;},async all(){return {results:[{id:"provider-1"}]};}};}}};
-  const response=await directoryList(new Request("https://example.test/api/intervenants"),env,"intervenants",async()=>({user:{id:"manager",role:"gerante"}}));
+test("intervenant directory filters by active tenant and preserves deterministic pagination", async () => {
+  const fake=directoryDb([{id:"provider-1"}]);
+  const response=await directoryList(new Request("https://example.test/api/intervenants"),{DB:fake.DB},"intervenants",managerSession,activeTenant);
   assert.equal(response.status,200);
   const body=await response.json();
   assert.equal(body.items[0].id,"provider-1");
   assert.equal(body.has_more,false);
   assert.equal(body.next_offset,null);
-  assert.match(query,/FROM intervenants i JOIN users u/);
+  assert.match(fake.query,/FROM intervenants i JOIN users u/);
+  assert.match(fake.query,/WHERE i\.tenant_id=\?/);
+  assert.deepEqual(fake.boundValues,["tenant-a",101,0]);
+});
+
+test("directory listing fails closed without an active tenant or tenant_id schema", async () => {
+  const noTenant=directoryDb([{id:"must-not-leak"}]);
+  const denied=await directoryList(new Request("https://example.test/api/clients"),{DB:noTenant.DB},"clients",managerSession,async()=>({ok:false,error:"ACTIVE_TENANT_REQUIRED",status:403}));
+  assert.equal(denied.status,403);
+  assert.equal(noTenant.executed,false);
+  const noColumn=directoryDb([{id:"must-not-leak"}],false);
+  const unavailable=await directoryList(new Request("https://example.test/api/clients"),{DB:noColumn.DB},"clients",managerSession,activeTenant);
+  assert.equal(unavailable.status,503);
+  assert.equal(noColumn.executed,false);
 });
