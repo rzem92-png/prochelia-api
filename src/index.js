@@ -1,8 +1,10 @@
+import { evaluateSupraActionPolicy } from "./supra-action-policy.mjs";
 import { handleV7Route } from "./v7-routes.js";
 import { handleSupraRoute } from "./supra-api.js";
 import { resolveTenantContext, tenantRoleAllowed } from "./tenant-context.js";
 import { handleSupraApprovalRoute } from "./supra-approvals.js";
 import { handleDeviceTrustRoute } from "./device-trust.js";
+import { handleAccountingRoute } from "./accounting-api.js";
 // PROCHÉLIA — INDEX BACKEND CONSOLIDÉ UNIQUE
 // Référence de consolidation : V14.1 Finance + sécurité/RBAC existants.
 // Généré le 19/10/2026. À déployer uniquement après recette avec la vraie base D1.
@@ -378,14 +380,24 @@ async function login(request, env) {
 export async function logout(request, env) {
   if (!env.DB) return json({ ok: false, database: false, version: VERSION }, 503);
   const token = getCookie(request, SESSION_COOKIE);
-  const headers = { 'set-cookie': sessionCookie('', 0) };
   if (token) {
     const tokenHash = await sha256Base64url(token);
-    await env.DB.prepare(`UPDATE sessions
-      SET revoked_at = CURRENT_TIMESTAMP, revoked_reason = 'USER_LOGOUT'
-      WHERE token_hash = ? AND revoked_at IS NULL`).bind(tokenHash).run();
+    try {
+      const result = await env.DB.prepare(`UPDATE sessions
+        SET revoked_at = CURRENT_TIMESTAMP, revoked_reason = 'USER_LOGOUT'
+        WHERE token_hash = ? AND revoked_at IS NULL`).bind(tokenHash).run();
+      // D1 may report failure without throwing. Never clear the browser cookie
+      // or claim logout succeeded until revocation is positively confirmed.
+      if (result?.success !== true) {
+        return json({ ok: false, error: 'SESSION_REVOCATION_UNCONFIRMED', version: VERSION }, 503);
+      }
+    } catch {
+      return json({ ok: false, error: 'SESSION_REVOCATION_UNCONFIRMED', version: VERSION }, 503);
+    }
   }
-  return json({ ok: true, version: VERSION, authenticated: false }, 200, headers);
+  return json({ ok: true, version: VERSION, authenticated: false }, 200, {
+    'set-cookie': sessionCookie('', 0)
+  });
 }
 
 export async function tenantContextRoute(request, env) {
@@ -414,10 +426,15 @@ export async function selectTenantForSession(request, env) {
   }
   const auth = await getSessionUser(request, env);
   if (!auth) return json({ ok: false, error: "UNAUTHENTICATED", version: VERSION }, 401);
-  let body;
-  try { body = await request.json(); } catch {
-    return json({ ok: false, error: "INVALID_JSON", version: VERSION }, 400);
+  const parsedBody = await readLimitedJson(request, 1024);
+  if (!parsedBody.ok) {
+    return json({
+      ok: false,
+      error: parsedBody.tooLarge ? "BODY_TOO_LARGE" : "INVALID_JSON",
+      version: VERSION
+    }, parsedBody.tooLarge ? 413 : 400);
   }
+  const body = parsedBody.value;
   const tenantId = typeof body?.tenant_id === "string" ? body.tenant_id.trim() : "";
   if (!tenantId || tenantId.length > 128) {
     return json({ ok: false, error: "TENANT_ID_REQUIRED", version: VERSION }, 400);
@@ -1648,6 +1665,41 @@ async function requireAuthRole(request, env, roles=[]) {
   return { auth };
 }
 
+// Tenant-scoped authorization foundation. Business data handlers must use the
+// membership role resolved from the authenticated session, never a client header
+// or the user's global role.
+function legacyTenantScopeBlocked() {
+  return json({
+    ok: false,
+    error: "TENANT_DATA_SCOPE_NOT_MIGRATED",
+    message: "This legacy resource is temporarily unavailable until tenant ownership and row-level isolation are validated.",
+    version: VERSION
+  }, 503);
+}
+
+export async function requireTenantAuthRole(request, env, allowedTenantRoles = []) {
+  let auth;
+  try {
+    auth = await getSessionUser(request, env);
+  } catch {
+    return { error: json({ ok: false, error: "AUTH_CONTEXT_UNAVAILABLE", version: VERSION }, 503) };
+  }
+  if (!auth) {
+    return { error: json({ ok: false, error: "UNAUTHENTICATED", version: VERSION }, 401) };
+  }
+  if (!Array.isArray(allowedTenantRoles) || allowedTenantRoles.length === 0) {
+    return { error: json({ ok: false, error: "TENANT_ROLE_POLICY_REQUIRED", version: VERSION }, 500) };
+  }
+  const context = await resolveTenantContext(request, env, auth);
+  if (!context.ok) {
+    return { error: json({ ok: false, error: context.error, version: VERSION }, context.status) };
+  }
+  if (!tenantRoleAllowed(context, allowedTenantRoles)) {
+    return { error: json({ ok: false, error: "FORBIDDEN", version: VERSION }, 403) };
+  }
+  return { auth, tenant: context.tenant };
+}
+
 async function journal(env, actorType, actorId, action, entityType=null, entityId=null, result='OK', metadata={}) {
   await env.DB.prepare(`INSERT INTO activity_journal(id,actor_type,actor_id,action,entity_type,entity_id,result,metadata_json) VALUES(?,?,?,?,?,?,?,?)`)
     .bind(crypto.randomUUID(),actorType,actorId,action,entityType,entityId,result,JSON.stringify(metadata)).run();
@@ -1677,6 +1729,7 @@ async function copilotRecommend(env, input) {
 
 async function createOperationalCase(request, env) {
   const gate=await requireAuthRole(request,env,['gerante','client','intervenant','entreprise']); if(gate.error)return gate.error;
+  return legacyTenantScopeBlocked();
   const body=await readJson(request)||{};
   const caseType=clean(body.case_type); if(!caseType)return json({ok:false,error:'CASE_TYPE_REQUIRED',version:VERSION},400);
   const phase=String(await getSetting(env,'project_phase','TEST')).toUpperCase();
@@ -1728,14 +1781,11 @@ async function executeCaseBusinessAction(env, c, rec, actorId=null, automatic=fa
   if (action === 'SEARCH_REPLACEMENT' || c.case_type === 'absence_intervenant' || c.case_type === 'retard_intervenant') {
     const replacementId = clean(context.replacement_intervenant_id || context.replacement_id);
     if (replacementId && c.mission_id) {
-      const cols = await getTableColumns(env,'missions');
-      if (cols.includes('intervenant_id')) {
-        await env.DB.prepare('UPDATE missions SET intervenant_id=? WHERE id=?').bind(replacementId,c.mission_id).run();
-        results.push({action:'ASSIGN_REPLACEMENT',mission_id:c.mission_id,intervenant_id:replacementId,status:'EXECUTED'});
-      } else {
-        const queued=await enqueueAction(env,c.id,'ASSIGN_REPLACEMENT',{mission_id:c.mission_id,intervenant_id:replacementId},`${c.id}:replacement:${replacementId}`);
-        results.push({action:'ASSIGN_REPLACEMENT',...queued,reason:'MISSION_SCHEMA_NEEDS_REVIEW'});
-      }
+      // Do not write mission assignment directly: this path has not yet proven
+      // tenant ownership, qualification, availability, conflict-free scheduling,
+      // and a transactional mission-state transition.
+      const queued=await enqueueAction(env,c.id,'ASSIGN_REPLACEMENT',{mission_id:c.mission_id,intervenant_id:replacementId},`${c.id}:replacement:${replacementId}`);
+      results.push({action:'ASSIGN_REPLACEMENT',...queued,reason:'VERIFIED_ASSIGNMENT_WORKFLOW_REQUIRED'});
     } else {
       const queued=await enqueueAction(env,c.id,'SEARCH_REPLACEMENT',{mission_id:c.mission_id||null,criteria:context.replacement_criteria||{},case_type:c.case_type},`${c.id}:search-replacement`);
       results.push({action:'SEARCH_REPLACEMENT',...queued});
@@ -1743,15 +1793,10 @@ async function executeCaseBusinessAction(env, c, rec, actorId=null, automatic=fa
   }
 
   if (context.reschedule_start_at && c.mission_id) {
-    const cols=await getTableColumns(env,'missions');
-    const target = cols.includes('start_at') ? 'start_at' : (cols.includes('scheduled_at') ? 'scheduled_at' : null);
-    if (target) {
-      await env.DB.prepare(`UPDATE missions SET ${target}=? WHERE id=?`).bind(String(context.reschedule_start_at),c.mission_id).run();
-      results.push({action:'RESCHEDULE_MISSION',mission_id:c.mission_id,field:target,status:'EXECUTED'});
-    } else {
-      const queued=await enqueueAction(env,c.id,'RESCHEDULE_MISSION',{mission_id:c.mission_id,start_at:context.reschedule_start_at},`${c.id}:reschedule:${context.reschedule_start_at}`);
-      results.push({action:'RESCHEDULE_MISSION',...queued,reason:'MISSION_SCHEMA_NEEDS_REVIEW'});
-    }
+    // Rescheduling remains queued until the tenant-scoped mission executor
+    // validates ownership, allowed state transition and conflict checks.
+    const queued=await enqueueAction(env,c.id,'RESCHEDULE_MISSION',{mission_id:c.mission_id,start_at:context.reschedule_start_at},`${c.id}:reschedule:${context.reschedule_start_at}`);
+    results.push({action:'RESCHEDULE_MISSION',...queued,reason:'TENANT_SCOPED_MISSION_EXECUTOR_REQUIRED'});
   }
 
   if (context.client_notification || c.client_id || c.company_id) {
@@ -1771,22 +1816,21 @@ async function executeCaseBusinessAction(env, c, rec, actorId=null, automatic=fa
 
 async function processActionOutbox(request, env) {
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
+  return legacyTenantScopeBlocked();
   await ensureOperationalSchema(env);
   const rows=await env.DB.prepare(`SELECT * FROM action_outbox WHERE status='PENDING' ORDER BY created_at ASC LIMIT 50`).all();
   const processed=[];
   for(const row of (rows.results||[])) {
-    const payload=row.payload_json?JSON.parse(row.payload_json):{};
-    // Provider-dependent actions stay queued until the corresponding adapter/secret is configured.
-    const external = ['PSP_REFUND_REVIEW','NOTIFY_CLIENT','SEARCH_REPLACEMENT','RESCHEDULE_MISSION','ASSIGN_REPLACEMENT'].includes(String(row.action_type));
-    if(external) {
-      await env.DB.prepare(`UPDATE action_outbox SET status='WAITING_PROVIDER',last_error=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind('External adapter/provider required for final execution.',row.id).run();
-      processed.push({id:row.id,status:'WAITING_PROVIDER',action_type:row.action_type});
-      continue;
-    }
-    await env.DB.prepare(`UPDATE action_outbox SET status='COMPLETED',processed_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(row.id).run();
-    processed.push({id:row.id,status:'COMPLETED',action_type:row.action_type,payload});
+    // No action type is considered complete merely because it was read from the
+    // outbox. A dedicated executor must perform the side effect and a verifier
+    // must persist VERIFIED before this row can become COMPLETED.
+    const status='WAITING_IMPLEMENTATION';
+    const reason='NO_VERIFIED_EXECUTOR_REGISTERED';
+    await env.DB.prepare(`UPDATE action_outbox SET status=?,last_error=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='PENDING'`)
+      .bind(status,reason,row.id).run();
+    processed.push({id:row.id,status,action_type:row.action_type,reason});
   }
-  await journal(env,'gerante',gate.auth.user.id,'ACTION_OUTBOX_PROCESSED','system',null,'OK',{count:processed.length});
+  await journal(env,'gerante',gate.auth.user.id,'ACTION_OUTBOX_PROCESSED','system',null,'WAITING_IMPLEMENTATION',{count:processed.length});
   return json({ok:true,version:VERSION,processed},200);
 }
 
@@ -1797,17 +1841,23 @@ async function executeOperationalCase(env, caseId, approverId=null, automatic=fa
   const rec=c.proposed_solution_json?JSON.parse(c.proposed_solution_json):{};
   if(c.requires_manager && !automatic && !approverId) return {ok:false,error:'MANAGER_APPROVAL_REQUIRED'};
   const businessResults = await executeCaseBusinessAction(env,c,rec,approverId,automatic);
-  const resolution={executed:true,automatic,action:rec.action||'RESOLVE',steps:rec.solution?.steps||[],business_results:businessResults,executed_at:new Date().toISOString()};
-  await env.DB.prepare(`INSERT INTO case_actions(id,case_id,action_code,mode,status,payload_json,result_json,completed_at) VALUES(?,?,?,?,?,?,?,CURRENT_TIMESTAMP)`)
-    .bind(crypto.randomUUID(),caseId,rec.action||'RESOLVE',automatic?'AUTO':'MANAGER','COMPLETED',JSON.stringify(rec),JSON.stringify(resolution)).run();
-  await env.DB.prepare(`UPDATE operational_cases SET status='RESOLVED',resolution_json=?,requires_manager=0,updated_at=CURRENT_TIMESTAMP,resolved_at=CURRENT_TIMESTAMP WHERE id=?`).bind(JSON.stringify(resolution),caseId).run();
+  // Queue acceptance or a direct write is not independent proof of completion.
+  // Close only when every requested effect has an explicit VERIFIED result.
+  const verified = businessResults.length > 0 && businessResults.every(x => x?.status === 'VERIFIED');
+  const nextStatus = verified ? 'RESOLVED' : 'IN_PROGRESS';
+  const resolution={executed:verified,automatic,action:rec.action||'RESOLVE',steps:rec.solution?.steps||[],business_results:businessResults,verification_required:!verified,executed_at:new Date().toISOString()};
+  await env.DB.prepare(`INSERT INTO case_actions(id,case_id,action_code,mode,status,payload_json,result_json,completed_at) VALUES(?,?,?,?,?,?,?,?)`)
+    .bind(crypto.randomUUID(),caseId,rec.action||'RESOLVE',automatic?'AUTO':'MANAGER',verified?'VERIFIED':'PENDING',JSON.stringify(rec),JSON.stringify(resolution),verified?new Date().toISOString():null).run();
+  await env.DB.prepare(`UPDATE operational_cases SET status=?,resolution_json=?,requires_manager=CASE WHEN ?='RESOLVED' THEN 0 ELSE requires_manager END,updated_at=CURRENT_TIMESTAMP,resolved_at=? WHERE id=?`)
+    .bind(nextStatus,JSON.stringify(resolution),nextStatus,verified?new Date().toISOString():null,caseId).run();
   await env.DB.prepare(`UPDATE copilot_log SET approved_by=COALESCE(?,approved_by),result=? WHERE case_id=? AND id=(SELECT id FROM copilot_log WHERE case_id=? ORDER BY created_at DESC LIMIT 1)`).bind(approverId,JSON.stringify(resolution),caseId,caseId).run();
-  await journal(env,automatic?'copilot':'gerante',approverId,automatic?'AUTO_CASE_RESOLVED':'CASE_RESOLVED','operational_case',caseId,'OK',resolution);
-  return {ok:true,case_id:caseId,resolution};
+  await journal(env,automatic?'copilot':'gerante',approverId,verified?'CASE_RESOLVED':'CASE_ACTIONS_PENDING','operational_case',caseId,verified?'OK':'PENDING_VERIFICATION',resolution);
+  return {ok:true,case_id:caseId,status:nextStatus,resolution};
 }
 
 async function approveOperationalCase(request, env) {
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
+  return legacyTenantScopeBlocked();
   const body=await readJson(request)||{}; if(!body.case_id)return json({ok:false,error:'CASE_ID_REQUIRED',version:VERSION},400);
   const result=await executeOperationalCase(env,body.case_id,gate.auth.user.id,false);
   return json({...result,version:VERSION},result.ok?200:409);
@@ -1815,6 +1865,7 @@ async function approveOperationalCase(request, env) {
 
 async function getOperationsDashboard(request, env) {
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
+  return legacyTenantScopeBlocked();
   const queries={
     open_cases:"SELECT COUNT(*) AS n FROM operational_cases WHERE status NOT IN ('RESOLVED','CLOSED')",
     auto_cases:"SELECT COUNT(*) AS n FROM operational_cases WHERE status='RESOLVED' AND auto_mode='AUTO'",
@@ -1830,6 +1881,7 @@ async function getOperationsDashboard(request, env) {
 
 async function getJournal(request, env) {
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
+  return legacyTenantScopeBlocked();
   const type=new URL(request.url).searchParams.get('type');
   const tables={copilot_log:'SELECT * FROM copilot_log ORDER BY created_at DESC LIMIT 200',activity_journal:'SELECT * FROM activity_journal ORDER BY created_at DESC LIMIT 200',commercial_tasks:'SELECT * FROM commercial_tasks ORDER BY created_at DESC LIMIT 200',recruitment_tasks:'SELECT * FROM recruitment_tasks ORDER BY created_at DESC LIMIT 200',operational_cases:'SELECT * FROM operational_cases ORDER BY created_at DESC LIMIT 200'};
   if(type && !tables[type])return json({ok:false,error:'UNKNOWN_JOURNAL',version:VERSION},400);
@@ -1977,6 +2029,7 @@ async function pricingQuote(request, env) {
 
 async function financeSummary(request, env) {
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
+  return legacyTenantScopeBlocked();
   let tenantContext;
   try { tenantContext = await resolveTenantContext(request, env, gate.auth); }
   catch { return json({ok:false,error:'TENANT_CONTEXT_UNAVAILABLE',version:VERSION,read_only:true},503); }
@@ -1988,6 +2041,7 @@ async function financeSummary(request, env) {
 }
 async function complaintCreate(request, env) {
   const gate=await requireAuthRole(request,env,['gerante','client','entreprise']); if(gate.error)return gate.error;
+  return legacyTenantScopeBlocked();
   const b=await readJson(request)||{};if(!b.category)return json({ok:false,error:'CATEGORY_REQUIRED',version:VERSION},400);
   const id=crypto.randomUUID();await env.DB.prepare(`INSERT INTO complaints(id,client_type,client_id,company_id,mission_id,category,severity,description) VALUES(?,?,?,?,?,?,?,?)`).bind(id,String(b.client_type||'B2C'),b.client_id||null,b.company_id||null,b.mission_id||null,b.category,String(b.severity||'LOW'),b.description||null).run();
   const caseType=SIMPLE_CASES.has(b.category)?b.category:'reclamation_client';
@@ -2284,6 +2338,7 @@ async function recommendPromotions(request, env) {
 async function createPromotion(request, env) {
   const gate = await requireAuthRole(request, env, ['gerante']);
   if (gate.error) return gate.error;
+  return legacyTenantScopeBlocked();
   await ensureStrategicSchema(env);
 
   const b = await readJson(request) || {};
@@ -2329,6 +2384,7 @@ async function createPromotion(request, env) {
 async function promotionList(request, env) {
   const gate = await requireAuthRole(request, env, ['gerante','entreprise','client']);
   if (gate.error) return gate.error;
+  return legacyTenantScopeBlocked();
   await ensureStrategicSchema(env);
   const status = new URL(request.url).searchParams.get('status');
   const q = status
@@ -2341,6 +2397,7 @@ async function promotionList(request, env) {
 async function activatePromotion(request, env) {
   const gate = await requireAuthRole(request, env, ['gerante']);
   if (gate.error) return gate.error;
+  return legacyTenantScopeBlocked();
   await ensureStrategicSchema(env);
   const b = await readJson(request) || {};
   if (!b.promotion_id) return json({ok:false,error:'PROMOTION_ID_REQUIRED',version:VERSION},400);
@@ -2360,6 +2417,7 @@ async function activatePromotion(request, env) {
 async function strategicDashboard(request, env) {
   const gate = await requireAuthRole(request, env, ['gerante']);
   if (gate.error) return gate.error;
+  return legacyTenantScopeBlocked();
   await ensureStrategicSchema(env);
 
   const queries = {
@@ -2519,9 +2577,26 @@ async function queueAction(env, actionType, entityType, entityId, payload, idem)
   return await env.DB.prepare('SELECT * FROM action_outbox WHERE id=?').bind(id).first();
 }
 
-async function executeQueuedAction(env, action) {
+async function executeQueuedAction(env, action, actorContext = {}) {
   if (!action) return {ok:false,error:'ACTION_NOT_FOUND'};
   const payload = JSON.parse(action.payload_json||'{}');
+  const policyDecision = evaluateSupraActionPolicy({
+    actionType: action.action_type,
+    role: actorContext.role,
+    jurisdiction: actorContext.jurisdiction,
+    autonomyLevel: actorContext.autonomyLevel || "A0",
+    hasApproval: actorContext.approvedAction === action.action_type,
+    tenantScoped: actorContext.tenantScoped === true,
+    idempotencyKey: action.idempotency_key
+  });
+  if (!policyDecision.allowed) {
+    return {
+      ok: false, status: "BLOCKED", performed: false,
+      error: "SUPRA_ACTION_POLICY_DENIED",
+      action: action.action_type,
+      policy: { risk: policyDecision.risk, reasons: policyDecision.reasons }
+    };
+  }
   const now = new Date().toISOString();
   try {
     let result = {performed:false,action:action.action_type};
@@ -2537,15 +2612,19 @@ async function executeQueuedAction(env, action) {
         if (usable.length) {
           const sql=`INSERT INTO notification_outbox(${usable.map(x=>x[0]).join(',')}) VALUES(${usable.map(()=>'?').join(',')})`;
           await env.DB.prepare(sql).bind(...usable.map(x=>x[1])).run();
-          result={performed:true,channel,notification_queued:true};
+          // Enqueueing is not delivery: keep the action pending until a delivery
+          // adapter records a provider receipt and a separate verifier confirms it.
+          result={performed:false,requires_provider:true,channel,notification_queued:true,reason:'DELIVERY_RECEIPT_REQUIRED'};
         } else result={performed:false,reason:'NOTIFICATION_SCHEMA_INCOMPATIBLE'};
       } else result={performed:false,reason:'NOTIFICATION_TABLE_MISSING'};
     } else if (action.action_type === 'RESCHEDULE_MISSION') {
-      result = await dynamicUpdate(env,'missions',action.entity_id,{scheduled_at:payload.scheduled_at,date:payload.date,time:payload.time,status:payload.status||'RESCHEDULED'});
-      result.action='RESCHEDULE_MISSION';
+      // This generic executor has no tenant-scoped authorization and post-write
+      // verifier. Never mutate a mission by unscoped entity ID.
+      result={performed:false,requires_provider:true,reason:'TENANT_SCOPED_MISSION_EXECUTOR_REQUIRED'};
     } else if (action.action_type === 'ASSIGN_REPLACEMENT') {
-      result = await dynamicUpdate(env,'missions',action.entity_id,{intervenant_id:payload.intervenant_id,assigned_intervenant_id:payload.intervenant_id,status:payload.status||'ASSIGNED'});
-      result.action='ASSIGN_REPLACEMENT';
+      // Assignment changes require qualification, availability, tenant ownership,
+      // conflict checks and an auditable transactional transition.
+      result={performed:false,requires_provider:true,reason:'VERIFIED_ASSIGNMENT_WORKFLOW_REQUIRED'};
     } else if (action.action_type === 'REFUND') {
       result={performed:false,requires_provider:true,reason:'PSP_EXECUTION_REQUIRED',payload};
     } else if (action.action_type === 'PAYOUT') {
@@ -2581,18 +2660,52 @@ async function operationalExecute(request, env) {
   if(!actions.length)return json({ok:false,error:'NO_ACTIONS_DEFINED',version:VERSION},400);
   const results=[];
   for(const a of actions){
-    const q=await queueAction(env,a.action_type||a.type,c.mission_id?'MISSION':'CASE',a.entity_id||c.mission_id,{...a},a.idempotency_key);
-    results.push(await executeQueuedAction(env,q));
+    // Preflight before creating any outbox row: denied actions must not become
+    // apparently executable pending work. All authority fields are server-derived
+    // or deliberately absent until their authoritative resolvers are integrated.
+    const actorContext = {
+      role: gate.auth.user.role,
+      jurisdiction: null,
+      autonomyLevel: "A0",
+      approvedAction: null,
+      tenantScoped: false
+    };
+    const actionType = a.action_type || a.type;
+    const preflight = evaluateSupraActionPolicy({
+      actionType,
+      role: actorContext.role,
+      jurisdiction: actorContext.jurisdiction,
+      autonomyLevel: actorContext.autonomyLevel,
+      hasApproval: false,
+      tenantScoped: actorContext.tenantScoped,
+      idempotencyKey: a.idempotency_key
+    });
+    if (!preflight.allowed) {
+      results.push({
+        ok: false, status: "BLOCKED", performed: false,
+        error: "SUPRA_ACTION_POLICY_DENIED",
+        action: String(actionType || "").toUpperCase(),
+        policy: { risk: preflight.risk, reasons: preflight.reasons },
+        queued: false
+      });
+      continue;
+    }
+    const q=await queueAction(env,actionType,c.mission_id?'MISSION':'CASE',a.entity_id||c.mission_id,{...a},a.idempotency_key);
+    results.push(await executeQueuedAction(env,q,actorContext));
   }
-  const allDone=results.every(x=>x.ok && ['DONE'].includes(x.status));
+  // DONE only means that an executor reported a side effect. Resolution
+  // requires a separate verifier to return VERIFIED for every requested action.
+  const allVerified=results.length>0 && results.every(x=>x.ok && x.status==='VERIFIED');
+  const caseStatus=allVerified?'RESOLVED':'IN_PROGRESS';
   await env.DB.prepare(`UPDATE operational_cases SET status=?,resolution_json=?,updated_at=CURRENT_TIMESTAMP,resolved_at=? WHERE id=?`)
-    .bind(allDone?'RESOLVED':'IN_PROGRESS',JSON.stringify({approved_by:gate.auth.user.id,results}),allDone?new Date().toISOString():null,c.id).run();
-  await journal(env,'gerante',gate.auth.user.id,'CASE_EXECUTED','operational_case',c.id,allDone?'OK':'PARTIAL',{results});
-  return json({ok:true,version:VERSION,case_id:c.id,status:allDone?'RESOLVED':'IN_PROGRESS',results});
+    .bind(caseStatus,JSON.stringify({approved_by:gate.auth.user.id,results,verification_required:!allVerified}),allVerified?new Date().toISOString():null,c.id).run();
+  await journal(env,'gerante',gate.auth.user.id,allVerified?'CASE_VERIFIED_AND_RESOLVED':'CASE_ACTIONS_PENDING_VERIFICATION','operational_case',c.id,allVerified?'OK':'PENDING_VERIFICATION',{results});
+  return json({ok:true,version:VERSION,case_id:c.id,status:caseStatus,verification_required:!allVerified,results});
 }
 
 async function scoreClients(request, env) {
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
+  return legacyTenantScopeBlocked();
   await ensureStrategicSchema(env); await ensureOperationalSchema(env);
   const rows=[];
   if(await tableExists(env,'payment_transactions')){
@@ -2631,6 +2744,7 @@ async function loyaltyUpdate(request, env) {
 
 async function qualityCreate(request, env) {
   const gate=await requireAuthRole(request,env,['gerante','client','entreprise']); if(gate.error)return gate.error;
+  return legacyTenantScopeBlocked();
   await ensureOperationalSchema(env); const b=await readJson(request)||{};
   if(!b.mission_id)return json({ok:false,error:'MISSION_ID_REQUIRED',version:VERSION},400);
   const id=crypto.randomUUID();
@@ -2641,6 +2755,7 @@ async function qualityCreate(request, env) {
 
 async function capacityDashboard(request, env) {
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
+  return legacyTenantScopeBlocked();
   await ensureOperationalSchema(env);
   let missions=0, available=0;
   if(await tableExists(env,'missions')) { const r=await env.DB.prepare(`SELECT COUNT(*) n FROM missions WHERE date(created_at)>=date('now','-7 day')`).first(); missions=Number(r?.n||0); }
@@ -2654,6 +2769,7 @@ async function capacityDashboard(request, env) {
 
 async function financeForecast(request, env) {
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
+  return legacyTenantScopeBlocked();
   const months=Math.max(1,Math.min(12,Number((await readJson(request)||{}).months||3)));
   const tx=await env.DB.prepare(`SELECT COALESCE(SUM(gross_cents),0) gross,COALESCE(SUM(commission_cents),0) commission,COALESCE(SUM(provider_fee_cents),0) provider_fee,COALESCE(SUM(refund_cents),0) refunds,COALESCE(SUM(net_intervenant_cents),0) intervenant FROM payment_transactions WHERE created_at>=datetime('now','-90 day')`).first();
   const base=Number(tx?.gross||0)/3;
@@ -2855,7 +2971,14 @@ async function processBackgroundJobs(request,env,{scheduler=false}={}) {
     ? {auth:{user:{id:'cloudflare-cron',role:'GERANTE'}}}
     : await requireAuthRole(request,env,['gerante']);
   if(gate.error)return gate.error;
-  await ensureFinalHardeningSchema(env); await ensureOperationalSchema(env);
+  if (!env?.DB?.prepare) return json({ok:false,error:'DATABASE_REQUIRED'},503);
+  // Runtime schedulers must never create or alter schema outside the reviewed
+  // migration chain. Readiness is read-only and fails closed until every table
+  // needed for claims, dead letters and audit journaling has been migrated.
+  const requiredTables=['background_jobs','background_jobs_dead_letter','activity_journal'];
+  const missingTables=[];
+  for(const table of requiredTables) if(!await tableExists(env,table)) missingTables.push(table);
+  if(missingTables.length) return json({ok:false,error:'BACKGROUND_JOB_SCHEMA_NOT_MIGRATED',missing:missingTables,write_enabled:false},503);
   // Recover abandoned leases after a worker crash. A bounded retry delay
   // prevents a hot loop while keeping exhausted jobs visible as FAILED.
   const stale=await env.DB.prepare(`SELECT id,attempts,max_attempts FROM background_jobs WHERE status='RUNNING' AND locked_at<=datetime(CURRENT_TIMESTAMP,'-10 minutes') ORDER BY locked_at LIMIT 50`).all();
@@ -2889,7 +3012,7 @@ async function processBackgroundJobs(request,env,{scheduler=false}={}) {
       // Delegation labels are not execution. Keep these jobs visible for an
       // implemented provider rather than falsely recording them as completed.
       if(job.job_type==='PROCESS_ACTION_OUTBOX') result={performed:false,reason:'OUTBOX_PROCESSOR_NOT_INTEGRATED',next:'/api/ops/outbox/process'};
-      else if(job.job_type==='PRODUCTION_AUDIT') result=await productionConfigCheck(env,{persist:true});
+      else if(job.job_type==='PRODUCTION_AUDIT') result=await productionConfigCheck(env,{persist:false});
       else if(job.job_type==='COPILOT_BRIEFING') result={performed:false,reason:'BRIEFING_PROVIDER_NOT_INTEGRATED',next:'/api/copilot/briefing'};
       const done=result.performed===true || result.overall===true;
       await env.DB.prepare(`UPDATE background_jobs SET status=?,result_json=?,attempts=attempts+1,updated_at=CURRENT_TIMESTAMP,completed_at=? WHERE id=?`)
@@ -4074,6 +4197,19 @@ async function handle(request,env){
     if (url.pathname === '/api/intervenant/opportunities' || /^\/api\/intervenant\/opportunities\/[^/]+\/apply$/.test(url.pathname)) return intervenantOpportunityRoute(request, env, url);
     if (url.pathname === '/api/intervenant/profile') return intervenantProfileUpdateRoute(request, env);
     if (url.pathname === '/api/intervenant/workspace') return intervenantWorkspaceReadModel(request, env);
+    if (url.pathname.startsWith('/api/accounting/')) {
+      const accountingAuth = await getSessionUser(request, env).catch(() => null);
+      if (!accountingAuth?.user) return json({ ok: false, error: 'UNAUTHENTICATED', version: VERSION }, 401);
+      const accountingContext = await resolveTenantContext(request, env, accountingAuth);
+      if (!accountingContext.ok) {
+        return json({ ok: false, error: accountingContext.error, version: VERSION }, accountingContext.status);
+      }
+      const accountingResponse = await handleAccountingRoute(request, env, {
+        ...accountingAuth,
+        tenant: accountingContext.tenant
+      });
+      if (accountingResponse) return accountingResponse;
+    }
     if (url.pathname.startsWith('/api/supra/')) {
       let supraAuth = await getSessionUser(request, env).catch(() => null);
       if (supraAuth?.user) {
@@ -4131,11 +4267,6 @@ export default {
         console.error('PROCHELIA_SCHEDULER_TICK_FAILED', String(error?.message || error));
       }));
     }
-    if(event?.cron === '0 3 * * *' || event?.cron === '0 3 * * 0'){
-      ctx.waitUntil(runNationalBackup(env,'AUTOMATIC').catch(error => {
-        console.error('PROCHELIA_AUTOMATIC_BACKUP_FAILED', String(error?.message || error));
-      }));
-    }
   }
 };
 
@@ -4148,84 +4279,6 @@ export default {
    - déclenchement manuel + automatique par Cron
    - journal des sauvegardes
    ============================================================================ */
-const NATIONAL_SCALE_DEFAULTS = Object.freeze({
-  maxPageSize:100, defaultPageSize:50, importBatchSize:500,
-  noArtificialUserCap:true, cursorPaginationRecommended:true,
-  documentsStorage:'R2', backupFrequency:'DAILY', backupRetentionDays:90
-});
-
-async function ensureNationalContinuitySchema(env){
-  if(!env.DB) throw new Error('DATABASE_REQUIRED');
-  const sqls=[
-    `CREATE TABLE IF NOT EXISTS platform_scale_config(id TEXT PRIMARY KEY,key TEXT NOT NULL UNIQUE,value_json TEXT NOT NULL,updated_at TEXT DEFAULT CURRENT_TIMESTAMP)`,
-    `CREATE TABLE IF NOT EXISTS backup_runs(id TEXT PRIMARY KEY,status TEXT NOT NULL,trigger_type TEXT NOT NULL,storage_provider TEXT,started_at TEXT DEFAULT CURRENT_TIMESTAMP,completed_at TEXT,object_count INTEGER DEFAULT 0,row_count INTEGER DEFAULT 0,error_message TEXT,metadata_json TEXT)`,
-    `CREATE TABLE IF NOT EXISTS backup_objects(id TEXT PRIMARY KEY,backup_run_id TEXT NOT NULL,object_key TEXT NOT NULL,table_name TEXT,row_count INTEGER DEFAULT 0,byte_size INTEGER DEFAULT 0,checksum TEXT,encrypted INTEGER DEFAULT 0,created_at TEXT DEFAULT CURRENT_TIMESTAMP)`,
-    `CREATE INDEX IF NOT EXISTS idx_backup_runs_date ON backup_runs(status,started_at)`,
-    `CREATE INDEX IF NOT EXISTS idx_backup_objects_run ON backup_objects(backup_run_id)`,
-    `CREATE INDEX IF NOT EXISTS idx_scale_key ON platform_scale_config(key)`
-  ];
-  for(const q of sqls) await env.DB.prepare(q).run();
-  for(const [k,v] of Object.entries(NATIONAL_SCALE_DEFAULTS))
-    await env.DB.prepare(`INSERT OR IGNORE INTO platform_scale_config(id,key,value_json) VALUES(?,?,?)`).bind(crypto.randomUUID(),k,JSON.stringify(v)).run();
-}
-
-function b64(u8){let s='';for(let i=0;i<u8.length;i+=0x8000)s+=String.fromCharCode(...u8.subarray(i,i+0x8000));return btoa(s)}
-async function backupEncrypt(text,secret){
-  if(!secret) throw new Error('BACKUP_ENCRYPTION_KEY_REQUIRED');
-  const h=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(secret));
-  const key=await crypto.subtle.importKey('raw',h,{name:'AES-GCM'},false,['encrypt']);
-  const iv=crypto.getRandomValues(new Uint8Array(12));
-  const data=await crypto.subtle.encrypt({name:'AES-GCM',iv},key,new TextEncoder().encode(text));
-  return JSON.stringify({v:1,alg:'AES-256-GCM',iv:b64(iv),data:b64(new Uint8Array(data))});
-}
-async function backupHash(text){
-  const d=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(text));
-  return [...new Uint8Array(d)].map(x=>x.toString(16).padStart(2,'0')).join('');
-}
-async function backupTables(env){
-  const r=await env.DB.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name`).all();
-  return (r.results||[]).map(x=>String(x.name));
-}
-async function runNationalBackup(env,trigger='MANUAL'){
-  // Validate every external dependency before schema helpers can write to D1.
-  // A missing key or bucket must leave Preview data untouched.
-  if(!env?.DB?.prepare) throw new Error('DATABASE_REQUIRED');
-  if(!env?.BACKUP_BUCKET || typeof env.BACKUP_BUCKET.put !== 'function') throw new Error('BACKUP_R2_NOT_CONFIGURED');
-  const secret=env.BACKUP_ENCRYPTION_KEY;
-  if(typeof secret !== 'string' || secret.length === 0) throw new Error('BACKUP_ENCRYPTION_KEY_REQUIRED');
-  await ensureNationalContinuitySchema(env);
-  const runId=crypto.randomUUID(), day=new Date().toISOString().slice(0,10);
-  await env.DB.prepare(`INSERT INTO backup_runs(id,status,trigger_type,storage_provider,metadata_json) VALUES(?,?,?,?,?)`).bind(runId,'RUNNING',trigger,'R2',JSON.stringify({version:VERSION,scope:'FULL_LOGICAL_DB'})).run();
-  let objects=0,rowsTotal=0;
-  try{
-    for(const table of await backupTables(env)){
-      let offset=0, tableRows=0;
-      while(true){
-        const safe=table.replace(/"/g,'""');
-        const r=await env.DB.prepare(`SELECT * FROM "${safe}" LIMIT ? OFFSET ?`).bind(500,offset).all();
-        const rows=r.results||[]; if(!rows.length) break;
-        const plain=rows.map(x=>JSON.stringify(x)).join('\n')+'\n';
-        const enc=await backupEncrypt(plain,secret);
-        const key=`prochelia/backups/${day}/${runId}/${table}/part-${String(offset/500).padStart(8,'0')}.json.enc`;
-        await env.BACKUP_BUCKET.put(key,enc,{httpMetadata:{contentType:'application/octet-stream'}});
-        await env.DB.prepare(`INSERT INTO backup_objects(id,backup_run_id,object_key,table_name,row_count,byte_size,checksum,encrypted) VALUES(?,?,?,?,?,?,?,1)`).bind(crypto.randomUUID(),runId,key,table,rows.length,new TextEncoder().encode(enc).byteLength,await backupHash(enc)).run();
-        objects++; rowsTotal+=rows.length; tableRows+=rows.length; offset+=rows.length;
-        if(rows.length<500) break;
-      }
-      if(!tableRows){
-        const key=`prochelia/backups/${day}/${runId}/${table}/empty.json.enc`,enc=await backupEncrypt('',secret);
-        await env.BACKUP_BUCKET.put(key,enc,{httpMetadata:{contentType:'application/octet-stream'}});
-        await env.DB.prepare(`INSERT INTO backup_objects(id,backup_run_id,object_key,table_name,row_count,byte_size,checksum,encrypted) VALUES(?,?,?,?,?,?,?,1)`).bind(crypto.randomUUID(),runId,key,table,0,new TextEncoder().encode(enc).byteLength,await backupHash(enc)).run();
-        objects++;
-      }
-    }
-    await env.DB.prepare(`UPDATE backup_runs SET status='COMPLETED',completed_at=CURRENT_TIMESTAMP,object_count=?,row_count=? WHERE id=?`).bind(objects,rowsTotal,runId).run();
-    return {ok:true,runId,status:'COMPLETED',objectCount:objects,rowCount:rowsTotal,storage:'R2',encrypted:true};
-  }catch(e){
-    await env.DB.prepare(`UPDATE backup_runs SET status='FAILED',completed_at=CURRENT_TIMESTAMP,object_count=?,row_count=?,error_message=? WHERE id=?`).bind(objects,rowsTotal,String(e.message||e),runId).run();
-    throw e;
-  }
-}
 async function nationalScaleStatus(env){
   if(!env?.DB?.prepare) throw new Error('DATABASE_REQUIRED');
   const t=await env.DB.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name`).all();
@@ -4234,8 +4287,8 @@ async function nationalScaleStatus(env){
     ? await env.DB.prepare(`SELECT key,value_json FROM platform_scale_config ORDER BY key`).all()
     : {results:[]};
   const encryptionConfigured=typeof env.BACKUP_ENCRYPTION_KEY==='string'&&env.BACKUP_ENCRYPTION_KEY.trim().length>0;
-  const backupConfigured=!!env.BACKUP_BUCKET&&typeof env.BACKUP_BUCKET.put==='function'&&encryptionConfigured;
-  return {ok:true,mode:'NATIONAL_SCALE',artificialUserCap:false,unlimitedInBusinessRules:true,database:'D1',documents:'R2_RECOMMENDED',backups:{provider:'R2',configured:backupConfigured,automatic:false,scheduleStatus:'NOT_ATTESTED',encryptionConfigured,encrypted:false,retentionDays:null,retentionStatus:'UNVERIFIED'},pagination:{cursorRecommended:true,maxPageSize:100},tables:tableNames,config:(c.results||[])};
+  const bucketBindingPresent=!!env.BACKUP_BUCKET&&typeof env.BACKUP_BUCKET.put==='function';
+  return {ok:true,mode:'NATIONAL_SCALE',artificialUserCap:false,unlimitedInBusinessRules:true,database:'D1',documents:'R2_RECOMMENDED',backups:{provider:'R2',bindingPresent:bucketBindingPresent,configured:false,verificationStatus:'UNVERIFIED',automatic:false,scheduleStatus:'NOT_ATTESTED',encryptionConfigured,encrypted:false,retentionDays:null,retentionStatus:'UNVERIFIED'},pagination:{cursorRecommended:true,maxPageSize:100},tables:tableNames,config:(c.results||[])};
 }
 async function backupStatus(env){
   if(!env?.DB?.prepare) throw new Error('DATABASE_REQUIRED');
@@ -4245,8 +4298,8 @@ async function backupStatus(env){
     ? await env.DB.prepare(`SELECT * FROM backup_runs ORDER BY started_at DESC LIMIT 20`).all()
     : {results:[]};
   const encryptionConfigured=typeof env.BACKUP_ENCRYPTION_KEY==='string'&&env.BACKUP_ENCRYPTION_KEY.trim().length>0;
-  const configured=!!env.BACKUP_BUCKET&&typeof env.BACKUP_BUCKET.put==='function'&&encryptionConfigured;
-  return {ok:true,schemaReady,configured,encryptionConfigured,automatic:false,frequency:null,scheduleStatus:'NOT_ATTESTED',retentionDays:null,retentionStatus:'UNVERIFIED',runs:r.results||[]};
+  const bindingPresent=!!env.BACKUP_BUCKET&&typeof env.BACKUP_BUCKET.put==='function';
+  return {ok:true,schemaReady,bindingPresent,configured:false,verificationStatus:'UNVERIFIED',encryptionConfigured,automatic:false,frequency:null,scheduleStatus:'NOT_ATTESTED',retentionDays:null,retentionStatus:'UNVERIFIED',runs:r.results||[]};
 }
 
 const __procheliaNationalHandle = handle;
@@ -4263,7 +4316,7 @@ handle = async function(request,env){
     }
     if(request.method==='POST'&&url.pathname==='/api/system/backup/run'){
       const auth=await getSessionUser(request,env).catch(()=>null); if(!auth?.user||String(auth.user.role||'').toUpperCase()!=='GERANTE') return json({ok:false,error:'FORBIDDEN'},403);
-      return json(await runNationalBackup(env,'MANUAL'));
+      return json({ok:false,error:'SIGNED_BACKUP_WORKFLOW_REQUIRED',message:'Direct Worker backup is disabled; use the signed EU R2 backup workflow.'},503);
     }
     return __procheliaNationalHandle(request,env);
   }catch(e){return json({ok:false,error:'NATIONAL_CONTINUITY_ERROR',message:String(e.message||e)},500)}
@@ -4599,7 +4652,7 @@ async function strictProductionAudit(request,env){
   const extra=[
     {code:'SECURITY_CODE_DELIVERY',status:finalSecretConfigured(env,'SECURITY_CODE_WEBHOOK')&&finalSecretConfigured(env,'SECURITY_CODE_WEBHOOK_SECRET')?'OK':'NOT_CONFIGURED'},
     {code:'CORS_ORIGIN',status:finalSecretConfigured(env,'CORS_ORIGIN')?'OK':'NOT_CONFIGURED'},
-    {code:'BACKUP_R2',status:env.BACKUP_BUCKET&&finalSecretConfigured(env,'BACKUP_ENCRYPTION_KEY')?'OK':'NOT_CONFIGURED'},
+    {code:'BACKUP_R2',status:'NOT_VERIFIED',bindingPresent:!!env.BACKUP_BUCKET&&typeof env.BACKUP_BUCKET.put==='function',encryptionConfigured:finalSecretConfigured(env,'BACKUP_ENCRYPTION_KEY')},
     {code:'NOTIFICATION_PROVIDER',status:finalSecretConfigured(env,'NOTIFICATION_PROVIDER')?'OK':'NOT_CONFIGURED'},
     {code:'MAPS_PROVIDER',status:finalSecretConfigured(env,'MAPS_API_KEY')?'OK':'NOT_CONFIGURED'}
   ];
