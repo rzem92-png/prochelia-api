@@ -2583,11 +2583,14 @@ async function operationalExecute(request, env) {
     const q=await queueAction(env,a.action_type||a.type,c.mission_id?'MISSION':'CASE',a.entity_id||c.mission_id,{...a},a.idempotency_key);
     results.push(await executeQueuedAction(env,q));
   }
-  const allDone=results.every(x=>x.ok && ['DONE'].includes(x.status));
+  // DONE only means that an executor reported a side effect. Resolution
+  // requires a separate verifier to return VERIFIED for every requested action.
+  const allVerified=results.length>0 && results.every(x=>x.ok && x.status==='VERIFIED');
+  const caseStatus=allVerified?'RESOLVED':'IN_PROGRESS';
   await env.DB.prepare(`UPDATE operational_cases SET status=?,resolution_json=?,updated_at=CURRENT_TIMESTAMP,resolved_at=? WHERE id=?`)
-    .bind(allDone?'RESOLVED':'IN_PROGRESS',JSON.stringify({approved_by:gate.auth.user.id,results}),allDone?new Date().toISOString():null,c.id).run();
-  await journal(env,'gerante',gate.auth.user.id,'CASE_EXECUTED','operational_case',c.id,allDone?'OK':'PARTIAL',{results});
-  return json({ok:true,version:VERSION,case_id:c.id,status:allDone?'RESOLVED':'IN_PROGRESS',results});
+    .bind(caseStatus,JSON.stringify({approved_by:gate.auth.user.id,results,verification_required:!allVerified}),allVerified?new Date().toISOString():null,c.id).run();
+  await journal(env,'gerante',gate.auth.user.id,allVerified?'CASE_VERIFIED_AND_RESOLVED':'CASE_ACTIONS_PENDING_VERIFICATION','operational_case',c.id,allVerified?'OK':'PENDING_VERIFICATION',{results});
+  return json({ok:true,version:VERSION,case_id:c.id,status:caseStatus,verification_required:!allVerified,results});
 }
 
 async function scoreClients(request, env) {
