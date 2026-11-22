@@ -1,3 +1,4 @@
+import { evaluateSupraActionPolicy } from "./supra-action-policy.mjs";
 import { handleV7Route } from "./v7-routes.js";
 import { handleSupraRoute } from "./supra-api.js";
 import { resolveTenantContext, tenantRoleAllowed } from "./tenant-context.js";
@@ -2514,9 +2515,26 @@ async function queueAction(env, actionType, entityType, entityId, payload, idem)
   return await env.DB.prepare('SELECT * FROM action_outbox WHERE id=?').bind(id).first();
 }
 
-async function executeQueuedAction(env, action) {
+async function executeQueuedAction(env, action, actorContext = {}) {
   if (!action) return {ok:false,error:'ACTION_NOT_FOUND'};
   const payload = JSON.parse(action.payload_json||'{}');
+  const policyDecision = evaluateSupraActionPolicy({
+    actionType: action.action_type,
+    role: actorContext.role,
+    jurisdiction: actorContext.jurisdiction,
+    autonomyLevel: actorContext.autonomyLevel || "A0",
+    hasApproval: actorContext.approvedAction === action.action_type,
+    tenantScoped: actorContext.tenantScoped === true,
+    idempotencyKey: action.idempotency_key
+  });
+  if (!policyDecision.allowed) {
+    return {
+      ok: false, status: "BLOCKED", performed: false,
+      error: "SUPRA_ACTION_POLICY_DENIED",
+      action: action.action_type,
+      policy: { risk: policyDecision.risk, reasons: policyDecision.reasons }
+    };
+  }
   const now = new Date().toISOString();
   try {
     let result = {performed:false,action:action.action_type};
@@ -2581,7 +2599,16 @@ async function operationalExecute(request, env) {
   const results=[];
   for(const a of actions){
     const q=await queueAction(env,a.action_type||a.type,c.mission_id?'MISSION':'CASE',a.entity_id||c.mission_id,{...a},a.idempotency_key);
-    results.push(await executeQueuedAction(env,q));
+    // No caller-supplied approval, autonomy, jurisdiction or tenant assertion is trusted.
+    // Until a verified tenant-context resolver and approval ledger are wired here,
+    // the execution gate intentionally denies actions lacking those server-side facts.
+    results.push(await executeQueuedAction(env,q,{
+      role: gate.auth.user.role,
+      jurisdiction: null,
+      autonomyLevel: "A0",
+      approvedAction: null,
+      tenantScoped: false
+    }));
   }
   // DONE only means that an executor reported a side effect. Resolution
   // requires a separate verifier to return VERIFIED for every requested action.
