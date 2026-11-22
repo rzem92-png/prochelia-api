@@ -18,7 +18,7 @@ test("Preview E2E pins the current private frontend branch and exact Pages commi
   assert.match(workflow, /FRONTEND_BRANCH: feat\/intervenant-secure-pages-integration-2026-11-20/);
   assert.match(workflow, /FRONTEND_COMMIT_SHA: \$\{\{ inputs\.frontend_commit_sha/);
   assert.match(workflow, /f7a1a2015083043ec2d4f35c914f7c38e785853a/);
-  assert.match(workflow, /pages\/projects\/prochelia\/deployments\?env=preview&per_page=100/);
+  assert.match(workflow, /pages\/projects\/prochelia\/deployments\?env=preview&per_page=10/);
   assert.match(workflow, /deployment_trigger\.metadata\.branch/);
   assert.match(workflow, /deployment_trigger\.metadata\.commit_hash/);
   assert.match(workflow, /prochelia-api-preview/);
