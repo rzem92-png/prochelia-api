@@ -3194,56 +3194,21 @@ async function growthDashboard(request,env){
 
 /* ==================== V14.0.0 — COMPTABILITÉ MULTI-ESPACE / EXPORTS / RÉSOLUTION ==================== */
 async function ensureFinanceWorkspaceSchema(env) {
-  if (!env.DB) throw new Error('DATABASE_REQUIRED');
-  const sql = [
-    `CREATE TABLE IF NOT EXISTS finance_workspace_entries (
-      id TEXT PRIMARY KEY,
-      user_id TEXT NOT NULL,
-      role TEXT NOT NULL,
-      entry_type TEXT NOT NULL,
-      direction TEXT NOT NULL DEFAULT 'IN',
-      amount_cents INTEGER NOT NULL DEFAULT 0,
-      currency TEXT NOT NULL DEFAULT 'EUR',
-      label TEXT,
-      reference_type TEXT,
-      reference_id TEXT,
-      status TEXT NOT NULL DEFAULT 'posted',
-      metadata_json TEXT NOT NULL DEFAULT '{}',
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )`,
-    `CREATE INDEX IF NOT EXISTS idx_finance_workspace_user ON finance_workspace_entries(user_id, created_at DESC)`,
-    `CREATE INDEX IF NOT EXISTS idx_finance_workspace_ref ON finance_workspace_entries(reference_type, reference_id)`,
-    `CREATE TABLE IF NOT EXISTS finance_export_log (
-      id TEXT PRIMARY KEY,
-      user_id TEXT NOT NULL,
-      role TEXT NOT NULL,
-      format TEXT NOT NULL,
-      period_start TEXT,
-      period_end TEXT,
-      row_count INTEGER NOT NULL DEFAULT 0,
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )`,
-    `CREATE INDEX IF NOT EXISTS idx_finance_export_user ON finance_export_log(user_id, created_at DESC)`,
-    `CREATE TABLE IF NOT EXISTS finance_resolution_cases (
-      id TEXT PRIMARY KEY,
-      user_id TEXT NOT NULL,
-      role TEXT NOT NULL,
-      issue_type TEXT NOT NULL,
-      status TEXT NOT NULL DEFAULT 'OPEN',
-      severity TEXT NOT NULL DEFAULT 'LOW',
-      description TEXT,
-      proposed_solution TEXT,
-      resolution TEXT,
-      amount_cents INTEGER,
-      reference_id TEXT,
-      metadata_json TEXT NOT NULL DEFAULT '{}',
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      resolved_at TEXT
-    )`,
-    `CREATE INDEX IF NOT EXISTS idx_finance_resolution_user ON finance_resolution_cases(user_id, status, created_at DESC)`
-  ];
-  for (const q of sql) await env.DB.prepare(q).run();
+  if (!env?.DB) throw new Error('DATABASE_REQUIRED');
+  // Finance workspace schema is owned by canonical migrations, never runtime DDL.
+  const required = {
+    finance_workspace_entries: ['id','user_id','tenant_id','entry_type','amount_cents'],
+    finance_export_log: ['id','user_id','tenant_id','format'],
+    finance_resolution_cases: ['id','user_id','tenant_id','issue_type','status']
+  };
+  for (const [table, requiredColumns] of Object.entries(required)) {
+    const columns = await tableColumns(env, table);
+    if (!requiredColumns.every(column => columns.includes(column))) {
+      throw new Error('FINANCE_WORKSPACE_TENANT_SCHEMA_REQUIRED');
+    }
+    const count = await env.DB.prepare(`SELECT COUNT(*) AS total FROM ${table} WHERE tenant_id IS NULL`).first();
+    if (Number(count?.total || 0) > 0) throw new Error('FINANCE_WORKSPACE_TENANT_ATTRIBUTION_REQUIRED');
+  }
 }
 
 function financeRoleAllowed(role) {
@@ -3254,8 +3219,21 @@ async function financeAuth(request, env) {
   const auth = await getSessionUser(request, env);
   if (!auth) return { response: json({ok:false,error:'UNAUTHENTICATED',version:VERSION},401) };
   if (!financeRoleAllowed(auth.user.role)) return { response: json({ok:false,error:'FORBIDDEN',version:VERSION},403) };
-  await ensureFinanceWorkspaceSchema(env);
-  return { auth };
+  let tenantContext;
+  try {
+    tenantContext = await resolveTenantContext(request,env,auth);
+  } catch {
+    return { response: json({ok:false,error:'TENANT_CONTEXT_UNAVAILABLE',version:VERSION},503) };
+  }
+  if (!tenantContext?.ok || !tenantContext.tenant?.id) {
+    return { response: json({ok:false,error:tenantContext?.error||'ACTIVE_TENANT_REQUIRED',version:VERSION},tenantContext?.status||403) };
+  }
+  try {
+    await ensureFinanceWorkspaceSchema(env);
+  } catch {
+    return { response: json({ok:false,error:'FINANCE_WORKSPACE_TENANT_SCOPE_REQUIRED',version:VERSION,write_enabled:false},503) };
+  }
+  return { auth, tenantId:tenantContext.tenant.id };
 }
 
 function financeMoney(cents) {
@@ -3268,55 +3246,48 @@ function financeIso(v) {
   return Number.isNaN(d.getTime()) ? null : d.toISOString();
 }
 
-async function financeRowsForUser(env, user) {
+async function financeRowsForUser(env, user, tenantId) {
+  if (!tenantId) throw new Error('ACTIVE_TENANT_REQUIRED');
   const role = String(user.role||'').toUpperCase();
   const uid = user.id;
-  const params = [];
-  let where = '';
-  if (['GERANTE','ADMIN','FINANCE'].includes(role)) {
-    where = '1=1';
-  } else if (role === 'INTERVENANT') {
-    where = 'intervenant_id=?'; params.push(uid);
-  } else {
-    where = 'client_id=?'; params.push(uid);
+  const manager = ['GERANTE','ADMIN','FINANCE','SUPPORT'].includes(role);
+  let where = 'tenant_id=?';
+  const params = [tenantId];
+  if (role === 'INTERVENANT') {
+    where += ' AND intervenant_id IN (SELECT id FROM intervenants WHERE user_id=? AND tenant_id=?)';
+    params.push(uid,tenantId);
+  } else if (!manager) {
+    where += ' AND client_id IN (SELECT id FROM clients WHERE user_id=? AND tenant_id=?)';
+    params.push(uid,tenantId);
   }
 
   let payments = [];
-  try {
-    const r = await env.DB.prepare(
-      `SELECT id,mission_id,client_id,intervenant_id,type,status,gross_cents,commission_cents,
-              provider_fee_cents,refund_cents,net_intervenant_cents,currency,provider,
-              provider_payment_id,provider_payout_id,reason,created_at,updated_at
-         FROM payment_transactions WHERE ${where}
-        ORDER BY created_at DESC LIMIT 5000`
-    ).bind(...params).all();
-    payments = r.results || [];
-  } catch (_) {}
+  const r = await env.DB.prepare(
+    `SELECT id,mission_id,client_id,intervenant_id,type,status,gross_cents,commission_cents,
+            provider_fee_cents,refund_cents,net_intervenant_cents,currency,provider,
+            provider_payment_id,provider_payout_id,reason,created_at,updated_at
+       FROM payment_transactions WHERE ${where}
+      ORDER BY created_at DESC LIMIT 5000`
+  ).bind(...params).all();
+  payments = r.results || [];
 
   let ledger = [];
-  try {
-    if (['GERANTE','ADMIN','FINANCE'].includes(role)) {
-      const r = await env.DB.prepare(
-        `SELECT id,entry_type,direction,amount_cents,currency,label,reference_type,reference_id,status,created_at
-           FROM finance_workspace_entries ORDER BY created_at DESC LIMIT 5000`
-      ).all();
-      ledger = r.results || [];
-    } else {
-      const r = await env.DB.prepare(
-        `SELECT id,entry_type,direction,amount_cents,currency,label,reference_type,reference_id,status,created_at
-           FROM finance_workspace_entries WHERE user_id=? ORDER BY created_at DESC LIMIT 5000`
-      ).bind(uid).all();
-      ledger = r.results || [];
-    }
-  } catch (_) {}
+  const ledgerQuery = manager
+    ? env.DB.prepare(`SELECT id,entry_type,direction,amount_cents,currency,label,reference_type,reference_id,status,created_at
+         FROM finance_workspace_entries WHERE tenant_id=? ORDER BY created_at DESC LIMIT 5000`).bind(tenantId)
+    : env.DB.prepare(`SELECT id,entry_type,direction,amount_cents,currency,label,reference_type,reference_id,status,created_at
+         FROM finance_workspace_entries WHERE tenant_id=? AND user_id=? ORDER BY created_at DESC LIMIT 5000`).bind(tenantId,uid);
+  const ledgerResult = await ledgerQuery.all();
+  ledger = ledgerResult.results || [];
 
-  let payouts=[];
-  try {
-    const q = ['GERANTE','ADMIN','FINANCE'].includes(role)
-      ? env.DB.prepare(`SELECT id,user_id,amount_cents,currency,mode,status,provider,provider_payout_id,failure_code,requested_at,completed_at FROM payout_requests ORDER BY requested_at DESC LIMIT 5000`)
-      : env.DB.prepare(`SELECT id,user_id,amount_cents,currency,mode,status,provider,provider_payout_id,failure_code,requested_at,completed_at FROM payout_requests WHERE user_id=? ORDER BY requested_at DESC LIMIT 5000`).bind(uid);
-    const r=await q.all(); payouts=r.results||[];
-  } catch (_) {}
+  let payouts = [];
+  const payoutQuery = manager
+    ? env.DB.prepare(`SELECT id,user_id,amount_cents,currency,mode,status,provider,provider_payout_id,failure_code,requested_at,completed_at
+         FROM payout_requests WHERE tenant_id=? ORDER BY requested_at DESC LIMIT 5000`).bind(tenantId)
+    : env.DB.prepare(`SELECT id,user_id,amount_cents,currency,mode,status,provider,provider_payout_id,failure_code,requested_at,completed_at
+         FROM payout_requests WHERE tenant_id=? AND user_id=? ORDER BY requested_at DESC LIMIT 5000`).bind(tenantId,uid);
+  const payoutResult = await payoutQuery.all();
+  payouts = payoutResult.results || [];
   return {payments,ledger,payouts};
 }
 
@@ -3373,7 +3344,7 @@ function financeProblemSolution(issueType) {
 
 async function financeDashboard(request,env) {
   const a=await financeAuth(request,env); if(a.response)return a.response;
-  const {auth}=a, rows=await financeRowsForUser(env,auth.user), summary=financeSummaryFromRows(rows,auth.user);
+  const {auth,tenantId}=a, rows=await financeRowsForUser(env,auth.user,tenantId), summary=financeSummaryFromRows(rows,auth.user);
   return json({ok:true,version:VERSION,workspace:{
     owner:{id:auth.user.id,role:auth.user.role,email:auth.user.email},
     summary,
@@ -3387,10 +3358,10 @@ async function financeDashboard(request,env) {
 
 async function financeExport(request,env) {
   const a=await financeAuth(request,env); if(a.response)return a.response;
-  const {auth}=a, url=new URL(request.url);
+  const {auth,tenantId}=a, url=new URL(request.url);
   const format=String(url.searchParams.get('format')||'csv').toLowerCase();
   const start=url.searchParams.get('from'), end=url.searchParams.get('to');
-  const rows=await financeRowsForUser(env,auth.user);
+  const rows=await financeRowsForUser(env,auth.user,tenantId);
   let payments=rows.payments.filter(x=>(!start||String(x.created_at)>=start)&&(!end||String(x.created_at)<=end));
   const data=payments.map(x=>({
     id:x.id, mission_id:x.mission_id, type:x.type, status:x.status, date:x.created_at,
@@ -3401,8 +3372,8 @@ async function financeExport(request,env) {
   }));
   const summary=financeSummaryFromRows({payments,ledger:rows.ledger},auth.user);
   const id=crypto.randomUUID();
-  await env.DB.prepare(`INSERT INTO finance_export_log(id,user_id,role,format,period_start,period_end,row_count) VALUES(?,?,?,?,?,?,?)`)
-    .bind(id,auth.user.id,auth.user.role,format,start,end,data.length).run();
+  await env.DB.prepare(`INSERT INTO finance_export_log(id,user_id,role,format,period_start,period_end,row_count,tenant_id) VALUES(?,?,?,?,?,?,?,?)`)
+    .bind(id,auth.user.id,auth.user.role,format,start,end,data.length,tenantId).run();
   await journal(env,auth.user.role,auth.user.id,'FINANCE_EXPORT','finance_export',id,'OK',{format,row_count:data.length,from:start,to:end});
 
   if(format==='json') return json({ok:true,version:VERSION,summary,rows:data,export_id:id});
@@ -3419,34 +3390,34 @@ async function financeExport(request,env) {
 
 async function financeEntryCreate(request,env) {
   const a=await financeAuth(request,env); if(a.response)return a.response;
-  const {auth}=a, b=await readJson(request)||{};
+  const {auth,tenantId}=a, b=await readJson(request)||{};
   const amount=Math.round(Number(b.amount_eur)*100);
   if(!Number.isFinite(amount)||amount<=0||!b.entry_type) return json({ok:false,error:'INVALID_FINANCE_ENTRY',version:VERSION},400);
   const id=crypto.randomUUID();
-  await env.DB.prepare(`INSERT INTO finance_workspace_entries(id,user_id,role,entry_type,direction,amount_cents,currency,label,reference_type,reference_id,metadata_json) VALUES(?,?,?,?,?,?,?,?,?,?,?)`)
-    .bind(id,auth.user.id,auth.user.role,String(b.entry_type),String(b.direction||'IN').toUpperCase()==='OUT'?'OUT':'IN',amount,b.currency||'EUR',clean(b.label)||null,clean(b.reference_type)||null,clean(b.reference_id)||null,JSON.stringify(b.metadata||{})).run();
+  await env.DB.prepare(`INSERT INTO finance_workspace_entries(id,user_id,role,entry_type,direction,amount_cents,currency,label,reference_type,reference_id,metadata_json,tenant_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`)
+    .bind(id,auth.user.id,auth.user.role,String(b.entry_type),String(b.direction||'IN').toUpperCase()==='OUT'?'OUT':'IN',amount,b.currency||'EUR',clean(b.label)||null,clean(b.reference_type)||null,clean(b.reference_id)||null,JSON.stringify(b.metadata||{}),tenantId).run();
   await journal(env,auth.user.role,auth.user.id,'FINANCE_ENTRY_CREATE','finance_workspace_entries',id,'OK',{entry_type:b.entry_type});
   return json({ok:true,version:VERSION,id});
 }
 
 async function financeProblemCreate(request,env) {
   const a=await financeAuth(request,env); if(a.response)return a.response;
-  const {auth}=a,b=await readJson(request)||{}, [issueType,solution]=financeProblemSolution(b.issue_type);
+  const {auth,tenantId}=a,b=await readJson(request)||{}, [issueType,solution]=financeProblemSolution(b.issue_type);
   const severity=['CRITICAL','HIGH','MEDIUM','LOW'].includes(String(b.severity||'').toUpperCase())?String(b.severity).toUpperCase():'LOW';
   const auto=['LOW','MEDIUM'].includes(severity) && ['PAYMENT_FAILED','EXPORT_FAILED','INVOICE_MISSING','UNKNOWN'].includes(issueType);
   const status=auto?'AUTO_RESOLUTION_PROPOSED':'OPEN';
   const id=crypto.randomUUID();
-  await env.DB.prepare(`INSERT INTO finance_resolution_cases(id,user_id,role,issue_type,status,severity,description,proposed_solution,amount_cents,reference_id,metadata_json) VALUES(?,?,?,?,?,?,?,?,?,?,?)`)
-    .bind(id,auth.user.id,auth.user.role,issueType,status,severity,clean(b.description)||null,solution,Number.isFinite(Number(b.amount_cents))?Number(b.amount_cents):null,clean(b.reference_id)||null,JSON.stringify(b.metadata||{})).run();
+  await env.DB.prepare(`INSERT INTO finance_resolution_cases(id,user_id,role,issue_type,status,severity,description,proposed_solution,amount_cents,reference_id,metadata_json,tenant_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`)
+    .bind(id,auth.user.id,auth.user.role,issueType,status,severity,clean(b.description)||null,solution,Number.isFinite(Number(b.amount_cents))?Number(b.amount_cents):null,clean(b.reference_id)||null,JSON.stringify(b.metadata||{}),tenantId).run();
   await journal(env,auth.user.role,auth.user.id,'FINANCE_PROBLEM_CREATE','finance_resolution_cases',id,status,{issue_type:issueType,auto});
   return json({ok:true,version:VERSION,case:{id,issue_type:issueType,status,severity,automatic_resolution_possible:auto,proposed_solution:solution,requires_human_validation:!auto}});
 }
 
 async function financeProblemResolve(request,env) {
   const a=await financeAuth(request,env); if(a.response)return a.response;
-  const {auth}=a,b=await readJson(request)||{},id=clean(b.case_id);
+  const {auth,tenantId}=a,b=await readJson(request)||{},id=clean(b.case_id);
   if(!id)return json({ok:false,error:'CASE_ID_REQUIRED',version:VERSION},400);
-  const row=await env.DB.prepare('SELECT * FROM finance_resolution_cases WHERE id=? LIMIT 1').bind(id).first();
+  const row=await env.DB.prepare('SELECT * FROM finance_resolution_cases WHERE id=? AND tenant_id=? LIMIT 1').bind(id,tenantId).first();
   if(!row)return json({ok:false,error:'CASE_NOT_FOUND',version:VERSION},404);
   const role=String(auth.user.role||'').toUpperCase();
   const owner=String(row.user_id)===String(auth.user.id);
@@ -3455,7 +3426,7 @@ async function financeProblemResolve(request,env) {
   const approved=Boolean(b.approve);
   const resolution=clean(b.resolution)||row.proposed_solution||'Résolution contrôlée par le Copilote.';
   const status=approved?'RESOLVED':'ESCALATED';
-  await env.DB.prepare(`UPDATE finance_resolution_cases SET status=?,resolution=?,resolved_at=CURRENT_TIMESTAMP WHERE id=?`).bind(status,resolution,id).run();
+  await env.DB.prepare(`UPDATE finance_resolution_cases SET status=?,resolution=?,resolved_at=CURRENT_TIMESTAMP WHERE id=? AND tenant_id=?`).bind(status,resolution,id,tenantId).run();
   await journal(env,auth.user.role,auth.user.id,'FINANCE_PROBLEM_RESOLVE','finance_resolution_cases',id,status,{approved});
   return json({ok:true,version:VERSION,case_id:id,status,resolution});
 }
