@@ -103,7 +103,8 @@ test("Preview migration workflow validates the full canonical migration chain", 
     "0037_support_cases_tenant_isolation.sql",
     "0038_identity_verification_tenant_scope.sql",
     "0039_cryptographic_device_enrollment.sql",
-    "0040_accounting_active_state_at_posting.sql"
+    "0040_accounting_active_state_at_posting.sql",
+    "0041_tenant_invitation_onboarding.sql"
   ];
   for (const migration of expected) assert.ok(workflow.includes(`"${migration}"`), `missing canonical migration ${migration}`);
 });
@@ -132,6 +133,7 @@ test("Preview post-migration verification checks identity, mission-security and 
     "0038_identity_verification_tenant_scope.sql",
     "0039_cryptographic_device_enrollment.sql",
     "0040_accounting_active_state_at_posting.sql",
+    "0041_tenant_invitation_onboarding.sql",
     "trg_accounting_journal_post_active_scope",
     "trusted_device_credentials", "device_auth_challenges",
     "idx_trusted_device_credentials_tenant_user_status",
@@ -168,13 +170,13 @@ test("Preview post-migration verification checks identity, mission-security and 
   ]) assert.ok(workflow.includes(name), `missing post-migration verification for ${name}`);
 });
 
-test("Preview migration workflow accepts only an empty EU D1, the exact 23-entry reviewed baseline or the exact 41-entry target", () => {
+test("Preview migration workflow accepts only an empty EU D1, the exact 23-entry reviewed baseline or the exact 42-entry target", () => {
   assert.match(workflow, /SELECT type, name FROM sqlite_master ORDER BY type, name/);
   assert.match(workflow, /registry_present/);
   assert.match(workflow, /non_internal/);
-  assert.match(workflow, /len\(local\) != 41/);
+  assert.match(workflow, /len\(local\) != 42/);
   assert.match(workflow, /remote == base/);
-  assert.match(workflow, /differs from the exact reviewed 23-entry baseline and 41-entry target/);
+  assert.match(workflow, /differs from the exact reviewed 23-entry baseline and 42-entry target/);
   assert.doesNotMatch(workflow, /legacy=/);
   assert.doesNotMatch(workflow, /baseline=\(local-pending\)\|legacy/);
 });
