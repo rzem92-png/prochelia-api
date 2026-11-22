@@ -2905,7 +2905,14 @@ async function processBackgroundJobs(request,env,{scheduler=false}={}) {
     ? {auth:{user:{id:'cloudflare-cron',role:'GERANTE'}}}
     : await requireAuthRole(request,env,['gerante']);
   if(gate.error)return gate.error;
-  await ensureFinalHardeningSchema(env); await ensureOperationalSchema(env);
+  if (!env?.DB?.prepare) return json({ok:false,error:'DATABASE_REQUIRED'},503);
+  // Runtime schedulers must never create or alter schema outside the reviewed
+  // migration chain. Readiness is read-only and fails closed until every table
+  // needed for claims, dead letters and audit journaling has been migrated.
+  const requiredTables=['background_jobs','background_jobs_dead_letter','activity_journal'];
+  const missingTables=[];
+  for(const table of requiredTables) if(!await tableExists(env,table)) missingTables.push(table);
+  if(missingTables.length) return json({ok:false,error:'BACKGROUND_JOB_SCHEMA_NOT_MIGRATED',missing:missingTables,write_enabled:false},503);
   // Recover abandoned leases after a worker crash. A bounded retry delay
   // prevents a hot loop while keeping exhausted jobs visible as FAILED.
   const stale=await env.DB.prepare(`SELECT id,attempts,max_attempts FROM background_jobs WHERE status='RUNNING' AND locked_at<=datetime(CURRENT_TIMESTAMP,'-10 minutes') ORDER BY locked_at LIMIT 50`).all();
@@ -2939,7 +2946,7 @@ async function processBackgroundJobs(request,env,{scheduler=false}={}) {
       // Delegation labels are not execution. Keep these jobs visible for an
       // implemented provider rather than falsely recording them as completed.
       if(job.job_type==='PROCESS_ACTION_OUTBOX') result={performed:false,reason:'OUTBOX_PROCESSOR_NOT_INTEGRATED',next:'/api/ops/outbox/process'};
-      else if(job.job_type==='PRODUCTION_AUDIT') result=await productionConfigCheck(env,{persist:true});
+      else if(job.job_type==='PRODUCTION_AUDIT') result=await productionConfigCheck(env,{persist:false});
       else if(job.job_type==='COPILOT_BRIEFING') result={performed:false,reason:'BRIEFING_PROVIDER_NOT_INTEGRATED',next:'/api/copilot/briefing'};
       const done=result.performed===true || result.overall===true;
       await env.DB.prepare(`UPDATE background_jobs SET status=?,result_json=?,attempts=attempts+1,updated_at=CURRENT_TIMESTAMP,completed_at=? WHERE id=?`)
