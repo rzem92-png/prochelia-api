@@ -20,7 +20,7 @@ test("Preview migration restores the exact encrypted R2 backup into a distinct E
   assert.ok(targetGate >= 0 && exportStep > targetGate && roundTrip > exportStep);
   assert.ok(restoreStep > roundTrip && publish > restoreStep && applyStep > publish);
   assert.match(workflow, /restore_test_db_id:[\s\S]*required: true/);
-  assert.match(workflow, /RESTORE_TEST_DB_NAME: prochelia-restore-test-v3/);
+  assert.match(workflow, /RESTORE_TEST_DB_NAME: prochelia-r2-restore-validation-2026-11-18/);
   assert.match(workflow, /\.result\.jurisdiction == "eu"/);
   assert.ok(workflow.includes('[[ "$RESTORE_TEST_DB_ID" != "$EXPECTED_DB_ID"'), "restore D1 must be distinct from Preview D1");
   assert.match(workflow, /PRAGMA quick_check/);
