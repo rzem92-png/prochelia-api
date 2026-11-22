@@ -1062,3 +1062,115 @@ assert "code:'FINANCIAL_AUXILIARY_TENANT_COLUMNS'" in source
 assert "tenant_id=? AND status IN ('requested','processing')" in source
 assert "WHERE mission_id=? AND tenant_id=?" in source
 assert "payment_wallet_ledger','payment_reconciliation" in source
+
+
+# Two-tenant financial isolation: valid tenant-A links work; forged tenant-B links fail.
+db.execute("""
+    INSERT INTO users(id, role, email, first_name, last_name, password_hash)
+    VALUES ('finance-user-a', 'intervenant', 'finance-a@example.test', 'Finance', 'A', 'synthetic-test-hash')
+""")
+for tenant_id, suffix in [("tenant-a", "a"), ("tenant-b", "b")]:
+    membership_id = f"finance-membership-{suffix}"
+    db.execute("""
+        INSERT INTO tenant_memberships(id,tenant_id,user_id,role,status,invited_by_user_id)
+        VALUES (?,?,'finance-user-a','MEMBER','INVITED','user-admin')
+    """, (membership_id, tenant_id))
+    db.execute("""
+        UPDATE tenant_memberships
+           SET status='ACTIVE', accepted_at=CURRENT_TIMESTAMP
+         WHERE id=?
+    """, (membership_id,))
+
+db.execute("""
+    INSERT INTO wallets(id,user_id,tenant_id,currency)
+    VALUES ('finance-wallet-a','finance-user-a','tenant-a','EUR')
+""")
+db.execute("""
+    INSERT INTO payment_accounts(id,user_id,provider,tenant_id)
+    VALUES ('finance-account-a','finance-user-a','sandbox','tenant-a')
+""")
+db.execute("""
+    INSERT INTO payment_transactions(
+      id,idempotency_key,mission_id,client_id,intervenant_id,type,status,
+      gross_cents,commission_cents,net_intervenant_cents,currency,tenant_id
+    ) VALUES (
+      'finance-tx-a','finance-idem-a','market-mission-opportunity','market-client-a-row',
+      NULL,'MISSION_CHARGE','paid',10000,1000,9000,'EUR','tenant-a'
+    )
+""")
+db.execute("""
+    INSERT INTO payout_requests(
+      id,idempotency_key,wallet_id,user_id,amount_cents,tenant_id
+    ) VALUES ('finance-payout-a','finance-payout-idem-a','finance-wallet-a','finance-user-a',2500,'tenant-a')
+""")
+db.execute("""
+    INSERT INTO payment_disputes(
+      id,mission_id,transaction_id,client_id,intervenant_id,reason,amount_cents,tenant_id
+    ) VALUES (
+      'finance-dispute-a','market-mission-opportunity','finance-tx-a','market-client-a-row',
+      NULL,'synthetic test dispute',1000,'tenant-a'
+    )
+""")
+db.execute("""
+    INSERT INTO payment_wallet_ledger(
+      id,idempotency_key,user_id,entry_type,currency,tenant_id
+    ) VALUES ('finance-ledger-a','finance-ledger-idem-a','finance-user-a','TEST_NOOP','EUR','tenant-a')
+""")
+db.execute("""
+    INSERT INTO payment_reconciliation(
+      id,provider,external_id,internal_transaction_id,tenant_id
+    ) VALUES ('finance-recon-a','sandbox','external-a','finance-tx-a','tenant-a')
+""")
+assert db.execute("SELECT available_cents FROM wallets WHERE id='finance-wallet-a'").fetchone()[0] == 0
+
+cross_tenant_financial_writes = [
+    """INSERT INTO payment_transactions(
+         id,idempotency_key,mission_id,client_id,type,status,tenant_id
+       ) VALUES ('finance-tx-cross','finance-idem-cross','market-mission-opportunity',
+         'market-client-a-row','MISSION_CHARGE','pending','tenant-b')""",
+    """INSERT INTO payout_requests(
+         id,idempotency_key,wallet_id,user_id,amount_cents,tenant_id
+       ) VALUES ('finance-payout-cross','finance-payout-idem-cross',
+         'finance-wallet-a','finance-user-a',1000,'tenant-b')""",
+    """INSERT INTO payment_disputes(
+         id,mission_id,transaction_id,client_id,reason,amount_cents,tenant_id
+       ) VALUES ('finance-dispute-cross','market-mission-opportunity','finance-tx-a',
+         'market-client-a-row','cross tenant',1000,'tenant-b')""",
+    """INSERT INTO payment_wallet_ledger(
+         id,idempotency_key,user_id,entry_type,currency,tenant_id
+       ) VALUES ('finance-ledger-cross','finance-ledger-idem-cross',
+         'finance-user-a','TEST_NOOP','EUR','tenant-b')""",
+    """INSERT INTO payment_reconciliation(
+         id,provider,external_id,internal_transaction_id,tenant_id
+       ) VALUES ('finance-recon-cross','sandbox','external-cross','finance-tx-a','tenant-b')""",
+]
+for sql in cross_tenant_financial_writes:
+    try:
+        db.execute(sql)
+        raise AssertionError(f"Cross-tenant financial write was incorrectly accepted: {sql}")
+    except sqlite3.IntegrityError:
+        pass
+
+# A user with active memberships in both tenants still cannot move an existing PSP account.
+try:
+    db.execute("UPDATE payment_accounts SET tenant_id='tenant-b' WHERE id='finance-account-a'")
+    raise AssertionError("Financial account tenant reassignment was incorrectly accepted")
+except sqlite3.IntegrityError as exc:
+    assert "PAYMENT_ACCOUNT_TENANT_IMMUTABLE" in str(exc), str(exc)
+
+# Financial audit is append-only.
+db.execute("""
+    INSERT INTO payment_audit(id,event_type,user_id,result,tenant_id)
+    VALUES ('finance-audit-a','FINANCE_TEST','finance-user-a','OK','tenant-a')
+""")
+for sql in [
+    "UPDATE payment_audit SET result='TAMPERED' WHERE id='finance-audit-a'",
+    "DELETE FROM payment_audit WHERE id='finance-audit-a'",
+]:
+    try:
+        db.execute(sql)
+        raise AssertionError("Financial audit history was mutable")
+    except sqlite3.IntegrityError as exc:
+        assert "PAYMENT_AUDIT_APPEND_ONLY" in str(exc), str(exc)
+
+print("PASS: financial tenant isolation, wallet/mission linkage, cross-tenant write rejection, immutable attribution and append-only audit.")
