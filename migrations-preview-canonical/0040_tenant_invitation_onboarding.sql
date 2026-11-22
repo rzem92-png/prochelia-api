@@ -138,3 +138,20 @@ WHEN NEW.actor_user_id IS NOT NULL
 BEGIN
   SELECT RAISE(ABORT, 'TENANT_INVITATION_EVENT_ACTOR_TENANT_MISMATCH');
 END;
+
+
+-- The invitation address must match the pre-provisioned, non-login user attached
+-- to the pending membership. Login remains blocked while users.status is not active.
+CREATE TRIGGER IF NOT EXISTS trg_tenant_invitation_email_matches_member
+BEFORE INSERT ON tenant_invitations
+WHEN NOT EXISTS (
+  SELECT 1
+  FROM tenant_memberships invited_membership
+  JOIN users invited_user ON invited_user.id = invited_membership.user_id
+  WHERE invited_membership.id = NEW.membership_id
+    AND invited_membership.tenant_id = NEW.tenant_id
+    AND lower(trim(invited_user.email)) = NEW.email_normalized
+)
+BEGIN
+  SELECT RAISE(ABORT, 'TENANT_INVITATION_EMAIL_MEMBER_MISMATCH');
+END;
