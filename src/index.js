@@ -938,10 +938,11 @@ function moneyCents(value) {
 
 async function paymentAudit(env, eventType, data = {}, result = 'OK') {
   await env.DB.prepare(`INSERT INTO payment_audit
-    (id,event_type,transaction_id,payout_id,mission_id,user_id,result,metadata_json)
-    VALUES (?,?,?,?,?,?,?,?)`)
+    (id,event_type,transaction_id,payout_id,mission_id,user_id,result,metadata_json,tenant_id)
+    VALUES (?,?,?,?,?,?,?,?,?)`)
     .bind(crypto.randomUUID(), eventType, data.transaction_id || null, data.payout_id || null,
-      data.mission_id || null, data.user_id || null, result, JSON.stringify(data.metadata || {})).run();
+      data.mission_id || null, data.user_id || null, result, JSON.stringify(data.metadata || {}),
+      data.tenant_id || null).run();
 }
 
 function paymentProvider(env) {
@@ -960,25 +961,22 @@ export function paymentsConfigured(env) {
 async function paymentOnboard(request, env) {
   const auth = await getSessionUser(request, env);
   if (!requireRole(auth, ['intervenant'])) return json({ok:false,error:auth?.user?'FORBIDDEN':'UNAUTHENTICATED',version:VERSION},auth?.user?403:401);
-  // No placeholder PSP account or wallet may be created before a real adapter exists.
-  if (!paymentsConfigured(env)) {
-    return json({ok:false,error:'PAYMENT_PROVIDER_NOT_CONFIGURED',version:VERSION,write_enabled:false},503);
-  }
+  if (!paymentsConfigured(env)) return json({ok:false,error:'PAYMENT_PROVIDER_NOT_CONFIGURED',version:VERSION,write_enabled:false},503);
   const tenantContext = await resolveTenantContext(request, env, auth);
   if (!tenantContext.ok) return json({ok:false,error:tenantContext.error,version:VERSION},tenantContext.status);
   await ensurePaymentSchema(env);
   const body = await readJson(request);
   const provider = paymentProvider(env);
   const accountId = clean(body?.provider_account_id) || null;
-  const existing = await env.DB.prepare('SELECT * FROM payment_accounts WHERE user_id=? LIMIT 1').bind(auth.user.id).first();
+  const existing = await env.DB.prepare('SELECT * FROM payment_accounts WHERE user_id=? AND tenant_id=? LIMIT 1').bind(auth.user.id,tenantContext.tenant.id).first();
   if (existing) return json({ok:true,version:VERSION,account:existing,action:'REUSE_EXISTING'},200);
   const id=crypto.randomUUID();
   await env.DB.prepare(`INSERT INTO payment_accounts
-    (id,user_id,provider,provider_account_id,status,onboarding_status)
-    VALUES (?,?,?,?, 'pending','required')`).bind(id,auth.user.id,provider,accountId).run();
+    (id,user_id,provider,provider_account_id,status,onboarding_status,tenant_id)
+    VALUES (?,?,?,?, 'pending','required',?)`).bind(id,auth.user.id,provider,accountId,tenantContext.tenant.id).run();
   const wallet = await env.DB.prepare('SELECT id FROM wallets WHERE user_id=? AND tenant_id=? LIMIT 1').bind(auth.user.id,tenantContext.tenant.id).first();
   if (!wallet) await env.DB.prepare(`INSERT INTO wallets (id,user_id,tenant_id) VALUES (?,?,?)`).bind(crypto.randomUUID(),auth.user.id,tenantContext.tenant.id).run();
-  await paymentAudit(env,'PAYOUT_ACCOUNT_CREATED',{user_id:auth.user.id,metadata:{provider}},'OK');
+  await paymentAudit(env,'PAYOUT_ACCOUNT_CREATED',{user_id:auth.user.id,tenant_id:tenantContext.tenant.id,metadata:{provider}},'OK');
   return json({ok:true,version:VERSION,account_id:id,provider,onboarding_status:'required',next:'PSP_ONBOARDING_REQUIRED'},201);
 }
 
@@ -987,24 +985,16 @@ async function paymentStatus(request, env) {
   if(!auth) return json({ok:false,error:'UNAUTHENTICATED',version:VERSION},401);
   const tenantContext = await resolveTenantContext(request, env, auth);
   if (!tenantContext.ok) return json({ok:false,error:tenantContext.error,version:VERSION},tenantContext.status);
-  // A status GET must never initialize schema, create wallets, or imply that a
-  // configured provider name is a functioning payment adapter.
-  if (!paymentsConfigured(env)) {
-    return json({
-      ok:true, read_only:true, version:VERSION, provider:null,
-      payments_configured:false, wallet:null, payout_account:null, pending_payouts:0
-    },200);
-  }
+  if (!paymentsConfigured(env)) return json({ok:true,read_only:true,version:VERSION,provider:null,payments_configured:false,wallet:null,payout_account:null,pending_payouts:0},200);
   try {
-    const wallet=await env.DB.prepare('SELECT * FROM wallets WHERE user_id=? AND tenant_id=? LIMIT 1').bind(auth.user.id,tenantContext.tenant.id).first();
-    const account=await env.DB.prepare('SELECT * FROM payment_accounts WHERE user_id=? LIMIT 1').bind(auth.user.id).first();
-    const pending=await env.DB.prepare(`SELECT COUNT(*) total FROM payout_requests WHERE user_id=? AND status IN ('requested','processing')`).bind(auth.user.id).first();
-    return json({
-      ok:true, read_only:true, version:VERSION, provider:paymentProvider(env), payments_configured:true,
+    const tenantId=tenantContext.tenant.id;
+    const wallet=await env.DB.prepare('SELECT * FROM wallets WHERE user_id=? AND tenant_id=? LIMIT 1').bind(auth.user.id,tenantId).first();
+    const account=await env.DB.prepare('SELECT * FROM payment_accounts WHERE user_id=? AND tenant_id=? LIMIT 1').bind(auth.user.id,tenantId).first();
+    const pending=await env.DB.prepare(`SELECT COUNT(*) total FROM payout_requests WHERE user_id=? AND tenant_id=? AND status IN ('requested','processing')`).bind(auth.user.id,tenantId).first();
+    return json({ok:true,read_only:true,version:VERSION,provider:paymentProvider(env),payments_configured:true,
       wallet:wallet?{currency:wallet.currency,available_cents:wallet.available_cents,pending_cents:wallet.pending_cents,paid_cents:wallet.paid_cents,reserved_cents:wallet.reserved_cents}:null,
       payout_account:account?{status:account.status,onboarding_status:account.onboarding_status,payouts_enabled:!!account.payouts_enabled}:null,
-      pending_payouts:Number(pending?.total||0)
-    },200);
+      pending_payouts:Number(pending?.total||0)},200);
   } catch {
     return json({ok:false,error:'PAYMENT_STATUS_UNAVAILABLE',version:VERSION},503);
   }
@@ -1013,26 +1003,27 @@ async function paymentStatus(request, env) {
 async function createMissionPayment(request, env) {
   const auth=await getSessionUser(request,env);
   if(!requireRole(auth,['gerante'])) return json({ok:false,error:auth?.user?'FORBIDDEN':'UNAUTHENTICATED',version:VERSION},auth?.user?403:401);
-  // Do not create a pending financial transaction without a reviewed PSP adapter.
-  if (!paymentsConfigured(env)) {
-    return json({ok:false,error:'PAYMENT_PROVIDER_NOT_CONFIGURED',version:VERSION,write_enabled:false},503);
-  }
+  if (!paymentsConfigured(env)) return json({ok:false,error:'PAYMENT_PROVIDER_NOT_CONFIGURED',version:VERSION,write_enabled:false},503);
+  const tenantContext=await resolveTenantContext(request,env,auth);
+  if(!tenantContext.ok) return json({ok:false,error:tenantContext.error,version:VERSION},tenantContext.status);
   await ensurePaymentSchema(env);
   const body=await readJson(request);
   const missionId=clean(body?.mission_id), clientId=clean(body?.client_id), intervenantId=clean(body?.intervenant_id);
   const gross=moneyCents(body?.gross_eur), commission=moneyCents(body?.commission_eur);
   if(!missionId||!clientId||!intervenantId||gross===null||commission===null||commission>gross) return json({ok:false,error:'INVALID_PAYMENT_AMOUNT_OR_PARTIES',version:VERSION},400);
+  const tenantId=tenantContext.tenant.id;
+  const mission=await env.DB.prepare('SELECT id,client_id,intervenant_id FROM missions WHERE id=? AND tenant_id=? LIMIT 1').bind(missionId,tenantId).first();
+  if(!mission||mission.client_id!==clientId||mission.intervenant_id!==intervenantId) return json({ok:false,error:'MISSION_NOT_FOUND_IN_ACTIVE_TENANT',version:VERSION},404);
   const idem=clean(request.headers.get('idempotency-key'))||clean(body?.idempotency_key);
   if(!idem) return json({ok:false,error:'IDEMPOTENCY_KEY_REQUIRED',version:VERSION},400);
-  const old=await env.DB.prepare('SELECT * FROM payment_transactions WHERE idempotency_key=? LIMIT 1').bind(idem).first();
+  const old=await env.DB.prepare('SELECT * FROM payment_transactions WHERE idempotency_key=? AND tenant_id=? LIMIT 1').bind(idem,tenantId).first();
   if(old) return json({ok:true,version:VERSION,idempotent_replay:true,transaction:old},200);
-  const net=gross-commission;
-  const txId=crypto.randomUUID();
+  const net=gross-commission, txId=crypto.randomUUID();
   await env.DB.prepare(`INSERT INTO payment_transactions
-    (id,idempotency_key,mission_id,client_id,intervenant_id,type,status,gross_cents,commission_cents,net_intervenant_cents,currency,provider,reason)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(txId,idem,missionId,clientId,intervenantId,'MISSION_CHARGE','pending',gross,commission,net,'EUR',paymentProvider(env),'MISSION_PAYMENT_CREATED').run();
-  await paymentAudit(env,'MISSION_PAYMENT_CREATED',{transaction_id:txId,mission_id:missionId,user_id:auth.user.id,metadata:{gross_cents:gross,commission_cents:commission,net_cents:net}},'OK');
-  return json({ok:true,version:VERSION,transaction_id:txId,status:'pending',gross_cents:gross,commission_cents:commission,net_intervenant_cents:net,provider:paymentProvider(env),next:paymentsConfigured(env)?'PSP_CHARGE_REQUIRED':'PAYMENT_PROVIDER_NOT_CONFIGURED'},201);
+    (id,idempotency_key,mission_id,client_id,intervenant_id,type,status,gross_cents,commission_cents,net_intervenant_cents,currency,provider,reason,tenant_id)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(txId,idem,missionId,clientId,intervenantId,'MISSION_CHARGE','pending',gross,commission,net,'EUR',paymentProvider(env),'MISSION_PAYMENT_CREATED',tenantId).run();
+  await paymentAudit(env,'MISSION_PAYMENT_CREATED',{transaction_id:txId,mission_id:missionId,user_id:auth.user.id,tenant_id:tenantId,metadata:{gross_cents:gross,commission_cents:commission,net_cents:net}},'OK');
+  return json({ok:true,version:VERSION,transaction_id:txId,status:'pending',gross_cents:gross,commission_cents:commission,net_intervenant_cents:net,provider:paymentProvider(env),next:'PSP_CHARGE_REQUIRED'},201);
 }
 
 async function finalizeMissionPayment(request, env) {
@@ -1050,95 +1041,74 @@ async function finalizeMissionPayment(request, env) {
 }
 
 export async function reservePayoutAtomically(env, input) {
-  const { payoutId, idempotencyKey, walletId, userId, amountCents, mode, provider } = input;
-  if (!env?.DB?.batch || !payoutId || !idempotencyKey || !walletId || !userId ||
-      !Number.isSafeInteger(amountCents) || amountCents <= 0 ||
-      !['standard', 'express'].includes(mode)) {
-    return { ok: false, reason: 'INVALID_INPUT' };
+  const { payoutId,idempotencyKey,walletId,userId,tenantId,amountCents,mode,provider } = input;
+  if (!env?.DB?.batch || !payoutId || !idempotencyKey || !walletId || !userId || !tenantId ||
+      !Number.isSafeInteger(amountCents) || amountCents<=0 || !['standard','express'].includes(mode)) {
+    return {ok:false,reason:'INVALID_INPUT'};
   }
-  const statements = [
+  const statements=[
     env.DB.prepare(`INSERT INTO payout_requests
-      (id,idempotency_key,wallet_id,user_id,amount_cents,mode,provider,status)
-      SELECT ?,?,?,?, ?,?,?, 'requested'
-      FROM wallets
-      WHERE id=? AND user_id=? AND available_cents>=?
-        AND NOT EXISTS (SELECT 1 FROM payout_requests WHERE idempotency_key=?)
-    `).bind(payoutId,idempotencyKey,walletId,userId,amountCents,mode,provider,walletId,userId,amountCents,idempotencyKey),
-    env.DB.prepare(`UPDATE wallets
-      SET available_cents=available_cents-?,reserved_cents=reserved_cents+?,updated_at=CURRENT_TIMESTAMP
-      WHERE id=? AND user_id=? AND available_cents>=?
-        AND EXISTS (SELECT 1 FROM payout_requests WHERE id=? AND user_id=? AND idempotency_key=?)
-    `).bind(amountCents,amountCents,walletId,userId,amountCents,payoutId,userId,idempotencyKey),
+      (id,idempotency_key,wallet_id,user_id,amount_cents,mode,provider,status,tenant_id)
+      SELECT ?,?,?,?, ?,?,?, 'requested',?
+      FROM wallets WHERE id=? AND user_id=? AND tenant_id=? AND available_cents>=?
+        AND NOT EXISTS (SELECT 1 FROM payout_requests WHERE idempotency_key=? AND tenant_id=?)`)
+      .bind(payoutId,idempotencyKey,walletId,userId,amountCents,mode,provider,tenantId,walletId,userId,tenantId,amountCents,idempotencyKey,tenantId),
+    env.DB.prepare(`UPDATE wallets SET available_cents=available_cents-?,reserved_cents=reserved_cents+?,updated_at=CURRENT_TIMESTAMP
+      WHERE id=? AND user_id=? AND tenant_id=? AND available_cents>=?
+        AND EXISTS (SELECT 1 FROM payout_requests WHERE id=? AND user_id=? AND tenant_id=? AND idempotency_key=?)`)
+      .bind(amountCents,amountCents,walletId,userId,tenantId,amountCents,payoutId,userId,tenantId,idempotencyKey),
     env.DB.prepare(`INSERT INTO payment_audit
-      (id,event_type,transaction_id,payout_id,mission_id,user_id,result,metadata_json)
-      SELECT ?, 'PAYOUT_REQUESTED', NULL, ?, NULL, ?, 'OK', ?
-      WHERE EXISTS (SELECT 1 FROM payout_requests WHERE id=? AND user_id=? AND idempotency_key=?)
-    `).bind(crypto.randomUUID(),payoutId,userId,JSON.stringify({amount_cents:amountCents,mode}),payoutId,userId,idempotencyKey)
+      (id,event_type,transaction_id,payout_id,mission_id,user_id,result,metadata_json,tenant_id)
+      SELECT ?, 'PAYOUT_REQUESTED', NULL, ?, NULL, ?, 'OK', ?, ?
+      WHERE EXISTS (SELECT 1 FROM payout_requests WHERE id=? AND user_id=? AND tenant_id=? AND idempotency_key=?)`)
+      .bind(crypto.randomUUID(),payoutId,userId,JSON.stringify({amount_cents:amountCents,mode}),tenantId,payoutId,userId,tenantId,idempotencyKey)
   ];
-  const results = await env.DB.batch(statements);
-  const inserted = Number(results?.[0]?.meta?.changes || 0) === 1;
-  const debited = Number(results?.[1]?.meta?.changes || 0) === 1;
-  return { ok: inserted && debited, reason: inserted && debited ? null : 'NOT_RESERVED' };
+  const results=await env.DB.batch(statements);
+  const inserted=Number(results?.[0]?.meta?.changes||0)===1;
+  const debited=Number(results?.[1]?.meta?.changes||0)===1;
+  return {ok:inserted&&debited,reason:inserted&&debited?null:'NOT_RESERVED'};
 }
 
 async function payoutRequest(request, env) {
-  const auth = await getSessionUser(request, env);
-  if (!requireRole(auth, ['intervenant'])) return json({ok:false,error:auth?.user?'FORBIDDEN':'UNAUTHENTICATED',version:VERSION}, auth?.user ? 403 : 401);
-  // Refuse before schema setup, account reads, wallet reads, or reservations.
-  if (!paymentsConfigured(env)) {
-    return json({ok:false,error:'PAYOUT_PROVIDER_NOT_CONFIGURED',version:VERSION,write_enabled:false},503);
-  }
+  const auth=await getSessionUser(request,env);
+  if(!requireRole(auth,['intervenant'])) return json({ok:false,error:auth?.user?'FORBIDDEN':'UNAUTHENTICATED',version:VERSION},auth?.user?403:401);
+  if(!paymentsConfigured(env)) return json({ok:false,error:'PAYOUT_PROVIDER_NOT_CONFIGURED',version:VERSION,write_enabled:false},503);
+  const tenantContext=await resolveTenantContext(request,env,auth);
+  if(!tenantContext.ok) return json({ok:false,error:tenantContext.error,version:VERSION},tenantContext.status);
   await ensurePaymentSchema(env);
-  const body = await readJson(request);
-  const amount = moneyCents(body?.amount_eur);
-  const mode = clean(body?.mode) || 'standard';
-  const idem = clean(request.headers.get('idempotency-key')) || clean(body?.idempotency_key);
-  if (amount === null || amount <= 0 || !['standard','express'].includes(mode) || !idem || idem.length > 200) {
-    return json({ok:false,error:'INVALID_PAYOUT_REQUEST',version:VERSION},400);
-  }
-
-  // Idempotency is scoped to the authenticated owner; never return another user's payout.
-  const existing = await env.DB.prepare('SELECT * FROM payout_requests WHERE idempotency_key=? AND user_id=? LIMIT 1').bind(idem,auth.user.id).first();
-  if (existing) {
-    if (Number(existing.amount_cents) !== amount || existing.mode !== mode) {
-      return json({ok:false,error:'IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_REQUEST',version:VERSION},409);
-    }
+  const tenantId=tenantContext.tenant.id, body=await readJson(request);
+  const amount=moneyCents(body?.amount_eur), mode=clean(body?.mode)||'standard';
+  const idem=clean(request.headers.get('idempotency-key'))||clean(body?.idempotency_key);
+  if(amount===null||amount<=0||!['standard','express'].includes(mode)||!idem||idem.length>200) return json({ok:false,error:'INVALID_PAYOUT_REQUEST',version:VERSION},400);
+  const existing=await env.DB.prepare('SELECT * FROM payout_requests WHERE idempotency_key=? AND user_id=? AND tenant_id=? LIMIT 1').bind(idem,auth.user.id,tenantId).first();
+  if(existing){
+    if(Number(existing.amount_cents)!==amount||existing.mode!==mode) return json({ok:false,error:'IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_REQUEST',version:VERSION},409);
     return json({ok:true,version:VERSION,idempotent_replay:true,payout:existing},200);
   }
-  const tenantContext = await resolveTenantContext(request, env, auth);
-  if (!tenantContext.ok) return json({ok:false,error:tenantContext.error,version:VERSION},tenantContext.status);
-  const account = await env.DB.prepare('SELECT * FROM payment_accounts WHERE user_id=? LIMIT 1').bind(auth.user.id).first();
-  if (!account || Number(account.payouts_enabled) !== 1) {
-    return json({ok:false,error:'PAYOUT_ACCOUNT_NOT_READY',version:VERSION,message:'Le compte de paiement de l’intervenant doit être vérifié et activé par le PSP.'},409);
-  }
-  const wallet = await env.DB.prepare('SELECT * FROM wallets WHERE user_id=? AND tenant_id=? LIMIT 1').bind(auth.user.id,tenantContext.tenant.id).first();
-  if (!wallet) return json({ok:false,error:'WALLET_NOT_FOUND',version:VERSION},409);
-
-  const payoutId = crypto.randomUUID();
+  const account=await env.DB.prepare('SELECT * FROM payment_accounts WHERE user_id=? AND tenant_id=? LIMIT 1').bind(auth.user.id,tenantId).first();
+  if(!account||Number(account.payouts_enabled)!==1) return json({ok:false,error:'PAYOUT_ACCOUNT_NOT_READY',version:VERSION,message:'Le compte de paiement de l’intervenant doit être vérifié et activé par le PSP.'},409);
+  const wallet=await env.DB.prepare('SELECT * FROM wallets WHERE user_id=? AND tenant_id=? LIMIT 1').bind(auth.user.id,tenantId).first();
+  if(!wallet) return json({ok:false,error:'WALLET_NOT_FOUND',version:VERSION},409);
+  const payoutId=crypto.randomUUID();
   let reservation;
-  try {
-    reservation = await reservePayoutAtomically(env, {
-      payoutId, idempotencyKey:idem, walletId:wallet.id, userId:auth.user.id,
-      amountCents:amount, mode, provider:paymentProvider(env)
-    });
-  } catch (error) {
-    console.error('PAYOUT_RESERVATION_FAILED', error?.name || 'D1_ERROR');
+  try{
+    reservation=await reservePayoutAtomically(env,{payoutId,idempotencyKey:idem,walletId:wallet.id,userId:auth.user.id,tenantId,amountCents:amount,mode,provider:paymentProvider(env)});
+  }catch(error){
+    console.error('PAYOUT_RESERVATION_FAILED',error?.name||'D1_ERROR');
     return json({ok:false,error:'PAYOUT_RESERVATION_FAILED',version:VERSION},503);
   }
-  if (!reservation.ok) {
-    const sameOwner = await env.DB.prepare('SELECT * FROM payout_requests WHERE idempotency_key=? AND user_id=? LIMIT 1').bind(idem,auth.user.id).first();
-    if (sameOwner) {
-      if (Number(sameOwner.amount_cents) !== amount || sameOwner.mode !== mode) {
-        return json({ok:false,error:'IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_REQUEST',version:VERSION},409);
-      }
+  if(!reservation.ok){
+    const sameOwner=await env.DB.prepare('SELECT * FROM payout_requests WHERE idempotency_key=? AND user_id=? AND tenant_id=? LIMIT 1').bind(idem,auth.user.id,tenantId).first();
+    if(sameOwner){
+      if(Number(sameOwner.amount_cents)!==amount||sameOwner.mode!==mode) return json({ok:false,error:'IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_REQUEST',version:VERSION},409);
       return json({ok:true,version:VERSION,idempotent_replay:true,payout:sameOwner},200);
     }
-    const collision = await env.DB.prepare('SELECT 1 AS used FROM payout_requests WHERE idempotency_key=? LIMIT 1').bind(idem).first();
-    if (collision) return json({ok:false,error:'IDEMPOTENCY_KEY_CONFLICT',version:VERSION},409);
-    const latestWallet = await env.DB.prepare('SELECT available_cents FROM wallets WHERE id=? AND user_id=? AND tenant_id=? LIMIT 1').bind(wallet.id,auth.user.id,tenantContext.tenant.id).first();
-    return json({ok:false,error:'INSUFFICIENT_AVAILABLE_BALANCE',version:VERSION,available_cents:Number(latestWallet?.available_cents || 0)},409);
+    const collision=await env.DB.prepare('SELECT 1 AS used FROM payout_requests WHERE idempotency_key=? AND tenant_id=? LIMIT 1').bind(idem,tenantId).first();
+    if(collision) return json({ok:false,error:'IDEMPOTENCY_KEY_CONFLICT',version:VERSION},409);
+    const latestWallet=await env.DB.prepare('SELECT available_cents FROM wallets WHERE id=? AND user_id=? AND tenant_id=? LIMIT 1').bind(wallet.id,auth.user.id,tenantId).first();
+    return json({ok:false,error:'INSUFFICIENT_AVAILABLE_BALANCE',version:VERSION,available_cents:Number(latestWallet?.available_cents||0)},409);
   }
-  return json({ok:true,version:VERSION,payout_id:payoutId,status:'requested',amount_cents:amount,mode,provider:paymentProvider(env),next:paymentsConfigured(env)?'PSP_PAYOUT_REQUIRED':'PAYMENT_PROVIDER_NOT_CONFIGURED'},201);
+  return json({ok:true,version:VERSION,payout_id:payoutId,status:'requested',amount_cents:amount,mode,provider:paymentProvider(env),next:'PSP_PAYOUT_REQUIRED'},201);
 }
 
 function constantTimeStringEqual(actual, expected) {
@@ -1276,49 +1246,38 @@ export async function paymentWebhook(request, env) {
 }
 
 async function openPaymentDispute(request, env) {
-  const auth = await getSessionUser(request, env);
-  if (!requireRole(auth, ['client','gerante'])) return json({ok:false,error:auth?.user?'FORBIDDEN':'UNAUTHENTICATED',version:VERSION}, auth?.user ? 403 : 401);
-  // Disputes can freeze or otherwise alter financial state; no state transition
-  // is allowed until a real PSP and its settlement/reconciliation path exist.
-  if (!paymentsConfigured(env)) {
-    return json({ok:false,error:'PAYMENT_PROVIDER_NOT_CONFIGURED',version:VERSION,write_enabled:false},503);
-  }
+  const auth=await getSessionUser(request,env);
+  if(!requireRole(auth,['client','gerante'])) return json({ok:false,error:auth?.user?'FORBIDDEN':'UNAUTHENTICATED',version:VERSION},auth?.user?403:401);
+  if(!paymentsConfigured(env)) return json({ok:false,error:'PAYMENT_PROVIDER_NOT_CONFIGURED',version:VERSION,write_enabled:false},503);
+  const tenantContext=await resolveTenantContext(request,env,auth);
+  if(!tenantContext.ok) return json({ok:false,error:tenantContext.error,version:VERSION},tenantContext.status);
   await ensurePaymentSchema(env);
-  const body = await readJson(request);
-  const missionId = clean(body?.mission_id);
-  const reason = clean(body?.reason);
-  const amount = moneyCents(body?.amount_eur);
-  if (!missionId || !reason || reason.length > 1000 || amount === null) {
-    return json({ok:false,error:'INVALID_DISPUTE',version:VERSION},400);
+  const body=await readJson(request), missionId=clean(body?.mission_id), reason=clean(body?.reason), amount=moneyCents(body?.amount_eur);
+  if(!missionId||!reason||reason.length>1000||amount===null) return json({ok:false,error:'INVALID_DISPUTE',version:VERSION},400);
+  const tenantId=tenantContext.tenant.id;
+  const tx=await env.DB.prepare('SELECT * FROM payment_transactions WHERE mission_id=? AND tenant_id=? ORDER BY created_at DESC LIMIT 1').bind(missionId,tenantId).first();
+  if(!tx) return json({ok:false,error:'PAYMENT_NOT_FOUND_FOR_MISSION',version:VERSION},404);
+  if(auth.user.role==='client'){
+    const ownsClient=await env.DB.prepare('SELECT 1 AS ok FROM clients WHERE id=? AND user_id=? AND tenant_id=? LIMIT 1').bind(tx.client_id,auth.user.id,tenantId).first();
+    if(!ownsClient) return json({ok:false,error:'PAYMENT_NOT_FOUND_FOR_MISSION',version:VERSION},404);
   }
-  const tx = await env.DB.prepare('SELECT * FROM payment_transactions WHERE mission_id=? ORDER BY created_at DESC LIMIT 1').bind(missionId).first();
-  if (!tx) return json({ok:false,error:'PAYMENT_NOT_FOUND_FOR_MISSION',version:VERSION},404);
-  if (auth.user.role === 'client' && tx.client_id !== auth.user.id) {
-    return json({ok:false,error:'PAYMENT_NOT_FOUND_FOR_MISSION',version:VERSION},404);
-  }
-  if (amount <= 0 || amount > Number(tx.gross_cents || 0)) {
-    return json({ok:false,error:'DISPUTE_AMOUNT_OUT_OF_RANGE',version:VERSION},400);
-  }
-  if (tx.status !== 'paid') {
-    return json({ok:false,error:'PAYMENT_NOT_DISPUTABLE_IN_CURRENT_STATE',version:VERSION,status:tx.status},409);
-  }
-  const id = crypto.randomUUID();
-  const results = await env.DB.batch([
-    env.DB.prepare("UPDATE payment_transactions SET status='held',updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='paid'").bind(tx.id),
+  if(amount<=0||amount>Number(tx.gross_cents||0)) return json({ok:false,error:'DISPUTE_AMOUNT_OUT_OF_RANGE',version:VERSION},400);
+  if(tx.status!=='paid') return json({ok:false,error:'PAYMENT_NOT_DISPUTABLE_IN_CURRENT_STATE',version:VERSION,status:tx.status},409);
+  const id=crypto.randomUUID();
+  const results=await env.DB.batch([
+    env.DB.prepare("UPDATE payment_transactions SET status='held',updated_at=CURRENT_TIMESTAMP WHERE id=? AND tenant_id=? AND status='paid'").bind(tx.id,tenantId),
     env.DB.prepare(`INSERT INTO payment_disputes
-      (id,mission_id,transaction_id,client_id,intervenant_id,status,reason,amount_cents)
-      SELECT ?,?,?,?,?,?,?,?
-      WHERE EXISTS (SELECT 1 FROM payment_transactions WHERE id=? AND status='held')`)
-      .bind(id,missionId,tx.id,tx.client_id,tx.intervenant_id,'open',reason,amount,tx.id),
+      (id,mission_id,transaction_id,client_id,intervenant_id,status,reason,amount_cents,tenant_id)
+      SELECT ?,?,?,?,?,?,?,?,?
+      WHERE EXISTS (SELECT 1 FROM payment_transactions WHERE id=? AND tenant_id=? AND status='held')`)
+      .bind(id,missionId,tx.id,tx.client_id,tx.intervenant_id,'open',reason,amount,tenantId,tx.id,tenantId),
     env.DB.prepare(`INSERT INTO payment_audit
-      (id,event_type,transaction_id,payout_id,mission_id,user_id,result,metadata_json)
-      SELECT ?, 'PAYMENT_DISPUTE_OPENED', ?, NULL, ?, ?, 'OK', ?
-      WHERE EXISTS (SELECT 1 FROM payment_disputes WHERE id=? AND status='open')`)
-      .bind(crypto.randomUUID(),tx.id,missionId,auth.user.id,JSON.stringify({amount_cents:amount,reason}),id)
+      (id,event_type,transaction_id,payout_id,mission_id,user_id,result,metadata_json,tenant_id)
+      SELECT ?, 'PAYMENT_DISPUTE_OPENED', ?, NULL, ?, ?, 'OK', ?, ?
+      WHERE EXISTS (SELECT 1 FROM payment_disputes WHERE id=? AND tenant_id=? AND status='open')`)
+      .bind(crypto.randomUUID(),tx.id,missionId,auth.user.id,JSON.stringify({amount_cents:amount,reason}),tenantId,id,tenantId)
   ]);
-  if (Number(results?.[0]?.meta?.changes || 0) !== 1 || Number(results?.[1]?.meta?.changes || 0) !== 1) {
-    return json({ok:false,error:'PAYMENT_STATE_CONFLICT',version:VERSION},409);
-  }
+  if(Number(results?.[0]?.meta?.changes||0)!==1||Number(results?.[1]?.meta?.changes||0)!==1) return json({ok:false,error:'PAYMENT_STATE_CONFLICT',version:VERSION},409);
   return json({ok:true,version:VERSION,dispute_id:id,status:'open',payment_status:'held'},201);
 }
 
@@ -2911,26 +2870,31 @@ async function productionConfigCheck(env, { persist = false } = {}) {
     await ensureConsolidatedSchema(env); await ensurePaymentSchema(env); await ensureOperationalSchema(env); await ensureStrategicSchema(env); await ensureFinalHardeningSchema(env);
   }
   const checks=[];
-  const requiredTables=['users','sessions','missions','payment_transactions','payment_accounts','wallets','payout_requests','payment_webhook_events','payment_disputes','operational_cases','action_outbox','notification_outbox','accounting_ledger','promotions','promotion_recommendations','activity_journal','compliance_events'];
+  const requiredTables=['users','sessions','missions','payment_transactions','payment_accounts','wallets','payout_requests','payment_wallet_ledger','payment_reconciliation','payment_audit','payment_webhook_events','payment_disputes','operational_cases','action_outbox','notification_outbox','accounting_ledger','promotions','promotion_recommendations','activity_journal','compliance_events'];
   for(const t of requiredTables) checks.push({code:`TABLE:${t}`,status:await tableExists(env,t)?'OK':'MISSING'});
   const pspRequired=['PAYMENT_PROVIDER','PAYMENT_WEBHOOK_SECRET'];
   for(const k of pspRequired) checks.push({code:`SECRET:${k}`,status:finalSecretConfigured(env,k)?'OK':'NOT_CONFIGURED'});
   checks.push({code:'BOOTSTRAP_TOKEN',status:finalSecretConfigured(env,'BOOTSTRAP_TOKEN')?'OK':'NOT_CONFIGURED'});
   const paymentCols=await tableColumns(env,'payment_transactions');
-  const requiredPaymentCols=['id','idempotency_key','mission_id','client_id','intervenant_id','gross_cents','commission_cents','provider_fee_cents','refund_cents','net_intervenant_cents','status','provider_payment_id'];
+  const requiredPaymentCols=['id','idempotency_key','mission_id','client_id','intervenant_id','tenant_id','gross_cents','commission_cents','provider_fee_cents','refund_cents','net_intervenant_cents','status','provider_payment_id'];
   checks.push({code:'PAYMENT_COLUMNS',status:requiredPaymentCols.every(x=>paymentCols.includes(x))?'OK':'INCOMPLETE',missing:requiredPaymentCols.filter(x=>!paymentCols.includes(x))});
   const missionCols=await tableColumns(env,'missions');
-  const usefulMissionCols=['id','client_id','intervenant_id'];
+  const usefulMissionCols=['id','client_id','intervenant_id','tenant_id'];
   checks.push({code:'MISSION_CORE_COLUMNS',status:usefulMissionCols.every(x=>missionCols.includes(x))?'OK':'INCOMPLETE',missing:usefulMissionCols.filter(x=>!missionCols.includes(x))});
   // Financial data must be tenant-bound before the readiness gate can ever open.
   // These columns are deliberately required even while the PSP adapter is disabled:
   // a future secret/configuration change must not silently bypass tenant isolation.
-  const tenantScopedTables=['missions','payment_transactions','payment_accounts','wallets','payout_requests','payment_disputes'];
+  const tenantScopedTables=['missions','wallets','payment_transactions','payment_accounts','payout_requests','payment_disputes','payment_wallet_ledger','payment_reconciliation'];
   const tenantScopeChecks=[];
   for(const table of tenantScopedTables){
     const cols=await tableColumns(env,table);
     const missing=cols.includes('tenant_id')?[]:['tenant_id'];
-    tenantScopeChecks.push({table,status:missing.length?'INCOMPLETE':'OK',missing});
+    let unassigned=0;
+    if(!missing.length){
+      const count=await env.DB.prepare(`SELECT COUNT(*) AS total FROM ${table} WHERE tenant_id IS NULL`).first();
+      unassigned=Number(count?.total||0);
+    }
+    tenantScopeChecks.push({table,status:missing.length||unassigned?'INCOMPLETE':'OK',missing,unassigned});
   }
   checks.push({code:'FINANCIAL_TENANT_SCOPE',status:tenantScopeChecks.every(x=>x.status==='OK')?'OK':'INCOMPLETE',tables:tenantScopeChecks,missing:tenantScopeChecks.filter(x=>x.status!=='OK').map(x=>x.table)});
   if (persist) {
