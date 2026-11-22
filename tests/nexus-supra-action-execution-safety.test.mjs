@@ -79,3 +79,20 @@ test("manual operational execution cannot resolve a case on DONE alone", () => {
   assert.match(handler, /verification_required:!allVerified/);
   assert.doesNotMatch(handler, /\['DONE'\]\.includes\(x\.status\)/);
 });
+
+test("background jobs use conditional claims and recover stale leases with bounded backoff", () => {
+  const start = source.indexOf("async function processBackgroundJobs(");
+  const end = source.indexOf("\nasync function ", start + 30);
+  assert.ok(start >= 0 && end > start);
+  const handler = source.slice(start, end);
+  assert.match(handler, /WHERE id=\? AND status='PENDING'/);
+  assert.match(handler, /status='RUNNING'.*locked_at<=datetime\(CURRENT_TIMESTAMP,'-10 minutes'\)/s);
+  assert.match(handler, /Math\.min\(3600,30\*Math\.pow\(2,/);
+  assert.match(handler, /background_jobs_dead_letter/);
+});
+
+test("scheduled automation is explicit and does not expose scheduler privilege to HTTP callers", () => {
+  assert.match(source, /scheduler\s*\?\s*\{auth:\{user:\{id:'cloudflare-cron',role:'GERANTE'\}\}\}\s*:\s*await requireAuthRole/);
+  assert.match(source, /event\?\.cron === '\*\/1 \* \* \* \*'/);
+  assert.match(source, /event\?\.cron === '0 3 \* \* \*' \|\| event\?\.cron === '0 3 \* \* 0'/);
+});
