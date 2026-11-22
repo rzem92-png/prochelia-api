@@ -1265,15 +1265,41 @@ function parseDirectoryOffset(url) {
   return Number.isSafeInteger(value) && value >= 0 ? value : null;
 }
 
-export async function directoryList(request, env, kind, resolveSession = getSessionUser) {
+export async function directoryList(
+  request, env, kind,
+  resolveSession = getSessionUser,
+  resolveTenant = resolveTenantContext
+) {
   const auth = await resolveSession(request, env);
   if (!auth) return json({ok:false,error:'UNAUTHENTICATED',version:VERSION},401);
   if (auth.user.role !== 'gerante') return json({ok:false,error:'FORBIDDEN',version:VERSION},403);
-  if (!env.DB) return json({ok:false,database:false,error:'DATABASE_UNAVAILABLE',version:VERSION},503);
+  if (!env?.DB) return json({ok:false,database:false,error:'DATABASE_UNAVAILABLE',version:VERSION},503);
+  if (!['clients','intervenants'].includes(kind)) return json({ok:false,error:'INVALID_DIRECTORY_KIND',version:VERSION},400);
 
   const url = new URL(request.url);
   const offset = parseDirectoryOffset(url);
   if (offset === null) return json({ok:false,error:'INVALID_OFFSET',version:VERSION},400);
+
+  let tenantContext;
+  try {
+    tenantContext = await resolveTenant(request, env, auth);
+  } catch {
+    return json({ok:false,error:'TENANT_CONTEXT_UNAVAILABLE',version:VERSION},503);
+  }
+  if (!tenantContext?.ok || !tenantContext.tenant?.id) {
+    return json({ok:false,error:tenantContext?.error||'ACTIVE_TENANT_REQUIRED',version:VERSION},tenantContext?.status||403);
+  }
+
+  const table = kind === 'clients' ? 'clients' : 'intervenants';
+  let columns;
+  try {
+    columns = await tableColumns(env, table);
+  } catch {
+    return json({ok:false,error:'TENANT_DIRECTORY_SCHEMA_UNAVAILABLE',version:VERSION},503);
+  }
+  if (!columns.includes('tenant_id')) {
+    return json({ok:false,error:'TENANT_DIRECTORY_SCHEMA_REQUIRED',version:VERSION,write_enabled:false},503);
+  }
 
   const pageSize = 100;
   const limit = pageSize + 1;
@@ -1283,16 +1309,18 @@ export async function directoryList(request, env, kind, resolveSession = getSess
       `SELECT c.id,c.user_id,c.address,c.city,c.postal_code,c.created_at,c.updated_at,
               u.first_name,u.last_name,u.email,u.phone,u.status AS user_status
          FROM clients c JOIN users u ON u.id=c.user_id
+        WHERE c.tenant_id=?
         ORDER BY c.created_at ASC,c.id ASC LIMIT ? OFFSET ?`
-    ).bind(limit, offset).all();
+    ).bind(tenantContext.tenant.id, limit, offset).all();
   } else {
     rows = await env.DB.prepare(
       `SELECT i.id,i.user_id,i.professional_status,i.description,i.service_area,
               i.hourly_rate,i.validation_status,i.created_at,i.updated_at,
               u.first_name,u.last_name,u.email,u.phone,u.status AS user_status
          FROM intervenants i JOIN users u ON u.id=i.user_id
+        WHERE i.tenant_id=?
         ORDER BY i.created_at ASC,i.id ASC LIMIT ? OFFSET ?`
-    ).bind(limit, offset).all();
+    ).bind(tenantContext.tenant.id, limit, offset).all();
   }
 
   const fetched = rows.results || [];
