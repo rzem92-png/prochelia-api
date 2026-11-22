@@ -155,3 +155,18 @@ test("webhook signature verifier rejects short secrets and non-string raw bodies
   assert.equal(await verifyWebhookSignature(genericRequest, { PAYMENT_WEBHOOK_SECRET: "short" }, payload), false);
   assert.equal(await verifyWebhookSignature(genericRequest, { PAYMENT_WEBHOOK_SECRET: genericSecret }, null), false);
 });
+
+
+test("verified non-financial webhook remains read-only until a reviewed processor exists", async () => {
+  const source = await (await import("node:fs/promises")).readFile(
+    new URL("../src/index.js", import.meta.url),
+    "utf8"
+  );
+  const start = source.indexOf("export async function paymentWebhook(request, env) {");
+  const end = source.indexOf("\n}\n\nasync function openPaymentDispute", start);
+  assert.ok(start >= 0 && end > start, "paymentWebhook handler boundaries must exist");
+  const handler = source.slice(start, end);
+  assert.match(handler, /WEBHOOK_PROCESSOR_NOT_IMPLEMENTED/);
+  assert.doesNotMatch(handler, /env\.DB\.prepare|paymentAudit\(/,
+    "webhook receiver must not write D1 or audit rows before processor acceptance");
+});
