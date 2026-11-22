@@ -8,39 +8,30 @@ const end = source.indexOf("\nasync function financeSummary", start);
 assert.ok(start >= 0 && end > start, "pricing quote handler must exist");
 const handler = source.slice(start, end);
 
-test("pricing simulations are restricted to the authorized manager role", () => {
+test("pricing simulations require POST, manager RBAC and a server-derived tenant", () => {
+  assert.match(handler, /request\.method !== 'POST'/);
   assert.match(handler, /requireAuthRole\(request,env,\['gerante'\]\)/);
+  assert.match(handler, /resolveTenantContext\(request, env, gate\.auth\)/);
+  assert.match(handler, /TENANT_CONTEXT_REQUIRED/);
 });
 
-test("pricing assumptions are loaded from the active server policy", () => {
-  assert.match(handler, /getSetting\(env,'project_phase','TEST'\)/);
-  assert.match(handler, /SELECT \* FROM pricing_policies WHERE active=1/);
-  assert.match(handler, /Number\(policy\.psp_percent\|\|0\)/);
-  assert.match(handler, /Number\(policy\.psp_fixed_cents\|\|0\)/);
-  assert.match(handler, /Number\(policy\.target_margin_percent\|\|0\)/);
-  assert.match(handler, /Number\(policy\.platform_fee_percent\|\|0\)/);
-  assert.match(handler, /discountCents:0/);
+test("legacy global pricing policy and client-supplied financial assumptions fail closed", () => {
+  assert.match(handler, /TENANT_SCOPED_PRICING_POLICY_REQUIRED/);
+  assert.match(handler, /write_enabled:false/);
+  assert.doesNotMatch(handler, /readJson\(|base_price_cents|pricing_policies|pricing_quotes|financeStrategicQuote|INSERT INTO/);
 });
 
-test("missing or incomplete pricing policy fails closed", () => {
-  assert.match(handler, /PRICING_POLICY_NOT_CONFIGURED/);
-  assert.match(handler, /PRICING_POLICY_INCOMPLETE/);
-  assert.match(handler, /targetMargin<=0/);
-  assert.match(handler, /intervenantFloor<=0/);
+test("pricing quote refuses before initializing the legacy consolidated schema", () => {
+  const routeStart = source.indexOf("async function handleConsolidated(request, env) {");
+  const routeEnd = source.indexOf("\n/* ============================================================", routeStart);
+  const router = source.slice(routeStart, routeEnd);
+  const consolidatedPath = router.split("\n").find(line => line.includes("const consolidatedPath"));
+  assert.ok(consolidatedPath);
+  assert.doesNotMatch(consolidatedPath, /\/api\/pricing\/quote/);
+  assert.match(router, /url\.pathname==='\/api\/pricing\/quote'\s*&&\s*request\.method==='POST'\) return pricingQuote\(request,env\)/);
 });
 
-test("pricing inputs are bounded and the quote is marked as estimate-only without PSP", () => {
-  assert.match(handler, /distance>500/);
-  assert.match(handler, /duration>1440/);
-  assert.match(handler, /base>100000000/);
-  assert.match(handler, /ESTIMATE_ONLY_PSP_NOT_CONFIGURED/);
-  assert.doesNotMatch(handler, /b\.psp_percent|b\.psp_fixed_cents|b\.target_margin_percent|b\.platform_fee_percent|b\.discount_cents/);
-});
-
-test("fixed platform commission is loaded from the server policy and included in the quote", () => {
-  assert.match(handler, /Number\(policy\.platform_fee_fixed_cents\|\|0\)/);
-  assert.match(handler, /commissionFixedCents:platformFeeFixed/);
-  assert.match(handler, /commission_fixed_cents:platformFeeFixed/);
+test("the pure strategic pricing calculator retains percentage and fixed commission arithmetic", () => {
   const quoteStart = source.indexOf("function financeStrategicQuote(");
   const quoteEnd = source.indexOf("\nasync function pricingQuote", quoteStart);
   const quoteEngine = source.slice(quoteStart, quoteEnd);
@@ -50,7 +41,7 @@ test("fixed platform commission is loaded from the server policy and included in
   assert.match(quoteEngine, /commission_fixed_cents:fixedCommission/);
 });
 
-test("regulated customer ceiling caps the final price including travel", () => {
+test("the pure strategic calculator can cap final customer price including travel", () => {
   const quoteStart = source.indexOf("function financeStrategicQuote(");
   const quoteEnd = source.indexOf("\nasync function pricingQuote", quoteStart);
   const quoteEngine = source.slice(quoteStart, quoteEnd);
