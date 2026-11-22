@@ -29,6 +29,10 @@ test("Preview migration restores the exact encrypted R2 backup into a distinct E
   assert.match(workflow, /0022_supra_persisted_approvals\.sql/);
   assert.match(workflow, /unique \| length == 9/);
   assert.match(workflow, /Restore-test D1 is not empty/);
+  assert.match(workflow, /wrangler\.restore-test\.json/);
+  assert.match(workflow, /database_name": "\$RESTORE_TEST_DB_NAME"/);
+  assert.match(workflow, /database_id": "\$RESTORE_TEST_DB_ID"/);
+  assert.match(workflow, /--config "\$RUNNER_TEMP\/wrangler\.restore-test\.json"/);
 });
 
 test("Preview migration workflow pins the dedicated Preview database and forbids production", () => {
