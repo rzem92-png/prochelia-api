@@ -722,6 +722,7 @@ jobs:
           'tenants','tenant_memberships','tenant_membership_events','tenant_invitations','tenant_invitation_events',
           'payment_accounts','payment_transactions','payout_requests','payment_disputes','payment_reconciliation',
           'payment_audit','payment_webhook_events','payment_wallet_ledger','wallets',
+          'finance_workspace_entries','finance_export_log','finance_resolution_cases',
           'idx_accounting_entities_tenant','idx_accounting_accounts_tenant_entity','idx_accounting_journals_tenant_date',
           'idx_accounting_journals_source','idx_accounting_journals_one_reversal','idx_accounting_lines_journal','idx_accounting_lines_account',
           'idx_tenant_membership_one_nonrevoked_per_user','idx_tenant_membership_one_owner','idx_tenant_memberships_user_status',
@@ -772,7 +773,8 @@ jobs:
             "tenant_invitations","tenant_invitation_events",
             "trusted_device_credentials","device_auth_challenges",
             "payment_accounts","payment_transactions","payout_requests","payment_disputes",
-            "payment_reconciliation","payment_audit","payment_webhook_events","payment_wallet_ledger","wallets"
+            "payment_reconciliation","payment_audit","payment_webhook_events","payment_wallet_ledger","wallets",
+            "finance_workspace_entries","finance_export_log","finance_resolution_cases"
           }
           expected_indexes={
             "idx_accounting_entities_tenant","idx_accounting_accounts_tenant_entity",
@@ -787,7 +789,9 @@ jobs:
             "idx_payment_accounts_tenant_user","idx_payment_tx_tenant_mission_created",
             "idx_payment_tx_tenant_intervenant_status","idx_payout_tenant_user_status",
             "idx_payment_disputes_tenant_mission","idx_wallet_ledger_tenant_user_date",
-            "idx_payment_reconciliation_tenant_status","idx_payment_audit_tenant_created"
+            "idx_payment_reconciliation_tenant_status","idx_payment_audit_tenant_created",
+            "idx_finance_workspace_tenant_created","idx_finance_workspace_tenant_user_created",
+            "idx_finance_export_tenant_created","idx_finance_resolution_tenant_status_created"
           }
           expected_triggers={
             "trg_accounting_journal_insert_draft_only","trg_accounting_line_draft_only",
@@ -813,7 +817,13 @@ jobs:
             "trg_payment_account_tenant_immutable","trg_payment_transaction_identity_immutable",
             "trg_payout_request_identity_immutable","trg_payment_dispute_identity_immutable",
             "trg_payment_reconciliation_identity_immutable","trg_payment_webhook_tenant_immutable",
-            "trg_payment_audit_no_update","trg_payment_audit_no_delete"
+            "trg_payment_audit_no_update","trg_payment_audit_no_delete",
+            "trg_finance_workspace_entry_tenant_insert","trg_finance_workspace_entry_tenant_update",
+            "trg_finance_workspace_entry_no_update","trg_finance_workspace_entry_no_delete",
+            "trg_finance_export_tenant_insert","trg_finance_export_tenant_update",
+            "trg_finance_export_no_update","trg_finance_export_no_delete",
+            "trg_finance_resolution_tenant_insert","trg_finance_resolution_tenant_update",
+            "trg_finance_resolution_identity_immutable","trg_finance_resolution_no_delete"
           }
           missing = (
             {("table",x) for x in expected_tables} |
