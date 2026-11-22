@@ -3,20 +3,29 @@ name: PROCHÉLIA migration SQL tests
 on:
   pull_request:
     paths:
+      - "src/**"
+      - "wrangler*.jsonc"
       - "migrations/**"
       - "migrations-preview-canonical/**"
-      - "tests/test_migrations_sqlite.py"
-      - "tests/test_preview_canonical_migrations.py"
-      - "scripts/prepare-d1-restore.py"
-      - "tests/test_prepare_d1_restore.py"
+      - "scripts/**"
+      - "tests/**"
+      - ".github/workflows/*d1*.yml"
+      - ".github/workflows/*migration*.yml"
+      - ".github/workflows/*restore*.yml"
       - ".github/workflows/preview-directory-e2e-acceptance.yml"
-      - ".github/workflows/restore-production-backup-isolated-test.yml"
       - ".github/workflows/migration-sql-tests.yml"
   push:
     branches: [main]
     paths:
+      - "src/**"
+      - "wrangler*.jsonc"
       - "migrations/**"
-      - "tests/test_migrations_sqlite.py"
+      - "migrations-preview-canonical/**"
+      - "scripts/**"
+      - "tests/**"
+      - ".github/workflows/*d1*.yml"
+      - ".github/workflows/*migration*.yml"
+      - ".github/workflows/*restore*.yml"
       - ".github/workflows/migration-sql-tests.yml"
 
 permissions:
@@ -27,12 +36,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Lint isolated production restore workflow
+      - name: Lint migration and acceptance workflows
         run: |
           go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
-          "$HOME/go/bin/actionlint" .github/workflows/restore-production-backup-isolated-test.yml
+          "$HOME/go/bin/actionlint" .github/workflows/migration-sql-tests.yml
           "$HOME/go/bin/actionlint" .github/workflows/preview-directory-e2e-acceptance.yml
-          "$HOME/go/bin/actionlint" .github/workflows/restore-production-backup-isolated-test.yml
+          if [ -f .github/workflows/restore-production-backup-isolated-test.yml ]; then
+            "$HOME/go/bin/actionlint" .github/workflows/restore-production-backup-isolated-test.yml
+          fi
       - name: Validate migration SQL and payment ledger invariants in isolated SQLite
         run: |
           python3 tests/test_migrations_sqlite.py
