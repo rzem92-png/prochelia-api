@@ -7,6 +7,7 @@ const start = source.indexOf("async function pricingQuote(request, env) {");
 const end = source.indexOf("\nasync function financeSummary", start);
 assert.ok(start >= 0 && end > start, "pricing quote handler must exist");
 const handler = source.slice(start, end);
+const executableHandler = handler.replace(/^\\s*\\/\\/.*$/gm, "");
 
 test("pricing simulations require POST, manager RBAC and a server-derived tenant", () => {
   assert.match(handler, /request\.method !== 'POST'/);
