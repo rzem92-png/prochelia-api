@@ -2856,7 +2856,7 @@ async function productionConfigCheck(env, { persist = false } = {}) {
     await ensureConsolidatedSchema(env); await ensurePaymentSchema(env); await ensureOperationalSchema(env); await ensureStrategicSchema(env); await ensureFinalHardeningSchema(env);
   }
   const checks=[];
-  const requiredTables=['users','sessions','missions','payment_transactions','payment_accounts','wallets','payout_requests','payment_wallet_ledger','payment_reconciliation','payment_audit','payment_webhook_events','payment_disputes','operational_cases','action_outbox','notification_outbox','accounting_ledger','promotions','promotion_recommendations','activity_journal','compliance_events'];
+  const requiredTables=['users','sessions','missions','payment_transactions','payment_accounts','wallets','payout_requests','payment_wallet_ledger','payment_reconciliation','payment_audit','payment_webhook_events','payment_disputes','finance_workspace_entries','finance_export_log','finance_resolution_cases','operational_cases','action_outbox','notification_outbox','accounting_ledger','promotions','promotion_recommendations','activity_journal','compliance_events'];
   for(const t of requiredTables) checks.push({code:`TABLE:${t}`,status:await tableExists(env,t)?'OK':'MISSING'});
   const pspRequired=['PAYMENT_PROVIDER','PAYMENT_WEBHOOK_SECRET'];
   for(const k of pspRequired) checks.push({code:`SECRET:${k}`,status:finalSecretConfigured(env,k)?'OK':'NOT_CONFIGURED'});
@@ -2870,7 +2870,7 @@ async function productionConfigCheck(env, { persist = false } = {}) {
   // Financial data must be tenant-bound before the readiness gate can ever open.
   // These columns are deliberately required even while the PSP adapter is disabled:
   // a future secret/configuration change must not silently bypass tenant isolation.
-  const tenantScopedTables=['missions','wallets','payment_transactions','payment_accounts','payout_requests','payment_disputes','payment_wallet_ledger','payment_reconciliation'];
+  const tenantScopedTables=['missions','wallets','payment_transactions','payment_accounts','payout_requests','payment_disputes','payment_wallet_ledger','payment_reconciliation','finance_workspace_entries','finance_export_log','finance_resolution_cases'];
   const tenantScopeChecks=[];
   for(const table of tenantScopedTables){
     const cols=await tableColumns(env,table);
