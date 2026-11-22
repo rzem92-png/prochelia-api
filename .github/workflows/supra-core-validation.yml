@@ -1,4 +1,4 @@
-name: Nexus Supra canonical integration validation
+name: Nexus Supra canonical integration validation (policy safety)
 
 on:
   pull_request:
