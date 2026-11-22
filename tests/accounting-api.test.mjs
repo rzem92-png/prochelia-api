@@ -152,7 +152,7 @@ test("trial balance sums only lines belonging to posted journals on or before th
   assert.equal(response.status, 200);
   const payload = await response.json();
   assert.equal(payload.accounts[0].debit_cents, 10000);
-  assert.match(trialBalanceSql, /CASE WHEN j\\.id IS NOT NULL AND l\\.side='DEBIT'/);
-  assert.match(trialBalanceSql, /CASE WHEN j\\.id IS NOT NULL AND l\\.side='CREDIT'/);
-  assert.match(trialBalanceSql, /j\\.status='POSTED' AND j\\.journal_date<=\\?/);
+  assert.match(trialBalanceSql, /CASE WHEN j[.]id IS NOT NULL AND l\\.side='DEBIT'/);
+  assert.match(trialBalanceSql, /CASE WHEN j[.]id IS NOT NULL AND l\\.side='CREDIT'/);
+  assert.match(trialBalanceSql, /j[.]status='POSTED' AND j[.]journal_date<=[?]/);
 });
