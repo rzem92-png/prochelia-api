@@ -3250,7 +3250,7 @@ async function financeRowsForUser(env, user, tenantId) {
   if (!tenantId) throw new Error('ACTIVE_TENANT_REQUIRED');
   const role = String(user.role||'').toUpperCase();
   const uid = user.id;
-  const manager = ['GERANTE','ADMIN','FINANCE','SUPPORT'].includes(role);
+  const manager = ['GERANTE','ADMIN','FINANCE','SUPPORT','SOCIETE','COMPANY'].includes(role);
   let where = 'tenant_id=?';
   const params = [tenantId];
   if (role === 'INTERVENANT') {
@@ -3421,7 +3421,7 @@ async function financeProblemResolve(request,env) {
   if(!row)return json({ok:false,error:'CASE_NOT_FOUND',version:VERSION},404);
   const role=String(auth.user.role||'').toUpperCase();
   const owner=String(row.user_id)===String(auth.user.id);
-  const manager=['GERANTE','ADMIN','FINANCE'].includes(role);
+  const manager=['GERANTE','ADMIN','FINANCE','SUPPORT','SOCIETE','COMPANY'].includes(role);
   if(!owner&&!manager)return json({ok:false,error:'FORBIDDEN',version:VERSION},403);
   const approved=Boolean(b.approve);
   const resolution=clean(b.resolution)||row.proposed_solution||'Résolution contrôlée par le Copilote.';
