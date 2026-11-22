@@ -202,8 +202,11 @@ test("intervenant can withdraw only their own pending application within their a
     "status IN ('SUBMITTED', 'SHORTLISTED')",
     "SET status = 'WITHDRAWN'",
     "APPLICATION_NOT_FOUND",
-    "APPLICATION_NOT_WITHDRAWABLE"
-  ]) assert.ok(withdrawalHandler.includes(fragment), "missing withdrawal guard: " + fragment);
+    "APPLICATION_NOT_WITHDRAWABLE",
+    "existing.status === 'WITHDRAWN'",
+    "replayed: true",
+    "status: 'WITHDRAWN'"
+  ]) assert.ok(withdrawalHandler.includes(fragment), "missing withdrawal guard or replay-safe result: " + fragment);
   assert.doesNotMatch(withdrawalHandler, /owner_tenant_id = \?/);
 });
 test("withdrawal route is dispatched only for the exact application path", () => {
