@@ -274,6 +274,8 @@ jobs:
           sqlite3 "$RUNNER_TEMP/prochelia-backup/restore-validation.sqlite" < "$RUNNER_TEMP/prochelia-backup/prochelia-preview.sql"
           integrity="$(sqlite3 "$RUNNER_TEMP/prochelia-backup/restore-validation.sqlite" 'PRAGMA integrity_check;')"
           test "$integrity" = "ok" || { echo "::error::Local SQLite restore integrity_check failed: $integrity"; exit 1; }
+          foreign_keys="$(sqlite3 "$RUNNER_TEMP/prochelia-backup/restore-validation.sqlite" 'PRAGMA foreign_key_check;')"
+          test -z "$foreign_keys" || { echo "::error::Local SQLite restore foreign_key_check found violations."; exit 1; }
 
       - name: Encrypt and verify fresh backup
         shell: bash
