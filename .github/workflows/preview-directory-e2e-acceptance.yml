@@ -1,11 +1,22 @@
 name: PROCHÉLIA — Preview directory API end-to-end acceptance
 
 on:
+  push:
+    branches:
+      - feat/supra-canonical-tenant-integration-2026-11-20
+    paths:
+      - ".github/workflows/preview-directory-e2e-acceptance.yml"
+      - "tests/preview-e2e-workflow.test.mjs"
   workflow_dispatch:
     inputs:
       confirmation:
         description: "Type RUN_PREVIEW_DIRECTORY_E2E to seed synthetic Preview data and test the live Pages-to-Worker path"
         required: true
+        type: string
+      frontend_commit_sha:
+        description: "Exact 40-character HEAD of the selected frontend Preview branch"
+        required: false
+        default: "f7a1a2015083043ec2d4f35c914f7c38e785853a"
         type: string
   workflow_run:
     workflows:
@@ -22,6 +33,10 @@ concurrency:
 jobs:
   preview-directory-e2e:
     if: >-
+      (
+        github.event_name == 'push' &&
+        github.ref == 'refs/heads/feat/supra-canonical-tenant-integration-2026-11-20'
+      ) ||
       (
         github.event_name == 'workflow_dispatch' &&
         inputs.confirmation == 'RUN_PREVIEW_DIRECTORY_E2E' &&
@@ -44,6 +59,7 @@ jobs:
       PREVIEW_DB_NAME: prochelia-preview-eu-2026-11-17
       PREVIEW_DB_ID: e3cf167c-37e1-4d72-9ac6-b3e27c14b97f
       FRONTEND_BRANCH: feat/intervenant-secure-pages-integration-2026-11-20
+      FRONTEND_COMMIT_SHA: ${{ inputs.frontend_commit_sha || 'f7a1a2015083043ec2d4f35c914f7c38e785853a' }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -90,16 +106,10 @@ jobs:
             jq -c '{result: {name: .result.name, uuid: .result.uuid}, errors}' "$RUNNER_TEMP/preview-d1.json"
             exit 1
           }
-          # Resolve the exact Preview deployment for the current frontend branch HEAD.
-          # Never trust a stale hard-coded Pages deployment URL or ID.
-          frontend_branch_encoded="${FRONTEND_BRANCH//\//%2F}"
-          curl --silent --show-error --fail \
-            -H "Accept: application/vnd.github+json" \
-            "https://api.github.com/repos/rzem92-png/-prochelia/branches/${frontend_branch_encoded}" \
-            > "$RUNNER_TEMP/frontend-branch.json"
-          FRONTEND_COMMIT_SHA="$(jq -r '.commit.sha // empty' "$RUNNER_TEMP/frontend-branch.json")"
+          # The frontend repository is private; pin its verified HEAD explicitly.
+          # The Pages deployment must match both this branch and exact commit.
           [[ "$FRONTEND_COMMIT_SHA" =~ ^[0-9a-f]{40}$ ]] || {
-            echo "::error::Could not resolve the pinned frontend branch HEAD."
+            echo "::error::A valid pinned frontend commit SHA is required."
             exit 1
           }
           cf_request "Pages Preview deployment list" \
