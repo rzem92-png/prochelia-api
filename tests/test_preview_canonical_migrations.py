@@ -1175,3 +1175,77 @@ for sql in [
         assert "PAYMENT_AUDIT_APPEND_ONLY" in str(exc), str(exc)
 
 print("PASS: financial tenant isolation, wallet/mission linkage, cross-tenant write rejection, immutable attribution and append-only audit.")
+
+
+# Finance workspace tables are tenant-bound and cannot be used as a cross-company ledger.
+finance_workspace_tables = {
+    "finance_workspace_entries", "finance_export_log", "finance_resolution_cases",
+}
+for table in finance_workspace_tables:
+    columns = {row[1] for row in db.execute(f"PRAGMA table_info({table})")}
+    assert "tenant_id" in columns, f"{table} missing tenant_id"
+finance_workspace_triggers = {
+    "trg_finance_workspace_entry_tenant_insert",
+    "trg_finance_workspace_entry_tenant_update",
+    "trg_finance_workspace_entry_no_update",
+    "trg_finance_workspace_entry_no_delete",
+    "trg_finance_export_tenant_insert",
+    "trg_finance_export_tenant_update",
+    "trg_finance_export_no_update",
+    "trg_finance_export_no_delete",
+    "trg_finance_resolution_tenant_insert",
+    "trg_finance_resolution_tenant_update",
+    "trg_finance_resolution_identity_immutable",
+    "trg_finance_resolution_no_delete",
+}
+triggers = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='trigger'")}
+assert finance_workspace_triggers <= triggers, (
+    f"Missing finance workspace tenant guards: {sorted(finance_workspace_triggers-triggers)}"
+)
+
+db.execute("""
+    INSERT INTO finance_workspace_entries(
+      id,user_id,role,entry_type,direction,amount_cents,currency,tenant_id
+    ) VALUES ('finance-entry-a','finance-user-a','intervenant','ADJUSTMENT','IN',1200,'EUR','tenant-a')
+""")
+db.execute("""
+    INSERT INTO finance_export_log(
+      id,user_id,role,format,row_count,tenant_id
+    ) VALUES ('finance-export-a','finance-user-a','intervenant','csv',1,'tenant-a')
+""")
+db.execute("""
+    INSERT INTO finance_resolution_cases(
+      id,user_id,role,issue_type,status,severity,description,tenant_id
+    ) VALUES ('finance-case-a','finance-user-a','intervenant','UNKNOWN','OPEN','LOW','synthetic test','tenant-a')
+""")
+for sql in [
+    "UPDATE finance_workspace_entries SET amount_cents=9999 WHERE id='finance-entry-a'",
+    "DELETE FROM finance_workspace_entries WHERE id='finance-entry-a'",
+    "UPDATE finance_export_log SET row_count=999 WHERE id='finance-export-a'",
+    "DELETE FROM finance_export_log WHERE id='finance-export-a'",
+]:
+    try:
+        db.execute(sql)
+        raise AssertionError("Finance ledger/export history was mutable")
+    except sqlite3.IntegrityError:
+        pass
+try:
+    db.execute("UPDATE finance_resolution_cases SET tenant_id='tenant-b' WHERE id='finance-case-a'")
+    raise AssertionError("Finance resolution case tenant reassignment was accepted")
+except sqlite3.IntegrityError as exc:
+    assert "FINANCE_CASE_IDENTITY_IMMUTABLE" in str(exc), str(exc)
+db.execute("UPDATE finance_resolution_cases SET status='RESOLVED',resolved_at=CURRENT_TIMESTAMP WHERE id='finance-case-a'")
+try:
+    db.execute("DELETE FROM finance_resolution_cases WHERE id='finance-case-a'")
+    raise AssertionError("Finance resolution case history was deletable")
+except sqlite3.IntegrityError:
+    pass
+
+# The API's finance read model must bind every domain query to the server-derived tenant.
+assert "FINANCE_WORKSPACE_TENANT_SCOPE_REQUIRED" in source
+assert "WHERE tenant_id=? ORDER BY created_at DESC LIMIT 5000" in source
+assert "WHERE tenant_id=? AND user_id=? ORDER BY created_at DESC LIMIT 5000" in source
+assert "intervenants WHERE user_id=? AND tenant_id=?" in source
+assert "clients WHERE user_id=? AND tenant_id=?" in source
+assert "WHERE id=? AND tenant_id=? LIMIT 1" in source
+print("PASS: finance dashboard/export/ledger/cases are tenant-scoped, legacy unassigned rows fail closed, ledger/export append-only and resolution identity immutable.")
