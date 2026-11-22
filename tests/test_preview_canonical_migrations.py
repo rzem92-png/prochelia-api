@@ -265,7 +265,7 @@ try:
     db.execute("UPDATE accounting_journals SET status='POSTED', posted_by='user-a', posted_at=CURRENT_TIMESTAMP WHERE id='journal-account-state'")
     raise AssertionError("Journal posted for a suspended accounting entity")
 except sqlite3.IntegrityError as exc:
-    assert "ENTITY_INACTIVE_AT_POSTING" in str(exc), str(exc)
+    assert "ACCOUNTING_ENTITY_INACTIVE_AT_POSTING" in str(exc), str(exc)
 db.execute("UPDATE accounting_entities SET status='ACTIVE' WHERE id='entity-a'")
 db.execute("UPDATE accounting_journals SET status='POSTED', posted_by='user-a', posted_at=CURRENT_TIMESTAMP WHERE id='journal-account-state'")
 
