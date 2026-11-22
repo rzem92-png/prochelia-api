@@ -24,9 +24,11 @@ test("payout reservation batches insert, conditional debit and audit atomically"
   });
   assert.deepEqual(result,{ok:true,reason:null});
   assert.equal(DB.calls.length,3);
-  assert.match(DB.calls[0].sql,/tenant_id/);\n  assert.match(DB.calls[0].sql,/NOT EXISTS \(SELECT 1 FROM payout_requests WHERE idempotency_key=\? AND tenant_id=\?\)/);
+  assert.match(DB.calls[0].sql,/tenant_id/);
+  assert.match(DB.calls[0].sql,/NOT EXISTS \(SELECT 1 FROM payout_requests WHERE idempotency_key=\? AND tenant_id=\?\)/);
   assert.match(DB.calls[1].sql,/available_cents>=\?/);
-  assert.match(DB.calls[1].sql,/tenant_id/);\n  assert.match(DB.calls[1].sql,/EXISTS \(SELECT 1 FROM payout_requests/);
+  assert.match(DB.calls[1].sql,/tenant_id/);
+  assert.match(DB.calls[1].sql,/EXISTS \(SELECT 1 FROM payout_requests/);
   assert.match(DB.calls[2].sql,/INSERT INTO payment_audit/);
 });
 
