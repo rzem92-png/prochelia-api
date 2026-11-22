@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createHmac, webcrypto } from "node:crypto";
-import { paymentWebhook, webhookProviderForRequest } from "../src/index.js";
+import { paymentWebhook, webhookProviderForRequest, requiresAtomicFinancialSettlement } from "../src/index.js";
 
 globalThis.crypto ??= webcrypto;
 
@@ -109,4 +109,25 @@ test("invalid Stripe header cannot be rescued by a valid generic HMAC at the HTT
   assert.equal(response.status, 401);
   assert.equal((await response.json()).error, "INVALID_WEBHOOK_SIGNATURE");
   assert.equal(databaseCalls, 0);
+});
+
+
+test("native Stripe financial event types remain blocked until atomic settlement exists", () => {
+  for (const type of [
+    "payment_intent.succeeded",
+    "payment_intent.payment_failed",
+    "charge.succeeded",
+    "charge.failed",
+    "charge.refunded",
+    "refund.created",
+    "refund.updated",
+    "refund.failed",
+    "payout.paid",
+    "payout.failed",
+    "payout.canceled"
+  ]) {
+    assert.equal(requiresAtomicFinancialSettlement(type), true, type);
+  }
+  assert.equal(requiresAtomicFinancialSettlement("customer.updated"), false);
+  assert.equal(requiresAtomicFinancialSettlement("PAYMENT_INTENT.SUCCEEDED"), true);
 });
