@@ -154,3 +154,13 @@ test("directory listing fails closed without an active tenant or tenant_id schem
   assert.equal(unavailable.status,503);
   assert.equal(noColumn.executed,false);
 });
+
+
+test("legacy loyalty mutations fail closed until their tenant-scoped schema exists", async () => {
+  const source = await (await import("node:fs/promises")).readFile(new URL("../src/index.js", import.meta.url), "utf8");
+  const start=source.indexOf("async function loyaltyUpdate(request, env) {");
+  const end=source.indexOf("async function qualityCreate",start);
+  const body=source.slice(start,end);
+  assert.ok(start>=0 && end>start);
+  assert.ok(body.indexOf("return legacyTenantScopeBlocked();") < body.indexOf("ensureOperationalSchema(env)"));
+});
