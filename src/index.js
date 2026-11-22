@@ -2911,7 +2911,7 @@ async function productionConfigCheck(env, { persist = false } = {}) {
     await ensureConsolidatedSchema(env); await ensurePaymentSchema(env); await ensureOperationalSchema(env); await ensureStrategicSchema(env); await ensureFinalHardeningSchema(env);
   }
   const checks=[];
-  const requiredTables=['users','sessions','missions','payment_transactions','payment_webhook_events','payment_disputes','operational_cases','action_outbox','notification_outbox','accounting_ledger','promotions','promotion_recommendations','activity_journal','compliance_events'];
+  const requiredTables=['users','sessions','missions','payment_transactions','payment_accounts','wallets','payout_requests','payment_webhook_events','payment_disputes','operational_cases','action_outbox','notification_outbox','accounting_ledger','promotions','promotion_recommendations','activity_journal','compliance_events'];
   for(const t of requiredTables) checks.push({code:`TABLE:${t}`,status:await tableExists(env,t)?'OK':'MISSING'});
   const pspRequired=['PAYMENT_PROVIDER','PAYMENT_WEBHOOK_SECRET'];
   for(const k of pspRequired) checks.push({code:`SECRET:${k}`,status:finalSecretConfigured(env,k)?'OK':'NOT_CONFIGURED'});
@@ -2922,6 +2922,17 @@ async function productionConfigCheck(env, { persist = false } = {}) {
   const missionCols=await tableColumns(env,'missions');
   const usefulMissionCols=['id','client_id','intervenant_id'];
   checks.push({code:'MISSION_CORE_COLUMNS',status:usefulMissionCols.every(x=>missionCols.includes(x))?'OK':'INCOMPLETE',missing:usefulMissionCols.filter(x=>!missionCols.includes(x))});
+  // Financial data must be tenant-bound before the readiness gate can ever open.
+  // These columns are deliberately required even while the PSP adapter is disabled:
+  // a future secret/configuration change must not silently bypass tenant isolation.
+  const tenantScopedTables=['missions','payment_transactions','payment_accounts','wallets','payout_requests','payment_disputes'];
+  const tenantScopeChecks=[];
+  for(const table of tenantScopedTables){
+    const cols=await tableColumns(env,table);
+    const missing=cols.includes('tenant_id')?[]:['tenant_id'];
+    tenantScopeChecks.push({table,status:missing.length?'INCOMPLETE':'OK',missing});
+  }
+  checks.push({code:'FINANCIAL_TENANT_SCOPE',status:tenantScopeChecks.every(x=>x.status==='OK')?'OK':'INCOMPLETE',tables:tenantScopeChecks,missing:tenantScopeChecks.filter(x=>x.status!=='OK').map(x=>x.table)});
   if (persist) {
     await registerIntegration(env,'PSP','PAYMENT',['PAYMENT_PROVIDER','PAYMENT_WEBHOOK_SECRET'],['charge','refund','payout','webhook','reconciliation'],finalSecretConfigured(env,'PAYMENT_PROVIDER')&&finalSecretConfigured(env,'PAYMENT_WEBHOOK_SECRET')?'CONFIGURED':'NOT_CONFIGURED');
     await registerIntegration(env,'NOTIFICATIONS','MESSAGING',['NOTIFICATION_PROVIDER'],['email','sms','push'],finalSecretConfigured(env,'NOTIFICATION_PROVIDER')?'CONFIGURED':'NOT_CONFIGURED');
