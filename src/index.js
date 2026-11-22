@@ -1728,14 +1728,11 @@ async function executeCaseBusinessAction(env, c, rec, actorId=null, automatic=fa
   if (action === 'SEARCH_REPLACEMENT' || c.case_type === 'absence_intervenant' || c.case_type === 'retard_intervenant') {
     const replacementId = clean(context.replacement_intervenant_id || context.replacement_id);
     if (replacementId && c.mission_id) {
-      const cols = await getTableColumns(env,'missions');
-      if (cols.includes('intervenant_id')) {
-        await env.DB.prepare('UPDATE missions SET intervenant_id=? WHERE id=?').bind(replacementId,c.mission_id).run();
-        results.push({action:'ASSIGN_REPLACEMENT',mission_id:c.mission_id,intervenant_id:replacementId,status:'EXECUTED'});
-      } else {
-        const queued=await enqueueAction(env,c.id,'ASSIGN_REPLACEMENT',{mission_id:c.mission_id,intervenant_id:replacementId},`${c.id}:replacement:${replacementId}`);
-        results.push({action:'ASSIGN_REPLACEMENT',...queued,reason:'MISSION_SCHEMA_NEEDS_REVIEW'});
-      }
+      // Do not write mission assignment directly: this path has not yet proven
+      // tenant ownership, qualification, availability, conflict-free scheduling,
+      // and a transactional mission-state transition.
+      const queued=await enqueueAction(env,c.id,'ASSIGN_REPLACEMENT',{mission_id:c.mission_id,intervenant_id:replacementId},`${c.id}:replacement:${replacementId}`);
+      results.push({action:'ASSIGN_REPLACEMENT',...queued,reason:'VERIFIED_ASSIGNMENT_WORKFLOW_REQUIRED'});
     } else {
       const queued=await enqueueAction(env,c.id,'SEARCH_REPLACEMENT',{mission_id:c.mission_id||null,criteria:context.replacement_criteria||{},case_type:c.case_type},`${c.id}:search-replacement`);
       results.push({action:'SEARCH_REPLACEMENT',...queued});
@@ -1743,15 +1740,10 @@ async function executeCaseBusinessAction(env, c, rec, actorId=null, automatic=fa
   }
 
   if (context.reschedule_start_at && c.mission_id) {
-    const cols=await getTableColumns(env,'missions');
-    const target = cols.includes('start_at') ? 'start_at' : (cols.includes('scheduled_at') ? 'scheduled_at' : null);
-    if (target) {
-      await env.DB.prepare(`UPDATE missions SET ${target}=? WHERE id=?`).bind(String(context.reschedule_start_at),c.mission_id).run();
-      results.push({action:'RESCHEDULE_MISSION',mission_id:c.mission_id,field:target,status:'EXECUTED'});
-    } else {
-      const queued=await enqueueAction(env,c.id,'RESCHEDULE_MISSION',{mission_id:c.mission_id,start_at:context.reschedule_start_at},`${c.id}:reschedule:${context.reschedule_start_at}`);
-      results.push({action:'RESCHEDULE_MISSION',...queued,reason:'MISSION_SCHEMA_NEEDS_REVIEW'});
-    }
+    // Rescheduling remains queued until the tenant-scoped mission executor
+    // validates ownership, allowed state transition and conflict checks.
+    const queued=await enqueueAction(env,c.id,'RESCHEDULE_MISSION',{mission_id:c.mission_id,start_at:context.reschedule_start_at},`${c.id}:reschedule:${context.reschedule_start_at}`);
+    results.push({action:'RESCHEDULE_MISSION',...queued,reason:'TENANT_SCOPED_MISSION_EXECUTOR_REQUIRED'});
   }
 
   if (context.client_notification || c.client_id || c.company_id) {
