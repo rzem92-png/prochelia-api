@@ -189,6 +189,19 @@ WHEN NEW.tenant_id IS NULL OR (
 )
 BEGIN SELECT RAISE(ABORT,'PAYMENT_RECONCILIATION_TENANT_MISMATCH'); END;
 
+CREATE TRIGGER IF NOT EXISTS trg_payment_reconciliation_tenant_update
+BEFORE UPDATE OF tenant_id ON payment_reconciliation
+WHEN NEW.tenant_id IS NULL OR (
+  NEW.internal_transaction_id IS NOT NULL AND NOT EXISTS (
+    SELECT 1 FROM payment_transactions tx WHERE tx.id=NEW.internal_transaction_id AND tx.tenant_id=NEW.tenant_id
+  )
+) OR (
+  NEW.internal_payout_id IS NOT NULL AND NOT EXISTS (
+    SELECT 1 FROM payout_requests p WHERE p.id=NEW.internal_payout_id AND p.tenant_id=NEW.tenant_id
+  )
+)
+BEGIN SELECT RAISE(ABORT,'PAYMENT_RECONCILIATION_TENANT_MISMATCH'); END;
+
 -- Ledger balance application is now constrained to the matching tenant wallet.
 DROP TRIGGER IF EXISTS trg_payment_wallet_ledger_apply;
 CREATE TRIGGER trg_payment_wallet_ledger_apply
