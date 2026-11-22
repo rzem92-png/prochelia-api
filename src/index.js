@@ -1956,85 +1956,23 @@ function financeStrategicQuote({basePriceCents=0,phaseFactor=1,urgency='normal',
 }
 
 async function pricingQuote(request, env) {
-  // This endpoint persists an administrative simulation. Public roles must not
-  // supply or influence the platform's financial assumptions.
+  if (request.method !== 'POST') return json({ok:false,error:'METHOD_NOT_ALLOWED',version:VERSION},405,{allow:'POST'});
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
-  const b=await readJson(request)||{};
-  const phase=String(await getSetting(env,'project_phase','TEST')).toUpperCase();
-  const cfg=PROJECT_PHASES[phase];
-  if (!cfg) return json({ok:false,error:'PROJECT_PHASE_INVALID',version:VERSION},503);
-
-  const distance=Number(b.distance_km??0);
-  const duration=Number(b.duration_minutes??60);
-  const base=Number(b.base_price_cents);
-  const clientType=String(b.client_type||'B2C').toUpperCase();
-  const serviceCode=clean(b.service_code);
-  if (!Number.isFinite(distance) || distance<0 || distance>500 ||
-      !Number.isSafeInteger(duration) || duration<1 || duration>1440 ||
-      !Number.isSafeInteger(base) || base<=0 || base>100000000 ||
-      !['B2C','B2B'].includes(clientType) || !serviceCode) {
-    return json({ok:false,error:'INVALID_PRICING_SIMULATION_INPUT',version:VERSION},400);
-  }
-
-  let policy=null;
-  try {
-    policy=await env.DB.prepare(`SELECT * FROM pricing_policies WHERE active=1 AND phase=? AND client_type=? AND (service_code=? OR service_code IS NULL) ORDER BY CASE WHEN service_code=? THEN 0 ELSE 1 END LIMIT 1`)
-      .bind(phase,clientType,serviceCode,serviceCode).first();
-  } catch (_) {}
-  if (!policy) return json({
-    ok:false,error:'PRICING_POLICY_NOT_CONFIGURED',version:VERSION,
+  let tenantContext;
+  try { tenantContext = await resolveTenantContext(request, env, gate.auth); }
+  catch { return json({ok:false,error:'TENANT_CONTEXT_UNAVAILABLE',version:VERSION,write_enabled:false},503); }
+  if (!tenantContext?.ok) return json({ok:false,error:tenantContext?.error || 'TENANT_CONTEXT_REQUIRED',version:VERSION,write_enabled:false},tenantContext?.status || 403);
+  // The legacy pricing_policies and pricing_quotes models are not tenant-scoped,
+  // and the old route accepted base_price_cents from the caller. Do not compute
+  // or persist a commercial quote until a versioned, tenant-scoped server policy
+  // (country, currency, service, effective dates and approval) is available.
+  return json({
+    ok:false,
+    error:'TENANT_SCOPED_PRICING_POLICY_REQUIRED',
+    version:VERSION,
     write_enabled:false,
-    message:'Aucune politique tarifaire active ne couvre ce pays, ce segment et ce service. La simulation est bloquée.'
-  },409);
-
-  const fuelMode=String(b.fuel_mode||'normal').toLowerCase()==='high'?'high':'normal';
-  const fuelRateLegacy=Number(policy.fuel_cost_per_km_cents||0);
-  const fuelPriceCentsPerLitre=Number(await getSetting(env,
-    fuelMode==='high'?'fuel_reference_price_cents_litre_high':'fuel_reference_price_cents_litre_normal',
-    fuelMode==='high'?200:175));
-  const software=Number(policy.software_cost_cents||0);
-  const pspPercent=Number(policy.psp_percent||0);
-  const pspFixed=Number(policy.psp_fixed_cents||0);
-  const targetMargin=Number(policy.target_margin_percent||0);
-  const commissionRate=Number(policy.platform_fee_percent||0)/100;
-  const platformFeeFixed=Number(policy.platform_fee_fixed_cents||0);
-  const intervenantFloor=Number(policy.intervenant_floor_cents||0);
-  const regulatedMax=Number(policy.client_ceiling_cents)>0?Number(policy.client_ceiling_cents):null;
-  if (!Number.isFinite(targetMargin) || targetMargin<=0 ||
-      !Number.isFinite(intervenantFloor) || intervenantFloor<=0 ||
-      !Number.isFinite(commissionRate) || commissionRate<0 ||
-      !Number.isFinite(platformFeeFixed) || platformFeeFixed<0 ||
-      !Number.isFinite(pspPercent) || pspPercent<0 ||
-      !Number.isFinite(pspFixed) || pspFixed<0 ||
-      !Number.isFinite(software) || software<0) {
-    return json({ok:false,error:'PRICING_POLICY_INCOMPLETE',version:VERSION,write_enabled:false},409);
-  }
-
-  const strategic=financeStrategicQuote({
-    basePriceCents:base,
-    phaseFactor:cfg.pricingFactor,
-    urgency:b.urgency||'normal',
-    evening:Boolean(b.evening),night:Boolean(b.night),saturday:Boolean(b.saturday),sunday:Boolean(b.sunday),holiday:Boolean(b.holiday),lastMinute:Boolean(b.last_minute||b.lastMinute),
-    distanceKm:distance,fuelMode,fuelPriceCentsPerLitre,commissionRate,commissionFixedCents:platformFeeFixed,discountCents:0,regulatedMaxCents:regulatedMax,
-    intervenantFloorCents:intervenantFloor,pspPercent,pspFixedCents:pspFixed,softwareCostCents:software,targetMarginPercent:targetMargin
-  });
-  const legacyFuel=Math.max(0,Math.round(distance*fuelRateLegacy));
-  const quote={
-    phase,clientType,distance,duration,
-    client_price_cents:strategic.client_price_cents,
-    intervenant_amount_cents:strategic.intervenant_amount_cents,
-    platform_commission_cents:strategic.commission_cents,
-    psp_cost_cents:strategic.psp_cost_cents,
-    software_cost_cents:strategic.software_cost_cents,
-    fuel_cost_cents:strategic.travel.total_cost_cents,
-    estimated_margin_cents:strategic.estimated_margin_cents,
-    strategic_finance:strategic,
-    financial_validation_status:paymentsConfigured(env)?'PSP_CONFIGURED_SANDBOX_VALIDATION_REQUIRED':'ESTIMATE_ONLY_PSP_NOT_CONFIGURED',
-    assumptions:{market_position:'strategic',fuel_included:true,fuel_mode:fuelMode,fuel_reference_price_cents_per_litre:fuelPriceCentsPerLitre,legacy_fuel_cost_per_km_cents:legacyFuel,software_included:true,target_margin_percent:targetMargin,commission_rate_percent:commissionRate*100,commission_fixed_cents:platformFeeFixed,b2b_rule:'company_pays_intervenant_platform_bills_commission',single_finance_engine:true,discounts_excluded_until_server_authorized}
-  };
-  await env.DB.prepare(`INSERT INTO pricing_quotes(id,phase,client_type,service_code,distance_km,duration_minutes,client_price_cents,intervenant_amount_cents,platform_commission_cents,psp_cost_cents,software_cost_cents,fuel_cost_cents,estimated_margin_cents,assumptions_json) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
-    .bind(crypto.randomUUID(),phase,clientType,serviceCode,distance,duration,quote.client_price_cents,quote.intervenant_amount_cents,quote.platform_commission_cents,quote.psp_cost_cents,quote.software_cost_cents,quote.fuel_cost_cents,quote.estimated_margin_cents,JSON.stringify(quote.assumptions)).run();
-  return json({ok:true,version:VERSION,quote},200);
+    message:'Le devis est suspendu tant que la politique tarifaire serveur versionnée et isolée par tenant n’est pas validée.'
+  },503);
 }
 
 async function financeSummary(request, env) {
@@ -2074,7 +2012,7 @@ async function consolidatedInfo(env) {
 
 async function handleConsolidated(request, env) {
   const url=new URL(request.url);
-  const consolidatedPath = ['/api/consolidated/info','/api/ops/dashboard','/api/journal','/api/cases','/api/cases/approve','/api/metiers','/api/metiers/suggest','/api/pricing/quote','/api/complaints','/api/settings/phase'].includes(url.pathname);
+  const consolidatedPath = ['/api/consolidated/info','/api/ops/dashboard','/api/journal','/api/cases','/api/cases/approve','/api/metiers','/api/metiers/suggest','/api/complaints','/api/settings/phase'].includes(url.pathname);
   if (consolidatedPath) {
     try { await ensureConsolidatedSchema(env); } catch (e) { return json({ok:false,error:'CONSOLIDATED_SCHEMA_ERROR',version:VERSION,message:e.message},500); }
   }
