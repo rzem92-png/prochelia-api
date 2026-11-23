@@ -92,3 +92,56 @@ Aucune déclaration de conformité juridique n'est faite par cette note. Les con
 - Règlement d'exécution (UE) 2026/2487 relatif aux bacs à sable réglementaires IA : https://eur-lex.europa.eu/eli/reg_impl/2026/2487/oj
 - CNIL, **Amendes RGPD et interaction avec le DSA**, 23 septembre 2026 : https://www.cnil.fr/fr/pleniere-cepd-amendes-reglement-services-numeriques
 
+
+
+## 6. Addendum juridique vérifié le 23 novembre 2026 — sources primaires
+
+### Union européenne — AI Act et transparence utilisateur
+
+Le règlement (UE) 2026/1744 du 8 juillet 2026, publié au JOUE le 24 juillet 2026 et en vigueur, a modifié le calendrier de l'AI Act :
+- systèmes à haut risque relevant de l'article 6(2) et de l'annexe III : application des exigences du chapitre III à partir du **2 décembre 2027** ;
+- systèmes à haut risque relevant de l'article 6(1) et de l'annexe I : à partir du **2 août 2028**.
+
+Les obligations de transparence de l'article 50 s'appliquent depuis le **2 août 2026** : l'utilisateur doit être informé lorsqu'il interagit directement avec un système d'IA (par exemple un chatbot ou agent IA), sauf exception légale applicable ; certains contenus générés ou manipulés par IA doivent être clairement identifiés/étiquetés selon leur catégorie.
+
+**Conséquences immédiates pour Nexus Supra :**
+1. Afficher une information claire avant ou au début de l'interaction : « Vous échangez avec un assistant IA Nexus Supra », avec accès simple à un interlocuteur humain.
+2. Tracer la version du système, la finalité, les recommandations et les validations humaines, sans présenter une recommandation comme une décision humaine.
+3. Identifier les contenus synthétiques lorsqu'ils entrent dans les catégories de l'article 50 ; ne pas appliquer un étiquetage indifférencié à tout texte interne.
+4. Qualifier séparément Nexus Talent : classement, présélection ou évaluation de personnes pour l'emploi peut relever de l'annexe III selon la finalité et l'influence réelle sur les décisions. Maintenir la décision humaine, l'explication, la contestation et le contrôle des biais.
+
+La proposition Digital Fairness Act (COM(2026) 1100 final, 11 novembre 2026) demeure une **proposition législative**, non une obligation déjà applicable. Elle doit néanmoins alimenter les contrôles de conception sur les dark patterns, la transparence des prix dynamiques, les interfaces addictives, la personnalisation et l'accès au support humain.
+
+### Algérie — lois n° 25-10 et 25-11 du 24 juillet 2025
+
+**Loi n° 25-11 — données personnelles :**
+- article 41 bis : désignation d'un délégué à la protection des données selon les conditions prévues par le texte ;
+- article 41 bis 2 : registre des activités de traitement tenu par le responsable et registre du sous-traitant ;
+- article 41 bis 3 : carnet automatisé des opérations de traitement, couvrant notamment collecte, enregistrement, conservation, modification, extraction, consultation, utilisation, communication, rapprochement, chiffrement, effacement et destruction. Le carnet doit permettre de retrouver les motifs, date et heure et, dans la mesure du possible, l'identité de l'utilisateur et des destinataires.
+
+**Conséquence PROCHÉLIA :** le journal Nexus Supra et les journaux techniques doivent être reliés à un véritable registre de traitement et à un carnet automatisé conforme : finalité/motif, horodatage, acteur, opération, catégories de données et destinataire lorsque disponible. Un simple journal de gouvernance métier ne suffit pas à lui seul. Définir formellement les rôles responsable/sous-traitant et le DPO avant le pilote algérien.
+
+**Loi n° 25-10 — LBC/FT et actifs virtuels :**
+Le texte modifie la loi n° 05-01 relative à la prévention et à la lutte contre le blanchiment d'argent et le financement du terrorisme. Son article 6 bis interdit notamment l'émission, l'achat, la vente, l'utilisation, la détention, la promotion et l'exploitation de plateformes d'échange d'actifs virtuels, ainsi que le minage.
+
+**Conséquence PROCHÉLIA :** ne pas introduire de jeton, crypto-actif, portefeuille crypto ou fonctionnalité d'échange pour le lancement algérien. Les soldes fiat, la détention éventuelle de fonds, le cantonnement, les commissions, les transferts et le rôle exact de la plateforme doivent faire l'objet d'une qualification locale avec un PSP/établissement habilité et un avocat spécialisé. Ne pas conclure que PROCHÉLIA est automatiquement un assujetti LBC/FT : cette qualification dépend de son rôle, des services effectivement fournis et des catégories légales applicables.
+
+**Limite de portée importante :** les articles 45 bis et suivants créés par la loi 25-11 sont dans un titre spécifique aux traitements effectués à des fins de prévention/détection des infractions, enquêtes et poursuites pénales. Le délai de notification de cinq jours de l'article 45 bis 8 ne doit donc pas être transposé automatiquement à tout traitement d'une marketplace privée. Les obligations générales applicables à PROCHÉLIA doivent être déterminées à partir du régime général de la loi 18-07 modifiée et de ses textes d'application.
+
+### Actions de gouvernance à intégrer au plan de conformité
+
+- [ ] Ajouter l'information d'interaction IA Nexus Supra dans les parcours concernés et une voie de recours humain.
+- [ ] Faire qualifier Nexus Talent au regard de l'annexe III AI Act avant toute sélection ou notation opérationnelle.
+- [ ] Ajouter au registre et au carnet de traitement Algérie les événements de consultation, extraction, modification, chiffrement, export, partage et suppression.
+- [ ] Nommer/désigner le DPO selon l'analyse locale et documenter ses coordonnées et responsabilités.
+- [ ] Obtenir une note juridique algérienne sur LBC/FT, PSP, fonds clients, wallets fiat, cantonnement et modèle de commission avant tout flux financier.
+- [ ] Garder tout crypto-actif, jeton ou échange hors périmètre du pilote algérien.
+
+### Sources officielles
+
+- Règlement (UE) 2026/1744 : https://eur-lex.europa.eu/eli/reg/2026/1744/oj
+- Commission européenne, transparence AI Act applicable depuis le 2 août 2026 : https://commission.europa.eu/news-and-media/news/safer-and-more-transparent-ai-2026-08-02_en
+- Digital Fairness Act, COM(2026) 1100 final : https://eur-lex.europa.eu/legal-content/EN/TXT/?uri=CELEX:52026PC1100
+- Journal officiel algérien n° 48 du 24 juillet 2025, lois 25-10 et 25-11 : https://www.joradp.dz/FTP/JO-FRANCAIS/2025/F2025048.pdf
+
+Cette note est une veille produit, non un avis juridique. Les qualifications France/UE et Algérie, le statut PSP, les obligations LBC/FT, les transferts internationaux et la conformité des usages IA doivent être validés par des professionnels compétents avant lancement.
