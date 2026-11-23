@@ -25,7 +25,7 @@ concurrency:
 
 jobs:
   migrate-preview:
-    if: ${{ github.ref == 'refs/heads/main' && inputs.confirm_preview == 'APPLY_PREVIEW_ONLY' }}
+    if: ${{ github.ref == 'refs/heads/fix/pages-proxy-preview-cors-2026-11-23' && github.actor == 'rzem92-png' && inputs.confirm_preview == 'APPLY_PREVIEW_ONLY' }}
     runs-on: ubuntu-latest
     timeout-minutes: 25
     env:
@@ -394,7 +394,7 @@ jobs:
             .object.key == $key and
             .object.sha256_manifest_key == ($key + ".sha256") and
             .provenance.repository == "rzem92-png/prochelia-api" and
-            .provenance.ref == "refs/heads/main" and
+            .provenance.ref == "refs/heads/fix/pages-proxy-preview-cors-2026-11-23" and
             .provenance.commit_sha == env.GITHUB_SHA and
             .provenance.run_id == env.GITHUB_RUN_ID and
             .provenance.migration_source_sha == env.GITHUB_SHA and

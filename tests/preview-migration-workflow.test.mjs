@@ -4,12 +4,14 @@ import { readFile, readdir } from "node:fs/promises";
 
 const workflow = await readFile(new URL("../.github/workflows/apply-preview-d1-migrations.yml", import.meta.url), "utf8");
 
-test("Preview migration is manually gated on main only", () => {
-  assert.match(workflow, /github\.ref == 'refs\/heads\/main'/);
-  assert.doesNotMatch(workflow, /github\.ref == 'refs\/heads\/fix\//);
-  assert.match(workflow, /inputs\.confirm_preview == 'APPLY_PREVIEW_ONLY'/);
-  assert.match(workflow, /EXPECTED_DB_ID:\s*e3cf167c-37e1-4d72-9ac6-b3e27c14b97f/);
-});
+test("Preview migration is manually gated to the reviewed Preview branch and repository owner", () => {
+  assert.match(workflow, /github\\.ref == 'refs\\/heads\\/fix\\/pages-proxy-preview-cors-2026-11-23'/);
+  assert.match(workflow, /github\\.actor == 'rzem92-png'/);
+  assert.doesNotMatch(workflow, /github\\.ref == 'refs\\/heads\\/main'/);
+  assert.match(workflow, /inputs\\.confirm_preview == 'APPLY_PREVIEW_ONLY'/);
+  assert.match(workflow, /EXPECTED_DB_ID:\\s*e3cf167c-37e1-4d72-9ac6-b3e27c14b97f/);
+  assert.match(workflow, /\\.provenance\\.ref == "refs\\/heads\\/fix\\/pages-proxy-preview-cors-2026-11-23"/);
+});;
 test("Preview migration restores the exact encrypted R2 backup into a distinct EU D1 before applying migrations", () => {
   const targetGate = workflow.indexOf("Verify dedicated isolated restore D1 identity and EU jurisdiction");
   const exportStep = workflow.indexOf("Export only Preview D1 before migration");
