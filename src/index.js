@@ -4380,6 +4380,14 @@ async function ensureProcheliaMasterComplementSchema(env){
     `CREATE INDEX IF NOT EXISTS idx_clearance_term ON brand_clearance_log(term,checked_at)`
   ];
   await assertVersionedSchema(env, sqls, 'ensureProcheliaMasterComplementSchema');
+  const supportColumns = await env.DB.prepare('PRAGMA table_info("support_cases")').all();
+  if (!(supportColumns.results || []).some(column => String(column.name) === 'tenant_id')) {
+    const error = new Error('SCHEMA_NOT_READY');
+    error.code = 'SCHEMA_NOT_READY';
+    error.status = 503;
+    error.details = { domain: 'ensureProcheliaMasterComplementSchema', missing: ['support_cases.tenant_id (migration 0037 required)'] };
+    throw error;
+  }
   await env.DB.prepare(`INSERT OR IGNORE INTO brand_identity(id,brand_key,name,visual_json,uniqueness_policy_json) VALUES(?,?,?,?,?)`)
     .bind(crypto.randomUUID(),'PROCHELIA',PROCHELIA_BRAND.name,JSON.stringify(PROCHELIA_BRAND.visual),JSON.stringify(PROCHELIA_BRAND.uniqueness_policy)).run();
   for(const [role,config] of Object.entries(PROCHELIA_UI)){
