@@ -145,3 +145,24 @@ Le texte modifie la loi n° 05-01 relative à la prévention et à la lutte cont
 - Journal officiel algérien n° 48 du 24 juillet 2025, lois 25-10 et 25-11 : https://www.joradp.dz/FTP/JO-FRANCAIS/2025/F2025048.pdf
 
 Cette note est une veille produit, non un avis juridique. Les qualifications France/UE et Algérie, le statut PSP, les obligations LBC/FT, les transferts internationaux et la conformité des usages IA doivent être validés par des professionnels compétents avant lancement.
+
+
+### 7. Clarification officielle — délai transitoire limité de l'article 50 AI Act (23 novembre 2026)
+
+La FAQ officielle de la Commission européenne sur l'article 50 précise une nuance à intégrer au calendrier produit :
+
+- L'article 50 s'applique depuis le **2 août 2026**.
+- Le délai transitoire jusqu'au **2 décembre 2026** est limité aux systèmes d'IA **déjà mis sur le marché avant le 2 août 2026** et uniquement à l'obligation de marquage/détection des contenus générés ou manipulés visée à l'article 50(2).
+- Ce délai ne constitue pas une dispense générale de transparence pour les chatbots ou agents qui interagissent directement avec des personnes au titre de l'article 50(1).
+- Un système nouvellement mis sur le marché après le 2 août 2026 ne doit pas présumer bénéficier de cette transition.
+
+**Conséquence immédiate pour PROCHÉLIA :** afficher dès le premier échange une mention explicite indiquant que l'interlocuteur est l'assistant IA Nexus Supra, avec une voie d'accès humaine. Pour les contenus synthétiques, appliquer une analyse par catégorie de sortie et documenter les mécanismes de marquage/détection pertinents ; ne pas étendre mécaniquement l'obligation à tout texte interne ou sortie machine-à-machine hors champ.
+
+La FAQ précise également que des fournisseurs établis hors UE peuvent relever des obligations lorsque les sorties de leur système sont utilisées dans l'Union. La localisation de l'hébergement ou du fournisseur ne suffit donc pas à écarter l'AI Act pour le lancement français.
+
+Sources primaires :
+- Commission européenne, FAQ officielle — obligations de transparence de l'article 50 : https://digital-strategy.ec.europa.eu/en/faqs/transparency-obligations-under-article-50-ai-act
+- Commission européenne, lignes directrices sur les obligations de transparence : https://digital-strategy.ec.europa.eu/en/policies/guidelines-ai-transparency-obligations
+- Commission européenne, cadre réglementaire AI Act et calendrier : https://digital-strategy.ec.europa.eu/en/policies/regulatory-framework-ai
+
+Cette clarification ne vaut pas qualification juridique du système Nexus Supra ; la date de mise sur le marché, le rôle exact de PROCHÉLIA et les catégories de sorties doivent être documentés et validés par un professionnel compétent.
