@@ -17,7 +17,7 @@ concurrency:
 
 jobs:
   preview-only:
-    if: github.ref == 'refs/heads/main' && inputs.confirmation == 'DEPLOY_PREVIEW_ONLY'
+    if: github.ref == 'refs/heads/main' && github.actor == 'rzem92-png' && inputs.confirmation == 'DEPLOY_PREVIEW_ONLY'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
