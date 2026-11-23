@@ -19,16 +19,17 @@ function mockDb(changes) {
 
 test("arrival code consumption is a single conditional update", async () => {
   const DB = mockDb(1);
-  assert.equal(await consumeMissionSecurityCode({ DB }, "security-1", "ARRIVAL", "hash-1"), true);
+  assert.equal(await consumeMissionSecurityCode({ DB }, "tenant-a", "security-1", "ARRIVAL", "hash-1"), true);
   assert.match(DB.calls[0].sql, /status='prepared'/);
   assert.match(DB.calls[0].sql, /arrival_used_at IS NULL/);
   assert.match(DB.calls[0].sql, /julianday\(arrival_expires_at\)>julianday\('now'\)/);
-  assert.deepEqual(DB.calls[0].values, ["security-1", "hash-1"]);
+  assert.match(DB.calls[0].sql, /tenant_id=\?/);
+  assert.deepEqual(DB.calls[0].values, ["security-1", "tenant-a", "hash-1"]);
 });
 
 test("end code consumption requires an in-progress mission and unused code", async () => {
   const DB = mockDb(1);
-  assert.equal(await consumeMissionSecurityCode({ DB }, "security-2", "END", "hash-2"), true);
+  assert.equal(await consumeMissionSecurityCode({ DB }, "tenant-a", "security-2", "END", "hash-2"), true);
   assert.match(DB.calls[0].sql, /status='in_progress'/);
   assert.match(DB.calls[0].sql, /end_used_at IS NULL/);
   assert.match(DB.calls[0].sql, /julianday\(end_expires_at\)>julianday\('now'\)/);
@@ -36,13 +37,14 @@ test("end code consumption requires an in-progress mission and unused code", asy
 
 test("a concurrent replay loses when the conditional update changes no row", async () => {
   const DB = mockDb(0);
-  assert.equal(await consumeMissionSecurityCode({ DB }, "security-1", "ARRIVAL", "hash-1"), false);
+  assert.equal(await consumeMissionSecurityCode({ DB }, "tenant-a", "security-1", "ARRIVAL", "hash-1"), false);
 });
 
 test("invalid purpose and missing database fail closed without a query", async () => {
   const DB = mockDb(1);
-  assert.equal(await consumeMissionSecurityCode({ DB }, "security-1", "OTHER", "hash-1"), false);
-  assert.equal(await consumeMissionSecurityCode({}, "security-1", "ARRIVAL", "hash-1"), false);
+  assert.equal(await consumeMissionSecurityCode({ DB }, "tenant-a", "security-1", "OTHER", "hash-1"), false);
+  assert.equal(await consumeMissionSecurityCode({}, "tenant-a", "security-1", "ARRIVAL", "hash-1"), false);
+  assert.equal(await consumeMissionSecurityCode({ DB }, "", "security-1", "ARRIVAL", "hash-1"), false);
   assert.equal(DB.calls.length, 0);
 });
 
@@ -79,6 +81,9 @@ test("security status never claims device binding or presence while cryptographi
   assert.match(status, /device:'cryptographic_enrollment_required'/);
   assert.match(status, /presence:'blocked'/);
   assert.match(status, /mission_code_verification:'blocked'/);
+  assert.match(status, /schema_ready:schemaReady/);
+  assert.match(status, /write_enabled:false/);
+  assert.doesNotMatch(status, /ensureSecuritySchema|CREATE TABLE|\\.run\\(/);
   assert.doesNotMatch(status, /device:'bound'|presence:'recorded'/);
   assert.doesNotMatch(status, /SELECT COUNT\(\*\).*security_audit|audit_events/);
   assert.match(status, /user:\{id:auth\.user\.id,role:auth\.user\.role\}/);
@@ -98,4 +103,41 @@ test("mission security preparation is tenant-scoped and verifies the intervenant
   assert.match(handler, /requireVerifiedIntervenant\(env,assignment\.intervenant_user_id,tenantId\)/);
   assert.doesNotMatch(handler, /requireVerifiedIntervenant\(env,intervenantId\)/);
   assert.match(handler, /MISSION_TENANT_ASSIGNMENT_NOT_FOUND/);
+});
+
+test("security schema readiness is read-only and requires tenant-scoped columns", () => {
+  const start = workerSource.indexOf("async function securitySchemaReady(env) {");
+  const end = workerSource.indexOf("\\nfunction securityCode()", start);
+  assert.ok(start >= 0 && end > start, "security schema readiness helper must exist");
+  const helper = workerSource.slice(start, end);
+  assert.match(helper, /tableColumns\\(env, table\\)/);
+  assert.match(helper, /identity_verifications:[\\s\\S]*tenant_id/);
+  assert.match(helper, /mission_security:[\\s\\S]*tenant_id/);
+  assert.match(helper, /mission_security_attempts:[\\s\\S]*tenant_id/);
+  assert.match(helper, /security_audit:[\\s\\S]*tenant_id/);
+  assert.doesNotMatch(helper, /CREATE TABLE|CREATE INDEX|INSERT INTO|\\.run\\(/);
+  assert.doesNotMatch(workerSource, /ensureSecuritySchema/);
+});
+
+test("security audit and mission-security reads/writes are tenant-scoped", () => {
+  const auditStart = workerSource.indexOf("async function securityAudit(env, tenantId,");
+  const auditEnd = workerSource.indexOf("\\n}", auditStart);
+  assert.ok(auditStart >= 0 && auditEnd > auditStart);
+  const audit = workerSource.slice(auditStart, auditEnd);
+  assert.match(audit, /metadata_json,tenant_id/);
+  assert.match(audit, /SECURITY_AUDIT_TENANT_REQUIRED/);
+
+  const prepareStart = workerSource.indexOf("async function securityPrepareMission(request, env) {");
+  const prepareEnd = workerSource.indexOf("async function securityPresence(request, env) {", prepareStart);
+  const prepare = workerSource.slice(prepareStart, prepareEnd);
+  assert.match(prepare, /WHERE mission_id=\\? AND tenant_id=\\?/);
+  assert.match(prepare, /mission_security \\(id,mission_id,client_id,intervenant_id,tenant_id,/);
+  assert.match(prepare, /securityAudit\\(env,tenantId,/);
+
+  const resendStart = workerSource.indexOf("async function securityResendCodes(request, env) {");
+  const resendEnd = workerSource.indexOf("async function securityClientCode", resendStart);
+  const resend = workerSource.slice(resendStart, resendEnd);
+  assert.match(resend, /resolveTenantContext\\(request,env,auth\\)/);
+  assert.match(resend, /s\\.tenant_id=\\?/);
+  assert.match(resend, /c\\.user_id=\\?/);
 });
