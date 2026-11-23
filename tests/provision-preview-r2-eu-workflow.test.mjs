@@ -12,7 +12,7 @@ test("R2 provisioning is manually gated to its dedicated branch and exact Previe
 });
 
 test("R2 provisioning creates a new bucket with explicit EU jurisdiction and verifies Cloudflare response", () => {
-  assert.match(workflow, /prochelia-preview-backups-eu-locked/);
+  assert.match(workflow, /prochelia-preview-backups-eu-v2/);
   assert.match(workflow, /r2 bucket create "\$BUCKET" --jurisdiction eu(?! --location)/);
   assert.match(workflow, /cf-r2-jurisdiction: eu/);
   assert.match(workflow, /\.result\.jurisdiction == "eu"/);
