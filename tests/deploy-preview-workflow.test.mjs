@@ -9,15 +9,15 @@ import { fileURLToPath } from "node:url";
 const workflow = await readFile(new URL("../.github/workflows/deploy-preview-worker-manual.yml", import.meta.url), "utf8");
 const generator = await readFile(new URL("../scripts/generate-preview-wrangler-config.mjs", import.meta.url), "utf8");
 
-test("Preview deploy is manual, owner-only and requires exact confirmation on main", () => {
+test("Preview deploy is manual, owner-only and requires exact confirmation on the reviewed isolated Preview branch", () => {
   assert.match(workflow, /workflow_dispatch:/);
   assert.match(workflow, /DEPLOY_PREVIEW_ONLY/);
-  assert.match(workflow, /github\.ref == 'refs\/heads\/main'/);
+  assert.match(workflow, /github\.ref == 'refs\/heads\/fix\/pages-proxy-preview-cors-2026-11-23'/);
   assert.match(workflow, /github\.actor == 'rzem92-png'/);
 });
 
 test("Preview deploy pins isolated Worker and Preview D1, never production", () => {
-  assert.match(generator, /name:\s*"prochelia-api-preview"/);
+  assert.match(generator, /name:\s*"fix-pages-proxy-preview-cors-2026-11-23"/);
   assert.match(generator, /e3cf167c-37e1-4d72-9ac6-b3e27c14b97f/);
   assert.match(generator, /04f52830-ef5a-4f17-a640-42bbc2381bba/);
   assert.match(generator, /preview\.name === production\.name/);
@@ -27,6 +27,8 @@ test("Preview deploy pins isolated Worker and Preview D1, never production", () 
   assert.match(generator, /binding:\s*"BACKUP_BUCKET"/);
   assert.match(generator, /https:\/\/83a36d32\.prochelia\.pages\.dev/);
   assert.match(generator, /https:\/\/feat-intervenant-secure-page\.prochelia\.pages\.dev/);
+  assert.match(generator, /https:\/\/pages-proxy-2026-11-23\.prochelia\.pages\.dev/);
+  assert.match(generator, /https:\/\/fix-frontend-finance-confirm\.prochelia\.pages\.dev/);
   assert.match(generator, /bucket_name:\s*"prochelia-preview-backups-eu-v2"/);
   assert.match(generator, /jurisdiction:\s*"eu"/);
   assert.match(workflow, /Verify dedicated Preview R2 bucket has EU jurisdiction/);
@@ -52,7 +54,7 @@ test("checkout and Node setup actions are pinned to immutable SHAs", () => {
   assert.match(workflow, /actions\/setup-node@[0-9a-f]{40}/);
 });
 
-test("Preview deployment config generator emits isolated EU bindings and keeps only the queue-processing Cron", async () => {
+test("Preview deployment config generator emits isolated EU bindings and keeps Cron disabled until separately approved", async () => {
   const directory = await mkdtemp(join(tmpdir(), "prochelia-preview-config-"));
   try {
     await writeFile(join(directory, "wrangler.jsonc"), JSON.stringify({
@@ -67,7 +69,9 @@ test("Preview deployment config generator emits isolated EU bindings and keeps o
     assert.equal(generated.vars.APP_ENV, "preview");
     assert.equal(generated.d1_databases[0].database_id, "e3cf167c-37e1-4d72-9ac6-b3e27c14b97f");
     assert.equal(generated.r2_buckets[0].jurisdiction, "eu");
-    assert.deepEqual(generated.triggers?.crons, ["*/1 * * * *"]);
+    assert.equal(generated.observability.enabled, true);
+    assert.equal(generated.observability.redact_query_string, true);
+    assert.deepEqual(generated.triggers?.crons, []);
     assert.notEqual(generated.d1_databases[0].database_id, "04f52830-ef5a-4f17-a640-42bbc2381bba");
   } finally {
     await rm(directory, { recursive: true, force: true });
