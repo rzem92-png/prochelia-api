@@ -18,7 +18,7 @@ on:
       frontend_commit_sha:
         description: "Exact 40-character HEAD of the selected frontend Preview branch"
         required: false
-        default: "ebd177244267a1e317f357451cd5b512553365ee"
+        default: "e548a3acbf19dec646b9a5d61fdfcdd00e435826"
         type: string
   workflow_run:
     workflows:
@@ -67,7 +67,7 @@ jobs:
       PREVIEW_DB_NAME: prochelia-preview-eu-2026-11-17
       PREVIEW_DB_ID: e3cf167c-37e1-4d72-9ac6-b3e27c14b97f
       FRONTEND_BRANCH: pages-proxy-2026-11-23
-      FRONTEND_COMMIT_SHA: ${{ inputs.frontend_commit_sha || 'ebd177244267a1e317f357451cd5b512553365ee' }}
+      FRONTEND_COMMIT_SHA: ${{ inputs.frontend_commit_sha || 'e548a3acbf19dec646b9a5d61fdfcdd00e435826' }}
       API_PREVIEW_URL: https://fix-pages-proxy-preview-cors-2026-11-23-prochelia-api.rzem92.workers.dev
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -249,7 +249,29 @@ jobs:
           fi
           echo "PASS: Pages Function -> pinned Worker branch Preview, exact Origin forwarding, unauthenticated route guards and same-origin preflight verified without data writes."
 
+      - name: Verify tenant-scoped directory schema before synthetic data writes
+        id: tenant_schema
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          payload='{"sql":"SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type=\u0027table\u0027 AND name=\u0027tenants\u0027) AS tenants, EXISTS(SELECT 1 FROM sqlite_master WHERE type=\u0027table\u0027 AND name=\u0027tenant_memberships\u0027) AS memberships, EXISTS(SELECT 1 FROM pragma_table_info(\u0027sessions\u0027) WHERE name=\u0027active_tenant_id\u0027) AS session_active_tenant, EXISTS(SELECT 1 FROM pragma_table_info(\u0027sessions\u0027) WHERE name=\u0027revoked_at\u0027) AS session_revoked_at, EXISTS(SELECT 1 FROM pragma_table_info(\u0027clients\u0027) WHERE name=\u0027tenant_id\u0027) AS clients_tenant, EXISTS(SELECT 1 FROM pragma_table_info(\u0027intervenants\u0027) WHERE name=\u0027tenant_id\u0027) AS intervenants_tenant"}'
+          status="$(curl --silent --show-error --output "$RUNNER_TEMP/tenant-schema.json" --write-out '%{http_code}' \
+            -X POST -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -H "Content-Type: application/json" \
+            --data "$payload" "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/d1/database/$PREVIEW_DB_ID/query")"
+          [[ "$status" == "200" ]]
+          jq -e '.success == true' "$RUNNER_TEMP/tenant-schema.json" >/dev/null
+          ready="$(jq -r '.result[0].results[0] | [.tenants, .memberships, .session_active_tenant, .session_revoked_at, .clients_tenant, .intervenants_tenant] | all(. == 1)' "$RUNNER_TEMP/tenant-schema.json")"
+          printf 'ready=%s\n' "$ready" >> "$GITHUB_OUTPUT"
+          if [[ "$ready" != "true" ]]; then
+            echo "::warning::TENANT_SCHEMA_NOT_READY: authenticated directory tests are deferred; no synthetic fixture rows will be written."
+          else
+            echo "PASS: tenant-scoped session and directory schema is present."
+          fi
+
       - name: Read current directory offsets without reading personal rows
+        if: steps.tenant_schema.outputs.ready == 'true'
         shell: bash
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -268,6 +290,7 @@ jobs:
           echo "Existing row counts captured; no personal row data read."
 
       - name: Generate synthetic test fixtures and guaranteed cleanup SQL
+        if: steps.tenant_schema.outputs.ready == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -332,6 +355,7 @@ jobs:
           NODE
 
       - name: Seed only the isolated Preview D1
+        if: steps.tenant_schema.outputs.ready == 'true'
         shell: bash
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -343,6 +367,7 @@ jobs:
           echo "Synthetic fixtures inserted into Preview D1 only."
 
       - name: Exercise Preview Worker authentication, role checks and pagination
+        if: steps.tenant_schema.outputs.ready == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -420,8 +445,12 @@ jobs:
         if: always()
         shell: bash
         run: |
+          if [[ "${{ steps.tenant_schema.outputs.ready }}" != "true" ]]; then
+            echo "::error::TENANT_SCHEMA_NOT_READY: tenant migrations are not applied to the isolated Preview D1. Authenticated directory E2E remains blocked; no synthetic data was written."
+            exit 1
+          fi
           if [[ "${{ steps.pages_proxy.outcome }}" != "success" ]]; then
             echo "::error::Pages-to-Worker workspace routes are not yet accepted. Review the proxy step; the Worker Preview must implement every allowlisted route before promotion."
             exit 1
           fi
-          echo "PASS: all Pages-to-Worker workspace routes passed the unauthenticated access gate."
+          echo "PASS: tenant schema and Pages-to-Worker workspace routes passed the Preview acceptance gate."

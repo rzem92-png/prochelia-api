@@ -19,8 +19,8 @@ test("Preview E2E pins the current Pages proxy branch and exact deployment commi
   assert.match(workflow, /PREVIEW_DB_ID: e3cf167c-37e1-4d72-9ac6-b3e27c14b97f/);
   assert.match(workflow, /FRONTEND_BRANCH: pages-proxy-2026-11-23/);
   assert.match(workflow, /FRONTEND_COMMIT_SHA: \$\{\{ inputs\.frontend_commit_sha/);
-  assert.match(workflow, /ebd177244267a1e317f357451cd5b512553365ee/);
-  assert.match(workflow, /default: "ebd177244267a1e317f357451cd5b512553365ee"/);
+  assert.match(workflow, /e548a3acbf19dec646b9a5d61fdfcdd00e435826/);
+  assert.match(workflow, /default: "e548a3acbf19dec646b9a5d61fdfcdd00e435826"/);
   assert.match(workflow, /API_PREVIEW_URL: https:\/\/fix-pages-proxy-preview-cors-2026-11-23-prochelia-api\.rzem92\.workers\.dev/);
   assert.match(workflow, /https:\/\/pages-proxy-2026-11-23\.prochelia\.pages\.dev/);
   assert.match(workflow, /pages\/projects\/prochelia\/deployments\?env=preview&per_page=10/);
@@ -101,4 +101,11 @@ test("Pages proxy verifies unauthenticated workspace routes, exact Origin forwar
   assert.match(workflow, /Access-Control-Allow-Origin|access-control-allow-origin/);
   assert.match(workflow, /expected HTTP 204/);
   assert.match(workflow, /pinned Worker branch Preview/);
+});
+test("authenticated directory fixtures are gated on tenant-scoped Preview schema before any write", () => {
+  assert.match(workflow, /Verify tenant-scoped directory schema before synthetic data writes/);
+  assert.match(workflow, /steps\.tenant_schema\.outputs\.ready == 'true'/);
+  assert.match(workflow, /TENANT_SCHEMA_NOT_READY/);
+  assert.match(workflow, /pragma_table_info/);
+  assert.match(workflow, /no synthetic fixture rows will be written/);
 });
