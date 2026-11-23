@@ -9,10 +9,11 @@ import { fileURLToPath } from "node:url";
 const workflow = await readFile(new URL("../.github/workflows/deploy-preview-worker-manual.yml", import.meta.url), "utf8");
 const generator = await readFile(new URL("../scripts/generate-preview-wrangler-config.mjs", import.meta.url), "utf8");
 
-test("Preview deploy is manual and requires exact confirmation on main", () => {
+test("Preview deploy is manual, owner-only and requires exact confirmation on main", () => {
   assert.match(workflow, /workflow_dispatch:/);
   assert.match(workflow, /DEPLOY_PREVIEW_ONLY/);
   assert.match(workflow, /github\.ref == 'refs\/heads\/main'/);
+  assert.match(workflow, /github\.actor == 'rzem92-png'/);
 });
 
 test("Preview deploy pins isolated Worker and Preview D1, never production", () => {
