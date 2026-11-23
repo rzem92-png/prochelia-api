@@ -17,7 +17,7 @@ concurrency:
 
 jobs:
   preview-only:
-    if: github.ref == 'refs/heads/main' && github.actor == 'rzem92-png' && inputs.confirmation == 'DEPLOY_PREVIEW_ONLY'
+    if: github.ref == 'refs/heads/fix/pages-proxy-preview-cors-2026-11-23' && github.actor == 'rzem92-png' && inputs.confirmation == 'DEPLOY_PREVIEW_ONLY'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -94,7 +94,7 @@ jobs:
             process.exit(1);
           }
           const names = (body.result || []).map(x => x.id);
-          if (!names.includes('prochelia-api-preview')) {
+          if (!names.includes('fix-pages-proxy-preview-cors-2026-11-23')) {
             console.error('Preview Worker is not visible to this token/account.');
             process.exit(1);
           }
@@ -125,7 +125,7 @@ jobs:
       - name: Record deployment guardrails
         run: |
           {
-            echo 'Preview Worker only: prochelia-api-preview.'
+            echo 'Dedicated isolated Preview Worker only: fix-pages-proxy-preview-cors-2026-11-23.'
             echo 'D1 binding is pinned to Preview DB e3cf167c-37e1-4d72-9ac6-b3e27c14b97f.'
             echo "Backend source deployed from commit ${GITHUB_SHA}. Preview CORS allowlist includes the exact Pages Preview origin."
             echo 'Preview APP_ENV and explicit CORS configuration are applied; no dashboard variables are implicitly preserved. No migrations, no production Worker, and no production D1 changes.'
