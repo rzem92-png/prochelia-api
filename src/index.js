@@ -1241,7 +1241,17 @@ export async function directoryList(
   resolveSession = getSessionUser,
   resolveTenant = resolveTenantContext
 ) {
-  const auth = await resolveSession(request, env);
+  let auth;
+  try {
+    auth = await resolveSession(request, env);
+  } catch {
+    return json({
+      ok:false,
+      error:'AUTHENTICATION_SCHEMA_UNAVAILABLE',
+      version:VERSION,
+      write_enabled:false
+    },503);
+  }
   if (!auth) return json({ok:false,error:'UNAUTHENTICATED',version:VERSION},401);
   if (auth.user.role !== 'gerante') return json({ok:false,error:'FORBIDDEN',version:VERSION},403);
   if (!env?.DB) return json({ok:false,database:false,error:'DATABASE_UNAVAILABLE',version:VERSION},503);
