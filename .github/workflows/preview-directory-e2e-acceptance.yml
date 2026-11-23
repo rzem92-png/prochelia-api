@@ -5,6 +5,7 @@ on:
     branches:
       - feat/supra-canonical-tenant-integration-2026-11-20
       - fix/tenant-accounting-api-readonly-gate-2026-11-22
+      - fix/pages-proxy-preview-cors-2026-11-23
     paths:
       - ".github/workflows/preview-directory-e2e-acceptance.yml"
       - "tests/preview-e2e-workflow.test.mjs"
@@ -38,7 +39,8 @@ jobs:
         github.event_name == 'push' &&
         (
           github.ref == 'refs/heads/feat/supra-canonical-tenant-integration-2026-11-20' ||
-          github.ref == 'refs/heads/fix/tenant-accounting-api-readonly-gate-2026-11-22'
+          github.ref == 'refs/heads/fix/tenant-accounting-api-readonly-gate-2026-11-22' ||
+          github.ref == 'refs/heads/fix/pages-proxy-preview-cors-2026-11-23'
         )
       ) ||
       (
@@ -47,7 +49,8 @@ jobs:
         (
           github.ref == 'refs/heads/main' ||
           github.ref == 'refs/heads/feat/supra-canonical-tenant-integration-2026-11-20' ||
-          github.ref == 'refs/heads/fix/tenant-accounting-api-readonly-gate-2026-11-22'
+          github.ref == 'refs/heads/fix/tenant-accounting-api-readonly-gate-2026-11-22' ||
+          github.ref == 'refs/heads/fix/pages-proxy-preview-cors-2026-11-23'
         )
       ) ||
       (
@@ -63,8 +66,9 @@ jobs:
       CLOUDFLARE_ACCOUNT_ID: f2a79e9fa41566a8ec80fb24c02c60eb
       PREVIEW_DB_NAME: prochelia-preview-eu-2026-11-17
       PREVIEW_DB_ID: e3cf167c-37e1-4d72-9ac6-b3e27c14b97f
-      FRONTEND_BRANCH: feat/intervenant-secure-pages-integration-2026-11-20
-      FRONTEND_COMMIT_SHA: ${{ inputs.frontend_commit_sha || 'a916165be5fd3f431115e0a2e9d6ce67163c889d' }}
+      FRONTEND_BRANCH: pages-proxy-2026-11-23
+      FRONTEND_COMMIT_SHA: ${{ inputs.frontend_commit_sha || '6e20d43cb0a91e998e3c7d103b0fb44049b33ede' }}
+      API_PREVIEW_URL: https://fix-pages-proxy-preview-cors-2026-11-23-prochelia-api.rzem92.workers.dev
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -132,12 +136,12 @@ jobs:
             exit 1
           }
           PAGES_DEPLOYMENT_ID="$(jq -r '.id // empty' <<< "$deployment")"
-          PAGES_PREVIEW_URL="$(jq -r '.url // empty' <<< "$deployment")"
+          PAGES_PREVIEW_URL="$(jq -r --arg alias 'https://pages-proxy-2026-11-23.prochelia.pages.dev' '(.aliases // []) | map(select(. == $alias)) | first // empty' <<< "$deployment")"
           [[ -n "$PAGES_DEPLOYMENT_ID" ]] || { echo "::error::Pages deployment ID missing."; exit 1; }
-          case "$PAGES_PREVIEW_URL" in
-            https://????????.prochelia.pages.dev) ;;
-            *) echo "::error::Unexpected Pages Preview hostname."; exit 1 ;;
-          esac
+          [[ "$PAGES_PREVIEW_URL" == "https://pages-proxy-2026-11-23.prochelia.pages.dev" ]] || {
+            echo "::error::The exact Pages proxy branch alias is missing from the pinned deployment."
+            exit 1
+          }
           printf 'PAGES_DEPLOYMENT_ID=%s\nPAGES_PREVIEW_URL=%s\nFRONTEND_COMMIT_SHA=%s\n' \
             "$PAGES_DEPLOYMENT_ID" "$PAGES_PREVIEW_URL" "$FRONTEND_COMMIT_SHA" >> "$GITHUB_ENV"
           cf_request "Pages Preview deployment access" \
@@ -182,6 +186,27 @@ jobs:
           printf 'CLOUDFLARE_API_TOKEN=%s\n' "$token" >> "$GITHUB_ENV"
           echo "Exact isolated Preview D1 identity verified."
 
+      - name: Wait for the pinned Worker Preview CORS origin
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected_origin="https://pages-proxy-2026-11-23.prochelia.pages.dev"
+          for attempt in $(seq 1 24); do
+            status="$(curl --silent --show-error --output "$RUNNER_TEMP/worker-preflight.json" --dump-header "$RUNNER_TEMP/worker-preflight.headers" --write-out '%{http_code}' \
+              -X OPTIONS -H "Origin: $expected_origin" \
+              -H "Access-Control-Request-Method: POST" \
+              -H "Access-Control-Request-Headers: content-type,x-idempotency-key" \
+              "$API_PREVIEW_URL/api/tenant/select" || true)"
+            if [[ "$status" == "204" ]] && grep -iF "access-control-allow-origin: $expected_origin" "$RUNNER_TEMP/worker-preflight.headers" >/dev/null; then
+              echo "PASS: branch Worker Preview accepts the exact Pages proxy Origin."
+              exit 0
+            fi
+            echo "Waiting for branch Worker Preview CORS deployment (attempt $attempt/24; HTTP ${status:-000})."
+            sleep 5
+          done
+          echo "::error::Branch Worker Preview did not expose the exact CORS origin after 120 seconds."
+          exit 1
+
       - name: Exercise same-origin Pages-to-Worker proxy without a session
         id: pages_proxy
         continue-on-error: true
@@ -203,6 +228,14 @@ jobs:
               exit 1
             fi
           done
+          tenant_select_status="$(curl --silent --show-error --output "$RUNNER_TEMP/tenant-select.json" --write-out '%{http_code}' \
+            -X POST -H "Origin: $PAGES_PREVIEW_URL" -H "Content-Type: application/json" \
+            --data '{}' "$PAGES_PREVIEW_URL/api/tenant/select")"
+          [[ "$tenant_select_status" == "401" ]] || {
+            echo "::error::Same-origin tenant selection without a session expected HTTP 401; got $tenant_select_status."
+            jq -c '{ok, error, status}' "$RUNNER_TEMP/tenant-select.json" 2>/dev/null || true
+            exit 1
+          }
           options_status="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' \
             -X OPTIONS -H "Origin: $PAGES_PREVIEW_URL" -H "Access-Control-Request-Method: GET" \
             "$PAGES_PREVIEW_URL/api/intervenant/workspace")"
@@ -214,7 +247,7 @@ jobs:
             echo "::error::Pages proxy readiness is incomplete; continue with independent Worker directory tests, then fail the final acceptance gate."
             exit 1
           fi
-          echo "PASS: Pages Function -> Worker service binding, unauthenticated route guards and same-origin preflight verified without data writes."
+          echo "PASS: Pages Function -> pinned Worker branch Preview, exact Origin forwarding, unauthenticated route guards and same-origin preflight verified without data writes."
 
       - name: Read current directory offsets without reading personal rows
         shell: bash
