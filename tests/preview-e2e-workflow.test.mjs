@@ -4,28 +4,29 @@ import { readFile } from "node:fs/promises";
 
 const workflow = await readFile(new URL("../.github/workflows/preview-directory-e2e-acceptance.yml", import.meta.url), "utf8");
 
-test("Preview E2E is limited to the audited API candidate or accounting integration branch and explicit manual confirmation", () => {
+test("Preview E2E is limited to audited API branches, the Pages proxy branch and explicit manual confirmation", () => {
   assert.match(workflow, /workflow_dispatch:/);
   assert.match(workflow, /RUN_PREVIEW_DIRECTORY_E2E/);
   assert.match(workflow, /github\.event_name == 'push'/);
   assert.match(workflow, /github\.ref == 'refs\/heads\/feat\/supra-canonical-tenant-integration-2026-11-20'/);
   assert.match(workflow, /github\.ref == 'refs\/heads\/fix\/tenant-accounting-api-readonly-gate-2026-11-22'/);
+  assert.match(workflow, /github\.ref == 'refs\/heads\/fix\/pages-proxy-preview-cors-2026-11-23'/);
   assert.match(workflow, /github\.event_name == 'workflow_dispatch'/);
   assert.match(workflow, /github\.ref == 'refs\/heads\/main'/);
 });
 
-test("Preview E2E pins the current private frontend branch and exact Pages commit", () => {
+test("Preview E2E pins the current Pages proxy branch and exact deployment commit", () => {
   assert.match(workflow, /PREVIEW_DB_ID: e3cf167c-37e1-4d72-9ac6-b3e27c14b97f/);
-  assert.match(workflow, /FRONTEND_BRANCH: feat\/intervenant-secure-pages-integration-2026-11-20/);
+  assert.match(workflow, /FRONTEND_BRANCH: pages-proxy-2026-11-23/);
   assert.match(workflow, /FRONTEND_COMMIT_SHA: \$\{\{ inputs\.frontend_commit_sha/);
-  assert.match(workflow, /a916165be5fd3f431115e0a2e9d6ce67163c889d/);
-  assert.match(workflow, /FRONTEND_COMMIT_SHA: \$\{\{ inputs\.frontend_commit_sha \|\| 'a916165be5fd3f431115e0a2e9d6ce67163c889d'/);
-  assert.match(workflow, /FRONTEND_COMMIT_SHA: \\$\\{\\{ inputs\\.frontend_commit_sha \\|\\| 'a916165be5fd3f431115e0a2e9d6ce67163c889d'/);
+  assert.match(workflow, /6e20d43cb0a91e998e3c7d103b0fb44049b33ede/);
+  assert.match(workflow, /API_PREVIEW_URL: https:\/\/fix-pages-proxy-preview-cors-2026-11-23-prochelia-api\.rzem92\.workers\.dev/);
+  assert.match(workflow, /https:\/\/pages-proxy-2026-11-23\.prochelia\.pages\.dev/);
   assert.match(workflow, /pages\/projects\/prochelia\/deployments\?env=preview&per_page=10/);
   assert.match(workflow, /deployment_trigger\.metadata\.branch/);
   assert.match(workflow, /deployment_trigger\.metadata\.commit_hash/);
+  assert.match(workflow, /uses_functions == true/);
   assert.match(workflow, /prochelia-api-preview/);
-  assert.doesNotMatch(workflow, /api\.github\.com\/repos\/rzem92-png\/-prochelia\/branches/);
   assert.doesNotMatch(workflow, /PREVIEW_DB_ID: 04f52830-ef5a-4f17-a640-42bbc2381bba/);
 });
 
@@ -79,7 +80,7 @@ test("Synthetic Preview E2E fixtures are cleaned up and cleanup is verified", ()
   assert.match(workflow, /all synthetic Preview test rows and sessions removed/);
 });
 
-test("Preview directory acceptance exercises the deployed Worker and deterministic synthetic ordering", () => {
+test("Preview directory acceptance exercises the real Worker and deterministic synthetic ordering", () => {
   assert.match(workflow, /https:\/\/prochelia-api-preview\.rzem92\.workers\.dev/);
   assert.match(workflow, /created_at,updated_at/);
   assert.match(workflow, /9999-12-31 23:59:59/);
@@ -87,13 +88,15 @@ test("Preview directory acceptance exercises the deployed Worker and determinist
   assert.doesNotMatch(workflow, /offset=50001/);
 });
 
-test("Preview E2E exercises the real same-origin Pages-to-Worker proxy without session or data writes", () => {
+test("Pages proxy verifies unauthenticated workspace routes, exact Origin forwarding and preflight", () => {
   assert.match(workflow, /Exercise same-origin Pages-to-Worker proxy without a session/);
-  for (const route of ["workspace","opportunities","assignments","applications"]) {
+  for (const route of ["workspace", "opportunities", "assignments", "applications"]) {
     assert.match(workflow, new RegExp("/api/intervenant/" + route));
   }
   assert.match(workflow, /expected HTTP 401/);
-  assert.match(workflow, /options_status/);
+  assert.match(workflow, /api\/tenant\/select/);
+  assert.match(workflow, /tenant_select_status/);
+  assert.match(workflow, /Access-Control-Allow-Origin|access-control-allow-origin/);
   assert.match(workflow, /expected HTTP 204/);
-  assert.match(workflow, /service binding/);
+  assert.match(workflow, /pinned Worker branch Preview/);
 });
