@@ -110,3 +110,9 @@ test("authenticated directory fixtures are gated on tenant-scoped Preview schema
   assert.match(workflow, /pragma_table_info/);
   assert.match(workflow, /no synthetic fixture rows will be written/);
 });
+
+test("live Preview E2E reruns when the isolated Worker generator or deploy workflow changes", () => {
+  assert.match(workflow, /scripts\/generate-preview-wrangler-config\.mjs/);
+  assert.match(workflow, /\.github\/workflows\/deploy-pages-proxy-preview\.yml/);
+  assert.match(workflow, /tests\/preview-wrangler-generator\.test\.mjs/);
+});

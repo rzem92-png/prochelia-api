@@ -26,12 +26,12 @@ test("Preview deploy pins isolated Worker and Preview D1, never production", () 
   assert.match(generator, /if \(enablePreviewR2\)/);
   assert.match(generator, /PROCHELIA_PREVIEW_R2_VERIFIED_BY_WORKFLOW/);
   assert.match(generator, /binding:\s*"BACKUP_BUCKET"/);
-  assert.match(generator, /https:\/\/83a36d32\.prochelia\.pages\.dev/);
-  assert.match(generator, /https:\/\/feat-intervenant-secure-page\.prochelia\.pages\.dev/);
-  assert.match(generator, /https:\/\/pages-proxy-2026-11-23\.prochelia\.pages\.dev/);
-  assert.match(generator, /https:\/\/fix-frontend-finance-confirm\.prochelia\.pages\.dev/);
   assert.match(generator, /bucket_name:\s*"prochelia-preview-backups-eu-v2"/);
   assert.match(generator, /jurisdiction:\s*"eu"/);
+  assert.match(generator, /requiredOrigins/);
+  assert.match(generator, /source\.previews\?\.vars\?\.CORS_ORIGIN/);
+  assert.match(generator, /https:\/\/pages-proxy-2026-11-23\.prochelia\.pages\.dev/);
+  assert.match(generator, /https:\/\/fix-frontend-finance-confirm\.prochelia\.pages\.dev/);
   assert.match(workflow, /Verify dedicated Preview R2 bucket has EU jurisdiction/);
   assert.match(workflow, /cf-r2-jurisdiction: eu/);
   assert.match(workflow, /jurisdiction == "eu"/);

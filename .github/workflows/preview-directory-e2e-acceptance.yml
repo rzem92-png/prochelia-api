@@ -7,6 +7,9 @@ on:
     paths:
       - ".github/workflows/preview-directory-e2e-acceptance.yml"
       - "tests/preview-e2e-workflow.test.mjs"
+      - "scripts/generate-preview-wrangler-config.mjs"
+      - ".github/workflows/deploy-pages-proxy-preview.yml"
+      - "tests/preview-wrangler-generator.test.mjs"
   workflow_dispatch:
     inputs:
       confirmation:
