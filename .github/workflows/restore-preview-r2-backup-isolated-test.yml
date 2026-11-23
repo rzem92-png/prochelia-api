@@ -23,8 +23,10 @@ jobs:
   restore-isolated:
     if: >-
       (
-        github.ref == 'refs/heads/main'
+        github.ref == 'refs/heads/main' ||
+        github.ref == 'refs/heads/fix/r2-backup-attestation-rebased-2026-11-22'
       ) &&
+      github.actor == 'rzem92-png' &&
       inputs.confirm_restore == 'RESTORE_PREVIEW_R2_TO_ISOLATED_TEST_ONLY'
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -51,9 +53,10 @@ jobs:
         run: |
           set -euo pipefail
           case "$GITHUB_REF" in
-            refs/heads/main) ;;
-            *) echo "::error::Restore is restricted to the main branch only."; exit 1 ;;
+            refs/heads/main|refs/heads/fix/r2-backup-attestation-rebased-2026-11-22) ;;
+            *) echo "::error::Restore is restricted to main or the exact reviewed Preview branch."; exit 1 ;;
           esac
+          test "$GITHUB_ACTOR" = "rzem92-png" || { echo "::error::Only the repository owner may dispatch the isolated Preview restore."; exit 1; }
           test "$CLOUDFLARE_ACCOUNT_ID" = "$EXPECTED_ACCOUNT_ID"
           for name in CLOUDFLARE_API_TOKEN BACKUP_ENCRYPTION_KEY BACKUP_ATTESTATION_HMAC_KEY AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY; do
             test -n "${!name:-}" || { echo "::error::Required secret missing: $name"; exit 1; }
@@ -151,7 +154,7 @@ jobs:
         run: |
           set -euo pipefail
           node scripts/r2-backup-attestation.mjs verify "$RUNNER_TEMP/prochelia-restore/attestation.json" "$RUNNER_TEMP/prochelia-restore/attestation.hmac"
-          jq -e --arg key "$BACKUP_OBJECT_KEY" --arg bucket "$R2_BUCKET" --arg db "$PREVIEW_DB_ID" --arg name "$SOURCE_DB_NAME" --arg account "$EXPECTED_ACCOUNT_ID" '
+          jq -e --arg key "$BACKUP_OBJECT_KEY" --arg bucket "$R2_BUCKET" --arg db "$PREVIEW_DB_ID" --arg name "$SOURCE_DB_NAME" --arg account "$EXPECTED_ACCOUNT_ID" --arg expected_ref "$GITHUB_REF" '
             .schema_version == 1 and
             .attestation_type == "prochelia.preview-d1-backup" and
             .source.account_id == $account and
@@ -162,7 +165,7 @@ jobs:
             .object.key == $key and
             .object.sha256_manifest_key == ($key + ".sha256") and
             .provenance.repository == "rzem92-png/prochelia-api" and
-            .provenance.ref == "refs/heads/main" and
+            .provenance.ref == $expected_ref and
             (.provenance.migration_source_sha | test("^[0-9a-f]{40}$")) and
             .validation.sqlite_integrity_check == "ok" and
             .validation.foreign_key_check == "empty" and
