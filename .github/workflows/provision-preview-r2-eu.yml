@@ -17,6 +17,10 @@ concurrency:
 
 jobs:
   provision-preview-r2-eu:
+    if: >-
+      github.ref == 'refs/heads/fix/r2-backup-attestation-branch-gated-2026-11-23' &&
+      github.actor == 'rzem92-png' &&
+      inputs.confirmation == 'CREATE_PREVIEW_R2_EU_ONLY'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -26,7 +30,8 @@ jobs:
           CONFIRMATION: ${{ inputs.confirmation }}
         run: |
           set -euo pipefail
-          test "$REQUESTED_REF" = "refs/heads/ops/provision-preview-r2-eu-jurisdiction-2026-11-16"
+          test "$REQUESTED_REF" = "refs/heads/fix/r2-backup-attestation-branch-gated-2026-11-23"
+          test "$GITHUB_ACTOR" = "rzem92-png" || { echo "::error::Only the repository owner may provision the Preview bucket."; exit 1; }
           test "$CONFIRMATION" = "CREATE_PREVIEW_R2_EU_ONLY"
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:

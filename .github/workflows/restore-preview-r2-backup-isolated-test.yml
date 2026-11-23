@@ -22,9 +22,8 @@ concurrency:
 jobs:
   restore-isolated:
     if: >-
-      (
-        github.ref == 'refs/heads/main'
-      ) &&
+      github.ref == 'refs/heads/fix/r2-backup-attestation-branch-gated-2026-11-23' &&
+      github.actor == 'rzem92-png' &&
       inputs.confirm_restore == 'RESTORE_PREVIEW_R2_TO_ISOLATED_TEST_ONLY'
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -51,9 +50,10 @@ jobs:
         run: |
           set -euo pipefail
           case "$GITHUB_REF" in
-            refs/heads/main) ;;
-            *) echo "::error::Restore is restricted to the main branch only."; exit 1 ;;
+            refs/heads/fix/r2-backup-attestation-branch-gated-2026-11-23) ;;
+            *) echo "::error::Restore is restricted to the exact reviewed Preview branch only."; exit 1 ;;
           esac
+          test "$GITHUB_ACTOR" = "rzem92-png" || { echo "::error::Only the repository owner may dispatch the isolated Preview restore."; exit 1; }
           test "$CLOUDFLARE_ACCOUNT_ID" = "$EXPECTED_ACCOUNT_ID"
           for name in CLOUDFLARE_API_TOKEN BACKUP_ENCRYPTION_KEY BACKUP_ATTESTATION_HMAC_KEY AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY; do
             test -n "${!name:-}" || { echo "::error::Required secret missing: $name"; exit 1; }
@@ -162,7 +162,7 @@ jobs:
             .object.key == $key and
             .object.sha256_manifest_key == ($key + ".sha256") and
             .provenance.repository == "rzem92-png/prochelia-api" and
-            .provenance.ref == "refs/heads/main" and
+            .provenance.ref == "refs/heads/fix/r2-backup-attestation-branch-gated-2026-11-23" and
             (.provenance.migration_source_sha | test("^[0-9a-f]{40}$")) and
             .validation.sqlite_integrity_check == "ok" and
             .validation.foreign_key_check == "empty" and
