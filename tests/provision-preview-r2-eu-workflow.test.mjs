@@ -8,7 +8,7 @@ const workerConfig = await readFile(new URL("../scripts/generate-preview-wrangle
 
 test("R2 provisioning is manually gated to its dedicated branch and exact Preview-only confirmation", () => {
   assert.match(workflow, /workflow_dispatch:/);
-  assert.match(workflow, /refs\/heads\/ops\/provision-preview-r2-eu-jurisdiction-2026-11-16/);
+  assert.match(workflow, /refs\/heads\/fix\/align-preview-r2-provisioning-2026-11-23/);
   assert.match(workflow, /CREATE_PREVIEW_R2_EU_ONLY/);
   assert.match(workflow, /permissions:\s*\n\s+contents:\s+read/);
 });
