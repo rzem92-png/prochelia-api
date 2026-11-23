@@ -8,7 +8,7 @@ const restoreWorkflow = await readFile(new URL("../.github/workflows/restore-pre
 
 test("R2 provisioning is manually gated to its dedicated branch and exact Preview-only confirmation", () => {
   assert.match(workflow, /workflow_dispatch:/);
-  assert.match(workflow, /refs\/heads\/ops\/provision-preview-r2-eu-jurisdiction-2026-11-16/);
+  assert.ok(workflow.includes("refs/heads/fix/r2-backup-attestation-branch-gated-2026-11-23"));
   assert.match(workflow, /CREATE_PREVIEW_R2_EU_ONLY/);
   assert.ok(workflow.includes("github.actor == 'rzem92-png'"));
   assert.ok(workflow.includes('test "$GITHUB_ACTOR" = "rzem92-png"'));
