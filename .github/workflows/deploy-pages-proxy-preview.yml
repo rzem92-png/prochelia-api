@@ -50,11 +50,41 @@ jobs:
           if (config.previews?.r2_buckets?.length) throw new Error('No R2 binding until the EU bucket is independently verified');
           if (config.previews?.triggers) throw new Error('Cron triggers are not allowed in this branch Preview');
           console.log('Preview D1, APP_ENV and exact CORS origin verified; no R2 or Cron binding.');
+          const previewConfig = {
+            name: 'fix-pages-proxy-preview-cors-2026-11-23',
+            main: config.main,
+            compatibility_date: config.compatibility_date,
+            compatibility_flags: config.compatibility_flags || [],
+            vars: {
+              APP_ENV: 'preview',
+              CORS_ORIGIN: config.previews.vars.CORS_ORIGIN
+            },
+            d1_databases: [{
+              binding: 'DB',
+              database_name: previewDb.database_name,
+              database_id: previewDb.database_id
+            }]
+          };
+          if (JSON.stringify(previewConfig).includes(productionDb.database_id)) {
+            throw new Error('Generated Preview config contains the Production D1 identifier');
+          }
+          const previewConfigPath = `${process.env.RUNNER_TEMP}/wrangler.preview.json`;
+          fs.writeFileSync(previewConfigPath, JSON.stringify(previewConfig, null, 2) + '\\n');
+          fs.appendFileSync(process.env.GITHUB_ENV, `PREVIEW_WRANGLER_CONFIG=${previewConfigPath}\\n`);
+          console.log('Preview-only Wrangler config generated with the isolated EU D1 binding.');
           NODE
           node --experimental-default-type=module --test tests/preview-cors-origin-config.test.mjs tests/production-safety-rate-limit.test.mjs
 
       - name: Validate Worker bundle without deployment
-        run: npx --yes wrangler@4 deploy --dry-run --config wrangler.jsonc --outdir "$RUNNER_TEMP/prochelia-pages-proxy-worker-dry-run"
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx --yes wrangler@4 deploy --dry-run --config "$PREVIEW_WRANGLER_CONFIG" --outdir "$RUNNER_TEMP/prochelia-pages-proxy-worker-dry-run" 2>&1 | tee "$RUNNER_TEMP/preview-worker-dry-run.log"
+          grep -F "e3cf167c-37e1-4d72-9ac6-b3e27c14b97f" "$RUNNER_TEMP/preview-worker-dry-run.log" >/dev/null
+          if grep -F "04f52830-ef5a-4f17-a640-42bbc2381bba" "$RUNNER_TEMP/preview-worker-dry-run.log" >/dev/null; then
+            echo "::error::Production D1 identifier appeared in the Preview Worker dry-run."
+            exit 1
+          fi
 
       - name: Verify Cloudflare credentials and deploy this branch Preview only
         env:
@@ -67,7 +97,7 @@ jobs:
           test "$CLOUDFLARE_ACCOUNT_ID" = "f2a79e9fa41566a8ec80fb24c02c60eb" || {
             echo "::error::Cloudflare account mismatch"; exit 1;
           }
-          npx --yes wrangler@4 preview --name fix-pages-proxy-preview-cors-2026-11-23 --message "Preview-only Pages proxy CORS validation"
+          npx --yes wrangler@4 preview --config "$PREVIEW_WRANGLER_CONFIG" --message "Preview-only Pages proxy CORS validation"
 
       - name: Record Preview-only deployment guardrails
         run: |
