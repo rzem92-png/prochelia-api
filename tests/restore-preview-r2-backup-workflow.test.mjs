@@ -5,8 +5,11 @@ import { readFile } from "node:fs/promises";
 const workflow = await readFile(new URL("../.github/workflows/restore-preview-r2-backup-isolated-test.yml", import.meta.url), "utf8");
 const backupWorkflow = await readFile(new URL("../.github/workflows/backup-preview-d1-to-r2-eu.yml", import.meta.url), "utf8");
 
-test("Preview R2 restore is manually gated to main only", () => {
-  assert.ok(workflow.includes("github.ref == 'refs/heads/main'"));
+test("Preview R2 restore is owner-only and gated to the exact reviewed Preview branch", () => {
+  assert.ok(workflow.includes("github.ref == 'refs/heads/fix/r2-backup-attestation-branch-gated-2026-11-23'"));
+  assert.ok(workflow.includes("github.actor == 'rzem92-png'"));
+  assert.ok(workflow.includes('test "$GITHUB_ACTOR" = "rzem92-png"'));
+  assert.doesNotMatch(workflow, /refs\/heads\/main/);
   assert.ok(workflow.includes("RESTORE_PREVIEW_R2_TO_ISOLATED_TEST_ONLY"));
 });
 
@@ -73,7 +76,7 @@ test("Restore requires and verifies the HMAC attestation before decrypting or wr
 test("Restore refuses to reuse the encryption secret as the HMAC attestation key", () => {
   assert.match(workflow, /BACKUP_ATTESTATION_HMAC_KEY.*BACKUP_ENCRYPTION_KEY/s);
 });
-test("Isolated restore accepts only main provenance", () => {
+test("Isolated restore accepts only the reviewed Preview branch provenance", () => {
   assert.match(workflow, /\.provenance\.ref == "refs\/heads\/main"/);
   assert.doesNotMatch(workflow, /fix\/r2-preview-backup-signed-attestation|fix\/restore-preview-fresh-eu-d1/);
   assert.match(workflow, /r2-backup-attestation\.mjs verify/);
