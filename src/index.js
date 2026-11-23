@@ -4539,12 +4539,12 @@ handle = async function(request,env){
    - traçabilité des blocages de sécurité
    ============================================================================ */
 
-async function productionSubjectHash(request, route){
+export async function productionSubjectHash(request, route){
   const ip=clean(request.headers.get('CF-Connecting-IP')) || clean(request.headers.get('X-Forwarded-For')) || 'unknown';
   return sha256Base64url(`${ip}|${route}`);
 }
 
-async function productionRateLimit(request,env){
+export async function productionRateLimit(request,env){
   if(!isMutatingMethod(request.method)) return {ok:true};
   const path=new URL(request.url).pathname;
   const sensitive =
