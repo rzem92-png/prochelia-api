@@ -17,7 +17,7 @@ test("Preview E2E is limited to audited API branches, the Pages proxy branch and
 
 test("Preview E2E pins the current Pages proxy branch and exact deployment commit", () => {
   assert.match(workflow, /PREVIEW_DB_ID: e3cf167c-37e1-4d72-9ac6-b3e27c14b97f/);
-  assert.match(workflow, /FRONTEND_BRANCH: fix/frontend-finance-confirmation-guard-2026-11-23/);
+  assert.ok(workflow.includes("FRONTEND_BRANCH: fix/frontend-finance-confirmation-guard-2026-11-23"));
   assert.match(workflow, /FRONTEND_COMMIT_SHA: \$\{\{ inputs\.frontend_commit_sha/);
   assert.match(workflow, /17e05550e18491bb37390ab4c6fd534ceba0d59b/);
   assert.match(workflow, /default: "17e05550e18491bb37390ab4c6fd534ceba0d59b"/);
