@@ -28,8 +28,6 @@ jobs:
       - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
           node-version: '22'
-      - name: Generate isolated Preview deployment config
-        run: node scripts/generate-preview-wrangler-config.mjs
       - name: Check Worker source syntax
         run: |
           node --experimental-default-type=module --check src/index.js
@@ -50,8 +48,6 @@ jobs:
             tests/preview-e2e-workflow.test.mjs
       - name: Test D1 backup restore preparation logic
         run: python3 -m unittest tests/test_prepare_d1_restore.py
-      - name: Validate Wrangler bundle without deployment
-        run: npx --yes wrangler@4 deploy --dry-run --config wrangler.preview.generated.json --outdir "$RUNNER_TEMP/prochelia-preview-dry-run"
       - name: Verify Cloudflare token and Preview Worker access
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -117,6 +113,13 @@ jobs:
             exit 1
           }
           echo "PASS: dedicated Preview R2 bucket jurisdiction is eu."
+      - name: Generate isolated Preview deployment config after EU bucket verification
+        env:
+          PROCHELIA_PREVIEW_R2_VERIFIED_BY_WORKFLOW: "true"
+          PROCHELIA_PREVIEW_DEPLOY_CONFIRMATION: ${{ inputs.confirmation }}
+        run: node scripts/generate-preview-wrangler-config.mjs
+      - name: Validate Wrangler bundle without deployment
+        run: npx --yes wrangler@4 deploy --dry-run --config wrangler.preview.generated.json --outdir "$RUNNER_TEMP/prochelia-preview-dry-run"
       - name: Deploy ONLY the isolated Preview Worker
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}

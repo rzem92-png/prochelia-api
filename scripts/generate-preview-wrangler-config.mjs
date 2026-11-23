@@ -42,6 +42,20 @@ const previewD1 = {
   database_id: expectedPreviewId
 };
 
+const enablePreviewR2 = process.env.PROCHELIA_PREVIEW_R2_VERIFIED_BY_WORKFLOW === "true";
+if (enablePreviewR2) {
+  const approvedWorkflowContext =
+    process.env.GITHUB_ACTIONS === "true" &&
+    process.env.GITHUB_EVENT_NAME === "workflow_dispatch" &&
+    process.env.GITHUB_REPOSITORY === "rzem92-png/prochelia-api" &&
+    process.env.GITHUB_REF === "refs/heads/fix/pages-proxy-preview-cors-2026-11-23" &&
+    process.env.GITHUB_ACTOR === "rzem92-png" &&
+    process.env.PROCHELIA_PREVIEW_DEPLOY_CONFIRMATION === "DEPLOY_PREVIEW_ONLY";
+  if (!approvedWorkflowContext) {
+    throw new Error("R2 binding requires the owner-confirmed manual Preview workflow after EU bucket verification");
+  }
+}
+
 const preview = {
   name: expectedWorkerName,
   main: source.main || "src/index.js",
@@ -74,11 +88,24 @@ const preview = {
   }
 };
 
+if (enablePreviewR2) {
+  preview.r2_buckets = [{
+    binding: "BACKUP_BUCKET",
+    bucket_name: "prochelia-preview-backups-eu-v2",
+    jurisdiction: "eu"
+  }];
+}
+
 const serialized = JSON.stringify(preview);
 if (preview.name === source.name ||
     preview.d1_databases[0].database_id !== expectedPreviewId ||
     serialized.includes(expectedProductionId) ||
-    preview.r2_buckets?.length ||
+    (enablePreviewR2 && !preview.r2_buckets?.some((bucket) =>
+      bucket.binding === "BACKUP_BUCKET" &&
+      bucket.bucket_name === "prochelia-preview-backups-eu-v2" &&
+      bucket.jurisdiction === "eu"
+    )) ||
+    (!enablePreviewR2 && preview.r2_buckets?.length) ||
     preview.triggers.crons.length !== 0 ||
     preview.observability.enabled !== true ||
     preview.observability.redact_query_string !== true ||
@@ -87,4 +114,6 @@ if (preview.name === source.name ||
 }
 
 fs.writeFileSync("wrangler.preview.generated.json", JSON.stringify(preview, null, 2) + "\n");
-console.log("Verified isolated Preview D1, exact CORS, redacted observability, disabled invocation logs, no R2 binding and no Cron.");
+console.log(enablePreviewR2
+  ? "Verified owner-confirmed manual Preview context, exact EU R2 binding, isolated D1, redacted observability and no Cron."
+  : "Verified isolated Preview D1, exact CORS, redacted observability, disabled invocation logs, no R2 binding and no Cron.");
