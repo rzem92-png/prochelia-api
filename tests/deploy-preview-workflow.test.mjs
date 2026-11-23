@@ -65,7 +65,7 @@ test("Preview deployment config generator emits isolated EU bindings and keeps C
     const result = spawnSync(process.execPath, [script], { cwd: directory, encoding: "utf8" });
     assert.equal(result.status, 0, result.stderr || result.stdout);
     const generated = JSON.parse(await readFile(join(directory, "wrangler.preview.generated.json"), "utf8"));
-    assert.equal(generated.name, "prochelia-api-preview");
+    assert.equal(generated.name, "fix-pages-proxy-preview-cors-2026-11-23");
     assert.equal(generated.vars.APP_ENV, "preview");
     assert.equal(generated.d1_databases[0].database_id, "e3cf167c-37e1-4d72-9ac6-b3e27c14b97f");
     assert.equal(generated.r2_buckets[0].jurisdiction, "eu");
