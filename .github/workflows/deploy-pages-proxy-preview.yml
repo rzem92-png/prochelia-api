@@ -8,6 +8,7 @@ on:
       - "src/**"
       - "wrangler.jsonc"
       - "tests/preview-cors-origin-config.test.mjs"
+      - "tests/production-safety-rate-limit.test.mjs"
       - ".github/workflows/deploy-pages-proxy-preview.yml"
 
 permissions:
@@ -50,7 +51,7 @@ jobs:
           if (config.previews?.triggers) throw new Error('Cron triggers are not allowed in this branch Preview');
           console.log('Preview D1, APP_ENV and exact CORS origin verified; no R2 or Cron binding.');
           NODE
-          node --experimental-default-type=module --test tests/preview-cors-origin-config.test.mjs
+          node --experimental-default-type=module --test tests/preview-cors-origin-config.test.mjs tests/production-safety-rate-limit.test.mjs
 
       - name: Validate Worker bundle without deployment
         run: npx --yes wrangler@4 deploy --dry-run --config wrangler.jsonc --outdir "$RUNNER_TEMP/prochelia-pages-proxy-worker-dry-run"
