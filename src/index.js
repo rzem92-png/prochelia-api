@@ -1539,6 +1539,38 @@ const SENSITIVE_CASES = new Set([
   'decision_contractuelle','conflit_reglementaire'
 ]);
 
+async function assertVersionedSchema(env, statements, domain) {
+  if (!env.DB) throw new Error('DATABASE_REQUIRED');
+  const missing = [];
+  for (const statement of statements) {
+    const tableMatch = statement.match(/^\\s*CREATE\\s+TABLE\\s+IF\\s+NOT\\s+EXISTS\\s+["'`]?([\\w]+)["'`]?\\s*\\(([\\s\\S]*)\\)\\s*;?\\s*$/i);
+    if (tableMatch) {
+      const table = tableMatch[1];
+      const definitions = tableMatch[2];
+      const expected = [...definitions.matchAll(/(?:^|,)\\s*["'`]?([A-Za-z_][\\w]*)["'`]?\\s+(?:TEXT|INTEGER|REAL|BLOB|NUMERIC)\\b/gi)].map(m=>m[1]);
+      const info = await env.DB.prepare(`PRAGMA table_info("${table}")`).all();
+      const actual = new Set((info.results || []).map(row=>String(row.name)));
+      if (!info.results?.length) missing.push(`${table}:TABLE`);
+      else for (const column of expected) if (!actual.has(column)) missing.push(`${table}.${column}`);
+      continue;
+    }
+    const indexMatch = statement.match(/^\\s*CREATE\\s+(?:UNIQUE\\s+)?INDEX\\s+IF\\s+NOT\\s+EXISTS\\s+["'`]?([\\w]+)["'`]?\\s+ON\\s+["'`]?([\\w]+)["'`]?/i);
+    if (indexMatch) {
+      const [, index, table] = indexMatch;
+      const info = await env.DB.prepare(`PRAGMA index_list("${table}")`).all();
+      if (!(info.results || []).some(row=>String(row.name)===index)) missing.push(`INDEX:${index}`);
+    }
+  }
+  if (missing.length) {
+    console.error('PROCHELIA_SCHEMA_NOT_READY', JSON.stringify({domain,missing}));
+    const error = new Error('SCHEMA_NOT_READY');
+    error.code = 'SCHEMA_NOT_READY';
+    error.status = 503;
+    error.details = { domain, missing };
+    throw error;
+  }
+}
+
 async function ensureConsolidatedSchema(env) {
   if (!env.DB) throw new Error('DATABASE_REQUIRED');
   const statements = [
@@ -1562,7 +1594,7 @@ async function ensureConsolidatedSchema(env) {
     `CREATE TABLE IF NOT EXISTS notification_outbox (id TEXT PRIMARY KEY, channel TEXT NOT NULL, recipient_ref TEXT NOT NULL, template TEXT NOT NULL, payload_json TEXT NOT NULL DEFAULT '{}', status TEXT NOT NULL DEFAULT 'PENDING', attempts INTEGER NOT NULL DEFAULT 0, last_error TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, sent_at TEXT)`,
     `CREATE TABLE IF NOT EXISTS compliance_events (id TEXT PRIMARY KEY, type TEXT NOT NULL, severity TEXT NOT NULL, entity_type TEXT, entity_id TEXT, status TEXT NOT NULL DEFAULT 'OPEN', details_json TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, closed_at TEXT)`
   ];
-  for (const sql of statements) await env.DB.prepare(sql).run();
+  await assertVersionedSchema(env, statements, 'ensureConsolidatedSchema');
   const defaults = {
     project_phase:'TEST',
     fuel_cost_per_km_cents:'20',
@@ -2132,7 +2164,7 @@ async function ensureStrategicSchema(env) {
       closed_at TEXT
     )`
   ];
-  for (const sql of statements) await env.DB.prepare(sql).run();
+  await assertVersionedSchema(env, statements, 'ensureStrategicSchema');
 }
 
 function promotionCandidate(input) {
@@ -2462,11 +2494,8 @@ async function ensureOperationalSchema(env) {
       details_json TEXT NOT NULL DEFAULT '{}', checked_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     )`
   ];
-  for (const sql of statements) await env.DB.prepare(sql).run();
-  const actionInfo = await env.DB.prepare('PRAGMA table_info(action_outbox)').all();
-  const actionColumns = (actionInfo.results || []).map(x => String(x.name));
-  if (!actionColumns.includes('case_id')) await env.DB.prepare('ALTER TABLE action_outbox ADD COLUMN case_id TEXT').run();
-  if (!actionColumns.includes('processed_at')) await env.DB.prepare('ALTER TABLE action_outbox ADD COLUMN processed_at TEXT').run();
+  await assertVersionedSchema(env, statements, 'ensureOperationalSchema');
+  // action_outbox columns are required from migration 0014; never alter schema in a request.
 }
 
 async function tableExists(env, table) {
@@ -2813,7 +2842,7 @@ async function ensureFinalHardeningSchema(env) {
       capabilities_json TEXT NOT NULL DEFAULT '[]', last_checked_at TEXT, details_json TEXT NOT NULL DEFAULT '{}'
     )`
   ];
-  for (const sql of statements) await env.DB.prepare(sql).run();
+  await assertVersionedSchema(env, statements, 'ensureFinalHardeningSchema');
 }
 
 function finalSecretConfigured(env, key) {
@@ -3053,7 +3082,7 @@ async function ensureCommercialRecruitmentSchema(env){
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     )`
   ];
-  for(const q of sql) await env.DB.prepare(q).run();
+  await assertVersionedSchema(env, sql, 'ensureCommercialRecruitmentSchema');
 }
 
 function commercialStageGuide(stage){
@@ -4351,7 +4380,7 @@ async function ensureProcheliaMasterComplementSchema(env){
     `CREATE INDEX IF NOT EXISTS idx_brand_assets_type ON brand_assets(asset_type,status)`,
     `CREATE INDEX IF NOT EXISTS idx_clearance_term ON brand_clearance_log(term,checked_at)`
   ];
-  for(const q of sqls) await env.DB.prepare(q).run();
+  await assertVersionedSchema(env, sqls, 'ensureProcheliaMasterComplementSchema');
   await env.DB.prepare(`INSERT OR IGNORE INTO brand_identity(id,brand_key,name,visual_json,uniqueness_policy_json) VALUES(?,?,?,?,?)`)
     .bind(crypto.randomUUID(),'PROCHELIA',PROCHELIA_BRAND.name,JSON.stringify(PROCHELIA_BRAND.visual),JSON.stringify(PROCHELIA_BRAND.uniqueness_policy)).run();
   for(const [role,config] of Object.entries(PROCHELIA_UI)){
