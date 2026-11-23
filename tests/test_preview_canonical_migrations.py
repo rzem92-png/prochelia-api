@@ -1413,7 +1413,12 @@ print("PASS: security records are tenant-scoped; legacy records remain unassigne
 # Master seed migration is deterministic and idempotent.
 seed_roles = {row[0] for row in db.execute("SELECT role FROM interface_profiles")}
 assert {"CLIENT", "SOCIETE", "INTERVENANT", "GERANTE"} <= seed_roles, "Missing canonical interface profiles"
-assert db.execute("SELECT COUNT(*) FROM copilot_resolution_rules").fetchone()[0] >= 10, "Missing canonical Copilot resolution rules"
+assert db.execute("SELECT COUNT(*) FROM copilot_resolution_rules").fetchone()[0] == 10, "Canonical Copilot rule set must contain exactly ten scenarios"
+for scenario in ("SIMPLE_REFUND_CHECK", "CLIENT_COMPLAINT", "DUPLICATE_PAYMENT", "IDENTITY_SECURITY", "DATA_INCIDENT", "LEGAL_DISPUTE", "INTERVENANT_ABSENT"):
+    rule = db.execute("SELECT auto_allowed, manager_approval_required, steps_json FROM copilot_resolution_rules WHERE scenario_key=?", (scenario,)).fetchone()
+    assert rule is not None and rule[0] == 0 and rule[1] == 1, f"{scenario} must require manager approval"
+    assert "manager_approval" in rule[2], f"{scenario} resolution plan must include explicit approval"
+    assert "execute_allowed_action" not in rule[2], f"{scenario} must not execute sensitive action autonomously"
 assert db.execute("SELECT COUNT(*) FROM brand_identity WHERE brand_key='PROCHELIA'").fetchone()[0] == 1, "Missing canonical brand identity"
 db.executescript((MIGRATIONS / EXPECTED[-1]).read_text(encoding="utf-8"))
 assert db.execute("SELECT COUNT(*) FROM interface_profiles").fetchone()[0] == 4, "Master interface seed migration is not idempotent"
