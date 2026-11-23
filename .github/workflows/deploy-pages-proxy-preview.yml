@@ -50,20 +50,26 @@ jobs:
           if (config.previews?.r2_buckets?.length) throw new Error('No R2 binding until the EU bucket is independently verified');
           if (config.previews?.triggers) throw new Error('Cron triggers are not allowed in this branch Preview');
           console.log('Preview D1, APP_ENV and exact CORS origin verified; no R2 or Cron binding.');
+          const previewVars = {
+            APP_ENV: 'preview',
+            CORS_ORIGIN: config.previews.vars.CORS_ORIGIN
+          };
+          const previewD1 = {
+            binding: 'DB',
+            database_name: previewDb.database_name,
+            database_id: previewDb.database_id
+          };
           const previewConfig = {
             name: 'fix-pages-proxy-preview-cors-2026-11-23',
             main: config.main,
             compatibility_date: config.compatibility_date,
             compatibility_flags: config.compatibility_flags || [],
-            vars: {
-              APP_ENV: 'preview',
-              CORS_ORIGIN: config.previews.vars.CORS_ORIGIN
-            },
-            d1_databases: [{
-              binding: 'DB',
-              database_name: previewDb.database_name,
-              database_id: previewDb.database_id
-            }]
+            vars: previewVars,
+            d1_databases: [previewD1],
+            previews: {
+              vars: previewVars,
+              d1_databases: [previewD1]
+            }
           };
           if (JSON.stringify(previewConfig).includes(productionDb.database_id)) {
             throw new Error('Generated Preview config contains the Production D1 identifier');
