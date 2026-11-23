@@ -1543,26 +1543,26 @@ async function assertVersionedSchema(env, statements, domain) {
   if (!env.DB) throw new Error('DATABASE_REQUIRED');
   const missing = [];
   for (const statement of statements) {
-    const tableMatch = statement.match(/^\\s*CREATE\\s+TABLE\\s+IF\\s+NOT\\s+EXISTS\\s+["'`]?([\\w]+)["'`]?\\s*\\(([\\s\\S]*)\\)\\s*;?\\s*$/i);
+    const tableMatch = statement.match(/^\s*CREATE\s+TABLE\s+IF\s+NOT\s+EXISTS\s+["'`]?([\w]+)["'`]?\s*\(([\s\S]*)\)\s*;?\s*$/i);
     if (tableMatch) {
       const table = tableMatch[1];
       const definitions = tableMatch[2];
-      const expected = [...definitions.matchAll(/(?:^|,)\\s*["'`]?([A-Za-z_][\\w]*)["'`]?\\s+(?:TEXT|INTEGER|REAL|BLOB|NUMERIC)\\b/gi)].map(m=>m[1]);
+      const expected = [...definitions.matchAll(/(?:^|,)\s*["'`]?([A-Za-z_][\w]*)["'`]?\s+(?:TEXT|INTEGER|REAL|BLOB|NUMERIC)\b/gi)].map(match => match[1]);
       const info = await env.DB.prepare(`PRAGMA table_info("${table}")`).all();
-      const actual = new Set((info.results || []).map(row=>String(row.name)));
+      const actual = new Set((info.results || []).map(row => String(row.name)));
       if (!info.results?.length) missing.push(`${table}:TABLE`);
       else for (const column of expected) if (!actual.has(column)) missing.push(`${table}.${column}`);
       continue;
     }
-    const indexMatch = statement.match(/^\\s*CREATE\\s+(?:UNIQUE\\s+)?INDEX\\s+IF\\s+NOT\\s+EXISTS\\s+["'`]?([\\w]+)["'`]?\\s+ON\\s+["'`]?([\\w]+)["'`]?/i);
+    const indexMatch = statement.match(/^\s*CREATE\s+(?:UNIQUE\s+)?INDEX\s+IF\s+NOT\s+EXISTS\s+["'`]?([\w]+)["'`]?\s+ON\s+["'`]?([\w]+)["'`]?/i);
     if (indexMatch) {
       const [, index, table] = indexMatch;
       const info = await env.DB.prepare(`PRAGMA index_list("${table}")`).all();
-      if (!(info.results || []).some(row=>String(row.name)===index)) missing.push(`INDEX:${index}`);
+      if (!(info.results || []).some(row => String(row.name) === index)) missing.push(`INDEX:${index}`);
     }
   }
   if (missing.length) {
-    console.error('PROCHELIA_SCHEMA_NOT_READY', JSON.stringify({domain,missing}));
+    console.error('PROCHELIA_SCHEMA_NOT_READY', JSON.stringify({ domain, missing }));
     const error = new Error('SCHEMA_NOT_READY');
     error.code = 'SCHEMA_NOT_READY';
     error.status = 503;
@@ -1570,7 +1570,6 @@ async function assertVersionedSchema(env, statements, domain) {
     throw error;
   }
 }
-
 async function ensureConsolidatedSchema(env) {
   if (!env.DB) throw new Error('DATABASE_REQUIRED');
   const statements = [
