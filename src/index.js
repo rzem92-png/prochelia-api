@@ -1594,18 +1594,7 @@ async function ensureConsolidatedSchema(env) {
     `CREATE TABLE IF NOT EXISTS compliance_events (id TEXT PRIMARY KEY, type TEXT NOT NULL, severity TEXT NOT NULL, entity_type TEXT, entity_id TEXT, status TEXT NOT NULL DEFAULT 'OPEN', details_json TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, closed_at TEXT)`
   ];
   await assertVersionedSchema(env, statements, 'ensureConsolidatedSchema');
-  const defaults = {
-    project_phase:'TEST',
-    fuel_cost_per_km_cents:'20',
-    default_margin_percent:'15',
-    software_monthly_cost_cents:'0',
-    automation_policy:'simple_low_impact_auto_sensitive_manager',
-    b2b_model:'company_pays_intervenant_platform_bills_commission',
-    b2c_model:'client_pays_platform_platform_pays_intervenant'
-  };
-  for (const [key,value] of Object.entries(defaults)) {
-    await env.DB.prepare(`INSERT OR IGNORE INTO platform_settings(key,value_json) VALUES(?,?)`).bind(key, JSON.stringify(value)).run();
-  }
+  // Default platform settings are seeded by canonical migration 0018; request handlers remain read-only.
 }
 
 async function getSetting(env,key,fallback=null) {
