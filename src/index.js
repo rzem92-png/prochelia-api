@@ -4377,28 +4377,8 @@ async function ensureProcheliaMasterComplementSchema(env){
     error.details = { domain: 'ensureProcheliaMasterComplementSchema', missing: ['support_cases.tenant_id (migration 0037 required)'] };
     throw error;
   }
-  await env.DB.prepare(`INSERT OR IGNORE INTO brand_identity(id,brand_key,name,visual_json,uniqueness_policy_json) VALUES(?,?,?,?,?)`)
-    .bind(crypto.randomUUID(),'PROCHELIA',PROCHELIA_BRAND.name,JSON.stringify(PROCHELIA_BRAND.visual),JSON.stringify(PROCHELIA_BRAND.uniqueness_policy)).run();
-  for(const [role,config] of Object.entries(PROCHELIA_UI)){
-    await env.DB.prepare(`INSERT OR IGNORE INTO interface_profiles(id,role,config_json,version) VALUES(?,?,?,?)`)
-      .bind(crypto.randomUUID(),role,JSON.stringify(config),VERSION).run();
-  }
-  const rules={
-    DELAY_LIGHT:{category:'DELAY',severity:'LOW',auto:1,manager:0,steps:['verify_mission','recalculate_eta','notify_client','journal','close_if_resolved']},
-    NOTIFICATION_FAILED:{category:'TECHNICAL',severity:'LOW',auto:1,manager:0,steps:['retry_notification','verify_delivery','fallback_channel','journal','close_if_resolved']},
-    DOCUMENT_REMINDER:{category:'DOCUMENT',severity:'LOW',auto:1,manager:0,steps:['identify_missing_document','notify_owner','create_follow_up','journal']},
-    SIMPLE_REFUND_CHECK:{category:'PAYMENT',severity:'LOW',auto:1,manager:0,steps:['reconcile_transaction','verify_refund_eligibility','prepare_or_execute_allowed_action','notify','journal']},
-    DUPLICATE_PAYMENT:{category:'PAYMENT',severity:'HIGH',auto:0,manager:1,steps:['freeze_duplicate_action','reconcile_psp','calculate_exposure','propose_resolution','manager_approval','notify','journal']},
-    IDENTITY_SECURITY:{category:'SECURITY',severity:'CRITICAL',auto:0,manager:1,steps:['lock_sensitive_action','preserve_evidence','risk_assessment','manager_approval','notify_if_required','journal']},
-    DATA_INCIDENT:{category:'RGPD_SECURITY',severity:'CRITICAL',auto:0,manager:1,steps:['contain','preserve_evidence','classify','compliance_review','manager_approval','journal']},
-    LEGAL_DISPUTE:{category:'LEGAL',severity:'CRITICAL',auto:0,manager:1,steps:['collect_evidence','freeze_irreversible_action','legal_review','manager_approval','notify','journal']},
-    INTERVENANT_ABSENT:{category:'REPLACEMENT',severity:'HIGH',auto:0,manager:1,steps:['verify_absence','check_available_intervenants','propose_replacement','manager_approval','notify','journal']},
-    CLIENT_COMPLAINT:{category:'COMPLAINT',severity:'MEDIUM',auto:1,manager:0,steps:['acknowledge','collect_evidence','reconcile_mission','reconcile_finance','propose_resolution','notify','journal','close_if_resolved']}
-  };
-  for(const [k,v] of Object.entries(rules)){
-    await env.DB.prepare(`INSERT OR IGNORE INTO copilot_resolution_rules(id,scenario_key,category,severity,auto_allowed,manager_approval_required,steps_json) VALUES(?,?,?,?,?,?,?)`)
-      .bind(crypto.randomUUID(),k,v.category,v.severity,v.auto,v.manager,JSON.stringify(v.steps)).run();
-  }
+  // Brand, interface and Copilot defaults are versioned in migration 0045.
+  // Request handlers perform schema readiness checks only; they never seed runtime data.
 }
 
 function supportRoleAllowed(role){return ['CLIENT','SOCIETE','INTERVENANT','GERANTE','ADMIN'].includes(String(role||'').toUpperCase())}
