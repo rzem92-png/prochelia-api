@@ -12,7 +12,7 @@ if (!production.d1_databases?.some((db) => db.binding === "DB" && db.database_id
 }
 
 const preview = {
-  name: "prochelia-api-preview",
+  name: "fix-pages-proxy-preview-cors-2026-11-23",
   main: "src/index.js",
   compatibility_date: "2026-09-25",
   workers_dev: true,
@@ -25,7 +25,9 @@ const preview = {
       "https://feat-supra-control-center-v1.prochelia.pages.dev",
       "https://db884f74.prochelia.pages.dev",
       "https://repair-prochelia-frontend-xs.prochelia.pages.dev",
-      "https://feat-intervenant-secure-page.prochelia.pages.dev"
+      "https://feat-intervenant-secure-page.prochelia.pages.dev",
+      "https://pages-proxy-2026-11-23.prochelia.pages.dev",
+      "https://fix-frontend-finance-confirm.prochelia.pages.dev"
     ].join(",")
   },
   d1_databases: [{
@@ -38,13 +40,15 @@ const preview = {
     bucket_name: "prochelia-preview-backups-eu-v2",
     jurisdiction: "eu"
   }],
-  triggers: {
-    // Preview runs only the durable background queue processor.
-    // Backups are handled exclusively by the signed, manually approved
-    // GitHub Actions workflow; never by an unsigned Worker cron.
-    crons: ["*/1 * * * *"]
-  },
-  observability: { logs: { enabled: true, invocation_logs: true } }
+  // No Cron is enabled until queue scope, migrations and job execution
+  // have a separately reviewed approval. R2 backups remain GitHub-workflow only.
+  triggers: { crons: [] },
+  observability: {
+    enabled: true,
+    redact_query_string: true,
+    head_sampling_rate: 1,
+    logs: { enabled: true, invocation_logs: true, head_sampling_rate: 1 }
+  }
 };
 
 if (preview.name === production.name ||
@@ -55,4 +59,4 @@ if (preview.name === production.name ||
 }
 
 fs.writeFileSync("wrangler.preview.generated.json", JSON.stringify(preview, null, 2));
-console.log("Verified isolated Preview Worker, EU D1, EU R2 and scheduled triggers.");
+console.log("Verified dedicated isolated Preview Worker, EU D1, EU R2, redacted observability and no Cron triggers.");
