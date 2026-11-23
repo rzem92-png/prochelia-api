@@ -96,7 +96,7 @@ test("automatic support resolution is limited to reversible low-risk operational
   assert.match(create, /safeAutoScenarios=\['DELAY_LIGHT','NOTIFICATION_FAILED','DOCUMENT_REMINDER'\]/);
   assert.match(create, /safeAutoScenarios\.includes\(scenario\)/);
   const start = source.indexOf("async function supportAutoResolve(");
-  const end = source.indexOf("\\n}", start) + 2;
+  const end = source.indexOf("\n}", start) + 2;
   const resolver = source.slice(start, end);
   assert.match(resolver, /const safeAuto=\['DELAY_LIGHT','NOTIFICATION_FAILED','DOCUMENT_REMINDER'\]/);
   for (const scenario of ["SIMPLE_REFUND_CHECK", "CLIENT_COMPLAINT", "DUPLICATE_PAYMENT", "IDENTITY_SECURITY", "DATA_INCIDENT", "LEGAL_DISPUTE", "INTERVENANT_ABSENT"]) {
