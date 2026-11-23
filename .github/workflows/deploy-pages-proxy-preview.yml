@@ -8,7 +8,9 @@ on:
       - "src/**"
       - "wrangler.jsonc"
       - "tests/preview-cors-origin-config.test.mjs"
+      - "tests/preview-wrangler-generator.test.mjs"
       - "tests/production-safety-rate-limit.test.mjs"
+      - "scripts/generate-preview-wrangler-config.mjs"
       - ".github/workflows/deploy-pages-proxy-preview.yml"
 
 permissions:
@@ -20,7 +22,7 @@ concurrency:
 
 jobs:
   deploy-isolated-preview:
-    if: github.ref == 'refs/heads/fix/pages-proxy-preview-cors-2026-11-23'
+    if: github.ref == 'refs/heads/fix/pages-proxy-preview-cors-2026-11-23' && github.actor == 'rzem92-png'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -32,56 +34,30 @@ jobs:
           node-version: "22"
           package-manager-cache: false
 
-      - name: Validate Preview-only resource contract
+      - name: Generate and validate isolated Preview configuration
+        shell: bash
         run: |
+          set -euo pipefail
+          node scripts/generate-preview-wrangler-config.mjs
+          test -s wrangler.preview.generated.json
           node --input-type=module <<'NODE'
           import fs from 'node:fs';
-          const config = JSON.parse(fs.readFileSync('wrangler.jsonc', 'utf8'));
-          const productionDb = config.d1_databases?.find(x => x.binding === 'DB');
-          const previewDb = config.previews?.d1_databases?.find(x => x.binding === 'DB');
-          const origins = String(config.previews?.vars?.CORS_ORIGIN || '').split(',').map(x => x.trim());
-          if (config.name !== 'prochelia-api') throw new Error('Unexpected Worker name');
-          if (config.previews?.vars?.APP_ENV !== 'preview') throw new Error('APP_ENV must be preview');
-          if (productionDb?.database_id !== '04f52830-ef5a-4f17-a640-42bbc2381bba') throw new Error('Production D1 reference changed unexpectedly');
-          if (previewDb?.database_id !== 'e3cf167c-37e1-4d72-9ac6-b3e27c14b97f') throw new Error('Preview D1 binding is not the dedicated Preview database');
-          if (previewDb.database_id === productionDb.database_id) throw new Error('Preview and Production D1 must be different');
-          if (!origins.includes('https://pages-proxy-2026-11-23.prochelia.pages.dev')) throw new Error('Exact Pages Preview origin missing');
-          if (origins.includes('*')) throw new Error('Wildcard CORS is forbidden');
-          if (config.previews?.r2_buckets?.length) throw new Error('No R2 binding until the EU bucket is independently verified');
-          if (config.previews?.triggers) throw new Error('Cron triggers are not allowed in this branch Preview');
-          console.log('Preview D1, APP_ENV and exact CORS origin verified; no R2 or Cron binding.');
-          const previewVars = {
-            APP_ENV: 'preview',
-            CORS_ORIGIN: config.previews.vars.CORS_ORIGIN
-          };
-          const previewD1 = {
-            binding: 'DB',
-            database_name: previewDb.database_name,
-            database_id: previewDb.database_id
-          };
-          const previewConfig = {
-            name: 'fix-pages-proxy-preview-cors-2026-11-23',
-            workers_dev: true,
-            main: config.main,
-            compatibility_date: config.compatibility_date,
-            compatibility_flags: config.compatibility_flags || [],
-            observability: config.observability,
-            vars: previewVars,
-            d1_databases: [previewD1],
-            previews: {
-              vars: previewVars,
-              d1_databases: [previewD1]
-            }
-          };
-          if (JSON.stringify(previewConfig).includes(productionDb.database_id)) {
-            throw new Error('Generated Preview config contains the Production D1 identifier');
-          }
-          const previewConfigPath = `${process.env.GITHUB_WORKSPACE}/wrangler.preview.generated.json`;
-          fs.writeFileSync(previewConfigPath, JSON.stringify(previewConfig, null, 2) + '\n');
-          fs.appendFileSync(process.env.GITHUB_ENV, `PREVIEW_WRANGLER_CONFIG=${previewConfigPath}\n`);
-          console.log('Preview-only Wrangler config generated with the isolated EU D1 binding.');
+          const preview = JSON.parse(fs.readFileSync('wrangler.preview.generated.json', 'utf8'));
+          const productionId = '04f52830-ef5a-4f17-a640-42bbc2381bba';
+          const previewId = 'e3cf167c-37e1-4d72-9ac6-b3e27c14b97f';
+          const db = preview.d1_databases?.find((item) => item.binding === 'DB');
+          if (preview.name !== 'fix-pages-proxy-preview-cors-2026-11-23') throw new Error('Unexpected Preview Worker name');
+          if (preview.vars?.APP_ENV !== 'preview') throw new Error('APP_ENV must be preview');
+          if (db?.database_id !== previewId) throw new Error('Preview D1 identity mismatch');
+          if (JSON.stringify(preview).includes(productionId)) throw new Error('Production D1 identifier leaked into generated Preview config');
+          if (preview.r2_buckets?.length) throw new Error('R2 must remain unbound until EU bucket inventory and attestation are independently verified');
+          if (preview.triggers?.crons?.length) throw new Error('Cron triggers are not allowed in this Preview deployment');
+          if (preview.observability?.enabled !== true || preview.observability?.redact_query_string !== true) throw new Error('Preview observability must be enabled with query-string redaction');
+          if (preview.observability?.logs?.invocation_logs !== false) throw new Error('Invocation logs must remain disabled to avoid recording request URLs');
+          console.log('Preview D1, exact origin allowlist, redacted observability, no R2 binding and no Cron verified.');
           NODE
-          node --experimental-default-type=module --test tests/preview-cors-origin-config.test.mjs tests/production-safety-rate-limit.test.mjs
+          node --experimental-default-type=module --test tests/preview-cors-origin-config.test.mjs tests/preview-wrangler-generator.test.mjs tests/production-safety-rate-limit.test.mjs
+          echo "PREVIEW_WRANGLER_CONFIG=$GITHUB_WORKSPACE/wrangler.preview.generated.json" >> "$GITHUB_ENV"
 
       - name: Validate Worker bundle without deployment
         shell: bash
