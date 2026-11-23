@@ -64,6 +64,7 @@ jobs:
             main: config.main,
             compatibility_date: config.compatibility_date,
             compatibility_flags: config.compatibility_flags || [],
+            observability: config.observability,
             vars: previewVars,
             d1_databases: [previewD1],
             previews: {
