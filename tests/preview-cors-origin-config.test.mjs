@@ -16,6 +16,7 @@ test("Worker Preview uses the dedicated Preview D1, never the Production D1", ()
 });
 
 test("Pages proxy origin is allowlisted only in the Worker Previews block", () => {
+  assert.equal(typeof config.previews.vars.CORS_ORIGIN, "string");
   const origins = config.previews.vars.CORS_ORIGIN.split(",").map((value) => value.trim());
 
   assert.equal(config.previews.vars.APP_ENV, "preview");
