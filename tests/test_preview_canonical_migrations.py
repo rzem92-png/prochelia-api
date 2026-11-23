@@ -180,12 +180,46 @@ assert "tenants" in accounting_entity_fk_targets, "Accounting entities must refe
 # Tenant authority and membership lifecycle fixtures.
 tenant_tables = {"tenants", "tenant_memberships", "tenant_membership_events", "tenant_invitations", "tenant_invitation_events"}
 assert tenant_tables <= tables, f"Missing tenant authority tables: {sorted(tenant_tables-tables)}"
-for user_id, email in [("user-a", "user-a@example.test"), ("user-b", "user-b@example.test"), ("user-admin", "admin@example.test")]:
+for user_id, email in [("user-a", "user-a@example.test"), ("user-b", "user-b@example.test"), ("user-admin", "admin@example.test"), ("user-multi", "multi@example.test")]:
     db.execute("INSERT INTO users(id, role, email, first_name, last_name, password_hash) VALUES (?, 'client', ?, 'Synthetic', 'User', 'not-a-real-password-hash')", (user_id, email))
 db.execute("INSERT INTO tenants(id, slug, display_name) VALUES ('tenant-a', 'tenant-a', 'Tenant A')")
 db.execute("INSERT INTO tenants(id, slug, display_name) VALUES ('tenant-b', 'tenant-b', 'Tenant B')")
+# One synthetic user may legitimately hold active memberships in multiple companies.
+db.execute("""
+    INSERT INTO tenant_memberships(id, tenant_id, user_id, role, status, accepted_at)
+    VALUES ('membership-multi-a', 'tenant-a', 'user-multi', 'MEMBER', 'ACTIVE', CURRENT_TIMESTAMP)
+""")
+db.execute("""
+    INSERT INTO tenant_memberships(id, tenant_id, user_id, role, status, accepted_at)
+    VALUES ('membership-multi-b', 'tenant-b', 'user-multi', 'MEMBER', 'ACTIVE', CURRENT_TIMESTAMP)
+""")
 db.execute("INSERT INTO tenant_memberships(id, tenant_id, user_id, role, status, invited_by_user_id) VALUES ('membership-a', 'tenant-a', 'user-a', 'OWNER', 'INVITED', 'user-admin')")
 db.execute("UPDATE tenant_memberships SET status='ACTIVE', accepted_at=CURRENT_TIMESTAMP WHERE id='membership-a'")
+
+# A member with two active company memberships may have one PSP account per tenant.
+db.execute("""
+    INSERT INTO payment_accounts(id, user_id, provider, tenant_id)
+    VALUES ('payment-account-multi-a', 'user-multi', 'stripe', 'tenant-a')
+""")
+db.execute("""
+    INSERT INTO payment_accounts(id, user_id, provider, tenant_id)
+    VALUES ('payment-account-multi-b', 'user-multi', 'stripe', 'tenant-b')
+""")
+account_unique_indexes = []
+for index in db.execute("PRAGMA index_list(payment_accounts)").fetchall():
+    if index[2]:
+        columns = [row[2] for row in db.execute('PRAGMA index_info("%s")' % index[1]).fetchall()]
+        account_unique_indexes.append(columns)
+assert ["tenant_id", "user_id"] in account_unique_indexes, "PSP account uniqueness must be scoped to tenant and user"
+assert ["user_id"] not in account_unique_indexes, "Global user-only PSP account uniqueness breaks multi-tenant companies"
+try:
+    db.execute("""
+        INSERT INTO payment_accounts(id, user_id, provider, tenant_id)
+        VALUES ('payment-account-multi-a-duplicate', 'user-multi', 'stripe', 'tenant-a')
+    """)
+    raise AssertionError("Duplicate PSP account for the same user and tenant was incorrectly accepted")
+except sqlite3.IntegrityError as exc:
+    assert "payment_accounts.tenant_id" in str(exc) and "payment_accounts.user_id" in str(exc), str(exc)
 for sql in [
     "UPDATE tenant_memberships SET id='membership-a-mutated' WHERE id='membership-a'",
     "UPDATE tenant_memberships SET tenant_id='tenant-b' WHERE id='membership-a'",
