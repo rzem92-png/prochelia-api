@@ -48,6 +48,7 @@ EXPECTED = [
     "0041_tenant_invitation_onboarding.sql",
     "0042_financial_tenant_scope.sql",
     "0043_finance_workspace_tenant_scope.sql",
+    "0044_security_records_tenant_scope.sql",
 ]
 
 # Keep the manual Preview migration gate synchronized with the canonical chain.
@@ -59,17 +60,20 @@ assert '"0029_supra_append_only_audit_guards.sql"' in workflow_text, (
 assert '"0030_supra_audit_tenant_scope.sql"' in workflow_text, (
     "Preview migration workflow omits tenant-scoped SUPRA audit migration 0030"
 )
-assert "if len(local) != 44:" in workflow_text, (
-    "Preview migration workflow must require exactly 44 canonical migrations"
+assert "if len(local) != 45:" in workflow_text, (
+    "Preview migration workflow must require exactly 45 canonical migrations"
 )
-assert "exact 44-entry registry" in workflow_text, (
+assert "exact 45-entry registry" in workflow_text, (
     "Preview migration workflow target registry count is stale"
 )
-assert "all 44 canonical migrations are pending" in workflow_text, (
+assert "all 45 canonical migrations are pending" in workflow_text, (
     "Preview migration workflow empty-database inventory message is stale"
 )
-assert "only migrations 0023-0043 are pending" in workflow_text, (
+assert "only migrations 0023-0044 are pending" in workflow_text, (
     "Preview migration workflow baseline-to-target range is stale"
+)
+assert '"0044_security_records_tenant_scope.sql"' in workflow_text, (
+    "Preview migration workflow omits tenant-scoped security migration 0044"
 )
 assert '"0038_identity_verification_tenant_scope.sql"' in workflow_text, (
     "Preview migration workflow omits tenant-scoped identity migration 0038"
@@ -90,8 +94,26 @@ assert actual == sorted(EXPECTED), (
 db = sqlite3.connect(":memory:")
 db.execute("PRAGMA foreign_keys = ON")
 # Start from a truly empty D1 database, matching the newly created EU Preview target.
-for name in EXPECTED:
+# Apply the reviewed baseline and candidate migrations through 0043 first.
+for name in EXPECTED[:-1]:
     db.executescript((MIGRATIONS / name).read_text(encoding="utf-8"))
+
+# Simulate pre-existing legacy security records before 0044. The migration must
+# preserve them without inventing a tenant attribution or making them writable.
+db.execute(
+    "INSERT INTO mission_security(id, mission_id, client_id, intervenant_id) VALUES (?, ?, ?, ?)",
+    ("legacy-security-1", "legacy-mission-1", "legacy-client-1", "legacy-intervenant-1"),
+)
+db.execute(
+    "INSERT INTO mission_security_attempts(id, security_id, purpose, result) VALUES (?, ?, ?, ?)",
+    ("legacy-security-attempt-1", "legacy-security-1", "ARRIVAL", "BLOCKED"),
+)
+db.execute(
+    "INSERT INTO security_audit(id, event_type, result) VALUES (?, ?, ?)",
+    ("legacy-security-audit-1", "LEGACY_EVENT", "BLOCKED"),
+)
+
+db.executescript((MIGRATIONS / EXPECTED[-1]).read_text(encoding="utf-8"))
 
 violations = db.execute("PRAGMA foreign_key_check").fetchall()
 assert not violations, f"Canonical migration chain creates foreign-key violations: {violations[:10]}"
@@ -137,7 +159,7 @@ assert {"tenants", "tenant_memberships", "users"} <= invitation_fk_targets, "Ten
 invitation_columns = {row[1] for row in db.execute("PRAGMA table_info(tenant_invitations)")}
 assert "token_sha256" in invitation_columns and "token" not in invitation_columns, "Only token digests may be persisted"
 
-print(f"PASS: all {len(EXPECTED)} canonical Preview migrations apply from an empty D1 database, creating users/sessions first; foreign_key_check=0.")
+print(f"PASS: all {len(EXPECTED)} canonical Preview migrations apply from an empty D1 database; legacy security records remain unassigned; foreign_key_check=0.")
 
 
 # Double-entry accounting invariants: tenant scoping, idempotency, balanced posting,
@@ -885,7 +907,7 @@ db.execute("""
       'market-opportunity-a', 'market-tenant-a', 'market-mission-opportunity',
       'market-consent-a', 'CLEANING', 'Nettoyage ponctuel d’un logement',
       'Aubergenville', '78', '2026-11-23T09:00:00Z', '2026-11-23T11:00:00Z',
-      4000, 'EUR', '["cleaning"]', 'market-client-a', '2026-11-22T23:00:00Z'
+      4000, 'EUR', '["cleaning"]', 'market-client-a', datetime('now','+7 days')
     )
 """)
 db.execute("""
@@ -1264,3 +1286,120 @@ print("PASS: finance dashboard/export/ledger/cases are tenant-scoped, legacy una
 assert "finance_workspace_entries','finance_export_log','finance_resolution_cases" in source
 assert "FINANCIAL_TENANT_SCOPE" in source
 assert "FINANCIAL_AUXILIARY_TENANT_COLUMNS" in source
+
+
+# Security records are tenant-scoped, append-only where they are audit evidence,
+# and legacy rows remain unassigned rather than being guessed into a tenant.
+security_columns = {
+    table: {row[1] for row in db.execute(f"PRAGMA table_info({table})")}
+    for table in ("identity_verifications", "mission_security", "mission_security_attempts", "security_audit")
+}
+for table, columns in security_columns.items():
+    assert "tenant_id" in columns, f"{table} missing tenant_id"
+
+for table, row_id in [
+    ("mission_security", "legacy-security-1"),
+    ("mission_security_attempts", "legacy-security-attempt-1"),
+    ("security_audit", "legacy-security-audit-1"),
+]:
+    tenant = db.execute(f"SELECT tenant_id FROM {table} WHERE id=?", (row_id,)).fetchone()[0]
+    assert tenant is None, f"{table} legacy row received an invented tenant attribution"
+
+for sql in [
+    "UPDATE mission_security SET status='completed' WHERE id='legacy-security-1'",
+    "DELETE FROM mission_security WHERE id='legacy-security-1'",
+    "UPDATE mission_security_attempts SET result='TAMPERED' WHERE id='legacy-security-attempt-1'",
+    "DELETE FROM mission_security_attempts WHERE id='legacy-security-attempt-1'",
+    "UPDATE security_audit SET result='TAMPERED' WHERE id='legacy-security-audit-1'",
+    "DELETE FROM security_audit WHERE id='legacy-security-audit-1'",
+]:
+    try:
+        db.execute(sql)
+        raise AssertionError(f"Unassigned security evidence was mutable: {sql}")
+    except sqlite3.IntegrityError:
+        pass
+
+security_indexes = {
+    "idx_mission_security_tenant_mission",
+    "idx_mission_security_attempts_tenant_security",
+    "idx_security_audit_tenant_created",
+}
+security_triggers = {
+    "trg_mission_security_tenant_insert",
+    "trg_mission_security_tenant_update",
+    "trg_mission_security_unscoped_no_update",
+    "trg_mission_security_unscoped_no_delete",
+    "trg_mission_security_attempts_tenant_insert",
+    "trg_mission_security_attempts_no_update",
+    "trg_mission_security_attempts_no_delete",
+    "trg_security_audit_tenant_insert",
+    "trg_security_audit_no_update",
+    "trg_security_audit_no_delete",
+}
+indexes = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='index'")}
+triggers = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='trigger'")}
+assert security_indexes <= indexes, f"Missing security tenant indexes: {sorted(security_indexes-indexes)}"
+assert security_triggers <= triggers, f"Missing security tenant/append-only guards: {sorted(security_triggers-triggers)}"
+
+# The existing two-tenant marketplace fixtures below are used to prove that
+# mission security and security audit writes cannot cross tenant boundaries.
+db.execute("""
+    INSERT INTO mission_security(
+      id,mission_id,client_id,intervenant_id,tenant_id
+    ) VALUES (
+      'security-market-a','market-mission-a','market-client-a-row','market-worker-a-row','market-tenant-a'
+    )
+""")
+db.execute("""
+    INSERT INTO mission_security_attempts(
+      id,security_id,tenant_id,purpose,actor_user_id,result
+    ) VALUES (
+      'security-attempt-market-a','security-market-a','market-tenant-a','ARRIVAL','market-manager-a','BLOCKED'
+    )
+""")
+db.execute("""
+    INSERT INTO security_audit(
+      id,event_type,mission_id,user_id,actor_role,result,metadata_json,tenant_id
+    ) VALUES (
+      'security-audit-market-a','MISSION_SECURITY_TEST','market-mission-a','market-manager-a','MANAGER','OK','{}','market-tenant-a'
+    )
+""")
+for sql, marker in [
+    ("""
+      INSERT INTO mission_security(id,mission_id,client_id,intervenant_id,tenant_id)
+      VALUES ('security-cross-tenant','market-mission-a','market-client-a-row','market-worker-a-row','market-tenant-b')
+    """, "MISSION_SECURITY_TENANT_MISMATCH"),
+    ("""
+      INSERT INTO mission_security_attempts(id,security_id,tenant_id,purpose,actor_user_id,result)
+      VALUES ('security-attempt-cross','security-market-a','market-tenant-b','ARRIVAL','market-manager-b','BLOCKED')
+    """, "MISSION_SECURITY_ATTEMPT_TENANT_MISMATCH"),
+    ("""
+      INSERT INTO security_audit(id,event_type,user_id,actor_role,result,metadata_json,tenant_id)
+      VALUES ('security-audit-cross','CROSS_TENANT','market-manager-b','MANAGER','OK','{}','market-tenant-a')
+    """, "SECURITY_AUDIT_TENANT_MISMATCH"),
+]:
+    try:
+        db.execute(sql)
+        raise AssertionError(f"Cross-tenant security write was accepted: {marker}")
+    except sqlite3.IntegrityError as exc:
+        assert marker in str(exc), str(exc)
+
+try:
+    db.execute("UPDATE mission_security SET tenant_id='market-tenant-b' WHERE id='security-market-a'")
+    raise AssertionError("Mission security tenant reassignment was accepted")
+except sqlite3.IntegrityError as exc:
+    assert "MISSION_SECURITY_TENANT_MISMATCH" in str(exc), str(exc)
+
+for sql in [
+    "UPDATE mission_security_attempts SET result='TAMPERED' WHERE id='security-attempt-market-a'",
+    "DELETE FROM mission_security_attempts WHERE id='security-attempt-market-a'",
+    "UPDATE security_audit SET result='TAMPERED' WHERE id='security-audit-market-a'",
+    "DELETE FROM security_audit WHERE id='security-audit-market-a'",
+]:
+    try:
+        db.execute(sql)
+        raise AssertionError(f"Security audit/attempt history was mutable: {sql}")
+    except sqlite3.IntegrityError:
+        pass
+
+print("PASS: security records are tenant-scoped; legacy records remain unassigned; cross-tenant writes and audit tampering are rejected.")
