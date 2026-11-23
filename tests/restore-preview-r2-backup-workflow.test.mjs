@@ -5,9 +5,9 @@ import { readFile } from "node:fs/promises";
 const workflow = await readFile(new URL("../.github/workflows/restore-preview-r2-backup-isolated-test.yml", import.meta.url), "utf8");
 const backupWorkflow = await readFile(new URL("../.github/workflows/backup-preview-d1-to-r2-eu.yml", import.meta.url), "utf8");
 
-test("Preview R2 restore is manually gated to main or the exact reviewed Preview branch and owner-only", () => {
-  assert.ok(workflow.includes("github.ref == 'refs/heads/main'"));
+test("Preview R2 restore is manually gated to the exact reviewed Preview branch only and owner-only", () => {
   assert.ok(workflow.includes("github.ref == 'refs/heads/fix/r2-backup-attestation-rebased-2026-11-22'"));
+  assert.doesNotMatch(workflow, /refs\/heads\/main/);
   assert.ok(workflow.includes("github.actor == 'rzem92-png'"));
   assert.ok(workflow.includes('test "$GITHUB_ACTOR" = "rzem92-png"'));
   assert.ok(workflow.includes("RESTORE_PREVIEW_R2_TO_ISOLATED_TEST_ONLY"));
