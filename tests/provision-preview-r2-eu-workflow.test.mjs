@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
 const workflow = await readFile(new URL("../.github/workflows/provision-preview-r2-eu.yml", import.meta.url), "utf8");
+const backupWorkflow = await readFile(new URL("../.github/workflows/backup-preview-d1-to-r2-eu.yml", import.meta.url), "utf8");
+const workerConfig = await readFile(new URL("../scripts/generate-preview-wrangler-config.mjs", import.meta.url), "utf8");
 
 test("R2 provisioning is manually gated to its dedicated branch and exact Preview-only confirmation", () => {
   assert.match(workflow, /workflow_dispatch:/);
@@ -29,4 +31,11 @@ test("R2 provisioning never deploys, migrates, or changes Production", () => {
 test("Third-party GitHub actions are pinned to immutable commit SHAs", () => {
   assert.match(workflow, /actions\/checkout@[0-9a-f]{40}/);
   assert.match(workflow, /actions\/setup-node@[0-9a-f]{40}/);
+});
+
+test("Provisioning, signed backup and Worker Preview binding use the same EU bucket", () => {
+  const bucket = "prochelia-preview-backups-eu-v2";
+  assert.ok(workflow.includes(`BUCKET="${bucket}"`));
+  assert.ok(backupWorkflow.includes(`R2_BUCKET: ${bucket}`));
+  assert.ok(workerConfig.includes(`bucket_name: "${bucket}"`));
 });
