@@ -166,3 +166,48 @@ Sources primaires :
 - Commission européenne, cadre réglementaire AI Act et calendrier : https://digital-strategy.ec.europa.eu/en/policies/regulatory-framework-ai
 
 Cette clarification ne vaut pas qualification juridique du système Nexus Supra ; la date de mise sur le marché, le rôle exact de PROCHÉLIA et les catégories de sorties doivent être documentés et validés par un professionnel compétent.
+
+
+## 8. Veille officielle complémentaire — 23 novembre 2026
+
+### 8.1 Digital Fairness Act : proposition toujours au stade législatif
+
+La page officielle de la Commission confirme l'adoption, le **11 novembre 2026**, de la proposition de Digital Fairness Act et de la Simplification Directive. La Commission présente notamment des mesures proposées contre les dark patterns, les pratiques addictives, la personnalisation exploitant les vulnérabilités, les prix dynamiques trompeurs et les obstacles à la résiliation ou à l'accès à un interlocuteur humain.
+
+**Statut : proposition de la Commission, non une règle déjà applicable.** Le texte doit encore être examiné par le Parlement européen et le Conseil. La date d'application ne doit pas être présentée comme acquise.
+
+Conséquences de conception à anticiper, sans les qualifier prématurément d'obligations nouvelles : prix et commissions explicables, absence de parcours trompeur, résiliation accessible, consentements non précochés, contrôle humain disponible et audit des personnalisations.
+
+Source primaire : Commission européenne, Digital Fairness Act, documents du 11 novembre 2026 : https://commission.europa.eu/law/law-topic/consumer-protection-law/digital-fairness-act_en
+
+### 8.2 Algérie : exigences opérationnelles précises des lois 25-10 et 25-11
+
+Le Journal officiel algérien n° 48 du **24 juillet 2025** contient les deux textes. La lecture des articles confirme les exigences suivantes :
+
+- **Loi 25-11, article 41 bis 2 :** le responsable du traitement tient un registre des activités de traitement ; le sous-traitant tient également son registre pour les traitements effectués pour le compte du responsable. Le registre couvre notamment finalités, base juridique, catégories de personnes/données, destinataires y compris à l'étranger, durées d'effacement et mesures de sécurité.
+- **Loi 25-11, article 41 bis 3 :** responsable et sous-traitant tiennent chacun un carnet automatisé des opérations. Il couvre notamment collecte, enregistrement, organisation, conservation, modification, extraction, consultation, communication, rapprochement/interconnexion, verrouillage, chiffrement, effacement et destruction. Le carnet doit permettre d'identifier les motifs, date et heure, ainsi que, dans la mesure du possible, l'acteur et les destinataires.
+- **Loi 25-11, article 45 bis 6 :** une étude d'impact doit précéder les traitements présentant probablement un risque élevé pour les droits et libertés.
+- **Loi 25-10, article 6 bis :** le texte interdit notamment l'émission, l'achat, la vente, l'utilisation, la détention, la promotion et l'exploitation de plateformes d'échange d'actifs virtuels à des fins de paiement ou d'investissement, ainsi que le minage. Le pilote algérien ne doit donc pas introduire de crypto-actifs, jetons ou wallets assimilables à ces activités.
+- **Loi 25-11, article 10 bis 3 :** la Commission bancaire est désignée pour la supervision des banques, établissements financiers, services financiers d'Algérie Poste et prestataires de services de paiement. Le rôle exact de PROCHÉLIA dans les flux doit être qualifié par un conseil algérien et le PSP local avant toute collecte, conservation ou transmission de fonds.
+
+**Précision de champ :** le délai de cinq jours de l'article 45 bis 8 figure dans le titre V bis relatif aux traitements à des fins de prévention/détection des infractions et de procédures pénales. Ne pas le généraliser automatiquement à toute violation de données d'une marketplace privée ; faire confirmer le régime général applicable par le conseil local.
+
+Source primaire : Journal officiel de la République algérienne n° 48, 24 juillet 2025, lois 25-10 et 25-11 : https://www.joradp.dz/FTP/JO-FRANCAIS/2025/F2025048.pdf
+
+### 8.3 Transferts France/UE–Algérie
+
+Tout transfert de données personnelles depuis l'UE vers l'Algérie doit être documenté selon le chapitre V du RGPD : vérifier la liste des décisions d'adéquation de la Commission à la date du transfert ; à défaut, identifier un mécanisme de garanties appropriées (par exemple clauses contractuelles types, avec analyse des circonstances et mesures supplémentaires si nécessaire) ou une dérogation strictement applicable. L'information des personnes, le registre des traitements, les sous-traitants, les accès distants et les transferts ultérieurs doivent être inclus dans l'analyse.
+
+Sources primaires :
+- CNIL, cadre général des transferts hors UE : https://www.cnil.fr/fr/transferts-de-donnees-hors-ue-le-cadre-general-prevu-par-le-rgpd
+- RGPD, chapitre V, articles 44 à 49 : https://www.cnil.fr/fr/reglement-europeen-protection-donnees/chapitre5
+
+### 8.4 Actions produit à ajouter au plan de conformité
+
+1. Séparer le registre des traitements et le carnet automatisé algérien du journal d'audit applicatif ordinaire ; prévoir motif, opération, horodatage, acteur, destinataire et preuve d'intégrité.
+2. Ajouter une DPIA préalable pour les traitements à risque élevé, notamment les fonctions de vérification, profilage, notation ou recrutement.
+3. Interdire dans le périmètre Algérie tout module crypto-actif, jeton, minage ou plateforme d'échange ; conserver uniquement un parcours fiat fourni par un prestataire dûment qualifié.
+4. Documenter le rôle de chaque partie dans le flux financier : PROCHÉLIA, PSP, banque, entreprise, intervenant et sous-traitants.
+5. Établir une fiche de transfert France–Algérie par catégorie de données, finalité, destinataire, localisation, mécanisme RGPD, mesures complémentaires et durée.
+
+Ces points constituent une analyse de préparation produit, pas une conclusion juridique. Les textes applicables, les seuils, formalités et qualifications doivent être confirmés par un avocat/DPO en Algérie et un conseil RGPD en France/UE avant le pilote.
