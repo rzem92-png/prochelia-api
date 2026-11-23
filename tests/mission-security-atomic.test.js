@@ -83,7 +83,7 @@ test("security status never claims device binding or presence while cryptographi
   assert.match(status, /mission_code_verification:'blocked'/);
   assert.match(status, /schema_ready:schemaReady/);
   assert.match(status, /write_enabled:false/);
-  assert.doesNotMatch(status, /ensureSecuritySchema|CREATE TABLE|\\.run\\(/);
+  assert.doesNotMatch(status, /ensureSecuritySchema|CREATE TABLE|\.run\(/);
   assert.doesNotMatch(status, /device:'bound'|presence:'recorded'/);
   assert.doesNotMatch(status, /SELECT COUNT\(\*\).*security_audit|audit_events/);
   assert.match(status, /user:\{id:auth\.user\.id,role:auth\.user\.role\}/);
