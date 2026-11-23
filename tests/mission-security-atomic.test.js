@@ -105,23 +105,24 @@ test("mission security preparation is tenant-scoped and verifies the intervenant
   assert.match(handler, /MISSION_TENANT_ASSIGNMENT_NOT_FOUND/);
 });
 
+
 test("security schema readiness is read-only and requires tenant-scoped columns", () => {
   const start = workerSource.indexOf("async function securitySchemaReady(env) {");
-  const end = workerSource.indexOf("\\nfunction securityCode()", start);
+  const end = workerSource.indexOf("\nfunction securityCode()", start);
   assert.ok(start >= 0 && end > start, "security schema readiness helper must exist");
   const helper = workerSource.slice(start, end);
-  assert.match(helper, /tableColumns\\(env, table\\)/);
-  assert.match(helper, /identity_verifications:[\\s\\S]*tenant_id/);
-  assert.match(helper, /mission_security:[\\s\\S]*tenant_id/);
-  assert.match(helper, /mission_security_attempts:[\\s\\S]*tenant_id/);
-  assert.match(helper, /security_audit:[\\s\\S]*tenant_id/);
-  assert.doesNotMatch(helper, /CREATE TABLE|CREATE INDEX|INSERT INTO|\\.run\\(/);
+  assert.match(helper, /tableColumns\(env, table\)/);
+  assert.match(helper, /identity_verifications:[\s\S]*tenant_id/);
+  assert.match(helper, /mission_security:[\s\S]*tenant_id/);
+  assert.match(helper, /mission_security_attempts:[\s\S]*tenant_id/);
+  assert.match(helper, /security_audit:[\s\S]*tenant_id/);
+  assert.doesNotMatch(helper, /CREATE TABLE|CREATE INDEX|INSERT INTO|\.run\(/);
   assert.doesNotMatch(workerSource, /ensureSecuritySchema/);
 });
 
 test("security audit and mission-security reads/writes are tenant-scoped", () => {
   const auditStart = workerSource.indexOf("async function securityAudit(env, tenantId,");
-  const auditEnd = workerSource.indexOf("\\n}", auditStart);
+  const auditEnd = workerSource.indexOf("\n}", auditStart);
   assert.ok(auditStart >= 0 && auditEnd > auditStart);
   const audit = workerSource.slice(auditStart, auditEnd);
   assert.match(audit, /metadata_json,tenant_id/);
@@ -130,14 +131,14 @@ test("security audit and mission-security reads/writes are tenant-scoped", () =>
   const prepareStart = workerSource.indexOf("async function securityPrepareMission(request, env) {");
   const prepareEnd = workerSource.indexOf("async function securityPresence(request, env) {", prepareStart);
   const prepare = workerSource.slice(prepareStart, prepareEnd);
-  assert.match(prepare, /WHERE mission_id=\\? AND tenant_id=\\?/);
-  assert.match(prepare, /mission_security \\(id,mission_id,client_id,intervenant_id,tenant_id,/);
-  assert.match(prepare, /securityAudit\\(env,tenantId,/);
+  assert.match(prepare, /WHERE mission_id=\? AND tenant_id=\?/);
+  assert.match(prepare, /mission_security \(id,mission_id,client_id,intervenant_id,tenant_id,/);
+  assert.match(prepare, /securityAudit\(env,tenantId,/);
 
   const resendStart = workerSource.indexOf("async function securityResendCodes(request, env) {");
   const resendEnd = workerSource.indexOf("async function securityClientCode", resendStart);
   const resend = workerSource.slice(resendStart, resendEnd);
-  assert.match(resend, /resolveTenantContext\\(request,env,auth\\)/);
-  assert.match(resend, /s\\.tenant_id=\\?/);
-  assert.match(resend, /c\\.user_id=\\?/);
+  assert.match(resend, /resolveTenantContext\(request,env,auth\)/);
+  assert.match(resend, /s\.tenant_id=\?/);
+  assert.match(resend, /c\.user_id=\?/);
 });
