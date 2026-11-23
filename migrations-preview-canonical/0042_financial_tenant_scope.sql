@@ -1,12 +1,12 @@
 -- PROCHÉLIA — tenant boundary for the payment runtime.
 -- Additive only: legacy financial rows remain NULL until individually attributed
--- CI runs the full 43-migration chain and synthetic two-tenant financial isolation fixtures.
+-- CI runs the full canonical Preview migration chain and synthetic multi-tenant financial isolation fixtures.
 -- from auditable source records. New financial writes must carry an active tenant.
 -- Webhook inbox events remain globally keyed by provider/event ID; tenant binding
 -- is attached only after the signed event is matched to an internal transaction.
 
 CREATE TABLE IF NOT EXISTS payment_accounts (
-  id TEXT PRIMARY KEY, user_id TEXT NOT NULL UNIQUE, provider TEXT NOT NULL,
+  id TEXT PRIMARY KEY, user_id TEXT NOT NULL, provider TEXT NOT NULL,
   provider_account_id TEXT, status TEXT NOT NULL DEFAULT 'pending',
   onboarding_status TEXT NOT NULL DEFAULT 'required',
   payouts_enabled INTEGER NOT NULL DEFAULT 0, charges_enabled INTEGER NOT NULL DEFAULT 0,
@@ -63,7 +63,7 @@ ALTER TABLE payment_reconciliation ADD COLUMN tenant_id TEXT REFERENCES tenants(
 ALTER TABLE payment_audit ADD COLUMN tenant_id TEXT REFERENCES tenants(id);
 ALTER TABLE payment_webhook_events ADD COLUMN tenant_id TEXT REFERENCES tenants(id);
 
-CREATE INDEX IF NOT EXISTS idx_payment_accounts_tenant_user ON payment_accounts(tenant_id,user_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_payment_accounts_tenant_user ON payment_accounts(tenant_id,user_id);
 CREATE INDEX IF NOT EXISTS idx_payment_tx_tenant_mission_created ON payment_transactions(tenant_id,mission_id,created_at);
 CREATE INDEX IF NOT EXISTS idx_payment_tx_tenant_intervenant_status ON payment_transactions(tenant_id,intervenant_id,status,created_at);
 CREATE INDEX IF NOT EXISTS idx_payout_tenant_user_status ON payout_requests(tenant_id,user_id,status,requested_at);
