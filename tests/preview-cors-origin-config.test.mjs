@@ -40,7 +40,11 @@ test("isolated Preview deploy uses a generated config pinned to the Preview D1",
   assert.match(deployWorkflow, /previews: \{/);
   assert.match(deployWorkflow, /observability: config\.observability/);
   assert.match(deployWorkflow, /wrangler@4 deploy --dry-run --config "\$PREVIEW_WRANGLER_CONFIG"/);
-  assert.match(deployWorkflow, /wrangler@4 preview --config "\$PREVIEW_WRANGLER_CONFIG"/);
+  assert.match(deployWorkflow, /workers_dev: true/);
+  assert.match(deployWorkflow, /wrangler@4 deploy --config "\$PREVIEW_WRANGLER_CONFIG"/);
+  assert.match(deployWorkflow, /PREVIEW_WORKER_URL: https:\/\/fix-pages-proxy-preview-cors-2026-11-23\.rzem92\.workers\.dev/);
+  assert.match(deployWorkflow, /api\/tenant\/context/);
+  assert.doesNotMatch(deployWorkflow, /wrangler@4 preview --config/);
   assert.match(deployWorkflow, /04f52830-ef5a-4f17-a640-42bbc2381bba/);
   assert.match(deployWorkflow, /e3cf167c-37e1-4d72-9ac6-b3e27c14b97f/);
   assert.match(deployWorkflow, /env\.DB \(prochelia-preview-eu-2026-11-17\)/);

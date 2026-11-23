@@ -21,7 +21,7 @@ test("Preview E2E pins the current Pages proxy branch and exact deployment commi
   assert.match(workflow, /FRONTEND_COMMIT_SHA: \$\{\{ inputs\.frontend_commit_sha/);
   assert.match(workflow, /1dc39f5ee4090e70436d84416c261bd462fda5af/);
   assert.match(workflow, /default: "1dc39f5ee4090e70436d84416c261bd462fda5af"/);
-  assert.match(workflow, /API_PREVIEW_URL: https:\/\/fix-pages-proxy-preview-fix-pages-proxy-preview-cors-2026-11-23\.rzem92\.workers\.dev/);
+  assert.match(workflow, /API_PREVIEW_URL: https:\/\/fix-pages-proxy-preview-cors-2026-11-23\.rzem92\.workers\.dev/);
   assert.match(workflow, /https:\/\/fix-frontend-finance-confirm\.prochelia\.pages\.dev/);
   assert.match(workflow, /pages\/projects\/prochelia\/deployments\?env=preview&per_page=10/);
   assert.match(workflow, /deployment_trigger\.metadata\.branch/);

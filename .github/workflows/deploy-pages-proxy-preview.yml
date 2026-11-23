@@ -61,6 +61,7 @@ jobs:
           };
           const previewConfig = {
             name: 'fix-pages-proxy-preview-cors-2026-11-23',
+            workers_dev: true,
             main: config.main,
             compatibility_date: config.compatibility_date,
             compatibility_flags: config.compatibility_flags || [],
@@ -104,12 +105,39 @@ jobs:
           test "$CLOUDFLARE_ACCOUNT_ID" = "f2a79e9fa41566a8ec80fb24c02c60eb" || {
             echo "::error::Cloudflare account mismatch"; exit 1;
           }
-          npx --yes wrangler@4 preview --config "$PREVIEW_WRANGLER_CONFIG" --message "Preview-only Pages proxy CORS validation"
+          npx --yes wrangler@4 deploy --config "$PREVIEW_WRANGLER_CONFIG" --message "Persistent isolated Preview for Pages proxy"
+
+
+      - name: Verify persistent isolated Worker Preview HTTP
+        env:
+          PREVIEW_WORKER_URL: https://fix-pages-proxy-preview-cors-2026-11-23.rzem92.workers.dev
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in {1..10}; do
+            health_status="$(curl --silent --show-error --output "$RUNNER_TEMP/preview-health.json" --write-out '%{http_code}' "$PREVIEW_WORKER_URL/api/health" || true)"
+            if [ "$health_status" = "200" ]; then break; fi
+            sleep 3
+          done
+          test "$health_status" = "200" || { echo "::error::Persistent Preview Worker health endpoint failed (HTTP $health_status)."; exit 1; }
+          jq -e '.ok == true' "$RUNNER_TEMP/preview-health.json" >/dev/null
+
+          auth_status="$(curl --silent --show-error --output "$RUNNER_TEMP/preview-tenant-context.json" --write-out '%{http_code}' "$PREVIEW_WORKER_URL/api/tenant/context" || true)"
+          test "$auth_status" = "401" || { echo "::error::Unauthenticated tenant context must fail closed with HTTP 401 (received $auth_status)."; exit 1; }
+
+          preflight_status="$(curl --silent --show-error --dump-header "$RUNNER_TEMP/preview-preflight.headers" --output /dev/null --write-out '%{http_code}' --request OPTIONS \
+            --header 'Origin: https://fix-frontend-finance-confirm.prochelia.pages.dev' \
+            --header 'Access-Control-Request-Method: GET' \
+            --header 'Access-Control-Request-Headers: content-type' \
+            "$PREVIEW_WORKER_URL/api/health")"
+          test "$preflight_status" = "204" || { echo "::error::Preview CORS preflight failed (HTTP $preflight_status)."; exit 1; }
+          grep -Fqi 'access-control-allow-origin: https://fix-frontend-finance-confirm.prochelia.pages.dev' "$RUNNER_TEMP/preview-preflight.headers"
+          echo "PASS: persistent Worker Preview health, unauthenticated tenant guard and exact Pages CORS origin."
 
       - name: Record Preview-only deployment guardrails
         run: |
           {
-            echo 'Worker Preview only: fix-pages-proxy-preview-cors-2026-11-23.'
+            echo 'Persistent Worker Preview only: https://fix-pages-proxy-preview-cors-2026-11-23.rzem92.workers.dev.'
             echo 'D1 binding is pinned to Preview database e3cf167c-37e1-4d72-9ac6-b3e27c14b97f.'
             echo 'No D1 migrations, no R2 writes, no Cron, no production Worker deployment, and no payment operations.'
           } >> "$GITHUB_STEP_SUMMARY"
