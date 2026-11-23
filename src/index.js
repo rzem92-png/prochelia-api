@@ -4456,7 +4456,8 @@ async function supportCreate(request,env){
   const severity=String(b.severity||'LOW').toUpperCase();
   const scenario=supportScenarioFor(category,severity);
   const rule=await env.DB.prepare(`SELECT * FROM copilot_resolution_rules WHERE scenario_key=? LIMIT 1`).bind(scenario).first();
-  const auto=Number(rule?.auto_allowed||0)===1 && String(severity)!=='CRITICAL' && String(severity)!=='HIGH';
+  const safeAutoScenarios=['DELAY_LIGHT','NOTIFICATION_FAILED','DOCUMENT_REMINDER'];
+  const auto=Number(rule?.auto_allowed||0)===1 && safeAutoScenarios.includes(scenario) && String(severity)!=='CRITICAL' && String(severity)!=='HIGH';
   const requiresManager=Number(rule?.manager_approval_required||1)===1 || !auto;
   const id=crypto.randomUUID();
   const proposed=rule?JSON.parse(rule.steps_json||'[]'):{steps:['collect_evidence','copilot_analysis','notify','audit']};
@@ -4472,7 +4473,7 @@ async function supportCreate(request,env){
 }
 
 async function supportAutoResolve(env,caseId,actorId,actorRole,scenario,context={}){
-  const safeAuto=['DELAY_LIGHT','NOTIFICATION_FAILED','DOCUMENT_REMINDER','SIMPLE_REFUND_CHECK','CLIENT_COMPLAINT'];
+  const safeAuto=['DELAY_LIGHT','NOTIFICATION_FAILED','DOCUMENT_REMINDER'];
   if(!safeAuto.includes(scenario)) return {ok:false,status:'MANAGER_REQUIRED'};
   // Fail closed: context is supplied by the requester, so it is never proof
   // that a downstream action actually executed. No trusted execution receipt
