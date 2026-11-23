@@ -69,8 +69,8 @@ jobs:
             throw new Error('Generated Preview config contains the Production D1 identifier');
           }
           const previewConfigPath = `${process.env.RUNNER_TEMP}/wrangler.preview.json`;
-          fs.writeFileSync(previewConfigPath, JSON.stringify(previewConfig, null, 2) + '\\n');
-          fs.appendFileSync(process.env.GITHUB_ENV, `PREVIEW_WRANGLER_CONFIG=${previewConfigPath}\\n`);
+          fs.writeFileSync(previewConfigPath, JSON.stringify(previewConfig, null, 2) + '\n');
+          fs.appendFileSync(process.env.GITHUB_ENV, `PREVIEW_WRANGLER_CONFIG=${previewConfigPath}\n`);
           console.log('Preview-only Wrangler config generated with the isolated EU D1 binding.');
           NODE
           node --experimental-default-type=module --test tests/preview-cors-origin-config.test.mjs tests/production-safety-rate-limit.test.mjs
