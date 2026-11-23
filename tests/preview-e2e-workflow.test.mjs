@@ -4,15 +4,15 @@ import { readFile } from "node:fs/promises";
 
 const workflow = await readFile(new URL("../.github/workflows/preview-directory-e2e-acceptance.yml", import.meta.url), "utf8");
 
-test("Preview E2E is limited to audited API branches, the Pages proxy branch and explicit manual confirmation", () => {
+test("Preview E2E runs only on the reviewed Preview branch; manual runs require the owner and exact confirmation", () => {
   assert.match(workflow, /workflow_dispatch:/);
   assert.match(workflow, /RUN_PREVIEW_DIRECTORY_E2E/);
   assert.match(workflow, /github\.event_name == 'push'/);
-  assert.match(workflow, /github\.ref == 'refs\/heads\/feat\/supra-canonical-tenant-integration-2026-11-20'/);
-  assert.match(workflow, /github\.ref == 'refs\/heads\/fix\/tenant-accounting-api-readonly-gate-2026-11-22'/);
   assert.match(workflow, /github\.ref == 'refs\/heads\/fix\/pages-proxy-preview-cors-2026-11-23'/);
   assert.match(workflow, /github\.event_name == 'workflow_dispatch'/);
-  assert.match(workflow, /github\.ref == 'refs\/heads\/main'/);
+  assert.match(workflow, /github\.actor == 'rzem92-png'/);
+  assert.doesNotMatch(workflow, /refs\/heads\/main/);
+  assert.doesNotMatch(workflow, /workflow_run:/);
 });
 
 test("Preview E2E pins the current Pages proxy branch and exact deployment commit", () => {
@@ -27,7 +27,7 @@ test("Preview E2E pins the current Pages proxy branch and exact deployment commi
   assert.match(workflow, /deployment_trigger\.metadata\.branch/);
   assert.match(workflow, /deployment_trigger\.metadata\.commit_hash/);
   assert.match(workflow, /uses_functions == true/);
-  assert.match(workflow, /prochelia-api-preview/);
+  assert.doesNotMatch(workflow, /services\.PROCHELIA_API\.service == \$worker/);
   assert.doesNotMatch(workflow, /PREVIEW_DB_ID: 04f52830-ef5a-4f17-a640-42bbc2381bba/);
 });
 
@@ -63,7 +63,7 @@ test("Pages binding mismatch diagnostics expose only non-secret deployment metad
   const start = workflow.indexOf(marker);
   assert.notEqual(start, -1, "safe mismatch diagnostic must exist");
   const block = workflow.slice(start, workflow.indexOf("exit 1", start));
-  for (const field of ["environment", "uses_functions", "d1_database_id", "worker_service", "commit_hash"]) {
+  for (const field of ["environment", "uses_functions", "d1_database_id", "service_binding", "commit_hash"]) {
     assert.match(block, new RegExp(field));
   }
   assert.doesNotMatch(block, /CLOUDFLARE_API_TOKEN|Authorization|Bearer/);

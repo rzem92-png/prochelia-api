@@ -3,8 +3,6 @@ name: PROCHÉLIA — Preview directory API end-to-end acceptance
 on:
   push:
     branches:
-      - feat/supra-canonical-tenant-integration-2026-11-20
-      - fix/tenant-accounting-api-readonly-gate-2026-11-22
       - fix/pages-proxy-preview-cors-2026-11-23
     paths:
       - ".github/workflows/preview-directory-e2e-acceptance.yml"
@@ -20,10 +18,6 @@ on:
         required: false
         default: "f63785c7553dfcef9bbfe742f68c7ba287a28391"
         type: string
-  workflow_run:
-    workflows:
-      - Deploy PROCHÉLIA API preview only (manual)
-    types: [completed]
 
 permissions:
   contents: read
@@ -37,28 +31,13 @@ jobs:
     if: >-
       (
         github.event_name == 'push' &&
-        (
-          github.ref == 'refs/heads/feat/supra-canonical-tenant-integration-2026-11-20' ||
-          github.ref == 'refs/heads/fix/tenant-accounting-api-readonly-gate-2026-11-22' ||
-          github.ref == 'refs/heads/fix/pages-proxy-preview-cors-2026-11-23'
-        )
+        github.ref == 'refs/heads/fix/pages-proxy-preview-cors-2026-11-23'
       ) ||
       (
         github.event_name == 'workflow_dispatch' &&
-        inputs.confirmation == 'RUN_PREVIEW_DIRECTORY_E2E' &&
-        (
-          github.ref == 'refs/heads/main' ||
-          github.ref == 'refs/heads/feat/supra-canonical-tenant-integration-2026-11-20' ||
-          github.ref == 'refs/heads/fix/tenant-accounting-api-readonly-gate-2026-11-22' ||
-          github.ref == 'refs/heads/fix/pages-proxy-preview-cors-2026-11-23'
-        )
-      ) ||
-      (
-        github.ref == 'refs/heads/main' &&
-        github.event_name == 'workflow_run' &&
-        github.event.workflow_run.event == 'workflow_dispatch' &&
-        github.event.workflow_run.conclusion == 'success' &&
-        github.event.workflow_run.head_branch == 'main'
+        github.actor == 'rzem92-png' &&
+        github.ref == 'refs/heads/fix/pages-proxy-preview-cors-2026-11-23' &&
+        inputs.confirmation == 'RUN_PREVIEW_DIRECTORY_E2E'
       )
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -146,24 +125,23 @@ jobs:
             "$PAGES_DEPLOYMENT_ID" "$PAGES_PREVIEW_URL" "$FRONTEND_COMMIT_SHA" >> "$GITHUB_ENV"
           cf_request "Pages Preview deployment access" \
             "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/pages/projects/prochelia/deployments/$PAGES_DEPLOYMENT_ID" "$RUNNER_TEMP/pages-preview.json"
-          if ! jq -e --arg db "$PREVIEW_DB_ID" --arg worker "prochelia-api-preview" --arg branch "$FRONTEND_BRANCH" --arg commit "$FRONTEND_COMMIT_SHA" '
+          if ! jq -e --arg db "$PREVIEW_DB_ID" --arg branch "$FRONTEND_BRANCH" --arg commit "$FRONTEND_COMMIT_SHA" '
             .success == true and
             .result.environment == "preview" and
             .result.uses_functions == true and
             .result.d1_databases.DB.id == $db and
-            .result.services.PROCHELIA_API.service == $worker and
             .result.deployment_trigger.metadata.branch == $branch and
             .result.deployment_trigger.metadata.commit_hash == $commit
           ' "$RUNNER_TEMP/pages-preview.json" >/dev/null; then
             echo "::error::Pages Preview deployment bindings/branch/commit mismatch. Safe metadata diagnostic follows."
-            jq -c --arg db "$PREVIEW_DB_ID" --arg worker "prochelia-api-preview" --arg branch "$FRONTEND_BRANCH" --arg commit "$FRONTEND_COMMIT_SHA" '
+            jq -c --arg db "$PREVIEW_DB_ID" --arg branch "$FRONTEND_BRANCH" --arg commit "$FRONTEND_COMMIT_SHA" '
               {
-                expected: {environment: "preview", uses_functions: true, d1_database_id: $db, worker_service: $worker, branch: $branch, commit_hash: $commit},
+                expected: {environment: "preview", uses_functions: true, d1_database_id: $db, branch: $branch, commit_hash: $commit},
                 observed: {
                   environment: .result.environment,
                   uses_functions: .result.uses_functions,
                   d1_database_id: .result.d1_databases.DB.id,
-                  worker_service: .result.services.PROCHELIA_API.service,
+                  service_binding: .result.services.PROCHELIA_API.service,
                   branch: .result.deployment_trigger.metadata.branch,
                   commit_hash: .result.deployment_trigger.metadata.commit_hash
                 }
