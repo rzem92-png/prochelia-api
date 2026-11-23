@@ -49,6 +49,7 @@ EXPECTED = [
     "0042_financial_tenant_scope.sql",
     "0043_finance_workspace_tenant_scope.sql",
     "0044_security_records_tenant_scope.sql",
+    "0045_master_complement_seed_data.sql",
 ]
 
 # Keep the manual Preview migration gate synchronized with the canonical chain.
@@ -95,7 +96,7 @@ db = sqlite3.connect(":memory:")
 db.execute("PRAGMA foreign_keys = ON")
 # Start from a truly empty D1 database, matching the newly created EU Preview target.
 # Apply the reviewed baseline and candidate migrations through 0043 first.
-for name in EXPECTED[:-1]:
+for name in EXPECTED[:-2]:
     db.executescript((MIGRATIONS / name).read_text(encoding="utf-8"))
 
 # Simulate pre-existing legacy security records before 0044. The migration must
@@ -113,6 +114,7 @@ db.execute(
     ("legacy-security-audit-1", "LEGACY_EVENT", "BLOCKED"),
 )
 
+db.executescript((MIGRATIONS / EXPECTED[-2]).read_text(encoding="utf-8"))
 db.executescript((MIGRATIONS / EXPECTED[-1]).read_text(encoding="utf-8"))
 
 violations = db.execute("PRAGMA foreign_key_check").fetchall()
@@ -124,6 +126,7 @@ assert "idx_disponibilites_tenant_intervenant_idempotency" in indexes, "Missing 
 assert "idx_support_cases_tenant_status_created" in indexes, "Missing tenant-scoped support status index"
 assert "idx_support_cases_tenant_requester_created" in indexes, "Missing tenant-scoped support requester index"
 assert "support_cases" in tables, "Missing tenant-scoped support case table"
+assert {"brand_identity", "interface_profiles", "copilot_resolution_rules"} <= tables, "Missing versioned brand/interface/Copilot seed tables"
 assert {"trusted_device_credentials", "device_auth_challenges"} <= tables, "Missing cryptographic device enrollment tables"
 assert {"idx_trusted_device_credentials_tenant_user_status", "idx_device_auth_challenges_session_expiry", "idx_device_auth_challenges_pending"} <= indexes, "Missing cryptographic device enrollment indexes"
 required = {
@@ -1403,3 +1406,11 @@ for sql in [
         pass
 
 print("PASS: security records are tenant-scoped; legacy records remain unassigned; cross-tenant writes and audit tampering are rejected.")
+
+# Master seed migration is deterministic and idempotent.
+seed_roles = {row[0] for row in db.execute("SELECT role FROM interface_profiles")}
+assert {"CLIENT", "SOCIETE", "INTERVENANT", "GERANTE"} <= seed_roles, "Missing canonical interface profiles"
+assert db.execute("SELECT COUNT(*) FROM copilot_resolution_rules").fetchone()[0] >= 10, "Missing canonical Copilot resolution rules"
+assert db.execute("SELECT COUNT(*) FROM brand_identity WHERE brand_key='PROCHELIA'").fetchone()[0] == 1, "Missing canonical brand identity"
+db.executescript((MIGRATIONS / EXPECTED[-1]).read_text(encoding="utf-8"))
+assert db.execute("SELECT COUNT(*) FROM interface_profiles").fetchone()[0] == 4, "Master interface seed migration is not idempotent"
