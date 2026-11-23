@@ -1543,7 +1543,7 @@ async function assertVersionedSchema(env, statements, domain) {
   if (!env.DB) throw new Error('DATABASE_REQUIRED');
   const missing = [];
   for (const statement of statements) {
-    const tableMatch = statement.match(/^\\s*CREATE\\s+TABLE\\s+IF\\s+NOT\\s+EXISTS\\s+["'`]?([^\\s(`"']+)["'`]?\\s*\\(([\\s\\S]*)\\)\\s*;?\\s*$/i);
+    const tableMatch = statement.match(/^\s*CREATE\s+TABLE\s+IF\s+NOT\s+EXISTS\s+["'`]?([^\s(`"']+)["'`]?\s*\(([\s\S]*)\)\s*;?\s*$/i);
     if (tableMatch) {
       const table = tableMatch[1];
       const definitions = tableMatch[2];
