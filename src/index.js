@@ -4539,19 +4539,9 @@ handle = async function(request,env){
    - traçabilité des blocages de sécurité
    ============================================================================ */
 
-async function productionSafetySchema(env){
-  if(!env.DB) throw new Error('DATABASE_REQUIRED');
-  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS production_security_events (
-    id TEXT PRIMARY KEY, event_type TEXT NOT NULL, route TEXT, subject_hash TEXT,
-    decision TEXT NOT NULL, details_json TEXT NOT NULL DEFAULT '{}',
-    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-  )`).run();
-  await env.DB.prepare(`CREATE INDEX IF NOT EXISTS idx_prod_sec_events_date ON production_security_events(event_type,created_at)`).run();
-}
-
 async function productionSubjectHash(request, route){
   const ip=clean(request.headers.get('CF-Connecting-IP')) || clean(request.headers.get('X-Forwarded-For')) || 'unknown';
-  return sha256Hex(`${ip}|${route}`);
+  return sha256Base64url(`${ip}|${route}`);
 }
 
 async function productionRateLimit(request,env){
@@ -4568,10 +4558,21 @@ async function productionRateLimit(request,env){
   const limit=sensitive ? 20 : 120;
   const windowSeconds=60;
   const bucket=`${sensitive?'SENSITIVE':'GENERAL'}:${path}`;
+
+  // Runtime rate limiting is strictly DML-only. Schema must be provisioned
+  // by a reviewed migration; request handling must never create tables/indexes.
+  const rateColumns=await tableColumns(env,'security_rate_limits');
+  const auditColumns=await tableColumns(env,'production_security_events');
+  const requiredRate=['id','bucket','subject_hash','window_start','request_count'];
+  const requiredAudit=['id','event_type','route','subject_hash','decision','details_json'];
+  if(!requiredRate.every(x=>rateColumns.includes(x)) ||
+     !requiredAudit.every(x=>auditColumns.includes(x))){
+    return {ok:false,response:json({ok:false,error:'RATE_LIMIT_SCHEMA_UNAVAILABLE',version:VERSION},503)};
+  }
+
   const subject=await productionSubjectHash(request,path);
   const now=Math.floor(Date.now()/1000);
   const start=new Date(Math.floor(now/windowSeconds)*windowSeconds*1000).toISOString();
-  await ensureFinalHardeningSchema(env);
   const existing=await env.DB.prepare(`SELECT request_count FROM security_rate_limits WHERE bucket=? AND subject_hash=? AND window_start=? LIMIT 1`).bind(bucket,subject,start).first();
   const count=Number(existing?.request_count||0)+1;
   if(existing){
@@ -4580,7 +4581,6 @@ async function productionRateLimit(request,env){
     await env.DB.prepare(`INSERT INTO security_rate_limits(id,bucket,subject_hash,window_start,request_count) VALUES(?,?,?,?,1)`).bind(crypto.randomUUID(),bucket,subject,start).run();
   }
   if(count>limit){
-    await productionSafetySchema(env);
     await env.DB.prepare(`INSERT INTO production_security_events(id,event_type,route,subject_hash,decision,details_json) VALUES(?,?,?,?,?,?)`)
       .bind(crypto.randomUUID(),'RATE_LIMIT',path,subject,'BLOCKED',JSON.stringify({limit,windowSeconds})).run();
     return {ok:false,response:json({ok:false,error:'RATE_LIMITED',version:VERSION,retry_after_seconds:Math.max(1,windowSeconds-(now%windowSeconds))},429,{'retry-after':String(Math.max(1,windowSeconds-(now%windowSeconds)))})};
@@ -4641,6 +4641,14 @@ handle = async function(request,env){
       if (preflightMethod !== 'POST') return json({ok:false,error:'METHOD_NOT_ALLOWED',version:VERSION},405,{'allow':'POST'});
       return json({ok:false,error:'AUTHENTICATED_VALIDATION_REQUIRED',version:VERSION,write_enabled:false},403);
     }
+    // These mutation routes require an existing session. Reject anonymous
+    // requests before rate-limit DML so an unauthenticated caller cannot
+    // create rate-limit rows or trigger schema access on a tenant endpoint.
+    if (isMutatingMethod(preflightMethod) &&
+        (preflightPath === '/api/tenant/select' || preflightPath.startsWith('/api/intervenant/')) &&
+        !getCookie(request, SESSION_COOKIE)) {
+      return json({ok:false,error:'UNAUTHENTICATED',version:VERSION},401);
+    }
     if (getOnlyDiagnostics.has(preflightPath) && preflightMethod !== 'GET' && preflightMethod !== 'HEAD') {
       return json({ok:false,error:'METHOD_NOT_ALLOWED',version:VERSION},405,{'allow':'GET, HEAD'});
     }
@@ -4660,6 +4668,7 @@ handle = async function(request,env){
     if(u.pathname==='/api/system/production-check' && request.method==='GET') return strictProductionAudit(request,env);
     return __procheliaProductionSafetyHandle(request,env);
   }catch(e){
-    return json({ok:false,error:'PRODUCTION_SAFETY_ERROR',version:VERSION},500);
+    console.error('PRODUCTION_SAFETY_GUARD_FAILED',e?.name||'ERROR');
+    return json({ok:false,error:'SAFETY_GUARD_UNAVAILABLE',version:VERSION},503);
   }
 };
