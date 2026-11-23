@@ -37,6 +37,7 @@ test("isolated Preview deploy uses a generated config pinned to the Preview D1",
   assert.match(deployWorkflow, /PREVIEW_WRANGLER_CONFIG/);
   assert.match(deployWorkflow, /process\.env\.GITHUB_WORKSPACE/);
   assert.match(deployWorkflow, /database_id: previewDb\.database_id/);
+  assert.match(deployWorkflow, /previews: \{/);
   assert.match(deployWorkflow, /wrangler@4 deploy --dry-run --config "\$PREVIEW_WRANGLER_CONFIG"/);
   assert.match(deployWorkflow, /wrangler@4 preview --config "\$PREVIEW_WRANGLER_CONFIG"/);
   assert.match(deployWorkflow, /04f52830-ef5a-4f17-a640-42bbc2381bba/);
