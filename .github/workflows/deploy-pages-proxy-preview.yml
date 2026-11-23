@@ -80,7 +80,7 @@ jobs:
         run: |
           set -euo pipefail
           npx --yes wrangler@4 deploy --dry-run --config "$PREVIEW_WRANGLER_CONFIG" --outdir "$RUNNER_TEMP/prochelia-pages-proxy-worker-dry-run" 2>&1 | tee "$RUNNER_TEMP/preview-worker-dry-run.log"
-          grep -F "e3cf167c-37e1-4d72-9ac6-b3e27c14b97f" "$RUNNER_TEMP/preview-worker-dry-run.log" >/dev/null
+          grep -F "env.DB (prochelia-preview-eu-2026-11-17)" "$RUNNER_TEMP/preview-worker-dry-run.log" >/dev/null
           if grep -F "04f52830-ef5a-4f17-a640-42bbc2381bba" "$RUNNER_TEMP/preview-worker-dry-run.log" >/dev/null; then
             echo "::error::Production D1 identifier appeared in the Preview Worker dry-run."
             exit 1
