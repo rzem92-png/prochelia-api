@@ -907,7 +907,7 @@ db.execute("""
       'market-opportunity-a', 'market-tenant-a', 'market-mission-opportunity',
       'market-consent-a', 'CLEANING', 'Nettoyage ponctuel d’un logement',
       'Aubergenville', '78', '2026-11-23T09:00:00Z', '2026-11-23T11:00:00Z',
-      4000, 'EUR', '["cleaning"]', 'market-client-a', '2026-11-22T23:00:00Z'
+      4000, 'EUR', '["cleaning"]', 'market-client-a', datetime('now','+7 days')
     )
 """)
 db.execute("""
