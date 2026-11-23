@@ -562,69 +562,23 @@ async function authStatus(request, env) {
    Chaîne : identité vérifiée -> compte -> appareil -> mission ->
    présence -> code client -> journal d'audit.
 =============================================================== */
-async function ensureSecuritySchema(env) {
-  if (!env.DB) throw new Error('DATABASE_REQUIRED');
-  const statements = [
-    `CREATE TABLE IF NOT EXISTS identity_verifications (
-      id TEXT PRIMARY KEY,
-      user_id TEXT NOT NULL,
-      status TEXT NOT NULL DEFAULT 'pending',
-      level TEXT NOT NULL DEFAULT 'standard',
-      provider TEXT,
-      provider_reference TEXT,
-      verified_at TEXT,
-      expires_at TEXT,
-      rejection_reason TEXT,
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )`,
-    `CREATE INDEX IF NOT EXISTS idx_identity_verifications_user ON identity_verifications(user_id, status, updated_at)`,
-    `CREATE TABLE IF NOT EXISTS mission_security (
-      id TEXT PRIMARY KEY,
-      mission_id TEXT NOT NULL UNIQUE,
-      client_id TEXT NOT NULL,
-      intervenant_id TEXT NOT NULL,
-      risk_level TEXT NOT NULL DEFAULT 'standard',
-      arrival_code_hash TEXT,
-      arrival_expires_at TEXT,
-      arrival_used_at TEXT,
-      end_code_hash TEXT,
-      end_expires_at TEXT,
-      end_used_at TEXT,
-      status TEXT NOT NULL DEFAULT 'prepared',
-      locked_until TEXT,
-      arrival_started_at TEXT,
-      ended_at TEXT,
-      last_presence_at TEXT,
-      last_device_id TEXT,
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )`,
-    `CREATE INDEX IF NOT EXISTS idx_mission_security_intervenant ON mission_security(intervenant_id, status)`,
-    `CREATE TABLE IF NOT EXISTS mission_security_attempts (
-      id TEXT PRIMARY KEY,
-      security_id TEXT NOT NULL,
-      purpose TEXT NOT NULL,
-      actor_user_id TEXT,
-      device_id TEXT,
-      result TEXT NOT NULL,
-      reason TEXT,
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )`,
-    `CREATE INDEX IF NOT EXISTS idx_security_attempts_security ON mission_security_attempts(security_id, created_at)`,
-    `CREATE TABLE IF NOT EXISTS security_audit (
-      id TEXT PRIMARY KEY,
-      event_type TEXT NOT NULL,
-      mission_id TEXT,
-      user_id TEXT,
-      actor_role TEXT,
-      result TEXT NOT NULL,
-      metadata_json TEXT,
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )`,
-    `CREATE INDEX IF NOT EXISTS idx_security_audit_mission ON security_audit(mission_id, created_at)`
-  ];
-  for (const sql of statements) await env.DB.prepare(sql).run();
+async function securitySchemaReady(env) {
+  if (!env?.DB) return false;
+  const required = {
+    identity_verifications: ['id','user_id','tenant_id','status','level','verified_at','expires_at'],
+    mission_security: ['id','mission_id','client_id','intervenant_id','tenant_id','status','arrival_code_hash','end_code_hash'],
+    mission_security_attempts: ['id','security_id','tenant_id','purpose','actor_user_id','result'],
+    security_audit: ['id','event_type','mission_id','user_id','actor_role','result','metadata_json','tenant_id']
+  };
+  try {
+    for (const [table, requiredColumns] of Object.entries(required)) {
+      const columns = await tableColumns(env, table);
+      if (!requiredColumns.every(column => columns.includes(column))) return false;
+    }
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function securityCode() {
@@ -632,11 +586,12 @@ function securityCode() {
   return String(n).padStart(6, '0');
 }
 
-async function securityAudit(env, eventType, missionId, userId, role, result, metadata = {}) {
+async function securityAudit(env, tenantId, eventType, missionId, userId, role, result, metadata = {}) {
+  if (!tenantId) throw new Error('SECURITY_AUDIT_TENANT_REQUIRED');
   await env.DB.prepare(
-    `INSERT INTO security_audit (id,event_type,mission_id,user_id,actor_role,result,metadata_json)
-     VALUES (?,?,?,?,?,?,?)`
-  ).bind(crypto.randomUUID(), eventType, missionId || null, userId || null, role || null, result, JSON.stringify(metadata)).run();
+    `INSERT INTO security_audit (id,event_type,mission_id,user_id,actor_role,result,metadata_json,tenant_id)
+     VALUES (?,?,?,?,?,?,?,?)`
+  ).bind(crypto.randomUUID(), eventType, missionId || null, userId || null, role || null, result, JSON.stringify(metadata), tenantId).run();
 }
 
 async function requireVerifiedIntervenant(env, userId, tenantId) {
@@ -656,12 +611,12 @@ async function securityIdentityStart(request, env) {
   const tenantContext = await resolveTenantContext(request, env, auth);
   if (!tenantContext.ok) return json({ok:false,error:tenantContext.error,version:VERSION},tenantContext.status);
   const tenantId = tenantContext.tenant.id;
-  await ensureSecuritySchema(env);
+  if (!(await securitySchemaReady(env))) return json({ok:false,error:'SECURITY_SCHEMA_NOT_READY',version:VERSION,write_enabled:false},503);
   const id = crypto.randomUUID();
   await env.DB.prepare(
     `INSERT INTO identity_verifications (id,user_id,tenant_id,status,level) VALUES (?,?,?, 'pending','standard')`
   ).bind(id, auth.user.id, tenantId).run();
-  await securityAudit(env,'IDENTITY_VERIFICATION_REQUESTED',null,auth.user.id,auth.user.role,'PENDING',{verification_id:id,tenant_id:tenantId});
+  await securityAudit(env,tenantId,'IDENTITY_VERIFICATION_REQUESTED',null,auth.user.id,auth.user.role,'PENDING',{verification_id:id,tenant_id:tenantId});
   return json({ok:true,version:VERSION,verification_id:id,status:'pending',message:'Vérification d’identité requise avant l’accès aux missions.'},201);
 }
 
@@ -672,7 +627,7 @@ async function securityIdentityApprove(request, env) {
   if (!tenantContext.ok) return json({ok:false,error:tenantContext.error,version:VERSION},tenantContext.status);
   if (!tenantRoleAllowed(tenantContext, ['OWNER','ADMIN','MANAGER'])) return json({ok:false,error:'TENANT_PERMISSION_REQUIRED',version:VERSION},403);
   const tenantId = tenantContext.tenant.id;
-  await ensureSecuritySchema(env);
+  if (!(await securitySchemaReady(env))) return json({ok:false,error:'SECURITY_SCHEMA_NOT_READY',version:VERSION,write_enabled:false},503);
   const body = await readJson(request);
   const verificationId = clean(body?.verification_id);
   const status = clean(body?.status);
@@ -690,7 +645,7 @@ async function securityIdentityApprove(request, env) {
     `UPDATE identity_verifications SET status=?,level=?,provider=?,provider_reference=?,verified_at=?,expires_at=?,rejection_reason=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND tenant_id=? AND status='pending'`
   ).bind(status,level,provider,providerReference,verifiedAt,expiresAt,reason,verificationId,tenantId).run();
   if (Number(result?.meta?.changes || 0) !== 1) return json({ok:false,error:'IDENTITY_DECISION_CONFLICT',version:VERSION},409);
-  await securityAudit(env,'IDENTITY_VERIFICATION_DECISION',null,auth.user.id,auth.user.role,status,{verification_id:verificationId,subject_user_id:row.user_id,tenant_id:tenantId,level});
+  await securityAudit(env,tenantId,'IDENTITY_VERIFICATION_DECISION',null,auth.user.id,auth.user.role,status,{verification_id:verificationId,subject_user_id:row.user_id,tenant_id:tenantId,level});
   return json({ok:true,version:VERSION,verification_id:verificationId,user_id:row.user_id,status,level,verified_at:verifiedAt},200);
 }
 
@@ -724,7 +679,7 @@ async function securityPrepareMission(request, env) {
   const tenantContext = await resolveTenantContext(request, env, auth);
   if (!tenantContext.ok) return json({ok:false,error:tenantContext.error,version:VERSION},tenantContext.status);
   const tenantId = tenantContext.tenant.id;
-  await ensureSecuritySchema(env);
+  if (!(await securitySchemaReady(env))) return json({ok:false,error:'SECURITY_SCHEMA_NOT_READY',version:VERSION,write_enabled:false},503);
   const body = await readJson(request);
   const missionId=clean(body?.mission_id), clientId=clean(body?.client_id), intervenantId=clean(body?.intervenant_id);
   if(!missionId||!clientId||!intervenantId) return json({ok:false,error:'MISSION_SECURITY_FIELDS_REQUIRED',version:VERSION},400);
@@ -742,16 +697,16 @@ async function securityPrepareMission(request, env) {
   if (!assignment) return json({ok:false,error:'MISSION_TENANT_ASSIGNMENT_NOT_FOUND',version:VERSION},404);
   const verified = await requireVerifiedIntervenant(env,assignment.intervenant_user_id,tenantId);
   if(!verified) return json({ok:false,error:'INTERVENANT_IDENTITY_NOT_VERIFIED',version:VERSION},409);
-  const existing=await env.DB.prepare('SELECT id,status FROM mission_security WHERE mission_id=? LIMIT 1').bind(missionId).first();
+  const existing=await env.DB.prepare('SELECT id,status FROM mission_security WHERE mission_id=? AND tenant_id=? LIMIT 1').bind(missionId,tenantId).first();
   if(existing) return json({ok:false,error:'MISSION_SECURITY_ALREADY_PREPARED',version:VERSION,status:existing.status},409);
   const arrival=securityCode(), end=securityCode();
   const now=Date.now(), arrivalExpiry=new Date(now+SECURITY_CODE_TTL_SECONDS*1000).toISOString(), endExpiry=new Date(now+SECURITY_CODE_TTL_SECONDS*1000).toISOString();
   const id=crypto.randomUUID();
   await env.DB.prepare(
-    `INSERT INTO mission_security (id,mission_id,client_id,intervenant_id,risk_level,arrival_code_hash,arrival_expires_at,end_code_hash,end_expires_at)
-     VALUES (?,?,?,?,?,?,?,?,?)`
-  ).bind(id,missionId,clientId,intervenantId,clean(body?.risk_level)||'standard',await sha256Base64url(arrival),arrivalExpiry,await sha256Base64url(end),endExpiry).run();
-  await securityAudit(env,'MISSION_SECURITY_PREPARED',missionId,auth.user.id,auth.user.role,'OK',{intervenant_id:intervenantId,risk_level:clean(body?.risk_level)||'standard'});
+    `INSERT INTO mission_security (id,mission_id,client_id,intervenant_id,tenant_id,risk_level,arrival_code_hash,arrival_expires_at,end_code_hash,end_expires_at)
+     VALUES (?,?,?,?,?,?,?,?,?,?)`
+  ).bind(id,missionId,clientId,intervenantId,tenantId,clean(body?.risk_level)||'standard',await sha256Base64url(arrival),arrivalExpiry,await sha256Base64url(end),endExpiry).run();
+  await securityAudit(env,tenantId,'MISSION_SECURITY_PREPARED',missionId,auth.user.id,auth.user.role,'OK',{intervenant_id:intervenantId,risk_level:clean(body?.risk_level)||'standard'});
   const delivery = await deliverSecurityCodes(env, {
     mission_id: missionId,
     client_id: clientId,
@@ -761,11 +716,11 @@ async function securityPrepareMission(request, env) {
     end_expires_at: endExpiry
   });
   if (!delivery.ok) {
-    await env.DB.prepare('DELETE FROM mission_security WHERE id=?').bind(id).run();
-    await securityAudit(env,'MISSION_SECURITY_PREPARE_DELIVERY_FAILED',missionId,auth.user.id,auth.user.role,'DENIED',{reason:delivery.error});
+    await env.DB.prepare('DELETE FROM mission_security WHERE id=? AND tenant_id=?').bind(id,tenantId).run();
+    await securityAudit(env,tenantId,'MISSION_SECURITY_PREPARE_DELIVERY_FAILED',missionId,auth.user.id,auth.user.role,'DENIED',{reason:delivery.error});
     return json({ok:false,error:'SECURITY_CODE_DELIVERY_FAILED',version:VERSION,details:delivery.error},503);
   }
-  await securityAudit(env,'SECURITY_CODES_DELIVERED',missionId,auth.user.id,auth.user.role,'OK',{channel:delivery.channel});
+  await securityAudit(env,tenantId,'SECURITY_CODES_DELIVERED',missionId,auth.user.id,auth.user.role,'OK',{channel:delivery.channel});
   return json({ok:true,version:VERSION,mission_id:missionId,status:'prepared',arrival:{expires_at:arrivalExpiry},end:{expires_at:endExpiry},delivery:{channel:delivery.channel,delivered:true},security_note:'Les codes en clair ne sont jamais renvoyés par l’API.'},201);
 }
 
@@ -787,21 +742,21 @@ async function securityPresence(request, env) {
   }, 503);
 }
 
-export async function consumeMissionSecurityCode(env, securityId, purpose, expectedHash) {
-  if (!env?.DB || !securityId || !expectedHash) return false;
+export async function consumeMissionSecurityCode(env, tenantId, securityId, purpose, expectedHash) {
+  if (!env?.DB || !tenantId || !securityId || !expectedHash) return false;
   let statement;
   if (purpose === 'ARRIVAL') {
     statement = env.DB.prepare(`UPDATE mission_security
       SET arrival_used_at=CURRENT_TIMESTAMP,arrival_started_at=CURRENT_TIMESTAMP,status='in_progress',updated_at=CURRENT_TIMESTAMP
-      WHERE id=? AND status='prepared' AND arrival_used_at IS NULL
+      WHERE id=? AND tenant_id=? AND status='prepared' AND arrival_used_at IS NULL
         AND arrival_code_hash=? AND julianday(arrival_expires_at)>julianday('now')
-        AND (locked_until IS NULL OR julianday(locked_until)<=julianday('now'))`).bind(securityId, expectedHash);
+        AND (locked_until IS NULL OR julianday(locked_until)<=julianday('now'))`).bind(securityId, tenantId, expectedHash);
   } else if (purpose === 'END') {
     statement = env.DB.prepare(`UPDATE mission_security
       SET end_used_at=CURRENT_TIMESTAMP,ended_at=CURRENT_TIMESTAMP,status='completed',updated_at=CURRENT_TIMESTAMP
-      WHERE id=? AND status='in_progress' AND end_used_at IS NULL
+      WHERE id=? AND tenant_id=? AND status='in_progress' AND end_used_at IS NULL
         AND end_code_hash=? AND julianday(end_expires_at)>julianday('now')
-        AND (locked_until IS NULL OR julianday(locked_until)<=julianday('now'))`).bind(securityId, expectedHash);
+        AND (locked_until IS NULL OR julianday(locked_until)<=julianday('now'))`).bind(securityId, tenantId, expectedHash);
   } else {
     return false;
   }
@@ -829,13 +784,29 @@ async function securityVerifyCode(request, env) {
 async function securityResendCodes(request, env) {
   const auth=await getSessionUser(request,env);
   if(!requireRole(auth,['gerante','client'])) return json({ok:false,error:auth?.user?'FORBIDDEN':'UNAUTHENTICATED',version:VERSION},auth?.user?403:401);
-  await ensureSecuritySchema(env);
+  const tenantContext=await resolveTenantContext(request,env,auth);
+  if(!tenantContext.ok) return json({ok:false,error:tenantContext.error,version:VERSION},tenantContext.status);
+  const tenantId=tenantContext.tenant.id;
+  if(auth.user.role==='gerante'&&!tenantRoleAllowed(tenantContext,['OWNER','ADMIN','MANAGER'])) return json({ok:false,error:'TENANT_PERMISSION_REQUIRED',version:VERSION},403);
+  if (!(await securitySchemaReady(env))) return json({ok:false,error:'SECURITY_SCHEMA_NOT_READY',version:VERSION,write_enabled:false},503);
   const body=await readJson(request);
   const missionId=clean(body?.mission_id);
   if(!missionId) return json({ok:false,error:'MISSION_ID_REQUIRED',version:VERSION},400);
-  const sec=await env.DB.prepare('SELECT * FROM mission_security WHERE mission_id=? LIMIT 1').bind(missionId).first();
+  let sec;
+  if(auth.user.role==='client') {
+    sec=await env.DB.prepare(
+      `SELECT s.id,s.status,s.client_id FROM mission_security s
+        JOIN clients c ON c.id=s.client_id AND c.tenant_id=s.tenant_id
+       WHERE s.mission_id=? AND s.tenant_id=? AND c.user_id=? LIMIT 1`
+    ).bind(missionId,tenantId,auth.user.id).first();
+  } else {
+    sec=await env.DB.prepare(
+      `SELECT s.id,s.status,s.client_id FROM mission_security s
+        JOIN missions m ON m.id=s.mission_id AND m.tenant_id=s.tenant_id
+       WHERE s.mission_id=? AND s.tenant_id=? LIMIT 1`
+    ).bind(missionId,tenantId).first();
+  }
   if(!sec) return json({ok:false,error:'MISSION_SECURITY_NOT_FOUND',version:VERSION},404);
-  if(auth.user.role==='client' && sec.client_id!==auth.user.id) return json({ok:false,error:'FORBIDDEN',version:VERSION},403);
   if(sec.status==='completed') return json({ok:false,error:'MISSION_ALREADY_COMPLETED',version:VERSION},409);
   return json({ok:false,error:'SECURITY_CODE_RESEND_REQUIRES_REGENERATION_FLOW',version:VERSION,message:'Pour éviter la réutilisation d’un ancien secret, la réémission doit générer de nouveaux codes et invalider les précédents.'},409);
 }
@@ -849,10 +820,10 @@ async function securityClientCode(request, env) {
 async function securityStatus(request, env) {
   const auth=await getSessionUser(request,env);
   if(!auth) return json({ok:false,error:'UNAUTHENTICATED',version:VERSION},401);
-  await ensureSecuritySchema(env);
+  const schemaReady = await securitySchemaReady(env);
   // Return configuration state only. Do not expose global audit volume or
   // cross-tenant operational metadata to an individual authenticated user.
-  return json({ok:true,version:VERSION,security:{identity:'verified_required',device:'cryptographic_enrollment_required',presence:'blocked',mission_code_verification:'blocked',arrival_code:'not_verifiable_until_device_enrollment',end_code:'not_verifiable_until_device_enrollment',max_attempts:SECURITY_MAX_ATTEMPTS,code_ttl_seconds:SECURITY_CODE_TTL_SECONDS},user:{id:auth.user.id,role:auth.user.role}},200);
+  return json({ok:true,version:VERSION,schema_ready:schemaReady,write_enabled:false,security:{identity:'verified_required',device:'cryptographic_enrollment_required',presence:'blocked',mission_code_verification:'blocked',arrival_code:'not_verifiable_until_device_enrollment',end_code:'not_verifiable_until_device_enrollment',max_attempts:SECURITY_MAX_ATTEMPTS,code_ttl_seconds:SECURITY_CODE_TTL_SECONDS},user:{id:auth.user.id,role:auth.user.role}},200);
 }
 
 
