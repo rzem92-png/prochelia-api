@@ -18,7 +18,7 @@ on:
       frontend_commit_sha:
         description: "Exact 40-character HEAD of the selected frontend Preview branch"
         required: false
-        default: "a916165be5fd3f431115e0a2e9d6ce67163c889d"
+        default: "ebd177244267a1e317f357451cd5b512553365ee"
         type: string
   workflow_run:
     workflows:
@@ -67,7 +67,7 @@ jobs:
       PREVIEW_DB_NAME: prochelia-preview-eu-2026-11-17
       PREVIEW_DB_ID: e3cf167c-37e1-4d72-9ac6-b3e27c14b97f
       FRONTEND_BRANCH: pages-proxy-2026-11-23
-      FRONTEND_COMMIT_SHA: ${{ inputs.frontend_commit_sha || '6e20d43cb0a91e998e3c7d103b0fb44049b33ede' }}
+      FRONTEND_COMMIT_SHA: ${{ inputs.frontend_commit_sha || 'ebd177244267a1e317f357451cd5b512553365ee' }}
       API_PREVIEW_URL: https://fix-pages-proxy-preview-cors-2026-11-23-prochelia-api.rzem92.workers.dev
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -347,7 +347,7 @@ jobs:
         run: |
           set -euo pipefail
           node --input-type=module <<'NODE'
-          const base = 'https://prochelia-api-preview.rzem92.workers.dev';
+          const base = process.env.API_PREVIEW_URL;
           const prefix = process.env.E2E_PREFIX;
           const manager = process.env.E2E_MANAGER_TOKEN;
           const client = process.env.E2E_CLIENT_TOKEN;
