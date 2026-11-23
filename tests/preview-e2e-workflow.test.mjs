@@ -8,6 +8,7 @@ test("Preview E2E runs only on the reviewed Preview branch; manual runs require 
   assert.match(workflow, /workflow_dispatch:/);
   assert.match(workflow, /RUN_PREVIEW_DIRECTORY_E2E/);
   assert.match(workflow, /github\.event_name == 'push'/);
+  assert.match(workflow, /github\.event_name == 'push' &&\s*github\.actor == 'rzem92-png'/);
   assert.match(workflow, /github\.ref == 'refs\/heads\/fix\/pages-proxy-preview-cors-2026-11-23'/);
   assert.match(workflow, /github\.event_name == 'workflow_dispatch'/);
   assert.match(workflow, /github\.actor == 'rzem92-png'/);

@@ -31,6 +31,7 @@ jobs:
     if: >-
       (
         github.event_name == 'push' &&
+        github.actor == 'rzem92-png' &&
         github.ref == 'refs/heads/fix/pages-proxy-preview-cors-2026-11-23'
       ) ||
       (
