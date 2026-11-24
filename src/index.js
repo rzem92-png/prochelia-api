@@ -1140,6 +1140,10 @@ export async function paymentWebhook(request, env) {
   if (request.method !== "POST") {
     return json({ ok: false, error: "METHOD_NOT_ALLOWED", version: VERSION }, 405, { allow: "POST" });
   }
+  // No PSP adapter is operational: reject before reading untrusted input or touching D1.
+  if (!paymentsConfigured(env)) {
+    return json({ ok: false, error: "PAYMENT_PROVIDER_NOT_CONFIGURED", version: VERSION, write_enabled: false }, 503);
+  }
   const bodyResult = await readBoundedWebhookBody(request);
   if (!bodyResult.ok) {
     const tooLarge = bodyResult.reason === "too_large";
@@ -1161,12 +1165,8 @@ export async function paymentWebhook(request, env) {
   if (!provider || !eventId || !type) {
     return json({ ok: false, error: "INVALID_WEBHOOK_EVENT", version: VERSION }, 400);
   }
-  // The receiver remains fail-closed until a reviewed PSP adapter, atomic
-  // settlement ledger and Sandbox acceptance are available. No D1 writes,
-  // wallet changes, refunds or payouts occur in this state.
-  if (!paymentsConfigured(env)) {
-    return json({ ok: false, error: "PAYMENT_PROVIDER_NOT_CONFIGURED", version: VERSION, provider, write_enabled: false }, 503);
-  }
+  // Financial settlement remains blocked until the atomic ledger and Sandbox
+  // acceptance gates are satisfied; no wallet, refund or payout writes occur here.
   if (requiresAtomicFinancialSettlement(type)) {
     return json({ ok: false, error: "ATOMIC_SETTLEMENT_LEDGER_REQUIRED", version: VERSION, retryable: true, write_enabled: false }, 503);
   }
