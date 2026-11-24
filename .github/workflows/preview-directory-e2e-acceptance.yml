@@ -233,6 +233,7 @@ jobs:
           fi
           echo "PASS: Pages Function -> pinned Preview Worker origin, unauthenticated route guards and same-origin preflight verified without data writes."
 
+      # This gated branch run verifies schema readiness before any synthetic fixture write.
       - name: Verify tenant authentication and directory schema before seeding
         id: tenant_schema
         shell: bash
