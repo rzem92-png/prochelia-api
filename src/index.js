@@ -1537,7 +1537,7 @@ async function executeCaseBusinessAction(env, c, rec, actorId=null, automatic=fa
 
 async function processActionOutbox(request, env) {
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
-  await ensureOperationalSchema(env);
+  const schemaGate = await schemaReadinessResponse(env, ['action_outbox','copilot_briefings','loyalty_events','loyalty_balances','quality_events','b2b_leads','capacity_snapshots','finance_forecasts','system_checks'], 'OPERATIONAL_SCHEMA_NOT_READY'); if (schemaGate) return schemaGate;
   const rows=await env.DB.prepare(`SELECT * FROM action_outbox WHERE status='PENDING' ORDER BY created_at ASC LIMIT 50`).all();
   const processed=[];
   for(const row of (rows.results||[])) {
@@ -1807,7 +1807,8 @@ async function handleConsolidated(request, env) {
   const url=new URL(request.url);
   const consolidatedPath = ['/api/consolidated/info','/api/ops/dashboard','/api/journal','/api/cases','/api/cases/approve','/api/metiers','/api/metiers/suggest','/api/pricing/quote','/api/finance/summary','/api/complaints','/api/settings/phase'].includes(url.pathname);
   if (consolidatedPath) {
-    try { await ensureConsolidatedSchema(env); } catch (e) { return json({ok:false,error:'CONSOLIDATED_SCHEMA_ERROR',version:VERSION,message:e.message},500); }
+    const schemaGate = await schemaReadinessResponse(env, ['platform_settings','business_profiles','métier_catalog','metier_suggestions','pricing_policies','pricing_quotes','operational_cases','case_actions','copilot_log','activity_journal','commercial_tasks','recruitment_tasks','complaints','accounting_ledger','business_expenses','notification_outbox','compliance_events'], 'CONSOLIDATED_SCHEMA_NOT_READY');
+    if (schemaGate) return schemaGate;
   }
   if(url.pathname==='/api/consolidated/info' && request.method==='GET') return consolidatedInfo(env);
   if(url.pathname==='/api/ops/dashboard' && request.method==='GET') return getOperationsDashboard(request,env);
@@ -1978,7 +1979,7 @@ function promotionCandidate(input) {
 async function recommendPromotions(request, env) {
   const gate = await requireAuthRole(request, env, ['gerante']);
   if (gate.error) return gate.error;
-  await ensureStrategicSchema(env);
+  const schemaGate = await schemaReadinessResponse(env, ['promotions','promotion_recommendations','commercial_events','market_signals','client_value_scores','strategic_alerts'], 'STRATEGIC_SCHEMA_NOT_READY'); if (schemaGate) return schemaGate;
 
   const b = await readJson(request) || {};
   const phase = String(b.phase || await getSetting(env, 'project_phase', 'TEST')).toUpperCase();
@@ -2077,7 +2078,7 @@ async function recommendPromotions(request, env) {
 async function createPromotion(request, env) {
   const gate = await requireAuthRole(request, env, ['gerante']);
   if (gate.error) return gate.error;
-  await ensureStrategicSchema(env);
+  const schemaGate = await schemaReadinessResponse(env, ['promotions','promotion_recommendations','commercial_events','market_signals','client_value_scores','strategic_alerts'], 'STRATEGIC_SCHEMA_NOT_READY'); if (schemaGate) return schemaGate;
 
   const b = await readJson(request) || {};
   const code = clean(b.code);
@@ -2122,7 +2123,7 @@ async function createPromotion(request, env) {
 async function promotionList(request, env) {
   const gate = await requireAuthRole(request, env, ['gerante','entreprise','client']);
   if (gate.error) return gate.error;
-  await ensureStrategicSchema(env);
+  const schemaGate = await schemaReadinessResponse(env, ['promotions','promotion_recommendations','commercial_events','market_signals','client_value_scores','strategic_alerts'], 'STRATEGIC_SCHEMA_NOT_READY'); if (schemaGate) return schemaGate;
   const status = new URL(request.url).searchParams.get('status');
   const q = status
     ? 'SELECT * FROM promotions WHERE status=? ORDER BY created_at DESC LIMIT 200'
@@ -2134,7 +2135,7 @@ async function promotionList(request, env) {
 async function activatePromotion(request, env) {
   const gate = await requireAuthRole(request, env, ['gerante']);
   if (gate.error) return gate.error;
-  await ensureStrategicSchema(env);
+  const schemaGate = await schemaReadinessResponse(env, ['promotions','promotion_recommendations','commercial_events','market_signals','client_value_scores','strategic_alerts'], 'STRATEGIC_SCHEMA_NOT_READY'); if (schemaGate) return schemaGate;
   const b = await readJson(request) || {};
   if (!b.promotion_id) return json({ok:false,error:'PROMOTION_ID_REQUIRED',version:VERSION},400);
 
@@ -2153,7 +2154,7 @@ async function activatePromotion(request, env) {
 async function strategicDashboard(request, env) {
   const gate = await requireAuthRole(request, env, ['gerante']);
   if (gate.error) return gate.error;
-  await ensureStrategicSchema(env);
+  const schemaGate = await schemaReadinessResponse(env, ['promotions','promotion_recommendations','commercial_events','market_signals','client_value_scores','strategic_alerts'], 'STRATEGIC_SCHEMA_NOT_READY'); if (schemaGate) return schemaGate;
 
   const queries = {
     active_promotions: `SELECT COUNT(*) n FROM promotions WHERE status='ACTIVE'`,
@@ -2185,10 +2186,7 @@ async function handleStrategic(request, env) {
     '/api/strategic/dashboard'
   ];
 
-  if (strategicPaths.includes(url.pathname)) {
-    try { await ensureStrategicSchema(env); }
-    catch (e) { return json({ok:false,error:'STRATEGIC_SCHEMA_ERROR',version:VERSION,message:e.message},500); }
-  }
+
 
   if (url.pathname === '/api/strategic/promotions/recommend' && request.method === 'POST')
     return recommendPromotions(request, env);
@@ -2371,7 +2369,7 @@ async function executeQueuedAction(env, action) {
 async function operationalExecute(request, env) {
   const gate=await requireAuthRole(request,env,['gerante']);
   if(gate.error)return gate.error;
-  await ensureConsolidatedSchema(env); await ensureOperationalSchema(env);
+  const schemaGate = await schemaReadinessResponse(env, ['operational_cases','case_actions','action_outbox','activity_journal','platform_settings'], 'OPERATIONAL_SCHEMA_NOT_READY'); if (schemaGate) return schemaGate;
   const b=await readJson(request)||{};
   if(!b.case_id)return json({ok:false,error:'CASE_ID_REQUIRED',version:VERSION},400);
   const c=await env.DB.prepare('SELECT * FROM operational_cases WHERE id=? LIMIT 1').bind(b.case_id).first();
@@ -2393,7 +2391,7 @@ async function operationalExecute(request, env) {
 
 async function scoreClients(request, env) {
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
-  await ensureStrategicSchema(env); await ensureOperationalSchema(env);
+  const schemaGate = await schemaReadinessResponse(env, ['client_value_scores'], 'STRATEGIC_SCHEMA_NOT_READY'); if (schemaGate) return schemaGate;
   const rows=[];
   if(await tableExists(env,'payment_transactions')){
     const r=await env.DB.prepare(`SELECT client_id,COUNT(*) tx_count,COALESCE(SUM(gross_cents),0) gross,MAX(created_at) last_activity FROM payment_transactions WHERE client_id IS NOT NULL GROUP BY client_id LIMIT 1000`).all();
@@ -2414,7 +2412,7 @@ async function scoreClients(request, env) {
 
 async function loyaltyUpdate(request, env) {
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
-  await ensureOperationalSchema(env);
+  const schemaGate = await schemaReadinessResponse(env, ['loyalty_events','loyalty_balances','activity_journal'], 'OPERATIONAL_SCHEMA_NOT_READY'); if (schemaGate) return schemaGate;
   const b=await readJson(request)||{}; if(!b.client_id&&!b.company_id)return json({ok:false,error:'CLIENT_OR_COMPANY_REQUIRED',version:VERSION},400);
   const points=Math.max(-100000,Math.min(100000,Number(b.points||0)));
   const id=crypto.randomUUID();
@@ -2431,7 +2429,8 @@ async function loyaltyUpdate(request, env) {
 
 async function qualityCreate(request, env) {
   const gate=await requireAuthRole(request,env,['gerante','client','entreprise']); if(gate.error)return gate.error;
-  await ensureOperationalSchema(env); const b=await readJson(request)||{};
+  const schemaGate = await schemaReadinessResponse(env, ['quality_events'], 'OPERATIONAL_SCHEMA_NOT_READY'); if (schemaGate) return schemaGate;
+  const b=await readJson(request)||{};
   if(!b.mission_id)return json({ok:false,error:'MISSION_ID_REQUIRED',version:VERSION},400);
   const id=crypto.randomUUID();
   await env.DB.prepare(`INSERT INTO quality_events(id,mission_id,client_id,company_id,intervenant_id,rating,category,comment,severity,metadata_json) VALUES(?,?,?,?,?,?,?,?,?,?)`)
@@ -2441,7 +2440,7 @@ async function qualityCreate(request, env) {
 
 async function capacityDashboard(request, env) {
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
-  await ensureOperationalSchema(env);
+  const schemaGate = await schemaReadinessResponse(env, ['capacity_snapshots'], 'OPERATIONAL_SCHEMA_NOT_READY'); if (schemaGate) return schemaGate;
   let missions=0, available=0;
   if(await tableExists(env,'missions')) { const r=await env.DB.prepare(`SELECT COUNT(*) n FROM missions WHERE date(created_at)>=date('now','-7 day')`).first(); missions=Number(r?.n||0); }
   if(await tableExists(env,'users')) { const r=await env.DB.prepare(`SELECT COUNT(*) n FROM users WHERE role IN ('intervenant','aide_soignant','infirmier') AND status IN ('ACTIVE','active')`).first(); available=Number(r?.n||0); }
@@ -2452,6 +2451,7 @@ async function capacityDashboard(request, env) {
   return json({ok:true,version:VERSION,missions_last_7_days:missions,active_intervenants:available,utilization_percent:utilization,recommendation});
 }
 
+  const schemaGate = await schemaReadinessResponse(env, ['finance_forecasts'], 'FINANCE_FORECAST_SCHEMA_NOT_READY'); if (schemaGate) return schemaGate;
 async function financeForecast(request, env) {
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
   const months=Math.max(1,Math.min(12,Number((await readJson(request)||{}).months||3)));
@@ -2475,7 +2475,7 @@ async function financeForecast(request, env) {
 
 async function copilotBriefing(request, env) {
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
-  await ensureConsolidatedSchema(env); await ensureStrategicSchema(env); await ensureOperationalSchema(env);
+  const schemaGate = await schemaReadinessResponse(env, ['operational_cases','promotion_recommendations','strategic_alerts','copilot_briefings','platform_settings'], 'COPILOT_SCHEMA_NOT_READY'); if (schemaGate) return schemaGate;
   const phase=await getSetting(env,'project_phase','TEST'); const items=[];
   const open=await env.DB.prepare(`SELECT * FROM operational_cases WHERE status NOT IN ('RESOLVED','CLOSED') ORDER BY priority DESC,created_at ASC LIMIT 20`).all();
   for(const c of (open.results||[])) items.push({priority:Number(c.priority||10),category:'OPERATIONS',title:c.description||c.case_type,recommendation:c.proposed_solution_json||'Analyser et proposer une résolution',entity_type:'CASE',entity_id:c.id});
@@ -2490,7 +2490,7 @@ async function copilotBriefing(request, env) {
 
 async function systemAudit(request, env) {
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
-  await ensureOperationalSchema(env);
+  const schemaGate = await schemaReadinessResponse(env, ['system_checks'], 'OPERATIONAL_SCHEMA_NOT_READY'); if (schemaGate) return schemaGate;
   const checks=[];
   const required=['users','sessions','payment_transactions','operational_cases','promotions','promotion_recommendations','accounting_ledger','notification_outbox','action_outbox'];
   for(const t of required){ const exists=await tableExists(env,t); checks.push({table:t,status:exists?'OK':'MISSING'}); }
@@ -2507,9 +2507,7 @@ async function handleV139(request, env) {
     '/api/ops/case/execute','/api/ops/outbox/process','/api/copilot/briefing','/api/clients/score','/api/loyalty/update',
     '/api/quality','/api/capacity/dashboard','/api/finance/forecast','/api/system/audit'
   ];
-  if(operationalPaths.includes(url.pathname)){
-    try{await ensureOperationalSchema(env);}catch(e){return json({ok:false,error:'OPERATIONAL_SCHEMA_ERROR',version:VERSION,message:e.message},500);}
-  }
+
   if(url.pathname==='/api/ops/case/execute'&&request.method==='POST')return operationalExecute(request,env);
   if(url.pathname==='/api/ops/outbox/process'&&request.method==='POST')return processActionOutbox(request,env);
   if(url.pathname==='/api/copilot/briefing'&&request.method==='GET')return copilotBriefing(request,env);
@@ -2812,7 +2810,8 @@ function makeSalesKit(body){
 
 async function commercialProspectCreate(request,env){
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
-  await ensureCommercialRecruitmentSchema(env); const b=await readJson(request);
+  const schemaGate = await schemaReadinessResponse(env, ['commercial_prospects','commercial_playbooks','recruitment_candidates','copilot_growth_actions','sales_results'], 'COMMERCIAL_SCHEMA_NOT_READY'); if (schemaGate) return schemaGate;
+  const b=await readJson(request);
   const id=crypto.randomUUID(); const kind=String(b?.kind||'B2B').toUpperCase();
   const score=Math.max(0,Math.min(100,Number(b?.score||0)||0));
   await env.DB.prepare(`INSERT INTO commercial_prospects(id,kind,company_name,contact_name,email,phone,website,sector,city,postal_code,source,need,estimated_potential_cents,score,next_action,notes) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(id,kind,clean(b?.company_name)||null,clean(b?.contact_name)||null,normalizeEmail(b?.email)||null,clean(b?.phone)||null,clean(b?.website)||null,clean(b?.sector)||null,clean(b?.city)||null,clean(b?.postal_code)||null,clean(b?.source)||'COPILOTE',clean(b?.need)||null,Number.isFinite(Number(b?.estimated_potential_cents))?Math.max(0,Math.round(Number(b.estimated_potential_cents))):null,score,clean(b?.next_action)||'PREMIER_CONTACT',clean(b?.notes)||null).run();
@@ -2822,7 +2821,8 @@ async function commercialProspectCreate(request,env){
 
 async function commercialProspectSheet(request,env){
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
-  await ensureCommercialRecruitmentSchema(env); const b=await readJson(request);
+  const schemaGate = await schemaReadinessResponse(env, ['commercial_prospects','commercial_playbooks','recruitment_candidates','copilot_growth_actions','sales_results'], 'COMMERCIAL_SCHEMA_NOT_READY'); if (schemaGate) return schemaGate;
+  const b=await readJson(request);
   const kit=makeSalesKit(b); const id=clean(b?.prospect_id)||null;
   let prospect=null; if(id) prospect=await env.DB.prepare('SELECT * FROM commercial_prospects WHERE id=? LIMIT 1').bind(id).first();
   const p=prospect||b; const potential=Number(p?.estimated_potential_cents||0);
@@ -2833,14 +2833,16 @@ async function commercialProspectSheet(request,env){
 
 async function commercialPlaybook(request,env){
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
-  await ensureCommercialRecruitmentSchema(env); const b=await readJson(request); const kit=makeSalesKit(b); const id=crypto.randomUUID();
+  const schemaGate = await schemaReadinessResponse(env, ['commercial_prospects','commercial_playbooks','recruitment_candidates','copilot_growth_actions','sales_results'], 'COMMERCIAL_SCHEMA_NOT_READY'); if (schemaGate) return schemaGate;
+  const b=await readJson(request); const kit=makeSalesKit(b); const id=crypto.randomUUID();
   await env.DB.prepare(`INSERT INTO commercial_playbooks(id,target_type,stage,objective,script,objections_json,followup_json,metadata_json) VALUES(?,?,?,?,?,?,?,?)`).bind(id,kit.target_type,kit.stage,kit.objective,kit.opening,JSON.stringify(kit.objections),JSON.stringify(kit.followups),JSON.stringify({benefits:kit.benefits,questions:kit.questions,closing:kit.closing})).run();
   return json({ok:true,version:VERSION,playbook_id:id,playbook:kit},201);
 }
 
 async function recruitmentCandidateCreate(request,env){
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
-  await ensureCommercialRecruitmentSchema(env); const b=await readJson(request); const id=crypto.randomUUID();
+  const schemaGate = await schemaReadinessResponse(env, ['commercial_prospects','commercial_playbooks','recruitment_candidates','copilot_growth_actions','sales_results'], 'COMMERCIAL_SCHEMA_NOT_READY'); if (schemaGate) return schemaGate;
+  const b=await readJson(request); const id=crypto.randomUUID();
   const qualifications=Array.isArray(b?.qualifications)?b.qualifications:[];
   const score=Math.max(0,Math.min(100,Number(b?.score||0)||0));
   await env.DB.prepare(`INSERT INTO recruitment_candidates(id,full_name,email,phone,metier_code,city,radius_km,qualifications_json,score,notes) VALUES(?,?,?,?,?,?,?,?,?,?)`).bind(id,clean(b?.full_name)||null,normalizeEmail(b?.email)||null,clean(b?.phone)||null,clean(b?.metier_code)||null,clean(b?.city)||null,Number.isFinite(Number(b?.radius_km))?Number(b.radius_km):null,JSON.stringify(qualifications),score,clean(b?.notes)||null).run();
@@ -2851,7 +2853,8 @@ async function recruitmentCandidateCreate(request,env){
 
 async function recruitmentSheet(request,env){
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
-  await ensureCommercialRecruitmentSchema(env); const b=await readJson(request);
+  const schemaGate = await schemaReadinessResponse(env, ['commercial_prospects','commercial_playbooks','recruitment_candidates','copilot_growth_actions','sales_results'], 'COMMERCIAL_SCHEMA_NOT_READY'); if (schemaGate) return schemaGate;
+  const b=await readJson(request);
   const target=clean(b?.metier_code)||'METIER_A_DEFINIR'; const zone=clean(b?.city)||'zone à définir';
   const intro=`PROCHÉLIA recherche des intervenants pour renforcer sa capacité dans ${zone}. Le rôle consiste à réaliser les missions correspondant à votre métier, dans un cadre organisé, avec suivi des documents, des missions et des paiements.`;
   const objections=[{objection:'« Je veux comprendre le fonctionnement avant de m’inscrire. »',answer:'« C’est normal. Nous vous expliquons d’abord le parcours, les documents requis, les règles de mission et le fonctionnement des paiements avant toute activation. »'},{objection:'« Est-ce que je suis obligé d’accepter toutes les missions ? »',answer:'« Les règles exactes dépendent du cadre contractuel et du fonctionnement de la plateforme ; elles sont présentées clairement avant l’activation. »'}];
@@ -2860,7 +2863,7 @@ async function recruitmentSheet(request,env){
 
 async function growthDashboard(request,env){
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
-  await ensureCommercialRecruitmentSchema(env); await ensureConsolidatedSchema(env);
+  const schemaGate = await schemaReadinessResponse(env, ['commercial_prospects','recruitment_candidates','commercial_tasks','recruitment_tasks'], 'GROWTH_SCHEMA_NOT_READY'); if (schemaGate) return schemaGate;
   const p=await env.DB.prepare(`SELECT COUNT(*) n, COALESCE(AVG(score),0) avg_score FROM commercial_prospects WHERE status='OPEN'`).first();
   const r=await env.DB.prepare(`SELECT COUNT(*) n, COALESCE(AVG(score),0) avg_score FROM recruitment_candidates WHERE status='OPEN'`).first();
   const ct=await env.DB.prepare(`SELECT COUNT(*) n FROM commercial_tasks WHERE status='OPEN'`).first();
