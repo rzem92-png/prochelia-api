@@ -67,12 +67,12 @@ jobs:
             --data "$body" \
             'https://fix-pages-proxy-preview-cors-2026-11-23.rzem92.workers.dev/api/payments/webhook')"
           test "$status" = "503" || {
-            echo "::error::Disabled-PSP proxy expected HTTP 503 before body/D1 access, received $status."
+            echo "::error::Disabled-PSP proxy expected HTTP 503 with no financial write; the outer rate limiter may record one bounded counter. Received $status."
             jq -c '{ok,error,write_enabled}' "$RUNNER_TEMP/webhook-rejected.json" 2>/dev/null || true
             exit 1
           }
           jq -e '.error == "PAYMENT_PROVIDER_NOT_CONFIGURED" and .write_enabled == false' "$RUNNER_TEMP/webhook-rejected.json" >/dev/null
-          echo "PASS: disabled-PSP proxy rejected the synthetic event before reading the body or accessing D1."
+          echo "PASS: disabled-PSP proxy rejected the synthetic event before body consumption or financial writes; the outer rate limiter may record one bounded counter."
 
       - name: Verify the legacy Preview HMAC receiver rejects an unsigned synthetic event
         shell: bash
