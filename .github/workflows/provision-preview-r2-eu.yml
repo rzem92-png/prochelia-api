@@ -17,6 +17,7 @@ concurrency:
 
 jobs:
   provision-preview-r2-eu:
+    if: ${{ github.ref == 'refs/heads/fix/align-preview-r2-provisioning-2026-11-23' && github.actor == 'rzem92-png' && github.triggering_actor == 'rzem92-png' && inputs.confirmation == 'CREATE_PREVIEW_R2_EU_ONLY' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -24,11 +25,13 @@ jobs:
         env:
           REQUESTED_REF: ${{ github.ref }}
           REQUESTED_ACTOR: ${{ github.actor }}
+          REQUESTED_TRIGGERING_ACTOR: ${{ github.triggering_actor }}
           CONFIRMATION: ${{ inputs.confirmation }}
         run: |
           set -euo pipefail
           test "$REQUESTED_REF" = "refs/heads/fix/align-preview-r2-provisioning-2026-11-23"
           test "$REQUESTED_ACTOR" = "rzem92-png" || { echo "::error::Only the repository owner may provision the Preview R2 bucket."; exit 1; }
+          test "$REQUESTED_TRIGGERING_ACTOR" = "rzem92-png" || { echo "::error::Only the repository owner may rerun Preview R2 provisioning."; exit 1; }
           test "$CONFIRMATION" = "CREATE_PREVIEW_R2_EU_ONLY"
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
