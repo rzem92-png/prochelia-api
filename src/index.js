@@ -1967,11 +1967,11 @@ async function complaintCreate(request, env) {
 }
 
 async function setPhase(request, env) {
-  const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
-  const b=await readJson(request)||{};const phase=String(b.phase||'').toUpperCase();if(!PROJECT_PHASES[phase])return json({ok:false,error:'INVALID_PHASE',allowed:Object.keys(PROJECT_PHASES),version:VERSION},400);
-  await env.DB.prepare(`INSERT INTO platform_settings(key,value_json,updated_at) VALUES('project_phase',?,CURRENT_TIMESTAMP) ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json,updated_at=CURRENT_TIMESTAMP`).bind(JSON.stringify(phase)).run();
-  await journal(env,'gerante',gate.auth.user.id,'PHASE_CHANGED','platform','project', 'OK',{phase});
-  return json({ok:true,version:VERSION,phase,policy:PROJECT_PHASES[phase]},200);
+  const gate = await requireAuthRole(request, env, ['gerante']);
+  if (gate.error) return gate.error;
+  // Project phase is a platform-wide automation control, not a tenant setting.
+  // Keep it blocked until a dedicated platform-owner approval and audit boundary exists.
+  return legacyTenantScopeBlocked();
 }
 
 async function consolidatedInfo(env) {
