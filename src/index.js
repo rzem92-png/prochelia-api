@@ -576,6 +576,28 @@ async function securityPresence(request, env) {
   return tenantScopedHandlerNotReady('TENANT_SCOPED_SECURITY_HANDLER_REQUIRED');
 }
 
+export async function consumeMissionSecurityCode(env, tenantId, securityId, purpose, expectedHash) {
+  if (!env?.DB || !tenantId || !securityId || !expectedHash) return false;
+  let statement;
+  if (purpose === 'ARRIVAL') {
+    statement = env.DB.prepare(`UPDATE mission_security
+      SET arrival_used_at=CURRENT_TIMESTAMP,arrival_started_at=CURRENT_TIMESTAMP,status='in_progress',updated_at=CURRENT_TIMESTAMP
+      WHERE id=? AND tenant_id=? AND status='prepared' AND arrival_used_at IS NULL
+        AND arrival_code_hash=? AND julianday(arrival_expires_at)>julianday('now')
+        AND (locked_until IS NULL OR julianday(locked_until)<=julianday('now'))`).bind(securityId, tenantId, expectedHash);
+  } else if (purpose === 'END') {
+    statement = env.DB.prepare(`UPDATE mission_security
+      SET end_used_at=CURRENT_TIMESTAMP,ended_at=CURRENT_TIMESTAMP,status='completed',updated_at=CURRENT_TIMESTAMP
+      WHERE id=? AND tenant_id=? AND status='in_progress' AND end_used_at IS NULL
+        AND end_code_hash=? AND julianday(end_expires_at)>julianday('now')
+        AND (locked_until IS NULL OR julianday(locked_until)<=julianday('now'))`).bind(securityId, tenantId, expectedHash);
+  } else {
+    return false;
+  }
+  const result = await statement.run();
+  return Number(result?.meta?.changes || 0) === 1;
+}
+
 async function securityVerifyCode(request, env) {
   const auth = await getSessionUser(request, env);
   if (!requireRole(auth, ['intervenant'])) return json({ok:false,error:auth?.user?'FORBIDDEN':'UNAUTHENTICATED',version:VERSION}, auth?.user?403:401);
