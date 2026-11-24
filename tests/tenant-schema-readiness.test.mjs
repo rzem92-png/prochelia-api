@@ -70,7 +70,7 @@ test("finance workspace remains tenant-resolved and its schema checker is read-o
   const auth = bodyOf("financeAuth", "financeMoney");
   assert.match(auth, /resolveTenantContext\(request,env,auth\)/);
   assert.match(auth, /tenantContext\.tenant\.id/);
-  const schema = bodyOf("ensureFinanceWorkspaceSchema", "financeRoleAllowed");
+  const schema = bodyOf("assertFinanceWorkspaceTenantSchema", "financeRoleAllowed");
   assert.match(schema, /tenant_id/);
   assert.doesNotMatch(schema, /CREATE TABLE|ALTER TABLE|CREATE INDEX|\.run\(/);
   const rows = bodyOf("financeRowsForUser", "financeSummaryFromRows");
