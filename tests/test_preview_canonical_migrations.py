@@ -1330,18 +1330,50 @@ for dispute_id in ("finance-dispute-legacy-client-mismatch", "finance-dispute-le
     except sqlite3.IntegrityError as exc:
         assert "PAYMENT_DISPUTE_TRANSACTION_TENANT_MISMATCH" in str(exc), str(exc)
 
-# A webhook inbox event may be tenant-bound once after verification, but neither
-# that attribution nor its provider/event identity can subsequently be cleared or changed.
+# A signed webhook inbox event remains globally keyed until it is matched
+# to a transaction. Tenant attribution and the matched transaction are atomic.
+db.execute("""
+    INSERT INTO payment_webhook_events(id,provider,event_id,event_type)
+    VALUES ('finance-webhook-unmatched','sandbox','evt-unmatched','payment_succeeded')
+""")
+try:
+    db.execute("""
+        UPDATE payment_webhook_events SET tenant_id='market-tenant-a'
+        WHERE id='finance-webhook-unmatched'
+    """)
+    raise AssertionError("Webhook was tenant-bound without a matched transaction")
+except sqlite3.IntegrityError as exc:
+    assert "PAYMENT_WEBHOOK_TENANT_MISMATCH" in str(exc), str(exc)
+
 db.execute("""
     INSERT INTO payment_webhook_events(id,provider,event_id,event_type)
     VALUES ('finance-webhook-a','sandbox','evt-finance-a','payment_succeeded')
 """)
 db.execute("""
-    UPDATE payment_webhook_events SET tenant_id='market-tenant-a'
-    WHERE id='finance-webhook-a'
+    UPDATE payment_webhook_events
+       SET tenant_id='market-tenant-a',matched_transaction_id='finance-tx-a'
+     WHERE id='finance-webhook-a'
 """)
+db.execute("""
+    INSERT INTO payment_webhook_events(id,provider,event_id,event_type)
+    VALUES ('finance-webhook-cross','sandbox','evt-cross','payment_succeeded')
+""")
+try:
+    db.execute("""
+        UPDATE payment_webhook_events
+           SET tenant_id='tenant-b',matched_transaction_id='finance-tx-a'
+         WHERE id='finance-webhook-cross'
+    """)
+    raise AssertionError("Webhook was attributed to a tenant different from its matched transaction")
+except sqlite3.IntegrityError as exc:
+    assert "PAYMENT_WEBHOOK_TENANT_MISMATCH" in str(exc), str(exc)
+
 for sql, expected in [
     ("UPDATE payment_webhook_events SET tenant_id=NULL WHERE id='finance-webhook-a'",
+     "PAYMENT_WEBHOOK_TENANT_IMMUTABLE"),
+    ("UPDATE payment_webhook_events SET tenant_id='tenant-b' WHERE id='finance-webhook-a'",
+     "PAYMENT_WEBHOOK_TENANT_IMMUTABLE"),
+    ("UPDATE payment_webhook_events SET matched_transaction_id=NULL WHERE id='finance-webhook-a'",
      "PAYMENT_WEBHOOK_TENANT_IMMUTABLE"),
     ("UPDATE payment_webhook_events SET provider='other_psp' WHERE id='finance-webhook-a'",
      "PAYMENT_WEBHOOK_IDENTITY_IMMUTABLE"),
@@ -1356,11 +1388,33 @@ for sql, expected in [
     except sqlite3.IntegrityError as exc:
         assert expected in str(exc), str(exc)
 
-# Financial audit is append-only.
+# Financial audit is tenant-bound on INSERT and append-only afterwards.
 db.execute("""
-    INSERT INTO payment_audit(id,event_type,user_id,result,tenant_id)
-    VALUES ('finance-audit-a','FINANCE_TEST','finance-user-a','OK','tenant-a')
+    INSERT INTO payment_audit(
+      id,event_type,transaction_id,payout_id,mission_id,user_id,result,metadata_json,tenant_id
+    ) VALUES (
+      'finance-audit-a','FINANCE_TEST','finance-tx-a','finance-payout-a',
+      'market-mission-opportunity','finance-user-a','OK','{}','market-tenant-a'
+    )
 """)
+for sql in [
+    """INSERT INTO payment_audit(id,event_type,result,tenant_id)
+       VALUES ('finance-audit-no-tenant','FINANCE_TEST','OK',NULL)""",
+    """INSERT INTO payment_audit(id,event_type,user_id,result,tenant_id)
+       VALUES ('finance-audit-wrong-user','FINANCE_TEST','user-a','OK','market-tenant-a')""",
+    """INSERT INTO payment_audit(id,event_type,transaction_id,result,tenant_id)
+       VALUES ('finance-audit-wrong-transaction','FINANCE_TEST','finance-tx-a','OK','tenant-b')""",
+    """INSERT INTO payment_audit(id,event_type,payout_id,result,tenant_id)
+       VALUES ('finance-audit-wrong-payout','FINANCE_TEST','finance-payout-a','OK','tenant-b')""",
+    """INSERT INTO payment_audit(id,event_type,mission_id,result,tenant_id)
+       VALUES ('finance-audit-wrong-mission','FINANCE_TEST','market-mission-opportunity','OK','tenant-b')""",
+]:
+    try:
+        db.execute(sql)
+        raise AssertionError(f"Cross-tenant or unscoped financial audit insert was accepted: {sql}")
+    except sqlite3.IntegrityError as exc:
+        assert "PAYMENT_AUDIT_TENANT_MISMATCH" in str(exc), str(exc)
+
 for sql in [
     "UPDATE payment_audit SET result='TAMPERED' WHERE id='finance-audit-a'",
     "DELETE FROM payment_audit WHERE id='finance-audit-a'",
