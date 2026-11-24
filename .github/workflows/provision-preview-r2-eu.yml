@@ -103,7 +103,7 @@ jobs:
           ' "$RUNNER_TEMP/r2-lock-before.json" >/dev/null; then
             echo "PASS: an enabled retention rule already protects the exact Preview backup prefix."
           else
-            conflicts="$(jq --arg prefix "$prefix" '[.result.rules[]? | select(.prefix == $prefix)] | length' "$RUNNER_TEMP/r2-lock-before.json")"
+            conflicts="$(jq --arg prefix "$prefix" --arg id "$rule_id" '[.result.rules[]? | select(.prefix == $prefix or .id == $id)] | length' "$RUNNER_TEMP/r2-lock-before.json")"
             test "$conflicts" = "0" || {
               echo "::error::A conflicting rule already exists for the Preview prefix; manual retention-policy review is required."
               exit 1
