@@ -112,3 +112,9 @@ test("legacy cross-tenant operational writes stay fail-closed until tenant-aware
     assert.match(bodyOf(name), /legacyTenantScopeBlocked\(\)/);
   }
 });
+
+test("global project phase changes remain blocked until platform-owner approval and audit scope exist", () => {
+  const body = bodyOf("setPhase");
+  assert.match(body, /legacyTenantScopeBlocked\\(\\)/);
+  assert.doesNotMatch(body, /INSERT INTO platform_settings|\.run\\(/);
+});
