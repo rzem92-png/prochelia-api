@@ -1131,7 +1131,7 @@ financial_tenant_triggers = {
     "trg_payout_request_identity_immutable",
     "trg_payment_dispute_identity_immutable",
     "trg_payment_reconciliation_identity_immutable",
-    "trg_payment_webhook_tenant_immutable",
+    "trg_payment_webhook_tenant_binding_immutable",
     "trg_payment_webhook_identity_immutable",
     "trg_payment_audit_no_update",
     "trg_payment_audit_no_delete",
