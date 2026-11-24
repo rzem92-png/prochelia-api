@@ -17,16 +17,22 @@ concurrency:
 
 jobs:
   provision-preview-r2-eu:
+    if: >-
+      github.actor == 'rzem92-png' &&
+      github.ref == 'refs/heads/ops/provision-preview-r2-eu-jurisdiction-2026-11-16' &&
+      inputs.confirmation == 'CREATE_PREVIEW_R2_EU_ONLY'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - name: Enforce exact branch and Preview-only confirmation
         env:
           REQUESTED_REF: ${{ github.ref }}
+          REQUESTED_ACTOR: ${{ github.actor }}
           CONFIRMATION: ${{ inputs.confirmation }}
         run: |
           set -euo pipefail
           test "$REQUESTED_REF" = "refs/heads/ops/provision-preview-r2-eu-jurisdiction-2026-11-16"
+          test "$REQUESTED_ACTOR" = "rzem92-png"
           test "$CONFIRMATION" = "CREATE_PREVIEW_R2_EU_ONLY"
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:

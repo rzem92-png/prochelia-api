@@ -10,6 +10,9 @@ test("R2 provisioning is manually gated to its dedicated branch and exact Previe
   assert.match(workflow, /workflow_dispatch:/);
   assert.match(workflow, /refs\/heads\/ops\/provision-preview-r2-eu-jurisdiction-2026-11-16/);
   assert.match(workflow, /CREATE_PREVIEW_R2_EU_ONLY/);
+  assert.match(workflow, /github\.actor == 'rzem92-png'/);
+  assert.match(workflow, /REQUESTED_ACTOR: \$\{\{ github\.actor \}\}/);
+  assert.match(workflow, /test "\$REQUESTED_ACTOR" = "rzem92-png"/);
   assert.match(workflow, /permissions:\s*\n\s+contents:\s+read/);
 });
 

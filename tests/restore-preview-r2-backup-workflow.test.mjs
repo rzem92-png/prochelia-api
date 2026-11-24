@@ -8,6 +8,8 @@ const backupWorkflow = await readFile(new URL("../.github/workflows/backup-previ
 test("Preview R2 restore is manually gated to main only", () => {
   assert.ok(workflow.includes("github.ref == 'refs/heads/main'"));
   assert.ok(workflow.includes("RESTORE_PREVIEW_R2_TO_ISOLATED_TEST_ONLY"));
+  assert.match(workflow, /github\.actor == 'rzem92-png'/);
+  assert.match(workflow, /test "\$GITHUB_ACTOR" = "rzem92-png"/);
 });
 
 test("Restore source is pinned to the new EU Preview D1 and matching R2 object prefix", () => {
