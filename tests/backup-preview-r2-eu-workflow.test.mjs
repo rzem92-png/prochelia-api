@@ -10,7 +10,9 @@ test("Preview R2 backup is owner-only and gated to the exact reviewed Preview br
   assert.ok(workflow.includes('test "$GITHUB_ACTOR" = "rzem92-png"'));
   assert.doesNotMatch(workflow, /refs\/heads\/main/);
   assert.match(workflow, /inputs\.confirm_preview_backup == 'BACKUP_PREVIEW_TO_R2_EU'/);
-  assert.match(workflow, /ref: 1fc258c9c8d25e5e7b89241504218bf102afbf27/);
+  assert.ok(workflow.includes("ref: ${{ github.sha }}"));
+  assert.doesNotMatch(workflow, /1fc258c9c8d25e5e7b89241504218bf102afbf27/);
+  assert.ok(workflow.includes("migration_source_sha: process.env.GITHUB_SHA"));
   assert.match(workflow, /clean="\\n"\.join/);
   assert.ok(workflow.includes("grep -Fq \"$EXPECTED_ACCOUNT_ID\""));
   assert.ok(workflow.includes("PASS: Wrangler authenticated to the expected Cloudflare account."));
