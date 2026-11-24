@@ -36,7 +36,7 @@ export async function readBoundedWebhookBody(request, maxBytes = 1_048_576) {
   }
   const declaredLength = request.headers.get('content-length');
   if (declaredLength !== null) {
-    if (!/^\\d+$/.test(declaredLength)) {
+    if (!/^\d+$/.test(declaredLength)) {
       return { ok: false, tooLarge: false, body: "" };
     }
     const length = Number(declaredLength);
