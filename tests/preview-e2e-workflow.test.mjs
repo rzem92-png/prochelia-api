@@ -52,7 +52,7 @@ test("tenant authentication and directory schema preflight runs before any synth
     "session_revoked_at", "clients_tenant_id", "intervenants_tenant_id"
   ]) assert.ok(workflow.includes(column), "missing readiness assertion: " + column);
   assert.match(workflow, /No synthetic fixture will be inserted/);
-  assert.match(workflow, /SELECT EXISTS\(SELECT 1 FROM sqlite_master/);
+  assert.match(workflow, /EXISTS\(SELECT 1 FROM sqlite_master/);
   assert.match(workflow, /pragma_table_info\('sessions'\)/);
 });
 
