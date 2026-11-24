@@ -15,7 +15,7 @@ on:
       - ".github/workflows/restore-production-backup-isolated-test.yml"
       - ".github/workflows/migration-sql-tests.yml"
   push:
-    branches: [main, fix/tenant-aware-payment-account-unique-2026-11-24]
+    branches: [main, fix/tenant-aware-payment-account-unique-2026-11-24, fix/consolidate-preview-migrations-0046-seed-2026-11-24]
     paths:
       - "migrations/**"
       - "migrations-preview-canonical/**"
