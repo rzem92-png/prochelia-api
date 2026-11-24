@@ -1104,6 +1104,7 @@ financial_tenant_triggers = {
     "trg_payment_dispute_identity_immutable",
     "trg_payment_reconciliation_identity_immutable",
     "trg_payment_webhook_tenant_immutable",
+    "trg_payment_webhook_identity_immutable",
     "trg_payment_audit_no_update",
     "trg_payment_audit_no_delete",
 }
@@ -1226,6 +1227,94 @@ try:
     raise AssertionError("Financial account tenant reassignment was incorrectly accepted")
 except sqlite3.IntegrityError as exc:
     assert "PAYMENT_ACCOUNT_TENANT_IMMUTABLE" in str(exc), str(exc)
+
+# Account ownership and PSP provider identity cannot be reassigned to another active
+# member of the same legal entity after the account has been created.
+db.execute("""
+    INSERT INTO users(id,role,email,first_name,last_name,password_hash)
+    VALUES ('finance-owner-alt','intervenant','finance-owner-alt@example.test',
+            'Finance','Alt','synthetic-test-hash')
+""")
+db.execute("""
+    INSERT INTO tenant_memberships(id,tenant_id,user_id,role,status,invited_by_user_id)
+    VALUES ('finance-membership-owner-alt','market-tenant-a','finance-owner-alt',
+            'MEMBER','INVITED','user-admin')
+""")
+db.execute("""
+    UPDATE tenant_memberships SET status='ACTIVE',accepted_at=CURRENT_TIMESTAMP
+    WHERE id='finance-membership-owner-alt'
+""")
+for sql, expected in [
+    ("UPDATE payment_accounts SET user_id='finance-owner-alt' WHERE id='finance-account-a'",
+     "PAYMENT_ACCOUNT_TENANT_IMMUTABLE"),
+    ("UPDATE payment_accounts SET provider='other_psp' WHERE id='finance-account-a'",
+     "PAYMENT_ACCOUNT_TENANT_IMMUTABLE"),
+]:
+    try:
+        db.execute(sql)
+        raise AssertionError(f"PSP account identity was mutable: {sql}")
+    except sqlite3.IntegrityError as exc:
+        assert expected in str(exc), str(exc)
+
+# The transaction's beneficiary and dispute parties are immutable even when the
+# original value is NULL. Dispute insertions must match the source transaction exactly.
+try:
+    db.execute("UPDATE payment_transactions SET intervenant_id='market-worker-a-row' WHERE id='finance-tx-a'")
+    raise AssertionError("Payment transaction beneficiary was mutable")
+except sqlite3.IntegrityError as exc:
+    assert "PAYMENT_TRANSACTION_IDENTITY_IMMUTABLE" in str(exc), str(exc)
+
+for sql in [
+    "UPDATE payment_disputes SET client_id=NULL WHERE id='finance-dispute-a'",
+    "UPDATE payment_disputes SET intervenant_id='market-worker-a-row' WHERE id='finance-dispute-a'",
+]:
+    try:
+        db.execute(sql)
+        raise AssertionError(f"Payment dispute parties were mutable: {sql}")
+    except sqlite3.IntegrityError as exc:
+        assert "PAYMENT_DISPUTE_IDENTITY_IMMUTABLE" in str(exc), str(exc)
+
+for sql in [
+    """INSERT INTO payment_disputes(
+         id,mission_id,transaction_id,client_id,intervenant_id,reason,amount_cents,tenant_id
+       ) VALUES ('finance-dispute-client-mismatch','market-mission-opportunity','finance-tx-a',
+         'market-client-b-row',NULL,'mismatched client',1000,'market-tenant-a')""",
+    """INSERT INTO payment_disputes(
+         id,mission_id,transaction_id,client_id,intervenant_id,reason,amount_cents,tenant_id
+       ) VALUES ('finance-dispute-provider-mismatch','market-mission-opportunity','finance-tx-a',
+         'market-client-a-row','market-worker-b-row','mismatched provider',1000,'market-tenant-a')""",
+]:
+    try:
+        db.execute(sql)
+        raise AssertionError(f"Dispute with mismatched source identities was accepted: {sql}")
+    except sqlite3.IntegrityError as exc:
+        assert "PAYMENT_DISPUTE_TRANSACTION_TENANT_MISMATCH" in str(exc), str(exc)
+
+# A webhook inbox event may be tenant-bound once after verification, but neither
+# that attribution nor its provider/event identity can subsequently be cleared or changed.
+db.execute("""
+    INSERT INTO payment_webhook_events(id,provider,event_id,event_type)
+    VALUES ('finance-webhook-a','sandbox','evt-finance-a','payment_succeeded')
+""")
+db.execute("""
+    UPDATE payment_webhook_events SET tenant_id='market-tenant-a'
+    WHERE id='finance-webhook-a'
+""")
+for sql, expected in [
+    ("UPDATE payment_webhook_events SET tenant_id=NULL WHERE id='finance-webhook-a'",
+     "PAYMENT_WEBHOOK_TENANT_IMMUTABLE"),
+    ("UPDATE payment_webhook_events SET provider='other_psp' WHERE id='finance-webhook-a'",
+     "PAYMENT_WEBHOOK_IDENTITY_IMMUTABLE"),
+    ("UPDATE payment_webhook_events SET event_id='evt-mutated' WHERE id='finance-webhook-a'",
+     "PAYMENT_WEBHOOK_IDENTITY_IMMUTABLE"),
+    ("UPDATE payment_webhook_events SET event_type='payment_failed' WHERE id='finance-webhook-a'",
+     "PAYMENT_WEBHOOK_IDENTITY_IMMUTABLE"),
+]:
+    try:
+        db.execute(sql)
+        raise AssertionError(f"Webhook identity was mutable: {sql}")
+    except sqlite3.IntegrityError as exc:
+        assert expected in str(exc), str(exc)
 
 # Financial audit is append-only.
 db.execute("""
