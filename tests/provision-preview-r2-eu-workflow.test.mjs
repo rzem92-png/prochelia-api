@@ -3,16 +3,24 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
 const workflow = await readFile(new URL("../.github/workflows/provision-preview-r2-eu.yml", import.meta.url), "utf8");
+const backupWorkflow = await readFile(new URL("../.github/workflows/backup-preview-d1-to-r2-eu.yml", import.meta.url), "utf8");
+const workerConfig = await readFile(new URL("../scripts/generate-preview-wrangler-config.mjs", import.meta.url), "utf8");
 
 test("R2 provisioning is manually gated to its dedicated branch and exact Preview-only confirmation", () => {
   assert.match(workflow, /workflow_dispatch:/);
-  assert.match(workflow, /refs\/heads\/ops\/provision-preview-r2-eu-jurisdiction-2026-11-16/);
+  assert.match(workflow, /github\.actor == 'rzem92-png'/);
+  assert.match(workflow, /github\.triggering_actor == 'rzem92-png'/);
+  assert.match(workflow, /REQUESTED_TRIGGERING_ACTOR:.*github\.triggering_actor/);
+  assert.match(workflow, /REQUESTED_TRIGGERING_ACTOR.*rzem92-png/);
+  assert.match(workflow, /refs\/heads\/fix\/align-preview-r2-provisioning-2026-11-23/);
+  assert.match(workflow, /REQUESTED_ACTOR:.*github\.actor/);
+  assert.match(workflow, /test "\$REQUESTED_ACTOR" = "rzem92-png"/);
   assert.match(workflow, /CREATE_PREVIEW_R2_EU_ONLY/);
   assert.match(workflow, /permissions:\s*\n\s+contents:\s+read/);
 });
 
 test("R2 provisioning creates a new bucket with explicit EU jurisdiction and verifies Cloudflare response", () => {
-  assert.match(workflow, /prochelia-preview-backups-eu-locked/);
+  assert.match(workflow, /prochelia-preview-backups-eu-v2/);
   assert.match(workflow, /r2 bucket create "\$BUCKET" --jurisdiction eu(?! --location)/);
   assert.match(workflow, /cf-r2-jurisdiction: eu/);
   assert.match(workflow, /\.result\.jurisdiction == "eu"/);
@@ -29,4 +37,25 @@ test("R2 provisioning never deploys, migrates, or changes Production", () => {
 test("Third-party GitHub actions are pinned to immutable commit SHAs", () => {
   assert.match(workflow, /actions\/checkout@[0-9a-f]{40}/);
   assert.match(workflow, /actions\/setup-node@[0-9a-f]{40}/);
+});
+
+test("Provisioning, signed backup and Worker Preview binding use the same EU bucket", () => {
+  const bucket = "prochelia-preview-backups-eu-v2";
+  assert.ok(workflow.includes(`BUCKET="${bucket}"`));
+  assert.ok(backupWorkflow.includes(`R2_BUCKET: ${bucket}`));
+  assert.ok(workerConfig.includes(`bucket_name: "${bucket}"`));
+});
+
+test("R2 provisioning configures and verifies an EU lock for the exact Preview backup prefix", () => {
+  assert.match(workflow, /R2_EXPECTED_RETENTION_SECONDS:.*vars\.R2_EXPECTED_RETENTION_SECONDS/);
+  assert.match(workflow, /cf-r2-jurisdiction: eu/);
+  assert.match(workflow, /r2\/buckets\/\$bucket\/lock/);
+  assert.match(workflow, /-X PUT/);
+  assert.match(workflow, /preview-d1\/prochelia-preview-eu-2026-11-17\//);
+  assert.match(workflow, /condition: \{type: "Age", maxAgeSeconds: \$retention\}/);
+  assert.match(workflow, /conflicting rule already exists/);
+  assert.match(workflow, /\.result\.rules \/\/ \[\]/);
+  assert.match(workflow, /\.prefix == \$prefix or \.id == \$id/);
+  assert.match(workflow, /exact Preview backup prefix has the approved EU R2 retention lock/);
+  assert.doesNotMatch(workflow, /-X DELETE/);
 });

@@ -17,16 +17,21 @@ concurrency:
 
 jobs:
   provision-preview-r2-eu:
+    if: ${{ github.ref == 'refs/heads/fix/align-preview-r2-provisioning-2026-11-23' && github.actor == 'rzem92-png' && github.triggering_actor == 'rzem92-png' && inputs.confirmation == 'CREATE_PREVIEW_R2_EU_ONLY' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - name: Enforce exact branch and Preview-only confirmation
         env:
           REQUESTED_REF: ${{ github.ref }}
+          REQUESTED_ACTOR: ${{ github.actor }}
+          REQUESTED_TRIGGERING_ACTOR: ${{ github.triggering_actor }}
           CONFIRMATION: ${{ inputs.confirmation }}
         run: |
           set -euo pipefail
-          test "$REQUESTED_REF" = "refs/heads/ops/provision-preview-r2-eu-jurisdiction-2026-11-16"
+          test "$REQUESTED_REF" = "refs/heads/fix/align-preview-r2-provisioning-2026-11-23"
+          test "$REQUESTED_ACTOR" = "rzem92-png" || { echo "::error::Only the repository owner may provision the Preview R2 bucket."; exit 1; }
+          test "$REQUESTED_TRIGGERING_ACTOR" = "rzem92-png" || { echo "::error::Only the repository owner may rerun Preview R2 provisioning."; exit 1; }
           test "$CONFIRMATION" = "CREATE_PREVIEW_R2_EU_ONLY"
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -53,7 +58,7 @@ jobs:
         run: |
           set -euo pipefail
           export CLOUDFLARE_API_TOKEN="${CLOUDFLARE_API_TOKEN#Bearer }"
-          BUCKET="prochelia-preview-backups-eu-locked"
+          BUCKET="prochelia-preview-backups-eu-v2"
           # Never reuse or relabel the existing default-jurisdiction bucket.
           if npx --yes wrangler@4 r2 bucket info "$BUCKET" --jurisdiction eu --json > "$RUNNER_TEMP/existing.json" 2>/dev/null; then
             echo "The dedicated EU bucket already exists; skip creation and verify it."
@@ -64,7 +69,7 @@ jobs:
             "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/r2/buckets/$BUCKET" \
             -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -H "cf-r2-jurisdiction: eu")"
           test "$status" = "200"
-          jq -e '.success == true and .result.name == "prochelia-preview-backups-eu-locked" and .result.jurisdiction == "eu"' "$RUNNER_TEMP/bucket.json" >/dev/null
+          jq -e '.success == true and .result.name == "prochelia-preview-backups-eu-v2" and .result.jurisdiction == "eu"' "$RUNNER_TEMP/bucket.json" >/dev/null
           echo "Verified: new bucket jurisdiction is exactly eu."
           {
             echo "Created/verified Preview-only R2 bucket: $BUCKET."
@@ -72,3 +77,61 @@ jobs:
             echo "No existing bucket was renamed, deleted, rebound, or copied."
             echo "No Worker deployment, D1 migration, Production change, or customer-data transfer occurred."
           } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Configure and verify retention lock for the exact Preview backup prefix
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          R2_EXPECTED_RETENTION_SECONDS: ${{ vars.R2_EXPECTED_RETENTION_SECONDS }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "${R2_EXPECTED_RETENTION_SECONDS:-}" =~ ^[1-9][0-9]*$ ]] || {
+            echo "::error::R2_EXPECTED_RETENTION_SECONDS must be a positive integer approved by the data-retention owner."
+            exit 1
+          }
+          token="${CLOUDFLARE_API_TOKEN#Bearer }"
+          bucket="prochelia-preview-backups-eu-v2"
+          prefix="preview-d1/prochelia-preview-eu-2026-11-17/"
+          rule_id="prochelia-preview-d1-retention"
+          url="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/r2/buckets/$bucket/lock"
+          status="$(curl --silent --show-error --output "$RUNNER_TEMP/r2-lock-before.json" --write-out '%{http_code}' "$url" -H "Authorization: Bearer $token" -H 'cf-r2-jurisdiction: eu')"
+          test "$status" = "200" || { echo "::error::Unable to read existing EU R2 lock rules (HTTP $status)."; exit 1; }
+          jq -e '.success == true and (.result.rules | type == "array")' "$RUNNER_TEMP/r2-lock-before.json" >/dev/null
+          if jq -e --arg prefix "$prefix" --argjson retention "$R2_EXPECTED_RETENTION_SECONDS" '
+            any(.result.rules[]?;
+              .enabled == true and .prefix == $prefix and .condition.type == "Age" and
+              (.condition.maxAgeSeconds | type == "number") and .condition.maxAgeSeconds >= $retention
+            )
+          ' "$RUNNER_TEMP/r2-lock-before.json" >/dev/null; then
+            echo "PASS: an enabled retention rule already protects the exact Preview backup prefix."
+          else
+            conflicts="$(jq --arg prefix "$prefix" --arg id "$rule_id" '[.result.rules[]? | select(.prefix == $prefix or .id == $id)] | length' "$RUNNER_TEMP/r2-lock-before.json")"
+            test "$conflicts" = "0" || {
+              echo "::error::A conflicting rule already exists for the Preview prefix; manual retention-policy review is required."
+              exit 1
+            }
+            jq --arg id "$rule_id" --arg prefix "$prefix" --argjson retention "$R2_EXPECTED_RETENTION_SECONDS" '
+              {rules: ((.result.rules // []) + [{
+                id: $id,
+                enabled: true,
+                prefix: $prefix,
+                condition: {type: "Age", maxAgeSeconds: $retention}
+              }])}
+            ' "$RUNNER_TEMP/r2-lock-before.json" > "$RUNNER_TEMP/r2-lock-update.json"
+            status="$(curl --silent --show-error --output "$RUNNER_TEMP/r2-lock-update-response.json" --write-out '%{http_code}' -X PUT "$url" -H "Authorization: Bearer $token" -H 'cf-r2-jurisdiction: eu' -H 'Content-Type: application/json' --data-binary @"$RUNNER_TEMP/r2-lock-update.json")"
+            test "$status" = "200" || { echo "::error::Unable to set the Preview R2 retention lock (HTTP $status)."; exit 1; }
+            jq -e '.success == true' "$RUNNER_TEMP/r2-lock-update-response.json" >/dev/null
+          fi
+          status="$(curl --silent --show-error --output "$RUNNER_TEMP/r2-lock-after.json" --write-out '%{http_code}' "$url" -H "Authorization: Bearer $token" -H 'cf-r2-jurisdiction: eu')"
+          test "$status" = "200" || { echo "::error::Unable to verify the EU R2 retention lock after configuration (HTTP $status)."; exit 1; }
+          jq -e --arg prefix "$prefix" --argjson retention "$R2_EXPECTED_RETENTION_SECONDS" '
+            .success == true and any(.result.rules[]?;
+              .enabled == true and .prefix == $prefix and .condition.type == "Age" and
+              (.condition.maxAgeSeconds | type == "number") and .condition.maxAgeSeconds >= $retention
+            )
+          ' "$RUNNER_TEMP/r2-lock-after.json" >/dev/null || {
+            echo "::error::The exact Preview backup prefix does not have the approved enabled retention lock."
+            exit 1
+          }
+          echo "PASS: exact Preview backup prefix has the approved EU R2 retention lock."
