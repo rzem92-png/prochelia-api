@@ -88,7 +88,6 @@ test("EU R2 binding requires the owner-confirmed manual workflow context", () =>
 test("EU R2 binding is refused unless the workflow verifies the exact retention rule", () => {
   const { result, preview } = runGenerator((value) => value, {
     PROCHELIA_PREVIEW_R2_VERIFIED_BY_WORKFLOW: "true",
-    PROCHELIA_PREVIEW_R2_RETENTION_VERIFIED_BY_WORKFLOW: "true",
     PROCHELIA_PREVIEW_DEPLOY_CONFIRMATION: "DEPLOY_PREVIEW_ONLY",
     GITHUB_ACTIONS: "true",
     GITHUB_EVENT_NAME: "workflow_dispatch",
