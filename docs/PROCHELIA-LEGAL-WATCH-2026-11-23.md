@@ -336,3 +336,26 @@ Contrôle en lecture seule des métadonnées Cloudflare (ne constitue pas un avi
 **Action bloquante avant lancement France** : faire confirmer par Cloudflare et un juriste/DPO la juridiction contractuelle et technique des données Production, des sauvegardes et des journaux ; décider d'une éventuelle migration vers des ressources explicitement EU-jurisdiction ; exiger une preuve de sauvegarde et de restauration indépendante avant toute migration. Ne pas requalifier rétroactivement les ressources `default` comme EU.
 
 Aucune configuration, donnée, migration, sauvegarde ou ressource Production n'a été modifiée pendant ce contrôle.
+
+
+### Précisions d'échéances — facturation électronique et AI Act (24 novembre 2026)
+
+**Facturation électronique française :**
+- Depuis le **1er septembre 2026**, toutes les entreprises doivent pouvoir recevoir des factures électroniques ; les grandes entreprises et ETI doivent également pouvoir en émettre.
+- À compter du **1er septembre 2027**, les PME devront également émettre et recevoir des factures électroniques.
+- Les factures peuvent contenir des données personnelles de dirigeants, indépendants ou salariés ; appliquer la minimisation, éviter les détails sensibles et préférer des références de dossier. La CNIL rappelle aussi le rôle du responsable de traitement, le contrat de sous-traitance de la plateforme agréée et la conservation comptable de dix ans.
+- PROCHÉLIA doit déterminer si elle est simple solution compatible, sous-traitant, responsable de traitement ou, si elle sollicite un agrément, plateforme agréée. Aucun agrément n'est présumé.
+
+**AI Act — échéances exactes à distinguer :**
+- L'article 50 s'applique depuis le **2 août 2026** : information des personnes qui interagissent directement avec un système d'IA ; marquage machine-readable de certains contenus générés/manipulés ; information sur les deepfakes et certains textes d'intérêt public sans revue humaine.
+- Une transition ciblée jusqu'au **2 décembre 2026** concerne uniquement l'obligation de marquage/détection de l'article 50(2) pour les systèmes génératifs mis sur le marché avant le 2 août 2026. Elle ne reporte pas l'information due aux personnes qui interagissent avec un chatbot.
+- Les nouvelles interdictions de l'article 5 visées par le règlement 2026/1744 entrent en application le **2 décembre 2026**.
+- Les exigences applicables aux systèmes à haut risque de l'annexe III sont reportées au **2 décembre 2027** ; celles de l'annexe I au **2 août 2028**.
+
+Pour Nexus Supra, l'information visible « vous interagissez avec une IA » doit être intégrée dès maintenant. Pour Nexus Talent, toute fonction de classement, filtrage, évaluation ou recommandation de candidats doit faire l'objet d'une qualification documentée selon sa finalité et son effet réel ; si elle relève de l'emploi/du recrutement, préparer les obligations de système à haut risque et maintenir une décision humaine réelle, traçable et contestable. Les échéances différées ne dispensent pas des obligations déjà applicables.
+
+Sources officielles complémentaires :
+- CNIL, facturation électronique (10 septembre 2026) : https://www.cnil.fr/fr/facturation-electronique-quels-enjeux
+- Commission européenne, transparence AI Act article 50 : https://digital-strategy.ec.europa.eu/en/faqs/transparency-obligations-under-article-50-ai-act
+- Règlement (UE) 2026/1744, AI Omnibus : https://eur-lex.europa.eu/eli/reg/2026/1744/oj/eng
+- Règlement (UE) 2024/1689, version consolidée du 27 juillet 2026 : https://eur-lex.europa.eu/eli/reg/2024/1689/2026-07-27/eng
