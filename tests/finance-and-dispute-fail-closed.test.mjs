@@ -15,7 +15,7 @@ test("opening a payment dispute refuses before schema setup or financial state c
   const body = handler("openPaymentDispute");
   const guard = body.indexOf("if (!paymentsConfigured(env))");
   assert.ok(guard >= 0);
-  const schema = body.indexOf("ensurePaymentSchema(env)");
+  const schema = body.indexOf("schemaColumnsReadinessResponse(env");
   assert.ok(schema > guard);
   assert.match(body.slice(guard, schema), /PAYMENT_PROVIDER_NOT_CONFIGURED/);
   assert.match(body.slice(guard, schema), /write_enabled:false/);
@@ -39,7 +39,7 @@ test("finance summary GET does not run the legacy consolidated schema initialize
 
 
 test("finance workspace refuses legacy unscoped tables and derives every read from the active tenant", () => {
-  const schemaStart = source.indexOf("async function ensureFinanceWorkspaceSchema(env) {");
+  const schemaStart = source.indexOf("async function assertFinanceWorkspaceTenantSchema(env) {");
   const schemaEnd = source.indexOf("function financeRoleAllowed", schemaStart);
   assert.ok(schemaStart >= 0 && schemaEnd > schemaStart);
   const schema = source.slice(schemaStart, schemaEnd);

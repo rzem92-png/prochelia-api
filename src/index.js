@@ -120,6 +120,12 @@ async function sha256Base64url(value) {
   return base64url(new Uint8Array(digest));
 }
 
+async function sha256Hex(value) {
+  const data = new TextEncoder().encode(String(value));
+  const digest = await crypto.subtle.digest('SHA-256', data);
+  return [...new Uint8Array(digest)].map(byte => byte.toString(16).padStart(2, '0')).join('');
+}
+
 async function hmacSha256Base64url(secret, value) {
   if (typeof secret !== 'string' || !secret) throw new Error('HMAC_SECRET_REQUIRED');
   const key = await crypto.subtle.importKey(
@@ -892,7 +898,7 @@ async function paymentOnboard(request, env) {
   if (!paymentsConfigured(env)) return json({ok:false,error:'PAYMENT_PROVIDER_NOT_CONFIGURED',version:VERSION,write_enabled:false},503);
   const tenantContext = await resolveTenantContext(request, env, auth);
   if (!tenantContext.ok) return json({ok:false,error:tenantContext.error,version:VERSION},tenantContext.status);
-  await ensurePaymentSchema(env);
+  const schemaGate = await schemaColumnsReadinessResponse(env, {payment_accounts:['tenant_id'],wallets:['tenant_id'],payment_audit:['tenant_id']}, 'PAYMENT_SCHEMA_NOT_READY'); if (schemaGate) return schemaGate;
   const body = await readJson(request);
   const provider = paymentProvider(env);
   const accountId = clean(body?.provider_account_id) || null;
@@ -934,7 +940,7 @@ async function createMissionPayment(request, env) {
   if (!paymentsConfigured(env)) return json({ok:false,error:'PAYMENT_PROVIDER_NOT_CONFIGURED',version:VERSION,write_enabled:false},503);
   const tenantContext=await resolveTenantContext(request,env,auth);
   if(!tenantContext.ok) return json({ok:false,error:tenantContext.error,version:VERSION},tenantContext.status);
-  await ensurePaymentSchema(env);
+  const schemaGate = await schemaColumnsReadinessResponse(env, {payment_transactions:['tenant_id'],payment_audit:['tenant_id']}, 'PAYMENT_SCHEMA_NOT_READY'); if (schemaGate) return schemaGate;
   const body=await readJson(request);
   const missionId=clean(body?.mission_id), clientId=clean(body?.client_id), intervenantId=clean(body?.intervenant_id);
   const gross=moneyCents(body?.gross_eur), commission=moneyCents(body?.commission_eur);
@@ -1003,7 +1009,7 @@ async function payoutRequest(request, env) {
   if (!paymentsConfigured(env)) return json({ok:false,error:'PAYOUT_PROVIDER_NOT_CONFIGURED',version:VERSION,write_enabled:false},503);
   const tenantContext=await resolveTenantContext(request,env,auth);
   if(!tenantContext.ok) return json({ok:false,error:tenantContext.error,version:VERSION},tenantContext.status);
-  await ensurePaymentSchema(env);
+  const schemaGate = await schemaColumnsReadinessResponse(env, {payout_requests:['tenant_id'],payment_accounts:['tenant_id'],wallets:['tenant_id'],payment_wallet_ledger:['tenant_id'],payment_audit:['tenant_id']}, 'PAYMENT_SCHEMA_NOT_READY'); if (schemaGate) return schemaGate;
   const tenantId=tenantContext.tenant.id, body=await readJson(request);
   const amount=moneyCents(body?.amount_eur), mode=clean(body?.mode)||'standard';
   const idem=clean(request.headers.get('idempotency-key'))||clean(body?.idempotency_key);
@@ -1179,7 +1185,7 @@ async function openPaymentDispute(request, env) {
   if (!paymentsConfigured(env)) return json({ok:false,error:'PAYMENT_PROVIDER_NOT_CONFIGURED',version:VERSION,write_enabled:false},503);
   const tenantContext=await resolveTenantContext(request,env,auth);
   if(!tenantContext.ok) return json({ok:false,error:tenantContext.error,version:VERSION},tenantContext.status);
-  await ensurePaymentSchema(env);
+  const schemaGate = await schemaColumnsReadinessResponse(env, {payment_transactions:['tenant_id'],payment_disputes:['tenant_id'],payment_audit:['tenant_id']}, 'PAYMENT_SCHEMA_NOT_READY'); if (schemaGate) return schemaGate;
   const body=await readJson(request), missionId=clean(body?.mission_id), reason=clean(body?.reason), amount=moneyCents(body?.amount_eur);
   if(!missionId||!reason||reason.length>1000||amount===null) return json({ok:false,error:'INVALID_DISPUTE',version:VERSION},400);
   const tenantId=tenantContext.tenant.id;
@@ -1732,7 +1738,7 @@ async function executeCaseBusinessAction(env, c, rec, actorId=null, automatic=fa
 async function processActionOutbox(request, env) {
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
   return legacyTenantScopeBlocked();
-  await ensureOperationalSchema(env);
+  const schemaGate = await schemaReadinessResponse(env, ['action_outbox','copilot_briefings','loyalty_events','loyalty_balances','quality_events','b2b_leads','capacity_snapshots','finance_forecasts','system_checks'], 'OPERATIONAL_SCHEMA_NOT_READY'); if (schemaGate) return schemaGate;
   const rows=await env.DB.prepare(`SELECT * FROM action_outbox WHERE status='PENDING' ORDER BY created_at ASC LIMIT 50`).all();
   const processed=[];
   for(const row of (rows.results||[])) {
@@ -1967,11 +1973,11 @@ async function complaintCreate(request, env) {
 }
 
 async function setPhase(request, env) {
-  const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
-  const b=await readJson(request)||{};const phase=String(b.phase||'').toUpperCase();if(!PROJECT_PHASES[phase])return json({ok:false,error:'INVALID_PHASE',allowed:Object.keys(PROJECT_PHASES),version:VERSION},400);
-  await env.DB.prepare(`INSERT INTO platform_settings(key,value_json,updated_at) VALUES('project_phase',?,CURRENT_TIMESTAMP) ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json,updated_at=CURRENT_TIMESTAMP`).bind(JSON.stringify(phase)).run();
-  await journal(env,'gerante',gate.auth.user.id,'PHASE_CHANGED','platform','project', 'OK',{phase});
-  return json({ok:true,version:VERSION,phase,policy:PROJECT_PHASES[phase]},200);
+  const gate = await requireAuthRole(request, env, ['gerante']);
+  if (gate.error) return gate.error;
+  // Project phase is a platform-wide automation control, not a tenant setting.
+  // Keep it blocked until a dedicated platform-owner approval and audit boundary exists.
+  return legacyTenantScopeBlocked();
 }
 
 async function consolidatedInfo(env) {
@@ -1983,7 +1989,8 @@ async function handleConsolidated(request, env) {
   const url=new URL(request.url);
   const consolidatedPath = ['/api/consolidated/info','/api/ops/dashboard','/api/journal','/api/cases','/api/cases/approve','/api/metiers','/api/metiers/suggest','/api/complaints','/api/settings/phase'].includes(url.pathname);
   if (consolidatedPath) {
-    try { await ensureConsolidatedSchema(env); } catch (e) { return json({ok:false,error:'CONSOLIDATED_SCHEMA_ERROR',version:VERSION,message:e.message},500); }
+    const schemaGate = await schemaReadinessResponse(env, ['platform_settings','business_profiles','métier_catalog','metier_suggestions','pricing_policies','pricing_quotes','operational_cases','case_actions','copilot_log','activity_journal','commercial_tasks','recruitment_tasks','complaints','accounting_ledger','business_expenses','notification_outbox','compliance_events'], 'CONSOLIDATED_SCHEMA_NOT_READY');
+    if (schemaGate) return schemaGate;
   }
   if(url.pathname==='/api/consolidated/info' && request.method==='GET') return consolidatedInfo(env);
   if(url.pathname==='/api/ops/dashboard' && request.method==='GET') return getOperationsDashboard(request,env);
@@ -2154,7 +2161,7 @@ function promotionCandidate(input) {
 async function recommendPromotions(request, env) {
   const gate = await requireAuthRole(request, env, ['gerante']);
   if (gate.error) return gate.error;
-  await ensureStrategicSchema(env);
+  const schemaGate = await schemaReadinessResponse(env, ['promotions','promotion_recommendations','commercial_events','market_signals','client_value_scores','strategic_alerts'], 'STRATEGIC_SCHEMA_NOT_READY'); if (schemaGate) return schemaGate;
 
   const b = await readJson(request) || {};
   const phase = String(b.phase || await getSetting(env, 'project_phase', 'TEST')).toUpperCase();
@@ -2254,7 +2261,7 @@ async function createPromotion(request, env) {
   const gate = await requireAuthRole(request, env, ['gerante']);
   if (gate.error) return gate.error;
   return legacyTenantScopeBlocked();
-  await ensureStrategicSchema(env);
+  const schemaGate = await schemaReadinessResponse(env, ['promotions','promotion_recommendations','commercial_events','market_signals','client_value_scores','strategic_alerts'], 'STRATEGIC_SCHEMA_NOT_READY'); if (schemaGate) return schemaGate;
 
   const b = await readJson(request) || {};
   const code = clean(b.code);
@@ -2300,7 +2307,7 @@ async function promotionList(request, env) {
   const gate = await requireAuthRole(request, env, ['gerante','entreprise','client']);
   if (gate.error) return gate.error;
   return legacyTenantScopeBlocked();
-  await ensureStrategicSchema(env);
+  const schemaGate = await schemaReadinessResponse(env, ['promotions','promotion_recommendations','commercial_events','market_signals','client_value_scores','strategic_alerts'], 'STRATEGIC_SCHEMA_NOT_READY'); if (schemaGate) return schemaGate;
   const status = new URL(request.url).searchParams.get('status');
   const q = status
     ? 'SELECT * FROM promotions WHERE status=? ORDER BY created_at DESC LIMIT 200'
@@ -2313,7 +2320,7 @@ async function activatePromotion(request, env) {
   const gate = await requireAuthRole(request, env, ['gerante']);
   if (gate.error) return gate.error;
   return legacyTenantScopeBlocked();
-  await ensureStrategicSchema(env);
+  const schemaGate = await schemaReadinessResponse(env, ['promotions','promotion_recommendations','commercial_events','market_signals','client_value_scores','strategic_alerts'], 'STRATEGIC_SCHEMA_NOT_READY'); if (schemaGate) return schemaGate;
   const b = await readJson(request) || {};
   if (!b.promotion_id) return json({ok:false,error:'PROMOTION_ID_REQUIRED',version:VERSION},400);
 
@@ -2333,7 +2340,7 @@ async function strategicDashboard(request, env) {
   const gate = await requireAuthRole(request, env, ['gerante']);
   if (gate.error) return gate.error;
   return legacyTenantScopeBlocked();
-  await ensureStrategicSchema(env);
+  const schemaGate = await schemaReadinessResponse(env, ['promotions','promotion_recommendations','commercial_events','market_signals','client_value_scores','strategic_alerts'], 'STRATEGIC_SCHEMA_NOT_READY'); if (schemaGate) return schemaGate;
 
   const queries = {
     active_promotions: `SELECT COUNT(*) n FROM promotions WHERE status='ACTIVE'`,
@@ -2365,10 +2372,7 @@ async function handleStrategic(request, env) {
     '/api/strategic/dashboard'
   ];
 
-  if (strategicPaths.includes(url.pathname)) {
-    try { await ensureStrategicSchema(env); }
-    catch (e) { return json({ok:false,error:'STRATEGIC_SCHEMA_ERROR',version:VERSION,message:e.message},500); }
-  }
+
 
   if (url.pathname === '/api/strategic/promotions/recommend' && request.method === 'POST')
     return recommendPromotions(request, env);
@@ -2470,6 +2474,30 @@ async function tableColumns(env, table) {
   return (r.results||[]).map(x=>x.name);
 }
 
+async function missingRequiredTables(env, names) {
+  const missing = [];
+  for (const name of names) if (!(await tableExists(env, name))) missing.push(name);
+  return missing;
+}
+
+async function schemaReadinessResponse(env, names, error) {
+  const missing = await missingRequiredTables(env, names);
+  return missing.length ? json({ok:false,error,missing_tables:missing,version:VERSION},503) : null;
+}
+
+async function schemaColumnsReadinessResponse(env, requirements, error) {
+  const missing = [];
+  for (const [table, requiredColumns] of Object.entries(requirements)) {
+    const columns = await tableColumns(env, table);
+    if (!columns.length) missing.push({table,missing_table:true,missing_columns:[]});
+    else {
+      const absent = requiredColumns.filter(column => !columns.includes(column));
+      if (absent.length) missing.push({table,missing_table:false,missing_columns:absent});
+    }
+  }
+  return missing.length ? json({ok:false,error,missing_schema:missing,version:VERSION},503) : null;
+}
+
 async function dynamicUpdate(env, table, id, updates) {
   const cols = await tableColumns(env, table);
   if (!cols.includes('id')) return {ok:false,reason:'TABLE_OR_ID_UNAVAILABLE'};
@@ -2565,7 +2593,7 @@ async function executeQueuedAction(env, action, actorContext = {}) {
 async function operationalExecute(request, env) {
   const gate=await requireAuthRole(request,env,['gerante']);
   if(gate.error)return gate.error;
-  await ensureConsolidatedSchema(env); await ensureOperationalSchema(env);
+  const schemaGate = await schemaReadinessResponse(env, ['operational_cases','case_actions','action_outbox','activity_journal','platform_settings'], 'OPERATIONAL_SCHEMA_NOT_READY'); if (schemaGate) return schemaGate;
   const b=await readJson(request)||{};
   if(!b.case_id)return json({ok:false,error:'CASE_ID_REQUIRED',version:VERSION},400);
   const c=await env.DB.prepare('SELECT * FROM operational_cases WHERE id=? LIMIT 1').bind(b.case_id).first();
@@ -2621,93 +2649,31 @@ async function operationalExecute(request, env) {
 async function scoreClients(request, env) {
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
   return legacyTenantScopeBlocked();
-  await ensureStrategicSchema(env); await ensureOperationalSchema(env);
-  const rows=[];
-  if(await tableExists(env,'payment_transactions')){
-    const r=await env.DB.prepare(`SELECT client_id,COUNT(*) tx_count,COALESCE(SUM(gross_cents),0) gross,MAX(created_at) last_activity FROM payment_transactions WHERE client_id IS NOT NULL GROUP BY client_id LIMIT 1000`).all();
-    for(const x of (r.results||[])){
-      const gross=Number(x.gross||0), count=Number(x.tx_count||0);
-      const score=Math.min(100,Math.round(count*10+gross/10000));
-      const churn=Math.max(0,Math.min(100,100-score));
-      const segment=score>=70?'VIP':score>=40?'ACTIVE':'STANDARD';
-      const action=churn>=70?'REACTIVATE':score>=70?'FIDELIZE':'MAINTAIN';
-      const id=crypto.randomUUID();
-      await env.DB.prepare(`INSERT INTO client_value_scores(id,client_id,company_id,segment,score,churn_risk,lifetime_value_cents,last_activity_at,next_best_action) VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(client_id,company_id) DO UPDATE SET segment=excluded.segment,score=excluded.score,churn_risk=excluded.churn_risk,lifetime_value_cents=excluded.lifetime_value_cents,last_activity_at=excluded.last_activity_at,next_best_action=excluded.next_best_action,updated_at=CURRENT_TIMESTAMP`)
-        .bind(id,x.client_id,null,segment,score,churn,gross,x.last_activity,action).run();
-      rows.push({client_id:x.client_id,score,churn_risk:churn,segment,next_best_action:action});
-    }
-  }
-  return json({ok:true,version:VERSION,scored:rows.length,clients:rows});
 }
 
 async function loyaltyUpdate(request, env) {
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
   return legacyTenantScopeBlocked();
-  await ensureOperationalSchema(env);
-  const b=await readJson(request)||{}; if(!b.client_id&&!b.company_id)return json({ok:false,error:'CLIENT_OR_COMPANY_REQUIRED',version:VERSION},400);
-  const points=Math.max(-100000,Math.min(100000,Number(b.points||0)));
-  const id=crypto.randomUUID();
-  await env.DB.prepare(`INSERT INTO loyalty_events(id,client_id,company_id,event_type,points,amount_cents,metadata_json) VALUES(?,?,?,?,?,?,?)`)
-    .bind(id,b.client_id||null,b.company_id||null,b.event_type||'MANUAL',points,Number(b.amount_cents||0),JSON.stringify(b)).run();
-  const existing=await env.DB.prepare('SELECT * FROM loyalty_balances WHERE client_id IS ? AND company_id IS ? LIMIT 1').bind(b.client_id||null,b.company_id||null).first();
-  const total=Number(existing?.points||0)+points;
-  const tier=total>=1000?'PLATINUM':total>=500?'GOLD':total>=200?'SILVER':'STANDARD';
-  if(existing) await env.DB.prepare(`UPDATE loyalty_balances SET points=?,tier=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(total,tier,existing.id).run();
-  else await env.DB.prepare(`INSERT INTO loyalty_balances(id,client_id,company_id,points,tier) VALUES(?,?,?,?,?)`).bind(crypto.randomUUID(),b.client_id||null,b.company_id||null,total,tier).run();
-  await journal(env,'gerante',gate.auth.user.id,'LOYALTY_UPDATED','client',b.client_id||b.company_id,'OK',{points,tier});
-  return json({ok:true,version:VERSION,points:total,tier});
 }
 
 async function qualityCreate(request, env) {
   const gate=await requireAuthRole(request,env,['gerante','client','entreprise']); if(gate.error)return gate.error;
   return legacyTenantScopeBlocked();
-  await ensureOperationalSchema(env); const b=await readJson(request)||{};
-  if(!b.mission_id)return json({ok:false,error:'MISSION_ID_REQUIRED',version:VERSION},400);
-  const id=crypto.randomUUID();
-  await env.DB.prepare(`INSERT INTO quality_events(id,mission_id,client_id,company_id,intervenant_id,rating,category,comment,severity,metadata_json) VALUES(?,?,?,?,?,?,?,?,?,?)`)
-    .bind(id,b.mission_id,b.client_id||null,b.company_id||null,b.intervenant_id||null,b.rating==null?null:Number(b.rating),b.category||'GENERAL',b.comment||'',b.severity||'LOW',JSON.stringify(b)).run();
-  return json({ok:true,version:VERSION,id});
 }
 
 async function capacityDashboard(request, env) {
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
   return legacyTenantScopeBlocked();
-  await ensureOperationalSchema(env);
-  let missions=0, available=0;
-  if(await tableExists(env,'missions')) { const r=await env.DB.prepare(`SELECT COUNT(*) n FROM missions WHERE date(created_at)>=date('now','-7 day')`).first(); missions=Number(r?.n||0); }
-  if(await tableExists(env,'users')) { const r=await env.DB.prepare(`SELECT COUNT(*) n FROM users WHERE role IN ('intervenant','aide_soignant','infirmier') AND status IN ('ACTIVE','active')`).first(); available=Number(r?.n||0); }
-  const utilization=available?Math.min(100,Math.round(missions/Math.max(1,available*7)*100)):0;
-  const recommendation=utilization<50?'ACTIVER_PROMOTIONS_CAPACITE':utilization>90?'RENFORCER_RECRUTEMENT':'MAINTENIR';
-  await env.DB.prepare(`INSERT INTO capacity_snapshots(id,snapshot_date,demand_count,supply_count,fill_rate,unused_capacity,recommendation) VALUES(?,?,?,?,?,?,?)`)
-    .bind(crypto.randomUUID(),new Date().toISOString().slice(0,10),missions,available,utilization,Math.max(0,100-utilization),recommendation).run();
-  return json({ok:true,version:VERSION,missions_last_7_days:missions,active_intervenants:available,utilization_percent:utilization,recommendation});
 }
 
 async function financeForecast(request, env) {
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
   return legacyTenantScopeBlocked();
-  const months=Math.max(1,Math.min(12,Number((await readJson(request)||{}).months||3)));
-  const tx=await env.DB.prepare(`SELECT COALESCE(SUM(gross_cents),0) gross,COALESCE(SUM(commission_cents),0) commission,COALESCE(SUM(provider_fee_cents),0) provider_fee,COALESCE(SUM(refund_cents),0) refunds,COALESCE(SUM(net_intervenant_cents),0) intervenant FROM payment_transactions WHERE created_at>=datetime('now','-90 day')`).first();
-  const base=Number(tx?.gross||0)/3;
-  const rows=[];
-  for(let i=1;i<=months;i++){
-    const revenue=Math.round(base*(1+0.03*i));
-    const commission=Math.round(Number(tx?.commission||0)/3*(1+0.03*i));
-    const payout=Math.round(Number(tx?.intervenant||0)/3*(1+0.03*i));
-    const provider=Math.round(Number(tx?.provider_fee||0)/3*(1+0.03*i));
-    const refunds=Math.round(Number(tx?.refunds||0)/3*(1+0.03*i));
-    const margin=revenue-commission*0+payout*-1+commission-provider-refunds;
-    const period=new Date(); period.setMonth(period.getMonth()+i); const key=period.toISOString().slice(0,7);
-    await env.DB.prepare(`INSERT INTO finance_forecasts(id,period,scenario,revenue_cents,commission_cents,payout_cents,provider_fee_cents,refund_cents,estimated_margin_cents,confidence) VALUES(?,?,?,?,?,?,?,?,?,?)`)
-      .bind(crypto.randomUUID(),key,'BASE',revenue,commission,payout,provider,refunds,margin,0.55).run();
-    rows.push({period:key,revenue_cents:revenue,commission_cents:commission,payout_cents:payout,provider_fee_cents:provider,refund_cents:refunds,estimated_margin_cents:margin,confidence:0.55});
-  }
-  return json({ok:true,version:VERSION,method:'rolling_90_day_projection',rows});
 }
 
 async function copilotBriefing(request, env) {
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
-  await ensureConsolidatedSchema(env); await ensureStrategicSchema(env); await ensureOperationalSchema(env);
+  const schemaGate = await schemaReadinessResponse(env, ['operational_cases','promotion_recommendations','strategic_alerts','copilot_briefings','platform_settings'], 'COPILOT_SCHEMA_NOT_READY'); if (schemaGate) return schemaGate;
   const phase=await getSetting(env,'project_phase','TEST'); const items=[];
   const open=await env.DB.prepare(`SELECT * FROM operational_cases WHERE status NOT IN ('RESOLVED','CLOSED') ORDER BY priority DESC,created_at ASC LIMIT 20`).all();
   for(const c of (open.results||[])) items.push({priority:Number(c.priority||10),category:'OPERATIONS',title:c.description||c.case_type,recommendation:c.proposed_solution_json||'Analyser et proposer une résolution',entity_type:'CASE',entity_id:c.id});
@@ -2722,7 +2688,7 @@ async function copilotBriefing(request, env) {
 
 async function systemAudit(request, env) {
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
-  await ensureOperationalSchema(env);
+  const schemaGate = await schemaReadinessResponse(env, ['system_checks'], 'OPERATIONAL_SCHEMA_NOT_READY'); if (schemaGate) return schemaGate;
   const checks=[];
   const required=['users','sessions','payment_transactions','operational_cases','promotions','promotion_recommendations','accounting_ledger','notification_outbox','action_outbox'];
   for(const t of required){ const exists=await tableExists(env,t); checks.push({table:t,status:exists?'OK':'MISSING'}); }
@@ -2739,9 +2705,7 @@ async function handleV139(request, env) {
     '/api/ops/case/execute','/api/ops/outbox/process','/api/copilot/briefing','/api/clients/score','/api/loyalty/update',
     '/api/quality','/api/capacity/dashboard','/api/finance/forecast','/api/system/audit'
   ];
-  if(operationalPaths.includes(url.pathname)){
-    try{await ensureOperationalSchema(env);}catch(e){return json({ok:false,error:'OPERATIONAL_SCHEMA_ERROR',version:VERSION,message:e.message},500);}
-  }
+
   if(url.pathname==='/api/ops/case/execute'&&request.method==='POST')return operationalExecute(request,env);
   if(url.pathname==='/api/ops/outbox/process'&&request.method==='POST')return processActionOutbox(request,env);
   if(url.pathname==='/api/copilot/briefing'&&request.method==='GET')return copilotBriefing(request,env);
@@ -2822,10 +2786,7 @@ async function registerIntegration(env, code, category, required, capabilities, 
 
 async function productionConfigCheck(env, { persist = false } = {}) {
   if (!env?.DB) throw new Error('DATABASE_REQUIRED');
-  // Readiness GETs must inspect current state, not auto-create or mutate schema.
-  if (persist) {
-    await ensureConsolidatedSchema(env); await ensurePaymentSchema(env); await ensureOperationalSchema(env); await ensureStrategicSchema(env); await ensureFinalHardeningSchema(env);
-  }
+  // Schema creation belongs to reviewed migrations, never to an audit/job request.
   const checks=[];
   const requiredTables=['users','sessions','missions','payment_transactions','payment_accounts','wallets','payout_requests','payment_wallet_ledger','payment_reconciliation','payment_audit','payment_webhook_events','payment_disputes','finance_workspace_entries','finance_export_log','finance_resolution_cases','operational_cases','action_outbox','notification_outbox','accounting_ledger','promotions','promotion_recommendations','activity_journal','compliance_events'];
   for(const t of requiredTables) checks.push({code:`TABLE:${t}`,status:await tableExists(env,t)?'OK':'MISSING'});
@@ -2863,6 +2824,8 @@ async function productionConfigCheck(env, { persist = false } = {}) {
   }
   checks.push({code:'FINANCIAL_AUXILIARY_TENANT_COLUMNS',status:auxiliaryTenantChecks.every(x=>x.status==='OK')?'OK':'INCOMPLETE',tables:auxiliaryTenantChecks,missing:auxiliaryTenantChecks.filter(x=>x.status!=='OK').map(x=>x.table)});
   if (persist) {
+    const missingPersistenceTables = await missingRequiredTables(env, ['integration_registry','system_config_checks']);
+    if (missingPersistenceTables.length) throw new Error('PRODUCTION_AUDIT_SCHEMA_NOT_READY:' + missingPersistenceTables.join(','));
     await registerIntegration(env,'PSP','PAYMENT',['PAYMENT_PROVIDER','PAYMENT_WEBHOOK_SECRET'],['charge','refund','payout','webhook','reconciliation'],finalSecretConfigured(env,'PAYMENT_PROVIDER')&&finalSecretConfigured(env,'PAYMENT_WEBHOOK_SECRET')?'CONFIGURED':'NOT_CONFIGURED');
     await registerIntegration(env,'NOTIFICATIONS','MESSAGING',['NOTIFICATION_PROVIDER'],['email','sms','push'],finalSecretConfigured(env,'NOTIFICATION_PROVIDER')?'CONFIGURED':'NOT_CONFIGURED');
     await registerIntegration(env,'MAPS','LOCATION',['MAPS_PROVIDER','MAPS_API_KEY'],['distance','geocoding','routing'],finalSecretConfigured(env,'MAPS_API_KEY')?'CONFIGURED':'NOT_CONFIGURED');
@@ -2884,7 +2847,7 @@ async function finalProductionAudit(request,env) {
 
 async function copilotNextActions(request,env) {
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
-  await ensureConsolidatedSchema(env); await ensureOperationalSchema(env); await ensureStrategicSchema(env); await ensureFinalHardeningSchema(env);
+  const schemaGate = await schemaReadinessResponse(env, ['platform_settings','operational_cases','promotion_recommendations','action_outbox'], 'COPILOT_SCHEMA_NOT_READY'); if (schemaGate) return schemaGate;
   const phase=await getSetting(env,'project_phase','TEST');
   const items=[];
   const cases=await env.DB.prepare(`SELECT id,case_type,priority,status,impact_level,description,proposed_solution_json FROM operational_cases WHERE status NOT IN ('RESOLVED','CLOSED') ORDER BY priority DESC,created_at ASC LIMIT 30`).all();
@@ -2898,7 +2861,7 @@ async function copilotNextActions(request,env) {
 }
 
 async function enqueueBackgroundJob(env, jobType, payload={}, maxAttempts=5) {
-  await ensureFinalHardeningSchema(env);
+  if (!(await tableExists(env, 'background_jobs'))) throw new Error('BACKGROUND_JOB_SCHEMA_NOT_READY');
   const id=crypto.randomUUID();
   await env.DB.prepare(`INSERT INTO background_jobs(id,job_type,payload_json,max_attempts) VALUES(?,?,?,?)`).bind(id,jobType,JSON.stringify(payload),maxAttempts).run();
   return id;
@@ -3105,7 +3068,8 @@ function makeSalesKit(body){
 
 async function commercialProspectCreate(request,env){
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
-  await ensureCommercialRecruitmentSchema(env); const b=await readJson(request);
+  const schemaGate = await schemaReadinessResponse(env, ['commercial_prospects','commercial_playbooks','recruitment_candidates','copilot_growth_actions','sales_results'], 'COMMERCIAL_SCHEMA_NOT_READY'); if (schemaGate) return schemaGate;
+  const b=await readJson(request);
   const id=crypto.randomUUID(); const kind=String(b?.kind||'B2B').toUpperCase();
   const score=Math.max(0,Math.min(100,Number(b?.score||0)||0));
   await env.DB.prepare(`INSERT INTO commercial_prospects(id,kind,company_name,contact_name,email,phone,website,sector,city,postal_code,source,need,estimated_potential_cents,score,next_action,notes) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(id,kind,clean(b?.company_name)||null,clean(b?.contact_name)||null,normalizeEmail(b?.email)||null,clean(b?.phone)||null,clean(b?.website)||null,clean(b?.sector)||null,clean(b?.city)||null,clean(b?.postal_code)||null,clean(b?.source)||'COPILOTE',clean(b?.need)||null,Number.isFinite(Number(b?.estimated_potential_cents))?Math.max(0,Math.round(Number(b.estimated_potential_cents))):null,score,clean(b?.next_action)||'PREMIER_CONTACT',clean(b?.notes)||null).run();
@@ -3115,7 +3079,8 @@ async function commercialProspectCreate(request,env){
 
 async function commercialProspectSheet(request,env){
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
-  await ensureCommercialRecruitmentSchema(env); const b=await readJson(request);
+  const schemaGate = await schemaReadinessResponse(env, ['commercial_prospects','commercial_playbooks','recruitment_candidates','copilot_growth_actions','sales_results'], 'COMMERCIAL_SCHEMA_NOT_READY'); if (schemaGate) return schemaGate;
+  const b=await readJson(request);
   const kit=makeSalesKit(b); const id=clean(b?.prospect_id)||null;
   let prospect=null; if(id) prospect=await env.DB.prepare('SELECT * FROM commercial_prospects WHERE id=? LIMIT 1').bind(id).first();
   const p=prospect||b; const potential=Number(p?.estimated_potential_cents||0);
@@ -3126,14 +3091,16 @@ async function commercialProspectSheet(request,env){
 
 async function commercialPlaybook(request,env){
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
-  await ensureCommercialRecruitmentSchema(env); const b=await readJson(request); const kit=makeSalesKit(b); const id=crypto.randomUUID();
+  const schemaGate = await schemaReadinessResponse(env, ['commercial_prospects','commercial_playbooks','recruitment_candidates','copilot_growth_actions','sales_results'], 'COMMERCIAL_SCHEMA_NOT_READY'); if (schemaGate) return schemaGate;
+  const b=await readJson(request); const kit=makeSalesKit(b); const id=crypto.randomUUID();
   await env.DB.prepare(`INSERT INTO commercial_playbooks(id,target_type,stage,objective,script,objections_json,followup_json,metadata_json) VALUES(?,?,?,?,?,?,?,?)`).bind(id,kit.target_type,kit.stage,kit.objective,kit.opening,JSON.stringify(kit.objections),JSON.stringify(kit.followups),JSON.stringify({benefits:kit.benefits,questions:kit.questions,closing:kit.closing})).run();
   return json({ok:true,version:VERSION,playbook_id:id,playbook:kit},201);
 }
 
 async function recruitmentCandidateCreate(request,env){
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
-  await ensureCommercialRecruitmentSchema(env); const b=await readJson(request); const id=crypto.randomUUID();
+  const schemaGate = await schemaReadinessResponse(env, ['commercial_prospects','commercial_playbooks','recruitment_candidates','copilot_growth_actions','sales_results'], 'COMMERCIAL_SCHEMA_NOT_READY'); if (schemaGate) return schemaGate;
+  const b=await readJson(request); const id=crypto.randomUUID();
   const qualifications=Array.isArray(b?.qualifications)?b.qualifications:[];
   const score=Math.max(0,Math.min(100,Number(b?.score||0)||0));
   await env.DB.prepare(`INSERT INTO recruitment_candidates(id,full_name,email,phone,metier_code,city,radius_km,qualifications_json,score,notes) VALUES(?,?,?,?,?,?,?,?,?,?)`).bind(id,clean(b?.full_name)||null,normalizeEmail(b?.email)||null,clean(b?.phone)||null,clean(b?.metier_code)||null,clean(b?.city)||null,Number.isFinite(Number(b?.radius_km))?Number(b.radius_km):null,JSON.stringify(qualifications),score,clean(b?.notes)||null).run();
@@ -3144,7 +3111,8 @@ async function recruitmentCandidateCreate(request,env){
 
 async function recruitmentSheet(request,env){
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
-  await ensureCommercialRecruitmentSchema(env); const b=await readJson(request);
+  const schemaGate = await schemaReadinessResponse(env, ['commercial_prospects','commercial_playbooks','recruitment_candidates','copilot_growth_actions','sales_results'], 'COMMERCIAL_SCHEMA_NOT_READY'); if (schemaGate) return schemaGate;
+  const b=await readJson(request);
   const target=clean(b?.metier_code)||'METIER_A_DEFINIR'; const zone=clean(b?.city)||'zone à définir';
   const intro=`PROCHÉLIA recherche des intervenants pour renforcer sa capacité dans ${zone}. Le rôle consiste à réaliser les missions correspondant à votre métier, dans un cadre organisé, avec suivi des documents, des missions et des paiements.`;
   const objections=[{objection:'« Je veux comprendre le fonctionnement avant de m’inscrire. »',answer:'« C’est normal. Nous vous expliquons d’abord le parcours, les documents requis, les règles de mission et le fonctionnement des paiements avant toute activation. »'},{objection:'« Est-ce que je suis obligé d’accepter toutes les missions ? »',answer:'« Les règles exactes dépendent du cadre contractuel et du fonctionnement de la plateforme ; elles sont présentées clairement avant l’activation. »'}];
@@ -3153,7 +3121,7 @@ async function recruitmentSheet(request,env){
 
 async function growthDashboard(request,env){
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
-  await ensureCommercialRecruitmentSchema(env); await ensureConsolidatedSchema(env);
+  const schemaGate = await schemaReadinessResponse(env, ['commercial_prospects','recruitment_candidates','commercial_tasks','recruitment_tasks'], 'GROWTH_SCHEMA_NOT_READY'); if (schemaGate) return schemaGate;
   const p=await env.DB.prepare(`SELECT COUNT(*) n, COALESCE(AVG(score),0) avg_score FROM commercial_prospects WHERE status='OPEN'`).first();
   const r=await env.DB.prepare(`SELECT COUNT(*) n, COALESCE(AVG(score),0) avg_score FROM recruitment_candidates WHERE status='OPEN'`).first();
   const ct=await env.DB.prepare(`SELECT COUNT(*) n FROM commercial_tasks WHERE status='OPEN'`).first();
@@ -3165,7 +3133,7 @@ async function growthDashboard(request,env){
 
 
 /* ==================== V14.0.0 — COMPTABILITÉ MULTI-ESPACE / EXPORTS / RÉSOLUTION ==================== */
-async function ensureFinanceWorkspaceSchema(env) {
+async function assertFinanceWorkspaceTenantSchema(env) {
   if (!env?.DB) throw new Error('DATABASE_REQUIRED');
   // Finance workspace schema is owned by canonical migrations, never runtime DDL.
   const required = {
@@ -3201,7 +3169,7 @@ async function financeAuth(request, env) {
     return { response: json({ok:false,error:tenantContext?.error||'ACTIVE_TENANT_REQUIRED',version:VERSION},tenantContext?.status||403) };
   }
   try {
-    await ensureFinanceWorkspaceSchema(env);
+    await assertFinanceWorkspaceTenantSchema(env);
   } catch {
     return { response: json({ok:false,error:'FINANCE_WORKSPACE_TENANT_SCOPE_REQUIRED',version:VERSION,write_enabled:false},503) };
   }
@@ -4408,7 +4376,7 @@ async function supportEvent(env,caseId,actorRole,actorId,eventType,details={}){
 }
 
 async function brandIdentityEndpoint(request,env){
-  await ensureProcheliaMasterComplementSchema(env);
+  const schemaGate = await schemaReadinessResponse(env, ['brand_identity','brand_assets'], 'BRAND_SCHEMA_NOT_READY'); if (schemaGate) return schemaGate;
   const r=await env.DB.prepare(`SELECT * FROM brand_identity WHERE brand_key='PROCHELIA' LIMIT 1`).first();
   const assets=await env.DB.prepare(`SELECT asset_type,asset_name,storage_key,checksum,version,status FROM brand_assets WHERE status='ACTIVE' ORDER BY asset_type,asset_name`).all();
   return json({ok:true,version:VERSION,brand:{name:PROCHELIA_BRAND.name,identity:r||null,assets:assets.results||[],visual:PROCHELIA_BRAND.visual,uniqueness_policy:PROCHELIA_BRAND.uniqueness_policy,note:'L’originalité graphique interne est une spécification de création ; l’exclusivité juridique doit être confirmée par les recherches de similarités et le dépôt de marque.'}});
@@ -4417,7 +4385,7 @@ async function brandIdentityEndpoint(request,env){
 async function brandClearanceRecord(request,env){
   const a=await supportAuth(request,env); if(a.response)return a.response;
   if(a.role!=='GERANTE'&&!tenantRoleAllowed(a.tenantContext,['OWNER','ADMIN','MANAGER'])) return json({ok:false,error:'FORBIDDEN'},403);
-  await ensureProcheliaMasterComplementSchema(env);
+  const schemaGate = await schemaReadinessResponse(env, ['brand_clearance_log'], 'BRAND_SCHEMA_NOT_READY'); if (schemaGate) return schemaGate;
   const b=await readJson(request)||{};
   const id=crypto.randomUUID();
   await env.DB.prepare(`INSERT INTO brand_clearance_log(id,search_type,term,source,result,evidence_ref,notes) VALUES(?,?,?,?,?,?,?)`)
@@ -4427,7 +4395,6 @@ async function brandClearanceRecord(request,env){
 }
 
 async function interfaceConfigEndpoint(request,env){
-  await ensureProcheliaMasterComplementSchema(env);
   const url=new URL(request.url); const requested=supportRoleNormalize(url.searchParams.get('role')||'');
   if(requested && PROCHELIA_UI[requested]) return json({ok:true,version:VERSION,role:requested,config:PROCHELIA_UI[requested],brand:PROCHELIA_BRAND.visual});
   return json({ok:true,version:VERSION,interfaces:PROCHELIA_UI,brand:PROCHELIA_BRAND.visual});
@@ -4435,7 +4402,7 @@ async function interfaceConfigEndpoint(request,env){
 
 async function supportCreate(request,env){
   const a=await supportAuth(request,env); if(a.response)return a.response;
-  await ensureProcheliaMasterComplementSchema(env);
+  const schemaGate = await schemaColumnsReadinessResponse(env, {support_cases:['tenant_id'],support_case_events:['case_id'],copilot_resolution_rules:['scenario_key']}, 'SUPPORT_SCHEMA_NOT_READY'); if (schemaGate) return schemaGate;
   const b=await readJson(request)||{};
   const category=clean(b.category)||'GENERAL';
   const severity=String(b.severity||'LOW').toUpperCase();
@@ -4478,7 +4445,7 @@ async function supportAutoResolve(env,caseId,actorId,actorRole,scenario,context=
 
 async function supportList(request,env){
   const a=await supportAuth(request,env); if(a.response)return a.response;
-  await ensureProcheliaMasterComplementSchema(env);
+  const schemaGate = await schemaColumnsReadinessResponse(env, {support_cases:['tenant_id']}, 'SUPPORT_SCHEMA_NOT_READY'); if (schemaGate) return schemaGate;
   const u=new URL(request.url),status=clean(u.searchParams.get('status')||'');
   const isManager=a.role==='GERANTE'||tenantRoleAllowed(a.tenantContext,['OWNER','ADMIN','MANAGER']);
   let r;
@@ -4493,7 +4460,7 @@ async function supportList(request,env){
 async function supportResolve(request,env){
   const a=await supportAuth(request,env); if(a.response)return a.response;
   if(a.role!=='GERANTE'&&!tenantRoleAllowed(a.tenantContext,['OWNER','ADMIN','MANAGER'])) return json({ok:false,error:'MANAGER_APPROVAL_REQUIRED',version:VERSION},403);
-  await ensureProcheliaMasterComplementSchema(env);
+  const schemaGate = await schemaColumnsReadinessResponse(env, {support_cases:['tenant_id'],support_case_events:['case_id']}, 'SUPPORT_SCHEMA_NOT_READY'); if (schemaGate) return schemaGate;
   const b=await readJson(request)||{}; const id=clean(b.case_id);
   if(!id)return json({ok:false,error:'CASE_ID_REQUIRED',version:VERSION},400);
   const row=await env.DB.prepare(`SELECT * FROM support_cases WHERE id=? AND tenant_id=? LIMIT 1`).bind(id,a.tenantId).first();
@@ -4508,7 +4475,7 @@ async function supportResolve(request,env){
 async function supportDashboard(request,env){
   const a=await supportAuth(request,env); if(a.response)return a.response;
   if(a.role!=='GERANTE'&&!tenantRoleAllowed(a.tenantContext,['OWNER','ADMIN','MANAGER'])) return json({ok:false,error:'FORBIDDEN'},403);
-  await ensureProcheliaMasterComplementSchema(env);
+  const schemaGate = await schemaColumnsReadinessResponse(env, {support_cases:['tenant_id']}, 'SUPPORT_SCHEMA_NOT_READY'); if (schemaGate) return schemaGate;
   const rows=await env.DB.prepare(`SELECT status,severity,COUNT(*) AS n FROM support_cases WHERE tenant_id=? GROUP BY status,severity ORDER BY status,severity`).bind(a.tenantId).all();
   const recent=await env.DB.prepare(`SELECT id,source_role,category,severity,status,created_at,resolved_at FROM support_cases WHERE tenant_id=? ORDER BY created_at DESC LIMIT 30`).bind(a.tenantId).all();
   return json({ok:true,version:VERSION,dashboard:{breakdown:rows.results||[],recent:recent.results||[],policy:{simple_low_impact:'AUTOMATIQUE_APRES_CONTROLE',sensitive_or_high_impact:'VALIDATION_GERANTE',security_legal_rgpd:'ESCALADE_IMMEDIATE'}}});
@@ -4571,7 +4538,8 @@ async function productionRateLimit(request,env){
   const subject=await productionSubjectHash(request,path);
   const now=Math.floor(Date.now()/1000);
   const start=new Date(Math.floor(now/windowSeconds)*windowSeconds*1000).toISOString();
-  await ensureFinalHardeningSchema(env);
+  const rateSchemaGate = await schemaReadinessResponse(env, ['security_rate_limits'], 'RATE_LIMIT_SCHEMA_NOT_READY');
+  if (rateSchemaGate) return {ok:false,response:rateSchemaGate};
   const existing=await env.DB.prepare(`SELECT request_count FROM security_rate_limits WHERE bucket=? AND subject_hash=? AND window_start=? LIMIT 1`).bind(bucket,subject,start).first();
   const count=Number(existing?.request_count||0)+1;
   if(existing){
@@ -4580,7 +4548,8 @@ async function productionRateLimit(request,env){
     await env.DB.prepare(`INSERT INTO security_rate_limits(id,bucket,subject_hash,window_start,request_count) VALUES(?,?,?,?,1)`).bind(crypto.randomUUID(),bucket,subject,start).run();
   }
   if(count>limit){
-    await productionSafetySchema(env);
+    const eventSchemaGate = await schemaReadinessResponse(env, ['production_security_events'], 'RATE_LIMIT_AUDIT_SCHEMA_NOT_READY');
+    if (eventSchemaGate) return {ok:false,response:eventSchemaGate};
     await env.DB.prepare(`INSERT INTO production_security_events(id,event_type,route,subject_hash,decision,details_json) VALUES(?,?,?,?,?,?)`)
       .bind(crypto.randomUUID(),'RATE_LIMIT',path,subject,'BLOCKED',JSON.stringify({limit,windowSeconds})).run();
     return {ok:false,response:json({ok:false,error:'RATE_LIMITED',version:VERSION,retry_after_seconds:Math.max(1,windowSeconds-(now%windowSeconds))},429,{'retry-after':String(Math.max(1,windowSeconds-(now%windowSeconds)))})};

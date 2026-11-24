@@ -162,5 +162,6 @@ test("legacy loyalty mutations fail closed until their tenant-scoped schema exis
   const end=source.indexOf("async function qualityCreate",start);
   const body=source.slice(start,end);
   assert.ok(start>=0 && end>start);
-  assert.ok(body.indexOf("return legacyTenantScopeBlocked();") < body.indexOf("ensureOperationalSchema(env)"));
+  assert.ok(body.includes("return legacyTenantScopeBlocked();"));
+  assert.doesNotMatch(body, /ensureOperationalSchema\(env\)/);
 });

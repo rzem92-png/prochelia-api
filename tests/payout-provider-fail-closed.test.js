@@ -10,7 +10,7 @@ const handler = source.slice(start, end);
 
 test("payout requests fail closed before schema setup, account lookup, or fund reservation without a PSP adapter", () => {
   const guard = handler.indexOf("if (!paymentsConfigured(env))");
-  const schema = handler.indexOf("ensurePaymentSchema(env)");
+  const schema = handler.indexOf("schemaColumnsReadinessResponse(env");
   const accountLookup = handler.indexOf("SELECT * FROM payment_accounts");
   const reservation = handler.indexOf("reservePayoutAtomically(env");
   assert.ok(guard >= 0, "PSP capability guard must exist");
