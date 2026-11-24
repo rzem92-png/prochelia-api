@@ -6,7 +6,7 @@ import { readBoundedWebhookBody, verifyWebhookSignature } from "../src/index.js"
 globalThis.crypto ??= webcrypto;
 
 test("webhook body reader preserves the exact bounded UTF-8 body", async () => {
-  const raw = '{"message":"été"}\\n';
+  const raw = '{"message":"été"}\n';
   const request = new Request("https://example.test/api/payments/webhook", {
     method: "POST",
     body: raw
