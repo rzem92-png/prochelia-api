@@ -20,7 +20,7 @@ test("Preview E2E is pinned to the exact EU Preview D1 and current Pages branch 
   assert.match(workflow, /PREVIEW_DB_NAME: prochelia-preview-eu-2026-11-17/);
   assert.match(workflow, /PREVIEW_DB_ID: e3cf167c-37e1-4d72-9ac6-b3e27c14b97f/);
   assert.match(workflow, /FRONTEND_BRANCH: fix\/frontend-accounting-readonly-proxy-2026-11-24/);
-  assert.match(workflow, /24137dd2aeb83b76dd7b7584017c41ef545d9318/);
+  assert.match(workflow, /d602cac037bc5c04c9fa237aa60bf0dec1cd8883/);
   assert.match(workflow, /deployment_trigger\.metadata\.branch/);
   assert.match(workflow, /deployment_trigger\.metadata\.commit_hash/);
   assert.ok(workflow.includes('[[ "$PREVIEW_DB_ID" != "04f52830-ef5a-4f17-a640-42bbc2381bba" ]]'));
