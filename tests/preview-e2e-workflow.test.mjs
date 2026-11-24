@@ -40,6 +40,22 @@ test("Pages same-origin proxy tests the four protected intervenant routes and pr
   assert.match(workflow, /PAGES_PREVIEW_URL/);
 });
 
+test("tenant authentication and directory schema preflight runs before any synthetic seed", () => {
+  const gate = workflow.indexOf("Verify tenant authentication and directory schema before seeding");
+  const fixtureGeneration = workflow.indexOf("Generate synthetic test fixtures and guaranteed cleanup SQL");
+  const seed = workflow.indexOf("Seed only the isolated Preview D1");
+  assert.ok(gate >= 0, "read-only tenant schema gate is required");
+  assert.ok(fixtureGeneration > gate, "schema gate must run before fixture generation");
+  assert.ok(seed > gate, "schema gate must run before D1 seed");
+  for (const column of [
+    "tenants_table", "memberships_table", "session_active_tenant_id",
+    "session_revoked_at", "clients_tenant_id", "intervenants_tenant_id"
+  ]) assert.ok(workflow.includes(column), "missing readiness assertion: " + column);
+  assert.match(workflow, /No synthetic fixture will be inserted/);
+  assert.match(workflow, /SELECT EXISTS\(SELECT 1 FROM sqlite_master/);
+  assert.match(workflow, /pragma_table_info\('sessions'\)/);
+});
+
 test("synthetic directory fixtures use the existing Preview schema and a dedicated cleanup", () => {
   assert.match(workflow, /INSERT INTO users \(id,role,email,first_name,last_name,status,password_hash\) VALUES/);
   assert.match(workflow, /INSERT INTO clients \(id,user_id,address,city,postal_code,notes,created_at,updated_at\) VALUES/);
