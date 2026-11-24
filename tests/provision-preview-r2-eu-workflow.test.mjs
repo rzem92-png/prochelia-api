@@ -50,6 +50,8 @@ test("R2 provisioning configures and verifies an EU lock for the exact Preview b
   assert.match(workflow, /preview-d1\/prochelia-preview-eu-2026-11-17\//);
   assert.match(workflow, /condition: \{type: "Age", maxAgeSeconds: \$retention\}/);
   assert.match(workflow, /conflicting rule already exists/);
+  assert.match(workflow, /\.result\.rules \/\/ \[\]/);
+  assert.match(workflow, /\.prefix == \$prefix or \.id == \$id/);
   assert.match(workflow, /exact Preview backup prefix has the approved EU R2 retention lock/);
   assert.doesNotMatch(workflow, /-X DELETE/);
 });
