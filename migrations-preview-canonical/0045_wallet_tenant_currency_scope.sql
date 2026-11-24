@@ -2,6 +2,16 @@
 -- Rebuild only the Preview wallet table. Preserve every legacy balance and NULL tenant attribution.
 -- New wallet rows remain gated by the active-tenant and membership triggers below.
 
+-- Drop every dependent trigger before replacing wallets; SQLite validates
+-- trigger bodies during DROP TABLE and otherwise rejects the rebuild.
+DROP TRIGGER IF EXISTS trg_payment_wallet_ledger_require_wallet;
+DROP TRIGGER IF EXISTS trg_payment_wallet_ledger_guard_balances;
+DROP TRIGGER IF EXISTS trg_payment_wallet_ledger_apply;
+DROP TRIGGER IF EXISTS trg_wallet_ledger_tenant_insert;
+DROP TRIGGER IF EXISTS trg_wallet_ledger_tenant_update;
+DROP TRIGGER IF EXISTS trg_payout_request_tenant_insert;
+DROP TRIGGER IF EXISTS trg_payout_request_tenant_update;
+
 CREATE TABLE wallets_tenant_scoped (
   id TEXT PRIMARY KEY,
   user_id TEXT NOT NULL,
@@ -66,6 +76,27 @@ CREATE TRIGGER trg_wallets_user_identity_immutable
 BEFORE UPDATE OF user_id ON wallets
 WHEN NEW.user_id IS NOT OLD.user_id
 BEGIN SELECT RAISE(ABORT,'WALLETS_USER_IDENTITY_IMMUTABLE'); END;
+
+-- Restore the tenant guards that were temporarily dropped for the table rebuild.
+CREATE TRIGGER trg_wallet_ledger_tenant_insert
+BEFORE INSERT ON payment_wallet_ledger
+WHEN NEW.tenant_id IS NULL OR NOT EXISTS (
+  SELECT 1 FROM wallets w
+  WHERE w.tenant_id=NEW.tenant_id
+    AND w.user_id=NEW.user_id
+    AND w.currency=NEW.currency
+)
+BEGIN SELECT RAISE(ABORT,'PAYMENT_WALLET_LEDGER_TENANT_MISMATCH'); END;
+
+CREATE TRIGGER trg_wallet_ledger_tenant_update
+BEFORE UPDATE OF tenant_id,user_id,currency ON payment_wallet_ledger
+WHEN NEW.tenant_id IS NULL OR NOT EXISTS (
+  SELECT 1 FROM wallets w
+  WHERE w.tenant_id=NEW.tenant_id
+    AND w.user_id=NEW.user_id
+    AND w.currency=NEW.currency
+)
+BEGIN SELECT RAISE(ABORT,'PAYMENT_WALLET_LEDGER_TENANT_MISMATCH'); END;
 
 -- The old 0004 triggers selected wallets by user_id only. That becomes ambiguous
 -- once a user has multiple tenant wallets or multiple currencies.
