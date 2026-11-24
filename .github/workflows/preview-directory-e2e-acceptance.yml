@@ -19,7 +19,7 @@ on:
       frontend_commit_sha:
         description: "Exact 40-character HEAD of the selected frontend Preview branch"
         required: false
-        default: "f63785c7553dfcef9bbfe742f68c7ba287a28391"
+        default: "23a25c98c6faf5840310cecae77efbee64ebc816"
         type: string
 
 permissions:
@@ -50,7 +50,7 @@ jobs:
       PREVIEW_DB_NAME: prochelia-preview-eu-2026-11-17
       PREVIEW_DB_ID: e3cf167c-37e1-4d72-9ac6-b3e27c14b97f
       FRONTEND_BRANCH: fix/frontend-finance-confirmation-guard-2026-11-23
-      FRONTEND_COMMIT_SHA: ${{ inputs.frontend_commit_sha || 'f63785c7553dfcef9bbfe742f68c7ba287a28391' }}
+      FRONTEND_COMMIT_SHA: ${{ inputs.frontend_commit_sha || '23a25c98c6faf5840310cecae77efbee64ebc816' }}
       API_PREVIEW_URL: https://fix-pages-proxy-preview-cors-2026-11-23.rzem92.workers.dev
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
