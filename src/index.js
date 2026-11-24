@@ -1981,7 +1981,7 @@ async function consolidatedInfo(env) {
 
 async function handleConsolidated(request, env) {
   const url=new URL(request.url);
-  const consolidatedPath = ['/api/consolidated/info','/api/ops/dashboard','/api/journal','/api/cases','/api/cases/approve','/api/metiers','/api/metiers/suggest','/api/complaints','/api/settings/phase'].includes(url.pathname);
+  const consolidatedPath = ['/api/consolidated/info','/api/ops/dashboard','/api/journal','/api/cases','/api/cases/approve','/api/metiers','/api/metiers/suggest','/api/pricing/quote','/api/finance/summary','/api/complaints','/api/settings/phase'].includes(url.pathname);
   if (consolidatedPath) {
     const schemaGate = await schemaReadinessResponse(env, ['platform_settings','business_profiles','métier_catalog','metier_suggestions','pricing_policies','pricing_quotes','operational_cases','case_actions','copilot_log','activity_journal','commercial_tasks','recruitment_tasks','complaints','accounting_ledger','business_expenses','notification_outbox','compliance_events'], 'CONSOLIDATED_SCHEMA_NOT_READY');
     if (schemaGate) return schemaGate;
@@ -2643,89 +2643,26 @@ async function operationalExecute(request, env) {
 async function scoreClients(request, env) {
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
   return legacyTenantScopeBlocked();
-  const schemaGate = await schemaReadinessResponse(env, ['client_value_scores'], 'STRATEGIC_SCHEMA_NOT_READY'); if (schemaGate) return schemaGate;
-  const rows=[];
-  if(await tableExists(env,'payment_transactions')){
-    const r=await env.DB.prepare(`SELECT client_id,COUNT(*) tx_count,COALESCE(SUM(gross_cents),0) gross,MAX(created_at) last_activity FROM payment_transactions WHERE client_id IS NOT NULL GROUP BY client_id LIMIT 1000`).all();
-    for(const x of (r.results||[])){
-      const gross=Number(x.gross||0), count=Number(x.tx_count||0);
-      const score=Math.min(100,Math.round(count*10+gross/10000));
-      const churn=Math.max(0,Math.min(100,100-score));
-      const segment=score>=70?'VIP':score>=40?'ACTIVE':'STANDARD';
-      const action=churn>=70?'REACTIVATE':score>=70?'FIDELIZE':'MAINTAIN';
-      const id=crypto.randomUUID();
-      await env.DB.prepare(`INSERT INTO client_value_scores(id,client_id,company_id,segment,score,churn_risk,lifetime_value_cents,last_activity_at,next_best_action) VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(client_id,company_id) DO UPDATE SET segment=excluded.segment,score=excluded.score,churn_risk=excluded.churn_risk,lifetime_value_cents=excluded.lifetime_value_cents,last_activity_at=excluded.last_activity_at,next_best_action=excluded.next_best_action,updated_at=CURRENT_TIMESTAMP`)
-        .bind(id,x.client_id,null,segment,score,churn,gross,x.last_activity,action).run();
-      rows.push({client_id:x.client_id,score,churn_risk:churn,segment,next_best_action:action});
-    }
-  }
-  return json({ok:true,version:VERSION,scored:rows.length,clients:rows});
 }
 
 async function loyaltyUpdate(request, env) {
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
   return legacyTenantScopeBlocked();
-  const schemaGate = await schemaReadinessResponse(env, ['loyalty_events','loyalty_balances','activity_journal'], 'OPERATIONAL_SCHEMA_NOT_READY'); if (schemaGate) return schemaGate;
-  const b=await readJson(request)||{}; if(!b.client_id&&!b.company_id)return json({ok:false,error:'CLIENT_OR_COMPANY_REQUIRED',version:VERSION},400);
-  const points=Math.max(-100000,Math.min(100000,Number(b.points||0)));
-  const id=crypto.randomUUID();
-  await env.DB.prepare(`INSERT INTO loyalty_events(id,client_id,company_id,event_type,points,amount_cents,metadata_json) VALUES(?,?,?,?,?,?,?)`)
-    .bind(id,b.client_id||null,b.company_id||null,b.event_type||'MANUAL',points,Number(b.amount_cents||0),JSON.stringify(b)).run();
-  const existing=await env.DB.prepare('SELECT * FROM loyalty_balances WHERE client_id IS ? AND company_id IS ? LIMIT 1').bind(b.client_id||null,b.company_id||null).first();
-  const total=Number(existing?.points||0)+points;
-  const tier=total>=1000?'PLATINUM':total>=500?'GOLD':total>=200?'SILVER':'STANDARD';
-  if(existing) await env.DB.prepare(`UPDATE loyalty_balances SET points=?,tier=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(total,tier,existing.id).run();
-  else await env.DB.prepare(`INSERT INTO loyalty_balances(id,client_id,company_id,points,tier) VALUES(?,?,?,?,?)`).bind(crypto.randomUUID(),b.client_id||null,b.company_id||null,total,tier).run();
-  await journal(env,'gerante',gate.auth.user.id,'LOYALTY_UPDATED','client',b.client_id||b.company_id,'OK',{points,tier});
-  return json({ok:true,version:VERSION,points:total,tier});
 }
 
 async function qualityCreate(request, env) {
   const gate=await requireAuthRole(request,env,['gerante','client','entreprise']); if(gate.error)return gate.error;
   return legacyTenantScopeBlocked();
-  const schemaGate = await schemaColumnsReadinessResponse(env, {quality_events:['tenant_id']}, 'QUALITY_TENANT_SCHEMA_NOT_READY'); if (schemaGate) return schemaGate;
-  const b=await readJson(request)||{};
-  if(!b.mission_id)return json({ok:false,error:'MISSION_ID_REQUIRED',version:VERSION},400);
-  const id=crypto.randomUUID();
-  await env.DB.prepare(`INSERT INTO quality_events(id,mission_id,client_id,company_id,intervenant_id,rating,category,comment,severity,metadata_json) VALUES(?,?,?,?,?,?,?,?,?,?)`)
-    .bind(id,b.mission_id,b.client_id||null,b.company_id||null,b.intervenant_id||null,b.rating==null?null:Number(b.rating),b.category||'GENERAL',b.comment||'',b.severity||'LOW',JSON.stringify(b)).run();
-  return json({ok:true,version:VERSION,id});
 }
 
 async function capacityDashboard(request, env) {
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
   return legacyTenantScopeBlocked();
-  const schemaGate = await schemaReadinessResponse(env, ['capacity_snapshots'], 'OPERATIONAL_SCHEMA_NOT_READY'); if (schemaGate) return schemaGate;
-  let missions=0, available=0;
-  if(await tableExists(env,'missions')) { const r=await env.DB.prepare(`SELECT COUNT(*) n FROM missions WHERE date(created_at)>=date('now','-7 day')`).first(); missions=Number(r?.n||0); }
-  if(await tableExists(env,'users')) { const r=await env.DB.prepare(`SELECT COUNT(*) n FROM users WHERE role IN ('intervenant','aide_soignant','infirmier') AND status IN ('ACTIVE','active')`).first(); available=Number(r?.n||0); }
-  const utilization=available?Math.min(100,Math.round(missions/Math.max(1,available*7)*100)):0;
-  const recommendation=utilization<50?'ACTIVER_PROMOTIONS_CAPACITE':utilization>90?'RENFORCER_RECRUTEMENT':'MAINTENIR';
-  await env.DB.prepare(`INSERT INTO capacity_snapshots(id,snapshot_date,demand_count,supply_count,fill_rate,unused_capacity,recommendation) VALUES(?,?,?,?,?,?,?)`)
-    .bind(crypto.randomUUID(),new Date().toISOString().slice(0,10),missions,available,utilization,Math.max(0,100-utilization),recommendation).run();
-  return json({ok:true,version:VERSION,missions_last_7_days:missions,active_intervenants:available,utilization_percent:utilization,recommendation});
 }
 
 async function financeForecast(request, env) {
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
   return legacyTenantScopeBlocked();
-  const months=Math.max(1,Math.min(12,Number((await readJson(request)||{}).months||3)));
-  const tx=await env.DB.prepare(`SELECT COALESCE(SUM(gross_cents),0) gross,COALESCE(SUM(commission_cents),0) commission,COALESCE(SUM(provider_fee_cents),0) provider_fee,COALESCE(SUM(refund_cents),0) refunds,COALESCE(SUM(net_intervenant_cents),0) intervenant FROM payment_transactions WHERE created_at>=datetime('now','-90 day')`).first();
-  const base=Number(tx?.gross||0)/3;
-  const rows=[];
-  for(let i=1;i<=months;i++){
-    const revenue=Math.round(base*(1+0.03*i));
-    const commission=Math.round(Number(tx?.commission||0)/3*(1+0.03*i));
-    const payout=Math.round(Number(tx?.intervenant||0)/3*(1+0.03*i));
-    const provider=Math.round(Number(tx?.provider_fee||0)/3*(1+0.03*i));
-    const refunds=Math.round(Number(tx?.refunds||0)/3*(1+0.03*i));
-    const margin=revenue-commission*0+payout*-1+commission-provider-refunds;
-    const period=new Date(); period.setMonth(period.getMonth()+i); const key=period.toISOString().slice(0,7);
-    await env.DB.prepare(`INSERT INTO finance_forecasts(id,period,scenario,revenue_cents,commission_cents,payout_cents,provider_fee_cents,refund_cents,estimated_margin_cents,confidence) VALUES(?,?,?,?,?,?,?,?,?,?)`)
-      .bind(crypto.randomUUID(),key,'BASE',revenue,commission,payout,provider,refunds,margin,0.55).run();
-    rows.push({period:key,revenue_cents:revenue,commission_cents:commission,payout_cents:payout,provider_fee_cents:provider,refund_cents:refunds,estimated_margin_cents:margin,confidence:0.55});
-  }
-  return json({ok:true,version:VERSION,method:'rolling_90_day_projection',rows});
 }
 
 async function copilotBriefing(request, env) {
@@ -4452,7 +4389,6 @@ async function brandClearanceRecord(request,env){
 }
 
 async function interfaceConfigEndpoint(request,env){
-  const schemaGate = await schemaReadinessResponse(env, ['interface_profiles'], 'INTERFACE_SCHEMA_NOT_READY'); if (schemaGate) return schemaGate;
   const url=new URL(request.url); const requested=supportRoleNormalize(url.searchParams.get('role')||'');
   if(requested && PROCHELIA_UI[requested]) return json({ok:true,version:VERSION,role:requested,config:PROCHELIA_UI[requested],brand:PROCHELIA_BRAND.visual});
   return json({ok:true,version:VERSION,interfaces:PROCHELIA_UI,brand:PROCHELIA_BRAND.visual});
