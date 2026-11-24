@@ -24,6 +24,7 @@ jobs:
     if: >-
       github.ref == 'refs/heads/fix/r2-backup-attestation-rebased-2026-11-22' &&
       github.actor == 'rzem92-png' &&
+      github.triggering_actor == 'rzem92-png' &&
       inputs.confirm_restore == 'RESTORE_PREVIEW_R2_TO_ISOLATED_TEST_ONLY'
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -54,6 +55,7 @@ jobs:
             *) echo "::error::Restore is restricted to the exact reviewed Preview branch only."; exit 1 ;;
           esac
           test "$GITHUB_ACTOR" = "rzem92-png" || { echo "::error::Only the repository owner may dispatch the isolated Preview restore."; exit 1; }
+          test "$GITHUB_TRIGGERING_ACTOR" = "rzem92-png" || { echo "::error::Only the repository owner may rerun the isolated Preview restore."; exit 1; }
           test "$CLOUDFLARE_ACCOUNT_ID" = "$EXPECTED_ACCOUNT_ID"
           for name in CLOUDFLARE_API_TOKEN BACKUP_ENCRYPTION_KEY BACKUP_ATTESTATION_HMAC_KEY AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY; do
             test -n "${!name:-}" || { echo "::error::Required secret missing: $name"; exit 1; }
