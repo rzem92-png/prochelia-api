@@ -532,35 +532,12 @@ async function securityIdentityStart(request, env) {
   const auth = await getSessionUser(request, env);
   if (!requireRole(auth, ['intervenant'])) return json({ok:false,error:auth?.user?'FORBIDDEN':'UNAUTHENTICATED',version:VERSION}, auth?.user?403:401);
   return tenantScopedHandlerNotReady('TENANT_SCOPED_SECURITY_HANDLER_REQUIRED');
-  const id = crypto.randomUUID();
-  await env.DB.prepare(
-    `INSERT INTO identity_verifications (id,user_id,status,level) VALUES (?,?, 'pending','standard')`
-  ).bind(id, auth.user.id).run();
-  await securityAudit(env,'IDENTITY_VERIFICATION_REQUESTED',null,auth.user.id,auth.user.role,'PENDING',{verification_id:id});
-  return json({ok:true,version:VERSION,verification_id:id,status:'pending',message:'Vérification d’identité requise avant l’accès aux missions.'},201);
 }
 
 async function securityIdentityApprove(request, env) {
   const auth = await getSessionUser(request, env);
   if (!requireRole(auth, ['gerante'])) return json({ok:false,error:auth?.user?'FORBIDDEN':'UNAUTHENTICATED',version:VERSION}, auth?.user?403:401);
   return tenantScopedHandlerNotReady('TENANT_SCOPED_SECURITY_HANDLER_REQUIRED');
-  const body = await readJson(request);
-  const verificationId = clean(body?.verification_id);
-  const status = clean(body?.status);
-  const level = clean(body?.level) || 'standard';
-  if (!verificationId || !['verified','rejected','pending'].includes(status)) return json({ok:false,error:'INVALID_IDENTITY_DECISION',version:VERSION},400);
-  const row = await env.DB.prepare('SELECT * FROM identity_verifications WHERE id=? LIMIT 1').bind(verificationId).first();
-  if (!row) return json({ok:false,error:'VERIFICATION_NOT_FOUND',version:VERSION},404);
-  const provider = clean(body?.provider) || 'manual_control';
-  const providerReference = clean(body?.provider_reference) || null;
-  const reason = clean(body?.rejection_reason) || null;
-  const verifiedAt = status === 'verified' ? new Date().toISOString() : null;
-  const expiresAt = status === 'verified' ? new Date(Date.now()+30*24*60*60*1000).toISOString() : null;
-  await env.DB.prepare(
-    `UPDATE identity_verifications SET status=?,level=?,provider=?,provider_reference=?,verified_at=?,expires_at=?,rejection_reason=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`
-  ).bind(status,level,provider,providerReference,verifiedAt,expiresAt,reason,verificationId).run();
-  await securityAudit(env,'IDENTITY_VERIFICATION_DECISION',null,auth.user.id,auth.user.role,status,{verification_id:verificationId,subject_user_id:row.user_id,level});
-  return json({ok:true,version:VERSION,verification_id:verificationId,user_id:row.user_id,status,level,verified_at:verifiedAt},200);
 }
 
 async function deliverSecurityCodes(env, payload) {
@@ -591,145 +568,24 @@ async function securityPrepareMission(request, env) {
   const auth = await getSessionUser(request, env);
   if (!requireRole(auth, ['gerante'])) return json({ok:false,error:auth?.user?'FORBIDDEN':'UNAUTHENTICATED',version:VERSION}, auth?.user?403:401);
   return tenantScopedHandlerNotReady('TENANT_SCOPED_SECURITY_HANDLER_REQUIRED');
-  const body = await readJson(request);
-  const missionId=clean(body?.mission_id), clientId=clean(body?.client_id), intervenantId=clean(body?.intervenant_id);
-  if(!missionId||!clientId||!intervenantId) return json({ok:false,error:'MISSION_SECURITY_FIELDS_REQUIRED',version:VERSION},400);
-  const verified = await requireVerifiedIntervenant(env,intervenantId);
-  if(!verified) return json({ok:false,error:'INTERVENANT_IDENTITY_NOT_VERIFIED',version:VERSION},409);
-  const existing=await env.DB.prepare('SELECT id,status FROM mission_security WHERE mission_id=? LIMIT 1').bind(missionId).first();
-  if(existing) return json({ok:false,error:'MISSION_SECURITY_ALREADY_PREPARED',version:VERSION,status:existing.status},409);
-  const arrival=securityCode(), end=securityCode();
-  const now=Date.now(), arrivalExpiry=new Date(now+SECURITY_CODE_TTL_SECONDS*1000).toISOString(), endExpiry=new Date(now+SECURITY_CODE_TTL_SECONDS*1000).toISOString();
-  const id=crypto.randomUUID();
-  await env.DB.prepare(
-    `INSERT INTO mission_security (id,mission_id,client_id,intervenant_id,risk_level,arrival_code_hash,arrival_expires_at,end_code_hash,end_expires_at)
-     VALUES (?,?,?,?,?,?,?,?,?)`
-  ).bind(id,missionId,clientId,intervenantId,clean(body?.risk_level)||'standard',await sha256Base64url(arrival),arrivalExpiry,await sha256Base64url(end),endExpiry).run();
-  await securityAudit(env,'MISSION_SECURITY_PREPARED',missionId,auth.user.id,auth.user.role,'OK',{intervenant_id:intervenantId,risk_level:clean(body?.risk_level)||'standard'});
-  const delivery = await deliverSecurityCodes(env, {
-    mission_id: missionId,
-    client_id: clientId,
-    arrival_code: arrival,
-    arrival_expires_at: arrivalExpiry,
-    end_code: end,
-    end_expires_at: endExpiry
-  });
-  if (!delivery.ok) {
-    await env.DB.prepare('DELETE FROM mission_security WHERE id=?').bind(id).run();
-    await securityAudit(env,'MISSION_SECURITY_PREPARE_DELIVERY_FAILED',missionId,auth.user.id,auth.user.role,'DENIED',{reason:delivery.error});
-    return json({ok:false,error:'SECURITY_CODE_DELIVERY_FAILED',version:VERSION,details:delivery.error},503);
-  }
-  await securityAudit(env,'SECURITY_CODES_DELIVERED',missionId,auth.user.id,auth.user.role,'OK',{channel:delivery.channel});
-  return json({ok:true,version:VERSION,mission_id:missionId,status:'prepared',arrival:{expires_at:arrivalExpiry},end:{expires_at:endExpiry},delivery:{channel:delivery.channel,delivered:true},security_note:'Les codes en clair ne sont jamais renvoyés par l’API.'},201);
 }
 
 async function securityPresence(request, env) {
-  const auth=await getSessionUser(request,env);
-  if(!requireRole(auth,['intervenant'])) return json({ok:false,error:auth?.user?'FORBIDDEN':'UNAUTHENTICATED',version:VERSION},auth?.user?403:401);
+  const auth = await getSessionUser(request, env);
+  if (!requireRole(auth, ['intervenant'])) return json({ok:false,error:auth?.user?'FORBIDDEN':'UNAUTHENTICATED',version:VERSION}, auth?.user?403:401);
   return tenantScopedHandlerNotReady('TENANT_SCOPED_SECURITY_HANDLER_REQUIRED');
-  const identity = await requireVerifiedIntervenant(env, auth.user.id);
-  if(!identity) return json({ok:false,error:'INTERVENANT_IDENTITY_NOT_VERIFIED',version:VERSION},403);
-  const body=await readJson(request), missionId=clean(body?.mission_id);
-  if(!missionId) return json({ok:false,error:'MISSION_ID_REQUIRED',version:VERSION},400);
-  const sec=await env.DB.prepare('SELECT * FROM mission_security WHERE mission_id=? AND intervenant_id=? LIMIT 1').bind(missionId,auth.user.id).first();
-  if(!sec) return json({ok:false,error:'MISSION_NOT_ASSIGNED_OR_NOT_PREPARED',version:VERSION},404);
-  const device=await deviceHash(request,auth.user.id);
-  await env.DB.prepare(`INSERT INTO trusted_devices (id,user_id,device_hash,expires_at) VALUES (?,?,?,datetime('now',?)) ON CONFLICT(user_id,device_hash) DO UPDATE SET last_seen_at=CURRENT_TIMESTAMP,expires_at=excluded.expires_at,status='active'`)
-    .bind(crypto.randomUUID(),auth.user.id,device,`+${SECURITY_DEVICE_TTL_SECONDS} seconds`).run();
-  await env.DB.prepare(`UPDATE mission_security SET last_presence_at=CURRENT_TIMESTAMP,last_device_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(device,sec.id).run();
-  await securityAudit(env,'MISSION_PRESENCE_RECORDED',missionId,auth.user.id,auth.user.role,'OK',{device_bound:true});
-  return json({ok:true,version:VERSION,mission_id:missionId,presence:'RECORDED',device_bound:true},200);
-}
-
-export async function consumeMissionSecurityCode(env, securityId, purpose, expectedHash) {
-  if (!env?.DB || !securityId || !expectedHash) return false;
-  let statement;
-  if (purpose === 'ARRIVAL') {
-    statement = env.DB.prepare(`UPDATE mission_security
-      SET arrival_used_at=CURRENT_TIMESTAMP,arrival_started_at=CURRENT_TIMESTAMP,status='in_progress',updated_at=CURRENT_TIMESTAMP
-      WHERE id=? AND status='prepared' AND arrival_used_at IS NULL
-        AND arrival_code_hash=? AND julianday(arrival_expires_at)>julianday('now')
-        AND (locked_until IS NULL OR julianday(locked_until)<=julianday('now'))`).bind(securityId, expectedHash);
-  } else if (purpose === 'END') {
-    statement = env.DB.prepare(`UPDATE mission_security
-      SET end_used_at=CURRENT_TIMESTAMP,ended_at=CURRENT_TIMESTAMP,status='completed',updated_at=CURRENT_TIMESTAMP
-      WHERE id=? AND status='in_progress' AND end_used_at IS NULL
-        AND end_code_hash=? AND julianday(end_expires_at)>julianday('now')
-        AND (locked_until IS NULL OR julianday(locked_until)<=julianday('now'))`).bind(securityId, expectedHash);
-  } else {
-    return false;
-  }
-  const result = await statement.run();
-  return Number(result?.meta?.changes || 0) === 1;
 }
 
 async function securityVerifyCode(request, env) {
-  const auth=await getSessionUser(request,env);
-  if(!requireRole(auth,['intervenant'])) return json({ok:false,error:auth?.user?'FORBIDDEN':'UNAUTHENTICATED',version:VERSION},auth?.user?403:401);
+  const auth = await getSessionUser(request, env);
+  if (!requireRole(auth, ['intervenant'])) return json({ok:false,error:auth?.user?'FORBIDDEN':'UNAUTHENTICATED',version:VERSION}, auth?.user?403:401);
   return tenantScopedHandlerNotReady('TENANT_SCOPED_SECURITY_HANDLER_REQUIRED');
-  const body=await readJson(request), missionId=clean(body?.mission_id), purpose=clean(body?.purpose), code=clean(body?.code);
-  if(!missionId||!['ARRIVAL','END'].includes(purpose)||!/^[0-9]{6}$/.test(code)) return json({ok:false,error:'INVALID_SECURITY_CODE_REQUEST',version:VERSION},400);
-  const sec=await env.DB.prepare('SELECT * FROM mission_security WHERE mission_id=? AND intervenant_id=? LIMIT 1').bind(missionId,auth.user.id).first();
-  if(!sec) return json({ok:false,error:'MISSION_NOT_ASSIGNED_OR_NOT_PREPARED',version:VERSION},404);
-  const identity = await requireVerifiedIntervenant(env, auth.user.id);
-  if(!identity) {
-    await securityAudit(env,'SECURITY_IDENTITY_RECHECK_FAILED',missionId,auth.user.id,auth.user.role,'DENIED',{});
-    return json({ok:false,error:'INTERVENANT_IDENTITY_NOT_VERIFIED',version:VERSION},403);
-  }
-  if(!sec.last_presence_at) {
-    await securityAudit(env,'SECURITY_PRESENCE_REQUIRED',missionId,auth.user.id,auth.user.role,'DENIED',{purpose});
-    return json({ok:false,error:'PRESENCE_CHECK_REQUIRED',version:VERSION,message:'La présence de l’intervenant doit être enregistrée avant la validation du code.'},428);
-  }
-  const device=await deviceHash(request,auth.user.id);
-  const trusted = await env.DB.prepare(`SELECT id,status,expires_at FROM trusted_devices WHERE user_id=? AND device_hash=? AND status='active' AND expires_at>CURRENT_TIMESTAMP LIMIT 1`).bind(auth.user.id,device).first();
-  if(!trusted || sec.last_device_id !== device) {
-    await securityAudit(env,'SECURITY_DEVICE_RECHECK_FAILED',missionId,auth.user.id,auth.user.role,'DENIED',{purpose});
-    return json({ok:false,error:'DEVICE_NOT_TRUSTED_FOR_MISSION',version:VERSION},403);
-  }
-  const now=new Date().toISOString();
-  if(sec.locked_until && sec.locked_until>now) return json({ok:false,error:'SECURITY_TEMPORARILY_LOCKED',version:VERSION,locked_until:sec.locked_until},423);
-  const used=purpose==='ARRIVAL'?sec.arrival_used_at:sec.end_used_at;
-  const expires=purpose==='ARRIVAL'?sec.arrival_expires_at:sec.end_expires_at;
-  const stored=purpose==='ARRIVAL'?sec.arrival_code_hash:sec.end_code_hash;
-  if(used) return json({ok:false,error:'SECURITY_CODE_ALREADY_USED',version:VERSION},409);
-  if(purpose==='END' && sec.status !== 'in_progress') return json({ok:false,error:'MISSION_NOT_IN_PROGRESS',version:VERSION},409);
-  if(purpose==='ARRIVAL' && sec.status !== 'prepared') return json({ok:false,error:'MISSION_NOT_READY_FOR_ARRIVAL',version:VERSION},409);
-  if(!expires||expires<=now) return json({ok:false,error:'SECURITY_CODE_EXPIRED',version:VERSION},410);
-  const expected=await sha256Base64url(code), ok=expected===stored;
-  await env.DB.prepare(`INSERT INTO mission_security_attempts (id,security_id,purpose,actor_user_id,device_id,result,reason) VALUES (?,?,?,?,?,?,?)`).bind(crypto.randomUUID(),sec.id,purpose,auth.user.id,device,ok?'SUCCESS':'FAIL',ok?'CODE_MATCH':'CODE_MISMATCH').run();
-  if(!ok){
-    const attempts=await env.DB.prepare(`SELECT COUNT(*) AS total FROM mission_security_attempts WHERE security_id=? AND purpose=? AND result='FAIL' AND created_at >= datetime('now','-15 minutes')`).bind(sec.id,purpose).first();
-    const count=Number(attempts?.total||0);
-    if(count>=SECURITY_MAX_ATTEMPTS){
-      const locked=new Date(Date.now()+SECURITY_LOCK_SECONDS*1000).toISOString();
-      await env.DB.prepare('UPDATE mission_security SET locked_until=?,updated_at=CURRENT_TIMESTAMP WHERE id=?').bind(locked,sec.id).run();
-      await securityAudit(env,'SECURITY_CODE_LOCK',missionId,auth.user.id,auth.user.role,'BLOCKED',{purpose,attempts:count});
-      return json({ok:false,error:'SECURITY_TOO_MANY_ATTEMPTS',version:VERSION,locked_until:locked},423);
-    }
-    await securityAudit(env,'SECURITY_CODE_FAILED',missionId,auth.user.id,auth.user.role,'DENIED',{purpose,attempts:count});
-    return json({ok:false,error:'SECURITY_CODE_INVALID',version:VERSION,remaining_attempts:Math.max(0,SECURITY_MAX_ATTEMPTS-count)},401);
-  }
-  const consumed = await consumeMissionSecurityCode(env, sec.id, purpose, expected);
-  if (!consumed) {
-    await securityAudit(env,'SECURITY_CODE_CONSUMPTION_CONFLICT',missionId,auth.user.id,auth.user.role,'DENIED',{purpose});
-    return json({ok:false,error:'SECURITY_CODE_ALREADY_USED_OR_STATE_CHANGED',version:VERSION},409);
-  }
-  await securityAudit(env,`SECURITY_CODE_${purpose}_SUCCESS`,missionId,auth.user.id,auth.user.role,'OK',{purpose,device_bound:true});
-  return json({ok:true,version:VERSION,mission_id:missionId,purpose,status:purpose==='ARRIVAL'?'in_progress':'completed',identity_control:'VERIFIED_ACCOUNT_REQUIRED',presence_control:'RECORDED',code:'CONSUMED'},200);
 }
 
 async function securityResendCodes(request, env) {
-  const auth=await getSessionUser(request,env);
-  if(!requireRole(auth,['gerante','client'])) return json({ok:false,error:auth?.user?'FORBIDDEN':'UNAUTHENTICATED',version:VERSION},auth?.user?403:401);
+  const auth = await getSessionUser(request, env);
+  if (!requireRole(auth, ['gerante','client'])) return json({ok:false,error:auth?.user?'FORBIDDEN':'UNAUTHENTICATED',version:VERSION}, auth?.user?403:401);
   return tenantScopedHandlerNotReady('TENANT_SCOPED_SECURITY_HANDLER_REQUIRED');
-  const body=await readJson(request);
-  const missionId=clean(body?.mission_id);
-  if(!missionId) return json({ok:false,error:'MISSION_ID_REQUIRED',version:VERSION},400);
-  const sec=await env.DB.prepare('SELECT * FROM mission_security WHERE mission_id=? LIMIT 1').bind(missionId).first();
-  if(!sec) return json({ok:false,error:'MISSION_SECURITY_NOT_FOUND',version:VERSION},404);
-  if(auth.user.role==='client' && sec.client_id!==auth.user.id) return json({ok:false,error:'FORBIDDEN',version:VERSION},403);
-  if(sec.status==='completed') return json({ok:false,error:'MISSION_ALREADY_COMPLETED',version:VERSION},409);
-  return json({ok:false,error:'SECURITY_CODE_RESEND_REQUIRES_REGENERATION_FLOW',version:VERSION,message:'Pour éviter la réutilisation d’un ancien secret, la réémission doit générer de nouveaux codes et invalider les précédents.'},409);
 }
 
 async function securityClientCode(request, env) {
@@ -739,20 +595,11 @@ async function securityClientCode(request, env) {
 }
 
 async function securityStatus(request, env) {
-  const auth=await getSessionUser(request,env);
-  if(!auth) return json({ok:false,error:'UNAUTHENTICATED',version:VERSION},401);
+  const auth = await getSessionUser(request, env);
+  if (!auth) return json({ok:false,error:'UNAUTHENTICATED',version:VERSION},401);
   return tenantScopedHandlerNotReady('TENANT_SCOPED_SECURITY_HANDLER_REQUIRED');
-  const count=await env.DB.prepare('SELECT COUNT(*) AS total FROM security_audit').first();
-  return json({ok:true,version:VERSION,security:{identity:'verified_required',device:'bound',presence:'recorded',arrival_code:'single_use',end_code:'single_use',max_attempts:SECURITY_MAX_ATTEMPTS,code_ttl_seconds:SECURITY_CODE_TTL_SECONDS,audit_events:Number(count?.total||0)},user:auth.user},200);
 }
 
-
-/* ============================================================
-   PROCHÉLIA V13.5.17 — PAIEMENTS / PORTEFEUILLE / COMMISSIONS
-   Architecture de règlement de bout en bout.
-   IMPORTANT : les fonds réels passent par un PSP agréé ; PROCHÉLIA
-   conserve le ledger métier, les états, l'idempotence et l'audit.
-=============================================================== */
 async function ensurePaymentSchema(env) {
   if (!env.DB) throw new Error('DATABASE_REQUIRED');
   const statements = [
@@ -2433,12 +2280,6 @@ async function loyaltyUpdate(request, env) {
 async function qualityCreate(request, env) {
   const gate=await requireAuthRole(request,env,['gerante','client','entreprise']); if(gate.error)return gate.error;
   return tenantScopedHandlerNotReady('TENANT_SCOPED_QUALITY_HANDLER_REQUIRED');
-  const b=await readJson(request)||{};
-  if(!b.mission_id)return json({ok:false,error:'MISSION_ID_REQUIRED',version:VERSION},400);
-  const id=crypto.randomUUID();
-  await env.DB.prepare(`INSERT INTO quality_events(id,mission_id,client_id,company_id,intervenant_id,rating,category,comment,severity,metadata_json) VALUES(?,?,?,?,?,?,?,?,?,?)`)
-    .bind(id,b.mission_id,b.client_id||null,b.company_id||null,b.intervenant_id||null,b.rating==null?null:Number(b.rating),b.category||'GENERAL',b.comment||'',b.severity||'LOW',JSON.stringify(b)).run();
-  return json({ok:true,version:VERSION,id});
 }
 
 async function capacityDashboard(request, env) {
@@ -3493,24 +3334,6 @@ async function interfaceConfigEndpoint(request,env){
 async function supportCreate(request,env){
   const a=await supportAuth(request,env); if(a.response)return a.response;
   return tenantScopedHandlerNotReady('TENANT_SCOPED_SUPPORT_HANDLER_REQUIRED');
-  const b=await readJson(request)||{};
-  const category=clean(b.category)||'GENERAL';
-  const severity=String(b.severity||'LOW').toUpperCase();
-  const scenario=supportScenarioFor(category,severity);
-  const rule=await env.DB.prepare(`SELECT * FROM copilot_resolution_rules WHERE scenario_key=? LIMIT 1`).bind(scenario).first();
-  const auto=Number(rule?.auto_allowed||0)===1 && String(severity)!=='CRITICAL' && String(severity)!=='HIGH';
-  const requiresManager=Number(rule?.manager_approval_required||1)===1 || !auto;
-  const id=crypto.randomUUID();
-  const proposed=rule?JSON.parse(rule.steps_json||'[]'):{steps:['collect_evidence','copilot_analysis','notify','audit']};
-  await env.DB.prepare(`INSERT INTO support_cases(id,source_role,requester_id,company_id,mission_id,complaint_id,category,severity,status,description,proposed_resolution,requires_manager) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`)
-    .bind(id,a.role,a.auth.user.id,b.company_id||null,b.mission_id||null,b.complaint_id||null,category,severity,auto?'PROCESSING':'OPEN',clean(b.description)||null,JSON.stringify({scenario,steps:proposed.steps||proposed}),requiresManager?1:0).run();
-  await supportEvent(env,id,a.role,a.auth.user.id,'CREATED',{scenario,auto,requiresManager});
-  await journal(env,a.role,a.auth.user.id,'SUPPORT_CASE_CREATE','support_cases',id,'OK',{scenario,severity,auto});
-  let autoResult=null;
-  if(auto){
-    autoResult=await supportAutoResolve(env,id,a.auth.user.id,a.role,scenario,b);
-  }
-  return json({ok:true,version:VERSION,case_id:id,scenario,automatic_resolution:!!auto,auto_result:autoResult,manager_approval_required:!auto});
 }
 
 async function supportAutoResolve(env,caseId,actorId,actorRole,scenario,context={}){
@@ -3536,65 +3359,19 @@ async function supportAutoResolve(env,caseId,actorId,actorRole,scenario,context=
 async function supportList(request,env){
   const a=await supportAuth(request,env); if(a.response)return a.response;
   return tenantScopedHandlerNotReady('TENANT_SCOPED_SUPPORT_HANDLER_REQUIRED');
-  const u=new URL(request.url),status=clean(u.searchParams.get('status')||'');
-  const isManager=['GERANTE','ADMIN'].includes(a.role);
-  let r;
-  if(isManager){
-    r=status?await env.DB.prepare(`SELECT * FROM support_cases WHERE status=? ORDER BY created_at DESC LIMIT 200`).bind(status).all():await env.DB.prepare(`SELECT * FROM support_cases ORDER BY created_at DESC LIMIT 200`).all();
-  }else{
-    r=status?await env.DB.prepare(`SELECT * FROM support_cases WHERE requester_id=? AND status=? ORDER BY created_at DESC LIMIT 200`).bind(a.auth.user.id,status).all():await env.DB.prepare(`SELECT * FROM support_cases WHERE requester_id=? ORDER BY created_at DESC LIMIT 200`).bind(a.auth.user.id).all();
-  }
-  return json({ok:true,version:VERSION,role:a.role,cases:r.results||[]});
 }
 
 async function supportResolve(request,env){
   const a=await supportAuth(request,env); if(a.response)return a.response;
   if(a.role!=='GERANTE'&&a.role!=='ADMIN') return json({ok:false,error:'MANAGER_APPROVAL_REQUIRED',version:VERSION},403);
   return tenantScopedHandlerNotReady('TENANT_SCOPED_SUPPORT_HANDLER_REQUIRED');
-  const b=await readJson(request)||{}; const id=clean(b.case_id);
-  if(!id)return json({ok:false,error:'CASE_ID_REQUIRED',version:VERSION},400);
-  const row=await env.DB.prepare(`SELECT * FROM support_cases WHERE id=? LIMIT 1`).bind(id).first();
-  if(!row)return json({ok:false,error:'CASE_NOT_FOUND',version:VERSION},404);
-  const resolution=clean(b.resolution)||'Résolution validée par la Gérante après contrôle du dossier.';
-  await env.DB.prepare(`UPDATE support_cases SET status='RESOLVED',resolution=?,resolved_at=CURRENT_TIMESTAMP,requires_manager=0 WHERE id=?`).bind(resolution,id).run();
-  await supportEvent(env,id,a.role,a.auth.user.id,'MANAGER_RESOLVED',{resolution});
-  await journal(env,a.role,a.auth.user.id,'SUPPORT_CASE_MANAGER_RESOLVE','support_cases',id,'RESOLVED',{resolution});
-  return json({ok:true,version:VERSION,case_id:id,status:'RESOLVED',resolution});
 }
 
 async function supportDashboard(request,env){
   const a=await supportAuth(request,env); if(a.response)return a.response;
   if(a.role!=='GERANTE'&&a.role!=='ADMIN') return json({ok:false,error:'FORBIDDEN'},403);
   return tenantScopedHandlerNotReady('TENANT_SCOPED_SUPPORT_HANDLER_REQUIRED');
-  const rows=await env.DB.prepare(`SELECT status,severity,COUNT(*) AS n FROM support_cases GROUP BY status,severity ORDER BY status,severity`).all();
-  const recent=await env.DB.prepare(`SELECT id,source_role,category,severity,status,created_at,resolved_at FROM support_cases ORDER BY created_at DESC LIMIT 30`).all();
-  return json({ok:true,version:VERSION,dashboard:{breakdown:rows.results||[],recent:recent.results||[],policy:{simple_low_impact:'AUTOMATIQUE_APRES_CONTROLE',sensitive_or_high_impact:'VALIDATION_GERANTE',security_legal_rgpd:'ESCALADE_IMMEDIATE'}}});
 }
-
-const __procheliaComplementHandle = handle;
-handle = async function(request,env){
-  try{
-    const u=new URL(request.url);
-    if((u.pathname==='/api/brand/identity')&&request.method==='GET') return brandIdentityEndpoint(request,env);
-    if((u.pathname==='/api/brand/clearance')&&request.method==='POST') return brandClearanceRecord(request,env);
-    if((u.pathname==='/api/ui/config')&&request.method==='GET') return interfaceConfigEndpoint(request,env);
-    if((u.pathname==='/api/support/cases')&&request.method==='POST') return supportCreate(request,env);
-    if((u.pathname==='/api/support/cases')&&request.method==='GET') return supportList(request,env);
-    if((u.pathname==='/api/support/cases/resolve')&&request.method==='POST') return supportResolve(request,env);
-    if((u.pathname==='/api/support/dashboard')&&request.method==='GET') return supportDashboard(request,env);
-    return __procheliaComplementHandle(request,env);
-  }catch(e){return json({ok:false,error:'MASTER_COMPLEMENT_ERROR',version:VERSION,message:String(e.message||e)},500)}
-};
-
-/* ============================================================================
-   PROCHÉLIA — PRODUCTION SAFETY HARDENING 2026-10-06
-   Renforcement sans duplication :
-   - rate limiting effectif sur routes sensibles
-   - gate production plus strict pour les flux réellement utilisés
-   - aucune résolution Copilote "automatique" annoncée comme terminée si
-     aucune action vérifiable n'a réellement été exécutée
-   - traçabilité des blocages de sécurité
-   ============================================================================ */
 
 async function productionSafetySchema(env){
   if(!env.DB) throw new Error('DATABASE_REQUIRED');
