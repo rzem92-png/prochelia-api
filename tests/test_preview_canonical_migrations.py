@@ -145,6 +145,7 @@ for index in db.execute("PRAGMA index_list(wallets)").fetchall():
         wallet_unique_indexes.append(columns)
 assert ["tenant_id", "user_id", "currency"] in wallet_unique_indexes, "Wallet uniqueness must be scoped to tenant and currency"
 assert ["user_id"] not in wallet_unique_indexes, "Global user-only wallet uniqueness blocks multi-tenant providers"
+assert "idx_wallets_tenant_user_currency" in indexes, "Missing named tenant/currency wallet unique index"
 assert "idx_disponibilites_tenant_intervenant_idempotency" in indexes, "Missing durable availability idempotency index"
 assert "idx_support_cases_tenant_status_created" in indexes, "Missing tenant-scoped support status index"
 assert "idx_support_cases_tenant_requester_created" in indexes, "Missing tenant-scoped support requester index"
@@ -1330,6 +1331,11 @@ db.execute("""
     UPDATE tenant_memberships SET status='ACTIVE',accepted_at=CURRENT_TIMESTAMP
     WHERE id='finance-membership-owner-alt'
 """)
+try:
+    db.execute("UPDATE wallets SET user_id='finance-owner-alt' WHERE id='finance-wallet-a'")
+    raise AssertionError("Wallet owner identity was incorrectly mutable")
+except sqlite3.IntegrityError as exc:
+    assert "WALLETS_USER_IDENTITY_IMMUTABLE" in str(exc), str(exc)
 for sql, expected in [
     ("UPDATE payment_accounts SET user_id='finance-owner-alt' WHERE id='finance-account-a'",
      "PAYMENT_ACCOUNT_TENANT_IMMUTABLE"),
