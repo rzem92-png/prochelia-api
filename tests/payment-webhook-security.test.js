@@ -109,6 +109,36 @@ test("the canonical Worker router exposes the webhook endpoint as POST-only", as
   assert.equal(response.headers.get("allow"), "POST");
 });
 
+test("mutating webhook reaches signature validation without a missing rate-limit hash helper", async () => {
+  const statements = [];
+  const columns = ["id", "bucket", "subject_hash", "window_start", "request_count"];
+  const DB = {
+    prepare(sql) {
+      statements.push(sql);
+      return {
+        bind() { return this; },
+        async first() {
+          if (sql.startsWith("SELECT name FROM sqlite_master")) return { name: "security_rate_limits" };
+          if (sql.startsWith("SELECT request_count FROM security_rate_limits")) return null;
+          return null;
+        },
+        async all() {
+          if (sql.startsWith("PRAGMA table_info")) return { results: columns.map(name => ({ name })) };
+          return { results: [] };
+        },
+        async run() { return { meta: { changes: 1 } }; }
+      };
+    }
+  };
+  const response = await worker.fetch(
+    new Request("https://example.test/api/payments/webhook", { method: "POST", body: "{}" }),
+    { DB }
+  );
+  assert.equal(response.status, 401);
+  assert.equal((await response.json()).error, "INVALID_WEBHOOK_SIGNATURE");
+  assert.ok(statements.some(sql => sql.startsWith("INSERT INTO security_rate_limits")));
+});
+
 
 test("mission-code delivery webhook uses a keyed HMAC-SHA256 over the exact JSON body", async () => {
   const deliverySecret = "a-distinct-test-secret-for-mission-code-webhook";
