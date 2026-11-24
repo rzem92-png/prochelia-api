@@ -23,10 +23,12 @@ jobs:
       - name: Enforce exact branch and Preview-only confirmation
         env:
           REQUESTED_REF: ${{ github.ref }}
+          REQUESTED_ACTOR: ${{ github.actor }}
           CONFIRMATION: ${{ inputs.confirmation }}
         run: |
           set -euo pipefail
           test "$REQUESTED_REF" = "refs/heads/fix/align-preview-r2-provisioning-2026-11-23"
+          test "$REQUESTED_ACTOR" = "rzem92-png" || { echo "::error::Only the repository owner may provision the Preview R2 bucket."; exit 1; }
           test "$CONFIRMATION" = "CREATE_PREVIEW_R2_EU_ONLY"
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
