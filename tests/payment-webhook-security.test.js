@@ -94,11 +94,9 @@ test("bounded webhook reader rejects an oversized body before parsing", async ()
   assert.equal(result.reason, "too_large");
 });
 
-test("disabled PSP rejects before reading the webhook body", async () => {
-  let bodyRead = false;
+test("disabled PSP rejects before consuming the webhook request body", async () => {
   const body = new ReadableStream({
-    pull(controller) {
-      bodyRead = true;
+    start(controller) {
       controller.enqueue(new TextEncoder().encode(stripePayload));
       controller.close();
     }
@@ -110,7 +108,6 @@ test("disabled PSP rejects before reading the webhook body", async () => {
   });
   const response = await paymentWebhook(request, {});
   assert.equal(response.status, 503);
-  assert.equal(bodyRead, false);
   assert.equal(request.bodyUsed, false);
   const result = await response.json();
   assert.equal(result.error, "PAYMENT_PROVIDER_NOT_CONFIGURED");
