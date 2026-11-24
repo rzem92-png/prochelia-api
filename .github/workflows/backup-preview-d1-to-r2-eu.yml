@@ -20,6 +20,7 @@ jobs:
     if: >-
       github.ref == 'refs/heads/fix/r2-backup-attestation-rebased-2026-11-22' &&
       github.actor == 'rzem92-png' &&
+      github.triggering_actor == 'rzem92-png' &&
       inputs.confirm_preview_backup == 'BACKUP_PREVIEW_TO_R2_EU'
     runs-on: ubuntu-latest
     timeout-minutes: 25
@@ -48,6 +49,7 @@ jobs:
             *) echo "::error::Preview backup dispatch is restricted to the exact reviewed Preview branch only."; exit 1 ;;
           esac
           test "$GITHUB_ACTOR" = "rzem92-png" || { echo "::error::Only the repository owner may dispatch the Preview backup."; exit 1; }
+          test "$GITHUB_TRIGGERING_ACTOR" = "rzem92-png" || { echo "::error::Only the repository owner may rerun the Preview backup."; exit 1; }
           test "$CLOUDFLARE_ACCOUNT_ID" = "$EXPECTED_ACCOUNT_ID"
           test "$EXPECTED_DB_ID" != "$FORBIDDEN_PRODUCTION_DB_ID"
           for name in CLOUDFLARE_API_TOKEN BACKUP_ENCRYPTION_KEY BACKUP_ATTESTATION_HMAC_KEY AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY; do
