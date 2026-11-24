@@ -32,17 +32,19 @@ test("Preview deploy pins isolated Worker and Preview D1, never production", () 
   assert.match(generator, /source\.previews\?\.vars\?\.CORS_ORIGIN/);
   assert.match(generator, /https:\/\/pages-proxy-2026-11-23\.prochelia\.pages\.dev/);
   assert.match(generator, /https:\/\/fix-frontend-finance-confirm\.prochelia\.pages\.dev/);
-  assert.match(workflow, /Verify dedicated Preview R2 bucket has EU jurisdiction/);
+  assert.match(workflow, /Verify dedicated Preview R2 bucket jurisdiction and retention/);
   assert.match(workflow, /cf-r2-jurisdiction: eu/);
   assert.match(workflow, /jurisdiction == "eu"/);
   assert.match(workflow, /PROCHELIA_PREVIEW_R2_VERIFIED_BY_WORKFLOW: "true"/);
+  assert.match(workflow, /PROCHELIA_PREVIEW_R2_RETENTION_VERIFIED_BY_WORKFLOW: "true"/);
+  assert.match(workflow, /R2_EXPECTED_RETENTION_SECONDS/);
   assert.match(workflow, /PROCHELIA_PREVIEW_DEPLOY_CONFIRMATION/);
 });
 
 test("Preview deploy runs the complete security suite and dry-run before the only deployment command", () => {
   const tests = workflow.indexOf("Run backend contract and complete security regression suite");
-  const r2Verify = workflow.indexOf("Verify dedicated Preview R2 bucket has EU jurisdiction");
-  const generate = workflow.indexOf("Generate isolated Preview deployment config after EU bucket verification");
+  const r2Verify = workflow.indexOf("Verify dedicated Preview R2 bucket jurisdiction and retention");
+  const generate = workflow.indexOf("Generate isolated Preview deployment config after EU bucket and retention verification");
   const dryRun = workflow.indexOf("Validate Wrangler bundle without deployment");
   const deploy = workflow.indexOf("Deploy ONLY the isolated Preview Worker");
   assert.ok(tests >= 0 && r2Verify > tests && generate > r2Verify && dryRun > generate && deploy > dryRun);
@@ -59,7 +61,7 @@ test("checkout and Node setup actions are pinned to immutable SHAs", () => {
   assert.match(workflow, /actions\/setup-node@[0-9a-f]{40}/);
 });
 
-test("manual Preview generator includes EU R2 only after the owner-confirmed bucket verification step", async () => {
+test("manual Preview generator includes EU R2 only after owner-confirmed bucket and retention verification", async () => {
   const directory = await mkdtemp(join(tmpdir(), "prochelia-preview-config-"));
   try {
     const sourceConfig = await readFile(new URL("../wrangler.jsonc", import.meta.url), "utf8");
@@ -71,6 +73,7 @@ test("manual Preview generator includes EU R2 only after the owner-confirmed buc
       env: {
         ...process.env,
         PROCHELIA_PREVIEW_R2_VERIFIED_BY_WORKFLOW: "true",
+        PROCHELIA_PREVIEW_R2_RETENTION_VERIFIED_BY_WORKFLOW: "true",
         PROCHELIA_PREVIEW_DEPLOY_CONFIRMATION: "DEPLOY_PREVIEW_ONLY",
         GITHUB_ACTIONS: "true",
         GITHUB_EVENT_NAME: "workflow_dispatch",
