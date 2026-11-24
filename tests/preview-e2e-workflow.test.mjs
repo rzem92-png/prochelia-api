@@ -102,7 +102,7 @@ test("Cloudflare mismatch diagnostics never print tokens or authorization header
   const start = workflow.indexOf(marker);
   assert.notEqual(start, -1);
   const block = workflow.slice(start, workflow.indexOf("exit 1", start));
-  assert.match(block, /worker_service/);
+  assert.match(block, /service_binding/);
   assert.match(block, /preview_aliases/);
   assert.doesNotMatch(block, /CLOUDFLARE_API_TOKEN|Authorization|Bearer/);
 });
