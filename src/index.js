@@ -928,6 +928,21 @@ async function paymentStatus(request, env) {
   }
 }
 
+export function sameMissionPaymentRequest(existing, requested) {
+  if (!existing || !requested) return false;
+  const gross = Number(requested.grossCents);
+  const commission = Number(requested.commissionCents);
+  return String(existing.type || "").toUpperCase() === "MISSION_CHARGE" &&
+    String(existing.mission_id || "") === String(requested.missionId || "") &&
+    String(existing.client_id || "") === String(requested.clientId || "") &&
+    String(existing.intervenant_id || "") === String(requested.intervenantId || "") &&
+    Number.isSafeInteger(gross) && Number.isSafeInteger(commission) &&
+    Number(existing.gross_cents) === gross &&
+    Number(existing.commission_cents) === commission &&
+    Number(existing.net_intervenant_cents) === gross - commission &&
+    String(existing.currency || "EUR").toUpperCase() === "EUR";
+}
+
 async function createMissionPayment(request, env) {
   const auth=await getSessionUser(request,env);
   if(!requireRole(auth,['gerante'])) return json({ok:false,error:auth?.user?'FORBIDDEN':'UNAUTHENTICATED',version:VERSION},auth?.user?403:401);
@@ -945,7 +960,12 @@ async function createMissionPayment(request, env) {
   const idem=clean(request.headers.get('idempotency-key'))||clean(body?.idempotency_key);
   if(!idem) return json({ok:false,error:'IDEMPOTENCY_KEY_REQUIRED',version:VERSION},400);
   const old=await env.DB.prepare('SELECT * FROM payment_transactions WHERE idempotency_key=? AND tenant_id=? LIMIT 1').bind(idem,tenantId).first();
-  if(old) return json({ok:true,version:VERSION,idempotent_replay:true,transaction:old},200);
+  if(old){
+    if(!sameMissionPaymentRequest(old,{
+      missionId,clientId,intervenantId,grossCents:gross,commissionCents:commission
+    })) return json({ok:false,error:'IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_REQUEST',version:VERSION},409);
+    return json({ok:true,version:VERSION,idempotent_replay:true,transaction:old},200);
+  }
   const net=gross-commission, txId=crypto.randomUUID();
   await env.DB.prepare(`INSERT INTO payment_transactions
     (id,idempotency_key,mission_id,client_id,intervenant_id,type,status,gross_cents,commission_cents,net_intervenant_cents,currency,provider,reason,tenant_id)
