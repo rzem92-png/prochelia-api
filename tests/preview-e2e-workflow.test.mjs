@@ -4,6 +4,7 @@ import { readFile } from "node:fs/promises";
 
 const workflow = await readFile(new URL("../.github/workflows/preview-directory-e2e-acceptance.yml", import.meta.url), "utf8");
 // RUN_PREVIEW_DIRECTORY_E2E: validate the read-only tenant readiness gate before fixtures.
+// This run must stop before fixture creation when the tenant schema is incomplete.
 
 test("synthetic Preview E2E requires the exact branch, actor and commit marker or explicit manual confirmation", () => {
   assert.match(workflow, /workflow_dispatch:/);
