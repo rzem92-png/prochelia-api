@@ -74,3 +74,61 @@ jobs:
             echo "No existing bucket was renamed, deleted, rebound, or copied."
             echo "No Worker deployment, D1 migration, Production change, or customer-data transfer occurred."
           } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Configure and verify retention lock for the exact Preview backup prefix
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          R2_EXPECTED_RETENTION_SECONDS: ${{ vars.R2_EXPECTED_RETENTION_SECONDS }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "${R2_EXPECTED_RETENTION_SECONDS:-}" =~ ^[1-9][0-9]*$ ]] || {
+            echo "::error::R2_EXPECTED_RETENTION_SECONDS must be a positive integer approved by the data-retention owner."
+            exit 1
+          }
+          token="${CLOUDFLARE_API_TOKEN#Bearer }"
+          bucket="prochelia-preview-backups-eu-v2"
+          prefix="preview-d1/prochelia-preview-eu-2026-11-17/"
+          rule_id="prochelia-preview-d1-retention"
+          url="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/r2/buckets/$bucket/lock"
+          status="$(curl --silent --show-error --output "$RUNNER_TEMP/r2-lock-before.json" --write-out '%{http_code}' "$url" -H "Authorization: Bearer $token" -H 'cf-r2-jurisdiction: eu')"
+          test "$status" = "200" || { echo "::error::Unable to read existing EU R2 lock rules (HTTP $status)."; exit 1; }
+          jq -e '.success == true and (.result.rules | type == "array")' "$RUNNER_TEMP/r2-lock-before.json" >/dev/null
+          if jq -e --arg prefix "$prefix" --argjson retention "$R2_EXPECTED_RETENTION_SECONDS" '
+            any(.result.rules[]?;
+              .enabled == true and .prefix == $prefix and .condition.type == "Age" and
+              (.condition.maxAgeSeconds | type == "number") and .condition.maxAgeSeconds >= $retention
+            )
+          ' "$RUNNER_TEMP/r2-lock-before.json" >/dev/null; then
+            echo "PASS: an enabled retention rule already protects the exact Preview backup prefix."
+          else
+            conflicts="$(jq --arg prefix "$prefix" '[.result.rules[]? | select(.prefix == $prefix)] | length' "$RUNNER_TEMP/r2-lock-before.json")"
+            test "$conflicts" = "0" || {
+              echo "::error::A conflicting rule already exists for the Preview prefix; manual retention-policy review is required."
+              exit 1
+            }
+            jq --arg id "$rule_id" --arg prefix "$prefix" --argjson retention "$R2_EXPECTED_RETENTION_SECONDS" '
+              {rules: ((.result.rules // []) + [{
+                id: $id,
+                enabled: true,
+                prefix: $prefix,
+                condition: {type: "Age", maxAgeSeconds: $retention}
+              }])}
+            ' "$RUNNER_TEMP/r2-lock-before.json" > "$RUNNER_TEMP/r2-lock-update.json"
+            status="$(curl --silent --show-error --output "$RUNNER_TEMP/r2-lock-update-response.json" --write-out '%{http_code}' -X PUT "$url" -H "Authorization: Bearer $token" -H 'cf-r2-jurisdiction: eu' -H 'Content-Type: application/json' --data-binary @"$RUNNER_TEMP/r2-lock-update.json")"
+            test "$status" = "200" || { echo "::error::Unable to set the Preview R2 retention lock (HTTP $status)."; exit 1; }
+            jq -e '.success == true' "$RUNNER_TEMP/r2-lock-update-response.json" >/dev/null
+          fi
+          status="$(curl --silent --show-error --output "$RUNNER_TEMP/r2-lock-after.json" --write-out '%{http_code}' "$url" -H "Authorization: Bearer $token" -H 'cf-r2-jurisdiction: eu')"
+          test "$status" = "200" || { echo "::error::Unable to verify the EU R2 retention lock after configuration (HTTP $status)."; exit 1; }
+          jq -e --arg prefix "$prefix" --argjson retention "$R2_EXPECTED_RETENTION_SECONDS" '
+            .success == true and any(.result.rules[]?;
+              .enabled == true and .prefix == $prefix and .condition.type == "Age" and
+              (.condition.maxAgeSeconds | type == "number") and .condition.maxAgeSeconds >= $retention
+            )
+          ' "$RUNNER_TEMP/r2-lock-after.json" >/dev/null || {
+            echo "::error::The exact Preview backup prefix does not have the approved enabled retention lock."
+            exit 1
+          }
+          echo "PASS: exact Preview backup prefix has the approved EU R2 retention lock."
