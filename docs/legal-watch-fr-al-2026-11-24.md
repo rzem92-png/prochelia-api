@@ -48,6 +48,21 @@ La même loi modifie aussi le cadre LBC/FT : approche fondée sur les risques, v
 
 Le périmètre PROCHÉLIA doit rester fondé sur des moyens de paiement autorisés et des PSP habilités. Ne pas introduire de crypto-actifs, jetons de paiement ou mécanismes assimilables pour le pilote Algérie sans avis juridique local préalable.
 
+### E. Union européenne — règlement IA (AI Act) modifié par le règlement (UE) 2026/1744
+
+Le règlement (UE) 2026/1744 du 8 juillet 2026, publié au Journal officiel le 24 juillet 2026 et applicable à compter du 27 juillet 2026, modifie le règlement (UE) 2024/1689. Il ne reporte pas l'ensemble de l'AI Act : il ajuste certaines obligations et le calendrier des exigences applicables aux systèmes à haut risque.
+
+Points de calendrier à intégrer :
+
+- Les chapitres I et II de l'AI Act s'appliquent depuis le 2 février 2025. L'article 4, dans sa rédaction issue du règlement 2026/1744, impose aux fournisseurs et déployeurs de prendre des mesures pour soutenir le développement de la maîtrise de l'IA de leurs équipes et des personnes qui opèrent ou utilisent les systèmes pour leur compte ; il ne leur impose pas de garantir un niveau individuel déterminé.
+- Les obligations de transparence de l'article 50 relèvent du calendrier général d'application du 2 août 2026. Les personnes qui interagissent directement avec un système d'IA doivent notamment être informées qu'elles interagissent avec une IA, sauf si cela ressort clairement du contexte.
+- Les nouvelles interdictions de l'article 5(1), points (ba) et (bb), ainsi que les paragraphes 1a et 1b correspondants, s'appliquent à partir du 2 décembre 2026. Elles concernent notamment certains systèmes générant ou manipulant, sans consentement explicite, des représentations intimes réalistes de personnes identifiables ou du matériel d'abus sexuels sur enfants ; ce n'est pas une fonctionnalité prévue pour PROCHÉLIA, mais cette échéance doit être suivie.
+- Les exigences du chapitre III, sections 1 à 3, pour les systèmes à haut risque de l'article 6(2) / annexe III sont reportées au 2 décembre 2027. Pour les systèmes à haut risque de l'article 6(1) / annexe I, la date est le 2 août 2028. Ce report ne constitue pas une exemption ni une autorisation d'usage sans garanties.
+
+**Point de vigilance PROCHÉLIA / NEXUS SUPRA :** l'annexe III, point 4, vise notamment les systèmes utilisés pour recruter ou sélectionner des personnes (ciblage d'annonces, analyse/filtrage de candidatures, évaluation de candidats), prendre des décisions affectant les conditions de travail ou la promotion/rupture d'une relation de travail, attribuer des tâches selon le comportement ou des caractéristiques personnelles, ou surveiller/évaluer les performances et comportements. Si NEXUS SUPRA est utilisé à ces fins, certaines fonctions peuvent relever du haut risque selon leur destination réelle et leur rôle dans la décision. La qualification doit être faite fonction par fonction, en distinguant aide administrative, recommandation, classement, allocation de missions et décision effective.
+
+**Mesures de conception à retenir dès maintenant :** pas de rejet, suspension, sanction, rupture ou décision de rémunération entièrement automatisés ; décision humaine traçable, explication compréhensible, contestation, tests de biais, limitation des données, journal des recommandations et des validations, séparation des rôles fournisseur/déployeur et formation des personnes concernées. Ne pas utiliser de données sensibles pour corriger des biais sans base légale et garanties spécifiques ; l'article 4a introduit par le règlement 2026/1744 prévoit un cadre exceptionnel, strictement nécessaire et documenté.
+
 ## 2. Exigences à traduire en produit et contrôles
 
 | Domaine | Exigence de conception à instruire | Preuve attendue |
@@ -56,6 +71,7 @@ Le périmètre PROCHÉLIA doit rester fondé sur des moyens de paiement autoris�
 | DPO / contacts | Vérifier la désignation et les notifications requises dans chaque pays | Décision de désignation, coordonnées, périmètre, procédures |
 | Journal des traitements | Distinguer journal technique, journal d'activité, audit Nexus Supra et carnet légal des traitements | Motif, date/heure, acteur, opération, destinataire, intégrité et accès contrôlé |
 | Profilage | Inventorier scores de fiabilité, performance, fraude, matching et géolocalisation | Fiches de finalité, variables, seuils, tests de biais, explication, recours humain |
+| IA / AI Act | Qualifier les fonctions NEXUS SUPRA au regard de l'annexe III, point 4, et du calendrier modifié par 2026/1744 | Inventaire des finalités, classification par fonction, supervision humaine, tests de biais, information des utilisateurs, mesures de maîtrise de l'IA |
 | Identité des professionnels | Définir les pièces, registres et auto-certifications nécessaires selon le DSA et le droit national | Dossier vérifié, source, date, résultat, prochaine revue |
 | Transferts internationaux | Séparer les flux France/EEE, Algérie et sous-traitants | Cartographie, contrats, SCC si applicables, AITD/TIA, mesures supplémentaires |
 | Incidents | Procédure distincte par juridiction et type de traitement | Détection, horodatage, qualification, notification, preuve de décision |
@@ -72,17 +88,21 @@ Le périmètre PROCHÉLIA doit rester fondé sur des moyens de paiement autoris�
 6. Les scores d'intervenants, de fiabilité et de fraude constituent-ils du profilage à risque élevé ? Quelles évaluations d'impact et garanties sont nécessaires ?
 7. Quel est le rôle exact de PROCHÉLIA vis-à-vis des fonds, remboursements et reversements, et quelles obligations réglementaires s'appliquent au PSP et à la plateforme ?
 8. Quelles obligations sectorielles s'appliquent selon les prestations proposées (services à la personne, garde, travaux, transport, soins ou autres activités réglementées) ?
+9. NEXUS SUPRA est-il utilisé pour filtrer des candidatures, évaluer des intervenants, attribuer des missions selon des caractéristiques individuelles ou suivre les performances ? Pour chaque fonction, qui est fournisseur/déployeur, quel niveau d'influence l'IA exerce-t-elle et quelles exigences AI Act / droit du travail s'appliquent ?
 
 ## 4. Décision provisoire
 
 - **France :** pas de validation DSA/RGPD/consommation/fiscalité obtenue ; qualification de la plateforme et cartographie des transferts à faire valider.
 - **Algérie :** la loi 25-11 du 24 juillet 2025 doit être intégrée à la matrice ; la désignation DPO, les registres et le carnet automatisé des opérations doivent être instruits.
 - **Paiements :** aucun mouvement réel ne doit être activé avant avis juridique local, contrat PSP, recette Sandbox complète et autorisation humaine.
+- **IA / AI Act :** le règlement 2026/1744 reporte certaines exigences haut risque de l'annexe III au 2 décembre 2027, mais les obligations générales, la transparence et les mesures de maîtrise de l'IA sont déjà applicables selon leur calendrier. La qualification de NEXUS SUPRA et les garde-fous RH doivent être validés avant toute décision automatisée.
 - **Automatisation Nexus Supra :** recommandations et contrôles traçables seulement ; aucune décision juridique, fiscale, de paiement ou de suspension définitive sans validation humaine compétente.
 
 ## 5. Sources officielles consultées
 
 - Journal officiel algérien n° 48 du 24 juillet 2025, loi n° 25-11 (modification de la loi 18-07) et loi n° 25-10 : https://www.joradp.dz/FTP/JO-FRANCAIS/2025/F2025048.pdf
+- Règlement (UE) 2026/1744 du 8 juillet 2026 modifiant l'AI Act, JOUE du 24 juillet 2026 : https://eur-lex.europa.eu/eli/reg/2026/1744/oj/eng/pdf
+- AI Act consolidé au 27 juillet 2026 (règlement 2024/1689 modifié) : https://eur-lex.europa.eu/eli/reg/2024/1689/2026-07-27/eng
 - ANPDP, notice relative à la protection des données personnelles : https://plaintes.anpdp.dz/notice.php
 - Règlement (UE) 2022/2065 — Digital Services Act, notamment articles 29 à 32 : https://eur-lex.europa.eu/eli/reg/2022/2065
 - Commission européenne, impact du DSA sur les plateformes : https://digital-strategy.ec.europa.eu/en/policies/dsa-impact-platforms
