@@ -8,6 +8,10 @@ const workerConfig = await readFile(new URL("../scripts/generate-preview-wrangle
 
 test("R2 provisioning is manually gated to its dedicated branch and exact Preview-only confirmation", () => {
   assert.match(workflow, /workflow_dispatch:/);
+  assert.match(workflow, /github\.actor == 'rzem92-png'/);
+  assert.match(workflow, /github\.triggering_actor == 'rzem92-png'/);
+  assert.match(workflow, /REQUESTED_TRIGGERING_ACTOR:.*github\.triggering_actor/);
+  assert.match(workflow, /REQUESTED_TRIGGERING_ACTOR.*rzem92-png/);
   assert.match(workflow, /refs\/heads\/fix\/align-preview-r2-provisioning-2026-11-23/);
   assert.match(workflow, /REQUESTED_ACTOR:.*github\.actor/);
   assert.match(workflow, /test "\$REQUESTED_ACTOR" = "rzem92-png"/);
