@@ -41,6 +41,7 @@ test("generated Worker config is isolated, redacts query strings and excludes un
   assert.ok(preview);
   assert.equal(preview.name, "fix-pages-proxy-preview-cors-2026-11-23");
   assert.equal(preview.vars.APP_ENV, "preview");
+  assert.equal(preview.vars.PROCHELIA_COMMIT_SHA, process.env.GITHUB_SHA || "local-unpinned");
   assert.equal(preview.d1_databases[0].database_id, previewId);
   assert.equal(preview.previews.d1_databases[0].database_id, previewId);
   assert.equal(JSON.stringify(preview).includes(productionId), false);
@@ -56,6 +57,16 @@ test("generated Worker config is isolated, redacts query strings and excludes un
   assert.ok(origins.includes("https://fix-frontend-finance-confirm.prochelia.pages.dev"));
   assert.ok(origins.includes("https://fix-frontend-accounting-read.prochelia.pages.dev"));
   assert.ok(origins.every((origin) => origin.startsWith("https://") && origin !== "*"));
+});
+
+test("generator refuses a deployment without a full GitHub commit SHA", () => {
+  const { result, preview } = runGenerator((value) => value, {
+    GITHUB_ACTIONS: "true",
+    GITHUB_SHA: "not-a-full-sha"
+  });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /GITHUB_SHA must be a full 40-character commit SHA/);
+  assert.equal(preview, null);
 });
 
 test("generator fails closed if the source Production D1 identity changes", () => {

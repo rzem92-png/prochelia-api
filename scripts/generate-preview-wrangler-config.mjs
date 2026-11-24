@@ -5,6 +5,10 @@ const expectedPreviewId = "e3cf167c-37e1-4d72-9ac6-b3e27c14b97f";
 const expectedProductionId = "04f52830-ef5a-4f17-a640-42bbc2381bba";
 const expectedPreviewName = "prochelia-preview-eu-2026-11-17";
 const expectedWorkerName = "fix-pages-proxy-preview-cors-2026-11-23";
+const commitSha = process.env.GITHUB_SHA || "local-unpinned";
+if (process.env.GITHUB_ACTIONS === "true" && !/^[0-9a-f]{40}$/i.test(commitSha)) {
+  throw new Error("GITHUB_SHA must be a full 40-character commit SHA for Preview deployment");
+}
 
 if (source.name !== "prochelia-api") {
   throw new Error("Unexpected source Worker config");
@@ -35,7 +39,8 @@ if (origins.includes("*") || origins.some((origin) => !origin.startsWith("https:
 
 const previewVars = {
   APP_ENV: "preview",
-  CORS_ORIGIN: origins.join(",")
+  CORS_ORIGIN: origins.join(","),
+  PROCHELIA_COMMIT_SHA: commitSha
 };
 const previewD1 = {
   binding: "DB",
