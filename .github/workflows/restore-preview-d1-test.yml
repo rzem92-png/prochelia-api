@@ -27,7 +27,7 @@ concurrency:
 jobs:
   restore-test:
     name: Restaurer l’archive dans la base de test isolée
-    if: ${{ inputs.confirm_isolated_test == true }}
+    if: ${{ github.actor == 'rzem92-png' && inputs.confirm_isolated_test == true }}
     runs-on: ubuntu-latest
     timeout-minutes: 25
     env:
