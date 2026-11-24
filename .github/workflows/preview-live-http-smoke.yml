@@ -48,7 +48,8 @@ jobs:
             }
             echo "PASS: $label (HTTP 200, D1 SELECT 1)."
           }
-          check_health "Candidate API Worker for commit c243c38" "https://90678a75-prochelia-api.rzem92.workers.dev/api/health" "candidate-worker"
+          # Branch-scoped Cloudflare Preview alias follows the latest deployment for this PR branch.
+          check_health "Current branch API Worker Preview" "https://test-preview-live-http-smoke-2026-11-24-prochelia-api.rzem92.workers.dev/api/health" "candidate-worker"
           check_health "Legacy API Preview Worker" "https://prochelia-api-preview.rzem92.workers.dev/api/health" "legacy-worker"
           check_health "Current Pages proxy Worker" "https://fix-pages-proxy-preview-cors-2026-11-23.rzem92.workers.dev/api/health" "proxy-worker"
           check_health "Pages same-origin API proxy" "https://fix-frontend-finance-confirm.prochelia.pages.dev/api/health" "pages-proxy"
