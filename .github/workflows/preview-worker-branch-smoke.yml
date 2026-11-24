@@ -1,0 +1,64 @@
+name: PROCHÉLIA — isolated Worker branch Preview smoke
+
+on:
+  push:
+    branches:
+      - fix/e2e-tenant-schema-readiness-gate-2026-11-24
+    paths:
+      - ".github/workflows/preview-worker-branch-smoke.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: prochelia-isolated-worker-branch-smoke
+  cancel-in-progress: false
+
+jobs:
+  preview-worker-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      PREVIEW_WORKER_URL: https://fix-e2e-tenant-schema-readiness-gate-2026-11-24-prochelia-api.rzem92.workers.dev
+    steps:
+      - name: Verify isolated branch Preview health
+        shell: bash
+        run: |
+          set -euo pipefail
+          body="$RUNNER_TEMP/health.json"
+          status="$(curl --silent --show-error --retry 3 --retry-all-errors --retry-delay 2 \
+            --output "$body" --write-out '%{http_code}' "$PREVIEW_WORKER_URL/api/health")"
+          [[ "$status" == "200" ]] || {
+            echo "::error::Isolated Worker Preview health expected HTTP 200; got $status."
+            jq -c '{ok, error, database, version}' "$body" 2>/dev/null || true
+            exit 1
+          }
+          jq -e '.ok == true and .database == true' "$body" >/dev/null || {
+            echo "::error::Isolated Worker Preview did not confirm D1 health."
+            jq -c '{ok, error, database, version}' "$body"
+            exit 1
+          }
+          echo "PASS: isolated branch Worker Preview and its configured Preview D1 are healthy."
+
+      - name: Verify unauthenticated routes fail closed
+        shell: bash
+        run: |
+          set -euo pipefail
+          for route in /api/auth/me /api/clients /api/intervenants /api/tenant/context; do
+            body="$RUNNER_TEMP/route.json"
+            status="$(curl --silent --show-error --output "$body" --write-out '%{http_code}' "$PREVIEW_WORKER_URL$route")"
+            [[ "$status" == "401" ]] || {
+              echo "::error::$route expected HTTP 401 without a session; got $status."
+              jq -c '{ok, error, status}' "$body" 2>/dev/null || true
+              exit 1
+            }
+            echo "PASS: $route rejects unauthenticated access (HTTP 401)."
+          done
+
+      - name: Confirm this workflow performs read-only HTTP checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          ! grep -Eq 'curl[^\\n]*(-X[[:space:]]+POST|-X[[:space:]]+PUT|-X[[:space:]]+DELETE|--data)' .github/workflows/preview-worker-branch-smoke.yml
+          echo "PASS: smoke workflow contains only GET requests; no fixture or financial writes."
