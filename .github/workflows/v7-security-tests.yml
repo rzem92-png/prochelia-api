@@ -10,6 +10,7 @@ on:
       - "src/device-trust.js"
       - "scripts/r2-backup-attestation.mjs"
       - "tests/**"
+      - "migrations-preview-canonical/**"
       - ".github/workflows/v7-security-tests.yml"
       - ".github/workflows/apply-preview-d1-migrations.yml"
       - ".github/workflows/deploy-preview-worker-manual.yml"
@@ -18,7 +19,7 @@ on:
       - ".github/workflows/backup-preview-d1-to-r2-eu.yml"
       - ".github/workflows/restore-preview-r2-backup-isolated-test.yml"
   push:
-    branches: [main]
+    branches: [main, fix/tenant-aware-payment-account-unique-2026-11-24]
     paths:
       - "src/v7.js"
       - "src/v7-routes.js"
