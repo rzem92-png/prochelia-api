@@ -161,8 +161,7 @@ test("strategic routes require pre-migrated tables and never call the schema cre
     const start = source.indexOf("async function " + name + "(");
     const next = source.indexOf("\nasync function ", start + 20);
     const body = source.slice(start, next < 0 ? undefined : next);
-    if (name === "qualityCreate") assert.ok(body.includes("TENANT_SCOPED_QUALITY_HANDLER_REQUIRED"));
-    else assert.ok(body.includes("schemaReadinessResponse"), name + " must check migration readiness");
+    assert.ok(body.includes("schemaReadinessResponse"), name + " must check migration readiness");
   }
 });
 
@@ -172,7 +171,8 @@ test("operational routes require pre-migrated tables and never call the schema c
     const start = source.indexOf("async function " + name + "(");
     const next = source.indexOf("\nasync function ", start + 20);
     const body = source.slice(start, next < 0 ? undefined : next);
-    assert.ok(body.includes("schemaReadinessResponse"), name + " must check migration readiness");
+    if (name === "qualityCreate") assert.ok(body.includes("TENANT_SCOPED_QUALITY_HANDLER_REQUIRED"));
+    else assert.ok(body.includes("schemaReadinessResponse"), name + " must check migration readiness");
   }
 });
 
