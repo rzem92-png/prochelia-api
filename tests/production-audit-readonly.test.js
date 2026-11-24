@@ -183,3 +183,36 @@ test("commercial and recruitment routes require pre-migrated tables without runt
     assert.ok(body.includes("schemaReadinessResponse"), name + " must check migration readiness");
   }
 });
+
+test("legacy security endpoints remain disabled until tenant-scoped handlers are integrated", () => {
+  for (const name of ["securityIdentityStart","securityIdentityApprove","securityPrepareMission","securityPresence","securityVerifyCode","securityResendCodes","securityStatus"]) {
+    const start = source.indexOf("async function " + name + "(");
+    const next = source.indexOf("\nasync function ", start + 20);
+    const body = source.slice(start, next < 0 ? undefined : next);
+    assert.match(body, /tenantScopedHandlerNotReady\('TENANT_SCOPED_SECURITY_HANDLER_REQUIRED'\)/);
+    assert.doesNotMatch(body, /ensureSecuritySchema\(env\)|INSERT INTO identity_verifications|INSERT INTO mission_security/);
+  }
+});
+
+test("legacy finance workspace and support endpoints remain disabled until tenant-scoped handlers are integrated", () => {
+  const financeStart = source.indexOf("async function financeAuth");
+  const financeEnd = source.indexOf("\nfunction financeMoney", financeStart);
+  assert.match(source.slice(financeStart, financeEnd), /TENANT_SCOPED_FINANCE_HANDLER_REQUIRED/);
+  for (const name of ["supportCreate","supportList","supportResolve","supportDashboard"]) {
+    const start = source.indexOf("async function " + name + "(");
+    const next = source.indexOf("\nasync function ", start + 20);
+    const body = source.slice(start, next < 0 ? undefined : next);
+    assert.match(body, /TENANT_SCOPED_SUPPORT_HANDLER_REQUIRED/);
+  }
+});
+
+test("legacy case, complaint, finance summary and quality routes remain blocked pending tenant scoping", () => {
+  const start = source.indexOf("async function handleConsolidated");
+  const end = source.indexOf("\n/* ============================================================", start);
+  const body = source.slice(start, end);
+  assert.match(body, /TENANT_SCOPED_CONSOLIDATED_HANDLER_REQUIRED/);
+  for (const path of ["/api/cases","/api/cases/approve","/api/complaints","/api/finance/summary"]) assert.ok(body.includes(path));
+  const qualityStart = source.indexOf("async function qualityCreate");
+  const qualityEnd = source.indexOf("\nasync function capacityDashboard", qualityStart);
+  assert.match(source.slice(qualityStart, qualityEnd), /TENANT_SCOPED_QUALITY_HANDLER_REQUIRED/);
+});
