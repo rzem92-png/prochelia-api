@@ -44,6 +44,8 @@ Indépendamment de cette qualification, faire vérifier les obligations généra
 
 La loi n° 25-10 du 24 juillet 2025 modifie le cadre algérien de lutte contre le blanchiment et le financement du terrorisme et introduit notamment une interdiction relative à l'émission, l'achat, la vente, l'utilisation, la détention, la promotion et l'exploitation de plateformes d'échange d'actifs virtuels dans les conditions prévues par le texte.
 
+La même loi modifie aussi le cadre LBC/FT : approche fondée sur les risques, vigilance à l'égard des clients et identification du bénéficiaire effectif pour les « assujettis » visés par le texte. Faire déterminer par un conseil algérien si PROCHÉLIA relève elle-même d'une catégorie assujettie ou si ces obligations sont portées par le PSP et d'autres partenaires réglementés ; ne pas transférer automatiquement au produit des obligations qui ne s'appliqueraient qu'à ces assujettis.
+
 Le périmètre PROCHÉLIA doit rester fondé sur des moyens de paiement autorisés et des PSP habilités. Ne pas introduire de crypto-actifs, jetons de paiement ou mécanismes assimilables pour le pilote Algérie sans avis juridique local préalable.
 
 ## 2. Exigences à traduire en produit et contrôles
