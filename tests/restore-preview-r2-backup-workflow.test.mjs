@@ -8,6 +8,7 @@ const backupWorkflow = await readFile(new URL("../.github/workflows/backup-previ
 test("Preview R2 restore is manually gated to main only", () => {
   assert.ok(workflow.includes("github.ref == 'refs/heads/main'"));
   assert.ok(workflow.includes("github.actor == 'rzem92-png'"));
+  assert.ok(workflow.includes("github.triggering_actor == 'rzem92-png'"));
   assert.ok(workflow.includes('test "$GITHUB_ACTOR" = "rzem92-png"'));
   assert.ok(workflow.includes("Only the repository owner may dispatch the isolated Preview restore."));
   assert.ok(workflow.includes("RESTORE_PREVIEW_R2_TO_ISOLATED_TEST_ONLY"));
