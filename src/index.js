@@ -1018,15 +1018,59 @@ function constantTimeStringEqual(actual, expected) {
   return difference === 0;
 }
 
-export async function verifyWebhookSignature(request, env, rawBody) {
+const STRIPE_WEBHOOK_TOLERANCE_SECONDS = 300;
+
+async function verifyStripeWebhookSignature(request, env, rawBody, nowSeconds = Math.floor(Date.now() / 1000)) {
+  const secret = env?.STRIPE_WEBHOOK_SECRET;
+  if (typeof secret !== 'string' || !secret || !Number.isSafeInteger(nowSeconds)) return false;
+  const header = request.headers.get('stripe-signature') || '';
+  let timestamp = null;
+  const signatures = [];
+  for (const part of header.split(',')) {
+    const separator = part.indexOf('=');
+    if (separator <= 0) continue;
+    const name = part.slice(0, separator).trim();
+    const value = part.slice(separator + 1).trim();
+    if (name === 't') {
+      if (timestamp !== null || !/^\\d+$/.test(value)) return false;
+      const parsed = Number(value);
+      if (!Number.isSafeInteger(parsed)) return false;
+      timestamp = parsed;
+    } else if (name === 'v1' && /^[0-9a-f]{64}$/i.test(value)) {
+      signatures.push(value.toLowerCase());
+    }
+  }
+  if (timestamp === null || signatures.length === 0 ||
+      Math.abs(nowSeconds - timestamp) > STRIPE_WEBHOOK_TOLERANCE_SECONDS) return false;
+  try {
+    const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+    const message = new TextEncoder().encode(`${timestamp}.${rawBody}`);
+    const mac = new Uint8Array(await crypto.subtle.sign('HMAC', key, message));
+    const expected = [...mac].map(byte => byte.toString(16).padStart(2, '0')).join('');
+    let valid = false;
+    for (const supplied of signatures) valid = constantTimeStringEqual(supplied, expected) || valid;
+    return valid;
+  } catch {
+    return false;
+  }
+}
+
+export async function verifyWebhookSignature(request, env, rawBody, nowSeconds = Math.floor(Date.now() / 1000)) {
+  if (request.headers.has('stripe-signature') || paymentProvider(env) === 'stripe') {
+    return verifyStripeWebhookSignature(request, env, rawBody, nowSeconds);
+  }
   const secret = env?.PAYMENT_WEBHOOK_SECRET;
   if (typeof secret !== 'string' || !secret) return false;
   const signature = request.headers.get('x-prochelia-signature') || request.headers.get('x-webhook-signature') || '';
   const supplied = signature.startsWith('sha256=') ? signature.slice(7) : signature;
   if (!/^[A-Za-z0-9_-]{43}$/.test(supplied)) return false;
-  const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
-  const mac = new Uint8Array(await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(rawBody)));
-  return constantTimeStringEqual(supplied, base64url(mac));
+  try {
+    const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+    const mac = new Uint8Array(await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(rawBody)));
+    return constantTimeStringEqual(supplied, base64url(mac));
+  } catch {
+    return false;
+  }
 }
 
 export function requiresAtomicFinancialSettlement(eventType) {
