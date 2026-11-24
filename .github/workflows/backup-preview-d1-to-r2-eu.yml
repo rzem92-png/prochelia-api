@@ -20,7 +20,8 @@ jobs:
     if: >-
       (
         github.ref == 'refs/heads/main' &&
-        github.actor == 'rzem92-png'
+        github.actor == 'rzem92-png' &&
+        github.triggering_actor == 'rzem92-png'
       ) &&
       inputs.confirm_preview_backup == 'BACKUP_PREVIEW_TO_R2_EU'
     runs-on: ubuntu-latest
