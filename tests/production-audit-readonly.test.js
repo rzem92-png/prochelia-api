@@ -85,7 +85,7 @@ test("security endpoints require pre-migrated security tables and never execute 
     assert.notEqual(start, -1, "missing " + name);
     const next = source.indexOf("\nasync function ", start + 20);
     const body = source.slice(start, next < 0 ? undefined : next);
-    assert.match(body, /schemaReadinessResponse\(env, \['identity_verifications','trusted_devices','mission_security','mission_security_attempts','security_audit'\]/);
+    assert.match(body, /tenantScopedHandlerNotReady\('TENANT_SCOPED_SECURITY_HANDLER_REQUIRED'\)/);
     assert.doesNotMatch(body, /ensureSecuritySchema\(env\)/);
   }
 });
@@ -97,7 +97,7 @@ test("finance workspace routes require migration-owned tables instead of runtime
   assert.notEqual(end, -1);
   const body = source.slice(start, end);
   assert.doesNotMatch(body, /ensureFinanceWorkspaceSchema\(env\)/);
-  assert.match(body, /schemaReadinessResponse\(env, \['finance_workspace_entries','finance_export_log','finance_resolution_cases'\]/);
+  assert.match(body, /TENANT_SCOPED_FINANCE_HANDLER_REQUIRED/);
 });
 
 test("national scale and backup routes do not create tables at request time", () => {
@@ -127,7 +127,8 @@ test("brand and support routes fail closed when schema is not migrated and never
     assert.notEqual(start, -1, "missing " + name);
     const next = source.indexOf("\nasync function ", start + 20);
     const body = source.slice(start, next < 0 ? undefined : next);
-    assert.ok(body.includes("schemaReadinessResponse"), name + " must check migration readiness");
+    if (name.startsWith("support")) assert.ok(body.includes("TENANT_SCOPED_SUPPORT_HANDLER_REQUIRED"), name + " must fail closed pending tenant scoping");
+    else assert.ok(body.includes("schemaReadinessResponse"), name + " must check migration readiness");
     assert.ok(!body.includes("ensureProcheliaMasterComplementSchema(env)"));
   }
   const uiStart = source.indexOf("async function interfaceConfigEndpoint");
@@ -160,7 +161,8 @@ test("strategic routes require pre-migrated tables and never call the schema cre
     const start = source.indexOf("async function " + name + "(");
     const next = source.indexOf("\nasync function ", start + 20);
     const body = source.slice(start, next < 0 ? undefined : next);
-    assert.ok(body.includes("schemaReadinessResponse"), name + " must check migration readiness");
+    if (name === "qualityCreate") assert.ok(body.includes("TENANT_SCOPED_QUALITY_HANDLER_REQUIRED"));
+    else assert.ok(body.includes("schemaReadinessResponse"), name + " must check migration readiness");
   }
 });
 
