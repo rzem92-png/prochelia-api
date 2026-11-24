@@ -9,6 +9,8 @@ test("Preview R2 restore is manually gated to the exact reviewed Preview branch 
   assert.ok(workflow.includes("github.ref == 'refs/heads/fix/r2-backup-attestation-rebased-2026-11-22'"));
   assert.doesNotMatch(workflow, /refs\/heads\/main/);
   assert.ok(workflow.includes("github.actor == 'rzem92-png'"));
+  assert.ok(workflow.includes("github.triggering_actor == 'rzem92-png'"));
+  assert.ok(workflow.includes('test "$GITHUB_TRIGGERING_ACTOR" = "rzem92-png"'));
   assert.ok(workflow.includes('test "$GITHUB_ACTOR" = "rzem92-png"'));
   assert.ok(workflow.includes("RESTORE_PREVIEW_R2_TO_ISOLATED_TEST_ONLY"));
 });
