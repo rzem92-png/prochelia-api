@@ -322,3 +322,17 @@ Aucune conclusion de conformité, qualification réglementaire ou validation com
 - Commission européenne, « Data Act explained » : https://digital-strategy.ec.europa.eu/en/factpages/data-act-explained
 - Commission européenne, FAQ « Navigating the AI Act » : https://digital-strategy.ec.europa.eu/fr/faqs/navigating-ai-act
 - Secrétariat général du Gouvernement algérien, derniers Journaux officiels : https://www.joradp.dz/HFR/Accueil.htm
+
+
+### Hébergement et résidence des données — observation technique du 24 novembre 2026
+
+Contrôle en lecture seule des métadonnées Cloudflare (ne constitue pas un avis juridique) :
+
+- La D1 Production `prochelia-db` (`04f52830-ef5a-4f17-a640-42bbc2381bba`) retourne `running_in_region=WEUR`, mais `jurisdiction=null`.
+- Le bucket nommé `prochelia-production-backups-eu` est retourné dans la juridiction `default` (location `WEUR`), sans règle Object Lock visible ; l'endpoint du workflow de sauvegarde Production est l'endpoint R2 générique, pas l'endpoint EU dédié.
+- Le nom du bucket et la région WEUR ne suffisent donc pas à démontrer une restriction contractuelle ou technique de juridiction UE. PROCHÉLIA ne doit pas présenter la Production comme « EU-jurisdiction » sur cette seule base.
+- À l'inverse, la D1 Preview `prochelia-preview-eu-2026-11-17` retourne explicitement `jurisdiction=eu`. Le Worker R2 de smoke `prochelia-api-r2-preprod` déclare un binding vers `prochelia-staging-storage` avec `jurisdiction=eu`. Le Worker Preview partagé déclare un binding vers `prochelia-preview-backups-eu-v2` avec `jurisdiction=eu`, mais l'inventaire et les règles de ce dernier ne sont pas vérifiables via le connecteur faute d'en-tête `cf-r2-jurisdiction: eu`.
+
+**Action bloquante avant lancement France** : faire confirmer par Cloudflare et un juriste/DPO la juridiction contractuelle et technique des données Production, des sauvegardes et des journaux ; décider d'une éventuelle migration vers des ressources explicitement EU-jurisdiction ; exiger une preuve de sauvegarde et de restauration indépendante avant toute migration. Ne pas requalifier rétroactivement les ressources `default` comme EU.
+
+Aucune configuration, donnée, migration, sauvegarde ou ressource Production n'a été modifiée pendant ce contrôle.
