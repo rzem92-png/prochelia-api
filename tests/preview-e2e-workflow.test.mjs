@@ -26,10 +26,12 @@ test("Preview E2E is pinned to the exact EU Preview D1 and current Pages branch 
 
 test("Pages E2E uses the exact allowlisted alias and does not assume a service binding", () => {
   assert.match(workflow, /fix-frontend-accounting-read\.prochelia\.pages\.dev/);
-  assert.match(workflow, /\.result\.aliases/);
-  assert.match(workflow, /\.result\.services/);
-  assert.match(workflow, /pinned Preview Worker origin/);
-  assert.match(workflow, /\.result\.d1_databases\.DB\.id == \$db/);
+  assert.match(workflow, /\.aliases/);
+  assert.match(workflow, /\.services \/\/ \{\}/);
+  assert.match(workflow, /Worker origin is pinned in Pages Function/);
+  assert.match(workflow, /\.d1_databases\.DB\.id == \$db/);
+  assert.match(workflow, /printf '%s\\\\n' "\$deployment" > "\$RUNNER_TEMP\/pages-preview\.json"/);
+  assert.doesNotMatch(workflow, /pages\/projects\/prochelia\/deployments\/\$PAGES_DEPLOYMENT_ID/);
 });
 
 test("Pages same-origin proxy tests the four protected intervenant routes and preflight", () => {
