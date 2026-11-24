@@ -156,6 +156,7 @@ jobs:
           printf 'PAGES_DEPLOYMENT_ID=%s\nPAGES_PREVIEW_URL=%s\nFRONTEND_COMMIT_SHA=%s\n' \
             "$PAGES_DEPLOYMENT_ID" "$PAGES_PREVIEW_URL" "$FRONTEND_COMMIT_SHA" >> "$GITHUB_ENV"
           # RUN_PREVIEW_DIRECTORY_E2E: verify metadata from the list response before any fixture writes.
+          # RUN_PREVIEW_DIRECTORY_E2E: verify current Pages Preview commit and tenant schema gate.
           # Use the full deployment record from the list response. The detail endpoint
           # omits aliases and service bindings for this Pages project, while the list
           # response carries the verified alias and D1 binding.
