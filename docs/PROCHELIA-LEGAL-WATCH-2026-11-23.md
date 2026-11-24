@@ -265,3 +265,60 @@ Aucune déclaration de conformité juridique ou de conformité AI Act n'est fait
 - Règlement (UE) 2026/1744, JOUE du 24 juillet 2026 : https://eur-lex.europa.eu/eli/reg/2026/1744/oj/eng/pdf
 - CNIL / CEPD, action coordonnée 2027 sur le recrutement par IA, 12 novembre 2026 : https://www.cnil.fr/fr/actualite-du-cepd-adequation-de-la-coree-du-sud-versions-finales-des-bcr-st-et-action-coordonnee-sur
 - Journal officiel algérien n° 80, 18 novembre 2026 : https://www.joradp.dz/FTP/jo-francais/2026/F2026080.pdf
+
+
+## Addendum du 24 novembre 2026 — facturation électronique et portabilité cloud
+
+### Facturation électronique — protection et conservation des données
+
+La CNIL rappelle, dans sa fiche sur la facturation électronique, que les factures électroniques relevant de la comptabilité sont soumises à la durée légale de conservation de **dix ans** prévue à l'article L.123-22 du Code de commerce. La plateforme de facturation ne peut pas réutiliser librement les données personnelles reçues : toute réutilisation pour des finalités supplémentaires doit être compatible avec la finalité initiale, encadrée contractuellement et autorisée par écrit lorsque le prestataire agit comme sous-traitant.
+
+**Conséquences à traiter pour PROCHÉLIA :**
+- distinguer les factures et pièces comptables des événements techniques, journaux de connexion et webhooks PSP ;
+- définir, pour chaque flux, le responsable de traitement, le sous-traitant et les éventuels sous-traitants ultérieurs ;
+- fixer la durée de conservation légale des pièces comptables sans appliquer automatiquement dix ans à toutes les données du compte ;
+- interdire la réutilisation des factures, justificatifs ou données clients pour l'entraînement ou l'analyse indépendante sans base légale, information et autorisation adaptées ;
+- prévoir export, restitution et suppression contrôlée à la fin du contrat, sous réserve des obligations légales d'archivage.
+
+Cette fiche ne qualifie pas à elle seule PROCHÉLIA de plateforme agréée de facturation électronique : ce statut et les obligations correspondantes doivent être déterminés selon le rôle réellement exercé.
+
+### Data Act — échéance de portabilité cloud du 12 janvier 2027
+
+L'article 29 du règlement (UE) 2023/2854 (« Data Act ») prévoit la suppression des frais de changement de fournisseur pour les services de traitement de données à compter du **12 janvier 2027**. Jusqu'à cette date, seuls des frais réduits directement liés au changement peuvent encore être facturés. La Commission précise également que les fournisseurs doivent supprimer les obstacles au changement et fournir des informations contractuelles claires.
+
+**Conséquences pour l'architecture PROCHÉLIA :**
+- inventorier les dépendances Cloudflare (Workers, D1, R2, Pages, journaux, secrets et identité) ;
+- documenter les formats d'export et les procédures de restauration hors du fournisseur ;
+- conserver une preuve périodique de lisibilité des sauvegardes et de restauration sur environnement isolé ;
+- vérifier les clauses de sortie, délais, frais résiduels, restitution et effacement dans les contrats cloud ;
+- ne pas confondre la suppression des frais de changement avec une garantie automatique de portabilité technique ou de résidence des données.
+
+La qualification exacte du contrat et du service cloud doit être confirmée par un juriste spécialisé.
+
+### AI Act — confirmation des échéances officielles
+
+La FAQ actualisée de la Commission confirme le calendrier révisé : transparence de l'article 50 applicable depuis le 2 août 2026 ; systèmes à haut risque de l'annexe III à compter du 2 décembre 2027 ; systèmes de l'annexe I à compter du 2 août 2028. Les interdictions déjà applicables et les nouvelles interdictions prévues au 2 décembre 2026 doivent être traitées séparément. Pour Nexus Supra et Nexus Talent, la qualification fournisseur/déployeur et l'éventuelle qualification « emploi » restent à documenter avant pilote ; la date d'application différée ne dispense pas des obligations déjà applicables.
+
+### Algérie — dernier contrôle du Journal officiel
+
+Au contrôle du 24 novembre, le portail officiel du Secrétariat général du Gouvernement affiche toujours le Journal officiel n°80 du 18 novembre 2026 comme dernier numéro publié. Aucun nouveau texte général relatif aux données personnelles ou aux paiements de plateforme n'a été identifié dans cette vérification ciblée. Cela ne constitue pas une veille exhaustive ni un avis de droit algérien.
+
+### Actions à suivre
+
+| Action | Validation requise | État |
+|---|---|---|
+| Définir la matrice de conservation des factures, justificatifs, webhooks et journaux | Expert-comptable / DPO / juriste | Bloquant avant données réelles |
+| Déterminer les rôles RGPD et les contrats de sous-traitance des intégrations de facturation | DPO / juriste | À réaliser |
+| Établir un plan d'export et de sortie cloud, avec restauration indépendante | RSSI / architecte / juriste cloud | À réaliser |
+| Vérifier les contrats et frais de changement au regard du 12 janvier 2027 | Juriste cloud / achats | À surveiller |
+| Qualifier les usages Nexus Talent et les obligations de transparence AI Act | Juriste IA / DPO | À réaliser avant pilote |
+
+Aucune conclusion de conformité, qualification réglementaire ou validation comptable n'est prononcée par cet addendum. Les décisions engageantes restent soumises à des professionnels qualifiés.
+
+### Sources officielles
+
+- CNIL, « Facturation électronique : quels enjeux pour la protection des données personnelles ? » : https://www.cnil.fr/fr/facturation-electronique-quels-enjeux
+- Règlement (UE) 2023/2854, Data Act, article 29 : https://eur-lex.europa.eu/eli/reg/2023/2854/oj/eng
+- Commission européenne, « Data Act explained » : https://digital-strategy.ec.europa.eu/en/factpages/data-act-explained
+- Commission européenne, FAQ « Navigating the AI Act » : https://digital-strategy.ec.europa.eu/fr/faqs/navigating-ai-act
+- Secrétariat général du Gouvernement algérien, derniers Journaux officiels : https://www.joradp.dz/HFR/Accueil.htm
