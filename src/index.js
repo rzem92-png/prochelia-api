@@ -944,6 +944,20 @@ export function sameMissionPaymentRequest(existing, requested) {
     String(existing.currency || "EUR").toUpperCase() === "EUR";
 }
 
+export function samePayoutRequest(existing, requested) {
+  if (!existing || !requested) return false;
+  const amount = Number(requested.amountCents);
+  const currency = String(requested.currency || "EUR").toUpperCase();
+  return Number.isSafeInteger(amount) && amount > 0 &&
+    currency === "EUR" &&
+    String(existing.user_id || "") === String(requested.userId || "") &&
+    String(existing.tenant_id || "") === String(requested.tenantId || "") &&
+    String(existing.wallet_id || "") === String(requested.walletId || "") &&
+    Number(existing.amount_cents) === amount &&
+    String(existing.mode || "standard") === String(requested.mode || "standard") &&
+    String(existing.currency || "EUR").toUpperCase() === currency;
+}
+
 async function createMissionPayment(request, env) {
   const auth=await getSessionUser(request,env);
   if(!requireRole(auth,['gerante'])) return json({ok:false,error:auth?.user?'FORBIDDEN':'UNAUTHENTICATED',version:VERSION},auth?.user?403:401);
@@ -999,11 +1013,11 @@ export async function reservePayoutAtomically(env, input) {
     env.DB.prepare(`INSERT INTO payout_requests
       (id,idempotency_key,wallet_id,user_id,amount_cents,mode,provider,status,tenant_id)
       SELECT ?,?,?,?, ?,?,?, 'requested',?
-      FROM wallets WHERE id=? AND user_id=? AND tenant_id=? AND available_cents>=?
+      FROM wallets WHERE id=? AND user_id=? AND tenant_id=? AND currency='EUR' AND available_cents>=?
         AND NOT EXISTS (SELECT 1 FROM payout_requests WHERE idempotency_key=? AND tenant_id=?)`)
       .bind(payoutId,idempotencyKey,walletId,userId,amountCents,mode,provider,tenantId,walletId,userId,tenantId,amountCents,idempotencyKey,tenantId),
     env.DB.prepare(`UPDATE wallets SET available_cents=available_cents-?,reserved_cents=reserved_cents+?,updated_at=CURRENT_TIMESTAMP
-      WHERE id=? AND user_id=? AND tenant_id=? AND available_cents>=?
+      WHERE id=? AND user_id=? AND tenant_id=? AND currency='EUR' AND available_cents>=?
         AND EXISTS (SELECT 1 FROM payout_requests WHERE id=? AND user_id=? AND tenant_id=? AND idempotency_key=?)`)
       .bind(amountCents,amountCents,walletId,userId,tenantId,amountCents,payoutId,userId,tenantId,idempotencyKey),
     env.DB.prepare(`INSERT INTO payment_audit
@@ -1029,15 +1043,16 @@ async function payoutRequest(request, env) {
   const amount=moneyCents(body?.amount_eur), mode=clean(body?.mode)||'standard';
   const idem=clean(request.headers.get('idempotency-key'))||clean(body?.idempotency_key);
   if(amount===null||amount<=0||!['standard','express'].includes(mode)||!idem||idem.length>200) return json({ok:false,error:'INVALID_PAYOUT_REQUEST',version:VERSION},400);
+  const wallet=await env.DB.prepare("SELECT * FROM wallets WHERE user_id=? AND tenant_id=? AND currency='EUR' LIMIT 1").bind(auth.user.id,tenantId).first();
+  if(!wallet) return json({ok:false,error:'WALLET_NOT_FOUND',version:VERSION},409);
+  const requestIdentity={userId:auth.user.id,tenantId,walletId:wallet.id,amountCents:amount,mode,currency:'EUR'};
   const existing=await env.DB.prepare('SELECT * FROM payout_requests WHERE idempotency_key=? AND user_id=? AND tenant_id=? LIMIT 1').bind(idem,auth.user.id,tenantId).first();
   if(existing){
-    if(Number(existing.amount_cents)!==amount||existing.mode!==mode) return json({ok:false,error:'IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_REQUEST',version:VERSION},409);
+    if(!samePayoutRequest(existing,requestIdentity)) return json({ok:false,error:'IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_REQUEST',version:VERSION},409);
     return json({ok:true,version:VERSION,idempotent_replay:true,payout:existing},200);
   }
   const account=await env.DB.prepare('SELECT * FROM payment_accounts WHERE user_id=? AND tenant_id=? LIMIT 1').bind(auth.user.id,tenantId).first();
   if(!account||Number(account.payouts_enabled)!==1) return json({ok:false,error:'PAYOUT_ACCOUNT_NOT_READY',version:VERSION,message:'Le compte de paiement de l’intervenant doit être vérifié et activé par le PSP.'},409);
-  const wallet=await env.DB.prepare('SELECT * FROM wallets WHERE user_id=? AND tenant_id=? LIMIT 1').bind(auth.user.id,tenantId).first();
-  if(!wallet) return json({ok:false,error:'WALLET_NOT_FOUND',version:VERSION},409);
   const payoutId=crypto.randomUUID();
   let reservation;
   try{
@@ -1049,7 +1064,7 @@ async function payoutRequest(request, env) {
   if(!reservation.ok){
     const sameOwner=await env.DB.prepare('SELECT * FROM payout_requests WHERE idempotency_key=? AND user_id=? AND tenant_id=? LIMIT 1').bind(idem,auth.user.id,tenantId).first();
     if(sameOwner){
-      if(Number(sameOwner.amount_cents)!==amount||sameOwner.mode!==mode) return json({ok:false,error:'IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_REQUEST',version:VERSION},409);
+      if(!samePayoutRequest(sameOwner,requestIdentity)) return json({ok:false,error:'IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_REQUEST',version:VERSION},409);
       return json({ok:true,version:VERSION,idempotent_replay:true,payout:sameOwner},200);
     }
     const collision=await env.DB.prepare('SELECT 1 AS used FROM payout_requests WHERE idempotency_key=? AND tenant_id=? LIMIT 1').bind(idem,tenantId).first();
