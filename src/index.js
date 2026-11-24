@@ -531,7 +531,7 @@ async function deviceHash(request, userId) {
 async function securityIdentityStart(request, env) {
   const auth = await getSessionUser(request, env);
   if (!requireRole(auth, ['intervenant'])) return json({ok:false,error:auth?.user?'FORBIDDEN':'UNAUTHENTICATED',version:VERSION}, auth?.user?403:401);
-  await ensureSecuritySchema(env);
+  const schemaGate = await schemaReadinessResponse(env, ['identity_verifications','trusted_devices','mission_security','mission_security_attempts','security_audit'], 'SECURITY_SCHEMA_NOT_READY'); if (schemaGate) return schemaGate;
   const id = crypto.randomUUID();
   await env.DB.prepare(
     `INSERT INTO identity_verifications (id,user_id,status,level) VALUES (?,?, 'pending','standard')`
@@ -543,7 +543,7 @@ async function securityIdentityStart(request, env) {
 async function securityIdentityApprove(request, env) {
   const auth = await getSessionUser(request, env);
   if (!requireRole(auth, ['gerante'])) return json({ok:false,error:auth?.user?'FORBIDDEN':'UNAUTHENTICATED',version:VERSION}, auth?.user?403:401);
-  await ensureSecuritySchema(env);
+  const schemaGate = await schemaReadinessResponse(env, ['identity_verifications','trusted_devices','mission_security','mission_security_attempts','security_audit'], 'SECURITY_SCHEMA_NOT_READY'); if (schemaGate) return schemaGate;
   const body = await readJson(request);
   const verificationId = clean(body?.verification_id);
   const status = clean(body?.status);
@@ -590,7 +590,7 @@ async function deliverSecurityCodes(env, payload) {
 async function securityPrepareMission(request, env) {
   const auth = await getSessionUser(request, env);
   if (!requireRole(auth, ['gerante'])) return json({ok:false,error:auth?.user?'FORBIDDEN':'UNAUTHENTICATED',version:VERSION}, auth?.user?403:401);
-  await ensureSecuritySchema(env);
+  const schemaGate = await schemaReadinessResponse(env, ['identity_verifications','trusted_devices','mission_security','mission_security_attempts','security_audit'], 'SECURITY_SCHEMA_NOT_READY'); if (schemaGate) return schemaGate;
   const body = await readJson(request);
   const missionId=clean(body?.mission_id), clientId=clean(body?.client_id), intervenantId=clean(body?.intervenant_id);
   if(!missionId||!clientId||!intervenantId) return json({ok:false,error:'MISSION_SECURITY_FIELDS_REQUIRED',version:VERSION},400);
@@ -626,7 +626,7 @@ async function securityPrepareMission(request, env) {
 async function securityPresence(request, env) {
   const auth=await getSessionUser(request,env);
   if(!requireRole(auth,['intervenant'])) return json({ok:false,error:auth?.user?'FORBIDDEN':'UNAUTHENTICATED',version:VERSION},auth?.user?403:401);
-  await ensureSecuritySchema(env);
+  const schemaGate = await schemaReadinessResponse(env, ['identity_verifications','trusted_devices','mission_security','mission_security_attempts','security_audit'], 'SECURITY_SCHEMA_NOT_READY'); if (schemaGate) return schemaGate;
   const identity = await requireVerifiedIntervenant(env, auth.user.id);
   if(!identity) return json({ok:false,error:'INTERVENANT_IDENTITY_NOT_VERIFIED',version:VERSION},403);
   const body=await readJson(request), missionId=clean(body?.mission_id);
@@ -666,7 +666,7 @@ export async function consumeMissionSecurityCode(env, securityId, purpose, expec
 async function securityVerifyCode(request, env) {
   const auth=await getSessionUser(request,env);
   if(!requireRole(auth,['intervenant'])) return json({ok:false,error:auth?.user?'FORBIDDEN':'UNAUTHENTICATED',version:VERSION},auth?.user?403:401);
-  await ensureSecuritySchema(env);
+  const schemaGate = await schemaReadinessResponse(env, ['identity_verifications','trusted_devices','mission_security','mission_security_attempts','security_audit'], 'SECURITY_SCHEMA_NOT_READY'); if (schemaGate) return schemaGate;
   const body=await readJson(request), missionId=clean(body?.mission_id), purpose=clean(body?.purpose), code=clean(body?.code);
   if(!missionId||!['ARRIVAL','END'].includes(purpose)||!/^[0-9]{6}$/.test(code)) return json({ok:false,error:'INVALID_SECURITY_CODE_REQUEST',version:VERSION},400);
   const sec=await env.DB.prepare('SELECT * FROM mission_security WHERE mission_id=? AND intervenant_id=? LIMIT 1').bind(missionId,auth.user.id).first();
@@ -721,7 +721,7 @@ async function securityVerifyCode(request, env) {
 async function securityResendCodes(request, env) {
   const auth=await getSessionUser(request,env);
   if(!requireRole(auth,['gerante','client'])) return json({ok:false,error:auth?.user?'FORBIDDEN':'UNAUTHENTICATED',version:VERSION},auth?.user?403:401);
-  await ensureSecuritySchema(env);
+  const schemaGate = await schemaReadinessResponse(env, ['identity_verifications','trusted_devices','mission_security','mission_security_attempts','security_audit'], 'SECURITY_SCHEMA_NOT_READY'); if (schemaGate) return schemaGate;
   const body=await readJson(request);
   const missionId=clean(body?.mission_id);
   if(!missionId) return json({ok:false,error:'MISSION_ID_REQUIRED',version:VERSION},400);
@@ -741,7 +741,7 @@ async function securityClientCode(request, env) {
 async function securityStatus(request, env) {
   const auth=await getSessionUser(request,env);
   if(!auth) return json({ok:false,error:'UNAUTHENTICATED',version:VERSION},401);
-  await ensureSecuritySchema(env);
+  const schemaGate = await schemaReadinessResponse(env, ['identity_verifications','trusted_devices','mission_security','mission_security_attempts','security_audit'], 'SECURITY_SCHEMA_NOT_READY'); if (schemaGate) return schemaGate;
   const count=await env.DB.prepare('SELECT COUNT(*) AS total FROM security_audit').first();
   return json({ok:true,version:VERSION,security:{identity:'verified_required',device:'bound',presence:'recorded',arrival_code:'single_use',end_code:'single_use',max_attempts:SECURITY_MAX_ATTEMPTS,code_ttl_seconds:SECURITY_CODE_TTL_SECONDS,audit_events:Number(count?.total||0)},user:auth.user},200);
 }
@@ -2587,6 +2587,13 @@ async function missingRequiredTables(env, names) {
   return missing;
 }
 
+async function schemaReadinessResponse(env, names, error) {
+  const missing = await missingRequiredTables(env, names);
+  return missing.length
+    ? json({ok:false,error,missing_tables:missing,version:VERSION},503)
+    : null;
+}
+
 async function productionConfigCheck(env, { persist = false } = {}) {
   if (!env?.DB) throw new Error('DATABASE_REQUIRED');
   // Schema creation belongs to reviewed migrations, never to an audit/job request.
@@ -2926,7 +2933,8 @@ async function financeAuth(request, env) {
   const auth = await getSessionUser(request, env);
   if (!auth) return { response: json({ok:false,error:'UNAUTHENTICATED',version:VERSION},401) };
   if (!financeRoleAllowed(auth.user.role)) return { response: json({ok:false,error:'FORBIDDEN',version:VERSION},403) };
-  await ensureFinanceWorkspaceSchema(env);
+  const schemaGate = await schemaReadinessResponse(env, ['finance_workspace_entries','finance_export_log','finance_resolution_cases'], 'FINANCE_SCHEMA_NOT_READY');
+  if (schemaGate) return { response: schemaGate };
   return { auth };
 }
 
@@ -3246,7 +3254,8 @@ async function backupTables(env){
   return (r.results||[]).map(x=>String(x.name));
 }
 async function runNationalBackup(env,trigger='MANUAL'){
-  await ensureNationalContinuitySchema(env);
+  const missing = await missingRequiredTables(env, ['backup_runs','backup_objects']);
+  if (missing.length) throw new Error('BACKUP_SCHEMA_NOT_READY:' + missing.join(','));
   if(!env.BACKUP_BUCKET) throw new Error('BACKUP_R2_NOT_CONFIGURED');
   const secret=env.BACKUP_ENCRYPTION_KEY;
   if(!secret) throw new Error('BACKUP_ENCRYPTION_KEY_REQUIRED');
@@ -3283,13 +3292,11 @@ async function runNationalBackup(env,trigger='MANUAL'){
   }
 }
 async function nationalScaleStatus(env){
-  await ensureNationalContinuitySchema(env);
   const c=await env.DB.prepare(`SELECT key,value_json FROM platform_scale_config ORDER BY key`).all();
   const t=await env.DB.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name`).all();
   return {ok:true,mode:'NATIONAL_SCALE',artificialUserCap:false,unlimitedInBusinessRules:true,database:'D1',documents:'R2_RECOMMENDED',backups:{provider:'R2',automatic:true,encrypted:true},pagination:{cursorRecommended:true,maxPageSize:100},tables:(t.results||[]).map(x=>x.name),config:(c.results||[])};
 }
 async function backupStatus(env){
-  await ensureNationalContinuitySchema(env);
   const r=await env.DB.prepare(`SELECT * FROM backup_runs ORDER BY started_at DESC LIMIT 20`).all();
   return {ok:true,configured:!!env.BACKUP_BUCKET&&!!env.BACKUP_ENCRYPTION_KEY,automatic:true,frequency:'DAILY',retentionDays:90,runs:r.results||[]};
 }
@@ -3300,14 +3307,17 @@ handle = async function(request,env){
   try{
     if(request.method==='GET'&&url.pathname==='/api/system/scale'){
       const auth=await getSessionUser(request,env).catch(()=>null); if(!auth?.user||String(auth.user.role||'').toUpperCase()!=='GERANTE') return json({ok:false,error:'FORBIDDEN'},403);
+      const schemaGate = await schemaReadinessResponse(env, ['platform_scale_config'], 'NATIONAL_SCALE_SCHEMA_NOT_READY'); if (schemaGate) return schemaGate;
       return json(await nationalScaleStatus(env));
     }
     if(request.method==='GET'&&url.pathname==='/api/system/backups'){
       const auth=await getSessionUser(request,env).catch(()=>null); if(!auth?.user||String(auth.user.role||'').toUpperCase()!=='GERANTE') return json({ok:false,error:'FORBIDDEN'},403);
+      const schemaGate = await schemaReadinessResponse(env, ['backup_runs'], 'BACKUP_SCHEMA_NOT_READY'); if (schemaGate) return schemaGate;
       return json(await backupStatus(env));
     }
     if(request.method==='POST'&&url.pathname==='/api/system/backup/run'){
       const auth=await getSessionUser(request,env).catch(()=>null); if(!auth?.user||String(auth.user.role||'').toUpperCase()!=='GERANTE') return json({ok:false,error:'FORBIDDEN'},403);
+      const schemaGate = await schemaReadinessResponse(env, ['backup_runs','backup_objects'], 'BACKUP_SCHEMA_NOT_READY'); if (schemaGate) return schemaGate;
       return json(await runNationalBackup(env,'MANUAL'));
     }
     return __procheliaNationalHandle(request,env);
@@ -3448,7 +3458,7 @@ async function supportEvent(env,caseId,actorRole,actorId,eventType,details={}){
 }
 
 async function brandIdentityEndpoint(request,env){
-  await ensureProcheliaMasterComplementSchema(env);
+  const schemaGate = await schemaReadinessResponse(env, ['brand_identity','brand_assets'], 'BRAND_SCHEMA_NOT_READY'); if (schemaGate) return schemaGate;
   const r=await env.DB.prepare(`SELECT * FROM brand_identity WHERE brand_key='PROCHELIA' LIMIT 1`).first();
   const assets=await env.DB.prepare(`SELECT asset_type,asset_name,storage_key,checksum,version,status FROM brand_assets WHERE status='ACTIVE' ORDER BY asset_type,asset_name`).all();
   return json({ok:true,version:VERSION,brand:{name:PROCHELIA_BRAND.name,identity:r||null,assets:assets.results||[],visual:PROCHELIA_BRAND.visual,uniqueness_policy:PROCHELIA_BRAND.uniqueness_policy,note:'L’originalité graphique interne est une spécification de création ; l’exclusivité juridique doit être confirmée par les recherches de similarités et le dépôt de marque.'}});
@@ -3457,7 +3467,7 @@ async function brandIdentityEndpoint(request,env){
 async function brandClearanceRecord(request,env){
   const a=await supportAuth(request,env); if(a.response)return a.response;
   if(a.role!=='GERANTE'&&a.role!=='ADMIN') return json({ok:false,error:'FORBIDDEN'},403);
-  await ensureProcheliaMasterComplementSchema(env);
+  const schemaGate = await schemaReadinessResponse(env, ['brand_clearance_log'], 'BRAND_SCHEMA_NOT_READY'); if (schemaGate) return schemaGate;
   const b=await readJson(request)||{};
   const id=crypto.randomUUID();
   await env.DB.prepare(`INSERT INTO brand_clearance_log(id,search_type,term,source,result,evidence_ref,notes) VALUES(?,?,?,?,?,?,?)`)
@@ -3467,7 +3477,6 @@ async function brandClearanceRecord(request,env){
 }
 
 async function interfaceConfigEndpoint(request,env){
-  await ensureProcheliaMasterComplementSchema(env);
   const url=new URL(request.url); const requested=supportRoleNormalize(url.searchParams.get('role')||'');
   if(requested && PROCHELIA_UI[requested]) return json({ok:true,version:VERSION,role:requested,config:PROCHELIA_UI[requested],brand:PROCHELIA_BRAND.visual});
   return json({ok:true,version:VERSION,interfaces:PROCHELIA_UI,brand:PROCHELIA_BRAND.visual});
@@ -3475,7 +3484,7 @@ async function interfaceConfigEndpoint(request,env){
 
 async function supportCreate(request,env){
   const a=await supportAuth(request,env); if(a.response)return a.response;
-  await ensureProcheliaMasterComplementSchema(env);
+  const schemaGate = await schemaReadinessResponse(env, ['support_cases','support_case_events','copilot_resolution_rules'], 'SUPPORT_SCHEMA_NOT_READY'); if (schemaGate) return schemaGate;
   const b=await readJson(request)||{};
   const category=clean(b.category)||'GENERAL';
   const severity=String(b.severity||'LOW').toUpperCase();
@@ -3518,7 +3527,7 @@ async function supportAutoResolve(env,caseId,actorId,actorRole,scenario,context=
 
 async function supportList(request,env){
   const a=await supportAuth(request,env); if(a.response)return a.response;
-  await ensureProcheliaMasterComplementSchema(env);
+  const schemaGate = await schemaReadinessResponse(env, ['support_cases'], 'SUPPORT_SCHEMA_NOT_READY'); if (schemaGate) return schemaGate;
   const u=new URL(request.url),status=clean(u.searchParams.get('status')||'');
   const isManager=['GERANTE','ADMIN'].includes(a.role);
   let r;
@@ -3533,7 +3542,7 @@ async function supportList(request,env){
 async function supportResolve(request,env){
   const a=await supportAuth(request,env); if(a.response)return a.response;
   if(a.role!=='GERANTE'&&a.role!=='ADMIN') return json({ok:false,error:'MANAGER_APPROVAL_REQUIRED',version:VERSION},403);
-  await ensureProcheliaMasterComplementSchema(env);
+  const schemaGate = await schemaReadinessResponse(env, ['support_cases','support_case_events'], 'SUPPORT_SCHEMA_NOT_READY'); if (schemaGate) return schemaGate;
   const b=await readJson(request)||{}; const id=clean(b.case_id);
   if(!id)return json({ok:false,error:'CASE_ID_REQUIRED',version:VERSION},400);
   const row=await env.DB.prepare(`SELECT * FROM support_cases WHERE id=? LIMIT 1`).bind(id).first();
@@ -3548,7 +3557,7 @@ async function supportResolve(request,env){
 async function supportDashboard(request,env){
   const a=await supportAuth(request,env); if(a.response)return a.response;
   if(a.role!=='GERANTE'&&a.role!=='ADMIN') return json({ok:false,error:'FORBIDDEN'},403);
-  await ensureProcheliaMasterComplementSchema(env);
+  const schemaGate = await schemaReadinessResponse(env, ['support_cases'], 'SUPPORT_SCHEMA_NOT_READY'); if (schemaGate) return schemaGate;
   const rows=await env.DB.prepare(`SELECT status,severity,COUNT(*) AS n FROM support_cases GROUP BY status,severity ORDER BY status,severity`).all();
   const recent=await env.DB.prepare(`SELECT id,source_role,category,severity,status,created_at,resolved_at FROM support_cases ORDER BY created_at DESC LIMIT 30`).all();
   return json({ok:true,version:VERSION,dashboard:{breakdown:rows.results||[],recent:recent.results||[],policy:{simple_low_impact:'AUTOMATIQUE_APRES_CONTROLE',sensitive_or_high_impact:'VALIDATION_GERANTE',security_legal_rgpd:'ESCALADE_IMMEDIATE'}}});
@@ -3611,7 +3620,8 @@ async function productionRateLimit(request,env){
   const subject=await productionSubjectHash(request,path);
   const now=Math.floor(Date.now()/1000);
   const start=new Date(Math.floor(now/windowSeconds)*windowSeconds*1000).toISOString();
-  await ensureFinalHardeningSchema(env);
+  const rateSchemaGate = await schemaReadinessResponse(env, ['security_rate_limits'], 'RATE_LIMIT_SCHEMA_NOT_READY');
+  if (rateSchemaGate) return {ok:false,response:rateSchemaGate};
   const existing=await env.DB.prepare(`SELECT request_count FROM security_rate_limits WHERE bucket=? AND subject_hash=? AND window_start=? LIMIT 1`).bind(bucket,subject,start).first();
   const count=Number(existing?.request_count||0)+1;
   if(existing){
@@ -3620,7 +3630,8 @@ async function productionRateLimit(request,env){
     await env.DB.prepare(`INSERT INTO security_rate_limits(id,bucket,subject_hash,window_start,request_count) VALUES(?,?,?,?,1)`).bind(crypto.randomUUID(),bucket,subject,start).run();
   }
   if(count>limit){
-    await productionSafetySchema(env);
+    const eventSchemaGate = await schemaReadinessResponse(env, ['production_security_events'], 'RATE_LIMIT_AUDIT_SCHEMA_NOT_READY');
+    if (eventSchemaGate) return {ok:false,response:eventSchemaGate};
     await env.DB.prepare(`INSERT INTO production_security_events(id,event_type,route,subject_hash,decision,details_json) VALUES(?,?,?,?,?,?)`)
       .bind(crypto.randomUUID(),'RATE_LIMIT',path,subject,'BLOCKED',JSON.stringify({limit,windowSeconds})).run();
     return {ok:false,response:json({ok:false,error:'RATE_LIMITED',version:VERSION,retry_after_seconds:Math.max(1,windowSeconds-(now%windowSeconds))},429,{'retry-after':String(Math.max(1,windowSeconds-(now%windowSeconds)))})};
