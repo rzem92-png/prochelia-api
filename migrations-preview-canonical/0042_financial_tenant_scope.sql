@@ -271,15 +271,11 @@ BEGIN SELECT RAISE(ABORT,'PAYMENT_RECONCILIATION_IDENTITY_IMMUTABLE'); END;
 -- A webhook inbox event remains globally keyed until a verified provider event
 -- is matched to one internal transaction. Tenant attribution and the matched
 -- transaction are then written together and cannot be reassigned.
-CREATE TRIGGER IF NOT EXISTS trg_payment_webhook_tenant_immutable
+CREATE TRIGGER IF NOT EXISTS trg_payment_webhook_tenant_binding_immutable
 BEFORE UPDATE OF tenant_id,matched_transaction_id ON payment_webhook_events
 WHEN (OLD.tenant_id IS NOT NULL AND NEW.tenant_id IS NOT OLD.tenant_id)
   OR (OLD.matched_transaction_id IS NOT NULL AND NEW.matched_transaction_id IS NOT OLD.matched_transaction_id)
-BEGIN SELECT RAISE(ABORT,'PAYMENT_WEBHOOK_TENANT_IMMUTABLE'); END;
-
-CREATE TRIGGER IF NOT EXISTS trg_payment_webhook_tenant_binding
-BEFORE UPDATE OF tenant_id,matched_transaction_id ON payment_webhook_events
-WHEN (NEW.tenant_id IS NULL AND NEW.matched_transaction_id IS NOT NULL)
+  OR (NEW.tenant_id IS NULL AND NEW.matched_transaction_id IS NOT NULL)
   OR (NEW.tenant_id IS NOT NULL AND (
     NEW.matched_transaction_id IS NULL
     OR NOT EXISTS (
@@ -290,7 +286,7 @@ WHEN (NEW.tenant_id IS NULL AND NEW.matched_transaction_id IS NOT NULL)
       WHERE tx.id=NEW.matched_transaction_id AND tx.tenant_id=NEW.tenant_id
     )
   ))
-BEGIN SELECT RAISE(ABORT,'PAYMENT_WEBHOOK_TENANT_MISMATCH'); END;
+BEGIN SELECT RAISE(ABORT,'PAYMENT_WEBHOOK_TENANT_BINDING_INVALID'); END;
 
 CREATE TRIGGER IF NOT EXISTS trg_payment_webhook_identity_immutable
 BEFORE UPDATE OF provider,event_id,event_type ON payment_webhook_events
