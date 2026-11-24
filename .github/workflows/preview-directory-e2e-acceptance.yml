@@ -155,30 +155,31 @@ jobs:
           esac
           printf 'PAGES_DEPLOYMENT_ID=%s\nPAGES_PREVIEW_URL=%s\nFRONTEND_COMMIT_SHA=%s\n' \
             "$PAGES_DEPLOYMENT_ID" "$PAGES_PREVIEW_URL" "$FRONTEND_COMMIT_SHA" >> "$GITHUB_ENV"
-          cf_request "Pages Preview deployment access" \
-            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/pages/projects/prochelia/deployments/$PAGES_DEPLOYMENT_ID" "$RUNNER_TEMP/pages-preview.json"
+          # Use the full deployment record from the list response. The detail endpoint
+          # omits aliases and service bindings for this Pages project, while the list
+          # response carries the verified alias and D1 binding.
+          printf '%s\\n' "$deployment" > "$RUNNER_TEMP/pages-preview.json"
           if ! jq -e --arg db "$PREVIEW_DB_ID" --arg alias "$PAGES_PREVIEW_URL" --arg branch "$FRONTEND_BRANCH" --arg commit "$FRONTEND_COMMIT_SHA" '
-            .success == true and
-            .result.environment == "preview" and
-            .result.uses_functions == true and
-            .result.d1_databases.DB.id == $db and
-            (.result.services // {}) == {} and
-            ((.result.aliases // []) | index($alias) != null) and
-            .result.deployment_trigger.metadata.branch == $branch and
-            .result.deployment_trigger.metadata.commit_hash == $commit
+            .environment == "preview" and
+            .uses_functions == true and
+            .d1_databases.DB.id == $db and
+            (.services // {}) == {} and
+            ((.aliases // []) | index($alias) != null) and
+            .deployment_trigger.metadata.branch == $branch and
+            .deployment_trigger.metadata.commit_hash == $commit
           ' "$RUNNER_TEMP/pages-preview.json" >/dev/null; then
             echo "::error::Pages Preview deployment bindings/branch/commit mismatch. Safe metadata diagnostic follows."
             jq -c --arg db "$PREVIEW_DB_ID" --arg alias "$PAGES_PREVIEW_URL" --arg branch "$FRONTEND_BRANCH" --arg commit "$FRONTEND_COMMIT_SHA" '
               {
-                expected: {environment: "preview", uses_functions: true, d1_database_id: $db, preview_alias: $alias, worker_service: "pinned Preview Worker origin in Pages Function", branch: $branch, commit_hash: $commit},
+                expected: {environment: "preview", uses_functions: true, d1_database_id: $db, preview_alias: $alias, service_binding: "not used; Worker origin is pinned in Pages Function", branch: $branch, commit_hash: $commit},
                 observed: {
-                  environment: .result.environment,
-                  uses_functions: .result.uses_functions,
-                  d1_database_id: .result.d1_databases.DB.id,
-                  preview_aliases: .result.aliases,
-                  worker_service: (.result.services.PROCHELIA_API.service // null),
-                  branch: .result.deployment_trigger.metadata.branch,
-                  commit_hash: .result.deployment_trigger.metadata.commit_hash
+                  environment: .environment,
+                  uses_functions: .uses_functions,
+                  d1_database_id: .d1_databases.DB.id,
+                  preview_aliases: .aliases,
+                  services: (.services // {}),
+                  branch: .deployment_trigger.metadata.branch,
+                  commit_hash: .deployment_trigger.metadata.commit_hash
                 }
               }
             ' "$RUNNER_TEMP/pages-preview.json"
