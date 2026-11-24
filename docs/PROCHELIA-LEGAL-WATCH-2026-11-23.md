@@ -359,3 +359,48 @@ Sources officielles complémentaires :
 - Commission européenne, transparence AI Act article 50 : https://digital-strategy.ec.europa.eu/en/faqs/transparency-obligations-under-article-50-ai-act
 - Règlement (UE) 2026/1744, AI Omnibus : https://eur-lex.europa.eu/eli/reg/2026/1744/oj/eng
 - Règlement (UE) 2024/1689, version consolidée du 27 juillet 2026 : https://eur-lex.europa.eu/eli/reg/2024/1689/2026-07-27/eng
+
+
+### Veille réglementaire complémentaire — 24 novembre 2026
+
+#### France — CNIL : rejeu de session, sécurité et conservation
+
+La CNIL a publié le 5 novembre 2026 une recommandation sur les outils de rejeu de session. Si PROCHÉLIA déploie un tel outil (web ou mobile), le déploiement doit être précédé d'une finalité déterminée et d'une analyse de nécessité. La recommandation rappelle notamment le consentement préalable applicable aux traceurs hors exemption, l'information dédiée, le masquage des champs de saisie et la minimisation des sessions et identifiants. Aucun outil de rejeu de session n'est présumé présent dans l'architecture auditée ; son éventuelle présence doit être inventoriée avant activation.
+
+La CNIL a publié le 17 novembre 2026 le bilan de 38 sanctions simplifiées prononcées depuis juin (302 800 € cumulés), portant notamment sur les cookies, la sécurité, la prospection et la coopération avec l'autorité. Le 18 novembre, elle a annoncé une sanction de 5 M€ concernant des mots de passe conservés en clair, des comptes d'accès partagés et des durées de conservation excessives. Pour PROCHÉLIA, ces décisions renforcent les contrôles attendus sur les comptes nominatifs, le hachage des secrets d'authentification, la journalisation, les durées par finalité et la capacité à répondre aux demandes de la CNIL.
+
+#### France — facturation électronique
+
+La DGFiP confirme que, depuis le 1er septembre 2026, toutes les entreprises doivent pouvoir recevoir des factures électroniques ; les grandes entreprises et ETI doivent également les émettre via une plateforme agréée. Les PME et microentreprises devront émettre à compter du 1er septembre 2027. PROCHÉLIA doit donc spécifier une intégration avec une plateforme agréée et distinguer son rôle de logiciel compatible, sous-traitant, responsable de traitement ou éventuel opérateur agréé. Aucun statut de plateforme agréée n'est présumé.
+
+#### Union européenne — AI Act
+
+La Commission a publié le 16 novembre 2026 un projet de modèle d'évaluation de l'impact sur les droits fondamentaux (article 27) destiné à certains déployeurs de systèmes d'IA à haut risque. La consultation est annoncée jusqu'au 15 janvier 2027 et un appel à déployeurs pilotes jusqu'au 4 décembre 2026. Pour Nexus Talent, si les fonctions de filtrage, classement ou évaluation de candidats relèvent de l'emploi et entrent dans l'annexe III, documenter la qualification, les personnes affectées, les voies de contestation, la supervision humaine et la préparation de l'évaluation d'impact. Le modèle de la Commission est un projet de support, pas une validation juridique de PROCHÉLIA.
+
+Les échéances de l'AI Act doivent rester distinguées : transparence de l'article 50 applicable depuis le 2 août 2026 ; transition ciblée au 2 décembre 2026 pour certains marquages de systèmes génératifs déjà mis sur le marché avant le 2 août 2026 ; règles haut risque annexe III au 2 décembre 2027 et annexe I au 2 août 2028 selon le calendrier modifié. Les obligations déjà applicables ne sont pas suspendues par ces reports.
+
+#### Algérie — veille du Journal officiel
+
+Le portail officiel du Secrétariat général du Gouvernement affiche le Journal officiel n°80 du 18 novembre 2026 comme dernier numéro publié lors de ce contrôle. La recherche ciblée n'a pas identifié, dans les résultats consultés, de nouvelle disposition modifiant spécifiquement la matrice PROCHÉLIA relative aux données personnelles, aux paiements ou aux transferts internationaux. Cette absence de résultat n'est pas une preuve d'absence de texte : une vérification juridique locale demeure requise avant le pilote algérien.
+
+#### Actions de conformité à suivre
+
+- Inventorier les outils analytics, pixels, SDK et éventuels outils de rejeu de session ; maintenir tout outil non nécessaire désactivé jusqu'à validation DPO.
+- Vérifier les comptes nominatifs, le hachage des mots de passe, la MFA, les secrets d'accès et les journaux.
+- Établir une matrice de conservation par catégorie (prospects, demandes, missions, factures, sessions, journaux, litiges) et distinguer archivage légal, anonymisation et suppression.
+- Concevoir l'intégration à une plateforme agréée de facturation électronique ; ne pas présenter PROCHÉLIA comme plateforme agréée sans immatriculation.
+- Qualifier formellement Nexus Talent au regard de l'annexe III et préparer, si applicable, l'évaluation d'impact de l'article 27.
+- Faire confirmer la matrice Algérie par un avocat local et un spécialiste fiscal/paiement.
+
+Aucune conclusion de conformité, qualification réglementaire ou validation comptable n'est prononcée par cet addendum. Les décisions engageantes restent soumises à des professionnels qualifiés.
+
+#### Sources primaires complémentaires
+
+- CNIL, recommandation sur les outils de rejeu de session (5 novembre 2026) : https://www.cnil.fr/fr/rejeu-de-session-recommandation
+- CNIL, 38 sanctions simplifiées (17 novembre 2026) : https://www.cnil.fr/fr/38-sanctions-simplifiees
+- CNIL, sanction de 5 M€ relative aux mots de passe en clair (18 novembre 2026) : https://www.cnil.fr/fr/conservation-des-mots-de-passe-sanction-5-millions-deuros
+- DGFiP, calendrier de facturation électronique (mise à jour 16 janvier 2026) : https://www.impots.gouv.fr/professionnel/questions/partir-de-quand-suis-je-concerne-par-la-reforme-de-la-facturation
+- DGFiP, actualité facturation électronique (28 septembre 2026) : https://www.impots.gouv.fr/actualite/facturation-electronique
+- Commission européenne, projet de modèle d'évaluation des droits fondamentaux (16 novembre 2026) : https://digital-strategy.ec.europa.eu/en/news/commission-seeks-feedback-draft-template-fundamental-rights-impact-assessment-under-ai-act
+- Commission européenne, cadre et calendrier AI Act : https://digital-strategy.ec.europa.eu/en/policies/regulatory-framework-ai
+- Secrétariat général du Gouvernement algérien, derniers Journaux officiels : https://www.joradp.dz/hfr/Accueil.htm
