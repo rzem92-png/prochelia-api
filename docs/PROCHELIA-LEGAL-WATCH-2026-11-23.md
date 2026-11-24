@@ -1,5 +1,5 @@
 # PROCHÉLIA — veille juridique ciblée
-**État de la veille : 23 novembre 2026**  
+**État de la veille : 24 novembre 2026**  
 **Périmètre : France / Union européenne, puis Algérie**  
 **Statut : note de veille produit — ne constitue pas un avis juridique.**
 
@@ -211,3 +211,57 @@ Sources primaires :
 5. Établir une fiche de transfert France–Algérie par catégorie de données, finalité, destinataire, localisation, mécanisme RGPD, mesures complémentaires et durée.
 
 Ces points constituent une analyse de préparation produit, pas une conclusion juridique. Les textes applicables, les seuils, formalités et qualifications doivent être confirmés par un avocat/DPO en Algérie et un conseil RGPD en France/UE avant le pilote.
+
+
+## 7. Addendum juridique vérifié le 24 novembre 2026 — nouvelles sources officielles
+
+### CNIL — sanctions récentes : mots de passe, comptes partagés et conservation
+
+Le 18 novembre 2026, la CNIL a annoncé une sanction de 5 millions d'euros pour des manquements à l'article 32 du RGPD : mots de passe clients conservés en clair, identifiants partagés entre salariés, ainsi que des durées de conservation excessives (notamment des formulaires de contact conservés plus de dix ans et des journaux de connexion au-delà de la durée définie). La décision rappelle aussi la nécessité de supprimer, anonymiser ou archiver les données selon leur finalité et les obligations applicables.
+
+Le 17 novembre 2026, la CNIL a publié le bilan de 38 sanctions simplifiées prononcées entre juin et octobre 2026. Les manquements recensés concernent notamment les cookies déposés sans consentement, les mots de passe faibles, SHA-1, les comptes génériques partagés, la prospection sans consentement valable et le défaut de coopération avec l'autorité.
+
+**Observation technique limitée au candidat API inspecté :** `src/index.js` utilise actuellement PBKDF2-HMAC-SHA-256 avec un sel aléatoire de 16 octets et 100 000 itérations, et compare les empreintes sans comparaison anticipée. Le chemin inspecté ne stocke pas le mot de passe en clair et n'utilise pas SHA-1. Cela ne constitue pas une validation professionnelle de la robustesse du paramétrage : la CNIL cite notamment scrypt et Argon2 comme fonctions spécialisées et demande qu'une solution alternative démontre un niveau de sécurité au moins équivalent. Une revue de sécurité doit vérifier le coût de calcul, la politique d'entropie, la limitation des tentatives, les comptes privilégiés et l'opportunité d'une migration progressive vers une fonction dédiée. Aucun changement d'algorithme n'est effectué dans cette note.
+
+Aucune matrice complète de conservation et de purge couvrant les formulaires de contact, comptes, journaux de connexion, candidatures, réclamations, pièces justificatives et documents comptables n'a été identifiée dans les fichiers backend inspectés. La suppression des sessions expirées à la connexion ne constitue pas une politique globale de conservation. Les durées doivent être définies par finalité et obligation, puis validées juridiquement avant automatisation.
+
+### AI Act — échéances à ne pas confondre
+
+Le règlement (UE) 2026/1744 du 8 juillet 2026 a modifié l'article 113 du règlement IA :
+- les obligations du chapitre III, sections 1 à 3, pour les systèmes à haut risque relevant de l'article 6(2) et de l'annexe III s'appliquent à partir du **2 décembre 2027** ;
+- celles concernant les systèmes relevant de l'article 6(1) et de l'annexe I s'appliquent à partir du **2 août 2028**.
+
+Le même texte ajoute une transition : les fournisseurs de systèmes d'IA, y compris de modèles d'IA à usage général, qui génèrent du texte, de l'audio, des images ou de la vidéo synthétiques et qui ont été mis sur le marché avant le 2 août 2026 doivent prendre les mesures nécessaires pour respecter l'article 50(2) au plus tard le **2 décembre 2026**. Il faut donc qualifier formellement le rôle de PROCHÉLIA (fournisseur ou déployeur) et celui des fournisseurs de modèles utilisés ; ne pas attribuer automatiquement à PROCHÉLIA les obligations du fournisseur d'un modèle tiers.
+
+Les nouvelles interdictions de l'article 5 visées par le règlement 2026/1744 — notamment les pratiques relatives à la génération ou manipulation de matériel intime non consenti et de matériel d'abus sexuel d'enfants — s'appliquent à partir du **2 décembre 2026**. Pour les espaces de contenus et les outils génératifs éventuels, prévoir des règles de prévention, signalement, retrait et conservation de preuves conformes au droit applicable, sans assimiler tout contenu synthétique à un contenu interdit.
+
+### Nexus Talent — contrôle coordonné du recrutement par IA en 2027
+
+Le 12 novembre 2026, la CNIL a relayé le choix du CEPD de consacrer sa sixième action coordonnée de contrôle en 2027 à la prise de décision automatisée dans le recrutement, y compris les outils de sélection de candidats utilisant l'IA. L'action portera notamment sur le droit de ne pas faire l'objet d'une décision fondée exclusivement sur un traitement automatisé et sur le droit d'accès correspondant.
+
+**Conséquence produit :** avant toute exploitation de Nexus Talent, documenter la finalité exacte des fonctions de recherche, classement, présélection et évaluation ; maintenir une décision humaine réelle, une information compréhensible, l'accès aux données pertinentes, un recours effectif et une procédure de correction. La qualification AI Act (annexe III) et l'analyse d'impact RGPD doivent être conduites par des professionnels compétents.
+
+### Algérie — dernier Journal officiel contrôlé
+
+Le Journal officiel algérien n° 80 du 18 novembre 2026 a été consulté. Son sommaire fait apparaître principalement des transferts de crédits budgétaires, un décret relatif aux zones d'expansion touristique et des décisions individuelles. Aucune nouvelle disposition générale relative aux données personnelles ou aux paiements de plateforme n'a été identifiée dans ce numéro. Cette vérification ponctuelle ne remplace pas une veille exhaustive du Journal officiel ni l'avis d'un conseil local.
+
+### Actions de conformité à inscrire au plan PROCHÉLIA
+
+| Action | Validation requise | État |
+|---|---|---|
+| Revue indépendante du hachage des mots de passe, de l'entropie, du rate limiting et des comptes privilégiés | RSSI / expert sécurité / DPO | À réaliser |
+| Définir une matrice de conservation par catégorie, finalité et obligation, puis un mécanisme de purge vérifiable | DPO / juriste / responsable métier | Bloquant avant données réelles |
+| Qualifier fournisseur/déployeur des modèles IA et les obligations de l'article 50(2) avant le 2 décembre 2026 si le cas transitoire s'applique | Juriste IA / fournisseur du modèle | À vérifier immédiatement |
+| Revoir les interdictions AI Act applicables à compter du 2 décembre 2026 et les mécanismes de modération | Juriste IA / responsable Trust & Safety | À réaliser |
+| Auditer les parcours de recrutement automatisés et les droits d'accès/contestation | DPO / juriste emploi / responsable Nexus Talent | À réaliser avant pilote |
+
+Aucune déclaration de conformité juridique ou de conformité AI Act n'est faite par cet addendum. Les qualifications engageantes, les durées de conservation, les contrats et les mesures de conformité doivent être validés par des professionnels qualifiés.
+
+### Sources officielles
+
+- CNIL, sanction de 5 millions d'euros pour mots de passe en clair et conservation excessive, 18 novembre 2026 : https://www.cnil.fr/fr/conservation-des-mots-de-passe-sanction-5-millions-deuros
+- CNIL, 38 sanctions simplifiées depuis juin 2026, 17 novembre 2026 : https://www.cnil.fr/fr/38-sanctions-simplifiees
+- CNIL, recommandation sur les mots de passe, 14 octobre 2022, et délibération n° 2022-100 : https://www.cnil.fr/fr/mots-de-passe-recommandations-pour-maitriser-sa-securite
+- Règlement (UE) 2026/1744, JOUE du 24 juillet 2026 : https://eur-lex.europa.eu/eli/reg/2026/1744/oj/eng/pdf
+- CNIL / CEPD, action coordonnée 2027 sur le recrutement par IA, 12 novembre 2026 : https://www.cnil.fr/fr/actualite-du-cepd-adequation-de-la-coree-du-sud-versions-finales-des-bcr-st-et-action-coordonnee-sur
+- Journal officiel algérien n° 80, 18 novembre 2026 : https://www.joradp.dz/FTP/jo-francais/2026/F2026080.pdf
