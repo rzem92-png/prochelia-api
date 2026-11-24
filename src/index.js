@@ -120,6 +120,12 @@ async function sha256Base64url(value) {
   return base64url(new Uint8Array(digest));
 }
 
+async function sha256Hex(value) {
+  const data = new TextEncoder().encode(String(value));
+  const digest = await crypto.subtle.digest('SHA-256', data);
+  return [...new Uint8Array(digest)].map(byte => byte.toString(16).padStart(2, '0')).join('');
+}
+
 async function hmacSha256Base64url(secret, value) {
   if (typeof secret !== 'string' || !secret) throw new Error('HMAC_SECRET_REQUIRED');
   const key = await crypto.subtle.importKey(
