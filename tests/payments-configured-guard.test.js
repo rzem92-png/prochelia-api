@@ -60,9 +60,10 @@ test("payout and dispute writes fail closed before schema DDL", () => {
 test("webhook is rejected before reading its body or touching D1 while PSP is disabled", () => {
   const body = section("async function paymentWebhook(", "async function openPaymentDispute(");
   const gate = body.indexOf("paymentUnavailableResponse()");
-  const read = body.indexOf("request.text()");
+  const read = body.indexOf("readBoundedWebhookBody(request)");
   const ddl = body.indexOf("ensurePaymentSchema(env)");
   assert.ok(gate >= 0 && read > gate && ddl > gate);
+  assert.ok(body.includes("WEBHOOK_PAYLOAD_TOO_LARGE"), "webhook must reject oversized payloads before signature verification");
 });
 
 import worker from "../src/index.js";
