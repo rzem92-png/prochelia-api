@@ -174,7 +174,7 @@ assert "tenants" in accounting_entity_fk_targets, "Accounting entities must refe
 # Tenant authority and membership lifecycle fixtures.
 tenant_tables = {"tenants", "tenant_memberships", "tenant_membership_events", "tenant_invitations", "tenant_invitation_events"}
 assert tenant_tables <= tables, f"Missing tenant authority tables: {sorted(tenant_tables-tables)}"
-for user_id, email in [("user-a", "user-a@example.test"), ("user-b", "user-b@example.test"), ("user-admin", "admin@example.test")]:
+for user_id, email in [("user-a", "user-a@example.test"), ("user-b", "user-b@example.test"), ("user-admin", "admin@example.test"), ("user-multi", "multi@example.test")]:
     db.execute("INSERT INTO users(id, role, email, first_name, last_name, password_hash) VALUES (?, 'client', ?, 'Synthetic', 'User', 'not-a-real-password-hash')", (user_id, email))
 db.execute("INSERT INTO tenants(id, slug, display_name) VALUES ('tenant-a', 'tenant-a', 'Tenant A')")
 db.execute("INSERT INTO tenants(id, slug, display_name) VALUES ('tenant-b', 'tenant-b', 'Tenant B')")
