@@ -54,6 +54,7 @@ test("payment routes cannot enable money movement by configuration alone", () =>
 test("mission payment idempotency replays only an identical tenant request", () => {
   const existing = {
     type: "MISSION_CHARGE",
+    tenant_id: "tenant-a",
     mission_id: "mission-a",
     client_id: "client-a",
     intervenant_id: "worker-a",
