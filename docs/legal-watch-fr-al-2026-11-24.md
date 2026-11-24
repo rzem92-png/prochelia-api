@@ -1,5 +1,5 @@
 # PROCHÉLIA — veille juridique France / Algérie
-**État de veille : 24 novembre 2026**  
+**État de veille : 25 novembre 2026**  
 **Statut : note de cadrage documentaire — à faire valider par un avocat et un DPO compétents dans chaque juridiction.**  
 Cette note ne constitue ni un avis juridique ni une validation de conformité.
 
@@ -21,6 +21,8 @@ Points à intégrer dans la matrice Algérie :
 ### B. France / Union européenne — transferts de données vers l'Algérie
 
 La liste actuelle des décisions d'adéquation de la Commission européenne ne mentionne pas l'Algérie. Il ne faut donc pas traiter l'Algérie comme un pays bénéficiant d'une décision d'adéquation RGPD.
+
+**Contrôle de fraîcheur du 25 novembre 2026 :** la page officielle de la Commission européenne, relue ce jour, maintient une liste de pays/territoires adéquats qui comprend notamment le Brésil, l'Uruguay et l'Organisation européenne des brevets, mais pas l'Algérie. La rubrique « Latest » mentionne le 16 novembre 2026 une avancée vers un arrangement d'adéquation avec le Kenya ; il s'agit d'une étape annoncée, pas d'une décision d'adéquation déjà adoptée. Ne pas assimiler cette annonce à une autorisation de transfert vers l'Algérie. Source : https://commission.europa.eu/law/law-topic/data-protection/international-dimension-data-protection/adequacy-decisions_en
 
 Avant tout transfert de données personnelles depuis une entité soumise au RGPD vers une entité algérienne juridiquement distincte ou un sous-traitant algérien :
 
