@@ -1,9 +1,47 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createHmac, webcrypto } from "node:crypto";
-import { verifyWebhookSignature } from "../src/index.js";
+import { readBoundedWebhookBody, verifyWebhookSignature } from "../src/index.js";
 
 globalThis.crypto ??= webcrypto;
+
+test("webhook body reader preserves the exact bounded UTF-8 body", async () => {
+  const raw = '{"message":"été"}\\n';
+  const request = new Request("https://example.test/api/payments/webhook", {
+    method: "POST",
+    body: raw
+  });
+  const result = await readBoundedWebhookBody(request, 128);
+  assert.deepEqual(result, { ok: true, tooLarge: false, body: raw });
+});
+
+test("webhook body reader rejects an oversized declared length before reading", async () => {
+  const request = new Request("https://example.test/api/payments/webhook", {
+    method: "POST",
+    headers: { "content-length": "129" },
+    body: "small"
+  });
+  const result = await readBoundedWebhookBody(request, 128);
+  assert.deepEqual(result, { ok: false, tooLarge: true, body: "" });
+});
+
+test("webhook body reader enforces the byte limit when Content-Length is absent", async () => {
+  const request = new Request("https://example.test/api/payments/webhook", {
+    method: "POST",
+    body: "0123456789"
+  });
+  const result = await readBoundedWebhookBody(request, 9);
+  assert.deepEqual(result, { ok: false, tooLarge: true, body: "" });
+});
+
+test("webhook body reader rejects invalid UTF-8 rather than changing signed bytes", async () => {
+  const request = new Request("https://example.test/api/payments/webhook", {
+    method: "POST",
+    body: new Uint8Array([0xff, 0xfe])
+  });
+  const result = await readBoundedWebhookBody(request, 16);
+  assert.deepEqual(result, { ok: false, tooLarge: false, body: "" });
+});
 
 const secret = "test-webhook-secret-not-for-production";
 const payload = JSON.stringify({ id: "evt_test_001", type: "payment_succeeded", data: { transaction_id: "tx_test_001" } });
