@@ -19,7 +19,7 @@ on:
       - ".github/workflows/backup-preview-d1-to-r2-eu.yml"
       - ".github/workflows/restore-preview-r2-backup-isolated-test.yml"
   push:
-    branches: [main, fix/tenant-aware-payment-account-unique-2026-11-24]
+    branches: [main, fix/tenant-aware-payment-account-unique-2026-11-24, fix/consolidate-preview-migrations-0046-seed-2026-11-24]
     paths:
       - "src/v7.js"
       - "src/v7-routes.js"
