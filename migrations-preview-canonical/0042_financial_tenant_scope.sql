@@ -139,6 +139,8 @@ WHEN NEW.tenant_id IS NULL OR NOT EXISTS (
   SELECT 1 FROM payment_transactions tx
   WHERE tx.id=NEW.transaction_id AND tx.tenant_id=NEW.tenant_id
     AND tx.mission_id=NEW.mission_id
+    AND tx.client_id IS NEW.client_id
+    AND tx.intervenant_id IS NEW.intervenant_id
 )
 BEGIN SELECT RAISE(ABORT,'PAYMENT_DISPUTE_TRANSACTION_TENANT_MISMATCH'); END;
 
