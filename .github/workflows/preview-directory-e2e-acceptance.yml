@@ -159,7 +159,7 @@ jobs:
           # Use the full deployment record from the list response. The detail endpoint
           # omits aliases and service bindings for this Pages project, while the list
           # response carries the verified alias and D1 binding.
-          printf '%s\\n' "$deployment" > "$RUNNER_TEMP/pages-preview.json"
+          printf '%s' "$deployment" > "$RUNNER_TEMP/pages-preview.json"
           if ! jq -e --arg db "$PREVIEW_DB_ID" --arg alias "$PAGES_PREVIEW_URL" --arg branch "$FRONTEND_BRANCH" --arg commit "$FRONTEND_COMMIT_SHA" '
             .environment == "preview" and
             .uses_functions == true and
