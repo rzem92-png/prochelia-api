@@ -62,6 +62,7 @@ ALTER TABLE payment_wallet_ledger ADD COLUMN tenant_id TEXT REFERENCES tenants(i
 ALTER TABLE payment_reconciliation ADD COLUMN tenant_id TEXT REFERENCES tenants(id);
 ALTER TABLE payment_audit ADD COLUMN tenant_id TEXT REFERENCES tenants(id);
 ALTER TABLE payment_webhook_events ADD COLUMN tenant_id TEXT REFERENCES tenants(id);
+ALTER TABLE payment_webhook_events ADD COLUMN matched_transaction_id TEXT REFERENCES payment_transactions(id);
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_payment_accounts_tenant_user ON payment_accounts(tenant_id,user_id);
 CREATE INDEX IF NOT EXISTS idx_payment_tx_tenant_mission_created ON payment_transactions(tenant_id,mission_id,created_at);
@@ -71,6 +72,7 @@ CREATE INDEX IF NOT EXISTS idx_payment_disputes_tenant_mission ON payment_disput
 CREATE INDEX IF NOT EXISTS idx_wallet_ledger_tenant_user_date ON payment_wallet_ledger(tenant_id,user_id,created_at);
 CREATE INDEX IF NOT EXISTS idx_payment_reconciliation_tenant_status ON payment_reconciliation(tenant_id,status,checked_at);
 CREATE INDEX IF NOT EXISTS idx_payment_audit_tenant_created ON payment_audit(tenant_id,created_at);
+CREATE INDEX IF NOT EXISTS idx_payment_webhook_tenant_transaction ON payment_webhook_events(tenant_id,matched_transaction_id);
 
 CREATE TRIGGER IF NOT EXISTS trg_payment_account_tenant_insert
 BEFORE INSERT ON payment_accounts
@@ -183,7 +185,9 @@ BEGIN SELECT RAISE(ABORT,'PAYMENT_WALLET_LEDGER_IMMUTABLE'); END;
 
 CREATE TRIGGER IF NOT EXISTS trg_payment_reconciliation_tenant_insert
 BEFORE INSERT ON payment_reconciliation
-WHEN NEW.tenant_id IS NULL OR (
+WHEN NEW.tenant_id IS NULL OR NOT EXISTS (
+  SELECT 1 FROM tenants t WHERE t.id=NEW.tenant_id AND t.status='ACTIVE'
+) OR (
   NEW.internal_transaction_id IS NOT NULL AND NOT EXISTS (
     SELECT 1 FROM payment_transactions tx WHERE tx.id=NEW.internal_transaction_id AND tx.tenant_id=NEW.tenant_id
   )
@@ -196,7 +200,9 @@ BEGIN SELECT RAISE(ABORT,'PAYMENT_RECONCILIATION_TENANT_MISMATCH'); END;
 
 CREATE TRIGGER IF NOT EXISTS trg_payment_reconciliation_tenant_update
 BEFORE UPDATE OF tenant_id ON payment_reconciliation
-WHEN NEW.tenant_id IS NULL OR (
+WHEN NEW.tenant_id IS NULL OR NOT EXISTS (
+  SELECT 1 FROM tenants t WHERE t.id=NEW.tenant_id AND t.status='ACTIVE'
+) OR (
   NEW.internal_transaction_id IS NOT NULL AND NOT EXISTS (
     SELECT 1 FROM payment_transactions tx WHERE tx.id=NEW.internal_transaction_id AND tx.tenant_id=NEW.tenant_id
   )
@@ -262,10 +268,29 @@ WHEN (OLD.tenant_id IS NOT NULL AND NEW.tenant_id IS NOT OLD.tenant_id)
   OR NEW.internal_payout_id IS NOT OLD.internal_payout_id
 BEGIN SELECT RAISE(ABORT,'PAYMENT_RECONCILIATION_IDENTITY_IMMUTABLE'); END;
 
+-- A webhook inbox event remains globally keyed until a verified provider event
+-- is matched to one internal transaction. Tenant attribution and the matched
+-- transaction are then written together and cannot be reassigned.
 CREATE TRIGGER IF NOT EXISTS trg_payment_webhook_tenant_immutable
-BEFORE UPDATE OF tenant_id ON payment_webhook_events
-WHEN OLD.tenant_id IS NOT NULL AND NEW.tenant_id IS NOT OLD.tenant_id
+BEFORE UPDATE OF tenant_id,matched_transaction_id ON payment_webhook_events
+WHEN (OLD.tenant_id IS NOT NULL AND NEW.tenant_id IS NOT OLD.tenant_id)
+  OR (OLD.matched_transaction_id IS NOT NULL AND NEW.matched_transaction_id IS NOT OLD.matched_transaction_id)
 BEGIN SELECT RAISE(ABORT,'PAYMENT_WEBHOOK_TENANT_IMMUTABLE'); END;
+
+CREATE TRIGGER IF NOT EXISTS trg_payment_webhook_tenant_binding
+BEFORE UPDATE OF tenant_id,matched_transaction_id ON payment_webhook_events
+WHEN (NEW.tenant_id IS NULL AND NEW.matched_transaction_id IS NOT NULL)
+  OR (NEW.tenant_id IS NOT NULL AND (
+    NEW.matched_transaction_id IS NULL
+    OR NOT EXISTS (
+      SELECT 1 FROM tenants t WHERE t.id=NEW.tenant_id AND t.status='ACTIVE'
+    )
+    OR NOT EXISTS (
+      SELECT 1 FROM payment_transactions tx
+      WHERE tx.id=NEW.matched_transaction_id AND tx.tenant_id=NEW.tenant_id
+    )
+  ))
+BEGIN SELECT RAISE(ABORT,'PAYMENT_WEBHOOK_TENANT_MISMATCH'); END;
 
 CREATE TRIGGER IF NOT EXISTS trg_payment_webhook_identity_immutable
 BEFORE UPDATE OF provider,event_id,event_type ON payment_webhook_events
@@ -273,6 +298,33 @@ WHEN NEW.provider IS NOT OLD.provider
   OR NEW.event_id IS NOT OLD.event_id
   OR NEW.event_type IS NOT OLD.event_type
 BEGIN SELECT RAISE(ABORT,'PAYMENT_WEBHOOK_IDENTITY_IMMUTABLE'); END;
+
+-- New audit records must belong to an active tenant and every supplied
+-- business reference must resolve inside that same tenant. Historical NULL
+-- rows remain readable but cannot be extended or forged by new inserts.
+CREATE TRIGGER IF NOT EXISTS trg_payment_audit_tenant_insert
+BEFORE INSERT ON payment_audit
+WHEN NEW.tenant_id IS NULL
+  OR NOT EXISTS (
+    SELECT 1 FROM tenants t WHERE t.id=NEW.tenant_id AND t.status='ACTIVE'
+  )
+  OR (NEW.user_id IS NOT NULL AND NOT EXISTS (
+    SELECT 1 FROM tenant_memberships m
+    WHERE m.tenant_id=NEW.tenant_id AND m.user_id=NEW.user_id AND m.status='ACTIVE'
+  ))
+  OR (NEW.transaction_id IS NOT NULL AND NOT EXISTS (
+    SELECT 1 FROM payment_transactions tx
+    WHERE tx.id=NEW.transaction_id AND tx.tenant_id=NEW.tenant_id
+  ))
+  OR (NEW.payout_id IS NOT NULL AND NOT EXISTS (
+    SELECT 1 FROM payout_requests p
+    WHERE p.id=NEW.payout_id AND p.tenant_id=NEW.tenant_id
+  ))
+  OR (NEW.mission_id IS NOT NULL AND NOT EXISTS (
+    SELECT 1 FROM missions m
+    WHERE m.id=NEW.mission_id AND m.tenant_id=NEW.tenant_id
+  ))
+BEGIN SELECT RAISE(ABORT,'PAYMENT_AUDIT_TENANT_MISMATCH'); END;
 
 CREATE TRIGGER IF NOT EXISTS trg_payment_audit_no_update
 BEFORE UPDATE ON payment_audit
