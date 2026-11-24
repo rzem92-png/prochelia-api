@@ -49,6 +49,7 @@ EXPECTED = [
     "0042_financial_tenant_scope.sql",
     "0043_finance_workspace_tenant_scope.sql",
     "0044_security_records_tenant_scope.sql",
+    "0045_wallet_tenant_currency_scope.sql",
 ]
 
 # Keep the manual Preview migration gate synchronized with the canonical chain.
@@ -60,17 +61,20 @@ assert '"0029_supra_append_only_audit_guards.sql"' in workflow_text, (
 assert '"0030_supra_audit_tenant_scope.sql"' in workflow_text, (
     "Preview migration workflow omits tenant-scoped SUPRA audit migration 0030"
 )
-assert "if len(local) != 45:" in workflow_text, (
-    "Preview migration workflow must require exactly 45 canonical migrations"
+assert "if len(local) != 46:" in workflow_text, (
+    "Preview migration workflow must require exactly 46 canonical migrations"
 )
-assert "exact 45-entry registry" in workflow_text, (
+assert "exact 46-entry registry" in workflow_text, (
     "Preview migration workflow target registry count is stale"
 )
-assert "all 45 canonical migrations are pending" in workflow_text, (
+assert "all 46 canonical migrations are pending" in workflow_text, (
     "Preview migration workflow empty-database inventory message is stale"
 )
-assert "only migrations 0023-0044 are pending" in workflow_text, (
+assert "only migrations 0023-0045 are pending" in workflow_text, (
     "Preview migration workflow baseline-to-target range is stale"
+)
+assert '"0045_wallet_tenant_currency_scope.sql"' in workflow_text, (
+    "Preview migration workflow omits tenant/currency-scoped wallet migration 0045"
 )
 assert '"0044_security_records_tenant_scope.sql"' in workflow_text, (
     "Preview migration workflow omits tenant-scoped security migration 0044"
@@ -95,7 +99,15 @@ db = sqlite3.connect(":memory:")
 db.execute("PRAGMA foreign_keys = ON")
 # Start from a truly empty D1 database, matching the newly created EU Preview target.
 # Apply the reviewed baseline and candidate migrations through 0043 first.
-for name in EXPECTED[:-1]:
+for name in EXPECTED[:-2]:
+    if name == "0031_operational_marketplace_tenant_scope.sql":
+        # Preserve a pre-tenant wallet without guessing its legal-entity attribution.
+        db.execute(
+            """INSERT INTO wallets(
+                 id,user_id,currency,available_cents,pending_cents,paid_cents,reserved_cents
+               ) VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            ("legacy-wallet-1", "legacy-user-1", "EUR", 4200, 50, 10, 0),
+        )
     db.executescript((MIGRATIONS / name).read_text(encoding="utf-8"))
 
 # Simulate pre-existing legacy security records before 0044. The migration must
@@ -113,13 +125,26 @@ db.execute(
     ("legacy-security-audit-1", "LEGACY_EVENT", "BLOCKED"),
 )
 
+db.executescript((MIGRATIONS / EXPECTED[-2]).read_text(encoding="utf-8"))
 db.executescript((MIGRATIONS / EXPECTED[-1]).read_text(encoding="utf-8"))
+legacy_wallet = db.execute(
+    "SELECT tenant_id, available_cents, pending_cents, paid_cents, reserved_cents FROM wallets WHERE id=?",
+    ("legacy-wallet-1",),
+).fetchone()
+assert legacy_wallet == (None, 4200, 50, 10, 0), "Legacy wallet balances and NULL tenant attribution must be preserved"
 
 violations = db.execute("PRAGMA foreign_key_check").fetchall()
 assert not violations, f"Canonical migration chain creates foreign-key violations: {violations[:10]}"
 
 tables = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
 indexes = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='index'")}
+wallet_unique_indexes = []
+for index in db.execute("PRAGMA index_list(wallets)").fetchall():
+    if index[2]:
+        columns = [row[2] for row in db.execute(f'PRAGMA index_info("{index[1]}")').fetchall()]
+        wallet_unique_indexes.append(columns)
+assert ["tenant_id", "user_id", "currency"] in wallet_unique_indexes, "Wallet uniqueness must be scoped to tenant and currency"
+assert ["user_id"] not in wallet_unique_indexes, "Global user-only wallet uniqueness blocks multi-tenant providers"
 assert "idx_disponibilites_tenant_intervenant_idempotency" in indexes, "Missing durable availability idempotency index"
 assert "idx_support_cases_tenant_status_created" in indexes, "Missing tenant-scoped support status index"
 assert "idx_support_cases_tenant_requester_created" in indexes, "Missing tenant-scoped support requester index"
@@ -1108,6 +1133,10 @@ financial_tenant_triggers = {
     "trg_payment_webhook_identity_immutable",
     "trg_payment_audit_no_update",
     "trg_payment_audit_no_delete",
+    "trg_wallets_user_identity_immutable",
+    "trg_payment_wallet_ledger_require_wallet",
+    "trg_payment_wallet_ledger_guard_balances",
+    "trg_payment_wallet_ledger_apply",
 }
 triggers = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='trigger'")}
 assert financial_tenant_triggers <= triggers, (
@@ -1157,6 +1186,22 @@ db.execute("""
     VALUES ('finance-wallet-a','finance-user-a','market-tenant-a','EUR')
 """)
 db.execute("""
+    INSERT INTO wallets(id,user_id,tenant_id,currency)
+    VALUES ('finance-wallet-b','finance-user-a','tenant-b','EUR')
+""")
+db.execute("""
+    INSERT INTO wallets(id,user_id,tenant_id,currency)
+    VALUES ('finance-wallet-a-usd','finance-user-a','market-tenant-a','USD')
+""")
+try:
+    db.execute("""
+        INSERT INTO wallets(id,user_id,tenant_id,currency)
+        VALUES ('finance-wallet-a-duplicate','finance-user-a','market-tenant-a','EUR')
+    """)
+    raise AssertionError("Duplicate wallet for one tenant/user/currency was incorrectly accepted")
+except sqlite3.IntegrityError:
+    pass
+db.execute("""
     INSERT INTO payment_accounts(id,user_id,provider,tenant_id)
     VALUES ('finance-account-a','finance-user-a','sandbox','market-tenant-a')
 """)
@@ -1174,6 +1219,18 @@ db.execute("""
       id,idempotency_key,wallet_id,user_id,amount_cents,tenant_id
     ) VALUES ('finance-payout-a','finance-payout-idem-a','finance-wallet-a','finance-user-a',2500,'market-tenant-a')
 """)
+try:
+    db.execute("""
+        INSERT INTO payout_requests(
+          id,idempotency_key,wallet_id,user_id,amount_cents,currency,tenant_id
+        ) VALUES (
+          'finance-payout-currency-mismatch','finance-payout-currency-mismatch',
+          'finance-wallet-a','finance-user-a',1000,'USD','market-tenant-a'
+        )
+    """)
+    raise AssertionError("Payout in a currency different from its wallet was incorrectly accepted")
+except sqlite3.IntegrityError:
+    pass
 db.execute("""
     INSERT INTO payment_disputes(
       id,mission_id,transaction_id,client_id,intervenant_id,reason,amount_cents,tenant_id
@@ -1194,6 +1251,34 @@ db.execute("""
 """)
 assert db.execute("SELECT available_cents FROM wallets WHERE id='finance-wallet-a'").fetchone()[0] == 0
 
+# Ledger balance checks and application must select exactly one tenant+currency wallet.
+db.execute("UPDATE wallets SET pending_cents=10 WHERE id='finance-wallet-a'")
+db.execute("""
+    INSERT INTO payment_wallet_ledger(
+      id,idempotency_key,user_id,entry_type,available_delta_cents,currency,tenant_id
+    ) VALUES (
+      'finance-ledger-credit-a','finance-ledger-credit-a','finance-user-a',
+      'TEST_CREDIT',1250,'EUR','market-tenant-a'
+    )
+""")
+assert db.execute("SELECT available_cents FROM wallets WHERE id='finance-wallet-a'").fetchone()[0] == 1250
+assert db.execute("SELECT available_cents FROM wallets WHERE id='finance-wallet-b'").fetchone()[0] == 0
+assert db.execute("SELECT available_cents FROM wallets WHERE id='finance-wallet-a-usd'").fetchone()[0] == 0
+try:
+    db.execute("""
+        INSERT INTO payment_wallet_ledger(
+          id,idempotency_key,user_id,entry_type,pending_delta_cents,currency,tenant_id
+        ) VALUES (
+          'finance-ledger-negative-b','finance-ledger-negative-b','finance-user-a',
+          'TEST_NEGATIVE_PENDING',-1,'EUR','tenant-b'
+        )
+    """)
+    raise AssertionError("Tenant-B negative pending balance was incorrectly accepted using tenant-A funds")
+except sqlite3.IntegrityError as exc:
+    assert "PAYMENT_WALLET_NEGATIVE_PROTECTED_BALANCE" in str(exc), str(exc)
+assert db.execute("SELECT pending_cents FROM wallets WHERE id='finance-wallet-b'").fetchone()[0] == 0
+assert db.execute("SELECT pending_cents FROM wallets WHERE id='finance-wallet-a'").fetchone()[0] == 10
+
 cross_tenant_financial_writes = [
     """INSERT INTO payment_transactions(
          id,idempotency_key,mission_id,client_id,type,status,tenant_id
@@ -1210,7 +1295,7 @@ cross_tenant_financial_writes = [
     """INSERT INTO payment_wallet_ledger(
          id,idempotency_key,user_id,entry_type,currency,tenant_id
        ) VALUES ('finance-ledger-cross','finance-ledger-idem-cross',
-         'finance-user-a','TEST_NOOP','EUR','tenant-b')""",
+         'user-b','TEST_NOOP','EUR','tenant-b')""",
     """INSERT INTO payment_reconciliation(
          id,provider,external_id,internal_transaction_id,tenant_id
        ) VALUES ('finance-recon-cross','sandbox','external-cross','finance-tx-a','tenant-b')""",
