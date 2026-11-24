@@ -1067,12 +1067,12 @@ db.execute("""
 db.execute("""
     INSERT INTO mission_opportunities(
       id, owner_tenant_id, mission_id, consent_id, category_code, public_summary,
-      city, start_at, end_at, provider_pay_cents, currency, published_by_user_id, expires_at
+      city, start_at, end_at, provider_pay_cents, currency, published_by_user_id, published_at, expires_at
     ) VALUES (
       'market-opportunity-revoke', 'market-tenant-a', 'market-mission-revoke',
       'market-consent-revoke', 'CLEANING', 'Nettoyage ponctuel d’un logement',
       'Aubergenville', '2026-11-24T09:00:00Z', '2026-11-24T11:00:00Z',
-      4000, 'EUR', 'market-client-a', '2026-11-23T23:00:00Z'
+      4000, 'EUR', 'market-client-a', '2026-11-23T22:00:00Z', '2026-11-23T23:00:00Z'
     )
 """)
 db.execute("UPDATE mission_opportunity_consents SET revoked_at=CURRENT_TIMESTAMP WHERE id='market-consent-revoke'")

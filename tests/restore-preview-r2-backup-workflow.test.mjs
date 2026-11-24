@@ -76,7 +76,7 @@ test("Restore refuses to reuse the encryption secret as the HMAC attestation key
   assert.match(workflow, /BACKUP_ATTESTATION_HMAC_KEY.*BACKUP_ENCRYPTION_KEY/s);
 });
 test("Isolated restore accepts only the reviewed Preview branch provenance", () => {
-  assert.match(workflow, /\.provenance\.ref == "refs\/heads\/main"/);
+  assert.match(workflow, /\.provenance\.ref == "refs\/heads\/fix\/pages-proxy-preview-cors-2026-11-23"/);
   assert.doesNotMatch(workflow, /fix\/r2-preview-backup-signed-attestation|fix\/restore-preview-fresh-eu-d1/);
   assert.match(workflow, /r2-backup-attestation\.mjs verify/);
 });
