@@ -1981,7 +1981,7 @@ async function consolidatedInfo(env) {
 
 async function handleConsolidated(request, env) {
   const url=new URL(request.url);
-  const consolidatedPath = ['/api/consolidated/info','/api/ops/dashboard','/api/journal','/api/cases','/api/cases/approve','/api/metiers','/api/metiers/suggest','/api/pricing/quote','/api/finance/summary','/api/complaints','/api/settings/phase'].includes(url.pathname);
+  const consolidatedPath = ['/api/consolidated/info','/api/ops/dashboard','/api/journal','/api/cases','/api/cases/approve','/api/metiers','/api/metiers/suggest','/api/complaints','/api/settings/phase'].includes(url.pathname);
   if (consolidatedPath) {
     const schemaGate = await schemaReadinessResponse(env, ['platform_settings','business_profiles','métier_catalog','metier_suggestions','pricing_policies','pricing_quotes','operational_cases','case_actions','copilot_log','activity_journal','commercial_tasks','recruitment_tasks','complaints','accounting_ledger','business_expenses','notification_outbox','compliance_events'], 'CONSOLIDATED_SCHEMA_NOT_READY');
     if (schemaGate) return schemaGate;
