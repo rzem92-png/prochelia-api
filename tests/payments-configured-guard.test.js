@@ -39,9 +39,11 @@ test("payment onboarding and mission charge fail closed before schema DDL", () =
 
 test("payment status is read-only and does not create a schema or wallet while disabled", () => {
   const body = section("async function paymentStatus(", "async function createMissionPayment(");
-  assert.ok(body.indexOf("payments_configured:false") >= 0);
+  const gate = body.indexOf("payments_configured:false");
+  const ddl = body.indexOf("ensurePaymentSchema(env)");
+  const walletInsert = body.indexOf("INSERT INTO wallets");
+  assert.ok(gate >= 0 && ddl > gate && walletInsert > gate, "disabled status must return before schema or wallet writes");
   assert.ok(body.indexOf("write_enabled:false") >= 0);
-  assert.doesNotMatch(body, /ensurePaymentSchema|INSERT INTO wallets/);
 });
 
 test("payout and dispute writes fail closed before schema DDL", () => {
