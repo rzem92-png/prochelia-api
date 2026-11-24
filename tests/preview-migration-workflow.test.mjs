@@ -7,6 +7,7 @@ const workflow = await readFile(new URL("../.github/workflows/apply-preview-d1-m
 test("Preview migration is manually gated on main only", () => {
   assert.match(workflow, /github\.ref == 'refs\/heads\/main'/);
   assert.match(workflow, /github\.actor == 'rzem92-png'/);
+  assert.match(workflow, /github\.triggering_actor == 'rzem92-png'/);
   assert.match(workflow, /Only the repository owner may apply Preview D1 migrations/);
   assert.doesNotMatch(workflow, /github\.ref == 'refs\/heads\/fix\//);
   assert.match(workflow, /inputs\.confirm_preview == 'APPLY_PREVIEW_ONLY'/);
