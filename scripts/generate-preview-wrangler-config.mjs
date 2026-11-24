@@ -43,6 +43,7 @@ const previewD1 = {
 };
 
 const enablePreviewR2 = process.env.PROCHELIA_PREVIEW_R2_VERIFIED_BY_WORKFLOW === "true";
+const retentionVerified = process.env.PROCHELIA_PREVIEW_R2_RETENTION_VERIFIED_BY_WORKFLOW === "true";
 if (enablePreviewR2) {
   const approvedWorkflowContext =
     process.env.GITHUB_ACTIONS === "true" &&
@@ -50,9 +51,10 @@ if (enablePreviewR2) {
     process.env.GITHUB_REPOSITORY === "rzem92-png/prochelia-api" &&
     process.env.GITHUB_REF === "refs/heads/fix/pages-proxy-preview-cors-2026-11-23" &&
     process.env.GITHUB_ACTOR === "rzem92-png" &&
-    process.env.PROCHELIA_PREVIEW_DEPLOY_CONFIRMATION === "DEPLOY_PREVIEW_ONLY";
+    process.env.PROCHELIA_PREVIEW_DEPLOY_CONFIRMATION === "DEPLOY_PREVIEW_ONLY" &&
+    retentionVerified;
   if (!approvedWorkflowContext) {
-    throw new Error("R2 binding requires the owner-confirmed manual Preview workflow after EU bucket verification");
+    throw new Error("R2 binding requires the owner-confirmed manual Preview workflow after EU bucket and retention verification");
   }
 }
 
