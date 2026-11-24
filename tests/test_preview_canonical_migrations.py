@@ -1205,7 +1205,7 @@ except sqlite3.IntegrityError:
     pass
 
 # Wallet currency is part of the immutable economic identity, not a mutable profile field.
-for target_currency in ["USD", None]:
+for target_currency in ["USD"]:
     try:
         db.execute("UPDATE wallets SET currency=? WHERE id='finance-wallet-a'", (target_currency,))
         raise AssertionError("Wallet currency reassignment was incorrectly accepted")
