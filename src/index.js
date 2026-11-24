@@ -531,7 +531,7 @@ async function deviceHash(request, userId) {
 async function securityIdentityStart(request, env) {
   const auth = await getSessionUser(request, env);
   if (!requireRole(auth, ['intervenant'])) return json({ok:false,error:auth?.user?'FORBIDDEN':'UNAUTHENTICATED',version:VERSION}, auth?.user?403:401);
-  const schemaGate = await schemaReadinessResponse(env, ['identity_verifications','trusted_devices','mission_security','mission_security_attempts','security_audit'], 'SECURITY_SCHEMA_NOT_READY'); if (schemaGate) return schemaGate;
+  return tenantScopedHandlerNotReady('TENANT_SCOPED_SECURITY_HANDLER_REQUIRED');
   const id = crypto.randomUUID();
   await env.DB.prepare(
     `INSERT INTO identity_verifications (id,user_id,status,level) VALUES (?,?, 'pending','standard')`
@@ -543,7 +543,7 @@ async function securityIdentityStart(request, env) {
 async function securityIdentityApprove(request, env) {
   const auth = await getSessionUser(request, env);
   if (!requireRole(auth, ['gerante'])) return json({ok:false,error:auth?.user?'FORBIDDEN':'UNAUTHENTICATED',version:VERSION}, auth?.user?403:401);
-  const schemaGate = await schemaReadinessResponse(env, ['identity_verifications','trusted_devices','mission_security','mission_security_attempts','security_audit'], 'SECURITY_SCHEMA_NOT_READY'); if (schemaGate) return schemaGate;
+  return tenantScopedHandlerNotReady('TENANT_SCOPED_SECURITY_HANDLER_REQUIRED');
   const body = await readJson(request);
   const verificationId = clean(body?.verification_id);
   const status = clean(body?.status);
@@ -590,7 +590,7 @@ async function deliverSecurityCodes(env, payload) {
 async function securityPrepareMission(request, env) {
   const auth = await getSessionUser(request, env);
   if (!requireRole(auth, ['gerante'])) return json({ok:false,error:auth?.user?'FORBIDDEN':'UNAUTHENTICATED',version:VERSION}, auth?.user?403:401);
-  const schemaGate = await schemaReadinessResponse(env, ['identity_verifications','trusted_devices','mission_security','mission_security_attempts','security_audit'], 'SECURITY_SCHEMA_NOT_READY'); if (schemaGate) return schemaGate;
+  return tenantScopedHandlerNotReady('TENANT_SCOPED_SECURITY_HANDLER_REQUIRED');
   const body = await readJson(request);
   const missionId=clean(body?.mission_id), clientId=clean(body?.client_id), intervenantId=clean(body?.intervenant_id);
   if(!missionId||!clientId||!intervenantId) return json({ok:false,error:'MISSION_SECURITY_FIELDS_REQUIRED',version:VERSION},400);
@@ -626,7 +626,7 @@ async function securityPrepareMission(request, env) {
 async function securityPresence(request, env) {
   const auth=await getSessionUser(request,env);
   if(!requireRole(auth,['intervenant'])) return json({ok:false,error:auth?.user?'FORBIDDEN':'UNAUTHENTICATED',version:VERSION},auth?.user?403:401);
-  const schemaGate = await schemaReadinessResponse(env, ['identity_verifications','trusted_devices','mission_security','mission_security_attempts','security_audit'], 'SECURITY_SCHEMA_NOT_READY'); if (schemaGate) return schemaGate;
+  return tenantScopedHandlerNotReady('TENANT_SCOPED_SECURITY_HANDLER_REQUIRED');
   const identity = await requireVerifiedIntervenant(env, auth.user.id);
   if(!identity) return json({ok:false,error:'INTERVENANT_IDENTITY_NOT_VERIFIED',version:VERSION},403);
   const body=await readJson(request), missionId=clean(body?.mission_id);
@@ -666,7 +666,7 @@ export async function consumeMissionSecurityCode(env, securityId, purpose, expec
 async function securityVerifyCode(request, env) {
   const auth=await getSessionUser(request,env);
   if(!requireRole(auth,['intervenant'])) return json({ok:false,error:auth?.user?'FORBIDDEN':'UNAUTHENTICATED',version:VERSION},auth?.user?403:401);
-  const schemaGate = await schemaReadinessResponse(env, ['identity_verifications','trusted_devices','mission_security','mission_security_attempts','security_audit'], 'SECURITY_SCHEMA_NOT_READY'); if (schemaGate) return schemaGate;
+  return tenantScopedHandlerNotReady('TENANT_SCOPED_SECURITY_HANDLER_REQUIRED');
   const body=await readJson(request), missionId=clean(body?.mission_id), purpose=clean(body?.purpose), code=clean(body?.code);
   if(!missionId||!['ARRIVAL','END'].includes(purpose)||!/^[0-9]{6}$/.test(code)) return json({ok:false,error:'INVALID_SECURITY_CODE_REQUEST',version:VERSION},400);
   const sec=await env.DB.prepare('SELECT * FROM mission_security WHERE mission_id=? AND intervenant_id=? LIMIT 1').bind(missionId,auth.user.id).first();
@@ -721,7 +721,7 @@ async function securityVerifyCode(request, env) {
 async function securityResendCodes(request, env) {
   const auth=await getSessionUser(request,env);
   if(!requireRole(auth,['gerante','client'])) return json({ok:false,error:auth?.user?'FORBIDDEN':'UNAUTHENTICATED',version:VERSION},auth?.user?403:401);
-  const schemaGate = await schemaReadinessResponse(env, ['identity_verifications','trusted_devices','mission_security','mission_security_attempts','security_audit'], 'SECURITY_SCHEMA_NOT_READY'); if (schemaGate) return schemaGate;
+  return tenantScopedHandlerNotReady('TENANT_SCOPED_SECURITY_HANDLER_REQUIRED');
   const body=await readJson(request);
   const missionId=clean(body?.mission_id);
   if(!missionId) return json({ok:false,error:'MISSION_ID_REQUIRED',version:VERSION},400);
@@ -741,7 +741,7 @@ async function securityClientCode(request, env) {
 async function securityStatus(request, env) {
   const auth=await getSessionUser(request,env);
   if(!auth) return json({ok:false,error:'UNAUTHENTICATED',version:VERSION},401);
-  const schemaGate = await schemaReadinessResponse(env, ['identity_verifications','trusted_devices','mission_security','mission_security_attempts','security_audit'], 'SECURITY_SCHEMA_NOT_READY'); if (schemaGate) return schemaGate;
+  return tenantScopedHandlerNotReady('TENANT_SCOPED_SECURITY_HANDLER_REQUIRED');
   const count=await env.DB.prepare('SELECT COUNT(*) AS total FROM security_audit').first();
   return json({ok:true,version:VERSION,security:{identity:'verified_required',device:'bound',presence:'recorded',arrival_code:'single_use',end_code:'single_use',max_attempts:SECURITY_MAX_ATTEMPTS,code_ttl_seconds:SECURITY_CODE_TTL_SECONDS,audit_events:Number(count?.total||0)},user:auth.user},200);
 }
@@ -1810,6 +1810,9 @@ async function handleConsolidated(request, env) {
     const schemaGate = await schemaReadinessResponse(env, ['platform_settings','business_profiles','métier_catalog','metier_suggestions','pricing_policies','pricing_quotes','operational_cases','case_actions','copilot_log','activity_journal','commercial_tasks','recruitment_tasks','complaints','accounting_ledger','business_expenses','notification_outbox','compliance_events'], 'CONSOLIDATED_SCHEMA_NOT_READY');
     if (schemaGate) return schemaGate;
   }
+  if (['/api/cases','/api/cases/approve','/api/complaints','/api/finance/summary'].includes(url.pathname)) {
+    return tenantScopedHandlerNotReady('TENANT_SCOPED_CONSOLIDATED_HANDLER_REQUIRED');
+  }
   if(url.pathname==='/api/consolidated/info' && request.method==='GET') return consolidatedInfo(env);
   if(url.pathname==='/api/ops/dashboard' && request.method==='GET') return getOperationsDashboard(request,env);
   if(url.pathname==='/api/journal' && request.method==='GET') return getJournal(request,env);
@@ -2429,7 +2432,7 @@ async function loyaltyUpdate(request, env) {
 
 async function qualityCreate(request, env) {
   const gate=await requireAuthRole(request,env,['gerante','client','entreprise']); if(gate.error)return gate.error;
-  const schemaGate = await schemaReadinessResponse(env, ['quality_events'], 'OPERATIONAL_SCHEMA_NOT_READY'); if (schemaGate) return schemaGate;
+  return tenantScopedHandlerNotReady('TENANT_SCOPED_QUALITY_HANDLER_REQUIRED');
   const b=await readJson(request)||{};
   if(!b.mission_id)return json({ok:false,error:'MISSION_ID_REQUIRED',version:VERSION},400);
   const id=crypto.randomUUID();
@@ -2590,6 +2593,10 @@ async function schemaReadinessResponse(env, names, error) {
   return missing.length
     ? json({ok:false,error,missing_tables:missing,version:VERSION},503)
     : null;
+}
+
+function tenantScopedHandlerNotReady(error) {
+  return json({ok:false,error,write_enabled:false,version:VERSION},503);
 }
 
 async function productionConfigCheck(env, { persist = false } = {}) {
@@ -2936,9 +2943,7 @@ async function financeAuth(request, env) {
   const auth = await getSessionUser(request, env);
   if (!auth) return { response: json({ok:false,error:'UNAUTHENTICATED',version:VERSION},401) };
   if (!financeRoleAllowed(auth.user.role)) return { response: json({ok:false,error:'FORBIDDEN',version:VERSION},403) };
-  const schemaGate = await schemaReadinessResponse(env, ['finance_workspace_entries','finance_export_log','finance_resolution_cases'], 'FINANCE_SCHEMA_NOT_READY');
-  if (schemaGate) return { response: schemaGate };
-  return { auth };
+  return { response: tenantScopedHandlerNotReady('TENANT_SCOPED_FINANCE_HANDLER_REQUIRED') };
 }
 
 function financeMoney(cents) {
@@ -3487,7 +3492,7 @@ async function interfaceConfigEndpoint(request,env){
 
 async function supportCreate(request,env){
   const a=await supportAuth(request,env); if(a.response)return a.response;
-  const schemaGate = await schemaReadinessResponse(env, ['support_cases','support_case_events','copilot_resolution_rules'], 'SUPPORT_SCHEMA_NOT_READY'); if (schemaGate) return schemaGate;
+  return tenantScopedHandlerNotReady('TENANT_SCOPED_SUPPORT_HANDLER_REQUIRED');
   const b=await readJson(request)||{};
   const category=clean(b.category)||'GENERAL';
   const severity=String(b.severity||'LOW').toUpperCase();
@@ -3530,7 +3535,7 @@ async function supportAutoResolve(env,caseId,actorId,actorRole,scenario,context=
 
 async function supportList(request,env){
   const a=await supportAuth(request,env); if(a.response)return a.response;
-  const schemaGate = await schemaReadinessResponse(env, ['support_cases'], 'SUPPORT_SCHEMA_NOT_READY'); if (schemaGate) return schemaGate;
+  return tenantScopedHandlerNotReady('TENANT_SCOPED_SUPPORT_HANDLER_REQUIRED');
   const u=new URL(request.url),status=clean(u.searchParams.get('status')||'');
   const isManager=['GERANTE','ADMIN'].includes(a.role);
   let r;
@@ -3545,7 +3550,7 @@ async function supportList(request,env){
 async function supportResolve(request,env){
   const a=await supportAuth(request,env); if(a.response)return a.response;
   if(a.role!=='GERANTE'&&a.role!=='ADMIN') return json({ok:false,error:'MANAGER_APPROVAL_REQUIRED',version:VERSION},403);
-  const schemaGate = await schemaReadinessResponse(env, ['support_cases','support_case_events'], 'SUPPORT_SCHEMA_NOT_READY'); if (schemaGate) return schemaGate;
+  return tenantScopedHandlerNotReady('TENANT_SCOPED_SUPPORT_HANDLER_REQUIRED');
   const b=await readJson(request)||{}; const id=clean(b.case_id);
   if(!id)return json({ok:false,error:'CASE_ID_REQUIRED',version:VERSION},400);
   const row=await env.DB.prepare(`SELECT * FROM support_cases WHERE id=? LIMIT 1`).bind(id).first();
@@ -3560,7 +3565,7 @@ async function supportResolve(request,env){
 async function supportDashboard(request,env){
   const a=await supportAuth(request,env); if(a.response)return a.response;
   if(a.role!=='GERANTE'&&a.role!=='ADMIN') return json({ok:false,error:'FORBIDDEN'},403);
-  const schemaGate = await schemaReadinessResponse(env, ['support_cases'], 'SUPPORT_SCHEMA_NOT_READY'); if (schemaGate) return schemaGate;
+  return tenantScopedHandlerNotReady('TENANT_SCOPED_SUPPORT_HANDLER_REQUIRED');
   const rows=await env.DB.prepare(`SELECT status,severity,COUNT(*) AS n FROM support_cases GROUP BY status,severity ORDER BY status,severity`).all();
   const recent=await env.DB.prepare(`SELECT id,source_role,category,severity,status,created_at,resolved_at FROM support_cases ORDER BY created_at DESC LIMIT 30`).all();
   return json({ok:true,version:VERSION,dashboard:{breakdown:rows.results||[],recent:recent.results||[],policy:{simple_low_impact:'AUTOMATIQUE_APRES_CONTROLE',sensitive_or_high_impact:'VALIDATION_GERANTE',security_legal_rgpd:'ESCALADE_IMMEDIATE'}}});
