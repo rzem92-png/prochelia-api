@@ -40,6 +40,10 @@ Si le régime de la section 4 s'applique, l'article 30 impose notamment des info
 
 Indépendamment de cette qualification, faire vérifier les obligations générales applicables aux services intermédiaires, notamment le mécanisme de notification et d'action, le traitement des réclamations et la transparence des conditions.
 
+### C.1. DSA / RGPD — lignes directrices finales du CEPD
+
+Le Comité européen de la protection des données a publié le 17 septembre 2026 la version finale de ses Guidelines 3/2025 sur l'articulation entre le Digital Services Act et le RGPD. Ajouter cette grille à l'analyse des rôles, des finalités, des bases juridiques, des échanges de données, de la modération, des systèmes de recommandation et du traitement des réclamations lorsque ces activités relèvent du DSA. Cette publication ne qualifie pas à elle seule PROCHÉLIA comme place de marché et ne remplace ni l'analyse des parcours réels ni l'avis d'un professionnel compétent.
+
 ### D. Algérie — vigilance sur les actifs virtuels
 
 La loi n° 25-10 du 24 juillet 2025 modifie le cadre algérien de lutte contre le blanchiment et le financement du terrorisme et introduit notamment une interdiction relative à l'émission, l'achat, la vente, l'utilisation, la détention, la promotion et l'exploitation de plateformes d'échange d'actifs virtuels dans les conditions prévues par le texte.
@@ -110,6 +114,7 @@ Points de calendrier à intégrer :
 - Commission européenne, impact du DSA sur les plateformes : https://digital-strategy.ec.europa.eu/en/policies/dsa-impact-platforms
 - Commission européenne, FAQ officielle sur les obligations de transparence de l'article 50 (application au 2 août 2026 et transition limitée à l'article 50(2)) : https://digital-strategy.ec.europa.eu/en/faqs/transparency-obligations-under-article-50-ai-act
 - Commission européenne, lignes directrices sur les obligations de transparence des fournisseurs et déployeurs, publiées le 20 juillet 2026 : https://digital-strategy.ec.europa.eu/en/library/guidelines-transparency-obligations-providers-and-deployers-ai-systems
+- CEPD, Guidelines 3/2025 sur l'articulation entre le DSA et le RGPD, version finale du 17 septembre 2026 : https://www.edpb.europa.eu/documents/guideline/guidelines-32025-on-the-interplay-between-the-dsa-and-the-gdpr_fr
 - Commission européenne, décisions d'adéquation : https://commission.europa.eu/law/law-topic/data-protection/international-dimension-data-protection/adequacy-decisions_en
 - CNIL, guide final d'analyse d'impact des transferts de données (AITD), publié en juillet 2025 : https://www.cnil.fr/en/node/166593
 - CNIL, clauses contractuelles types de la Commission européenne : https://www.cnil.fr/fr/transfert-de-donnees-les-clauses-contractuelles-types-cct-de-la-commission-europeenne
