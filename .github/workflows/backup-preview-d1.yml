@@ -112,17 +112,19 @@ jobs:
           umask 077
           plaintext="$RUNNER_TEMP/prochelia-backup/prochelia-preview.sql"
           encrypted="$RUNNER_TEMP/prochelia-backup/prochelia-preview.sql.gpg"
+          decrypted_check="$RUNNER_TEMP/prochelia-backup/decrypted-check.sql"
+          trap 'rm -f "$plaintext" "$decrypted_check"' EXIT
           printf '%s' "$BACKUP_ENCRYPTION_KEY" | gpg --batch --yes --pinentry-mode loopback --passphrase-fd 0 --symmetric --cipher-algo AES256 --output "$encrypted" "$plaintext"
           test -s "$encrypted"
           expected="$(sha256sum "$plaintext" | cut -d ' ' -f 1)"
-          printf '%s' "$BACKUP_ENCRYPTION_KEY" | gpg --batch --yes --pinentry-mode loopback --passphrase-fd 0 --decrypt "$encrypted" > "$RUNNER_TEMP/prochelia-backup/decrypted-check.sql"
-          actual="$(sha256sum "$RUNNER_TEMP/prochelia-backup/decrypted-check.sql" | cut -d ' ' -f 1)"
+          printf '%s' "$BACKUP_ENCRYPTION_KEY" | gpg --batch --yes --pinentry-mode loopback --passphrase-fd 0 --decrypt "$encrypted" > "$decrypted_check"
+          actual="$(sha256sum "$decrypted_check" | cut -d ' ' -f 1)"
           test "$expected" = "$actual"
-          rm -f "$plaintext" "$RUNNER_TEMP/prochelia-backup/decrypted-check.sql"
+          rm -f "$plaintext" "$decrypted_check"
           printf 'database=%s\ncreated_utc=%s\nencrypted_file=prochelia-preview.sql.gpg\n' "$DB_NAME" "$(date -u +%FT%TZ)" > "$RUNNER_TEMP/prochelia-backup/README.txt"
 
       - name: Publier uniquement l'archive chiffrée
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: prochelia-preview-d1-encrypted-${{ github.run_id }}
           path: |
