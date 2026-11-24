@@ -5,7 +5,9 @@ import { readFile } from "node:fs/promises";
 const workflow = await readFile(new URL("../.github/workflows/backup-preview-d1-to-r2-eu.yml", import.meta.url), "utf8");
 
 test("Preview R2 backup is manually gated to main only and pinned to the reviewed EU Preview D1 config", () => {
-  assert.match(workflow, /github\.ref == 'refs\/heads\/main'/);
+  assert.match(workflow, /github\.ref == 'refs\/heads\/main'/);\n  assert.match(workflow, /github\.actor == 'rzem92-png'/);
+  assert.match(workflow, /GITHUB_ACTOR.*rzem92-png/);
+  assert.match(workflow, /Only the repository owner may dispatch the Preview backup/);
   assert.match(workflow, /inputs\.confirm_preview_backup == 'BACKUP_PREVIEW_TO_R2_EU'/);
   assert.match(workflow, /ref: 1fc258c9c8d25e5e7b89241504218bf102afbf27/);
   assert.match(workflow, /clean="\\n"\.join/);
