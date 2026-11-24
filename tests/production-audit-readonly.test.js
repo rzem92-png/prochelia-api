@@ -18,7 +18,7 @@ test("productionConfigCheck never creates schema and checks persistence tables b
 });
 
 test("GET production audit handlers do not journal or insert check records", () => {
-  const start = source.indexOf("async function finalProductionAudit");
+  const start = source.indexOf("async function strictProductionAudit");
   const end = source.indexOf("const __procheliaProductionSafetyHandle", start);
   assert.notEqual(start, -1);
   assert.notEqual(end, -1);
