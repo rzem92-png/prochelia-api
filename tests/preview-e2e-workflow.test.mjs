@@ -60,6 +60,17 @@ test("authenticated checks target the legacy Preview Worker explicitly and never
   assert.doesNotMatch(workflow, /wrangler@4 d1 migrations apply|wrangler@4 deploy/);
 });
 
+test("authenticated same-origin Pages proxy forwards synthetic sessions and enforces role-scoped directory access", () => {
+  assert.match(workflow, /Exercise authenticated same-origin Pages proxy with synthetic sessions/);
+  assert.match(workflow, /Origin: base/);
+  assert.match(workflow, /E2E_MANAGER_TOKEN/);
+  assert.match(workflow, /E2E_CLIENT_TOKEN/);
+  assert.match(workflow, /await expectStatus\('\/api\/clients', null, 401\)/);
+  assert.match(workflow, /await expectStatus\('\/api\/clients', client, 403\)/);
+  assert.match(workflow, /Pages proxy client directory first-page contract mismatch/);
+  assert.match(workflow, /Pages proxy did not return the synthetic intervenant fixture/);
+});
+
 test("Pages proxy acceptance is evaluated only after unconditional fixture cleanup", () => {
   const cleanup = workflow.indexOf("Always remove synthetic Preview fixtures and verify cleanup");
   const finalGate = workflow.indexOf("Enforce Pages proxy acceptance after synthetic Preview cleanup");
