@@ -143,3 +143,43 @@ test("rate limiting requires pre-migrated rate and audit tables instead of runti
   assert.match(body, /schemaReadinessResponse\(env, \['security_rate_limits'\]/);
   assert.match(body, /schemaReadinessResponse\(env, \['production_security_events'\]/);
 });
+
+test("consolidated routes require migration-owned tables and never create the schema at request time", () => {
+  assert.doesNotMatch(source, /await ensureConsolidatedSchema\(env\)/);
+  const start = source.indexOf("async function handleConsolidated");
+  const end = source.indexOf("\n/* ============================================================", start);
+  assert.notEqual(start, -1);
+  assert.notEqual(end, -1);
+  const body = source.slice(start, end);
+  assert.match(body, /schemaReadinessResponse\(env, \['platform_settings','business_profiles','métier_catalog'/);
+});
+
+test("strategic routes require pre-migrated tables and never call the schema creator", () => {
+  assert.doesNotMatch(source, /await ensureStrategicSchema\(env\)/);
+  for (const name of ["recommendPromotions","createPromotion","promotionList","activatePromotion","strategicDashboard"]) {
+    const start = source.indexOf("async function " + name + "(");
+    const next = source.indexOf("\nasync function ", start + 20);
+    const body = source.slice(start, next < 0 ? undefined : next);
+    assert.ok(body.includes("schemaReadinessResponse"), name + " must check migration readiness");
+  }
+});
+
+test("operational routes require pre-migrated tables and never call the schema creator", () => {
+  assert.doesNotMatch(source, /await ensureOperationalSchema\(env\)/);
+  for (const name of ["processActionOutbox","operationalExecute","scoreClients","loyaltyUpdate","qualityCreate","capacityDashboard","financeForecast","copilotBriefing","systemAudit"]) {
+    const start = source.indexOf("async function " + name + "(");
+    const next = source.indexOf("\nasync function ", start + 20);
+    const body = source.slice(start, next < 0 ? undefined : next);
+    assert.ok(body.includes("schemaReadinessResponse"), name + " must check migration readiness");
+  }
+});
+
+test("commercial and recruitment routes require pre-migrated tables without runtime DDL", () => {
+  assert.doesNotMatch(source, /await ensureCommercialRecruitmentSchema\(env\)/);
+  for (const name of ["commercialProspectCreate","commercialProspectSheet","commercialPlaybook","recruitmentCandidateCreate","recruitmentSheet","growthDashboard"]) {
+    const start = source.indexOf("async function " + name + "(");
+    const next = source.indexOf("\nasync function ", start + 20);
+    const body = source.slice(start, next < 0 ? undefined : next);
+    assert.ok(body.includes("schemaReadinessResponse"), name + " must check migration readiness");
+  }
+});
