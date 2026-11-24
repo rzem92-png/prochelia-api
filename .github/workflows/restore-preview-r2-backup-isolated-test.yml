@@ -23,7 +23,8 @@ jobs:
   restore-isolated:
     if: >-
       (
-        github.ref == 'refs/heads/main'
+        github.ref == 'refs/heads/main' &&
+        github.actor == 'rzem92-png'
       ) &&
       inputs.confirm_restore == 'RESTORE_PREVIEW_R2_TO_ISOLATED_TEST_ONLY'
     runs-on: ubuntu-latest
@@ -50,6 +51,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          test "$GITHUB_ACTOR" = "rzem92-png" || { echo "::error::Only the repository owner may dispatch the isolated Preview restore."; exit 1; }
           case "$GITHUB_REF" in
             refs/heads/main) ;;
             *) echo "::error::Restore is restricted to the main branch only."; exit 1 ;;
