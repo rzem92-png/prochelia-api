@@ -41,3 +41,15 @@ test("Provisioning, signed backup and Worker Preview binding use the same EU buc
   assert.ok(backupWorkflow.includes(`R2_BUCKET: ${bucket}`));
   assert.ok(workerConfig.includes(`bucket_name: "${bucket}"`));
 });
+
+test("R2 provisioning configures and verifies an EU lock for the exact Preview backup prefix", () => {
+  assert.match(workflow, /R2_EXPECTED_RETENTION_SECONDS:.*vars\.R2_EXPECTED_RETENTION_SECONDS/);
+  assert.match(workflow, /cf-r2-jurisdiction: eu/);
+  assert.match(workflow, /r2\/buckets\/\$bucket\/lock/);
+  assert.match(workflow, /-X PUT/);
+  assert.match(workflow, /preview-d1\/prochelia-preview-eu-2026-11-17\//);
+  assert.match(workflow, /condition: \{type: "Age", maxAgeSeconds: \$retention\}/);
+  assert.match(workflow, /conflicting rule already exists/);
+  assert.match(workflow, /exact Preview backup prefix has the approved EU R2 retention lock/);
+  assert.doesNotMatch(workflow, /-X DELETE/);
+});
