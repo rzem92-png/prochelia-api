@@ -1343,7 +1343,7 @@ try:
     """)
     raise AssertionError("Webhook was tenant-bound without a matched transaction")
 except sqlite3.IntegrityError as exc:
-    assert "PAYMENT_WEBHOOK_TENANT_MISMATCH" in str(exc), str(exc)
+    assert "PAYMENT_WEBHOOK_TENANT_BINDING_INVALID" in str(exc), str(exc)
 
 db.execute("""
     INSERT INTO payment_webhook_events(id,provider,event_id,event_type)
@@ -1366,15 +1366,15 @@ try:
     """)
     raise AssertionError("Webhook was attributed to a tenant different from its matched transaction")
 except sqlite3.IntegrityError as exc:
-    assert "PAYMENT_WEBHOOK_TENANT_MISMATCH" in str(exc), str(exc)
+    assert "PAYMENT_WEBHOOK_TENANT_BINDING_INVALID" in str(exc), str(exc)
 
 for sql, expected in [
     ("UPDATE payment_webhook_events SET tenant_id=NULL WHERE id='finance-webhook-a'",
-     "PAYMENT_WEBHOOK_TENANT_IMMUTABLE"),
+     "PAYMENT_WEBHOOK_TENANT_BINDING_INVALID"),
     ("UPDATE payment_webhook_events SET tenant_id='tenant-b' WHERE id='finance-webhook-a'",
-     "PAYMENT_WEBHOOK_TENANT_IMMUTABLE"),
+     "PAYMENT_WEBHOOK_TENANT_BINDING_INVALID"),
     ("UPDATE payment_webhook_events SET matched_transaction_id=NULL WHERE id='finance-webhook-a'",
-     "PAYMENT_WEBHOOK_TENANT_IMMUTABLE"),
+     "PAYMENT_WEBHOOK_TENANT_BINDING_INVALID"),
     ("UPDATE payment_webhook_events SET provider='other_psp' WHERE id='finance-webhook-a'",
      "PAYMENT_WEBHOOK_IDENTITY_IMMUTABLE"),
     ("UPDATE payment_webhook_events SET event_id='evt-mutated' WHERE id='finance-webhook-a'",
