@@ -6,6 +6,7 @@ on:
       - feat/supra-canonical-tenant-integration-2026-11-20
       - fix/tenant-accounting-api-readonly-gate-2026-11-22
       - test/preview-directory-e2e-current-pages-2026-11-24
+      - fix/e2e-tenant-schema-readiness-gate-2026-11-24
     paths:
       - ".github/workflows/preview-directory-e2e-acceptance.yml"
       - "tests/preview-e2e-workflow.test.mjs"
@@ -42,6 +43,12 @@ jobs:
           github.ref == 'refs/heads/fix/tenant-accounting-api-readonly-gate-2026-11-22' ||
           (
             github.ref == 'refs/heads/test/preview-directory-e2e-current-pages-2026-11-24' &&
+            github.actor == 'rzem92-png' &&
+            contains(github.event.head_commit.message, '[RUN_PREVIEW_DIRECTORY_E2E]')
+          )
+          ||
+          (
+            github.ref == 'refs/heads/fix/e2e-tenant-schema-readiness-gate-2026-11-24' &&
             github.actor == 'rzem92-png' &&
             contains(github.event.head_commit.message, '[RUN_PREVIEW_DIRECTORY_E2E]')
           )
