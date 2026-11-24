@@ -13,6 +13,12 @@ test("scheduled Preview D1 artifact backup checks out the repository before Wran
   assert.ok(workflow.includes("actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444"));
 });
 
+test("backup encryption removes plaintext even when encryption or checksum verification fails", () => {
+  assert.match(workflow, /trap 'rm -f "\$plaintext" "\$decrypted_check"' EXIT/);
+  assert.match(workflow, /decrypted_check="\$RUNNER_TEMP\/prochelia-backup\/decrypted-check\.sql"/);
+  assert.match(workflow, /actions\/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f/);
+});
+
 test("scheduled backup remains pinned to the exact EU Preview D1 and migration-only config", () => {
   assert.match(workflow, /DB_NAME: prochelia-preview-eu-2026-11-17/);
   assert.match(workflow, /DB_ID: e3cf167c-37e1-4d72-9ac6-b3e27c14b97f/);
