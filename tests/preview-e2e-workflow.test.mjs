@@ -9,6 +9,7 @@ test("synthetic Preview E2E requires the exact branch, actor and commit marker o
   assert.match(workflow, /inputs\.confirmation == 'RUN_PREVIEW_DIRECTORY_E2E'/);
   assert.match(workflow, /github\.event_name == 'push'/);
   assert.match(workflow, /refs\/heads\/test\/preview-directory-e2e-current-pages-2026-11-24/);
+  assert.match(workflow, /refs\/heads\/fix\/e2e-tenant-schema-readiness-gate-2026-11-24/);
   assert.match(workflow, /github\.actor == 'rzem92-png'/);
   assert.match(workflow, /contains\(github\.event\.head_commit\.message, '\[RUN_PREVIEW_DIRECTORY_E2E\]'\)/);
 });
