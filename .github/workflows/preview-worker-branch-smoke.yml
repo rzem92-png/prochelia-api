@@ -45,7 +45,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          for route in /api/auth/me /api/clients /api/intervenants /api/tenant/context; do
+          for route in /api/auth/me /api/clients /api/intervenants; do
             body="$RUNNER_TEMP/route.json"
             status="$(curl --silent --show-error --output "$body" --write-out '%{http_code}' "$PREVIEW_WORKER_URL$route")"
             [[ "$status" == "401" ]] || {
@@ -55,6 +55,15 @@ jobs:
             }
             echo "PASS: $route rejects unauthenticated access (HTTP 401)."
           done
+          body="$RUNNER_TEMP/tenant-context.json"
+          status="$(curl --silent --show-error --output "$body" --write-out '%{http_code}' "$PREVIEW_WORKER_URL/api/tenant/context")"
+          if [[ "$status" == "404" ]]; then
+            echo "::warning::Tenant context route is not implemented on this legacy-compatible branch Worker (HTTP 404); tenant-aware acceptance remains blocked."
+          else
+            echo "::error::Expected the unimplemented tenant context route to remain explicitly absent on this candidate until its tenant schema and route are integrated; got HTTP $status."
+            jq -c '{ok, error, status}' "$body" 2>/dev/null || true
+            exit 1
+          fi
 
       - name: Confirm this workflow performs read-only HTTP checks
         shell: bash
