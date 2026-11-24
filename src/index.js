@@ -1032,7 +1032,7 @@ async function verifyStripeWebhookSignature(request, env, rawBody, nowSeconds = 
     const name = part.slice(0, separator).trim();
     const value = part.slice(separator + 1).trim();
     if (name === 't') {
-      if (timestamp !== null || !/^\\d+$/.test(value)) return false;
+      if (timestamp !== null || !/^\d+$/.test(value)) return false;
       const parsed = Number(value);
       if (!Number.isSafeInteger(parsed)) return false;
       timestamp = parsed;
@@ -1056,9 +1056,10 @@ async function verifyStripeWebhookSignature(request, env, rawBody, nowSeconds = 
 }
 
 export async function verifyWebhookSignature(request, env, rawBody, nowSeconds = Math.floor(Date.now() / 1000)) {
-  if (request.headers.has('stripe-signature') || paymentProvider(env) === 'stripe') {
+  if (String(paymentProvider(env)).toLowerCase() === 'stripe') {
     return verifyStripeWebhookSignature(request, env, rawBody, nowSeconds);
   }
+  if (request.headers.has('stripe-signature')) return false;
   const secret = env?.PAYMENT_WEBHOOK_SECRET;
   if (typeof secret !== 'string' || !secret) return false;
   const signature = request.headers.get('x-prochelia-signature') || request.headers.get('x-webhook-signature') || '';
