@@ -1145,6 +1145,23 @@ assert financial_tenant_triggers <= triggers, (
     f"Missing financial tenant guards: {sorted(financial_tenant_triggers-triggers)}"
 )
 
+# Payment and payout idempotency is tenant-scoped; NULL legacy tenant rows are
+# deliberately not attributed to a guessed company.
+for table in ("payment_transactions", "payout_requests"):
+    unique_sets = []
+    for index in db.execute(f"PRAGMA index_list({table})").fetchall():
+        if index[2]:
+            columns = [
+                row[2] for row in db.execute(f'PRAGMA index_info("{index[1]}")').fetchall()
+            ]
+            unique_sets.append(columns)
+    assert ["tenant_id", "idempotency_key"] in unique_sets, (
+        f"{table} must have tenant-scoped idempotency uniqueness"
+    )
+    assert ["idempotency_key"] not in unique_sets, (
+        f"{table} must not enforce global idempotency uniqueness"
+    )
+
 
 # Runtime routes and the production readiness gate must use the same tenant boundary.
 source = (ROOT / "src" / "index.js").read_text(encoding="utf-8")
@@ -1181,6 +1198,19 @@ db.execute("""
 db.execute("""
     UPDATE tenant_memberships SET status='ACTIVE',accepted_at=CURRENT_TIMESTAMP
      WHERE id='finance-membership-market-a'
+""")
+db.execute("""
+    INSERT INTO tenant_memberships(id,tenant_id,user_id,role,status,invited_by_user_id)
+    VALUES ('finance-membership-market-b','market-tenant-b','finance-user-a','MEMBER','INVITED','user-admin')
+""")
+db.execute("""
+    UPDATE tenant_memberships SET status='ACTIVE',accepted_at=CURRENT_TIMESTAMP
+     WHERE id='finance-membership-market-b'
+""")
+db.execute("""
+    INSERT INTO missions(id,client_id,intervenant_id,prestation_id,start_at,tenant_id)
+    VALUES ('finance-mission-idem-b','market-client-b-row','market-worker-b-row',
+            'market-service-b','2026-11-22T10:00:00Z','market-tenant-b')
 """)
 
 db.execute("""
@@ -1232,6 +1262,59 @@ db.execute("""
       id,idempotency_key,wallet_id,user_id,amount_cents,tenant_id
     ) VALUES ('finance-payout-a','finance-payout-idem-a','finance-wallet-a','finance-user-a',2500,'market-tenant-a')
 """)
+
+# The same idempotency key is valid in another tenant, but remains unique
+# inside each tenant for both mission charges and payouts.
+db.execute("""
+    INSERT INTO payment_transactions(
+      id,idempotency_key,mission_id,client_id,intervenant_id,type,status,
+      gross_cents,commission_cents,net_intervenant_cents,currency,tenant_id
+    ) VALUES (
+      'finance-tx-b-idem','finance-idem-a','finance-mission-idem-b','market-client-b-row',
+      'market-worker-b-row','MISSION_CHARGE','pending',10000,1000,9000,'EUR','market-tenant-b'
+    )
+""")
+try:
+    db.execute("""
+        INSERT INTO payment_transactions(
+          id,idempotency_key,mission_id,client_id,intervenant_id,type,status,
+          gross_cents,commission_cents,net_intervenant_cents,currency,tenant_id
+        ) VALUES (
+          'finance-tx-a-duplicate','finance-idem-a','market-mission-opportunity',
+          'market-client-a-row',NULL,'MISSION_CHARGE','pending',10000,1000,9000,'EUR','market-tenant-a'
+        )
+    """)
+    raise AssertionError("Duplicate payment idempotency key inside one tenant was incorrectly accepted")
+except sqlite3.IntegrityError as exc:
+    assert "payment_transactions.tenant_id" in str(exc) and "payment_transactions.idempotency_key" in str(exc), str(exc)
+
+try:
+    db.execute("UPDATE payment_transactions SET idempotency_key='finance-idem-mutated' WHERE id='finance-tx-a'")
+    raise AssertionError("Payment transaction idempotency key was mutable")
+except sqlite3.IntegrityError as exc:
+    assert "PAYMENT_TRANSACTION_IDENTITY_IMMUTABLE" in str(exc), str(exc)
+
+db.execute("""
+    INSERT INTO payout_requests(
+      id,idempotency_key,wallet_id,user_id,amount_cents,tenant_id
+    ) VALUES ('finance-payout-b','finance-payout-idem-a','finance-wallet-b','finance-user-a',2500,'tenant-b')
+""")
+try:
+    db.execute("""
+        INSERT INTO payout_requests(
+          id,idempotency_key,wallet_id,user_id,amount_cents,tenant_id
+        ) VALUES ('finance-payout-a-duplicate','finance-payout-idem-a','finance-wallet-a','finance-user-a',2500,'market-tenant-a')
+    """)
+    raise AssertionError("Duplicate payout idempotency key inside one tenant was incorrectly accepted")
+except sqlite3.IntegrityError as exc:
+    assert "payout_requests.tenant_id" in str(exc) and "payout_requests.idempotency_key" in str(exc), str(exc)
+
+try:
+    db.execute("UPDATE payout_requests SET idempotency_key='finance-payout-idem-mutated' WHERE id='finance-payout-a'")
+    raise AssertionError("Payout idempotency key was mutable")
+except sqlite3.IntegrityError as exc:
+    assert "PAYOUT_REQUEST_IDENTITY_IMMUTABLE" in str(exc), str(exc)
+
 try:
     db.execute("""
         INSERT INTO payout_requests(
