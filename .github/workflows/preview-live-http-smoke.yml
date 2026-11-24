@@ -55,7 +55,7 @@ jobs:
           check_health "Current Pages proxy Worker" "https://fix-pages-proxy-preview-cors-2026-11-23.rzem92.workers.dev/api/health" "proxy-worker"
           check_health "Pages same-origin API proxy" "https://fix-frontend-finance-confirm.prochelia.pages.dev/api/health" "pages-proxy"
 
-      - name: Verify the public webhook receiver rejects an unauthenticated synthetic event before writes
+      - name: Verify the public webhook receiver rejects an unauthenticated synthetic event before webhook persistence
         shell: bash
         run: |
           set -euo pipefail
@@ -72,7 +72,7 @@ jobs:
             exit 1
           }
           jq -e '.error == "INVALID_WEBHOOK_SIGNATURE"' "$RUNNER_TEMP/webhook-rejected.json" >/dev/null
-          echo "PASS: unauthenticated synthetic webhook rejected before event parsing or D1 writes."
+          echo "PASS: unsigned synthetic webhook rejected; no webhook event or financial write is accepted. The generic security rate limiter may record a bounded counter."
 
       - name: Verify disabled-PSP candidate rejects before reading the webhook body
         shell: bash
@@ -108,4 +108,4 @@ jobs:
           expect_denied "Tenant context" "$base/api/tenant/context" "tenant"
           expect_denied "Device Trust credential list" "$base/api/security/device/list" "device"
           expect_denied "Accounting ledger health" "https://fix-pages-proxy-preview-cors-2026-11-23.rzem92.workers.dev/api/accounting/health" "accounting"
-          echo "No cookies, credentials, synthetic rows, or mutating requests were sent."
+          echo "No cookies or credentials were sent. Only synthetic unauthenticated POST probes were used; the security rate limiter may record hashed counters, while no webhook event or financial transaction is created."
