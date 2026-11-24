@@ -3,12 +3,16 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
 const workflow = await readFile(new URL("../.github/workflows/preview-directory-e2e-acceptance.yml", import.meta.url), "utf8");
+// RUN_PREVIEW_DIRECTORY_E2E: validate the read-only tenant readiness gate before fixtures.
+// This run must stop before fixture creation when the tenant schema is incomplete.
+// RUN_PREVIEW_DIRECTORY_E2E: current Pages deployment commit is pinned in this workflow.
 
 test("synthetic Preview E2E requires the exact branch, actor and commit marker or explicit manual confirmation", () => {
   assert.match(workflow, /workflow_dispatch:/);
   assert.match(workflow, /inputs\.confirmation == 'RUN_PREVIEW_DIRECTORY_E2E'/);
   assert.match(workflow, /github\.event_name == 'push'/);
   assert.match(workflow, /refs\/heads\/test\/preview-directory-e2e-current-pages-2026-11-24/);
+  assert.match(workflow, /refs\/heads\/fix\/e2e-tenant-schema-readiness-gate-2026-11-24/);
   assert.match(workflow, /github\.actor == 'rzem92-png'/);
   assert.match(workflow, /contains\(github\.event\.head_commit\.message, '\[RUN_PREVIEW_DIRECTORY_E2E\]'\)/);
 });
@@ -17,7 +21,7 @@ test("Preview E2E is pinned to the exact EU Preview D1 and current Pages branch 
   assert.match(workflow, /PREVIEW_DB_NAME: prochelia-preview-eu-2026-11-17/);
   assert.match(workflow, /PREVIEW_DB_ID: e3cf167c-37e1-4d72-9ac6-b3e27c14b97f/);
   assert.match(workflow, /FRONTEND_BRANCH: fix\/frontend-accounting-readonly-proxy-2026-11-24/);
-  assert.match(workflow, /24137dd2aeb83b76dd7b7584017c41ef545d9318/);
+  assert.match(workflow, /9001961fd30eae18be9643467196fe7bab797d8b/);
   assert.match(workflow, /deployment_trigger\.metadata\.branch/);
   assert.match(workflow, /deployment_trigger\.metadata\.commit_hash/);
   assert.ok(workflow.includes('[[ "$PREVIEW_DB_ID" != "04f52830-ef5a-4f17-a640-42bbc2381bba" ]]'));
@@ -25,10 +29,13 @@ test("Preview E2E is pinned to the exact EU Preview D1 and current Pages branch 
 
 test("Pages E2E uses the exact allowlisted alias and does not assume a service binding", () => {
   assert.match(workflow, /fix-frontend-accounting-read\.prochelia\.pages\.dev/);
-  assert.match(workflow, /\.result\.aliases/);
-  assert.match(workflow, /\.result\.services/);
-  assert.match(workflow, /pinned Preview Worker origin/);
-  assert.match(workflow, /\.result\.d1_databases\.DB\.id == \$db/);
+  assert.match(workflow, /\.aliases/);
+  assert.match(workflow, /\.services \/\/ \{\}/);
+  assert.match(workflow, /Worker origin is pinned in Pages Function/);
+  assert.match(workflow, /\.d1_databases\.DB\.id == \$db/);
+  assert.ok(workflow.includes("printf '%s'"));
+  assert.ok(workflow.includes("$RUNNER_TEMP/pages-preview.json"));
+  assert.doesNotMatch(workflow, /pages\/projects\/prochelia\/deployments\/\$PAGES_DEPLOYMENT_ID/);
 });
 
 test("Pages same-origin proxy tests the four protected intervenant routes and preflight", () => {
@@ -38,6 +45,22 @@ test("Pages same-origin proxy tests the four protected intervenant routes and pr
   assert.match(workflow, /expected HTTP 401/);
   assert.match(workflow, /expected HTTP 204/);
   assert.match(workflow, /PAGES_PREVIEW_URL/);
+});
+
+test("tenant authentication and directory schema preflight runs before any synthetic seed", () => {
+  const gate = workflow.indexOf("Verify tenant authentication and directory schema before seeding");
+  const fixtureGeneration = workflow.indexOf("Generate synthetic test fixtures and guaranteed cleanup SQL");
+  const seed = workflow.indexOf("Seed only the isolated Preview D1");
+  assert.ok(gate >= 0, "read-only tenant schema gate is required");
+  assert.ok(fixtureGeneration > gate, "schema gate must run before fixture generation");
+  assert.ok(seed > gate, "schema gate must run before D1 seed");
+  for (const column of [
+    "tenants_table", "memberships_table", "session_active_tenant_id",
+    "session_revoked_at", "clients_tenant_id", "intervenants_tenant_id"
+  ]) assert.ok(workflow.includes(column), "missing readiness assertion: " + column);
+  assert.match(workflow, /No synthetic fixture will be inserted/);
+  assert.match(workflow, /EXISTS\(SELECT 1 FROM sqlite_master/);
+  assert.match(workflow, /pragma_table_info\('sessions'\)/);
 });
 
 test("synthetic directory fixtures use the existing Preview schema and a dedicated cleanup", () => {
@@ -83,7 +106,7 @@ test("Cloudflare mismatch diagnostics never print tokens or authorization header
   const start = workflow.indexOf(marker);
   assert.notEqual(start, -1);
   const block = workflow.slice(start, workflow.indexOf("exit 1", start));
-  assert.match(block, /worker_service/);
+  assert.match(block, /service_binding/);
   assert.match(block, /preview_aliases/);
   assert.doesNotMatch(block, /CLOUDFLARE_API_TOKEN|Authorization|Bearer/);
 });

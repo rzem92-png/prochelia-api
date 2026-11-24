@@ -6,6 +6,7 @@ on:
       - feat/supra-canonical-tenant-integration-2026-11-20
       - fix/tenant-accounting-api-readonly-gate-2026-11-22
       - test/preview-directory-e2e-current-pages-2026-11-24
+      - fix/e2e-tenant-schema-readiness-gate-2026-11-24
     paths:
       - ".github/workflows/preview-directory-e2e-acceptance.yml"
       - "tests/preview-e2e-workflow.test.mjs"
@@ -18,7 +19,7 @@ on:
       frontend_commit_sha:
         description: "Exact 40-character HEAD of the selected frontend Preview branch"
         required: false
-        default: "24137dd2aeb83b76dd7b7584017c41ef545d9318"
+        default: "9001961fd30eae18be9643467196fe7bab797d8b"
         type: string
   workflow_run:
     workflows:
@@ -42,6 +43,12 @@ jobs:
           github.ref == 'refs/heads/fix/tenant-accounting-api-readonly-gate-2026-11-22' ||
           (
             github.ref == 'refs/heads/test/preview-directory-e2e-current-pages-2026-11-24' &&
+            github.actor == 'rzem92-png' &&
+            contains(github.event.head_commit.message, '[RUN_PREVIEW_DIRECTORY_E2E]')
+          )
+          ||
+          (
+            github.ref == 'refs/heads/fix/e2e-tenant-schema-readiness-gate-2026-11-24' &&
             github.actor == 'rzem92-png' &&
             contains(github.event.head_commit.message, '[RUN_PREVIEW_DIRECTORY_E2E]')
           )
@@ -70,7 +77,7 @@ jobs:
       PREVIEW_DB_NAME: prochelia-preview-eu-2026-11-17
       PREVIEW_DB_ID: e3cf167c-37e1-4d72-9ac6-b3e27c14b97f
       FRONTEND_BRANCH: fix/frontend-accounting-readonly-proxy-2026-11-24
-      FRONTEND_COMMIT_SHA: ${{ inputs.frontend_commit_sha || '24137dd2aeb83b76dd7b7584017c41ef545d9318' }}
+      FRONTEND_COMMIT_SHA: ${{ inputs.frontend_commit_sha || '9001961fd30eae18be9643467196fe7bab797d8b' }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -148,30 +155,33 @@ jobs:
           esac
           printf 'PAGES_DEPLOYMENT_ID=%s\nPAGES_PREVIEW_URL=%s\nFRONTEND_COMMIT_SHA=%s\n' \
             "$PAGES_DEPLOYMENT_ID" "$PAGES_PREVIEW_URL" "$FRONTEND_COMMIT_SHA" >> "$GITHUB_ENV"
-          cf_request "Pages Preview deployment access" \
-            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/pages/projects/prochelia/deployments/$PAGES_DEPLOYMENT_ID" "$RUNNER_TEMP/pages-preview.json"
+          # RUN_PREVIEW_DIRECTORY_E2E: verify metadata from the list response before any fixture writes.
+          # RUN_PREVIEW_DIRECTORY_E2E: verify current Pages Preview commit and tenant schema gate.
+          # Use the full deployment record from the list response. The detail endpoint
+          # omits aliases and service bindings for this Pages project, while the list
+          # response carries the verified alias and D1 binding.
+          printf '%s' "$deployment" > "$RUNNER_TEMP/pages-preview.json"
           if ! jq -e --arg db "$PREVIEW_DB_ID" --arg alias "$PAGES_PREVIEW_URL" --arg branch "$FRONTEND_BRANCH" --arg commit "$FRONTEND_COMMIT_SHA" '
-            .success == true and
-            .result.environment == "preview" and
-            .result.uses_functions == true and
-            .result.d1_databases.DB.id == $db and
-            (.result.services // {}) == {} and
-            ((.result.aliases // []) | index($alias) != null) and
-            .result.deployment_trigger.metadata.branch == $branch and
-            .result.deployment_trigger.metadata.commit_hash == $commit
+            .environment == "preview" and
+            .uses_functions == true and
+            .d1_databases.DB.id == $db and
+            (.services // {}) == {} and
+            ((.aliases // []) | index($alias) != null) and
+            .deployment_trigger.metadata.branch == $branch and
+            .deployment_trigger.metadata.commit_hash == $commit
           ' "$RUNNER_TEMP/pages-preview.json" >/dev/null; then
             echo "::error::Pages Preview deployment bindings/branch/commit mismatch. Safe metadata diagnostic follows."
             jq -c --arg db "$PREVIEW_DB_ID" --arg alias "$PAGES_PREVIEW_URL" --arg branch "$FRONTEND_BRANCH" --arg commit "$FRONTEND_COMMIT_SHA" '
               {
-                expected: {environment: "preview", uses_functions: true, d1_database_id: $db, preview_alias: $alias, worker_service: "pinned Preview Worker origin in Pages Function", branch: $branch, commit_hash: $commit},
+                expected: {environment: "preview", uses_functions: true, d1_database_id: $db, preview_alias: $alias, service_binding: "not used; Worker origin is pinned in Pages Function", branch: $branch, commit_hash: $commit},
                 observed: {
-                  environment: .result.environment,
-                  uses_functions: .result.uses_functions,
-                  d1_database_id: .result.d1_databases.DB.id,
-                  preview_aliases: .result.aliases,
-                  worker_service: (.result.services.PROCHELIA_API.service // null),
-                  branch: .result.deployment_trigger.metadata.branch,
-                  commit_hash: .result.deployment_trigger.metadata.commit_hash
+                  environment: .environment,
+                  uses_functions: .uses_functions,
+                  d1_database_id: .d1_databases.DB.id,
+                  preview_aliases: .aliases,
+                  services: (.services // {}),
+                  branch: .deployment_trigger.metadata.branch,
+                  commit_hash: .deployment_trigger.metadata.commit_hash
                 }
               }
             ' "$RUNNER_TEMP/pages-preview.json"
@@ -225,6 +235,52 @@ jobs:
             exit 1
           fi
           echo "PASS: Pages Function -> pinned Preview Worker origin, unauthenticated route guards and same-origin preflight verified without data writes."
+
+      # This gated branch run verifies schema readiness before any synthetic fixture write.
+      - name: Verify tenant authentication and directory schema before seeding
+        id: tenant_schema
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          sql="$(cat <<'SQL'
+          SELECT
+            EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='tenants') AS tenants_table,
+            EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='tenant_memberships') AS memberships_table,
+            EXISTS(SELECT 1 FROM pragma_table_info('tenants') WHERE name='id') AS tenants_id,
+            EXISTS(SELECT 1 FROM pragma_table_info('tenants') WHERE name='slug') AS tenants_slug,
+            EXISTS(SELECT 1 FROM pragma_table_info('tenants') WHERE name='display_name') AS tenants_display_name,
+            EXISTS(SELECT 1 FROM pragma_table_info('tenants') WHERE name='status') AS tenants_status,
+            EXISTS(SELECT 1 FROM pragma_table_info('tenant_memberships') WHERE name='id') AS memberships_id,
+            EXISTS(SELECT 1 FROM pragma_table_info('tenant_memberships') WHERE name='user_id') AS memberships_user_id,
+            EXISTS(SELECT 1 FROM pragma_table_info('tenant_memberships') WHERE name='tenant_id') AS memberships_tenant_id,
+            EXISTS(SELECT 1 FROM pragma_table_info('tenant_memberships') WHERE name='role') AS memberships_role,
+            EXISTS(SELECT 1 FROM pragma_table_info('tenant_memberships') WHERE name='status') AS memberships_status,
+            EXISTS(SELECT 1 FROM pragma_table_info('sessions') WHERE name='active_tenant_id') AS session_active_tenant_id,
+            EXISTS(SELECT 1 FROM pragma_table_info('sessions') WHERE name='revoked_at') AS session_revoked_at,
+            EXISTS(SELECT 1 FROM pragma_table_info('clients') WHERE name='tenant_id') AS clients_tenant_id,
+            EXISTS(SELECT 1 FROM pragma_table_info('intervenants') WHERE name='tenant_id') AS intervenants_tenant_id
+          SQL
+          )"
+          payload="$(jq -n --arg sql "$sql" '{sql:$sql}')"
+          status="$(curl --silent --show-error --output "$RUNNER_TEMP/tenant-schema.json" --write-out '%{http_code}' \
+            -X POST -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -H "Content-Type: application/json" \
+            --data "$payload" "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/d1/database/$PREVIEW_DB_ID/query")"
+          [[ "$status" == "200" ]] || {
+            echo "::error::Read-only tenant schema preflight failed (HTTP $status)."
+            exit 1
+          }
+          jq -e '.success == true and .result[0].results[0] != null' "$RUNNER_TEMP/tenant-schema.json" >/dev/null || {
+            echo "::error::Tenant schema preflight returned no valid D1 result."
+            exit 1
+          }
+          missing="$(jq -r '.result[0].results[0] | to_entries | map(select(.value != 1) | .key) | join(",")' "$RUNNER_TEMP/tenant-schema.json")"
+          if [[ -n "$missing" ]]; then
+            echo "::error::Tenant authentication/directory schema is not ready: $missing. No synthetic fixture will be inserted."
+            exit 1
+          fi
+          echo "PASS: tenant membership, session and directory schema is ready; safe to proceed with synthetic fixtures."
 
       - name: Read current directory offsets without reading personal rows
         shell: bash

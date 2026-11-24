@@ -15,7 +15,9 @@ on:
       - ".github/workflows/backup-preview-d1-to-r2-eu.yml"
       - ".github/workflows/restore-preview-r2-backup-isolated-test.yml"
   push:
-    branches: [main]
+    branches:
+      - main
+      - fix/e2e-tenant-schema-readiness-gate-2026-11-24
     paths:
       - "src/v7.js"
       - "src/v7-routes.js"
