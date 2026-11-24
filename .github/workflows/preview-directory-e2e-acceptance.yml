@@ -19,7 +19,7 @@ on:
       frontend_commit_sha:
         description: "Exact 40-character HEAD of the selected frontend Preview branch"
         required: false
-        default: "23a25c98c6faf5840310cecae77efbee64ebc816"
+        default: "24137dd2aeb83b76dd7b7584017c41ef545d9318"
         type: string
 
 permissions:
@@ -49,8 +49,8 @@ jobs:
       CLOUDFLARE_ACCOUNT_ID: f2a79e9fa41566a8ec80fb24c02c60eb
       PREVIEW_DB_NAME: prochelia-preview-eu-2026-11-17
       PREVIEW_DB_ID: e3cf167c-37e1-4d72-9ac6-b3e27c14b97f
-      FRONTEND_BRANCH: fix/frontend-finance-confirmation-guard-2026-11-23
-      FRONTEND_COMMIT_SHA: ${{ inputs.frontend_commit_sha || '23a25c98c6faf5840310cecae77efbee64ebc816' }}
+      FRONTEND_BRANCH: fix/frontend-accounting-readonly-proxy-2026-11-24
+      FRONTEND_COMMIT_SHA: ${{ inputs.frontend_commit_sha || '24137dd2aeb83b76dd7b7584017c41ef545d9318' }}
       API_PREVIEW_URL: https://fix-pages-proxy-preview-cors-2026-11-23.rzem92.workers.dev
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -119,9 +119,9 @@ jobs:
             exit 1
           }
           PAGES_DEPLOYMENT_ID="$(jq -r '.id // empty' <<< "$deployment")"
-          PAGES_PREVIEW_URL="$(jq -r --arg alias 'https://fix-frontend-finance-confirm.prochelia.pages.dev' '(.aliases // []) | map(select(. == $alias)) | first // empty' <<< "$deployment")"
+          PAGES_PREVIEW_URL="$(jq -r --arg alias 'https://fix-frontend-accounting-read.prochelia.pages.dev' '(.aliases // []) | map(select(. == $alias)) | first // empty' <<< "$deployment")"
           [[ -n "$PAGES_DEPLOYMENT_ID" ]] || { echo "::error::Pages deployment ID missing."; exit 1; }
-          [[ "$PAGES_PREVIEW_URL" == "https://fix-frontend-finance-confirm.prochelia.pages.dev" ]] || {
+          [[ "$PAGES_PREVIEW_URL" == "https://fix-frontend-accounting-read.prochelia.pages.dev" ]] || {
             echo "::error::The exact Pages proxy branch alias is missing from the pinned deployment."
             exit 1
           }
@@ -172,7 +172,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          expected_origin="https://fix-frontend-finance-confirm.prochelia.pages.dev"
+          expected_origin="https://fix-frontend-accounting-read.prochelia.pages.dev"
           for attempt in $(seq 1 24); do
             status="$(curl --silent --show-error --output "$RUNNER_TEMP/worker-preflight.json" --dump-header "$RUNNER_TEMP/worker-preflight.headers" --write-out '%{http_code}' \
               -X OPTIONS -H "Origin: $expected_origin" \
