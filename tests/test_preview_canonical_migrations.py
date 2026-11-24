@@ -146,7 +146,7 @@ for index in db.execute("PRAGMA index_list(wallets)").fetchall():
 assert ["tenant_id", "user_id", "currency"] in wallet_unique_indexes, "Wallet uniqueness must be scoped to tenant and currency"
 assert ["user_id"] not in wallet_unique_indexes, "Global user-only wallet uniqueness blocks multi-tenant providers"
 assert "idx_wallets_tenant_user_currency" in indexes, "Missing named tenant/currency wallet unique index"
-assert "trg_wallets_currency_immutable" in triggers, "Wallet currency must be immutable after tenant/currency identity is established"
+assert db.execute("SELECT 1 FROM sqlite_master WHERE type='trigger' AND name='trg_wallets_currency_immutable'").fetchone(), "Wallet currency must be immutable after tenant/currency identity is established"
 assert "idx_disponibilites_tenant_intervenant_idempotency" in indexes, "Missing durable availability idempotency index"
 assert "idx_support_cases_tenant_status_created" in indexes, "Missing tenant-scoped support status index"
 assert "idx_support_cases_tenant_requester_created" in indexes, "Missing tenant-scoped support requester index"
