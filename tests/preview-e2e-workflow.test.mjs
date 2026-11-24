@@ -16,7 +16,7 @@ test("Preview E2E pins its own D1, Worker and Pages deployment", () => {
   assert.match(workflow, /PREVIEW_DB_ID: e3cf167c-37e1-4d72-9ac6-b3e27c14b97f/);
   assert.match(workflow, /PAGES_DEPLOYMENT_ID: 83a36d32-4880-4417-a684-f9247e42debf/);
   assert.match(workflow, /PAGES_PREVIEW_URL: https:\/\/83a36d32\.prochelia\.pages\.dev/);
-  assert.match(workflow, /prochelia-api-preview/);
+  assert.match(workflow, /prochelia-api-preview/);\n  assert.match(workflow, /fix-frontend-accounting-read\\.prochelia\\.pages\\.dev/);\n  assert.match(workflow, /\\.result\\.aliases/);\n  assert.match(workflow, /\\(\\.result\\.services \\|\\| \\{\\}\\) == \\{\\}/);
   assert.match(workflow, /3846562300e97a1816b2aa7e317448449270c2bc/);
   assert.doesNotMatch(workflow, /PREVIEW_DB_ID: 04f52830-ef5a-4f17-a640-42bbc2381bba/);
 });
