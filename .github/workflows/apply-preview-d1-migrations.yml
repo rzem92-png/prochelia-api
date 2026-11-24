@@ -647,7 +647,7 @@ jobs:
               "0043_finance_workspace_tenant_scope.sql",
               "0044_security_records_tenant_scope.sql",
               "0045_wallet_tenant_currency_scope.sql",
-            "0046_master_complement_seed_data.sql",
+              "0046_master_complement_seed_data.sql",
           ])
           actual_tables=sorted(row["name"] for row in objects if row["type"] == "table")
           expected_tables=sorted([
