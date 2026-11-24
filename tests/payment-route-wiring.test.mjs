@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { sameMissionPaymentRequest } from "../src/index.js";
 import { readFile } from "node:fs/promises";
 
 const source = await readFile(new URL("../src/index.js", import.meta.url), "utf8");
@@ -48,4 +49,36 @@ test("payment routes cannot enable money movement by configuration alone", () =>
   }
   assert.match(source, /PAYMENT_PROVIDER_NOT_CONFIGURED/);
   assert.match(source, /PAYOUT_PROVIDER_NOT_CONFIGURED/);
+});
+
+test("mission payment idempotency replays only an identical tenant request", () => {
+  const existing = {
+    type: "MISSION_CHARGE",
+    mission_id: "mission-a",
+    client_id: "client-a",
+    intervenant_id: "worker-a",
+    gross_cents: 10000,
+    commission_cents: 1000,
+    net_intervenant_cents: 9000,
+    currency: "EUR"
+  };
+  const same = {
+    missionId: "mission-a",
+    clientId: "client-a",
+    intervenantId: "worker-a",
+    grossCents: 10000,
+    commissionCents: 1000
+  };
+  assert.equal(sameMissionPaymentRequest(existing, same), true);
+  for (const [key, value] of Object.entries({
+    missionId: "mission-b",
+    clientId: "client-b",
+    intervenantId: "worker-b",
+    grossCents: 12000,
+    commissionCents: 1500
+  })) {
+    assert.equal(sameMissionPaymentRequest(existing, { ...same, [key]: value }), false, key);
+  }
+  assert.equal(sameMissionPaymentRequest({ ...existing, type: "REFUND" }, same), false);
+  assert.equal(sameMissionPaymentRequest({ ...existing, currency: "USD" }, same), false);
 });
