@@ -112,7 +112,8 @@ test("Preview migration workflow validates the full canonical migration chain", 
     "0041_tenant_invitation_onboarding.sql",
     "0042_financial_tenant_scope.sql",
     "0043_finance_workspace_tenant_scope.sql",
-    "0044_security_records_tenant_scope.sql"
+    "0044_security_records_tenant_scope.sql",
+    "0045_wallet_tenant_currency_scope.sql"
   ];
   for (const migration of expected) assert.ok(workflow.includes(`"${migration}"`), `missing canonical migration ${migration}`);
 });
@@ -145,6 +146,7 @@ test("Preview post-migration verification checks identity, mission-security and 
     "0042_financial_tenant_scope.sql",
     "0043_finance_workspace_tenant_scope.sql",
     "0044_security_records_tenant_scope.sql",
+    "0045_wallet_tenant_currency_scope.sql",
     "trg_accounting_journal_post_active_scope",
     "trusted_device_credentials", "device_auth_challenges",
     "idx_trusted_device_credentials_tenant_user_status",
@@ -183,12 +185,14 @@ test("Preview post-migration verification checks identity, mission-security and 
     "idx_payment_accounts_tenant_user","idx_payment_tx_tenant_mission_created",
     "idx_payment_tx_tenant_intervenant_status","idx_payout_tenant_user_status",
     "idx_payment_disputes_tenant_mission","idx_wallet_ledger_tenant_user_date",
+    "idx_wallets_tenant_user_currency",
     "idx_payment_reconciliation_tenant_status","idx_payment_audit_tenant_created",
     "trg_payment_account_tenant_insert","trg_payment_account_tenant_update",
     "trg_payment_transaction_tenant_insert","trg_payment_transaction_tenant_update",
     "trg_payout_request_tenant_insert","trg_payout_request_tenant_update",
     "trg_payment_dispute_tenant_insert","trg_payment_dispute_tenant_update",
     "trg_wallet_ledger_tenant_insert","trg_wallet_ledger_tenant_update",
+    "trg_payment_wallet_ledger_require_wallet","trg_payment_wallet_ledger_guard_balances","trg_wallets_user_identity_immutable",
     "trg_payment_reconciliation_tenant_insert","trg_payment_reconciliation_tenant_update","trg_payment_wallet_ledger_apply",
     "trg_payment_account_tenant_immutable","trg_payment_transaction_identity_immutable",
     "trg_payout_request_identity_immutable","trg_payment_dispute_identity_immutable",
@@ -206,13 +210,13 @@ test("Preview post-migration verification checks identity, mission-security and 
   ]) assert.ok(workflow.includes(name), `missing post-migration verification for ${name}`);
 });
 
-test("Preview migration workflow accepts only an empty EU D1, the exact 23-entry reviewed baseline or the exact 45-entry target", () => {
+test("Preview migration workflow accepts only an empty EU D1, the exact 23-entry reviewed baseline or the exact 46-entry target", () => {
   assert.match(workflow, /SELECT type, name FROM sqlite_master ORDER BY type, name/);
   assert.match(workflow, /registry_present/);
   assert.match(workflow, /non_internal/);
-  assert.ok(workflow.includes("if len(local) != 45:"), "workflow must enforce the exact 45-entry chain");
+  assert.ok(workflow.includes("if len(local) != 46:"), "workflow must enforce the exact 46-entry chain");
   assert.match(workflow, /remote == base/);
-  assert.match(workflow, /differs from the exact reviewed 23-entry baseline and 45-entry target/);
+  assert.match(workflow, /differs from the exact reviewed 23-entry baseline and 46-entry target/);
   assert.doesNotMatch(workflow, /legacy=/);
   assert.doesNotMatch(workflow, /baseline=\(local-pending\)\|legacy/);
 });
@@ -395,10 +399,10 @@ test("Preview migration verifies operational marketplace tenant scope", () => {
     "idx_missions_tenant_intervenant", "idx_tarifs_tenant_prestation_active",
     "idx_paiements_tenant_mission", "idx_disponibilites_tenant_intervenant_start",
     "idx_evaluations_tenant_mission", "idx_documents_tenant_user",
-    "idx_conflits_tenant_mission", "idx_journal_tenant_created", "idx_wallets_tenant_user",
+    "idx_conflits_tenant_mission", "idx_journal_tenant_created", "idx_wallets_tenant_user", "idx_wallets_tenant_user_currency",
     "trg_missions_relationship_scope_insert", "trg_missions_relationship_scope_update",
     "trg_availability_intervenant_scope", "trg_payment_mission_scope",
-    "trg_tarif_prestation_scope", "trg_evaluation_mission_scope", "trg_conflict_mission_scope",
+    "trg_tarif_prestation_scope", "trg_evaluation_mission_scope", "trg_conflict_mission_scope", "trg_wallets_user_identity_immutable",
     "Verify operational marketplace tenant boundary",
     "tenant_id columns verified on all 12 operational marketplace tables"
   ]) assert.ok(workflow.includes(name), `missing operational marketplace tenant verification: ${name}`);
