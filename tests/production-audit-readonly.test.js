@@ -77,3 +77,69 @@ test("background job enqueue fails closed when its table is not migrated", () =>
   assert.match(body, /tableExists\(env, 'background_jobs'\)/);
   assert.doesNotMatch(body, /ensure[A-Za-z]+Schema\(env\)/);
 });
+
+test("security endpoints require pre-migrated security tables and never execute runtime DDL", () => {
+  assert.doesNotMatch(source, /await ensureSecuritySchema\(env\)/);
+  for (const name of ["securityIdentityStart","securityIdentityApprove","securityPrepareMission","securityPresence","securityVerifyCode","securityResendCodes","securityStatus"]) {
+    const start = source.indexOf("async function " + name + "(");
+    assert.notEqual(start, -1, "missing " + name);
+    const next = source.indexOf("\nasync function ", start + 20);
+    const body = source.slice(start, next < 0 ? undefined : next);
+    assert.match(body, /schemaReadinessResponse\(env, \['identity_verifications','trusted_devices','mission_security','mission_security_attempts','security_audit'\]/);
+    assert.doesNotMatch(body, /ensureSecuritySchema\(env\)/);
+  }
+});
+
+test("finance workspace routes require migration-owned tables instead of runtime schema creation", () => {
+  const start = source.indexOf("async function financeAuth");
+  const end = source.indexOf("\nfunction financeMoney", start);
+  assert.notEqual(start, -1);
+  assert.notEqual(end, -1);
+  const body = source.slice(start, end);
+  assert.doesNotMatch(body, /ensureFinanceWorkspaceSchema\(env\)/);
+  assert.match(body, /schemaReadinessResponse\(env, \['finance_workspace_entries','finance_export_log','finance_resolution_cases'\]/);
+});
+
+test("national scale and backup routes do not create tables at request time", () => {
+  const scaleStart = source.indexOf("async function nationalScaleStatus");
+  const scaleEnd = source.indexOf("\nasync function backupStatus", scaleStart);
+  assert.notEqual(scaleStart, -1);
+  assert.notEqual(scaleEnd, -1);
+  assert.doesNotMatch(source.slice(scaleStart, scaleEnd), /ensureNationalContinuitySchema\(env\)/);
+  const statusStart = source.indexOf("async function backupStatus");
+  const statusEnd = source.indexOf("\nconst __procheliaNationalHandle", statusStart);
+  assert.notEqual(statusStart, -1);
+  assert.notEqual(statusEnd, -1);
+  assert.doesNotMatch(source.slice(statusStart, statusEnd), /ensureNationalContinuitySchema\(env\)/);
+  const runStart = source.indexOf("async function runNationalBackup");
+  const runEnd = source.indexOf("\nasync function nationalScaleStatus", runStart);
+  assert.notEqual(runStart, -1);
+  assert.notEqual(runEnd, -1);
+  const runBody = source.slice(runStart, runEnd);
+  assert.doesNotMatch(runBody, /ensureNationalContinuitySchema\(env\)/);
+  assert.match(runBody, /missingRequiredTables\(env, \['backup_runs','backup_objects'\]\)/);
+});
+
+test("brand and support routes fail closed when schema is not migrated and never auto-create it", () => {
+  assert.doesNotMatch(source, /await ensureProcheliaMasterComplementSchema\(env\)/);
+  for (const name of ["brandIdentityEndpoint","brandClearanceRecord","supportCreate","supportList","supportResolve","supportDashboard"]) {
+    const start = source.indexOf("async function " + name + "(");
+    assert.notEqual(start, -1, "missing " + name);
+    const next = source.indexOf("\nasync function ", start + 20);
+    const body = source.slice(start, next < 0 ? undefined : next);
+    assert.ok(body.includes("schemaReadinessResponse"), name + " must check migration readiness");
+    assert.ok(!body.includes("ensureProcheliaMasterComplementSchema(env)"));
+  }
+  const uiStart = source.indexOf("async function interfaceConfigEndpoint");
+  const uiEnd = source.indexOf("\nasync function supportCreate", uiStart);
+  assert.doesNotMatch(source.slice(uiStart, uiEnd), /ensureProcheliaMasterComplementSchema\(env\)/);
+});
+
+test("rate limiting requires pre-migrated rate and audit tables instead of runtime DDL", () => {
+  const start = source.indexOf("async function productionRateLimit");
+  const end = source.indexOf("\nasync function strictProductionAudit", start);
+  const body = source.slice(start, end);
+  assert.doesNotMatch(body, /ensureFinalHardeningSchema\(env\)|productionSafetySchema\(env\)/);
+  assert.match(body, /schemaReadinessResponse\(env, \['security_rate_limits'\]/);
+  assert.match(body, /schemaReadinessResponse\(env, \['production_security_events'\]/);
+});
