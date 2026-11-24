@@ -64,3 +64,28 @@ test("webhook is rejected before reading its body or touching D1 while PSP is di
   const ddl = body.indexOf("ensurePaymentSchema(env)");
   assert.ok(gate >= 0 && read > gate && ddl > gate);
 });
+
+import worker from "../src/index.js";
+
+test("top-level disabled webhook gate returns before D1 rate limiting and body reads", async () => {
+  let databaseCalls = 0;
+  const request = new Request("https://api.example.test/api/payments/webhook", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ id: "evt_synthetic_disabled", type: "payment_succeeded" })
+  });
+  const response = await worker.fetch(request, {
+    DB: {
+      prepare() {
+        databaseCalls += 1;
+        throw new Error("D1_ACCESS_FORBIDDEN_WHILE_PSP_DISABLED");
+      }
+    }
+  });
+  assert.equal(response.status, 503);
+  const body = await response.json();
+  assert.equal(body.error, "PAYMENT_PROVIDER_NOT_CONFIGURED");
+  assert.equal(body.write_enabled, false);
+  assert.equal(databaseCalls, 0);
+  assert.equal(request.bodyUsed, false);
+});
