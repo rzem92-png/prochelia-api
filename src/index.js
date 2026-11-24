@@ -2581,12 +2581,15 @@ async function registerIntegration(env, code, category, required, capabilities, 
     .bind(crypto.randomUUID(),code,category,status,JSON.stringify(required),JSON.stringify(capabilities),JSON.stringify(details)).run();
 }
 
+async function missingRequiredTables(env, names) {
+  const missing = [];
+  for (const name of names) if (!(await tableExists(env, name))) missing.push(name);
+  return missing;
+}
+
 async function productionConfigCheck(env, { persist = false } = {}) {
   if (!env?.DB) throw new Error('DATABASE_REQUIRED');
-  // Readiness GETs must inspect current state, not auto-create or mutate schema.
-  if (persist) {
-    await ensureConsolidatedSchema(env); await ensurePaymentSchema(env); await ensureOperationalSchema(env); await ensureStrategicSchema(env); await ensureFinalHardeningSchema(env);
-  }
+  // Schema creation belongs to reviewed migrations, never to an audit/job request.
   const checks=[];
   const requiredTables=['users','sessions','missions','payment_transactions','payment_webhook_events','payment_disputes','operational_cases','action_outbox','notification_outbox','accounting_ledger','promotions','promotion_recommendations','activity_journal','compliance_events'];
   for(const t of requiredTables) checks.push({code:`TABLE:${t}`,status:await tableExists(env,t)?'OK':'MISSING'});
@@ -2599,16 +2602,20 @@ async function productionConfigCheck(env, { persist = false } = {}) {
   const missionCols=await tableColumns(env,'missions');
   const usefulMissionCols=['id','client_id','intervenant_id'];
   checks.push({code:'MISSION_CORE_COLUMNS',status:usefulMissionCols.every(x=>missionCols.includes(x))?'OK':'INCOMPLETE',missing:usefulMissionCols.filter(x=>!missionCols.includes(x))});
+  const blocking=checks.filter(x=>['MISSING','INCOMPLETE'].includes(x.status));
+  const externalNotConfigured=checks.filter(x=>x.status==='NOT_CONFIGURED' && ['SECRET:PAYMENT_PROVIDER','SECRET:PAYMENT_WEBHOOK_SECRET'].includes(x.code));
+  let overall=blocking.length===0 && externalNotConfigured.length===0;
   if (persist) {
+    const missingPersistenceTables = await missingRequiredTables(env, ['integration_registry','system_config_checks']);
+    if (missingPersistenceTables.length) {
+      return {overall:false,checks,blocking:blocking.length+1,externalNotConfigured:externalNotConfigured.length,persistence:{status:'MISSING',missing_tables:missingPersistenceTables}};
+    }
     await registerIntegration(env,'PSP','PAYMENT',['PAYMENT_PROVIDER','PAYMENT_WEBHOOK_SECRET'],['charge','refund','payout','webhook','reconciliation'],finalSecretConfigured(env,'PAYMENT_PROVIDER')&&finalSecretConfigured(env,'PAYMENT_WEBHOOK_SECRET')?'CONFIGURED':'NOT_CONFIGURED');
     await registerIntegration(env,'NOTIFICATIONS','MESSAGING',['NOTIFICATION_PROVIDER'],['email','sms','push'],finalSecretConfigured(env,'NOTIFICATION_PROVIDER')?'CONFIGURED':'NOT_CONFIGURED');
     await registerIntegration(env,'MAPS','LOCATION',['MAPS_PROVIDER','MAPS_API_KEY'],['distance','geocoding','routing'],finalSecretConfigured(env,'MAPS_API_KEY')?'CONFIGURED':'NOT_CONFIGURED');
     await registerIntegration(env,'MARKET_DATA','COMMERCIAL',['MARKET_DATA_PROVIDER'],['market_prices','competitor_signals'],finalSecretConfigured(env,'MARKET_DATA_PROVIDER')?'CONFIGURED':'NOT_CONFIGURED');
+    for(const c of checks) await env.DB.prepare(`INSERT INTO system_config_checks(id,check_code,status,details_json) VALUES(?,?,?,?)`).bind(crypto.randomUUID(),c.code,c.status,JSON.stringify(c)).run();
   }
-  const blocking=checks.filter(x=>['MISSING','INCOMPLETE'].includes(x.status));
-  const externalNotConfigured=checks.filter(x=>x.status==='NOT_CONFIGURED' && ['SECRET:PAYMENT_PROVIDER','SECRET:PAYMENT_WEBHOOK_SECRET'].includes(x.code));
-  const overall=blocking.length===0 && externalNotConfigured.length===0;
-  if (persist) for(const c of checks) await env.DB.prepare(`INSERT INTO system_config_checks(id,check_code,status,details_json) VALUES(?,?,?,?)`).bind(crypto.randomUUID(),c.code,c.status,JSON.stringify(c)).run();
   return {overall,checks,blocking:blocking.length,externalNotConfigured:externalNotConfigured.length};
 }
 
@@ -2621,7 +2628,8 @@ async function finalProductionAudit(request,env) {
 
 async function copilotNextActions(request,env) {
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
-  await ensureConsolidatedSchema(env); await ensureOperationalSchema(env); await ensureStrategicSchema(env); await ensureFinalHardeningSchema(env);
+  const missing = await missingRequiredTables(env, ['platform_settings','operational_cases','promotion_recommendations','action_outbox']);
+  if (missing.length) return json({ok:false,error:'COPILOT_SCHEMA_NOT_READY',missing_tables:missing,version:VERSION},503);
   const phase=await getSetting(env,'project_phase','TEST');
   const items=[];
   const cases=await env.DB.prepare(`SELECT id,case_type,priority,status,impact_level,description,proposed_solution_json FROM operational_cases WHERE status NOT IN ('RESOLVED','CLOSED') ORDER BY priority DESC,created_at ASC LIMIT 30`).all();
@@ -2635,7 +2643,7 @@ async function copilotNextActions(request,env) {
 }
 
 async function enqueueBackgroundJob(env, jobType, payload={}, maxAttempts=5) {
-  await ensureFinalHardeningSchema(env);
+  if (!(await tableExists(env, 'background_jobs'))) throw new Error('BACKGROUND_JOB_SCHEMA_NOT_READY');
   const id=crypto.randomUUID();
   await env.DB.prepare(`INSERT INTO background_jobs(id,job_type,payload_json,max_attempts) VALUES(?,?,?,?)`).bind(id,jobType,JSON.stringify(payload),maxAttempts).run();
   return id;
@@ -2643,7 +2651,8 @@ async function enqueueBackgroundJob(env, jobType, payload={}, maxAttempts=5) {
 
 async function processBackgroundJobs(request,env) {
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
-  await ensureFinalHardeningSchema(env); await ensureOperationalSchema(env);
+  const missing = await missingRequiredTables(env, ['background_jobs','activity_journal']);
+  if (missing.length) return json({ok:false,error:'BACKGROUND_JOB_SCHEMA_NOT_READY',missing_tables:missing,version:VERSION},503);
   const rows=await env.DB.prepare(`SELECT * FROM background_jobs WHERE status='PENDING' AND run_after<=CURRENT_TIMESTAMP ORDER BY created_at LIMIT 25`).all();
   const results=[];
   for(const job of rows.results||[]) {
