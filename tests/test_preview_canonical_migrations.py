@@ -174,12 +174,47 @@ assert "tenants" in accounting_entity_fk_targets, "Accounting entities must refe
 # Tenant authority and membership lifecycle fixtures.
 tenant_tables = {"tenants", "tenant_memberships", "tenant_membership_events", "tenant_invitations", "tenant_invitation_events"}
 assert tenant_tables <= tables, f"Missing tenant authority tables: {sorted(tenant_tables-tables)}"
-for user_id, email in [("user-a", "user-a@example.test"), ("user-b", "user-b@example.test"), ("user-admin", "admin@example.test")]:
+for user_id, email in [("user-a", "user-a@example.test"), ("user-b", "user-b@example.test"), ("user-admin", "admin@example.test"), ("user-multi", "multi@example.test")]:
     db.execute("INSERT INTO users(id, role, email, first_name, last_name, password_hash) VALUES (?, 'client', ?, 'Synthetic', 'User', 'not-a-real-password-hash')", (user_id, email))
 db.execute("INSERT INTO tenants(id, slug, display_name) VALUES ('tenant-a', 'tenant-a', 'Tenant A')")
 db.execute("INSERT INTO tenants(id, slug, display_name) VALUES ('tenant-b', 'tenant-b', 'Tenant B')")
 db.execute("INSERT INTO tenant_memberships(id, tenant_id, user_id, role, status, invited_by_user_id) VALUES ('membership-a', 'tenant-a', 'user-a', 'OWNER', 'INVITED', 'user-admin')")
+
 db.execute("UPDATE tenant_memberships SET status='ACTIVE', accepted_at=CURRENT_TIMESTAMP WHERE id='membership-a'")
+
+# One synthetic user may legitimately hold active memberships in multiple companies.
+# PSP accounts are scoped to each company, not globally unique by user.
+db.execute("""
+    INSERT INTO tenant_memberships(id, tenant_id, user_id, role, status, accepted_at)
+    VALUES ('membership-multi-a', 'tenant-a', 'user-multi', 'MEMBER', 'ACTIVE', CURRENT_TIMESTAMP)
+""")
+db.execute("""
+    INSERT INTO tenant_memberships(id, tenant_id, user_id, role, status, accepted_at)
+    VALUES ('membership-multi-b', 'tenant-b', 'user-multi', 'MEMBER', 'ACTIVE', CURRENT_TIMESTAMP)
+""")
+db.execute("""
+    INSERT INTO payment_accounts(id, user_id, provider, tenant_id)
+    VALUES ('payment-account-multi-a', 'user-multi', 'stripe', 'tenant-a')
+""")
+db.execute("""
+    INSERT INTO payment_accounts(id, user_id, provider, tenant_id)
+    VALUES ('payment-account-multi-b', 'user-multi', 'stripe', 'tenant-b')
+""")
+account_unique_indexes = []
+for index in db.execute("PRAGMA index_list(payment_accounts)").fetchall():
+    if index[2]:
+        columns = [row[2] for row in db.execute(f'PRAGMA index_info("{index[1]}")').fetchall()]
+        account_unique_indexes.append(columns)
+assert ["tenant_id", "user_id"] in account_unique_indexes, "PSP account uniqueness must be scoped to tenant and user"
+assert ["user_id"] not in account_unique_indexes, "Global user-only PSP account uniqueness breaks multi-tenant companies"
+try:
+    db.execute("""
+        INSERT INTO payment_accounts(id, user_id, provider, tenant_id)
+        VALUES ('payment-account-multi-a-duplicate', 'user-multi', 'stripe', 'tenant-a')
+    """)
+    raise AssertionError("Duplicate PSP account for the same user and tenant was incorrectly accepted")
+except sqlite3.IntegrityError as exc:
+    assert "payment_accounts.tenant_id" in str(exc) and "payment_accounts.user_id" in str(exc), str(exc)
 for sql in [
     "UPDATE tenant_memberships SET id='membership-a-mutated' WHERE id='membership-a'",
     "UPDATE tenant_memberships SET tenant_id='tenant-b' WHERE id='membership-a'",
@@ -1032,7 +1067,7 @@ db.execute("""
       'market-opportunity-revoke', 'market-tenant-a', 'market-mission-revoke',
       'market-consent-revoke', 'CLEANING', 'Nettoyage ponctuel d’un logement',
       'Aubergenville', '2026-11-24T09:00:00Z', '2026-11-24T11:00:00Z',
-      4000, 'EUR', 'market-client-a', '2026-11-23T23:00:00Z'
+      4000, 'EUR', 'market-client-a', datetime('now','+7 days')
     )
 """)
 db.execute("UPDATE mission_opportunity_consents SET revoked_at=CURRENT_TIMESTAMP WHERE id='market-consent-revoke'")
@@ -1060,6 +1095,7 @@ financial_tenant_triggers = {
     "trg_payment_transaction_tenant_insert",
     "trg_payout_request_tenant_insert",
     "trg_payment_dispute_tenant_insert",
+    "trg_payment_dispute_tenant_update",
     "trg_wallet_ledger_tenant_insert",
     "trg_payment_reconciliation_tenant_insert",
     "trg_payment_reconciliation_tenant_update",
@@ -1069,6 +1105,7 @@ financial_tenant_triggers = {
     "trg_payment_dispute_identity_immutable",
     "trg_payment_reconciliation_identity_immutable",
     "trg_payment_webhook_tenant_immutable",
+    "trg_payment_webhook_identity_immutable",
     "trg_payment_audit_no_update",
     "trg_payment_audit_no_delete",
 }
@@ -1191,6 +1228,133 @@ try:
     raise AssertionError("Financial account tenant reassignment was incorrectly accepted")
 except sqlite3.IntegrityError as exc:
     assert "PAYMENT_ACCOUNT_TENANT_IMMUTABLE" in str(exc), str(exc)
+
+# Account ownership and PSP provider identity cannot be reassigned to another active
+# member of the same legal entity after the account has been created.
+db.execute("""
+    INSERT INTO users(id,role,email,first_name,last_name,password_hash)
+    VALUES ('finance-owner-alt','intervenant','finance-owner-alt@example.test',
+            'Finance','Alt','synthetic-test-hash')
+""")
+db.execute("""
+    INSERT INTO tenant_memberships(id,tenant_id,user_id,role,status,invited_by_user_id)
+    VALUES ('finance-membership-owner-alt','market-tenant-a','finance-owner-alt',
+            'MEMBER','INVITED','user-admin')
+""")
+db.execute("""
+    UPDATE tenant_memberships SET status='ACTIVE',accepted_at=CURRENT_TIMESTAMP
+    WHERE id='finance-membership-owner-alt'
+""")
+for sql, expected in [
+    ("UPDATE payment_accounts SET user_id='finance-owner-alt' WHERE id='finance-account-a'",
+     "PAYMENT_ACCOUNT_TENANT_IMMUTABLE"),
+    ("UPDATE payment_accounts SET provider='other_psp' WHERE id='finance-account-a'",
+     "PAYMENT_ACCOUNT_TENANT_IMMUTABLE"),
+]:
+    try:
+        db.execute(sql)
+        raise AssertionError(f"PSP account identity was mutable: {sql}")
+    except sqlite3.IntegrityError as exc:
+        assert expected in str(exc), str(exc)
+
+# The transaction's beneficiary and dispute parties are immutable even when the
+# original value is NULL. Dispute insertions must match the source transaction exactly.
+try:
+    db.execute("UPDATE payment_transactions SET intervenant_id='market-worker-a-row' WHERE id='finance-tx-a'")
+    raise AssertionError("Payment transaction beneficiary was mutable")
+except sqlite3.IntegrityError as exc:
+    assert "PAYMENT_TRANSACTION_IDENTITY_IMMUTABLE" in str(exc), str(exc)
+
+for sql in [
+    "UPDATE payment_disputes SET client_id=NULL WHERE id='finance-dispute-a'",
+    "UPDATE payment_disputes SET intervenant_id='market-worker-a-row' WHERE id='finance-dispute-a'",
+]:
+    try:
+        db.execute(sql)
+        raise AssertionError(f"Payment dispute parties were mutable: {sql}")
+    except sqlite3.IntegrityError as exc:
+        assert "PAYMENT_DISPUTE_IDENTITY_IMMUTABLE" in str(exc), str(exc)
+
+for sql in [
+    """INSERT INTO payment_disputes(
+         id,mission_id,transaction_id,client_id,intervenant_id,reason,amount_cents,tenant_id
+       ) VALUES ('finance-dispute-client-mismatch','market-mission-opportunity','finance-tx-a',
+         'market-client-b-row',NULL,'mismatched client',1000,'market-tenant-a')""",
+    """INSERT INTO payment_disputes(
+         id,mission_id,transaction_id,client_id,intervenant_id,reason,amount_cents,tenant_id
+       ) VALUES ('finance-dispute-provider-mismatch','market-mission-opportunity','finance-tx-a',
+         'market-client-a-row','market-worker-b-row','mismatched provider',1000,'market-tenant-a')""",
+]:
+    try:
+        db.execute(sql)
+        raise AssertionError(f"Dispute with mismatched source identities was accepted: {sql}")
+    except sqlite3.IntegrityError as exc:
+        assert "PAYMENT_DISPUTE_TRANSACTION_TENANT_MISMATCH" in str(exc), str(exc)
+
+# Legacy dispute rows may be attributed only when both parties still match the source transaction.
+# Temporarily omit the INSERT guard to model rows that predate this migration; restore it before testing UPDATE.
+db.execute("DROP TRIGGER trg_payment_dispute_tenant_insert")
+for dispute_id, client_id, intervenant_id in [
+    ("finance-dispute-legacy-valid", "market-client-a-row", None),
+    ("finance-dispute-legacy-client-mismatch", "market-client-b-row", None),
+    ("finance-dispute-legacy-provider-mismatch", "market-client-a-row", "market-worker-b-row"),
+]:
+    db.execute("""
+        INSERT INTO payment_disputes(
+          id,mission_id,transaction_id,client_id,intervenant_id,reason,amount_cents,tenant_id
+        ) VALUES (?,?,?,?,?,'legacy attribution fixture',1000,NULL)
+    """, (dispute_id, "market-mission-opportunity", "finance-tx-a", client_id, intervenant_id))
+db.execute("""
+    CREATE TRIGGER trg_payment_dispute_tenant_insert
+    BEFORE INSERT ON payment_disputes
+    WHEN NEW.tenant_id IS NULL OR NOT EXISTS (
+      SELECT 1 FROM payment_transactions tx
+      WHERE tx.id=NEW.transaction_id AND tx.tenant_id=NEW.tenant_id
+        AND tx.mission_id=NEW.mission_id
+        AND tx.client_id IS NEW.client_id
+        AND tx.intervenant_id IS NEW.intervenant_id
+    )
+    BEGIN SELECT RAISE(ABORT,'PAYMENT_DISPUTE_TRANSACTION_TENANT_MISMATCH'); END;
+""")
+db.execute("""
+    UPDATE payment_disputes SET tenant_id='market-tenant-a'
+    WHERE id='finance-dispute-legacy-valid'
+""")
+for dispute_id in ("finance-dispute-legacy-client-mismatch", "finance-dispute-legacy-provider-mismatch"):
+    try:
+        db.execute(
+            "UPDATE payment_disputes SET tenant_id='market-tenant-a' WHERE id=?",
+            (dispute_id,),
+        )
+        raise AssertionError(f"Legacy dispute with mismatched parties was attributed: {dispute_id}")
+    except sqlite3.IntegrityError as exc:
+        assert "PAYMENT_DISPUTE_TRANSACTION_TENANT_MISMATCH" in str(exc), str(exc)
+
+# A webhook inbox event may be tenant-bound once after verification, but neither
+# that attribution nor its provider/event identity can subsequently be cleared or changed.
+db.execute("""
+    INSERT INTO payment_webhook_events(id,provider,event_id,event_type)
+    VALUES ('finance-webhook-a','sandbox','evt-finance-a','payment_succeeded')
+""")
+db.execute("""
+    UPDATE payment_webhook_events SET tenant_id='market-tenant-a'
+    WHERE id='finance-webhook-a'
+""")
+for sql, expected in [
+    ("UPDATE payment_webhook_events SET tenant_id=NULL WHERE id='finance-webhook-a'",
+     "PAYMENT_WEBHOOK_TENANT_IMMUTABLE"),
+    ("UPDATE payment_webhook_events SET provider='other_psp' WHERE id='finance-webhook-a'",
+     "PAYMENT_WEBHOOK_IDENTITY_IMMUTABLE"),
+    ("UPDATE payment_webhook_events SET event_id='evt-mutated' WHERE id='finance-webhook-a'",
+     "PAYMENT_WEBHOOK_IDENTITY_IMMUTABLE"),
+    ("UPDATE payment_webhook_events SET event_type='payment_failed' WHERE id='finance-webhook-a'",
+     "PAYMENT_WEBHOOK_IDENTITY_IMMUTABLE"),
+]:
+    try:
+        db.execute(sql)
+        raise AssertionError(f"Webhook identity was mutable: {sql}")
+    except sqlite3.IntegrityError as exc:
+        assert expected in str(exc), str(exc)
 
 # Financial audit is append-only.
 db.execute("""

@@ -25,7 +25,7 @@ concurrency:
 
 jobs:
   migrate-preview:
-    if: ${{ github.ref == 'refs/heads/main' && inputs.confirm_preview == 'APPLY_PREVIEW_ONLY' }}
+    if: ${{ github.ref == 'refs/heads/main' && github.actor == 'rzem92-png' && github.triggering_actor == 'rzem92-png' && inputs.confirm_preview == 'APPLY_PREVIEW_ONLY' }}
     runs-on: ubuntu-latest
     timeout-minutes: 25
     env:
@@ -55,6 +55,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          test "$GITHUB_ACTOR" = "rzem92-png" || { echo "::error::Only the repository owner may apply Preview D1 migrations."; exit 1; }
           for name in CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID BACKUP_ENCRYPTION_KEY BACKUP_ATTESTATION_HMAC_KEY AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY; do
             test -n "${!name:-}" || { echo "::error::Required secret missing: $name"; exit 1; }
           done

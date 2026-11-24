@@ -112,3 +112,20 @@ test("legacy cross-tenant operational writes stay fail-closed until tenant-aware
     assert.match(bodyOf(name), /legacyTenantScopeBlocked\(\)/);
   }
 });
+
+test("legacy schema initializers are unreachable from every Worker request path", () => {
+  const initializers = [
+    "ensurePaymentSchema",
+    "ensureConsolidatedSchema",
+    "ensureStrategicSchema",
+    "ensureOperationalSchema",
+    "ensureFinalHardeningSchema",
+    "ensureCommercialRecruitmentSchema",
+    "ensureProcheliaMasterComplementSchema",
+    "productionSafetySchema"
+  ];
+  for (const name of initializers) {
+    const references = source.match(new RegExp("\\b" + name + "\\b", "g")) || [];
+    assert.equal(references.length, 1, name + " must remain declaration-only until replaced by migrations");
+  }
+});
