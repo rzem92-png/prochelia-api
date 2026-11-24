@@ -936,6 +936,7 @@ export function sameMissionPaymentRequest(existing, requested) {
     String(existing.mission_id || "") === String(requested.missionId || "") &&
     String(existing.client_id || "") === String(requested.clientId || "") &&
     String(existing.intervenant_id || "") === String(requested.intervenantId || "") &&
+    String(existing.tenant_id || "") === String(requested.tenantId || "") &&
     Number.isSafeInteger(gross) && Number.isSafeInteger(commission) &&
     Number(existing.gross_cents) === gross &&
     Number(existing.commission_cents) === commission &&
@@ -962,7 +963,7 @@ async function createMissionPayment(request, env) {
   const old=await env.DB.prepare('SELECT * FROM payment_transactions WHERE idempotency_key=? AND tenant_id=? LIMIT 1').bind(idem,tenantId).first();
   if(old){
     if(!sameMissionPaymentRequest(old,{
-      missionId,clientId,intervenantId,grossCents:gross,commissionCents:commission
+      missionId,clientId,intervenantId,tenantId,grossCents:gross,commissionCents:commission
     })) return json({ok:false,error:'IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_REQUEST',version:VERSION},409);
     return json({ok:true,version:VERSION,idempotent_replay:true,transaction:old},200);
   }
