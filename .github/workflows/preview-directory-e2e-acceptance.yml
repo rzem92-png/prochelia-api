@@ -140,6 +140,7 @@ jobs:
           PAGES_DEPLOYMENT_ID="$(jq -r '.id // empty' <<< "$deployment")"
           [[ -n "$PAGES_DEPLOYMENT_ID" ]] || { echo "::error::Pages deployment ID missing."; exit 1; }
           # The Pages Function allowlists this exact branch alias; hash deployment URLs are not accepted by its host guard.
+          # The branch push is separately gated by the exact commit marker and repository actor above.
           PAGES_PREVIEW_URL="https://fix-frontend-accounting-read.prochelia.pages.dev"
           case "$PAGES_PREVIEW_URL" in
             https://fix-frontend-accounting-read.prochelia.pages.dev) ;;
