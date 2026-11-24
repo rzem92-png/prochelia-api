@@ -64,12 +64,14 @@ test("mission payment idempotency replays only an identical tenant request", () 
   };
   const same = {
     missionId: "mission-a",
+    tenantId: "tenant-a",
     clientId: "client-a",
     intervenantId: "worker-a",
     grossCents: 10000,
     commissionCents: 1000
   };
   assert.equal(sameMissionPaymentRequest(existing, same), true);
+  assert.equal(sameMissionPaymentRequest(existing, { ...same, tenantId: "tenant-b" }), false, "tenantId");
   for (const [key, value] of Object.entries({
     missionId: "mission-b",
     clientId: "client-b",
