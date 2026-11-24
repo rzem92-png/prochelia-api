@@ -80,21 +80,34 @@ jobs:
           echo "::warning::Live HMAC acceptance is not claimed: the active PSP-disabled Preview Worker returns 503 before signature verification; the legacy Worker returned HTTP 500 PRODUCTION_SAFETY_ERROR on the unsigned probe because its deployed revision lacks sha256Hex. HMAC verification remains covered by isolated unit/security tests; do not route traffic to the legacy Worker."
           echo "PASS: no live HMAC or financial write was attempted while the PSP adapter remains disabled."
 
-      - name: Confirm unauthenticated tenant and Device Trust paths fail closed
+      - name: Report tenant and Device Trust route readiness without masking missing endpoints
         shell: bash
         run: |
           set -euo pipefail
-          expect_denied() {
-            local label="$1" url="$2" output="$RUNNER_TEMP/denied-$3.json" status
+          report_route_state() {
+            local label="$1" url="$2" output="$RUNNER_TEMP/route-$3.json" status
             status="$(curl --silent --show-error --max-time 20 --output "$output" --write-out '%{http_code}' "$url")"
             case "$status" in
-              401|403) echo "PASS: $label denied unauthenticated access (HTTP $status)." ;;
-              *) echo "::error::$label expected HTTP 401/403 without a session, received $status"; jq -c '{ok,error,write_enabled}' "$output" 2>/dev/null || true; exit 1 ;;
+              401|403)
+                echo "::warning::$label blocks unauthenticated access (HTTP $status), but route existence and tenant isolation are not proven without an authenticated synthetic E2E."
+                ;;
+              404)
+                echo "::warning::$label is not implemented on the deployed Preview Worker (HTTP 404)."
+                ;;
+              200)
+                echo "::error::$label returned HTTP 200 without a session; possible unauthenticated exposure."
+                exit 1
+                ;;
+              *)
+                echo "::error::$label returned unexpected HTTP $status."
+                jq -c '{ok,error,write_enabled}' "$output" 2>/dev/null || true
+                exit 1
+                ;;
             esac
           }
           base="https://fix-frontend-accounting-read.prochelia.pages.dev"
-          expect_denied "Tenant context" "$base/api/tenant/context" "tenant"
-          expect_denied "Device Trust credential list" "$base/api/security/device/list" "device"
+          report_route_state "Tenant context" "$base/api/tenant/context" "tenant"
+          report_route_state "Device Trust credential list" "$base/api/security/device/list" "device"
 
       - name: Report accounting backend readiness without masking a missing route
         shell: bash
@@ -104,10 +117,14 @@ jobs:
           status="$(curl --silent --show-error --max-time 20 --output "$RUNNER_TEMP/accounting-health.json" --write-out '%{http_code}' "$url")"
           case "$status" in
             401|403)
-              echo "PASS: accounting route is implemented and denies unauthenticated access (HTTP $status)."
+              echo "::warning::Accounting path blocks unauthenticated access (HTTP $status), but implementation and tenant isolation are not proven until authenticated E2E runs against the migrated Preview schema."
               ;;
             404)
               echo "::warning::Accounting backend route is not deployed. Pages proxy allowlisting alone is not implementation; keep frontend PR #51 blocked until backend PR #336 and tenant migrations are integrated and tested."
+              ;;
+            200)
+              echo "::error::Accounting health returned HTTP 200 without a session; possible unauthenticated exposure."
+              exit 1
               ;;
             *)
               echo "::error::Accounting readiness returned unexpected HTTP $status."
