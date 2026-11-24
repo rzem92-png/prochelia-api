@@ -531,36 +531,13 @@ async function deviceHash(request, userId) {
 async function securityIdentityStart(request, env) {
   const auth = await getSessionUser(request, env);
   if (!requireRole(auth, ['intervenant'])) return json({ok:false,error:auth?.user?'FORBIDDEN':'UNAUTHENTICATED',version:VERSION}, auth?.user?403:401);
-  await ensureSecuritySchema(env);
-  const id = crypto.randomUUID();
-  await env.DB.prepare(
-    `INSERT INTO identity_verifications (id,user_id,status,level) VALUES (?,?, 'pending','standard')`
-  ).bind(id, auth.user.id).run();
-  await securityAudit(env,'IDENTITY_VERIFICATION_REQUESTED',null,auth.user.id,auth.user.role,'PENDING',{verification_id:id});
-  return json({ok:true,version:VERSION,verification_id:id,status:'pending',message:'Vérification d’identité requise avant l’accès aux missions.'},201);
+  return tenantScopedHandlerNotReady('TENANT_SCOPED_SECURITY_HANDLER_REQUIRED');
 }
 
 async function securityIdentityApprove(request, env) {
   const auth = await getSessionUser(request, env);
   if (!requireRole(auth, ['gerante'])) return json({ok:false,error:auth?.user?'FORBIDDEN':'UNAUTHENTICATED',version:VERSION}, auth?.user?403:401);
-  await ensureSecuritySchema(env);
-  const body = await readJson(request);
-  const verificationId = clean(body?.verification_id);
-  const status = clean(body?.status);
-  const level = clean(body?.level) || 'standard';
-  if (!verificationId || !['verified','rejected','pending'].includes(status)) return json({ok:false,error:'INVALID_IDENTITY_DECISION',version:VERSION},400);
-  const row = await env.DB.prepare('SELECT * FROM identity_verifications WHERE id=? LIMIT 1').bind(verificationId).first();
-  if (!row) return json({ok:false,error:'VERIFICATION_NOT_FOUND',version:VERSION},404);
-  const provider = clean(body?.provider) || 'manual_control';
-  const providerReference = clean(body?.provider_reference) || null;
-  const reason = clean(body?.rejection_reason) || null;
-  const verifiedAt = status === 'verified' ? new Date().toISOString() : null;
-  const expiresAt = status === 'verified' ? new Date(Date.now()+30*24*60*60*1000).toISOString() : null;
-  await env.DB.prepare(
-    `UPDATE identity_verifications SET status=?,level=?,provider=?,provider_reference=?,verified_at=?,expires_at=?,rejection_reason=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`
-  ).bind(status,level,provider,providerReference,verifiedAt,expiresAt,reason,verificationId).run();
-  await securityAudit(env,'IDENTITY_VERIFICATION_DECISION',null,auth.user.id,auth.user.role,status,{verification_id:verificationId,subject_user_id:row.user_id,level});
-  return json({ok:true,version:VERSION,verification_id:verificationId,user_id:row.user_id,status,level,verified_at:verifiedAt},200);
+  return tenantScopedHandlerNotReady('TENANT_SCOPED_SECURITY_HANDLER_REQUIRED');
 }
 
 async function deliverSecurityCodes(env, payload) {
@@ -590,72 +567,30 @@ async function deliverSecurityCodes(env, payload) {
 async function securityPrepareMission(request, env) {
   const auth = await getSessionUser(request, env);
   if (!requireRole(auth, ['gerante'])) return json({ok:false,error:auth?.user?'FORBIDDEN':'UNAUTHENTICATED',version:VERSION}, auth?.user?403:401);
-  await ensureSecuritySchema(env);
-  const body = await readJson(request);
-  const missionId=clean(body?.mission_id), clientId=clean(body?.client_id), intervenantId=clean(body?.intervenant_id);
-  if(!missionId||!clientId||!intervenantId) return json({ok:false,error:'MISSION_SECURITY_FIELDS_REQUIRED',version:VERSION},400);
-  const verified = await requireVerifiedIntervenant(env,intervenantId);
-  if(!verified) return json({ok:false,error:'INTERVENANT_IDENTITY_NOT_VERIFIED',version:VERSION},409);
-  const existing=await env.DB.prepare('SELECT id,status FROM mission_security WHERE mission_id=? LIMIT 1').bind(missionId).first();
-  if(existing) return json({ok:false,error:'MISSION_SECURITY_ALREADY_PREPARED',version:VERSION,status:existing.status},409);
-  const arrival=securityCode(), end=securityCode();
-  const now=Date.now(), arrivalExpiry=new Date(now+SECURITY_CODE_TTL_SECONDS*1000).toISOString(), endExpiry=new Date(now+SECURITY_CODE_TTL_SECONDS*1000).toISOString();
-  const id=crypto.randomUUID();
-  await env.DB.prepare(
-    `INSERT INTO mission_security (id,mission_id,client_id,intervenant_id,risk_level,arrival_code_hash,arrival_expires_at,end_code_hash,end_expires_at)
-     VALUES (?,?,?,?,?,?,?,?,?)`
-  ).bind(id,missionId,clientId,intervenantId,clean(body?.risk_level)||'standard',await sha256Base64url(arrival),arrivalExpiry,await sha256Base64url(end),endExpiry).run();
-  await securityAudit(env,'MISSION_SECURITY_PREPARED',missionId,auth.user.id,auth.user.role,'OK',{intervenant_id:intervenantId,risk_level:clean(body?.risk_level)||'standard'});
-  const delivery = await deliverSecurityCodes(env, {
-    mission_id: missionId,
-    client_id: clientId,
-    arrival_code: arrival,
-    arrival_expires_at: arrivalExpiry,
-    end_code: end,
-    end_expires_at: endExpiry
-  });
-  if (!delivery.ok) {
-    await env.DB.prepare('DELETE FROM mission_security WHERE id=?').bind(id).run();
-    await securityAudit(env,'MISSION_SECURITY_PREPARE_DELIVERY_FAILED',missionId,auth.user.id,auth.user.role,'DENIED',{reason:delivery.error});
-    return json({ok:false,error:'SECURITY_CODE_DELIVERY_FAILED',version:VERSION,details:delivery.error},503);
-  }
-  await securityAudit(env,'SECURITY_CODES_DELIVERED',missionId,auth.user.id,auth.user.role,'OK',{channel:delivery.channel});
-  return json({ok:true,version:VERSION,mission_id:missionId,status:'prepared',arrival:{expires_at:arrivalExpiry},end:{expires_at:endExpiry},delivery:{channel:delivery.channel,delivered:true},security_note:'Les codes en clair ne sont jamais renvoyés par l’API.'},201);
+  return tenantScopedHandlerNotReady('TENANT_SCOPED_SECURITY_HANDLER_REQUIRED');
 }
 
 async function securityPresence(request, env) {
-  const auth=await getSessionUser(request,env);
-  if(!requireRole(auth,['intervenant'])) return json({ok:false,error:auth?.user?'FORBIDDEN':'UNAUTHENTICATED',version:VERSION},auth?.user?403:401);
-  await ensureSecuritySchema(env);
-  const identity = await requireVerifiedIntervenant(env, auth.user.id);
-  if(!identity) return json({ok:false,error:'INTERVENANT_IDENTITY_NOT_VERIFIED',version:VERSION},403);
-  const body=await readJson(request), missionId=clean(body?.mission_id);
-  if(!missionId) return json({ok:false,error:'MISSION_ID_REQUIRED',version:VERSION},400);
-  const sec=await env.DB.prepare('SELECT * FROM mission_security WHERE mission_id=? AND intervenant_id=? LIMIT 1').bind(missionId,auth.user.id).first();
-  if(!sec) return json({ok:false,error:'MISSION_NOT_ASSIGNED_OR_NOT_PREPARED',version:VERSION},404);
-  const device=await deviceHash(request,auth.user.id);
-  await env.DB.prepare(`INSERT INTO trusted_devices (id,user_id,device_hash,expires_at) VALUES (?,?,?,datetime('now',?)) ON CONFLICT(user_id,device_hash) DO UPDATE SET last_seen_at=CURRENT_TIMESTAMP,expires_at=excluded.expires_at,status='active'`)
-    .bind(crypto.randomUUID(),auth.user.id,device,`+${SECURITY_DEVICE_TTL_SECONDS} seconds`).run();
-  await env.DB.prepare(`UPDATE mission_security SET last_presence_at=CURRENT_TIMESTAMP,last_device_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(device,sec.id).run();
-  await securityAudit(env,'MISSION_PRESENCE_RECORDED',missionId,auth.user.id,auth.user.role,'OK',{device_bound:true});
-  return json({ok:true,version:VERSION,mission_id:missionId,presence:'RECORDED',device_bound:true},200);
+  const auth = await getSessionUser(request, env);
+  if (!requireRole(auth, ['intervenant'])) return json({ok:false,error:auth?.user?'FORBIDDEN':'UNAUTHENTICATED',version:VERSION}, auth?.user?403:401);
+  return tenantScopedHandlerNotReady('TENANT_SCOPED_SECURITY_HANDLER_REQUIRED');
 }
 
-export async function consumeMissionSecurityCode(env, securityId, purpose, expectedHash) {
-  if (!env?.DB || !securityId || !expectedHash) return false;
+export async function consumeMissionSecurityCode(env, tenantId, securityId, purpose, expectedHash) {
+  if (!env?.DB || !tenantId || !securityId || !expectedHash) return false;
   let statement;
   if (purpose === 'ARRIVAL') {
     statement = env.DB.prepare(`UPDATE mission_security
       SET arrival_used_at=CURRENT_TIMESTAMP,arrival_started_at=CURRENT_TIMESTAMP,status='in_progress',updated_at=CURRENT_TIMESTAMP
-      WHERE id=? AND status='prepared' AND arrival_used_at IS NULL
+      WHERE id=? AND tenant_id=? AND status='prepared' AND arrival_used_at IS NULL
         AND arrival_code_hash=? AND julianday(arrival_expires_at)>julianday('now')
-        AND (locked_until IS NULL OR julianday(locked_until)<=julianday('now'))`).bind(securityId, expectedHash);
+        AND (locked_until IS NULL OR julianday(locked_until)<=julianday('now'))`).bind(securityId, tenantId, expectedHash);
   } else if (purpose === 'END') {
     statement = env.DB.prepare(`UPDATE mission_security
       SET end_used_at=CURRENT_TIMESTAMP,ended_at=CURRENT_TIMESTAMP,status='completed',updated_at=CURRENT_TIMESTAMP
-      WHERE id=? AND status='in_progress' AND end_used_at IS NULL
+      WHERE id=? AND tenant_id=? AND status='in_progress' AND end_used_at IS NULL
         AND end_code_hash=? AND julianday(end_expires_at)>julianday('now')
-        AND (locked_until IS NULL OR julianday(locked_until)<=julianday('now'))`).bind(securityId, expectedHash);
+        AND (locked_until IS NULL OR julianday(locked_until)<=julianday('now'))`).bind(securityId, tenantId, expectedHash);
   } else {
     return false;
   }
@@ -664,72 +599,15 @@ export async function consumeMissionSecurityCode(env, securityId, purpose, expec
 }
 
 async function securityVerifyCode(request, env) {
-  const auth=await getSessionUser(request,env);
-  if(!requireRole(auth,['intervenant'])) return json({ok:false,error:auth?.user?'FORBIDDEN':'UNAUTHENTICATED',version:VERSION},auth?.user?403:401);
-  await ensureSecuritySchema(env);
-  const body=await readJson(request), missionId=clean(body?.mission_id), purpose=clean(body?.purpose), code=clean(body?.code);
-  if(!missionId||!['ARRIVAL','END'].includes(purpose)||!/^[0-9]{6}$/.test(code)) return json({ok:false,error:'INVALID_SECURITY_CODE_REQUEST',version:VERSION},400);
-  const sec=await env.DB.prepare('SELECT * FROM mission_security WHERE mission_id=? AND intervenant_id=? LIMIT 1').bind(missionId,auth.user.id).first();
-  if(!sec) return json({ok:false,error:'MISSION_NOT_ASSIGNED_OR_NOT_PREPARED',version:VERSION},404);
-  const identity = await requireVerifiedIntervenant(env, auth.user.id);
-  if(!identity) {
-    await securityAudit(env,'SECURITY_IDENTITY_RECHECK_FAILED',missionId,auth.user.id,auth.user.role,'DENIED',{});
-    return json({ok:false,error:'INTERVENANT_IDENTITY_NOT_VERIFIED',version:VERSION},403);
-  }
-  if(!sec.last_presence_at) {
-    await securityAudit(env,'SECURITY_PRESENCE_REQUIRED',missionId,auth.user.id,auth.user.role,'DENIED',{purpose});
-    return json({ok:false,error:'PRESENCE_CHECK_REQUIRED',version:VERSION,message:'La présence de l’intervenant doit être enregistrée avant la validation du code.'},428);
-  }
-  const device=await deviceHash(request,auth.user.id);
-  const trusted = await env.DB.prepare(`SELECT id,status,expires_at FROM trusted_devices WHERE user_id=? AND device_hash=? AND status='active' AND expires_at>CURRENT_TIMESTAMP LIMIT 1`).bind(auth.user.id,device).first();
-  if(!trusted || sec.last_device_id !== device) {
-    await securityAudit(env,'SECURITY_DEVICE_RECHECK_FAILED',missionId,auth.user.id,auth.user.role,'DENIED',{purpose});
-    return json({ok:false,error:'DEVICE_NOT_TRUSTED_FOR_MISSION',version:VERSION},403);
-  }
-  const now=new Date().toISOString();
-  if(sec.locked_until && sec.locked_until>now) return json({ok:false,error:'SECURITY_TEMPORARILY_LOCKED',version:VERSION,locked_until:sec.locked_until},423);
-  const used=purpose==='ARRIVAL'?sec.arrival_used_at:sec.end_used_at;
-  const expires=purpose==='ARRIVAL'?sec.arrival_expires_at:sec.end_expires_at;
-  const stored=purpose==='ARRIVAL'?sec.arrival_code_hash:sec.end_code_hash;
-  if(used) return json({ok:false,error:'SECURITY_CODE_ALREADY_USED',version:VERSION},409);
-  if(purpose==='END' && sec.status !== 'in_progress') return json({ok:false,error:'MISSION_NOT_IN_PROGRESS',version:VERSION},409);
-  if(purpose==='ARRIVAL' && sec.status !== 'prepared') return json({ok:false,error:'MISSION_NOT_READY_FOR_ARRIVAL',version:VERSION},409);
-  if(!expires||expires<=now) return json({ok:false,error:'SECURITY_CODE_EXPIRED',version:VERSION},410);
-  const expected=await sha256Base64url(code), ok=expected===stored;
-  await env.DB.prepare(`INSERT INTO mission_security_attempts (id,security_id,purpose,actor_user_id,device_id,result,reason) VALUES (?,?,?,?,?,?,?)`).bind(crypto.randomUUID(),sec.id,purpose,auth.user.id,device,ok?'SUCCESS':'FAIL',ok?'CODE_MATCH':'CODE_MISMATCH').run();
-  if(!ok){
-    const attempts=await env.DB.prepare(`SELECT COUNT(*) AS total FROM mission_security_attempts WHERE security_id=? AND purpose=? AND result='FAIL' AND created_at >= datetime('now','-15 minutes')`).bind(sec.id,purpose).first();
-    const count=Number(attempts?.total||0);
-    if(count>=SECURITY_MAX_ATTEMPTS){
-      const locked=new Date(Date.now()+SECURITY_LOCK_SECONDS*1000).toISOString();
-      await env.DB.prepare('UPDATE mission_security SET locked_until=?,updated_at=CURRENT_TIMESTAMP WHERE id=?').bind(locked,sec.id).run();
-      await securityAudit(env,'SECURITY_CODE_LOCK',missionId,auth.user.id,auth.user.role,'BLOCKED',{purpose,attempts:count});
-      return json({ok:false,error:'SECURITY_TOO_MANY_ATTEMPTS',version:VERSION,locked_until:locked},423);
-    }
-    await securityAudit(env,'SECURITY_CODE_FAILED',missionId,auth.user.id,auth.user.role,'DENIED',{purpose,attempts:count});
-    return json({ok:false,error:'SECURITY_CODE_INVALID',version:VERSION,remaining_attempts:Math.max(0,SECURITY_MAX_ATTEMPTS-count)},401);
-  }
-  const consumed = await consumeMissionSecurityCode(env, sec.id, purpose, expected);
-  if (!consumed) {
-    await securityAudit(env,'SECURITY_CODE_CONSUMPTION_CONFLICT',missionId,auth.user.id,auth.user.role,'DENIED',{purpose});
-    return json({ok:false,error:'SECURITY_CODE_ALREADY_USED_OR_STATE_CHANGED',version:VERSION},409);
-  }
-  await securityAudit(env,`SECURITY_CODE_${purpose}_SUCCESS`,missionId,auth.user.id,auth.user.role,'OK',{purpose,device_bound:true});
-  return json({ok:true,version:VERSION,mission_id:missionId,purpose,status:purpose==='ARRIVAL'?'in_progress':'completed',identity_control:'VERIFIED_ACCOUNT_REQUIRED',presence_control:'RECORDED',code:'CONSUMED'},200);
+  const auth = await getSessionUser(request, env);
+  if (!requireRole(auth, ['intervenant'])) return json({ok:false,error:auth?.user?'FORBIDDEN':'UNAUTHENTICATED',version:VERSION}, auth?.user?403:401);
+  return tenantScopedHandlerNotReady('TENANT_SCOPED_SECURITY_HANDLER_REQUIRED');
 }
 
 async function securityResendCodes(request, env) {
-  const auth=await getSessionUser(request,env);
-  if(!requireRole(auth,['gerante','client'])) return json({ok:false,error:auth?.user?'FORBIDDEN':'UNAUTHENTICATED',version:VERSION},auth?.user?403:401);
-  await ensureSecuritySchema(env);
-  const body=await readJson(request);
-  const missionId=clean(body?.mission_id);
-  if(!missionId) return json({ok:false,error:'MISSION_ID_REQUIRED',version:VERSION},400);
-  const sec=await env.DB.prepare('SELECT * FROM mission_security WHERE mission_id=? LIMIT 1').bind(missionId).first();
-  if(!sec) return json({ok:false,error:'MISSION_SECURITY_NOT_FOUND',version:VERSION},404);
-  if(auth.user.role==='client' && sec.client_id!==auth.user.id) return json({ok:false,error:'FORBIDDEN',version:VERSION},403);
-  if(sec.status==='completed') return json({ok:false,error:'MISSION_ALREADY_COMPLETED',version:VERSION},409);
-  return json({ok:false,error:'SECURITY_CODE_RESEND_REQUIRES_REGENERATION_FLOW',version:VERSION,message:'Pour éviter la réutilisation d’un ancien secret, la réémission doit générer de nouveaux codes et invalider les précédents.'},409);
+  const auth = await getSessionUser(request, env);
+  if (!requireRole(auth, ['gerante','client'])) return json({ok:false,error:auth?.user?'FORBIDDEN':'UNAUTHENTICATED',version:VERSION}, auth?.user?403:401);
+  return tenantScopedHandlerNotReady('TENANT_SCOPED_SECURITY_HANDLER_REQUIRED');
 }
 
 async function securityClientCode(request, env) {
@@ -739,20 +617,11 @@ async function securityClientCode(request, env) {
 }
 
 async function securityStatus(request, env) {
-  const auth=await getSessionUser(request,env);
-  if(!auth) return json({ok:false,error:'UNAUTHENTICATED',version:VERSION},401);
-  await ensureSecuritySchema(env);
-  const count=await env.DB.prepare('SELECT COUNT(*) AS total FROM security_audit').first();
-  return json({ok:true,version:VERSION,security:{identity:'verified_required',device:'bound',presence:'recorded',arrival_code:'single_use',end_code:'single_use',max_attempts:SECURITY_MAX_ATTEMPTS,code_ttl_seconds:SECURITY_CODE_TTL_SECONDS,audit_events:Number(count?.total||0)},user:auth.user},200);
+  const auth = await getSessionUser(request, env);
+  if (!auth) return json({ok:false,error:'UNAUTHENTICATED',version:VERSION},401);
+  return tenantScopedHandlerNotReady('TENANT_SCOPED_SECURITY_HANDLER_REQUIRED');
 }
 
-
-/* ============================================================
-   PROCHÉLIA V13.5.17 — PAIEMENTS / PORTEFEUILLE / COMMISSIONS
-   Architecture de règlement de bout en bout.
-   IMPORTANT : les fonds réels passent par un PSP agréé ; PROCHÉLIA
-   conserve le ledger métier, les états, l'idempotence et l'audit.
-=============================================================== */
 async function ensurePaymentSchema(env) {
   if (!env.DB) throw new Error('DATABASE_REQUIRED');
   const statements = [
@@ -1537,7 +1406,7 @@ async function executeCaseBusinessAction(env, c, rec, actorId=null, automatic=fa
 
 async function processActionOutbox(request, env) {
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
-  await ensureOperationalSchema(env);
+  const schemaGate = await schemaReadinessResponse(env, ['action_outbox','copilot_briefings','loyalty_events','loyalty_balances','quality_events','b2b_leads','capacity_snapshots','finance_forecasts','system_checks'], 'OPERATIONAL_SCHEMA_NOT_READY'); if (schemaGate) return schemaGate;
   const rows=await env.DB.prepare(`SELECT * FROM action_outbox WHERE status='PENDING' ORDER BY created_at ASC LIMIT 50`).all();
   const processed=[];
   for(const row of (rows.results||[])) {
@@ -1807,7 +1676,11 @@ async function handleConsolidated(request, env) {
   const url=new URL(request.url);
   const consolidatedPath = ['/api/consolidated/info','/api/ops/dashboard','/api/journal','/api/cases','/api/cases/approve','/api/metiers','/api/metiers/suggest','/api/pricing/quote','/api/finance/summary','/api/complaints','/api/settings/phase'].includes(url.pathname);
   if (consolidatedPath) {
-    try { await ensureConsolidatedSchema(env); } catch (e) { return json({ok:false,error:'CONSOLIDATED_SCHEMA_ERROR',version:VERSION,message:e.message},500); }
+    const schemaGate = await schemaReadinessResponse(env, ['platform_settings','business_profiles','métier_catalog','metier_suggestions','pricing_policies','pricing_quotes','operational_cases','case_actions','copilot_log','activity_journal','commercial_tasks','recruitment_tasks','complaints','accounting_ledger','business_expenses','notification_outbox','compliance_events'], 'CONSOLIDATED_SCHEMA_NOT_READY');
+    if (schemaGate) return schemaGate;
+  }
+  if (['/api/cases','/api/cases/approve','/api/complaints','/api/finance/summary'].includes(url.pathname)) {
+    return tenantScopedHandlerNotReady('TENANT_SCOPED_CONSOLIDATED_HANDLER_REQUIRED');
   }
   if(url.pathname==='/api/consolidated/info' && request.method==='GET') return consolidatedInfo(env);
   if(url.pathname==='/api/ops/dashboard' && request.method==='GET') return getOperationsDashboard(request,env);
@@ -1978,7 +1851,7 @@ function promotionCandidate(input) {
 async function recommendPromotions(request, env) {
   const gate = await requireAuthRole(request, env, ['gerante']);
   if (gate.error) return gate.error;
-  await ensureStrategicSchema(env);
+  const schemaGate = await schemaReadinessResponse(env, ['promotions','promotion_recommendations','commercial_events','market_signals','client_value_scores','strategic_alerts'], 'STRATEGIC_SCHEMA_NOT_READY'); if (schemaGate) return schemaGate;
 
   const b = await readJson(request) || {};
   const phase = String(b.phase || await getSetting(env, 'project_phase', 'TEST')).toUpperCase();
@@ -2077,7 +1950,7 @@ async function recommendPromotions(request, env) {
 async function createPromotion(request, env) {
   const gate = await requireAuthRole(request, env, ['gerante']);
   if (gate.error) return gate.error;
-  await ensureStrategicSchema(env);
+  const schemaGate = await schemaReadinessResponse(env, ['promotions','promotion_recommendations','commercial_events','market_signals','client_value_scores','strategic_alerts'], 'STRATEGIC_SCHEMA_NOT_READY'); if (schemaGate) return schemaGate;
 
   const b = await readJson(request) || {};
   const code = clean(b.code);
@@ -2122,7 +1995,7 @@ async function createPromotion(request, env) {
 async function promotionList(request, env) {
   const gate = await requireAuthRole(request, env, ['gerante','entreprise','client']);
   if (gate.error) return gate.error;
-  await ensureStrategicSchema(env);
+  const schemaGate = await schemaReadinessResponse(env, ['promotions','promotion_recommendations','commercial_events','market_signals','client_value_scores','strategic_alerts'], 'STRATEGIC_SCHEMA_NOT_READY'); if (schemaGate) return schemaGate;
   const status = new URL(request.url).searchParams.get('status');
   const q = status
     ? 'SELECT * FROM promotions WHERE status=? ORDER BY created_at DESC LIMIT 200'
@@ -2134,7 +2007,7 @@ async function promotionList(request, env) {
 async function activatePromotion(request, env) {
   const gate = await requireAuthRole(request, env, ['gerante']);
   if (gate.error) return gate.error;
-  await ensureStrategicSchema(env);
+  const schemaGate = await schemaReadinessResponse(env, ['promotions','promotion_recommendations','commercial_events','market_signals','client_value_scores','strategic_alerts'], 'STRATEGIC_SCHEMA_NOT_READY'); if (schemaGate) return schemaGate;
   const b = await readJson(request) || {};
   if (!b.promotion_id) return json({ok:false,error:'PROMOTION_ID_REQUIRED',version:VERSION},400);
 
@@ -2153,7 +2026,7 @@ async function activatePromotion(request, env) {
 async function strategicDashboard(request, env) {
   const gate = await requireAuthRole(request, env, ['gerante']);
   if (gate.error) return gate.error;
-  await ensureStrategicSchema(env);
+  const schemaGate = await schemaReadinessResponse(env, ['promotions','promotion_recommendations','commercial_events','market_signals','client_value_scores','strategic_alerts'], 'STRATEGIC_SCHEMA_NOT_READY'); if (schemaGate) return schemaGate;
 
   const queries = {
     active_promotions: `SELECT COUNT(*) n FROM promotions WHERE status='ACTIVE'`,
@@ -2185,10 +2058,7 @@ async function handleStrategic(request, env) {
     '/api/strategic/dashboard'
   ];
 
-  if (strategicPaths.includes(url.pathname)) {
-    try { await ensureStrategicSchema(env); }
-    catch (e) { return json({ok:false,error:'STRATEGIC_SCHEMA_ERROR',version:VERSION,message:e.message},500); }
-  }
+
 
   if (url.pathname === '/api/strategic/promotions/recommend' && request.method === 'POST')
     return recommendPromotions(request, env);
@@ -2371,7 +2241,7 @@ async function executeQueuedAction(env, action) {
 async function operationalExecute(request, env) {
   const gate=await requireAuthRole(request,env,['gerante']);
   if(gate.error)return gate.error;
-  await ensureConsolidatedSchema(env); await ensureOperationalSchema(env);
+  const schemaGate = await schemaReadinessResponse(env, ['operational_cases','case_actions','action_outbox','activity_journal','platform_settings'], 'OPERATIONAL_SCHEMA_NOT_READY'); if (schemaGate) return schemaGate;
   const b=await readJson(request)||{};
   if(!b.case_id)return json({ok:false,error:'CASE_ID_REQUIRED',version:VERSION},400);
   const c=await env.DB.prepare('SELECT * FROM operational_cases WHERE id=? LIMIT 1').bind(b.case_id).first();
@@ -2393,7 +2263,7 @@ async function operationalExecute(request, env) {
 
 async function scoreClients(request, env) {
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
-  await ensureStrategicSchema(env); await ensureOperationalSchema(env);
+  const schemaGate = await schemaReadinessResponse(env, ['client_value_scores'], 'STRATEGIC_SCHEMA_NOT_READY'); if (schemaGate) return schemaGate;
   const rows=[];
   if(await tableExists(env,'payment_transactions')){
     const r=await env.DB.prepare(`SELECT client_id,COUNT(*) tx_count,COALESCE(SUM(gross_cents),0) gross,MAX(created_at) last_activity FROM payment_transactions WHERE client_id IS NOT NULL GROUP BY client_id LIMIT 1000`).all();
@@ -2414,7 +2284,7 @@ async function scoreClients(request, env) {
 
 async function loyaltyUpdate(request, env) {
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
-  await ensureOperationalSchema(env);
+  const schemaGate = await schemaReadinessResponse(env, ['loyalty_events','loyalty_balances','activity_journal'], 'OPERATIONAL_SCHEMA_NOT_READY'); if (schemaGate) return schemaGate;
   const b=await readJson(request)||{}; if(!b.client_id&&!b.company_id)return json({ok:false,error:'CLIENT_OR_COMPANY_REQUIRED',version:VERSION},400);
   const points=Math.max(-100000,Math.min(100000,Number(b.points||0)));
   const id=crypto.randomUUID();
@@ -2431,17 +2301,12 @@ async function loyaltyUpdate(request, env) {
 
 async function qualityCreate(request, env) {
   const gate=await requireAuthRole(request,env,['gerante','client','entreprise']); if(gate.error)return gate.error;
-  await ensureOperationalSchema(env); const b=await readJson(request)||{};
-  if(!b.mission_id)return json({ok:false,error:'MISSION_ID_REQUIRED',version:VERSION},400);
-  const id=crypto.randomUUID();
-  await env.DB.prepare(`INSERT INTO quality_events(id,mission_id,client_id,company_id,intervenant_id,rating,category,comment,severity,metadata_json) VALUES(?,?,?,?,?,?,?,?,?,?)`)
-    .bind(id,b.mission_id,b.client_id||null,b.company_id||null,b.intervenant_id||null,b.rating==null?null:Number(b.rating),b.category||'GENERAL',b.comment||'',b.severity||'LOW',JSON.stringify(b)).run();
-  return json({ok:true,version:VERSION,id});
+  return tenantScopedHandlerNotReady('TENANT_SCOPED_QUALITY_HANDLER_REQUIRED');
 }
 
 async function capacityDashboard(request, env) {
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
-  await ensureOperationalSchema(env);
+  const schemaGate = await schemaReadinessResponse(env, ['capacity_snapshots'], 'OPERATIONAL_SCHEMA_NOT_READY'); if (schemaGate) return schemaGate;
   let missions=0, available=0;
   if(await tableExists(env,'missions')) { const r=await env.DB.prepare(`SELECT COUNT(*) n FROM missions WHERE date(created_at)>=date('now','-7 day')`).first(); missions=Number(r?.n||0); }
   if(await tableExists(env,'users')) { const r=await env.DB.prepare(`SELECT COUNT(*) n FROM users WHERE role IN ('intervenant','aide_soignant','infirmier') AND status IN ('ACTIVE','active')`).first(); available=Number(r?.n||0); }
@@ -2454,6 +2319,7 @@ async function capacityDashboard(request, env) {
 
 async function financeForecast(request, env) {
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
+  const schemaGate = await schemaReadinessResponse(env, ['finance_forecasts'], 'FINANCE_FORECAST_SCHEMA_NOT_READY'); if (schemaGate) return schemaGate;
   const months=Math.max(1,Math.min(12,Number((await readJson(request)||{}).months||3)));
   const tx=await env.DB.prepare(`SELECT COALESCE(SUM(gross_cents),0) gross,COALESCE(SUM(commission_cents),0) commission,COALESCE(SUM(provider_fee_cents),0) provider_fee,COALESCE(SUM(refund_cents),0) refunds,COALESCE(SUM(net_intervenant_cents),0) intervenant FROM payment_transactions WHERE created_at>=datetime('now','-90 day')`).first();
   const base=Number(tx?.gross||0)/3;
@@ -2475,7 +2341,7 @@ async function financeForecast(request, env) {
 
 async function copilotBriefing(request, env) {
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
-  await ensureConsolidatedSchema(env); await ensureStrategicSchema(env); await ensureOperationalSchema(env);
+  const schemaGate = await schemaReadinessResponse(env, ['operational_cases','promotion_recommendations','strategic_alerts','copilot_briefings','platform_settings'], 'COPILOT_SCHEMA_NOT_READY'); if (schemaGate) return schemaGate;
   const phase=await getSetting(env,'project_phase','TEST'); const items=[];
   const open=await env.DB.prepare(`SELECT * FROM operational_cases WHERE status NOT IN ('RESOLVED','CLOSED') ORDER BY priority DESC,created_at ASC LIMIT 20`).all();
   for(const c of (open.results||[])) items.push({priority:Number(c.priority||10),category:'OPERATIONS',title:c.description||c.case_type,recommendation:c.proposed_solution_json||'Analyser et proposer une résolution',entity_type:'CASE',entity_id:c.id});
@@ -2490,7 +2356,7 @@ async function copilotBriefing(request, env) {
 
 async function systemAudit(request, env) {
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
-  await ensureOperationalSchema(env);
+  const schemaGate = await schemaReadinessResponse(env, ['system_checks'], 'OPERATIONAL_SCHEMA_NOT_READY'); if (schemaGate) return schemaGate;
   const checks=[];
   const required=['users','sessions','payment_transactions','operational_cases','promotions','promotion_recommendations','accounting_ledger','notification_outbox','action_outbox'];
   for(const t of required){ const exists=await tableExists(env,t); checks.push({table:t,status:exists?'OK':'MISSING'}); }
@@ -2507,9 +2373,7 @@ async function handleV139(request, env) {
     '/api/ops/case/execute','/api/ops/outbox/process','/api/copilot/briefing','/api/clients/score','/api/loyalty/update',
     '/api/quality','/api/capacity/dashboard','/api/finance/forecast','/api/system/audit'
   ];
-  if(operationalPaths.includes(url.pathname)){
-    try{await ensureOperationalSchema(env);}catch(e){return json({ok:false,error:'OPERATIONAL_SCHEMA_ERROR',version:VERSION,message:e.message},500);}
-  }
+
   if(url.pathname==='/api/ops/case/execute'&&request.method==='POST')return operationalExecute(request,env);
   if(url.pathname==='/api/ops/outbox/process'&&request.method==='POST')return processActionOutbox(request,env);
   if(url.pathname==='/api/copilot/briefing'&&request.method==='GET')return copilotBriefing(request,env);
@@ -2581,12 +2445,26 @@ async function registerIntegration(env, code, category, required, capabilities, 
     .bind(crypto.randomUUID(),code,category,status,JSON.stringify(required),JSON.stringify(capabilities),JSON.stringify(details)).run();
 }
 
+async function missingRequiredTables(env, names) {
+  const missing = [];
+  for (const name of names) if (!(await tableExists(env, name))) missing.push(name);
+  return missing;
+}
+
+async function schemaReadinessResponse(env, names, error) {
+  const missing = await missingRequiredTables(env, names);
+  return missing.length
+    ? json({ok:false,error,missing_tables:missing,version:VERSION},503)
+    : null;
+}
+
+function tenantScopedHandlerNotReady(error) {
+  return json({ok:false,error,write_enabled:false,version:VERSION},503);
+}
+
 async function productionConfigCheck(env, { persist = false } = {}) {
   if (!env?.DB) throw new Error('DATABASE_REQUIRED');
-  // Readiness GETs must inspect current state, not auto-create or mutate schema.
-  if (persist) {
-    await ensureConsolidatedSchema(env); await ensurePaymentSchema(env); await ensureOperationalSchema(env); await ensureStrategicSchema(env); await ensureFinalHardeningSchema(env);
-  }
+  // Schema creation belongs to reviewed migrations, never to an audit/job request.
   const checks=[];
   const requiredTables=['users','sessions','missions','payment_transactions','payment_webhook_events','payment_disputes','operational_cases','action_outbox','notification_outbox','accounting_ledger','promotions','promotion_recommendations','activity_journal','compliance_events'];
   for(const t of requiredTables) checks.push({code:`TABLE:${t}`,status:await tableExists(env,t)?'OK':'MISSING'});
@@ -2599,16 +2477,20 @@ async function productionConfigCheck(env, { persist = false } = {}) {
   const missionCols=await tableColumns(env,'missions');
   const usefulMissionCols=['id','client_id','intervenant_id'];
   checks.push({code:'MISSION_CORE_COLUMNS',status:usefulMissionCols.every(x=>missionCols.includes(x))?'OK':'INCOMPLETE',missing:usefulMissionCols.filter(x=>!missionCols.includes(x))});
+  const blocking=checks.filter(x=>['MISSING','INCOMPLETE'].includes(x.status));
+  const externalNotConfigured=checks.filter(x=>x.status==='NOT_CONFIGURED' && ['SECRET:PAYMENT_PROVIDER','SECRET:PAYMENT_WEBHOOK_SECRET'].includes(x.code));
+  let overall=blocking.length===0 && externalNotConfigured.length===0;
   if (persist) {
+    const missingPersistenceTables = await missingRequiredTables(env, ['integration_registry','system_config_checks']);
+    if (missingPersistenceTables.length) {
+      return {overall:false,checks,blocking:blocking.length+1,externalNotConfigured:externalNotConfigured.length,persistence:{status:'MISSING',missing_tables:missingPersistenceTables}};
+    }
     await registerIntegration(env,'PSP','PAYMENT',['PAYMENT_PROVIDER','PAYMENT_WEBHOOK_SECRET'],['charge','refund','payout','webhook','reconciliation'],finalSecretConfigured(env,'PAYMENT_PROVIDER')&&finalSecretConfigured(env,'PAYMENT_WEBHOOK_SECRET')?'CONFIGURED':'NOT_CONFIGURED');
     await registerIntegration(env,'NOTIFICATIONS','MESSAGING',['NOTIFICATION_PROVIDER'],['email','sms','push'],finalSecretConfigured(env,'NOTIFICATION_PROVIDER')?'CONFIGURED':'NOT_CONFIGURED');
     await registerIntegration(env,'MAPS','LOCATION',['MAPS_PROVIDER','MAPS_API_KEY'],['distance','geocoding','routing'],finalSecretConfigured(env,'MAPS_API_KEY')?'CONFIGURED':'NOT_CONFIGURED');
     await registerIntegration(env,'MARKET_DATA','COMMERCIAL',['MARKET_DATA_PROVIDER'],['market_prices','competitor_signals'],finalSecretConfigured(env,'MARKET_DATA_PROVIDER')?'CONFIGURED':'NOT_CONFIGURED');
+    for(const c of checks) await env.DB.prepare(`INSERT INTO system_config_checks(id,check_code,status,details_json) VALUES(?,?,?,?)`).bind(crypto.randomUUID(),c.code,c.status,JSON.stringify(c)).run();
   }
-  const blocking=checks.filter(x=>['MISSING','INCOMPLETE'].includes(x.status));
-  const externalNotConfigured=checks.filter(x=>x.status==='NOT_CONFIGURED' && ['SECRET:PAYMENT_PROVIDER','SECRET:PAYMENT_WEBHOOK_SECRET'].includes(x.code));
-  const overall=blocking.length===0 && externalNotConfigured.length===0;
-  if (persist) for(const c of checks) await env.DB.prepare(`INSERT INTO system_config_checks(id,check_code,status,details_json) VALUES(?,?,?,?)`).bind(crypto.randomUUID(),c.code,c.status,JSON.stringify(c)).run();
   return {overall,checks,blocking:blocking.length,externalNotConfigured:externalNotConfigured.length};
 }
 
@@ -2621,7 +2503,8 @@ async function finalProductionAudit(request,env) {
 
 async function copilotNextActions(request,env) {
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
-  await ensureConsolidatedSchema(env); await ensureOperationalSchema(env); await ensureStrategicSchema(env); await ensureFinalHardeningSchema(env);
+  const missing = await missingRequiredTables(env, ['platform_settings','operational_cases','promotion_recommendations','action_outbox']);
+  if (missing.length) return json({ok:false,error:'COPILOT_SCHEMA_NOT_READY',missing_tables:missing,version:VERSION},503);
   const phase=await getSetting(env,'project_phase','TEST');
   const items=[];
   const cases=await env.DB.prepare(`SELECT id,case_type,priority,status,impact_level,description,proposed_solution_json FROM operational_cases WHERE status NOT IN ('RESOLVED','CLOSED') ORDER BY priority DESC,created_at ASC LIMIT 30`).all();
@@ -2635,7 +2518,7 @@ async function copilotNextActions(request,env) {
 }
 
 async function enqueueBackgroundJob(env, jobType, payload={}, maxAttempts=5) {
-  await ensureFinalHardeningSchema(env);
+  if (!(await tableExists(env, 'background_jobs'))) throw new Error('BACKGROUND_JOB_SCHEMA_NOT_READY');
   const id=crypto.randomUUID();
   await env.DB.prepare(`INSERT INTO background_jobs(id,job_type,payload_json,max_attempts) VALUES(?,?,?,?)`).bind(id,jobType,JSON.stringify(payload),maxAttempts).run();
   return id;
@@ -2643,7 +2526,8 @@ async function enqueueBackgroundJob(env, jobType, payload={}, maxAttempts=5) {
 
 async function processBackgroundJobs(request,env) {
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
-  await ensureFinalHardeningSchema(env); await ensureOperationalSchema(env);
+  const missing = await missingRequiredTables(env, ['background_jobs','activity_journal']);
+  if (missing.length) return json({ok:false,error:'BACKGROUND_JOB_SCHEMA_NOT_READY',missing_tables:missing,version:VERSION},503);
   const rows=await env.DB.prepare(`SELECT * FROM background_jobs WHERE status='PENDING' AND run_after<=CURRENT_TIMESTAMP ORDER BY created_at LIMIT 25`).all();
   const results=[];
   for(const job of rows.results||[]) {
@@ -2796,7 +2680,8 @@ function makeSalesKit(body){
 
 async function commercialProspectCreate(request,env){
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
-  await ensureCommercialRecruitmentSchema(env); const b=await readJson(request);
+  const schemaGate = await schemaReadinessResponse(env, ['commercial_prospects','commercial_playbooks','recruitment_candidates','copilot_growth_actions','sales_results'], 'COMMERCIAL_SCHEMA_NOT_READY'); if (schemaGate) return schemaGate;
+  const b=await readJson(request);
   const id=crypto.randomUUID(); const kind=String(b?.kind||'B2B').toUpperCase();
   const score=Math.max(0,Math.min(100,Number(b?.score||0)||0));
   await env.DB.prepare(`INSERT INTO commercial_prospects(id,kind,company_name,contact_name,email,phone,website,sector,city,postal_code,source,need,estimated_potential_cents,score,next_action,notes) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(id,kind,clean(b?.company_name)||null,clean(b?.contact_name)||null,normalizeEmail(b?.email)||null,clean(b?.phone)||null,clean(b?.website)||null,clean(b?.sector)||null,clean(b?.city)||null,clean(b?.postal_code)||null,clean(b?.source)||'COPILOTE',clean(b?.need)||null,Number.isFinite(Number(b?.estimated_potential_cents))?Math.max(0,Math.round(Number(b.estimated_potential_cents))):null,score,clean(b?.next_action)||'PREMIER_CONTACT',clean(b?.notes)||null).run();
@@ -2806,7 +2691,8 @@ async function commercialProspectCreate(request,env){
 
 async function commercialProspectSheet(request,env){
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
-  await ensureCommercialRecruitmentSchema(env); const b=await readJson(request);
+  const schemaGate = await schemaReadinessResponse(env, ['commercial_prospects','commercial_playbooks','recruitment_candidates','copilot_growth_actions','sales_results'], 'COMMERCIAL_SCHEMA_NOT_READY'); if (schemaGate) return schemaGate;
+  const b=await readJson(request);
   const kit=makeSalesKit(b); const id=clean(b?.prospect_id)||null;
   let prospect=null; if(id) prospect=await env.DB.prepare('SELECT * FROM commercial_prospects WHERE id=? LIMIT 1').bind(id).first();
   const p=prospect||b; const potential=Number(p?.estimated_potential_cents||0);
@@ -2817,14 +2703,16 @@ async function commercialProspectSheet(request,env){
 
 async function commercialPlaybook(request,env){
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
-  await ensureCommercialRecruitmentSchema(env); const b=await readJson(request); const kit=makeSalesKit(b); const id=crypto.randomUUID();
+  const schemaGate = await schemaReadinessResponse(env, ['commercial_prospects','commercial_playbooks','recruitment_candidates','copilot_growth_actions','sales_results'], 'COMMERCIAL_SCHEMA_NOT_READY'); if (schemaGate) return schemaGate;
+  const b=await readJson(request); const kit=makeSalesKit(b); const id=crypto.randomUUID();
   await env.DB.prepare(`INSERT INTO commercial_playbooks(id,target_type,stage,objective,script,objections_json,followup_json,metadata_json) VALUES(?,?,?,?,?,?,?,?)`).bind(id,kit.target_type,kit.stage,kit.objective,kit.opening,JSON.stringify(kit.objections),JSON.stringify(kit.followups),JSON.stringify({benefits:kit.benefits,questions:kit.questions,closing:kit.closing})).run();
   return json({ok:true,version:VERSION,playbook_id:id,playbook:kit},201);
 }
 
 async function recruitmentCandidateCreate(request,env){
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
-  await ensureCommercialRecruitmentSchema(env); const b=await readJson(request); const id=crypto.randomUUID();
+  const schemaGate = await schemaReadinessResponse(env, ['commercial_prospects','commercial_playbooks','recruitment_candidates','copilot_growth_actions','sales_results'], 'COMMERCIAL_SCHEMA_NOT_READY'); if (schemaGate) return schemaGate;
+  const b=await readJson(request); const id=crypto.randomUUID();
   const qualifications=Array.isArray(b?.qualifications)?b.qualifications:[];
   const score=Math.max(0,Math.min(100,Number(b?.score||0)||0));
   await env.DB.prepare(`INSERT INTO recruitment_candidates(id,full_name,email,phone,metier_code,city,radius_km,qualifications_json,score,notes) VALUES(?,?,?,?,?,?,?,?,?,?)`).bind(id,clean(b?.full_name)||null,normalizeEmail(b?.email)||null,clean(b?.phone)||null,clean(b?.metier_code)||null,clean(b?.city)||null,Number.isFinite(Number(b?.radius_km))?Number(b.radius_km):null,JSON.stringify(qualifications),score,clean(b?.notes)||null).run();
@@ -2835,7 +2723,8 @@ async function recruitmentCandidateCreate(request,env){
 
 async function recruitmentSheet(request,env){
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
-  await ensureCommercialRecruitmentSchema(env); const b=await readJson(request);
+  const schemaGate = await schemaReadinessResponse(env, ['commercial_prospects','commercial_playbooks','recruitment_candidates','copilot_growth_actions','sales_results'], 'COMMERCIAL_SCHEMA_NOT_READY'); if (schemaGate) return schemaGate;
+  const b=await readJson(request);
   const target=clean(b?.metier_code)||'METIER_A_DEFINIR'; const zone=clean(b?.city)||'zone à définir';
   const intro=`PROCHÉLIA recherche des intervenants pour renforcer sa capacité dans ${zone}. Le rôle consiste à réaliser les missions correspondant à votre métier, dans un cadre organisé, avec suivi des documents, des missions et des paiements.`;
   const objections=[{objection:'« Je veux comprendre le fonctionnement avant de m’inscrire. »',answer:'« C’est normal. Nous vous expliquons d’abord le parcours, les documents requis, les règles de mission et le fonctionnement des paiements avant toute activation. »'},{objection:'« Est-ce que je suis obligé d’accepter toutes les missions ? »',answer:'« Les règles exactes dépendent du cadre contractuel et du fonctionnement de la plateforme ; elles sont présentées clairement avant l’activation. »'}];
@@ -2844,7 +2733,7 @@ async function recruitmentSheet(request,env){
 
 async function growthDashboard(request,env){
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
-  await ensureCommercialRecruitmentSchema(env); await ensureConsolidatedSchema(env);
+  const schemaGate = await schemaReadinessResponse(env, ['commercial_prospects','recruitment_candidates','commercial_tasks','recruitment_tasks'], 'GROWTH_SCHEMA_NOT_READY'); if (schemaGate) return schemaGate;
   const p=await env.DB.prepare(`SELECT COUNT(*) n, COALESCE(AVG(score),0) avg_score FROM commercial_prospects WHERE status='OPEN'`).first();
   const r=await env.DB.prepare(`SELECT COUNT(*) n, COALESCE(AVG(score),0) avg_score FROM recruitment_candidates WHERE status='OPEN'`).first();
   const ct=await env.DB.prepare(`SELECT COUNT(*) n FROM commercial_tasks WHERE status='OPEN'`).first();
@@ -2917,8 +2806,7 @@ async function financeAuth(request, env) {
   const auth = await getSessionUser(request, env);
   if (!auth) return { response: json({ok:false,error:'UNAUTHENTICATED',version:VERSION},401) };
   if (!financeRoleAllowed(auth.user.role)) return { response: json({ok:false,error:'FORBIDDEN',version:VERSION},403) };
-  await ensureFinanceWorkspaceSchema(env);
-  return { auth };
+  return { response: tenantScopedHandlerNotReady('TENANT_SCOPED_FINANCE_HANDLER_REQUIRED') };
 }
 
 function financeMoney(cents) {
@@ -3237,7 +3125,8 @@ async function backupTables(env){
   return (r.results||[]).map(x=>String(x.name));
 }
 async function runNationalBackup(env,trigger='MANUAL'){
-  await ensureNationalContinuitySchema(env);
+  const missing = await missingRequiredTables(env, ['backup_runs','backup_objects']);
+  if (missing.length) throw new Error('BACKUP_SCHEMA_NOT_READY:' + missing.join(','));
   if(!env.BACKUP_BUCKET) throw new Error('BACKUP_R2_NOT_CONFIGURED');
   const secret=env.BACKUP_ENCRYPTION_KEY;
   if(!secret) throw new Error('BACKUP_ENCRYPTION_KEY_REQUIRED');
@@ -3274,13 +3163,11 @@ async function runNationalBackup(env,trigger='MANUAL'){
   }
 }
 async function nationalScaleStatus(env){
-  await ensureNationalContinuitySchema(env);
   const c=await env.DB.prepare(`SELECT key,value_json FROM platform_scale_config ORDER BY key`).all();
   const t=await env.DB.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name`).all();
   return {ok:true,mode:'NATIONAL_SCALE',artificialUserCap:false,unlimitedInBusinessRules:true,database:'D1',documents:'R2_RECOMMENDED',backups:{provider:'R2',automatic:true,encrypted:true},pagination:{cursorRecommended:true,maxPageSize:100},tables:(t.results||[]).map(x=>x.name),config:(c.results||[])};
 }
 async function backupStatus(env){
-  await ensureNationalContinuitySchema(env);
   const r=await env.DB.prepare(`SELECT * FROM backup_runs ORDER BY started_at DESC LIMIT 20`).all();
   return {ok:true,configured:!!env.BACKUP_BUCKET&&!!env.BACKUP_ENCRYPTION_KEY,automatic:true,frequency:'DAILY',retentionDays:90,runs:r.results||[]};
 }
@@ -3291,14 +3178,17 @@ handle = async function(request,env){
   try{
     if(request.method==='GET'&&url.pathname==='/api/system/scale'){
       const auth=await getSessionUser(request,env).catch(()=>null); if(!auth?.user||String(auth.user.role||'').toUpperCase()!=='GERANTE') return json({ok:false,error:'FORBIDDEN'},403);
+      const schemaGate = await schemaReadinessResponse(env, ['platform_scale_config'], 'NATIONAL_SCALE_SCHEMA_NOT_READY'); if (schemaGate) return schemaGate;
       return json(await nationalScaleStatus(env));
     }
     if(request.method==='GET'&&url.pathname==='/api/system/backups'){
       const auth=await getSessionUser(request,env).catch(()=>null); if(!auth?.user||String(auth.user.role||'').toUpperCase()!=='GERANTE') return json({ok:false,error:'FORBIDDEN'},403);
+      const schemaGate = await schemaReadinessResponse(env, ['backup_runs'], 'BACKUP_SCHEMA_NOT_READY'); if (schemaGate) return schemaGate;
       return json(await backupStatus(env));
     }
     if(request.method==='POST'&&url.pathname==='/api/system/backup/run'){
       const auth=await getSessionUser(request,env).catch(()=>null); if(!auth?.user||String(auth.user.role||'').toUpperCase()!=='GERANTE') return json({ok:false,error:'FORBIDDEN'},403);
+      const schemaGate = await schemaReadinessResponse(env, ['backup_runs','backup_objects'], 'BACKUP_SCHEMA_NOT_READY'); if (schemaGate) return schemaGate;
       return json(await runNationalBackup(env,'MANUAL'));
     }
     return __procheliaNationalHandle(request,env);
@@ -3439,7 +3329,7 @@ async function supportEvent(env,caseId,actorRole,actorId,eventType,details={}){
 }
 
 async function brandIdentityEndpoint(request,env){
-  await ensureProcheliaMasterComplementSchema(env);
+  const schemaGate = await schemaReadinessResponse(env, ['brand_identity','brand_assets'], 'BRAND_SCHEMA_NOT_READY'); if (schemaGate) return schemaGate;
   const r=await env.DB.prepare(`SELECT * FROM brand_identity WHERE brand_key='PROCHELIA' LIMIT 1`).first();
   const assets=await env.DB.prepare(`SELECT asset_type,asset_name,storage_key,checksum,version,status FROM brand_assets WHERE status='ACTIVE' ORDER BY asset_type,asset_name`).all();
   return json({ok:true,version:VERSION,brand:{name:PROCHELIA_BRAND.name,identity:r||null,assets:assets.results||[],visual:PROCHELIA_BRAND.visual,uniqueness_policy:PROCHELIA_BRAND.uniqueness_policy,note:'L’originalité graphique interne est une spécification de création ; l’exclusivité juridique doit être confirmée par les recherches de similarités et le dépôt de marque.'}});
@@ -3448,7 +3338,7 @@ async function brandIdentityEndpoint(request,env){
 async function brandClearanceRecord(request,env){
   const a=await supportAuth(request,env); if(a.response)return a.response;
   if(a.role!=='GERANTE'&&a.role!=='ADMIN') return json({ok:false,error:'FORBIDDEN'},403);
-  await ensureProcheliaMasterComplementSchema(env);
+  const schemaGate = await schemaReadinessResponse(env, ['brand_clearance_log'], 'BRAND_SCHEMA_NOT_READY'); if (schemaGate) return schemaGate;
   const b=await readJson(request)||{};
   const id=crypto.randomUUID();
   await env.DB.prepare(`INSERT INTO brand_clearance_log(id,search_type,term,source,result,evidence_ref,notes) VALUES(?,?,?,?,?,?,?)`)
@@ -3458,7 +3348,6 @@ async function brandClearanceRecord(request,env){
 }
 
 async function interfaceConfigEndpoint(request,env){
-  await ensureProcheliaMasterComplementSchema(env);
   const url=new URL(request.url); const requested=supportRoleNormalize(url.searchParams.get('role')||'');
   if(requested && PROCHELIA_UI[requested]) return json({ok:true,version:VERSION,role:requested,config:PROCHELIA_UI[requested],brand:PROCHELIA_BRAND.visual});
   return json({ok:true,version:VERSION,interfaces:PROCHELIA_UI,brand:PROCHELIA_BRAND.visual});
@@ -3466,25 +3355,7 @@ async function interfaceConfigEndpoint(request,env){
 
 async function supportCreate(request,env){
   const a=await supportAuth(request,env); if(a.response)return a.response;
-  await ensureProcheliaMasterComplementSchema(env);
-  const b=await readJson(request)||{};
-  const category=clean(b.category)||'GENERAL';
-  const severity=String(b.severity||'LOW').toUpperCase();
-  const scenario=supportScenarioFor(category,severity);
-  const rule=await env.DB.prepare(`SELECT * FROM copilot_resolution_rules WHERE scenario_key=? LIMIT 1`).bind(scenario).first();
-  const auto=Number(rule?.auto_allowed||0)===1 && String(severity)!=='CRITICAL' && String(severity)!=='HIGH';
-  const requiresManager=Number(rule?.manager_approval_required||1)===1 || !auto;
-  const id=crypto.randomUUID();
-  const proposed=rule?JSON.parse(rule.steps_json||'[]'):{steps:['collect_evidence','copilot_analysis','notify','audit']};
-  await env.DB.prepare(`INSERT INTO support_cases(id,source_role,requester_id,company_id,mission_id,complaint_id,category,severity,status,description,proposed_resolution,requires_manager) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`)
-    .bind(id,a.role,a.auth.user.id,b.company_id||null,b.mission_id||null,b.complaint_id||null,category,severity,auto?'PROCESSING':'OPEN',clean(b.description)||null,JSON.stringify({scenario,steps:proposed.steps||proposed}),requiresManager?1:0).run();
-  await supportEvent(env,id,a.role,a.auth.user.id,'CREATED',{scenario,auto,requiresManager});
-  await journal(env,a.role,a.auth.user.id,'SUPPORT_CASE_CREATE','support_cases',id,'OK',{scenario,severity,auto});
-  let autoResult=null;
-  if(auto){
-    autoResult=await supportAutoResolve(env,id,a.auth.user.id,a.role,scenario,b);
-  }
-  return json({ok:true,version:VERSION,case_id:id,scenario,automatic_resolution:!!auto,auto_result:autoResult,manager_approval_required:!auto});
+  return tenantScopedHandlerNotReady('TENANT_SCOPED_SUPPORT_HANDLER_REQUIRED');
 }
 
 async function supportAutoResolve(env,caseId,actorId,actorRole,scenario,context={}){
@@ -3509,66 +3380,20 @@ async function supportAutoResolve(env,caseId,actorId,actorRole,scenario,context=
 
 async function supportList(request,env){
   const a=await supportAuth(request,env); if(a.response)return a.response;
-  await ensureProcheliaMasterComplementSchema(env);
-  const u=new URL(request.url),status=clean(u.searchParams.get('status')||'');
-  const isManager=['GERANTE','ADMIN'].includes(a.role);
-  let r;
-  if(isManager){
-    r=status?await env.DB.prepare(`SELECT * FROM support_cases WHERE status=? ORDER BY created_at DESC LIMIT 200`).bind(status).all():await env.DB.prepare(`SELECT * FROM support_cases ORDER BY created_at DESC LIMIT 200`).all();
-  }else{
-    r=status?await env.DB.prepare(`SELECT * FROM support_cases WHERE requester_id=? AND status=? ORDER BY created_at DESC LIMIT 200`).bind(a.auth.user.id,status).all():await env.DB.prepare(`SELECT * FROM support_cases WHERE requester_id=? ORDER BY created_at DESC LIMIT 200`).bind(a.auth.user.id).all();
-  }
-  return json({ok:true,version:VERSION,role:a.role,cases:r.results||[]});
+  return tenantScopedHandlerNotReady('TENANT_SCOPED_SUPPORT_HANDLER_REQUIRED');
 }
 
 async function supportResolve(request,env){
   const a=await supportAuth(request,env); if(a.response)return a.response;
   if(a.role!=='GERANTE'&&a.role!=='ADMIN') return json({ok:false,error:'MANAGER_APPROVAL_REQUIRED',version:VERSION},403);
-  await ensureProcheliaMasterComplementSchema(env);
-  const b=await readJson(request)||{}; const id=clean(b.case_id);
-  if(!id)return json({ok:false,error:'CASE_ID_REQUIRED',version:VERSION},400);
-  const row=await env.DB.prepare(`SELECT * FROM support_cases WHERE id=? LIMIT 1`).bind(id).first();
-  if(!row)return json({ok:false,error:'CASE_NOT_FOUND',version:VERSION},404);
-  const resolution=clean(b.resolution)||'Résolution validée par la Gérante après contrôle du dossier.';
-  await env.DB.prepare(`UPDATE support_cases SET status='RESOLVED',resolution=?,resolved_at=CURRENT_TIMESTAMP,requires_manager=0 WHERE id=?`).bind(resolution,id).run();
-  await supportEvent(env,id,a.role,a.auth.user.id,'MANAGER_RESOLVED',{resolution});
-  await journal(env,a.role,a.auth.user.id,'SUPPORT_CASE_MANAGER_RESOLVE','support_cases',id,'RESOLVED',{resolution});
-  return json({ok:true,version:VERSION,case_id:id,status:'RESOLVED',resolution});
+  return tenantScopedHandlerNotReady('TENANT_SCOPED_SUPPORT_HANDLER_REQUIRED');
 }
 
 async function supportDashboard(request,env){
   const a=await supportAuth(request,env); if(a.response)return a.response;
   if(a.role!=='GERANTE'&&a.role!=='ADMIN') return json({ok:false,error:'FORBIDDEN'},403);
-  await ensureProcheliaMasterComplementSchema(env);
-  const rows=await env.DB.prepare(`SELECT status,severity,COUNT(*) AS n FROM support_cases GROUP BY status,severity ORDER BY status,severity`).all();
-  const recent=await env.DB.prepare(`SELECT id,source_role,category,severity,status,created_at,resolved_at FROM support_cases ORDER BY created_at DESC LIMIT 30`).all();
-  return json({ok:true,version:VERSION,dashboard:{breakdown:rows.results||[],recent:recent.results||[],policy:{simple_low_impact:'AUTOMATIQUE_APRES_CONTROLE',sensitive_or_high_impact:'VALIDATION_GERANTE',security_legal_rgpd:'ESCALADE_IMMEDIATE'}}});
+  return tenantScopedHandlerNotReady('TENANT_SCOPED_SUPPORT_HANDLER_REQUIRED');
 }
-
-const __procheliaComplementHandle = handle;
-handle = async function(request,env){
-  try{
-    const u=new URL(request.url);
-    if((u.pathname==='/api/brand/identity')&&request.method==='GET') return brandIdentityEndpoint(request,env);
-    if((u.pathname==='/api/brand/clearance')&&request.method==='POST') return brandClearanceRecord(request,env);
-    if((u.pathname==='/api/ui/config')&&request.method==='GET') return interfaceConfigEndpoint(request,env);
-    if((u.pathname==='/api/support/cases')&&request.method==='POST') return supportCreate(request,env);
-    if((u.pathname==='/api/support/cases')&&request.method==='GET') return supportList(request,env);
-    if((u.pathname==='/api/support/cases/resolve')&&request.method==='POST') return supportResolve(request,env);
-    if((u.pathname==='/api/support/dashboard')&&request.method==='GET') return supportDashboard(request,env);
-    return __procheliaComplementHandle(request,env);
-  }catch(e){return json({ok:false,error:'MASTER_COMPLEMENT_ERROR',version:VERSION,message:String(e.message||e)},500)}
-};
-
-/* ============================================================================
-   PROCHÉLIA — PRODUCTION SAFETY HARDENING 2026-10-06
-   Renforcement sans duplication :
-   - rate limiting effectif sur routes sensibles
-   - gate production plus strict pour les flux réellement utilisés
-   - aucune résolution Copilote "automatique" annoncée comme terminée si
-     aucune action vérifiable n'a réellement été exécutée
-   - traçabilité des blocages de sécurité
-   ============================================================================ */
 
 async function productionSafetySchema(env){
   if(!env.DB) throw new Error('DATABASE_REQUIRED');
@@ -3602,7 +3427,8 @@ async function productionRateLimit(request,env){
   const subject=await productionSubjectHash(request,path);
   const now=Math.floor(Date.now()/1000);
   const start=new Date(Math.floor(now/windowSeconds)*windowSeconds*1000).toISOString();
-  await ensureFinalHardeningSchema(env);
+  const rateSchemaGate = await schemaReadinessResponse(env, ['security_rate_limits'], 'RATE_LIMIT_SCHEMA_NOT_READY');
+  if (rateSchemaGate) return {ok:false,response:rateSchemaGate};
   const existing=await env.DB.prepare(`SELECT request_count FROM security_rate_limits WHERE bucket=? AND subject_hash=? AND window_start=? LIMIT 1`).bind(bucket,subject,start).first();
   const count=Number(existing?.request_count||0)+1;
   if(existing){
@@ -3611,7 +3437,8 @@ async function productionRateLimit(request,env){
     await env.DB.prepare(`INSERT INTO security_rate_limits(id,bucket,subject_hash,window_start,request_count) VALUES(?,?,?,?,1)`).bind(crypto.randomUUID(),bucket,subject,start).run();
   }
   if(count>limit){
-    await productionSafetySchema(env);
+    const eventSchemaGate = await schemaReadinessResponse(env, ['production_security_events'], 'RATE_LIMIT_AUDIT_SCHEMA_NOT_READY');
+    if (eventSchemaGate) return {ok:false,response:eventSchemaGate};
     await env.DB.prepare(`INSERT INTO production_security_events(id,event_type,route,subject_hash,decision,details_json) VALUES(?,?,?,?,?,?)`)
       .bind(crypto.randomUUID(),'RATE_LIMIT',path,subject,'BLOCKED',JSON.stringify({limit,windowSeconds})).run();
     return {ok:false,response:json({ok:false,error:'RATE_LIMITED',version:VERSION,retry_after_seconds:Math.max(1,windowSeconds-(now%windowSeconds))},429,{'retry-after':String(Math.max(1,windowSeconds-(now%windowSeconds)))})};
