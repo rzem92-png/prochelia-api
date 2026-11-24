@@ -24,6 +24,8 @@ jobs:
       # Identifiant de compte confirmé depuis le tableau de bord Cloudflare fourni.
       CLOUDFLARE_ACCOUNT_ID: f2a79e9fa41566a8ec80fb24c02c60eb
     steps:
+      - name: Checkout repository for the pinned Preview D1 config
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - name: Vérifier les secrets requis et la cible Cloudflare
         shell: bash
         env:
@@ -87,7 +89,7 @@ jobs:
           fi
 
       - name: Installer Node.js
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
           node-version: "22"
           package-manager-cache: false
