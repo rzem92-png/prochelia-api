@@ -8,6 +8,8 @@ test("Preview R2 backup is manually gated to the exact reviewed Preview branch o
   assert.match(workflow, /github\.ref == 'refs\/heads\/fix\/r2-backup-attestation-rebased-2026-11-22'/);
   assert.doesNotMatch(workflow, /refs\/heads\/main/);
   assert.match(workflow, /github\.actor == 'rzem92-png'/);
+  assert.match(workflow, /github\.triggering_actor == 'rzem92-png'/);
+  assert.match(workflow, /GITHUB_TRIGGERING_ACTOR.*rzem92-png/);
   assert.match(workflow, /GITHUB_ACTOR.*rzem92-png/);
   assert.match(workflow, /inputs\.confirm_preview_backup == 'BACKUP_PREVIEW_TO_R2_EU'/);
   assert.match(workflow, /ref: 1fc258c9c8d25e5e7b89241504218bf102afbf27/);
