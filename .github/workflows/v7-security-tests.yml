@@ -17,8 +17,12 @@ on:
       - ".github/workflows/provision-preview-r2-eu.yml"
       - ".github/workflows/backup-preview-d1-to-r2-eu.yml"
       - ".github/workflows/restore-preview-r2-backup-isolated-test.yml"
+  workflow_dispatch:
+
   push:
-    branches: [main]
+    branches:
+      - main
+      - fix/r2-backup-attestation-branch-gated-2026-11-23
     paths:
       - "src/v7.js"
       - "src/v7-routes.js"
