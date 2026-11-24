@@ -77,6 +77,11 @@ BEFORE UPDATE OF user_id ON wallets
 WHEN NEW.user_id IS NOT OLD.user_id
 BEGIN SELECT RAISE(ABORT,'WALLETS_USER_IDENTITY_IMMUTABLE'); END;
 
+CREATE TRIGGER trg_wallets_currency_immutable
+BEFORE UPDATE OF currency ON wallets
+WHEN NEW.currency IS NOT OLD.currency
+BEGIN SELECT RAISE(ABORT,'WALLETS_CURRENCY_IMMUTABLE'); END;
+
 -- Restore the tenant guards that were temporarily dropped for the table rebuild.
 CREATE TRIGGER trg_wallet_ledger_tenant_insert
 BEFORE INSERT ON payment_wallet_ledger
