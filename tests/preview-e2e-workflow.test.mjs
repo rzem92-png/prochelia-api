@@ -20,7 +20,7 @@ test("Preview E2E is pinned to the exact EU Preview D1 and current Pages branch 
   assert.match(workflow, /24137dd2aeb83b76dd7b7584017c41ef545d9318/);
   assert.match(workflow, /deployment_trigger\.metadata\.branch/);
   assert.match(workflow, /deployment_trigger\.metadata\.commit_hash/);
-  assert.doesNotMatch(workflow, /04f52830-ef5a-4f17-a640-42bbc2381bba/);
+  assert.ok(workflow.includes('[[ "$PREVIEW_DB_ID" != "04f52830-ef5a-4f17-a640-42bbc2381bba" ]]'));
 });
 
 test("Pages E2E uses the exact allowlisted alias and does not assume a service binding", () => {
@@ -56,7 +56,7 @@ test("synthetic directory fixtures use the existing Preview schema and a dedicat
 test("authenticated checks target the legacy Preview Worker explicitly and never Production", () => {
   assert.match(workflow, /https:\/\/prochelia-api-preview\.rzem92\.workers\.dev/);
   assert.match(workflow, /offset=not-a-number/);
-  assert.doesNotMatch(workflow, /04f52830-ef5a-4f17-a640-42bbc2381bba/);
+  assert.ok(workflow.includes('[[ "$PREVIEW_DB_ID" != "04f52830-ef5a-4f17-a640-42bbc2381bba" ]]'));
   assert.doesNotMatch(workflow, /wrangler@4 d1 migrations apply|wrangler@4 deploy/);
 });
 
