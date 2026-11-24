@@ -1232,6 +1232,11 @@ try:
     raise AssertionError("Payout in a currency different from its wallet was incorrectly accepted")
 except sqlite3.IntegrityError:
     pass
+try:
+    db.execute("UPDATE payout_requests SET currency='USD' WHERE id='finance-payout-a'")
+    raise AssertionError("Payout currency identity was incorrectly mutable")
+except sqlite3.IntegrityError:
+    pass
 db.execute("""
     INSERT INTO payment_disputes(
       id,mission_id,transaction_id,client_id,intervenant_id,reason,amount_cents,tenant_id
