@@ -15,12 +15,19 @@ on:
       - ".github/workflows/restore-production-backup-isolated-test.yml"
       - ".github/workflows/migration-sql-tests.yml"
   push:
-    branches: [main]
+    branches: [main, fix/tenant-aware-payment-account-unique-2026-11-24]
     paths:
       - "migrations/**"
+      - "migrations-preview-canonical/**"
       - "tests/test_migrations_sqlite.py"
+      - "tests/test_preview_canonical_migrations.py"
+      - "scripts/prepare-d1-restore.py"
+      - "tests/test_prepare_d1_restore.py"
+      - "tests/test_preview_backup_workflow_guards.py"
       - ".github/workflows/migration-sql-tests.yml"
       - ".github/workflows/apply-preview-d1-migrations.yml"
+      - ".github/workflows/backup-preview-d1-to-r2-eu.yml"
+      - ".github/workflows/restore-preview-r2-backup-isolated-test.yml"
 
 permissions:
   contents: read
