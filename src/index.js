@@ -3127,7 +3127,7 @@ async function growthDashboard(request,env){
 
 
 /* ==================== V14.0.0 — COMPTABILITÉ MULTI-ESPACE / EXPORTS / RÉSOLUTION ==================== */
-async function ensureFinanceWorkspaceSchema(env) {
+async function assertFinanceWorkspaceTenantSchema(env) {
   if (!env?.DB) throw new Error('DATABASE_REQUIRED');
   // Finance workspace schema is owned by canonical migrations, never runtime DDL.
   const required = {
@@ -3163,7 +3163,7 @@ async function financeAuth(request, env) {
     return { response: json({ok:false,error:tenantContext?.error||'ACTIVE_TENANT_REQUIRED',version:VERSION},tenantContext?.status||403) };
   }
   try {
-    await ensureFinanceWorkspaceSchema(env);
+    await assertFinanceWorkspaceTenantSchema(env);
   } catch {
     return { response: json({ok:false,error:'FINANCE_WORKSPACE_TENANT_SCOPE_REQUIRED',version:VERSION,write_enabled:false},503) };
   }
