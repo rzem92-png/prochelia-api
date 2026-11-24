@@ -63,7 +63,7 @@ assert '"0030_supra_audit_tenant_scope.sql"' in workflow_text, (
     "Preview migration workflow omits tenant-scoped SUPRA audit migration 0030"
 )
 assert "if len(local) != 47:" in workflow_text, (
-    "Preview migration workflow must require exactly 46 canonical migrations"
+    "Preview migration workflow must require exactly 47 canonical migrations"
 )
 assert "exact 47-entry registry" in workflow_text, (
     "Preview migration workflow target registry count is stale"
