@@ -63,7 +63,6 @@ jobs:
             --request POST \
             --header 'Origin: https://fix-frontend-finance-confirm.prochelia.pages.dev' \
             --header 'Content-Type: application/json' \
-            --header "Stripe-Signature: $invalid_signature" \
             --data "$body" \
             'https://fix-pages-proxy-preview-cors-2026-11-23.rzem92.workers.dev/api/payments/webhook')"
           test "$status" = "401" || {
