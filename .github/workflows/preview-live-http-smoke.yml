@@ -72,6 +72,25 @@ jobs:
           }
           jq -e '.error == "INVALID_WEBHOOK_SIGNATURE"' "$RUNNER_TEMP/webhook-rejected.json" >/dev/null
           echo "PASS: unauthenticated synthetic webhook rejected before event parsing or D1 writes."
+
+      - name: Verify disabled-PSP candidate rejects before reading the webhook body
+        shell: bash
+        run: |
+          set -euo pipefail
+          body='{"id":"evt_synthetic_disabled_psp","type":"payment_succeeded","provider":"stripe"}'
+          status="$(curl --silent --show-error --max-time 20 --output "$RUNNER_TEMP/disabled-psp-webhook.json" --write-out '%{http_code}' \
+            --request POST \
+            --header 'Content-Type: application/json' \
+            --data "$body" \
+            'https://fix-fail-closed-payment-runtime-2026-11-24-prochelia-api.rzem92.workers.dev/api/payments/webhook')"
+          test "$status" = "503" || {
+            echo "::error::Disabled-PSP candidate expected HTTP 503 before body/D1 access, received $status."
+            jq -c '{ok,error,write_enabled}' "$RUNNER_TEMP/disabled-psp-webhook.json" 2>/dev/null || true
+            exit 1
+          }
+          jq -e '.error == "PAYMENT_PROVIDER_NOT_CONFIGURED" and .write_enabled == false' "$RUNNER_TEMP/disabled-psp-webhook.json" >/dev/null
+          echo "PASS: disabled-PSP candidate rejects the synthetic event before reading its body or accessing D1."
+
       - name: Confirm unauthenticated tenant, Device Trust and accounting paths fail closed
         shell: bash
         run: |
