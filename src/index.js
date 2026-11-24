@@ -4131,11 +4131,6 @@ export default {
         console.error('PROCHELIA_SCHEDULER_TICK_FAILED', String(error?.message || error));
       }));
     }
-    if(event?.cron === '0 3 * * *' || event?.cron === '0 3 * * 0'){
-      ctx.waitUntil(runNationalBackup(env,'AUTOMATIC').catch(error => {
-        console.error('PROCHELIA_AUTOMATIC_BACKUP_FAILED', String(error?.message || error));
-      }));
-    }
   }
 };
 
@@ -4148,91 +4143,27 @@ export default {
    - déclenchement manuel + automatique par Cron
    - journal des sauvegardes
    ============================================================================ */
-const NATIONAL_SCALE_DEFAULTS = Object.freeze({
-  maxPageSize:100, defaultPageSize:50, importBatchSize:500,
-  noArtificialUserCap:true, cursorPaginationRecommended:true,
-  documentsStorage:'R2', backupFrequency:'DAILY', backupRetentionDays:90
-});
-
-async function ensureNationalContinuitySchema(env){
-  if(!env.DB) throw new Error('DATABASE_REQUIRED');
-  const sqls=[
-    `CREATE TABLE IF NOT EXISTS platform_scale_config(id TEXT PRIMARY KEY,key TEXT NOT NULL UNIQUE,value_json TEXT NOT NULL,updated_at TEXT DEFAULT CURRENT_TIMESTAMP)`,
-    `CREATE TABLE IF NOT EXISTS backup_runs(id TEXT PRIMARY KEY,status TEXT NOT NULL,trigger_type TEXT NOT NULL,storage_provider TEXT,started_at TEXT DEFAULT CURRENT_TIMESTAMP,completed_at TEXT,object_count INTEGER DEFAULT 0,row_count INTEGER DEFAULT 0,error_message TEXT,metadata_json TEXT)`,
-    `CREATE TABLE IF NOT EXISTS backup_objects(id TEXT PRIMARY KEY,backup_run_id TEXT NOT NULL,object_key TEXT NOT NULL,table_name TEXT,row_count INTEGER DEFAULT 0,byte_size INTEGER DEFAULT 0,checksum TEXT,encrypted INTEGER DEFAULT 0,created_at TEXT DEFAULT CURRENT_TIMESTAMP)`,
-    `CREATE INDEX IF NOT EXISTS idx_backup_runs_date ON backup_runs(status,started_at)`,
-    `CREATE INDEX IF NOT EXISTS idx_backup_objects_run ON backup_objects(backup_run_id)`,
-    `CREATE INDEX IF NOT EXISTS idx_scale_key ON platform_scale_config(key)`
-  ];
-  for(const q of sqls) await env.DB.prepare(q).run();
-  for(const [k,v] of Object.entries(NATIONAL_SCALE_DEFAULTS))
-    await env.DB.prepare(`INSERT OR IGNORE INTO platform_scale_config(id,key,value_json) VALUES(?,?,?)`).bind(crypto.randomUUID(),k,JSON.stringify(v)).run();
-}
-
-function b64(u8){let s='';for(let i=0;i<u8.length;i+=0x8000)s+=String.fromCharCode(...u8.subarray(i,i+0x8000));return btoa(s)}
-async function backupEncrypt(text,secret){
-  if(!secret) throw new Error('BACKUP_ENCRYPTION_KEY_REQUIRED');
-  const h=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(secret));
-  const key=await crypto.subtle.importKey('raw',h,{name:'AES-GCM'},false,['encrypt']);
-  const iv=crypto.getRandomValues(new Uint8Array(12));
-  const data=await crypto.subtle.encrypt({name:'AES-GCM',iv},key,new TextEncoder().encode(text));
-  return JSON.stringify({v:1,alg:'AES-256-GCM',iv:b64(iv),data:b64(new Uint8Array(data))});
-}
-async function backupHash(text){
-  const d=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(text));
-  return [...new Uint8Array(d)].map(x=>x.toString(16).padStart(2,'0')).join('');
-}
-async function backupTables(env){
-  const r=await env.DB.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name`).all();
-  return (r.results||[]).map(x=>String(x.name));
-}
-async function runNationalBackup(env,trigger='MANUAL'){
-  await ensureNationalContinuitySchema(env);
-  if(!env.BACKUP_BUCKET) throw new Error('BACKUP_R2_NOT_CONFIGURED');
-  const secret=env.BACKUP_ENCRYPTION_KEY;
-  if(!secret) throw new Error('BACKUP_ENCRYPTION_KEY_REQUIRED');
-  const runId=crypto.randomUUID(), day=new Date().toISOString().slice(0,10);
-  await env.DB.prepare(`INSERT INTO backup_runs(id,status,trigger_type,storage_provider,metadata_json) VALUES(?,?,?,?,?)`).bind(runId,'RUNNING',trigger,'R2',JSON.stringify({version:VERSION,scope:'FULL_LOGICAL_DB'})).run();
-  let objects=0,rowsTotal=0;
-  try{
-    for(const table of await backupTables(env)){
-      let offset=0, tableRows=0;
-      while(true){
-        const safe=table.replace(/"/g,'""');
-        const r=await env.DB.prepare(`SELECT * FROM "${safe}" LIMIT ? OFFSET ?`).bind(500,offset).all();
-        const rows=r.results||[]; if(!rows.length) break;
-        const plain=rows.map(x=>JSON.stringify(x)).join('\n')+'\n';
-        const enc=await backupEncrypt(plain,secret);
-        const key=`prochelia/backups/${day}/${runId}/${table}/part-${String(offset/500).padStart(8,'0')}.json.enc`;
-        await env.BACKUP_BUCKET.put(key,enc,{httpMetadata:{contentType:'application/octet-stream'}});
-        await env.DB.prepare(`INSERT INTO backup_objects(id,backup_run_id,object_key,table_name,row_count,byte_size,checksum,encrypted) VALUES(?,?,?,?,?,?,?,1)`).bind(crypto.randomUUID(),runId,key,table,rows.length,new TextEncoder().encode(enc).byteLength,await backupHash(enc)).run();
-        objects++; rowsTotal+=rows.length; tableRows+=rows.length; offset+=rows.length;
-        if(rows.length<500) break;
-      }
-      if(!tableRows){
-        const key=`prochelia/backups/${day}/${runId}/${table}/empty.json.enc`,enc=await backupEncrypt('',secret);
-        await env.BACKUP_BUCKET.put(key,enc,{httpMetadata:{contentType:'application/octet-stream'}});
-        await env.DB.prepare(`INSERT INTO backup_objects(id,backup_run_id,object_key,table_name,row_count,byte_size,checksum,encrypted) VALUES(?,?,?,?,?,?,?,1)`).bind(crypto.randomUUID(),runId,key,table,0,new TextEncoder().encode(enc).byteLength,await backupHash(enc)).run();
-        objects++;
-      }
-    }
-    await env.DB.prepare(`UPDATE backup_runs SET status='COMPLETED',completed_at=CURRENT_TIMESTAMP,object_count=?,row_count=? WHERE id=?`).bind(objects,rowsTotal,runId).run();
-    return {ok:true,runId,status:'COMPLETED',objectCount:objects,rowCount:rowsTotal,storage:'R2',encrypted:true};
-  }catch(e){
-    await env.DB.prepare(`UPDATE backup_runs SET status='FAILED',completed_at=CURRENT_TIMESTAMP,object_count=?,row_count=?,error_message=? WHERE id=?`).bind(objects,rowsTotal,String(e.message||e),runId).run();
-    throw e;
-  }
-}
 async function nationalScaleStatus(env){
-  await ensureNationalContinuitySchema(env);
-  const c=await env.DB.prepare(`SELECT key,value_json FROM platform_scale_config ORDER BY key`).all();
+  if(!env?.DB?.prepare) throw new Error('DATABASE_REQUIRED');
   const t=await env.DB.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name`).all();
-  return {ok:true,mode:'NATIONAL_SCALE',artificialUserCap:false,unlimitedInBusinessRules:true,database:'D1',documents:'R2_RECOMMENDED',backups:{provider:'R2',automatic:true,encrypted:true},pagination:{cursorRecommended:true,maxPageSize:100},tables:(t.results||[]).map(x=>x.name),config:(c.results||[])};
+  const tableNames=(t.results||[]).map(x=>String(x.name));
+  const c=tableNames.includes('platform_scale_config')
+    ? await env.DB.prepare(`SELECT key,value_json FROM platform_scale_config ORDER BY key`).all()
+    : {results:[]};
+  const encryptionConfigured=typeof env.BACKUP_ENCRYPTION_KEY==='string'&&env.BACKUP_ENCRYPTION_KEY.trim().length>0;
+  const bucketBindingPresent=!!env.BACKUP_BUCKET&&typeof env.BACKUP_BUCKET.put==='function';
+  return {ok:true,mode:'NATIONAL_SCALE',artificialUserCap:false,unlimitedInBusinessRules:true,database:'D1',documents:'R2_RECOMMENDED',backups:{provider:'R2',bindingPresent:bucketBindingPresent,configured:false,verificationStatus:'UNVERIFIED',automatic:false,scheduleStatus:'NOT_ATTESTED',encryptionConfigured,encrypted:false,retentionDays:null,retentionStatus:'UNVERIFIED'},pagination:{cursorRecommended:true,maxPageSize:100},tables:tableNames,config:(c.results||[])};
 }
 async function backupStatus(env){
-  await ensureNationalContinuitySchema(env);
-  const r=await env.DB.prepare(`SELECT * FROM backup_runs ORDER BY started_at DESC LIMIT 20`).all();
-  return {ok:true,configured:!!env.BACKUP_BUCKET&&!!env.BACKUP_ENCRYPTION_KEY,automatic:true,frequency:'DAILY',retentionDays:90,runs:r.results||[]};
+  if(!env?.DB?.prepare) throw new Error('DATABASE_REQUIRED');
+  const schema=await env.DB.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name='backup_runs'`).all();
+  const schemaReady=(schema.results||[]).length>0;
+  const r=schemaReady
+    ? await env.DB.prepare(`SELECT * FROM backup_runs ORDER BY started_at DESC LIMIT 20`).all()
+    : {results:[]};
+  const encryptionConfigured=typeof env.BACKUP_ENCRYPTION_KEY==='string'&&env.BACKUP_ENCRYPTION_KEY.trim().length>0;
+  const bindingPresent=!!env.BACKUP_BUCKET&&typeof env.BACKUP_BUCKET.put==='function';
+  return {ok:true,schemaReady,bindingPresent,configured:false,verificationStatus:'UNVERIFIED',encryptionConfigured,automatic:false,frequency:null,scheduleStatus:'NOT_ATTESTED',retentionDays:null,retentionStatus:'UNVERIFIED',runs:r.results||[]};
 }
 
 const __procheliaNationalHandle = handle;
@@ -4249,7 +4180,7 @@ handle = async function(request,env){
     }
     if(request.method==='POST'&&url.pathname==='/api/system/backup/run'){
       const auth=await getSessionUser(request,env).catch(()=>null); if(!auth?.user||String(auth.user.role||'').toUpperCase()!=='GERANTE') return json({ok:false,error:'FORBIDDEN'},403);
-      return json(await runNationalBackup(env,'MANUAL'));
+      return json({ok:false,error:'SIGNED_BACKUP_WORKFLOW_REQUIRED',message:'Direct Worker backup is disabled; use the signed EU R2 backup workflow.'},503);
     }
     return __procheliaNationalHandle(request,env);
   }catch(e){return json({ok:false,error:'NATIONAL_CONTINUITY_ERROR',message:String(e.message||e)},500)}
@@ -4585,7 +4516,7 @@ async function strictProductionAudit(request,env){
   const extra=[
     {code:'SECURITY_CODE_DELIVERY',status:finalSecretConfigured(env,'SECURITY_CODE_WEBHOOK')&&finalSecretConfigured(env,'SECURITY_CODE_WEBHOOK_SECRET')?'OK':'NOT_CONFIGURED'},
     {code:'CORS_ORIGIN',status:finalSecretConfigured(env,'CORS_ORIGIN')?'OK':'NOT_CONFIGURED'},
-    {code:'BACKUP_R2',status:env.BACKUP_BUCKET&&finalSecretConfigured(env,'BACKUP_ENCRYPTION_KEY')?'OK':'NOT_CONFIGURED'},
+    {code:'BACKUP_R2',status:'NOT_VERIFIED',bindingPresent:!!env.BACKUP_BUCKET&&typeof env.BACKUP_BUCKET.put==='function',encryptionConfigured:finalSecretConfigured(env,'BACKUP_ENCRYPTION_KEY')},
     {code:'NOTIFICATION_PROVIDER',status:finalSecretConfigured(env,'NOTIFICATION_PROVIDER')?'OK':'NOT_CONFIGURED'},
     {code:'MAPS_PROVIDER',status:finalSecretConfigured(env,'MAPS_API_KEY')?'OK':'NOT_CONFIGURED'}
   ];
@@ -4610,6 +4541,7 @@ async function strictProductionAudit(request,env){
   // GET production-check is read-only: no config writes or journal side effects.
   return json({ok:true,version:VERSION,configuration_gate:configurationReady?'PASS':'BLOCKED',production_gate:overall?'OPEN':'CLOSED',ready_for_real_traffic:overall,checks,blocking:blocking.map(x=>x.code),note:overall?'All configuration and independently verified release-evidence gates passed.':'Production traffic remains blocked: configuration, independent acceptance evidence, and explicit human release approval are all required.'});
 }
+
 
 const __procheliaProductionSafetyHandle = handle;
 handle = async function(request,env){
