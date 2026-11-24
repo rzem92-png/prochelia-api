@@ -23,7 +23,7 @@ concurrency:
 jobs:
   restore-test-v2:
     name: Restaurer et vérifier la base D1 v2 isolée
-    if: ${{ inputs.confirm_isolated_test == true }}
+    if: ${{ github.actor == 'rzem92-png' && inputs.confirm_isolated_test == true }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
