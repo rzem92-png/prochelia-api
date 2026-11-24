@@ -848,9 +848,19 @@ export function paymentsConfigured(env) {
   return false;
 }
 
+function paymentUnavailableResponse() {
+  return json({
+    ok: false,
+    error: 'PAYMENT_PROVIDER_NOT_CONFIGURED',
+    version: VERSION,
+    write_enabled: false
+  }, 503);
+}
+
 async function paymentOnboard(request, env) {
   const auth = await getSessionUser(request, env);
   if (!requireRole(auth, ['intervenant'])) return json({ok:false,error:auth?.user?'FORBIDDEN':'UNAUTHENTICATED',version:VERSION},auth?.user?403:401);
+  if (!paymentsConfigured(env)) return paymentUnavailableResponse();
   await ensurePaymentSchema(env);
   const body = await readJson(request);
   const provider = paymentProvider(env);
@@ -869,6 +879,7 @@ async function paymentOnboard(request, env) {
 async function paymentStatus(request, env) {
   const auth=await getSessionUser(request,env);
   if(!auth) return json({ok:false,error:'UNAUTHENTICATED',version:VERSION},401);
+  if (!paymentsConfigured(env)) return json({ok:true,version:VERSION,provider:null,payments_configured:false,wallet:null,payout_account:null,pending_payouts:0,write_enabled:false},200);
   await ensurePaymentSchema(env);
   let wallet=await env.DB.prepare('SELECT * FROM wallets WHERE user_id=? LIMIT 1').bind(auth.user.id).first();
   if(!wallet){ await env.DB.prepare('INSERT INTO wallets (id,user_id) VALUES (?,?)').bind(crypto.randomUUID(),auth.user.id).run(); wallet=await env.DB.prepare('SELECT * FROM wallets WHERE user_id=? LIMIT 1').bind(auth.user.id).first(); }
@@ -880,6 +891,7 @@ async function paymentStatus(request, env) {
 async function createMissionPayment(request, env) {
   const auth=await getSessionUser(request,env);
   if(!requireRole(auth,['gerante'])) return json({ok:false,error:auth?.user?'FORBIDDEN':'UNAUTHENTICATED',version:VERSION},auth?.user?403:401);
+  if (!paymentsConfigured(env)) return paymentUnavailableResponse();
   await ensurePaymentSchema(env);
   const body=await readJson(request);
   const missionId=clean(body?.mission_id), clientId=clean(body?.client_id), intervenantId=clean(body?.intervenant_id);
@@ -947,6 +959,7 @@ export async function reservePayoutAtomically(env, input) {
 async function payoutRequest(request, env) {
   const auth = await getSessionUser(request, env);
   if (!requireRole(auth, ['intervenant'])) return json({ok:false,error:auth?.user?'FORBIDDEN':'UNAUTHENTICATED',version:VERSION}, auth?.user ? 403 : 401);
+  if (!paymentsConfigured(env)) return paymentUnavailableResponse();
   await ensurePaymentSchema(env);
   const body = await readJson(request);
   const amount = moneyCents(body?.amount_eur);
@@ -1024,6 +1037,8 @@ export function requiresAtomicFinancialSettlement(eventType) {
 }
 
 async function paymentWebhook(request, env) {
+  // No PSP adapter is operational: reject before reading unbounded input or touching D1.
+  if (!paymentsConfigured(env)) return paymentUnavailableResponse();
   // Reject unauthenticated and malformed events before any D1 schema access.
   // This prevents arbitrary callers from triggering CREATE TABLE/INDEX writes.
   const raw = await request.text();
@@ -1083,6 +1098,7 @@ async function paymentWebhook(request, env) {
 async function openPaymentDispute(request, env) {
   const auth = await getSessionUser(request, env);
   if (!requireRole(auth, ['client','gerante'])) return json({ok:false,error:auth?.user?'FORBIDDEN':'UNAUTHENTICATED',version:VERSION}, auth?.user ? 403 : 401);
+  if (!paymentsConfigured(env)) return paymentUnavailableResponse();
   await ensurePaymentSchema(env);
   const body = await readJson(request);
   const missionId = clean(body?.mission_id);
