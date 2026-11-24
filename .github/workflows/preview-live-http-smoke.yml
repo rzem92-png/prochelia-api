@@ -1,0 +1,71 @@
+name: PROCHÉLIA Preview live HTTP smoke
+
+on:
+  push:
+    branches:
+      - test/preview-live-http-smoke-2026-11-24
+  pull_request:
+    paths:
+      - ".github/workflows/preview-live-http-smoke.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: prochelia-preview-live-http-smoke
+  cancel-in-progress: false
+
+jobs:
+  preview-live-http:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Check the current Pages Preview document
+        shell: bash
+        run: |
+          set -euo pipefail
+          url="https://fix-frontend-finance-confirm.prochelia.pages.dev/"
+          status="$(curl --silent --show-error --max-time 20 --output "$RUNNER_TEMP/pages.html" --write-out '%{http_code}' "$url")"
+          test "$status" = "200" || { echo "::error::Pages Preview returned HTTP $status"; exit 1; }
+          grep -Eiq '<!doctype html' "$RUNNER_TEMP/pages.html" || {
+            echo "::error::Pages Preview did not return an HTML5 document."
+            exit 1
+          }
+          echo "PASS: Pages Preview document returned HTTP 200."
+
+      - name: Check read-only API health through both Preview Workers and Pages proxy
+        shell: bash
+        run: |
+          set -euo pipefail
+          check_health() {
+            local label="$1" url="$2" output="$RUNNER_TEMP/health-$3.json" status
+            status="$(curl --silent --show-error --max-time 20 --output "$output" --write-out '%{http_code}' "$url")"
+            test "$status" = "200" || { echo "::error::$label returned HTTP $status"; exit 1; }
+            jq -e '.ok == true and .database == true' "$output" >/dev/null || {
+              echo "::error::$label did not confirm a successful read-only D1 health check."
+              jq -c '{ok, database, service, version, error}' "$output" || true
+              exit 1
+            }
+            echo "PASS: $label (HTTP 200, D1 SELECT 1)."
+          }
+          check_health "Legacy API Preview Worker" "https://prochelia-api-preview.rzem92.workers.dev/api/health" "legacy-worker"
+          check_health "Current Pages proxy Worker" "https://fix-pages-proxy-preview-cors-2026-11-23.rzem92.workers.dev/api/health" "proxy-worker"
+          check_health "Pages same-origin API proxy" "https://fix-frontend-finance-confirm.prochelia.pages.dev/api/health" "pages-proxy"
+
+      - name: Confirm unauthenticated tenant, Device Trust and accounting paths fail closed
+        shell: bash
+        run: |
+          set -euo pipefail
+          expect_denied() {
+            local label="$1" url="$2" output="$RUNNER_TEMP/denied-$3.json" status
+            status="$(curl --silent --show-error --max-time 20 --output "$output" --write-out '%{http_code}' "$url")"
+            case "$status" in
+              401|403) echo "PASS: $label denied unauthenticated access (HTTP $status)." ;;
+              *) echo "::error::$label expected HTTP 401/403 without a session, received $status"; jq -c '{ok,error,write_enabled}' "$output" 2>/dev/null || true; exit 1 ;;
+            esac
+          }
+          base="https://fix-frontend-finance-confirm.prochelia.pages.dev"
+          expect_denied "Tenant context" "$base/api/tenant/context" "tenant"
+          expect_denied "Device Trust credential list" "$base/api/security/device/list" "device"
+          expect_denied "Accounting ledger health" "https://fix-pages-proxy-preview-cors-2026-11-23.rzem92.workers.dev/api/accounting/health" "accounting"
+          echo "No cookies, credentials, synthetic rows, or mutating requests were sent."
