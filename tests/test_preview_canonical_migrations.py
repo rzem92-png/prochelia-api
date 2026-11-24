@@ -1067,7 +1067,7 @@ db.execute("""
       'market-opportunity-revoke', 'market-tenant-a', 'market-mission-revoke',
       'market-consent-revoke', 'CLEANING', 'Nettoyage ponctuel d’un logement',
       'Aubergenville', '2026-11-24T09:00:00Z', '2026-11-24T11:00:00Z',
-      4000, 'EUR', 'market-client-a', '2026-11-23T23:00:00Z'
+      4000, 'EUR', 'market-client-a', datetime('now','+7 days')
     )
 """)
 db.execute("UPDATE mission_opportunity_consents SET revoked_at=CURRENT_TIMESTAMP WHERE id='market-consent-revoke'")
