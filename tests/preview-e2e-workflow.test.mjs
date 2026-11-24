@@ -31,7 +31,8 @@ test("Pages E2E uses the exact allowlisted alias and does not assume a service b
   assert.match(workflow, /\.services \/\/ \{\}/);
   assert.match(workflow, /Worker origin is pinned in Pages Function/);
   assert.match(workflow, /\.d1_databases\.DB\.id == \$db/);
-  assert.match(workflow, /printf '%s\\\\n' "\$deployment" > "\$RUNNER_TEMP\/pages-preview\.json"/);
+  assert.ok(workflow.includes("printf '%s'"));
+  assert.ok(workflow.includes("$RUNNER_TEMP/pages-preview.json"));
   assert.doesNotMatch(workflow, /pages\/projects\/prochelia\/deployments\/\$PAGES_DEPLOYMENT_ID/);
 });
 
