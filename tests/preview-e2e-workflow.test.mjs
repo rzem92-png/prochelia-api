@@ -63,6 +63,7 @@ test("authenticated checks target the legacy Preview Worker explicitly and never
 test("authenticated same-origin Pages proxy forwards synthetic sessions and enforces role-scoped directory access", () => {
   assert.match(workflow, /Exercise authenticated same-origin Pages proxy with synthetic sessions/);
   assert.match(workflow, /Origin: base/);
+  assert.match(workflow, /headers\.Cookie = 'prochelia_session=' \+ token/);
   assert.match(workflow, /E2E_MANAGER_TOKEN/);
   assert.match(workflow, /E2E_CLIENT_TOKEN/);
   assert.match(workflow, /await expectStatus\('\/api\/clients', null, 401\)/);
