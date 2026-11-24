@@ -1095,6 +1095,7 @@ financial_tenant_triggers = {
     "trg_payment_transaction_tenant_insert",
     "trg_payout_request_tenant_insert",
     "trg_payment_dispute_tenant_insert",
+    "trg_payment_dispute_tenant_update",
     "trg_wallet_ledger_tenant_insert",
     "trg_payment_reconciliation_tenant_insert",
     "trg_payment_reconciliation_tenant_update",
@@ -1287,6 +1288,45 @@ for sql in [
     try:
         db.execute(sql)
         raise AssertionError(f"Dispute with mismatched source identities was accepted: {sql}")
+    except sqlite3.IntegrityError as exc:
+        assert "PAYMENT_DISPUTE_TRANSACTION_TENANT_MISMATCH" in str(exc), str(exc)
+
+# Legacy dispute rows may be attributed only when both parties still match the source transaction.
+# Temporarily omit the INSERT guard to model rows that predate this migration; restore it before testing UPDATE.
+db.execute("DROP TRIGGER trg_payment_dispute_tenant_insert")
+for dispute_id, client_id, intervenant_id in [
+    ("finance-dispute-legacy-valid", "market-client-a-row", None),
+    ("finance-dispute-legacy-client-mismatch", "market-client-b-row", None),
+    ("finance-dispute-legacy-provider-mismatch", "market-client-a-row", "market-worker-b-row"),
+]:
+    db.execute("""
+        INSERT INTO payment_disputes(
+          id,mission_id,transaction_id,client_id,intervenant_id,reason,amount_cents,tenant_id
+        ) VALUES (?,?,?,?,?,'legacy attribution fixture',1000,NULL)
+    """, (dispute_id, "market-mission-opportunity", "finance-tx-a", client_id, intervenant_id))
+db.execute("""
+    CREATE TRIGGER trg_payment_dispute_tenant_insert
+    BEFORE INSERT ON payment_disputes
+    WHEN NEW.tenant_id IS NULL OR NOT EXISTS (
+      SELECT 1 FROM payment_transactions tx
+      WHERE tx.id=NEW.transaction_id AND tx.tenant_id=NEW.tenant_id
+        AND tx.mission_id=NEW.mission_id
+        AND tx.client_id IS NEW.client_id
+        AND tx.intervenant_id IS NEW.intervenant_id
+    )
+    BEGIN SELECT RAISE(ABORT,'PAYMENT_DISPUTE_TRANSACTION_TENANT_MISMATCH'); END;
+""")
+db.execute("""
+    UPDATE payment_disputes SET tenant_id='market-tenant-a'
+    WHERE id='finance-dispute-legacy-valid'
+""")
+for dispute_id in ("finance-dispute-legacy-client-mismatch", "finance-dispute-legacy-provider-mismatch"):
+    try:
+        db.execute(
+            "UPDATE payment_disputes SET tenant_id='market-tenant-a' WHERE id=?",
+            (dispute_id,),
+        )
+        raise AssertionError(f"Legacy dispute with mismatched parties was attributed: {dispute_id}")
     except sqlite3.IntegrityError as exc:
         assert "PAYMENT_DISPUTE_TRANSACTION_TENANT_MISMATCH" in str(exc), str(exc)
 
