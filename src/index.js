@@ -2451,9 +2451,9 @@ async function capacityDashboard(request, env) {
   return json({ok:true,version:VERSION,missions_last_7_days:missions,active_intervenants:available,utilization_percent:utilization,recommendation});
 }
 
-  const schemaGate = await schemaReadinessResponse(env, ['finance_forecasts'], 'FINANCE_FORECAST_SCHEMA_NOT_READY'); if (schemaGate) return schemaGate;
 async function financeForecast(request, env) {
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
+  const schemaGate = await schemaReadinessResponse(env, ['finance_forecasts'], 'FINANCE_FORECAST_SCHEMA_NOT_READY'); if (schemaGate) return schemaGate;
   const months=Math.max(1,Math.min(12,Number((await readJson(request)||{}).months||3)));
   const tx=await env.DB.prepare(`SELECT COALESCE(SUM(gross_cents),0) gross,COALESCE(SUM(commission_cents),0) commission,COALESCE(SUM(provider_fee_cents),0) provider_fee,COALESCE(SUM(refund_cents),0) refunds,COALESCE(SUM(net_intervenant_cents),0) intervenant FROM payment_transactions WHERE created_at>=datetime('now','-90 day')`).first();
   const base=Number(tx?.gross||0)/3;
