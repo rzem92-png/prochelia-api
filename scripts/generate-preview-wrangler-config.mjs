@@ -25,7 +25,8 @@ const origins = String(source.previews?.vars?.CORS_ORIGIN || "")
   .filter(Boolean);
 const requiredOrigins = [
   "https://pages-proxy-2026-11-23.prochelia.pages.dev",
-  "https://fix-frontend-finance-confirm.prochelia.pages.dev"
+  "https://fix-frontend-finance-confirm.prochelia.pages.dev",
+  "https://fix-frontend-accounting-read.prochelia.pages.dev"
 ];
 if (origins.includes("*") || origins.some((origin) => !origin.startsWith("https://")) ||
     requiredOrigins.some((origin) => !origins.includes(origin))) {

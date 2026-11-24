@@ -23,6 +23,7 @@ test("Pages proxy origin is allowlisted only in the Worker Previews block", () =
   assert.equal(config.previews.vars.APP_ENV, "preview");
   assert.ok(origins.includes("https://pages-proxy-2026-11-23.prochelia.pages.dev"));
   assert.ok(origins.includes("https://fix-frontend-finance-confirm.prochelia.pages.dev"));
+  assert.ok(origins.includes("https://fix-frontend-accounting-read.prochelia.pages.dev"));
   assert.ok(origins.every((origin) => origin.startsWith("https://")));
   assert.ok(!origins.includes("*"));
   assert.equal(config.vars, undefined);

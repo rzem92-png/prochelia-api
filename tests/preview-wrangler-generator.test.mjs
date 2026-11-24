@@ -54,6 +54,7 @@ test("generated Worker config is isolated, redacts query strings and excludes un
   const origins = preview.vars.CORS_ORIGIN.split(",");
   assert.ok(origins.includes("https://pages-proxy-2026-11-23.prochelia.pages.dev"));
   assert.ok(origins.includes("https://fix-frontend-finance-confirm.prochelia.pages.dev"));
+  assert.ok(origins.includes("https://fix-frontend-accounting-read.prochelia.pages.dev"));
   assert.ok(origins.every((origin) => origin.startsWith("https://") && origin !== "*"));
 });
 
