@@ -52,6 +52,27 @@ jobs:
           check_health "Current Pages proxy Worker" "https://fix-pages-proxy-preview-cors-2026-11-23.rzem92.workers.dev/api/health" "proxy-worker"
           check_health "Pages same-origin API proxy" "https://fix-frontend-finance-confirm.prochelia.pages.dev/api/health" "pages-proxy"
 
+      - name: Verify the public webhook receiver rejects a synthetic invalid Stripe signature before writes
+        shell: bash
+        run: |
+          set -euo pipefail
+          body='{"id":"evt_synthetic_http_smoke","type":"payment_succeeded","provider":"stripe"}'
+          timestamp="$(date +%s)"
+          invalid_signature="t=$timestamp,v1=$(printf '%064d' 0)"
+          status="$(curl --silent --show-error --max-time 20 --output "$RUNNER_TEMP/webhook-rejected.json" --write-out '%{http_code}' \
+            --request POST \
+            --header 'Origin: https://fix-frontend-finance-confirm.prochelia.pages.dev' \
+            --header 'Content-Type: application/json' \
+            --header "Stripe-Signature: $invalid_signature" \
+            --data "$body" \
+            'https://fix-pages-proxy-preview-cors-2026-11-23.rzem92.workers.dev/api/payments/webhook')"
+          test "$status" = "401" || {
+            echo "::error::Invalid synthetic webhook signature expected HTTP 401, received $status."
+            jq -c '{ok,error,write_enabled}' "$RUNNER_TEMP/webhook-rejected.json" 2>/dev/null || true
+            exit 1
+          }
+          jq -e '.error == "INVALID_WEBHOOK_SIGNATURE"' "$RUNNER_TEMP/webhook-rejected.json" >/dev/null
+          echo "PASS: invalid synthetic Stripe signature rejected before event parsing or D1 writes."
       - name: Confirm unauthenticated tenant, Device Trust and accounting paths fail closed
         shell: bash
         run: |
