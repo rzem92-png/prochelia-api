@@ -69,10 +69,10 @@ jobs:
             exit 1
           fi
 
-      - name: Checkout pinned reviewed Preview branch commit (D1 config)
+      - name: Checkout exact reviewed Preview workflow commit (D1 config and migration source)
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
-          ref: 1fc258c9c8d25e5e7b89241504218bf102afbf27
+          ref: ${{ github.sha }}
 
       - name: Checkout current workflow tooling for backup attestation
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
@@ -233,7 +233,7 @@ jobs:
               run_id: process.env.GITHUB_RUN_ID,
               commit_sha: process.env.GITHUB_SHA,
               ref: process.env.GITHUB_REF,
-              migration_source_sha: "1fc258c9c8d25e5e7b89241504218bf102afbf27"
+              migration_source_sha: process.env.GITHUB_SHA
             },
             validation: {
               encryption: "OpenPGP-AES256",
