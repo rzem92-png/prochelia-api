@@ -1,11 +1,24 @@
 name: PROCHÉLIA — Preview directory API end-to-end acceptance
 
 on:
+  push:
+    branches:
+      - feat/supra-canonical-tenant-integration-2026-11-20
+      - fix/tenant-accounting-api-readonly-gate-2026-11-22
+      - test/preview-directory-e2e-current-pages-2026-11-24
+    paths:
+      - ".github/workflows/preview-directory-e2e-acceptance.yml"
+      - "tests/preview-e2e-workflow.test.mjs"
   workflow_dispatch:
     inputs:
       confirmation:
         description: "Type RUN_PREVIEW_DIRECTORY_E2E to seed synthetic Preview data and test the live Pages-to-Worker path"
         required: true
+        type: string
+      frontend_commit_sha:
+        description: "Exact 40-character HEAD of the selected frontend Preview branch"
+        required: false
+        default: "24137dd2aeb83b76dd7b7584017c41ef545d9318"
         type: string
   workflow_run:
     workflows:
@@ -22,13 +35,33 @@ concurrency:
 jobs:
   preview-directory-e2e:
     if: >-
-      github.ref == 'refs/heads/main' &&
       (
-        (github.event_name == 'workflow_dispatch' && inputs.confirmation == 'RUN_PREVIEW_DIRECTORY_E2E') ||
-        (github.event_name == 'workflow_run' &&
-         github.event.workflow_run.event == 'workflow_dispatch' &&
-         github.event.workflow_run.conclusion == 'success' &&
-         github.event.workflow_run.head_branch == 'main')
+        github.event_name == 'push' &&
+        (
+          github.ref == 'refs/heads/feat/supra-canonical-tenant-integration-2026-11-20' ||
+          github.ref == 'refs/heads/fix/tenant-accounting-api-readonly-gate-2026-11-22' ||
+          (
+            github.ref == 'refs/heads/test/preview-directory-e2e-current-pages-2026-11-24' &&
+            github.actor == 'rzem92-png' &&
+            contains(github.event.head_commit.message, '[RUN_PREVIEW_DIRECTORY_E2E]')
+          )
+        )
+      ) ||
+      (
+        github.event_name == 'workflow_dispatch' &&
+        inputs.confirmation == 'RUN_PREVIEW_DIRECTORY_E2E' &&
+        (
+          github.ref == 'refs/heads/main' ||
+          github.ref == 'refs/heads/feat/supra-canonical-tenant-integration-2026-11-20' ||
+          github.ref == 'refs/heads/fix/tenant-accounting-api-readonly-gate-2026-11-22'
+        )
+      ) ||
+      (
+        github.ref == 'refs/heads/main' &&
+        github.event_name == 'workflow_run' &&
+        github.event.workflow_run.event == 'workflow_dispatch' &&
+        github.event.workflow_run.conclusion == 'success' &&
+        github.event.workflow_run.head_branch == 'main'
       )
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -36,8 +69,8 @@ jobs:
       CLOUDFLARE_ACCOUNT_ID: f2a79e9fa41566a8ec80fb24c02c60eb
       PREVIEW_DB_NAME: prochelia-preview-eu-2026-11-17
       PREVIEW_DB_ID: e3cf167c-37e1-4d72-9ac6-b3e27c14b97f
-      PAGES_PREVIEW_URL: https://83a36d32.prochelia.pages.dev
-      PAGES_DEPLOYMENT_ID: 83a36d32-4880-4417-a684-f9247e42debf
+      FRONTEND_BRANCH: fix/frontend-accounting-readonly-proxy-2026-11-24
+      FRONTEND_COMMIT_SHA: ${{ inputs.frontend_commit_sha || '24137dd2aeb83b76dd7b7584017c41ef545d9318' }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -84,25 +117,59 @@ jobs:
             jq -c '{result: {name: .result.name, uuid: .result.uuid}, errors}' "$RUNNER_TEMP/preview-d1.json"
             exit 1
           }
+          # The frontend repository is private; pin its verified HEAD explicitly.
+          # The Pages deployment must match both this branch and exact commit.
+          [[ "$FRONTEND_COMMIT_SHA" =~ ^[0-9a-f]{40}$ ]] || {
+            echo "::error::A valid pinned frontend commit SHA is required."
+            exit 1
+          }
+          cf_request "Pages Preview deployment list" \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/pages/projects/prochelia/deployments?env=preview&per_page=10" "$RUNNER_TEMP/pages-previews.json"
+          deployment="$(jq -c --arg branch "$FRONTEND_BRANCH" --arg commit "$FRONTEND_COMMIT_SHA" '
+            (.result // [])
+            | (if type == "array" then . else (.deployments // []) end)
+            | map(select(.environment == "preview" and
+                         .deployment_trigger.metadata.branch == $branch and
+                         .deployment_trigger.metadata.commit_hash == $commit))
+            | sort_by(.created_on) | last // empty
+          ' "$RUNNER_TEMP/pages-previews.json")"
+          [[ -n "$deployment" ]] || {
+            echo "::error::No Pages Preview deployment matches frontend branch $FRONTEND_BRANCH at $FRONTEND_COMMIT_SHA."
+            exit 1
+          }
+          PAGES_DEPLOYMENT_ID="$(jq -r '.id // empty' <<< "$deployment")"
+          [[ -n "$PAGES_DEPLOYMENT_ID" ]] || { echo "::error::Pages deployment ID missing."; exit 1; }
+          # The Pages Function allowlists this exact branch alias; hash deployment URLs are not accepted by its host guard.
+          PAGES_PREVIEW_URL="https://fix-frontend-accounting-read.prochelia.pages.dev"
+          case "$PAGES_PREVIEW_URL" in
+            https://fix-frontend-accounting-read.prochelia.pages.dev) ;;
+            *) echo "::error::Unexpected Pages Preview hostname."; exit 1 ;;
+          esac
+          printf 'PAGES_DEPLOYMENT_ID=%s\nPAGES_PREVIEW_URL=%s\nFRONTEND_COMMIT_SHA=%s\n' \
+            "$PAGES_DEPLOYMENT_ID" "$PAGES_PREVIEW_URL" "$FRONTEND_COMMIT_SHA" >> "$GITHUB_ENV"
           cf_request "Pages Preview deployment access" \
             "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/pages/projects/prochelia/deployments/$PAGES_DEPLOYMENT_ID" "$RUNNER_TEMP/pages-preview.json"
-          if ! jq -e --arg db "$PREVIEW_DB_ID" --arg worker "prochelia-api-preview" --arg commit "3846562300e97a1816b2aa7e317448449270c2bc" '
+          if ! jq -e --arg db "$PREVIEW_DB_ID" --arg alias "$PAGES_PREVIEW_URL" --arg branch "$FRONTEND_BRANCH" --arg commit "$FRONTEND_COMMIT_SHA" '
             .success == true and
             .result.environment == "preview" and
             .result.uses_functions == true and
             .result.d1_databases.DB.id == $db and
-            .result.services.PROCHELIA_API.service == $worker and
+            (.result.services // {}) == {} and
+            ((.result.aliases // []) | index($alias) != null) and
+            .result.deployment_trigger.metadata.branch == $branch and
             .result.deployment_trigger.metadata.commit_hash == $commit
           ' "$RUNNER_TEMP/pages-preview.json" >/dev/null; then
-            echo "::error::Pages Preview deployment bindings/commit mismatch. Safe metadata diagnostic follows."
-            jq -c --arg db "$PREVIEW_DB_ID" --arg worker "prochelia-api-preview" --arg commit "e69fde70fb28405aa8117eaf041aed618d3da664" '
+            echo "::error::Pages Preview deployment bindings/branch/commit mismatch. Safe metadata diagnostic follows."
+            jq -c --arg db "$PREVIEW_DB_ID" --arg alias "$PAGES_PREVIEW_URL" --arg branch "$FRONTEND_BRANCH" --arg commit "$FRONTEND_COMMIT_SHA" '
               {
-                expected: {environment: "preview", uses_functions: true, d1_database_id: $db, worker_service: $worker, commit_hash: $commit},
+                expected: {environment: "preview", uses_functions: true, d1_database_id: $db, preview_alias: $alias, worker_service: "pinned Preview Worker origin in Pages Function", branch: $branch, commit_hash: $commit},
                 observed: {
                   environment: .result.environment,
                   uses_functions: .result.uses_functions,
                   d1_database_id: .result.d1_databases.DB.id,
-                  worker_service: .result.services.PROCHELIA_API.service,
+                  preview_aliases: .result.aliases,
+                  worker_service: (.result.services.PROCHELIA_API.service // null),
+                  branch: .result.deployment_trigger.metadata.branch,
                   commit_hash: .result.deployment_trigger.metadata.commit_hash
                 }
               }
@@ -123,6 +190,40 @@ jobs:
           JSON
           printf 'CLOUDFLARE_API_TOKEN=%s\n' "$token" >> "$GITHUB_ENV"
           echo "Exact isolated Preview D1 identity verified."
+
+      - name: Exercise same-origin Pages-to-Worker proxy without a session
+        id: pages_proxy
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+          proxy_gap=0
+          for route in /api/intervenant/workspace /api/intervenant/opportunities /api/intervenant/assignments /api/intervenant/applications; do
+            status="$(curl --silent --show-error --output "$RUNNER_TEMP/pages-proxy.json" --write-out '%{http_code}' "$PAGES_PREVIEW_URL$route")"
+            if [[ "$status" == "401" ]]; then
+              echo "PASS: $route rejects unauthenticated access (HTTP 401)."
+            elif [[ "$status" == "404" ]]; then
+              echo "::warning::$route is allowlisted by Pages but is not implemented by the active Preview Worker (HTTP 404)."
+              jq -c '{ok, error, status}' "$RUNNER_TEMP/pages-proxy.json" 2>/dev/null || true
+              proxy_gap=1
+            else
+              echo "::error::Pages proxy $route expected HTTP 401; got $status."
+              jq -c '{ok, error, status}' "$RUNNER_TEMP/pages-proxy.json" 2>/dev/null || true
+              exit 1
+            fi
+          done
+          options_status="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' \
+            -X OPTIONS -H "Origin: $PAGES_PREVIEW_URL" -H "Access-Control-Request-Method: GET" \
+            "$PAGES_PREVIEW_URL/api/intervenant/workspace")"
+          [[ "$options_status" == "204" ]] || {
+            echo "::error::Pages same-origin OPTIONS expected HTTP 204; got $options_status."
+            exit 1
+          }
+          if [[ "$proxy_gap" == "1" ]]; then
+            echo "::error::Pages proxy readiness is incomplete; continue with independent Worker directory tests, then fail the final acceptance gate."
+            exit 1
+          fi
+          echo "PASS: Pages Function -> pinned Preview Worker origin, unauthenticated route guards and same-origin preflight verified without data writes."
 
       - name: Read current directory offsets without reading personal rows
         shell: bash
@@ -160,17 +261,16 @@ jobs:
             id: prefix + 'client-user-' + String(i).padStart(3,'0'),
             email: `e2e+${run}-client-${i}@example.test`,
             first: 'Synthetic' + String(i).padStart(3,'0'),
-            last: '\u{10FFFF}E2E' + run
+            last: '\\u{10FFFF}E2E' + run
           }));
           const providerId = prefix + 'provider-user';
           const users = [
             [managerId,'gerante',`e2e+${run}-manager@example.test`,'E2E','Manager'],
             ...clientUsers.map(u=>[u.id,'client',u.email,u.first,u.last]),
-            [providerId,'intervenant',`e2e+${run}-provider@example.test`,'E2EProvider','\u{10FFFF}E2E'+run]
+            [providerId,'intervenant',`e2e+${run}-provider@example.test`,'E2EProvider','\\u{10FFFF}E2E'+run]
           ];
-          // The production users schema requires password_hash even for synthetic E2E accounts.
-          // Use an unguessable, non-login-capable fixture value; the E2E authenticates via
-          // independently generated session tokens and SHA-256 token hashes.
+          // The users schema requires password_hash even for synthetic E2E accounts.
+          // The E2E authenticates via independently generated session tokens and hashes.
           const userValues = users.map(u=>'('+[...u.map(q),q('active'),q(hash(randomBytes(48).toString('base64url')))].join(',')+')').join(',\n');
           const clientValues = clientUsers.map((u,i)=>'('+[
             q(prefix+'client-'+String(i).padStart(3,'0')),q(u.id),
@@ -281,10 +381,23 @@ jobs:
           fi
           [[ "$PREVIEW_DB_ID" == "e3cf167c-37e1-4d72-9ac6-b3e27c14b97f" ]]
           npx --yes wrangler@4 d1 execute "$PREVIEW_DB_NAME" --remote --config "$RUNNER_TEMP/wrangler.preview.json" --file="$RUNNER_TEMP/preview-e2e-cleanup.sql" --yes
-          payload="{\"sql\":\"SELECT (SELECT COUNT(*) FROM users WHERE id LIKE 'e2e-$GITHUB_RUN_ID-%') AS users, (SELECT COUNT(*) FROM sessions WHERE id LIKE 'e2e-$GITHUB_RUN_ID-%') AS sessions, (SELECT COUNT(*) FROM clients WHERE id LIKE 'e2e-$GITHUB_RUN_ID-%') AS clients, (SELECT COUNT(*) FROM intervenants WHERE id LIKE 'e2e-$GITHUB_RUN_ID-%') AS intervenants\"}"
+          payload="$(cat <<EOF
+          {"sql":"SELECT (SELECT COUNT(*) FROM users WHERE id LIKE 'e2e-${GITHUB_RUN_ID}-%') AS users, (SELECT COUNT(*) FROM sessions WHERE id LIKE 'e2e-${GITHUB_RUN_ID}-%') AS sessions, (SELECT COUNT(*) FROM clients WHERE id LIKE 'e2e-${GITHUB_RUN_ID}-%') AS clients, (SELECT COUNT(*) FROM intervenants WHERE id LIKE 'e2e-${GITHUB_RUN_ID}-%') AS intervenants"}
+          EOF
+          )"
           status="$(curl --silent --show-error --output "$RUNNER_TEMP/cleanup-check.json" --write-out '%{http_code}' \
             -X POST -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -H "Content-Type: application/json" \
             --data "$payload" "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/d1/database/$PREVIEW_DB_ID/query")"
           [[ "$status" == "200" ]]
           jq -e '.success == true and .result[0].results[0].users == 0 and .result[0].results[0].sessions == 0 and .result[0].results[0].clients == 0 and .result[0].results[0].intervenants == 0' "$RUNNER_TEMP/cleanup-check.json" >/dev/null
           echo "PASS: all synthetic Preview test rows and sessions removed."
+
+      - name: Enforce Pages proxy acceptance after synthetic Preview cleanup
+        if: always()
+        shell: bash
+        run: |
+          if [[ "${{ steps.pages_proxy.outcome }}" != "success" ]]; then
+            echo "::error::Pages-to-Worker workspace routes are not yet accepted. Review the proxy step; the Worker Preview must implement every allowlisted route before promotion."
+            exit 1
+          fi
+          echo "PASS: all Pages-to-Worker workspace routes passed the unauthenticated access gate."
