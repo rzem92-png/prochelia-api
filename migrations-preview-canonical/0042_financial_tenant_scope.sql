@@ -14,7 +14,7 @@ CREATE TABLE IF NOT EXISTS payment_accounts (
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE TABLE IF NOT EXISTS payment_transactions (
-  id TEXT PRIMARY KEY, idempotency_key TEXT NOT NULL UNIQUE, mission_id TEXT,
+  id TEXT PRIMARY KEY, idempotency_key TEXT NOT NULL, mission_id TEXT,
   client_id TEXT, intervenant_id TEXT, type TEXT NOT NULL, status TEXT NOT NULL,
   gross_cents INTEGER NOT NULL DEFAULT 0, commission_cents INTEGER NOT NULL DEFAULT 0,
   provider_fee_cents INTEGER NOT NULL DEFAULT 0, refund_cents INTEGER NOT NULL DEFAULT 0,
@@ -23,7 +23,7 @@ CREATE TABLE IF NOT EXISTS payment_transactions (
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE TABLE IF NOT EXISTS payout_requests (
-  id TEXT PRIMARY KEY, idempotency_key TEXT NOT NULL UNIQUE, wallet_id TEXT NOT NULL,
+  id TEXT PRIMARY KEY, idempotency_key TEXT NOT NULL, wallet_id TEXT NOT NULL,
   user_id TEXT NOT NULL, amount_cents INTEGER NOT NULL, currency TEXT NOT NULL DEFAULT 'EUR',
   mode TEXT NOT NULL DEFAULT 'standard', status TEXT NOT NULL DEFAULT 'requested',
   provider TEXT, provider_payout_id TEXT, failure_code TEXT, failure_message TEXT,
@@ -63,6 +63,13 @@ ALTER TABLE payment_reconciliation ADD COLUMN tenant_id TEXT REFERENCES tenants(
 ALTER TABLE payment_audit ADD COLUMN tenant_id TEXT REFERENCES tenants(id);
 ALTER TABLE payment_webhook_events ADD COLUMN tenant_id TEXT REFERENCES tenants(id);
 ALTER TABLE payment_webhook_events ADD COLUMN matched_transaction_id TEXT REFERENCES payment_transactions(id);
+
+-- Idempotency is scoped to the legal tenant. Legacy rows with NULL tenant_id
+-- remain unassigned and are not guessed or globally locked together.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_payment_transactions_tenant_idempotency
+  ON payment_transactions(tenant_id,idempotency_key);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_payout_requests_tenant_idempotency
+  ON payout_requests(tenant_id,idempotency_key);
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_payment_accounts_tenant_user ON payment_accounts(tenant_id,user_id);
 CREATE INDEX IF NOT EXISTS idx_payment_tx_tenant_mission_created ON payment_transactions(tenant_id,mission_id,created_at);
@@ -237,11 +244,12 @@ WHEN (OLD.tenant_id IS NOT NULL AND NEW.tenant_id IS NOT OLD.tenant_id)
 BEGIN SELECT RAISE(ABORT,'PAYMENT_ACCOUNT_TENANT_IMMUTABLE'); END;
 
 CREATE TRIGGER IF NOT EXISTS trg_payment_transaction_identity_immutable
-BEFORE UPDATE OF tenant_id,mission_id,client_id,intervenant_id ON payment_transactions
+BEFORE UPDATE OF tenant_id,mission_id,client_id,intervenant_id,idempotency_key ON payment_transactions
 WHEN (OLD.tenant_id IS NOT NULL AND NEW.tenant_id IS NOT OLD.tenant_id)
   OR NEW.mission_id IS NOT OLD.mission_id
   OR NEW.client_id IS NOT OLD.client_id
   OR NEW.intervenant_id IS NOT OLD.intervenant_id
+  OR NEW.idempotency_key IS NOT OLD.idempotency_key
 BEGIN SELECT RAISE(ABORT,'PAYMENT_TRANSACTION_IDENTITY_IMMUTABLE'); END;
 
 CREATE TRIGGER IF NOT EXISTS trg_payout_request_identity_immutable
