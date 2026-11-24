@@ -59,7 +59,6 @@ jobs:
         run: |
           set -euo pipefail
           body='{"id":"evt_synthetic_http_smoke","type":"payment_succeeded","provider":"stripe"}'
-          timestamp="$(date +%s)"
           status="$(curl --silent --show-error --max-time 20 --output "$RUNNER_TEMP/webhook-rejected.json" --write-out '%{http_code}' \
             --request POST \
             --header 'Origin: https://fix-frontend-finance-confirm.prochelia.pages.dev' \
@@ -68,7 +67,7 @@ jobs:
             --data "$body" \
             'https://fix-pages-proxy-preview-cors-2026-11-23.rzem92.workers.dev/api/payments/webhook')"
           test "$status" = "401" || {
-            echo "::error::Invalid synthetic webhook signature expected HTTP 401, received $status."
+            echo "::error::Unauthenticated synthetic webhook expected HTTP 401, received $status."
             jq -c '{ok,error,write_enabled}' "$RUNNER_TEMP/webhook-rejected.json" 2>/dev/null || true
             exit 1
           }
