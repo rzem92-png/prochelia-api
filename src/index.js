@@ -30,6 +30,46 @@ async function readJson(request) {
   catch { return null; }
 }
 
+export async function readBoundedWebhookBody(request, maxBytes = 1_048_576) {
+  if (!Number.isSafeInteger(maxBytes) || maxBytes <= 0) {
+    return { ok: false, tooLarge: false, body: "" };
+  }
+  const declaredLength = request.headers.get('content-length');
+  if (declaredLength !== null) {
+    if (!/^\d+$/.test(declaredLength)) {
+      return { ok: false, tooLarge: false, body: "" };
+    }
+    const length = Number(declaredLength);
+    if (!Number.isSafeInteger(length) || length > maxBytes) {
+      return { ok: false, tooLarge: true, body: "" };
+    }
+  }
+  if (!request.body) return { ok: true, tooLarge: false, body: "" };
+
+  const reader = request.body.getReader();
+  const decoder = new TextDecoder('utf-8', { fatal: true });
+  let total = 0;
+  let body = "";
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > maxBytes) {
+        await reader.cancel();
+        return { ok: false, tooLarge: true, body: "" };
+      }
+      body += decoder.decode(value, { stream: true });
+    }
+    body += decoder.decode();
+    return { ok: true, tooLarge: false, body };
+  } catch {
+    return { ok: false, tooLarge: false, body: "" };
+  } finally {
+    try { reader.releaseLock(); } catch {}
+  }
+}
+
 function clean(value) {
   return typeof value === 'string' ? value.trim() : value;
 }
@@ -848,9 +888,19 @@ export function paymentsConfigured(env) {
   return false;
 }
 
+function paymentUnavailableResponse() {
+  return json({
+    ok: false,
+    error: 'PAYMENT_PROVIDER_NOT_CONFIGURED',
+    version: VERSION,
+    write_enabled: false
+  }, 503);
+}
+
 async function paymentOnboard(request, env) {
   const auth = await getSessionUser(request, env);
   if (!requireRole(auth, ['intervenant'])) return json({ok:false,error:auth?.user?'FORBIDDEN':'UNAUTHENTICATED',version:VERSION},auth?.user?403:401);
+  if (!paymentsConfigured(env)) return paymentUnavailableResponse();
   await ensurePaymentSchema(env);
   const body = await readJson(request);
   const provider = paymentProvider(env);
@@ -869,6 +919,7 @@ async function paymentOnboard(request, env) {
 async function paymentStatus(request, env) {
   const auth=await getSessionUser(request,env);
   if(!auth) return json({ok:false,error:'UNAUTHENTICATED',version:VERSION},401);
+  if (!paymentsConfigured(env)) return json({ok:true,version:VERSION,provider:null,payments_configured:false,wallet:null,payout_account:null,pending_payouts:0,write_enabled:false},200);
   await ensurePaymentSchema(env);
   let wallet=await env.DB.prepare('SELECT * FROM wallets WHERE user_id=? LIMIT 1').bind(auth.user.id).first();
   if(!wallet){ await env.DB.prepare('INSERT INTO wallets (id,user_id) VALUES (?,?)').bind(crypto.randomUUID(),auth.user.id).run(); wallet=await env.DB.prepare('SELECT * FROM wallets WHERE user_id=? LIMIT 1').bind(auth.user.id).first(); }
@@ -880,6 +931,7 @@ async function paymentStatus(request, env) {
 async function createMissionPayment(request, env) {
   const auth=await getSessionUser(request,env);
   if(!requireRole(auth,['gerante'])) return json({ok:false,error:auth?.user?'FORBIDDEN':'UNAUTHENTICATED',version:VERSION},auth?.user?403:401);
+  if (!paymentsConfigured(env)) return paymentUnavailableResponse();
   await ensurePaymentSchema(env);
   const body=await readJson(request);
   const missionId=clean(body?.mission_id), clientId=clean(body?.client_id), intervenantId=clean(body?.intervenant_id);
@@ -947,6 +999,7 @@ export async function reservePayoutAtomically(env, input) {
 async function payoutRequest(request, env) {
   const auth = await getSessionUser(request, env);
   if (!requireRole(auth, ['intervenant'])) return json({ok:false,error:auth?.user?'FORBIDDEN':'UNAUTHENTICATED',version:VERSION}, auth?.user ? 403 : 401);
+  if (!paymentsConfigured(env)) return paymentUnavailableResponse();
   await ensurePaymentSchema(env);
   const body = await readJson(request);
   const amount = moneyCents(body?.amount_eur);
@@ -1005,15 +1058,60 @@ function constantTimeStringEqual(actual, expected) {
   return difference === 0;
 }
 
-export async function verifyWebhookSignature(request, env, rawBody) {
+const STRIPE_WEBHOOK_TOLERANCE_SECONDS = 300;
+
+async function verifyStripeWebhookSignature(request, env, rawBody, nowSeconds = Math.floor(Date.now() / 1000)) {
+  const secret = env?.STRIPE_WEBHOOK_SECRET;
+  if (typeof secret !== 'string' || !secret || !Number.isSafeInteger(nowSeconds)) return false;
+  const header = request.headers.get('stripe-signature') || '';
+  let timestamp = null;
+  const signatures = [];
+  for (const part of header.split(',')) {
+    const separator = part.indexOf('=');
+    if (separator <= 0) continue;
+    const name = part.slice(0, separator).trim();
+    const value = part.slice(separator + 1).trim();
+    if (name === 't') {
+      if (timestamp !== null || !/^\d+$/.test(value)) return false;
+      const parsed = Number(value);
+      if (!Number.isSafeInteger(parsed)) return false;
+      timestamp = parsed;
+    } else if (name === 'v1' && /^[0-9a-f]{64}$/i.test(value)) {
+      signatures.push(value.toLowerCase());
+    }
+  }
+  if (timestamp === null || signatures.length === 0 ||
+      Math.abs(nowSeconds - timestamp) > STRIPE_WEBHOOK_TOLERANCE_SECONDS) return false;
+  try {
+    const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+    const message = new TextEncoder().encode(`${timestamp}.${rawBody}`);
+    const mac = new Uint8Array(await crypto.subtle.sign('HMAC', key, message));
+    const expected = [...mac].map(byte => byte.toString(16).padStart(2, '0')).join('');
+    let valid = false;
+    for (const supplied of signatures) valid = constantTimeStringEqual(supplied, expected) || valid;
+    return valid;
+  } catch {
+    return false;
+  }
+}
+
+export async function verifyWebhookSignature(request, env, rawBody, nowSeconds = Math.floor(Date.now() / 1000)) {
+  if (String(paymentProvider(env)).toLowerCase() === 'stripe') {
+    return verifyStripeWebhookSignature(request, env, rawBody, nowSeconds);
+  }
+  if (request.headers.has('stripe-signature')) return false;
   const secret = env?.PAYMENT_WEBHOOK_SECRET;
   if (typeof secret !== 'string' || !secret) return false;
   const signature = request.headers.get('x-prochelia-signature') || request.headers.get('x-webhook-signature') || '';
   const supplied = signature.startsWith('sha256=') ? signature.slice(7) : signature;
   if (!/^[A-Za-z0-9_-]{43}$/.test(supplied)) return false;
-  const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
-  const mac = new Uint8Array(await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(rawBody)));
-  return constantTimeStringEqual(supplied, base64url(mac));
+  try {
+    const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+    const mac = new Uint8Array(await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(rawBody)));
+    return constantTimeStringEqual(supplied, base64url(mac));
+  } catch {
+    return false;
+  }
 }
 
 export function requiresAtomicFinancialSettlement(eventType) {
@@ -1024,9 +1122,19 @@ export function requiresAtomicFinancialSettlement(eventType) {
 }
 
 async function paymentWebhook(request, env) {
+  // No PSP adapter is operational: reject before reading unbounded input or touching D1.
+  if (!paymentsConfigured(env)) return paymentUnavailableResponse();
   // Reject unauthenticated and malformed events before any D1 schema access.
   // This prevents arbitrary callers from triggering CREATE TABLE/INDEX writes.
-  const raw = await request.text();
+  const boundedBody = await readBoundedWebhookBody(request);
+  if (!boundedBody.ok) {
+    return json({
+      ok: false,
+      error: boundedBody.tooLarge ? 'WEBHOOK_PAYLOAD_TOO_LARGE' : 'WEBHOOK_BODY_INVALID',
+      version: VERSION
+    }, boundedBody.tooLarge ? 413 : 400);
+  }
+  const raw = boundedBody.body;
   if (!(await verifyWebhookSignature(request, env, raw))) return json({ok:false,error:'INVALID_WEBHOOK_SIGNATURE',version:VERSION},401);
   let event;
   try { event = JSON.parse(raw); } catch { return json({ok:false,error:'INVALID_WEBHOOK_JSON',version:VERSION},400); }
@@ -1083,6 +1191,7 @@ async function paymentWebhook(request, env) {
 async function openPaymentDispute(request, env) {
   const auth = await getSessionUser(request, env);
   if (!requireRole(auth, ['client','gerante'])) return json({ok:false,error:auth?.user?'FORBIDDEN':'UNAUTHENTICATED',version:VERSION}, auth?.user ? 403 : 401);
+  if (!paymentsConfigured(env)) return paymentUnavailableResponse();
   await ensurePaymentSchema(env);
   const body = await readJson(request);
   const missionId = clean(body?.mission_id);
@@ -3678,6 +3787,12 @@ handle = async function(request,env){
     if (getOnlyDiagnostics.has(preflightPath) && preflightMethod === 'HEAD') {
       const response = await __procheliaProductionSafetyHandle(new Request(request.url,{method:'GET',headers:request.headers}),env);
       return new Response(null,{status:response.status,headers:response.headers});
+    }
+    // Keep the disabled PSP webhook fail-closed before the generic write
+    // rate limiter can touch D1. The origin guard above still applies, and
+    // the request body remains unread until a reviewed PSP adapter exists.
+    if (preflightPath === '/api/payments/webhook' && preflightMethod === 'POST' && !paymentsConfigured(env)) {
+      return paymentUnavailableResponse();
     }
     // Fail closed with a truthful service-unavailable response when a write
     // needs the persistent rate limiter but D1 is not bound.
