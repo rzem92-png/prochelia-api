@@ -25,7 +25,7 @@ concurrency:
 
 jobs:
   migrate-preview:
-    if: ${{ github.ref == 'refs/heads/main' && github.actor == 'rzem92-png' && inputs.confirm_preview == 'APPLY_PREVIEW_ONLY' }}
+    if: ${{ github.ref == 'refs/heads/main' && github.actor == 'rzem92-png' && github.triggering_actor == 'rzem92-png' && inputs.confirm_preview == 'APPLY_PREVIEW_ONLY' }}
     runs-on: ubuntu-latest
     timeout-minutes: 25
     env:
