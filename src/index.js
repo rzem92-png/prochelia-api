@@ -30,6 +30,46 @@ async function readJson(request) {
   catch { return null; }
 }
 
+export async function readBoundedWebhookBody(request, maxBytes = 1_048_576) {
+  if (!Number.isSafeInteger(maxBytes) || maxBytes <= 0) {
+    return { ok: false, tooLarge: false, body: "" };
+  }
+  const declaredLength = request.headers.get('content-length');
+  if (declaredLength !== null) {
+    if (!/^\\d+$/.test(declaredLength)) {
+      return { ok: false, tooLarge: false, body: "" };
+    }
+    const length = Number(declaredLength);
+    if (!Number.isSafeInteger(length) || length > maxBytes) {
+      return { ok: false, tooLarge: true, body: "" };
+    }
+  }
+  if (!request.body) return { ok: true, tooLarge: false, body: "" };
+
+  const reader = request.body.getReader();
+  const decoder = new TextDecoder('utf-8', { fatal: true });
+  let total = 0;
+  let body = "";
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > maxBytes) {
+        await reader.cancel();
+        return { ok: false, tooLarge: true, body: "" };
+      }
+      body += decoder.decode(value, { stream: true });
+    }
+    body += decoder.decode();
+    return { ok: true, tooLarge: false, body };
+  } catch {
+    return { ok: false, tooLarge: false, body: "" };
+  } finally {
+    try { reader.releaseLock(); } catch {}
+  }
+}
+
 function clean(value) {
   return typeof value === 'string' ? value.trim() : value;
 }
@@ -1086,7 +1126,15 @@ async function paymentWebhook(request, env) {
   if (!paymentsConfigured(env)) return paymentUnavailableResponse();
   // Reject unauthenticated and malformed events before any D1 schema access.
   // This prevents arbitrary callers from triggering CREATE TABLE/INDEX writes.
-  const raw = await request.text();
+  const boundedBody = await readBoundedWebhookBody(request);
+  if (!boundedBody.ok) {
+    return json({
+      ok: false,
+      error: boundedBody.tooLarge ? 'WEBHOOK_PAYLOAD_TOO_LARGE' : 'WEBHOOK_BODY_INVALID',
+      version: VERSION
+    }, boundedBody.tooLarge ? 413 : 400);
+  }
+  const raw = boundedBody.body;
   if (!(await verifyWebhookSignature(request, env, raw))) return json({ok:false,error:'INVALID_WEBHOOK_SIGNATURE',version:VERSION},401);
   let event;
   try { event = JSON.parse(raw); } catch { return json({ok:false,error:'INVALID_WEBHOOK_JSON',version:VERSION},400); }
