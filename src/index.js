@@ -3695,6 +3695,12 @@ handle = async function(request,env){
       const response = await __procheliaProductionSafetyHandle(new Request(request.url,{method:'GET',headers:request.headers}),env);
       return new Response(null,{status:response.status,headers:response.headers});
     }
+    // Keep the disabled PSP webhook fail-closed before the generic write
+    // rate limiter can touch D1. The origin guard above still applies, and
+    // the request body remains unread until a reviewed PSP adapter exists.
+    if (preflightPath === '/api/payments/webhook' && preflightMethod === 'POST' && !paymentsConfigured(env)) {
+      return paymentUnavailableResponse();
+    }
     // Fail closed with a truthful service-unavailable response when a write
     // needs the persistent rate limiter but D1 is not bound.
     if (isMutatingMethod(preflightMethod) && !env?.DB) {
