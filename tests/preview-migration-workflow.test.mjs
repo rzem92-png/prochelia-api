@@ -5,7 +5,8 @@ import { readFile, readdir } from "node:fs/promises";
 const workflow = await readFile(new URL("../.github/workflows/apply-preview-d1-migrations.yml", import.meta.url), "utf8");
 
 test("Preview migration is manually gated on main only", () => {
-  assert.match(workflow, /github\.ref == 'refs\/heads\/main'/);
+  assert.match(workflow, /github\.ref == 'refs\/heads\/main'/);\n  assert.match(workflow, /github\.actor == 'rzem92-png'/);
+  assert.match(workflow, /Only the repository owner may apply Preview D1 migrations/);
   assert.doesNotMatch(workflow, /github\.ref == 'refs\/heads\/fix\//);
   assert.match(workflow, /inputs\.confirm_preview == 'APPLY_PREVIEW_ONLY'/);
   assert.match(workflow, /EXPECTED_DB_ID:\s*e3cf167c-37e1-4d72-9ac6-b3e27c14b97f/);
