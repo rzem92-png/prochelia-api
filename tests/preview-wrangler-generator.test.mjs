@@ -69,6 +69,7 @@ test("generator fails closed if the source Production D1 identity changes", () =
 test("EU R2 binding requires the owner-confirmed manual workflow context", () => {
   const { result, preview } = runGenerator((value) => value, {
     PROCHELIA_PREVIEW_R2_VERIFIED_BY_WORKFLOW: "true",
+    PROCHELIA_PREVIEW_R2_RETENTION_VERIFIED_BY_WORKFLOW: "true",
     PROCHELIA_PREVIEW_DEPLOY_CONFIRMATION: "DEPLOY_PREVIEW_ONLY",
     GITHUB_ACTIONS: "true",
     GITHUB_EVENT_NAME: "workflow_dispatch",
@@ -82,6 +83,22 @@ test("EU R2 binding requires the owner-confirmed manual workflow context", () =>
     bucket_name: "prochelia-preview-backups-eu-v2",
     jurisdiction: "eu"
   }]);
+});
+
+test("EU R2 binding is refused unless the workflow verifies the exact retention rule", () => {
+  const { result, preview } = runGenerator((value) => value, {
+    PROCHELIA_PREVIEW_R2_VERIFIED_BY_WORKFLOW: "true",
+    PROCHELIA_PREVIEW_R2_RETENTION_VERIFIED_BY_WORKFLOW: "true",
+    PROCHELIA_PREVIEW_DEPLOY_CONFIRMATION: "DEPLOY_PREVIEW_ONLY",
+    GITHUB_ACTIONS: "true",
+    GITHUB_EVENT_NAME: "workflow_dispatch",
+    GITHUB_REPOSITORY: "rzem92-png/prochelia-api",
+    GITHUB_REF: "refs/heads/fix/pages-proxy-preview-cors-2026-11-23",
+    GITHUB_ACTOR: "rzem92-png"
+  });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /EU bucket and retention verification/);
+  assert.equal(preview, null);
 });
 
 test("R2 cannot be enabled from a push or a non-owner workflow context", () => {
