@@ -19,7 +19,7 @@ jobs:
   backup-preview:
     if: >-
       (
-        github.ref == 'refs/heads/main'
+        github.ref == 'refs/heads/fix/pages-proxy-preview-cors-2026-11-23'
       ) &&
       github.actor == 'rzem92-png' &&
       inputs.confirm_preview_backup == 'BACKUP_PREVIEW_TO_R2_EU'
@@ -47,8 +47,8 @@ jobs:
           set -euo pipefail
           test "$GITHUB_ACTOR" = "rzem92-png"
           case "$GITHUB_REF" in
-            refs/heads/main) ;;
-            *) echo "::error::Preview backup dispatch is restricted to the main branch only."; exit 1 ;;
+            refs/heads/fix/pages-proxy-preview-cors-2026-11-23) ;;
+            *) echo "::error::Preview backup dispatch is restricted to the reviewed Preview branch only."; exit 1 ;;
           esac
           test "$CLOUDFLARE_ACCOUNT_ID" = "$EXPECTED_ACCOUNT_ID"
           test "$EXPECTED_DB_ID" != "$FORBIDDEN_PRODUCTION_DB_ID"
@@ -298,7 +298,7 @@ jobs:
             .object.key == $key and
             .object.sha256_manifest_key == ($key + ".sha256") and
             .provenance.repository == "rzem92-png/prochelia-api" and
-            .provenance.ref == "refs/heads/main" and
+            .provenance.ref == "refs/heads/fix/pages-proxy-preview-cors-2026-11-23" and
             (.provenance.migration_source_sha | test("^[0-9a-f]{40}$")) and
             .validation.sqlite_integrity_check == "ok" and
             .validation.foreign_key_check == "empty" and
