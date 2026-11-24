@@ -50,6 +50,7 @@ EXPECTED = [
     "0043_finance_workspace_tenant_scope.sql",
     "0044_security_records_tenant_scope.sql",
     "0045_wallet_tenant_currency_scope.sql",
+    "0046_master_complement_seed_data.sql",
 ]
 
 # Keep the manual Preview migration gate synchronized with the canonical chain.
@@ -61,20 +62,23 @@ assert '"0029_supra_append_only_audit_guards.sql"' in workflow_text, (
 assert '"0030_supra_audit_tenant_scope.sql"' in workflow_text, (
     "Preview migration workflow omits tenant-scoped SUPRA audit migration 0030"
 )
-assert "if len(local) != 46:" in workflow_text, (
+assert "if len(local) != 47:" in workflow_text, (
     "Preview migration workflow must require exactly 46 canonical migrations"
 )
-assert "exact 46-entry registry" in workflow_text, (
+assert "exact 47-entry registry" in workflow_text, (
     "Preview migration workflow target registry count is stale"
 )
-assert "all 46 canonical migrations are pending" in workflow_text, (
+assert "all 47 canonical migrations are pending" in workflow_text, (
     "Preview migration workflow empty-database inventory message is stale"
 )
-assert "only migrations 0023-0045 are pending" in workflow_text, (
+assert "only migrations 0023-0046 are pending" in workflow_text, (
     "Preview migration workflow baseline-to-target range is stale"
 )
 assert '"0045_wallet_tenant_currency_scope.sql"' in workflow_text, (
     "Preview migration workflow omits tenant/currency-scoped wallet migration 0045"
+)
+assert '"0046_master_complement_seed_data.sql"' in workflow_text, (
+    "Preview migration workflow omits versioned master seed migration 0046"
 )
 assert '"0044_security_records_tenant_scope.sql"' in workflow_text, (
     "Preview migration workflow omits tenant-scoped security migration 0044"
@@ -99,7 +103,7 @@ db = sqlite3.connect(":memory:")
 db.execute("PRAGMA foreign_keys = ON")
 # Start from a truly empty D1 database, matching the newly created EU Preview target.
 # Apply the reviewed baseline and candidate migrations through 0043 first.
-for name in EXPECTED[:-2]:
+for name in EXPECTED[:-3]:
     if name == "0031_operational_marketplace_tenant_scope.sql":
         # Preserve a pre-tenant wallet without guessing its legal-entity attribution.
         db.execute(
@@ -125,8 +129,24 @@ db.execute(
     ("legacy-security-audit-1", "LEGACY_EVENT", "BLOCKED"),
 )
 
+db.executescript((MIGRATIONS / EXPECTED[-3]).read_text(encoding="utf-8"))
 db.executescript((MIGRATIONS / EXPECTED[-2]).read_text(encoding="utf-8"))
 db.executescript((MIGRATIONS / EXPECTED[-1]).read_text(encoding="utf-8"))
+
+# Versioned master seed data is appended after tenant/currency wallet guards.
+seed_counts = (
+    db.execute("SELECT COUNT(*) FROM brand_identity WHERE id='seed-prochelia-brand-v1'").fetchone()[0],
+    db.execute("SELECT COUNT(*) FROM interface_profiles WHERE id LIKE 'seed-interface-%'").fetchone()[0],
+    db.execute("SELECT COUNT(*) FROM copilot_resolution_rules WHERE id LIKE 'seed-rule-%'").fetchone()[0],
+)
+assert seed_counts == (1, 4, 10), f"Unexpected master seed records: {seed_counts}"
+db.executescript((MIGRATIONS / EXPECTED[-1]).read_text(encoding="utf-8"))
+seed_counts_after_replay = (
+    db.execute("SELECT COUNT(*) FROM brand_identity WHERE id='seed-prochelia-brand-v1'").fetchone()[0],
+    db.execute("SELECT COUNT(*) FROM interface_profiles WHERE id LIKE 'seed-interface-%'").fetchone()[0],
+    db.execute("SELECT COUNT(*) FROM copilot_resolution_rules WHERE id LIKE 'seed-rule-%'").fetchone()[0],
+)
+assert seed_counts_after_replay == seed_counts, "Master seed migration must be idempotent"
 legacy_wallet = db.execute(
     "SELECT tenant_id, available_cents, pending_cents, paid_cents, reserved_cents FROM wallets WHERE id=?",
     ("legacy-wallet-1",),
