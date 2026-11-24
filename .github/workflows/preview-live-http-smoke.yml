@@ -25,7 +25,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          url="https://fix-frontend-finance-confirm.prochelia.pages.dev/"
+          url="https://fix-frontend-accounting-read.prochelia.pages.dev/"
           status="$(curl --silent --show-error --max-time 20 --output "$RUNNER_TEMP/pages.html" --write-out '%{http_code}' "$url")"
           test "$status" = "200" || { echo "::error::Pages Preview returned HTTP $status"; exit 1; }
           grep -Eiq '<!doctype html' "$RUNNER_TEMP/pages.html" || {
@@ -53,26 +53,44 @@ jobs:
           check_health "Current branch API Worker Preview" "https://test-preview-live-http-smoke-2026-11-24-prochelia-api.rzem92.workers.dev/api/health" "candidate-worker"
           check_health "Legacy API Preview Worker" "https://prochelia-api-preview.rzem92.workers.dev/api/health" "legacy-worker"
           check_health "Current Pages proxy Worker" "https://fix-pages-proxy-preview-cors-2026-11-23.rzem92.workers.dev/api/health" "proxy-worker"
-          check_health "Pages same-origin API proxy" "https://fix-frontend-finance-confirm.prochelia.pages.dev/api/health" "pages-proxy"
+          check_health "Pages same-origin API proxy" "https://fix-frontend-accounting-read.prochelia.pages.dev/api/health" "pages-proxy"
 
-      - name: Verify the public webhook receiver rejects an unauthenticated synthetic event before webhook persistence
+      - name: Verify the disabled-PSP proxy rejects before reading the synthetic webhook body
         shell: bash
         run: |
           set -euo pipefail
           body='{"id":"evt_synthetic_http_smoke","type":"payment_succeeded","provider":"stripe"}'
           status="$(curl --silent --show-error --max-time 20 --output "$RUNNER_TEMP/webhook-rejected.json" --write-out '%{http_code}' \
             --request POST \
-            --header 'Origin: https://fix-frontend-finance-confirm.prochelia.pages.dev' \
+            --header 'Origin: https://fix-frontend-accounting-read.prochelia.pages.dev' \
             --header 'Content-Type: application/json' \
             --data "$body" \
             'https://fix-pages-proxy-preview-cors-2026-11-23.rzem92.workers.dev/api/payments/webhook')"
-          test "$status" = "401" || {
-            echo "::error::Unauthenticated synthetic webhook expected HTTP 401, received $status."
+          test "$status" = "503" || {
+            echo "::error::Disabled-PSP proxy expected HTTP 503 before body/D1 access, received $status."
             jq -c '{ok,error,write_enabled}' "$RUNNER_TEMP/webhook-rejected.json" 2>/dev/null || true
             exit 1
           }
-          jq -e '.error == "INVALID_WEBHOOK_SIGNATURE"' "$RUNNER_TEMP/webhook-rejected.json" >/dev/null
-          echo "PASS: unsigned synthetic webhook rejected; no webhook event or financial write is accepted. The generic security rate limiter may record a bounded counter."
+          jq -e '.error == "PAYMENT_PROVIDER_NOT_CONFIGURED" and .write_enabled == false' "$RUNNER_TEMP/webhook-rejected.json" >/dev/null
+          echo "PASS: disabled-PSP proxy rejected the synthetic event before reading the body or accessing D1."
+
+      - name: Verify the legacy Preview HMAC receiver rejects an unsigned synthetic event
+        shell: bash
+        run: |
+          set -euo pipefail
+          body='{"id":"evt_synthetic_legacy_hmac","type":"payment_succeeded","provider":"stripe"}'
+          status="$(curl --silent --show-error --max-time 20 --output "$RUNNER_TEMP/legacy-webhook-rejected.json" --write-out '%{http_code}' \
+            --request POST \
+            --header 'Content-Type: application/json' \
+            --data "$body" \
+            'https://prochelia-api-preview.rzem92.workers.dev/api/payments/webhook')"
+          test "$status" = "401" || {
+            echo "::error::Legacy unsigned webhook expected HTTP 401, received $status."
+            jq -c '{ok,error,write_enabled}' "$RUNNER_TEMP/legacy-webhook-rejected.json" 2>/dev/null || true
+            exit 1
+          }
+          jq -e '.error == "INVALID_WEBHOOK_SIGNATURE"' "$RUNNER_TEMP/legacy-webhook-rejected.json" >/dev/null
+          echo "PASS: legacy HMAC receiver rejects unsigned events. No valid signature or financial write was attempted."
 
       - name: Verify disabled-PSP candidate rejects before reading the webhook body
         shell: bash
@@ -104,7 +122,7 @@ jobs:
               *) echo "::error::$label expected HTTP 401/403 without a session, received $status"; jq -c '{ok,error,write_enabled}' "$output" 2>/dev/null || true; exit 1 ;;
             esac
           }
-          base="https://fix-frontend-finance-confirm.prochelia.pages.dev"
+          base="https://fix-frontend-accounting-read.prochelia.pages.dev"
           expect_denied "Tenant context" "$base/api/tenant/context" "tenant"
           expect_denied "Device Trust credential list" "$base/api/security/device/list" "device"
           expect_denied "Accounting ledger health" "https://fix-pages-proxy-preview-cors-2026-11-23.rzem92.workers.dev/api/accounting/health" "accounting"
