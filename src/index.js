@@ -4516,7 +4516,7 @@ async function strictProductionAudit(request,env){
   const extra=[
     {code:'SECURITY_CODE_DELIVERY',status:finalSecretConfigured(env,'SECURITY_CODE_WEBHOOK')&&finalSecretConfigured(env,'SECURITY_CODE_WEBHOOK_SECRET')?'OK':'NOT_CONFIGURED'},
     {code:'CORS_ORIGIN',status:finalSecretConfigured(env,'CORS_ORIGIN')?'OK':'NOT_CONFIGURED'},
-    {code:'BACKUP_R2',status:env.BACKUP_BUCKET&&finalSecretConfigured(env,'BACKUP_ENCRYPTION_KEY')?'OK':'NOT_CONFIGURED'},
+    {code:'BACKUP_R2',status:'NOT_VERIFIED',bindingPresent:!!env.BACKUP_BUCKET&&typeof env.BACKUP_BUCKET.put==='function',encryptionConfigured:finalSecretConfigured(env,'BACKUP_ENCRYPTION_KEY')},
     {code:'NOTIFICATION_PROVIDER',status:finalSecretConfigured(env,'NOTIFICATION_PROVIDER')?'OK':'NOT_CONFIGURED'},
     {code:'MAPS_PROVIDER',status:finalSecretConfigured(env,'MAPS_API_KEY')?'OK':'NOT_CONFIGURED'}
   ];
@@ -4541,6 +4541,7 @@ async function strictProductionAudit(request,env){
   // GET production-check is read-only: no config writes or journal side effects.
   return json({ok:true,version:VERSION,configuration_gate:configurationReady?'PASS':'BLOCKED',production_gate:overall?'OPEN':'CLOSED',ready_for_real_traffic:overall,checks,blocking:blocking.map(x=>x.code),note:overall?'All configuration and independently verified release-evidence gates passed.':'Production traffic remains blocked: configuration, independent acceptance evidence, and explicit human release approval are all required.'});
 }
+
 
 const __procheliaProductionSafetyHandle = handle;
 handle = async function(request,env){
