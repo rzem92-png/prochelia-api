@@ -1,4 +1,5 @@
 import { handleV7Route } from "./v7-routes.js";
+import { handleGlobalCountryRoute } from "./global-country-routes.js";
 // PROCHÉLIA — INDEX BACKEND CONSOLIDÉ UNIQUE
 // Référence de consolidation : V14.1 Finance + sécurité/RBAC existants.
 // Généré le 19/10/2026. À déployer uniquement après recette avec la vraie base D1.
@@ -1194,6 +1195,9 @@ export async function directoryList(request, env, kind, resolveSession = getSess
 
 async function handleBase(request, env) {
   const url = new URL(request.url);
+
+  const globalCountryResponse = handleGlobalCountryRoute(request, url.pathname);
+  if (globalCountryResponse) return globalCountryResponse;
 
 
   if (url.pathname === '/api/clients') {
