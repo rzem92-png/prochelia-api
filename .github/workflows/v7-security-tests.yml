@@ -11,6 +11,7 @@ on:
       - "src/global-locale-formatters.js"
       - "src/global-country-routes.js"
       - "src/country-launch-gates.js"
+      - "src/country-launch-assessment-template.js"
       - "tests/**"
       - ".github/workflows/v7-security-tests.yml"
       - ".github/workflows/apply-preview-d1-migrations.yml"
