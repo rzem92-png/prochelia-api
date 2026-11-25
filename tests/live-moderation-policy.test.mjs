@@ -55,6 +55,22 @@ test("blocks phone, email, IP and street-address disclosures without returning t
   }
 });
 
+test("detects common obfuscated email disclosures and strips zero-width separators", () => {
+  for (const text of [
+    "Contact victime [at] example [dot] com",
+    "Contact victime (at) example (dot) com",
+    "Contact victime arrobase example point com",
+    "Contact victime\u200b[at] example [dot] com"
+  ]) {
+    const result = evaluateLiveMessage(text);
+    assert.equal(result.decision, "block", text);
+    assert.ok(result.reason_codes.includes("email"));
+    assert.ok(result.actions.includes("redact_personal_data"));
+    assert.ok(result.actions.includes("exclude_from_replay"));
+    assert.ok(!JSON.stringify(result).includes(text));
+  }
+});
+
 test("escalates repeated insult violations with temporary live-only sanctions", () => {
   assert.ok(evaluateLiveMessage("Idiot.", { recentViolations: 1 }).actions.includes("temporary_live_timeout_5m"));
   assert.ok(evaluateLiveMessage("Idiot.", { recentViolations: 3 }).actions.includes("temporary_live_timeout_30m"));
