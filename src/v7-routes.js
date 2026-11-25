@@ -6,6 +6,7 @@
 // =====================================================
 
 import { procheliaV7 } from "./v7.js";
+import { evaluateLiveMessage, LIVE_MODERATION_PROFILES, LIVE_MODERATION_POLICY_VERSION } from "./live-moderation-policy.js";
 
 export async function handleV7Route(
   request,
@@ -19,6 +20,101 @@ export async function handleV7Route(
     const method =
       request.method.toUpperCase();
 
+
+
+    // =================================================
+    // NEXUS SUPRA — LIVE MODERATION POLICY PREVIEW
+    // Authenticated, bounded input; no database write or live-control side effect.
+    // =================================================
+    if (path === "/api/v7/live/moderation/evaluate") {
+      if (method !== "POST") {
+        return Response.json(
+          { ok: false, version: procheliaV7.version, error: "METHOD_NOT_ALLOWED" },
+          { status: 405, headers: { allow: "POST" } }
+        );
+      }
+      if (!auth?.user) {
+        return Response.json(
+          { ok: false, version: procheliaV7.version, error: "UNAUTHENTICATED" },
+          { status: 401 }
+        );
+      }
+      const contentLength = Number(request.headers.get("content-length") || 0);
+      if (Number.isFinite(contentLength) && contentLength > 8192) {
+        return Response.json(
+          { ok: false, version: procheliaV7.version, error: "BODY_TOO_LARGE" },
+          { status: 413 }
+        );
+      }
+      let raw = "";
+      if (request.body) {
+        const reader = request.body.getReader();
+        const chunks = [];
+        let total = 0;
+        try {
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            total += value.byteLength;
+            if (total > 8192) {
+              await reader.cancel();
+              return Response.json(
+                { ok: false, version: procheliaV7.version, error: "BODY_TOO_LARGE" },
+                { status: 413 }
+              );
+            }
+            chunks.push(value);
+          }
+          const bytes = new Uint8Array(total);
+          let offset = 0;
+          for (const chunk of chunks) {
+            bytes.set(chunk, offset);
+            offset += chunk.byteLength;
+          }
+          raw = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+        } catch {
+          return Response.json(
+            { ok: false, version: procheliaV7.version, error: "INVALID_BODY" },
+            { status: 400 }
+          );
+        }
+      }
+      let body;
+      try {
+        body = JSON.parse(raw);
+      } catch {
+        return Response.json(
+          { ok: false, version: procheliaV7.version, error: "INVALID_JSON" },
+          { status: 400 }
+        );
+      }
+      if (typeof body?.text !== "string" || !body.text.trim()) {
+        return Response.json(
+          { ok: false, version: procheliaV7.version, error: "TEXT_REQUIRED" },
+          { status: 400 }
+        );
+      }
+      if (body.text.length > 3000) {
+        return Response.json(
+          { ok: false, version: procheliaV7.version, error: "TEXT_TOO_LONG", max_length: 3000 },
+          { status: 400 }
+        );
+      }
+      if (body.profile !== undefined && !LIVE_MODERATION_PROFILES.includes(body.profile)) {
+        return Response.json(
+          { ok: false, version: procheliaV7.version, error: "INVALID_PROFILE" },
+          { status: 400 }
+        );
+      }
+      const evaluation = evaluateLiveMessage(body.text, { profile: body.profile || "standard" });
+      return Response.json({
+        ok: true,
+        module: "NEXUS_SUPRA_LIVE_MODERATION",
+        policy_version: LIVE_MODERATION_POLICY_VERSION,
+        execution: "policy_plan_only",
+        evaluation
+      });
+    }
 
     // =================================================
     // STATUT V7
