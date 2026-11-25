@@ -1123,7 +1123,7 @@ export async function readBoundedWebhookBody(request, maxBytes = MAX_PAYMENT_WEB
   }
 }
 
-async function paymentWebhook(request, env) {
+export async function paymentWebhook(request, env) {
   // Reject unauthenticated and malformed events before any D1 schema access.
   // This prevents arbitrary callers from triggering CREATE TABLE/INDEX writes.
   const bounded = await readBoundedWebhookBody(request);
