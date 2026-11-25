@@ -10,7 +10,7 @@ const source = await readFile(new URL("../src/index.js", import.meta.url), "utf8
 test("active Preview rate-limit subject hashing uses the defined SHA-256 helper", () => {
   const start = source.indexOf("async function productionSubjectHash(request, route)");
   assert.ok(start >= 0, "productionSubjectHash must remain defined");
-  const end = source.indexOf("\\n}", start);
+  const end = source.indexOf("}", start);
   assert.ok(end > start, "productionSubjectHash body must be complete");
   const body = source.slice(start, end);
   assert.ok(body.includes("return sha256Base64url("), "rate-limit subject must use the existing SHA-256 helper");
