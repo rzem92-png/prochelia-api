@@ -35,6 +35,16 @@ const LAUNCH_GATE_DETAILS = Object.freeze({
   }),
 });
 
+function parseCountryRoute(pathname) {
+  const segments = pathname.split("/");
+  if (segments.length < 5 || segments[0] !== "" || segments[1] !== "api" || segments[2] !== "global" || segments[3] !== "countries") return null;
+  const code = segments[4];
+  if (!/^[A-Za-z]{2}$/.test(code)) return null;
+  if (segments.length === 5) return { code, subroute: null };
+  if (segments.length === 6 && ["timezones", "launch-checklist"].includes(segments[5])) return { code, subroute: segments[5] };
+  return null;
+}
+
 function publicCountry(config) {
   return {
     code: config.code,
@@ -90,10 +100,7 @@ function json(data, status = 200, extraHeaders = {}) {
 }
 
 export function handleGlobalCountryRoute(request, pathname) {
-  if (
-    pathname !== "/api/global/countries" &&
-    !/^\\/api\\/global\\/countries\\/[A-Za-z]{2}(?:\\/timezones|\\/launch-checklist)?$/.test(pathname)
-  ) return null;
+  if (pathname !== "/api/global/countries" && !parseCountryRoute(pathname)) return null;
   if (request.method !== "GET") return json({ ok: false, error: "METHOD_NOT_ALLOWED" }, 405, { allow: "GET" });
 
   if (pathname === "/api/global/countries") {
@@ -103,12 +110,11 @@ export function handleGlobalCountryRoute(request, pathname) {
     return json({ ok: true, count: countries.length, countries });
   }
 
-  const match = pathname.match(/^\\/api\\/global\\/countries\\/([A-Za-z]{2})(?:\\/timezones|\\/launch-checklist)?$/);
-  const code = match?.[1]?.toUpperCase();
-  const config = getCountryConfig(code);
+  const route = parseCountryRoute(pathname);
+  const config = getCountryConfig(route?.code);
   if (!config) return json({ ok: false, error: "COUNTRY_NOT_FOUND" }, 404);
 
-  if (pathname.endsWith("/timezones")) {
+  if (route.subroute === "timezones") {
     return json({
       ok: true,
       countryCode: config.code,
@@ -116,7 +122,7 @@ export function handleGlobalCountryRoute(request, pathname) {
       timezones: getCountryTimezones(config.code),
     });
   }
-  if (pathname.endsWith("/launch-checklist")) {
+  if (route.subroute === "launch-checklist") {
     return json(publicLaunchChecklist(config));
   }
   return json({ ok: true, country: publicCountry(config) });
