@@ -21,6 +21,8 @@ test("datetime formatter uses configured timezone and requires one for multi-zon
   assert.doesNotThrow(() => formatDateTime(date, "FR", "fr-FR"));
   assert.throws(() => formatDateTime(date, "US", "en-US"), RangeError);
   assert.doesNotThrow(() => formatDateTime(date, "US", "en-US", "America/New_York"));
+  assert.doesNotThrow(() => formatDateTime(date, "CA", "en-CA", "America/Toronto"));
+  assert.throws(() => formatDateTime(date, "CA", "en-CA", "Europe/Paris"), RangeError);
   assert.throws(() => formatDateTime("invalid", "FR"), TypeError);
 });
 

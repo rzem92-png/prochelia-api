@@ -24,6 +24,23 @@ test("country detail resolves normalized code and returns only public fields", a
   assert.equal("launchGates" in body.country, false);
 });
 
+test("country timezone endpoint returns curated regions without enabling markets", async () => {
+  const response = handleGlobalCountryRoute(get("/api/global/countries/CA/timezones"), "/api/global/countries/CA/timezones");
+  assert.equal(response.status, 200);
+  const body = await response.json();
+  assert.equal(body.countryCode, "CA");
+  assert.equal(body.defaultTimezone, null);
+  assert.ok(body.timezones.some((zone) => zone.id === "America/Toronto"));
+  assert.equal("available" in body, false);
+});
+
+test("timezone endpoint rejects unsupported countries and non-GET", async () => {
+  const unknown = await handleGlobalCountryRoute(get("/api/global/countries/ZZ/timezones"), "/api/global/countries/ZZ/timezones").json();
+  assert.equal(unknown.error, "COUNTRY_NOT_FOUND");
+  const response = handleGlobalCountryRoute(new Request("https://api.example.test/api/global/countries/CA/timezones", { method: "POST" }), "/api/global/countries/CA/timezones");
+  assert.equal(response.status, 405);
+});
+
 test("unknown country returns 404", async () => {
   const response = handleGlobalCountryRoute(get("/api/global/countries/zz"), "/api/global/countries/zz");
   assert.equal(response.status, 404);
