@@ -1,7 +1,7 @@
 // Nexus Supra — trusted live-event contract.
 // This is a server-internal planning boundary only. It has no live-control adapters,
 // persistence, network calls, or side effects. Never accept the trust context from HTTP input.
-import { evaluateLiveMessage, LIVE_MODERATION_POLICY_VERSION } from "./live-moderation-policy.js";
+import { evaluateLiveMessage, LIVE_MODERATION_POLICY_VERSION, LIVE_MODERATION_PROFILES } from "./live-moderation-policy.js";
 
 const REQUIRED_IDS = ["tenantId", "liveId", "hostId", "messageId", "authorId", "eventId"];
 const ID_PATTERN = /^[A-Za-z0-9._:-]{1,160}$/;
@@ -19,9 +19,13 @@ function fail(code) {
   throw error;
 }
 
+function errorFieldName(field) {
+  return field.replace(/[A-Z]/g, (letter) => "_" + letter).toUpperCase();
+}
+
 function requireId(value, field) {
   if (typeof value !== "string" || !ID_PATTERN.test(value) || value.trim() !== value) {
-    fail("INVALID_" + field.toUpperCase());
+    fail("INVALID_" + errorFieldName(field));
   }
   return value;
 }
@@ -40,6 +44,7 @@ function requireId(value, field) {
 export function buildTrustedLiveModerationPlan({ event, trustContext, profile = "standard" } = {}) {
   if (!event || typeof event !== "object" || Array.isArray(event)) fail("EVENT_REQUIRED");
   if (!trustContext || typeof trustContext !== "object" || Array.isArray(trustContext)) fail("TRUST_CONTEXT_REQUIRED");
+  if (!LIVE_MODERATION_PROFILES.includes(profile)) fail("INVALID_PROFILE");
 
   const eventIds = Object.fromEntries(REQUIRED_IDS.map((field) => [field, requireId(event[field], field)]));
   if (trustContext.source !== "verified_live_gateway" ||
@@ -50,10 +55,10 @@ export function buildTrustedLiveModerationPlan({ event, trustContext, profile = 
   }
 
   const trustedIds = {
-    tenantId: requireId(trustContext.tenantId, "trusted_tenant"),
-    liveId: requireId(trustContext.liveId, "trusted_live"),
-    hostId: requireId(trustContext.hostId, "trusted_host"),
-    authorId: requireId(trustContext.authorId, "trusted_author")
+    tenantId: requireId(trustContext.tenantId, "trustedTenant"),
+    liveId: requireId(trustContext.liveId, "trustedLive"),
+    hostId: requireId(trustContext.hostId, "trustedHost"),
+    authorId: requireId(trustContext.authorId, "trustedAuthor")
   };
   for (const field of ["tenantId", "liveId", "hostId", "authorId"]) {
     if (eventIds[field] !== trustedIds[field]) fail("TRUST_SCOPE_MISMATCH");
