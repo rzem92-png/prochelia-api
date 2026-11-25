@@ -4,7 +4,7 @@ import { formatCurrency, formatDateTime, formatNumber, getDisplayLocale } from "
 
 test("currency formatting uses configured currency and locale", () => {
   assert.match(formatCurrency(1234.5, "FR", "fr-FR"), /1\s?234,50/);
-  assert.match(formatCurrency(1234.5, "DZ", "ar-DZ"), /DZD|د\\.ج/);
+  assert.match(formatCurrency(1234.5, "DZ", "ar-DZ"), /DZD|د\.ج/);
   assert.match(formatCurrency(1234.5, "GB", "en-GB"), /£|GBP/);
   assert.throws(() => formatCurrency(NaN, "FR"), TypeError);
   assert.throws(() => formatCurrency(1, "ZZ"), RangeError);
