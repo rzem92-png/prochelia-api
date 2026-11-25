@@ -41,6 +41,30 @@ test("timezone endpoint rejects unsupported countries and non-GET", async () => 
   assert.equal(response.status, 405);
 });
 
+test("country launch checklist returns required human evidence as unassessed and fail-closed", async () => {
+  const response = handleGlobalCountryRoute(get("/api/global/countries/fr/launch-checklist"), "/api/global/countries/fr/launch-checklist");
+  assert.equal(response.status, 200);
+  const body = await response.json();
+  assert.equal(body.country.code, "FR");
+  assert.equal(body.country.marketStatus, "pilot_candidate");
+  assert.equal(body.checklist.requiredCount, 6);
+  assert.equal(body.checklist.assessedCount, 0);
+  assert.equal(body.checklist.approvedCount, 0);
+  assert.equal(body.checklist.gates.every((gate) => gate.required && gate.status === "not_assessed" && gate.approvalRecorded === false), true);
+  assert.equal(body.launchEligible, false);
+  assert.equal(body.activationAllowed, false);
+  assert.match(body.note, /does not store|ne stocke/i);
+  assert.ok(body.checklist.gates.every((gate) => gate.owner && gate.evidenceRequired));
+});
+
+test("launch checklist rejects unknown country and all non-GET requests", async () => {
+  const unknown = await handleGlobalCountryRoute(get("/api/global/countries/ZZ/launch-checklist"), "/api/global/countries/ZZ/launch-checklist");
+  assert.equal(unknown.status, 404);
+  const response = handleGlobalCountryRoute(new Request("https://api.example.test/api/global/countries/FR/launch-checklist", { method: "POST" }), "/api/global/countries/FR/launch-checklist");
+  assert.equal(response.status, 405);
+  assert.equal(response.headers.get("allow"), "GET");
+});
+
 test("unknown country returns 404", async () => {
   const response = handleGlobalCountryRoute(get("/api/global/countries/zz"), "/api/global/countries/zz");
   assert.equal(response.status, 404);
