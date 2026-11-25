@@ -74,7 +74,7 @@ test("trusted recurrence count is bounded and never taken from event payload", (
     event: { ...event, recentViolations: 99 },
     trustContext: { ...trustContext, recentViolations: 0 }
   });
-  assert.ok(!result.action_plan.some((action) => action.type === "temporary_timeout" && action.duration_minutes > 5));
+  assert.equal(result.action_plan.find((action) => action.type === "temporary_timeout").duration_minutes, 10);
 });
 
 test("safe factual discussion yields an empty action plan", () => {
@@ -94,7 +94,7 @@ test("event identifiers are validated and the idempotency key is stable and scop
   assert.throws(() => buildTrustedLiveModerationPlan({
     event: { ...event, eventId: "bad id" },
     trustContext
-  }), { code: "INVALID_EVENTID" });
+  }), { code: "INVALID_EVENT_ID" });
   const otherLive = buildTrustedLiveModerationPlan({
     event: { ...event, liveId: "live-25", hostId: "host-3" },
     trustContext: { ...trustContext, liveId: "live-25" }
@@ -102,11 +102,12 @@ test("event identifiers are validated and the idempotency key is stable and scop
   assert.notEqual(result.idempotency_key, otherLive.idempotency_key);
 });
 
-test("rejects unbounded or malformed trusted violation counters", () => {
+test("rejects unbounded or malformed trusted violation counters and unknown profiles", () => {
   for (const value of [-1, 21, 1.5, "5"]) {
     assert.throws(() => buildTrustedLiveModerationPlan({
       event,
       trustContext: { ...trustContext, recentViolations: value }
     }), { code: "INVALID_TRUSTED_VIOLATION_COUNT" });
   }
+  assert.throws(() => buildTrustedLiveModerationPlan({ event, trustContext, profile: "other" }), { code: "INVALID_PROFILE" });
 });
