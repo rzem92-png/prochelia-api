@@ -209,7 +209,7 @@ test("Preview migration workflow accepts only an empty EU D1, the exact 23-entry
   assert.match(workflow, /registry_present/);
   assert.match(workflow, /non_internal/);
   assert.ok(workflow.includes("if len(local) != 46:"), "workflow must enforce the exact 46-entry chain");
-  assert.match(workflow, /if: \\$\\{\\{ false &&/); // superseded branch is deliberately non-executable
+  assert.ok(workflow.includes("if: ${{ false &&"), "superseded branch must remain disabled");
   assert.ok(workflow.includes('"0045_master_complement_seed_data.sql"'), "workflow must register master seed migration 0045");
   assert.match(workflow, /remote == base/);
   assert.match(workflow, /differs from the exact reviewed 23-entry baseline and 46-entry target/);
