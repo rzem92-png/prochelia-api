@@ -54,32 +54,13 @@ jobs:
           check_health "Current Pages proxy Worker" "https://fix-pages-proxy-preview-cors-2026-11-23.rzem92.workers.dev/api/health" "proxy-worker"
           check_health "Pages same-origin API proxy" "https://fix-frontend-accounting-read.prochelia.pages.dev/api/health" "pages-proxy"
 
-      - name: Verify the disabled-PSP proxy rejects before reading the synthetic webhook body
+      - name: Record the live financial test boundary without mutating Preview
         shell: bash
         run: |
           set -euo pipefail
-          body='{"id":"evt_synthetic_http_smoke","type":"payment_succeeded","provider":"stripe"}'
-          status="$(curl --silent --show-error --max-time 20 --output "$RUNNER_TEMP/webhook-rejected.json" --write-out '%{http_code}' \
-            --request POST \
-            --header 'Origin: https://fix-frontend-accounting-read.prochelia.pages.dev' \
-            --header 'Content-Type: application/json' \
-            --data "$body" \
-            'https://fix-pages-proxy-preview-cors-2026-11-23.rzem92.workers.dev/api/payments/webhook')"
-          test "$status" = "503" || {
-            echo "::error::Disabled-PSP proxy expected HTTP 503 with no financial write; the outer rate limiter may record one bounded counter. Received $status."
-            jq -c '{ok,error,write_enabled}' "$RUNNER_TEMP/webhook-rejected.json" 2>/dev/null || true
-            exit 1
-          }
-          jq -e '.error == "PAYMENT_PROVIDER_NOT_CONFIGURED" and .write_enabled == false' "$RUNNER_TEMP/webhook-rejected.json" >/dev/null
-          echo "PASS: deployed disabled-PSP proxy rejected the synthetic event before body consumption or financial writes; the outer rate limiter may record one bounded counter."
-
-      - name: Record the live HMAC acceptance boundary
-        shell: bash
-        run: |
-          set -euo pipefail
-          echo "::warning::Live HMAC acceptance is not claimed: the active PSP-disabled Preview Worker returns 503 before signature verification; the legacy Worker returned HTTP 500 PRODUCTION_SAFETY_ERROR on the unsigned probe because its deployed revision lacks sha256Hex. HMAC verification remains covered by isolated unit/security tests; do not route traffic to the legacy Worker."
-          echo "PASS: no live HMAC or financial write was attempted while the PSP adapter remains disabled."
-
+          echo "::warning::The PSP is disabled, so live HMAC acceptance cannot be demonstrated. This read-only smoke deliberately sends no webhook POST: even a rejected synthetic POST can increment the Preview security_rate_limits table. Signature and body-limit behavior remains covered by isolated candidate tests; a live HMAC/PSP Sandbox acceptance requires a separately approved isolated fixture environment."
+          echo "PASS: no webhook, payment, refund, payout, wallet, accounting or rate-limit mutation was attempted."
+          
       - name: Report tenant and Device Trust route readiness without masking missing endpoints
         shell: bash
         run: |
@@ -132,4 +113,4 @@ jobs:
               exit 1
               ;;
           esac
-          echo "No cookies or credentials were sent. Only synthetic unauthenticated POST probes were used; the security rate limiter may record hashed counters. No webhook event or financial transaction is created."
+          echo "No cookies, credentials or mutating HTTP requests were sent. Health and unauthenticated route checks only; no D1 rate-limit, webhook, payment, wallet or accounting writes were requested."
