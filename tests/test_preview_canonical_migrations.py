@@ -131,17 +131,17 @@ db.execute(
 
 db.executescript((MIGRATIONS / EXPECTED[-3]).read_text(encoding="utf-8"))
 db.executescript((MIGRATIONS / EXPECTED[-2]).read_text(encoding="utf-8"))
-db.executescript((MIGRATIONS / EXPECTED[-1]).read_text(encoding="utf-8"))
+# Simulate pre-existing unsafe rows that use the canonical seed IDs, so INSERT OR IGNORE must not hide the correction.
+db.execute(
+    "INSERT INTO copilot_resolution_rules(id,scenario_key,category,severity,auto_allowed,manager_approval_required,steps_json) VALUES (?, ?, ?, ?, ?, ?, ?)",
+    ("seed-rule-simple_refund_check-v1", "SIMPLE_REFUND_CHECK", "PAYMENT", "LOW", 1, 0, '["prepare_or_execute_allowed_action"]'),
+)
+db.execute(
+    "INSERT INTO copilot_resolution_rules(id,scenario_key,category,severity,auto_allowed,manager_approval_required,steps_json) VALUES (?, ?, ?, ?, ?, ?, ?)",
+    ("seed-rule-client_complaint-v1", "CLIENT_COMPLAINT", "COMPLAINT", "MEDIUM", 1, 0, '["close_if_resolved"]'),
+)
 
-# Simulate legacy runtime-created unsafe rules before the versioned seed.
-db.execute(
-    "INSERT INTO copilot_resolution_rules(id,scenario_key,category,severity,auto_allowed,manager_approval_required,steps_json) VALUES (?, ?, ?, ?, ?, ?, ?)",
-    ("legacy-refund-rule", "SIMPLE_REFUND_CHECK", "PAYMENT", "LOW", 1, 0, '["prepare_or_execute_allowed_action"]'),
-)
-db.execute(
-    "INSERT INTO copilot_resolution_rules(id,scenario_key,category,severity,auto_allowed,manager_approval_required,steps_json) VALUES (?, ?, ?, ?, ?, ?, ?)",
-    ("legacy-complaint-rule", "CLIENT_COMPLAINT", "COMPLAINT", "MEDIUM", 1, 0, '["close_if_resolved"]'),
-)
+db.executescript((MIGRATIONS / EXPECTED[-1]).read_text(encoding="utf-8"))
 
 # Versioned master seed data is appended after tenant/currency wallet guards.
 seed_counts = (
