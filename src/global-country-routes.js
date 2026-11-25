@@ -87,6 +87,42 @@ function publicLaunchChecklist(config) {
   };
 }
 
+
+function publicLaunchOverview() {
+  const countries = listCountryConfigs().sort((a, b) => a.code.localeCompare(b.code));
+  const rows = countries.map((config) => {
+    const checklist = publicLaunchChecklist(config).checklist;
+    return {
+      code: config.code,
+      name: config.name,
+      marketStatus: config.marketStatus,
+      requiredCount: checklist.requiredCount,
+      assessedCount: checklist.assessedCount,
+      approvedCount: checklist.approvedCount,
+      status: "not_assessed",
+      launchEligible: false,
+      activationAllowed: false,
+      gates: checklist.gates.map((gate) => ({ id: gate.id, label: gate.label, status: gate.status, approvalRecorded: gate.approvalRecorded })),
+    };
+  });
+  const requiredGateCount = rows.reduce((sum, country) => sum + country.requiredCount, 0);
+  return {
+    ok: true,
+    summary: {
+      countryCount: rows.length,
+      marketEnabledCount: rows.filter((country) => country.marketStatus === "enabled").length,
+      requiredGateCount,
+      assessedGateCount: 0,
+      approvedGateCount: 0,
+      status: "not_assessed",
+      launchEligible: false,
+      activationAllowed: false,
+    },
+    countries: rows,
+    note: "Vue agrégée descriptive uniquement : aucun dossier de preuve ni approbation n'est stocké ou vérifié. Aucun pays n'est activé par cet endpoint.",
+  };
+}
+
 function json(data, status = 200, extraHeaders = {}) {
   return new Response(JSON.stringify(data), {
     status,
@@ -100,8 +136,11 @@ function json(data, status = 200, extraHeaders = {}) {
 }
 
 export function handleGlobalCountryRoute(request, pathname) {
-  if (pathname !== "/api/global/countries" && !parseCountryRoute(pathname)) return null;
+  const launchSummaryPath = "/api/global/countries/launch-summary";
+  if (pathname !== "/api/global/countries" && pathname !== launchSummaryPath && !parseCountryRoute(pathname)) return null;
   if (request.method !== "GET") return json({ ok: false, error: "METHOD_NOT_ALLOWED" }, 405, { allow: "GET" });
+
+  if (pathname === launchSummaryPath) return json(publicLaunchOverview());
 
   if (pathname === "/api/global/countries") {
     const countries = listCountryConfigs()
