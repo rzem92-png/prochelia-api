@@ -36,7 +36,8 @@ test("webhook signature accepts the sha256= prefix and rejects a changed payload
   assert.equal(await verifyWebhookSignature(request, { PAYMENT_WEBHOOK_SECRET: secret }, payload), true);
   assert.equal(await verifyWebhookSignature(request, { PAYMENT_WEBHOOK_SECRET: secret }, payload + " "), false);
 });
-\ntest("webhook body reader preserves valid UTF-8 payload bytes for HMAC", async () => {
+
+test("webhook body reader preserves valid UTF-8 payload bytes for HMAC", async () => {
   const request = new Request("https://example.test/api/payments/webhook", { method: "POST", body: payload });
   const result = await readBoundedWebhookBody(request);
   assert.deepEqual(result, { ok: true, raw: payload });
@@ -67,9 +68,10 @@ test("webhook body reader rejects malformed UTF-8", async () => {
   const request = new Request("https://example.test/api/payments/webhook", { method: "POST", body: new Uint8Array([0xff]) });
   assert.deepEqual(await readBoundedWebhookBody(request), { ok: false, error: "INVALID_WEBHOOK_ENCODING" });
 });
-\ntest("webhook body reader preserves a UTF-8 BOM for exact HMAC payloads", async () => {
+
+test("webhook body reader preserves a UTF-8 BOM for exact HMAC payloads", async () => {
   const bytes = new Uint8Array([0xef, 0xbb, 0xbf, ...new TextEncoder().encode(payload)]);
   const request = new Request("https://example.test/api/payments/webhook", { method: "POST", body: bytes });
   const result = await readBoundedWebhookBody(request);
-  assert.deepEqual(result, { ok: true, raw: "\\uFEFF" + payload });
+  assert.deepEqual(result, { ok: true, raw: String.fromCharCode(0xfeff) + payload });
 });
