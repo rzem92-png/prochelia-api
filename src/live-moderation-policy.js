@@ -46,7 +46,7 @@ function findPersonalData(text) {
   if (EMAIL.test(text)) return "email";
   if (FRENCH_PHONE.test(text) || INTERNATIONAL_PHONE.test(text)) return "phone";
   if (IPV4.test(text)) return "ip_address";
-  if (STREET_ADDRESS.test(normalized) || ADDRESS_REVERSE.test(normalized)) return "street_address";
+  if (STREET_ADDRESS.test(text) || ADDRESS_REVERSE.test(text)) return "street_address";
   return null;
 }
 
@@ -62,7 +62,7 @@ function findInsult(text, profile) {
   const metaMention = META_MENTION.test(normalized) && !DIRECT_TARGET.test(normalized);
   if (metaMention) return null;
   if (STRONG_INSULTS.test(normalized)) return "targeted_insult";
-  if (MILD_INSULTS.test(normalized) && DIRECT_TARGET.test(normalized)) return "targeted_insult";
+  if (MILD_INSULTS.test(normalized)) return "targeted_insult";
   if (profile === "maximum" && PROFANITY.test(normalized)) return "profanity";
   return null;
 }
