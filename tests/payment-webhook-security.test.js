@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createHmac, webcrypto } from "node:crypto";
-import { verifyWebhookSignature } from "../src/index.js";
+import { verifyWebhookSignature, readBoundedWebhookBody } from "../src/index.js";
 
 globalThis.crypto ??= webcrypto;
 
@@ -45,4 +45,35 @@ test("Stripe native timestamped signatures are rejected until a Stripe-specific 
     headers: { "stripe-signature": `t=${timestamp},v1=${stripeDigest}` }
   });
   assert.equal(await verifyWebhookSignature(request, { PAYMENT_WEBHOOK_SECRET: secret }, payload), false);
+});
+\ntest("webhook body reader preserves valid UTF-8 payload bytes for HMAC", async () => {
+  const request = new Request("https://example.test/api/payments/webhook", { method: "POST", body: payload });
+  const result = await readBoundedWebhookBody(request);
+  assert.deepEqual(result, { ok: true, raw: payload });
+});
+
+test("webhook body reader rejects an oversized declared length before reading", async () => {
+  const request = new Request("https://example.test/api/payments/webhook", {
+    method: "POST",
+    headers: { "content-length": "9" },
+    body: "12345678"
+  });
+  assert.deepEqual(await readBoundedWebhookBody(request, 8), { ok: false, error: "WEBHOOK_BODY_TOO_LARGE" });
+});
+
+test("webhook body reader enforces the byte limit while streaming", async () => {
+  const body = new ReadableStream({
+    start(controller) {
+      controller.enqueue(new TextEncoder().encode("12345"));
+      controller.enqueue(new TextEncoder().encode("67890"));
+      controller.close();
+    }
+  });
+  const request = new Request("https://example.test/api/payments/webhook", { method: "POST", body, duplex: "half" });
+  assert.deepEqual(await readBoundedWebhookBody(request, 8), { ok: false, error: "WEBHOOK_BODY_TOO_LARGE" });
+});
+
+test("webhook body reader rejects malformed UTF-8", async () => {
+  const request = new Request("https://example.test/api/payments/webhook", { method: "POST", body: new Uint8Array([0xff]) });
+  assert.deepEqual(await readBoundedWebhookBody(request), { ok: false, error: "INVALID_WEBHOOK_ENCODING" });
 });
