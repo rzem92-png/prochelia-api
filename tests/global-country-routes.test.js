@@ -32,12 +32,13 @@ test("unknown country returns 404", async () => {
 test("route rejects non-GET and unrelated paths are not handled", async () => {
   const response = handleGlobalCountryRoute(new Request("https://api.example.test/api/global/countries", { method: "POST" }), "/api/global/countries");
   assert.equal(response.status, 405);
+  assert.equal(response.headers.get("allow"), "GET");
   assert.equal(handleGlobalCountryRoute(get("/api/global/country"), "/api/global/country"), null);
 });
 
 test("route is mounted in the API request handler", async () => {
   const { readFile } = await import("node:fs/promises");
   const source = await readFile(new URL("../src/index.js", import.meta.url), "utf8");
-  assert.match(source, /import \\{ handleGlobalCountryRoute \\} from ["']\\.\\/global-country-routes\\.js["']/);
-  assert.match(source, /const globalCountryResponse = handleGlobalCountryRoute\\(request, url\\.pathname\\)/);
+  assert.ok(source.includes('import { handleGlobalCountryRoute } from "./global-country-routes.js";'));
+  assert.ok(source.includes("const globalCountryResponse = handleGlobalCountryRoute(request, url.pathname);"));
 });
