@@ -27,6 +27,11 @@ test("does not block a neutral educational mention of an insult", () => {
   assert.equal(result.decision, "allow");
 });
 
+test("a context marker cannot whitelist an actual personal attack", () => {
+  const result = evaluateLiveMessage("La personne est un connard, cette insulte est inadmissible.");
+  assert.equal(result.decision, "block");
+});
+
 test("blocks explicit violent threats and pauses the affected live for review", () => {
   const result = evaluateLiveMessage("Je vais te tuer.");
   assert.equal(result.decision, "block_and_pause_for_review");
@@ -61,6 +66,9 @@ test("escalates repeated insult violations with temporary live-only sanctions", 
 
 test("standard profile does not censor non-targeted profanity; maximum profile can filter it", () => {
   assert.equal(evaluateLiveMessage("C'est putain de compliqué.", { profile: "standard" }).decision, "allow");
+  const reinforced = evaluateLiveMessage("C'est putain de compliqué.", { profile: "reinforced" });
+  assert.equal(reinforced.decision, "mask");
+  assert.ok(reinforced.actions.includes("mask_profanity"));
   assert.equal(evaluateLiveMessage("C'est putain de compliqué.", { profile: "maximum" }).decision, "block");
 });
 
