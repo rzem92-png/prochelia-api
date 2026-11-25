@@ -2,7 +2,7 @@
 // Deterministic rules only: this module is a safe baseline, not an AI semantic model.
 // It returns an action plan. It does not mute, suspend, pause, persist, or report by itself.
 
-export const LIVE_MODERATION_POLICY_VERSION = "1.0.0";
+export const LIVE_MODERATION_POLICY_VERSION = "1.1.0";
 export const LIVE_MODERATION_PROFILES = Object.freeze(["standard", "reinforced", "maximum"]);
 
 const STRONG_INSULTS = /\b(?:connard|connasse|salaud|salope|pute|encule|enfoire|batard|fils de pute|fuck you|bitch|asshole|motherfucker|piece of shit)\b/i;
@@ -41,9 +41,16 @@ function normalizeModerationText(value) {
     .trim();
 }
 
+function normalizeObfuscatedEmail(value) {
+  return String(value ?? "")
+    .normalize("NFKC")
+    .replace(/[\u200B-\u200D\uFEFF]/g, "")
+    .replace(/\s*(?:\[\s*at\s*\]|\(\s*at\s*\)|\{\s*at\s*\}|<\s*at\s*>|arrobase)\s*/gi, "@")
+    .replace(/\s*(?:\[\s*dot\s*\]|\(\s*dot\s*\)|\{\s*dot\s*\}|<\s*dot\s*>|point)\s*/gi, ".");
+}
+
 function findPersonalData(text) {
-  const normalized = normalizeModerationText(text);
-  if (EMAIL.test(text)) return "email";
+  if (EMAIL.test(text) || EMAIL.test(normalizeObfuscatedEmail(text))) return "email";
   if (FRENCH_PHONE.test(text) || INTERNATIONAL_PHONE.test(text)) return "phone";
   if (IPV4.test(text)) return "ip_address";
   if (STREET_ADDRESS.test(text) || ADDRESS_REVERSE.test(text)) return "street_address";
