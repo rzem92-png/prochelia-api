@@ -6,6 +6,7 @@
 // =====================================================
 
 import { procheliaV7 } from "./v7.js";
+import { listCountryConfigs } from "./global-country-registry.js";
 
 export async function handleV7Route(
   request,
@@ -19,6 +20,28 @@ export async function handleV7Route(
     const method =
       request.method.toUpperCase();
 
+
+    // =================================================
+    // PUBLIC MARKET CONFIGURATION (READ-ONLY)
+    // =================================================
+    if (path === "/api/v7/markets" && method === "GET") {
+      return Response.json({
+        ok: true,
+        version: procheliaV7.version,
+        markets: listCountryConfigs().map((market) => ({
+          countryCode: market.code,
+          name: market.name,
+          marketStatus: market.marketStatus,
+          defaultLocale: market.defaultLocale,
+          locales: [...market.locales],
+          currency: market.currency,
+          timezone: market.timezone,
+          callingCode: market.callingCode,
+          launchEligible: false
+        })),
+        note: "Public configuration only. No market is activated or commercially approved by this endpoint."
+      }, { headers: { "cache-control": "public, max-age=300" } });
+    }
 
     // =================================================
     // STATUT V7
