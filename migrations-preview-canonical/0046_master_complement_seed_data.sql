@@ -14,3 +14,18 @@ INSERT OR IGNORE INTO copilot_resolution_rules(id,scenario_key,category,severity
 INSERT OR IGNORE INTO copilot_resolution_rules(id,scenario_key,category,severity,auto_allowed,manager_approval_required,steps_json) VALUES('seed-rule-legal_dispute-v1','LEGAL_DISPUTE','LEGAL','CRITICAL',0,1,'["collect_evidence","freeze_irreversible_action","legal_review","manager_approval","notify","journal"]');
 INSERT OR IGNORE INTO copilot_resolution_rules(id,scenario_key,category,severity,auto_allowed,manager_approval_required,steps_json) VALUES('seed-rule-intervenant_absent-v1','INTERVENANT_ABSENT','REPLACEMENT','HIGH',0,1,'["verify_absence","check_available_intervenants","propose_replacement","manager_approval","notify","journal"]');
 INSERT OR IGNORE INTO copilot_resolution_rules(id,scenario_key,category,severity,auto_allowed,manager_approval_required,steps_json) VALUES('seed-rule-client_complaint-v1','CLIENT_COMPLAINT','COMPLAINT','MEDIUM',0,1,'["acknowledge","collect_evidence","reconcile_mission","reconcile_finance","propose_resolution","manager_approval","notify","journal"]');
+
+-- Correct legacy runtime-seeded rules: refund and complaint workflows are proposal-only.
+-- The migration also repairs rows that already existed before this canonical seed.
+UPDATE copilot_resolution_rules
+   SET auto_allowed=0,
+       manager_approval_required=1,
+       steps_json='["reconcile_transaction","verify_refund_eligibility","prepare_refund_proposal","manager_approval","notify","journal"]',
+       updated_at=CURRENT_TIMESTAMP
+ WHERE scenario_key='SIMPLE_REFUND_CHECK';
+UPDATE copilot_resolution_rules
+   SET auto_allowed=0,
+       manager_approval_required=1,
+       steps_json='["acknowledge","collect_evidence","reconcile_mission","reconcile_finance","propose_resolution","manager_approval","notify","journal"]',
+       updated_at=CURRENT_TIMESTAMP
+ WHERE scenario_key='CLIENT_COMPLAINT';
