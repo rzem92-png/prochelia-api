@@ -133,6 +133,16 @@ db.executescript((MIGRATIONS / EXPECTED[-3]).read_text(encoding="utf-8"))
 db.executescript((MIGRATIONS / EXPECTED[-2]).read_text(encoding="utf-8"))
 db.executescript((MIGRATIONS / EXPECTED[-1]).read_text(encoding="utf-8"))
 
+# Simulate legacy runtime-created unsafe rules before the versioned seed.
+db.execute(
+    "INSERT INTO copilot_resolution_rules(id,scenario_key,category,severity,auto_allowed,manager_approval_required,steps_json) VALUES (?, ?, ?, ?, ?, ?, ?)",
+    ("legacy-refund-rule", "SIMPLE_REFUND_CHECK", "PAYMENT", "LOW", 1, 0, '["prepare_or_execute_allowed_action"]'),
+)
+db.execute(
+    "INSERT INTO copilot_resolution_rules(id,scenario_key,category,severity,auto_allowed,manager_approval_required,steps_json) VALUES (?, ?, ?, ?, ?, ?, ?)",
+    ("legacy-complaint-rule", "CLIENT_COMPLAINT", "COMPLAINT", "MEDIUM", 1, 0, '["close_if_resolved"]'),
+)
+
 # Versioned master seed data is appended after tenant/currency wallet guards.
 seed_counts = (
     db.execute("SELECT COUNT(*) FROM brand_identity WHERE id='seed-prochelia-brand-v1'").fetchone()[0],
@@ -147,6 +157,19 @@ seed_counts_after_replay = (
     db.execute("SELECT COUNT(*) FROM copilot_resolution_rules WHERE id LIKE 'seed-rule-%'").fetchone()[0],
 )
 assert seed_counts_after_replay == seed_counts, "Master seed migration must be idempotent"
+
+# Canonical migration repairs pre-existing runtime seed flags and restricts sensitive cases.
+refund_rule = db.execute(
+    "SELECT auto_allowed, manager_approval_required, steps_json FROM copilot_resolution_rules WHERE scenario_key='SIMPLE_REFUND_CHECK'"
+).fetchone()
+complaint_rule = db.execute(
+    "SELECT auto_allowed, manager_approval_required, steps_json FROM copilot_resolution_rules WHERE scenario_key='CLIENT_COMPLAINT'"
+).fetchone()
+assert refund_rule[0:2] == (0, 1), f"Refund rule must be proposal-only: {refund_rule}"
+assert "prepare_refund_proposal" in refund_rule[2] and "prepare_or_execute_allowed_action" not in refund_rule[2]
+assert complaint_rule[0:2] == (0, 1), f"Complaint rule must require manager review: {complaint_rule}"
+assert "manager_approval" in complaint_rule[2]
+
 legacy_wallet = db.execute(
     "SELECT tenant_id, available_cents, pending_cents, paid_cents, reserved_cents FROM wallets WHERE id=?",
     ("legacy-wallet-1",),
