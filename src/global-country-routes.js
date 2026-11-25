@@ -1,6 +1,7 @@
 import { getCountryConfig, listCountryConfigs, isCountryLaunchEligible } from "./global-country-registry.js";
 import { getCountryTimezones } from "./global-timezone-registry.js";
 import { COUNTRY_LAUNCH_GATES } from "./country-launch-gates.js";
+import { getCountryLaunchAssessmentTemplate } from "./country-launch-assessment-template.js";
 
 const LAUNCH_GATE_DETAILS = Object.freeze({
   legal_review: Object.freeze({
@@ -41,7 +42,7 @@ function parseCountryRoute(pathname) {
   const code = segments[4];
   if (!/^[A-Za-z]{2}$/.test(code)) return null;
   if (segments.length === 5) return { code, subroute: null };
-  if (segments.length === 6 && ["timezones", "launch-checklist"].includes(segments[5])) return { code, subroute: segments[5] };
+  if (segments.length === 6 && ["timezones", "launch-checklist", "launch-assessment-template"].includes(segments[5])) return { code, subroute: segments[5] };
   return null;
 }
 
@@ -163,6 +164,9 @@ export function handleGlobalCountryRoute(request, pathname) {
   }
   if (route.subroute === "launch-checklist") {
     return json(publicLaunchChecklist(config));
+  }
+  if (route.subroute === "launch-assessment-template") {
+    return json(getCountryLaunchAssessmentTemplate(config));
   }
   return json({ ok: true, country: publicCountry(config) });
 }
