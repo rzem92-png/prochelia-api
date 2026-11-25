@@ -1032,7 +1032,7 @@ export async function readBoundedWebhookBody(request, maxBytes = MAX_PAYMENT_WEB
   const declaredLength = request.headers.get("content-length");
   if (declaredLength !== null) {
     const value = declaredLength.trim();
-    if (!/^\\d+$/.test(value)) return { ok: false, error: "INVALID_WEBHOOK_CONTENT_LENGTH" };
+    if (!/^\d+$/.test(value)) return { ok: false, error: "INVALID_WEBHOOK_CONTENT_LENGTH" };
     if (Number(value) > limit) return { ok: false, error: "WEBHOOK_BODY_TOO_LARGE" };
   }
 
