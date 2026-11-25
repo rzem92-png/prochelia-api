@@ -20,7 +20,7 @@ test("Both source and isolated restore D1 identities and EU jurisdictions are ch
   assert.match(workflow, /source-d1\.json/);
   assert.match(workflow, /restore-d1\.json/);
   assert.match(workflow, /result\.jurisdiction == "eu"/);
-  assert.match(workflow, /RESTORE_DB_ID: 3caebbc6-982a-4562-96a7-e509185e9e9a/);
+  assert.match(workflow, /RESTORE_DB_ID: 6b9a2659-53b7-499a-a53c-eeae64166508/);
   assert.match(workflow, /RESTORE_DB_ID.*!=.*PRODUCTION_DB_ID/);
   assert.match(workflow, /RESTORE_DB_ID.*!=.*PREVIEW_DB_ID/);
 });
@@ -31,6 +31,14 @@ test("Restore validates encryption, checksum and SQLite integrity before remote 
   assert.match(workflow, /PRAGMA integrity_check/);
   assert.match(workflow, /PRAGMA foreign_key_check/);
   assert.ok(workflow.indexOf("Decrypt, verify checksum and test local SQLite restoration") < workflow.indexOf("Restore only into the isolated D1 database"));
+});
+
+test("Restore targets the verified empty EU isolated D1, never the non-empty validation database", () => {
+  assert.match(workflow, /RESTORE_DB_NAME: prochelia-r2-restore-validation-2026-11-18/);
+  assert.match(workflow, /RESTORE_DB_ID: 6b9a2659-53b7-499a-a53c-eeae64166508/);
+  assert.doesNotMatch(workflow, /3caebbc6-982a-4562-96a7-e509185e9e9a/);
+  assert.match(workflow, /Confirm isolated restore database is empty before any remote write/);
+  assert.match(workflow, /pre-restore\\.json/);
 });
 
 test("Isolated restore target must be empty and is checked after restoration", () => {
