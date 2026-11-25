@@ -8,7 +8,7 @@ export const LIVE_MODERATION_PROFILES = Object.freeze(["standard", "reinforced",
 const STRONG_INSULTS = /\b(?:connard|connasse|salaud|salope|pute|encule|enfoire|batard|fils de pute|fuck you|bitch|asshole|motherfucker|piece of shit)\b/i;
 const MILD_INSULTS = /\b(?:con|conne|idiot|imbecile|debile|cretin|stupide|bouffon|clown|moron|dumb|stupid)\b/i;
 const DIRECT_TARGET = /\b(?:tu|toi|t es|vous|il|elle|ce|cette|cet|ce type|cette personne)\b.{0,35}\b(?:con|conne|idiot|imbecile|debile|cretin|stupide|bouffon|clown|moron|dumb|stupid)\b/i;
-const META_MENTION = /\b(?:le mot|le terme|definition|citation|exemple|traduction|insulte|insulter|insultant|insultante|dans cette phrase)\b/i;
+const META_MENTION = /\b(?:le mot|le terme|definition|citation|exemple|traduction|dans cette phrase)\b/i;
 const PROFANITY = /\b(?:putain|merde|fuck|shit|damn|fucking|bullshit)\b/i;
 
 const THREAT_PATTERNS = [
@@ -63,7 +63,7 @@ function findInsult(text, profile) {
   if (metaMention) return null;
   if (STRONG_INSULTS.test(normalized)) return "targeted_insult";
   if (MILD_INSULTS.test(normalized)) return "targeted_insult";
-  if (profile === "maximum" && PROFANITY.test(normalized)) return "profanity";
+  if (profile !== "standard" && PROFANITY.test(normalized)) return "profanity";
   return null;
 }
 
@@ -79,7 +79,7 @@ function addUnique(target, value) {
   if (!target.includes(value)) target.push(value);
 }
 
-function actionPlan(findings, { recentViolations = 0 } = {}) {
+function actionPlan(findings, { profile = "standard", recentViolations = 0 } = {}) {
   const actions = [];
   const categories = findings.map((item) => item.category);
   const criticalThreat = categories.includes("explicit_violent_threat");
