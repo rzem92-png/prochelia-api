@@ -38,7 +38,7 @@ test("Restore targets the verified empty EU isolated D1, never the non-empty val
   assert.match(workflow, /RESTORE_DB_ID: 6b9a2659-53b7-499a-a53c-eeae64166508/);
   assert.doesNotMatch(workflow, /3caebbc6-982a-4562-96a7-e509185e9e9a/);
   assert.match(workflow, /Confirm isolated restore database is empty before any remote write/);
-  assert.match(workflow, /pre-restore\\.json/);
+  assert.match(workflow, /pre-restore\.json/);
 });
 
 test("Isolated restore target must be empty and is checked after restoration", () => {
