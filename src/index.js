@@ -1064,7 +1064,7 @@ export async function readBoundedWebhookBody(request, maxBytes = MAX_PAYMENT_WEB
     offset += chunk.byteLength;
   }
   try {
-    return { ok: true, raw: new TextDecoder("utf-8", { fatal: true }).decode(bytes) };
+    return { ok: true, raw: new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes) };
   } catch {
     return { ok: false, error: "INVALID_WEBHOOK_ENCODING" };
   }
