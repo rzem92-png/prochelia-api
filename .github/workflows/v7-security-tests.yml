@@ -27,6 +27,8 @@ on:
       - "src/index.js"
       - "src/global-country-registry.js"
       - "src/global-timezone-registry.js"
+      - "src/global-country-routes.js"
+      - "src/country-launch-gates.js"
       - "tests/**"
       - ".github/workflows/v7-security-tests.yml"
       - ".github/workflows/deploy-preview-worker-manual.yml"
