@@ -152,6 +152,7 @@ export function evaluateLiveMessage(text, options = {}) {
   if (spamType) findings.push({ category: "spam", code: spamType });
 
   const plan = actionPlan(findings, {
+    profile,
     recentViolations: Number.isInteger(options.recentViolations) && options.recentViolations >= 0
       ? Math.min(options.recentViolations, 20)
       : 0
