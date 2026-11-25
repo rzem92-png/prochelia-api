@@ -1,5 +1,39 @@
 import { getCountryConfig, listCountryConfigs, isCountryLaunchEligible } from "./global-country-registry.js";
 import { getCountryTimezones } from "./global-timezone-registry.js";
+import { COUNTRY_LAUNCH_GATES } from "./country-launch-gates.js";
+
+const LAUNCH_GATE_DETAILS = Object.freeze({
+  legal_review: Object.freeze({
+    label: "Revue juridique locale",
+    owner: "Conseil juridique qualifié dans le pays",
+    evidenceRequired: "Note juridique locale datée couvrant le modèle de service, les contrats, les responsabilités et les restrictions applicables.",
+  }),
+  tax_review: Object.freeze({
+    label: "Revue fiscale et facturation",
+    owner: "Expert-comptable ou fiscaliste local qualifié",
+    evidenceRequired: "Validation écrite des taxes, règles de facturation, obligations déclaratives et traitement comptable applicables.",
+  }),
+  payments_review: Object.freeze({
+    label: "Validation des paiements",
+    owner: "Responsable financier et prestataire de paiement",
+    evidenceRequired: "Confirmation du PSP, des moyens de paiement, remboursements, rapprochement et restrictions locales; aucun paiement réel n'est activé par cette API.",
+  }),
+  data_protection_review: Object.freeze({
+    label: "Protection des données",
+    owner: "DPO ou conseil privacy qualifié",
+    evidenceRequired: "Analyse des données, bases légales, droits, rétention, hébergement, transferts et mesures de sécurité; DPIA si requise.",
+  }),
+  operations_review: Object.freeze({
+    label: "Validation opérationnelle",
+    owner: "Responsable opérations local",
+    evidenceRequired: "Capacité de support, procédures d'urgence, qualité, SLA, assurance et processus de réclamation adaptés.",
+  }),
+  human_activation: Object.freeze({
+    label: "Autorisation humaine de lancement",
+    owner: "Fondateur ou responsable marché habilité",
+    evidenceRequired: "Décision explicite, datée et traçable de l'autorité habilitée, après examen des validations précédentes.",
+  }),
+});
 
 function publicCountry(config) {
   return {
@@ -12,6 +46,34 @@ function publicCountry(config) {
     timezones: getCountryTimezones(config.code),
     callingCode: config.callingCode,
     available: isCountryLaunchEligible(config.code),
+  };
+}
+
+function publicLaunchChecklist(config) {
+  const gates = (config.launchGates ?? COUNTRY_LAUNCH_GATES).map((gateId) => {
+    const details = LAUNCH_GATE_DETAILS[gateId];
+    return {
+      id: gateId,
+      label: details?.label ?? gateId,
+      owner: details?.owner ?? "Responsable qualifié à désigner",
+      evidenceRequired: details?.evidenceRequired ?? "Validation humaine documentée à fournir.",
+      required: true,
+      status: "not_assessed",
+      approvalRecorded: false,
+    };
+  });
+  return {
+    ok: true,
+    country: { code: config.code, name: config.name, marketStatus: config.marketStatus },
+    checklist: {
+      requiredCount: gates.length,
+      assessedCount: 0,
+      approvedCount: 0,
+      gates,
+    },
+    launchEligible: false,
+    activationAllowed: false,
+    note: "Checklist descriptive uniquement : cet endpoint ne stocke ni ne vérifie les preuves et approbations. Toute activation exige une validation humaine séparée.",
   };
 }
 
@@ -30,7 +92,7 @@ function json(data, status = 200, extraHeaders = {}) {
 export function handleGlobalCountryRoute(request, pathname) {
   if (
     pathname !== "/api/global/countries" &&
-    !/^\/api\/global\/countries\/[A-Za-z]{2}(?:\/timezones)?$/.test(pathname)
+    !/^\\/api\\/global\\/countries\\/[A-Za-z]{2}(?:\\/timezones|\\/launch-checklist)?$/.test(pathname)
   ) return null;
   if (request.method !== "GET") return json({ ok: false, error: "METHOD_NOT_ALLOWED" }, 405, { allow: "GET" });
 
@@ -41,7 +103,7 @@ export function handleGlobalCountryRoute(request, pathname) {
     return json({ ok: true, count: countries.length, countries });
   }
 
-  const match = pathname.match(/^\/api\/global\/countries\/([A-Za-z]{2})(?:\/timezones)?$/);
+  const match = pathname.match(/^\\/api\\/global\\/countries\\/([A-Za-z]{2})(?:\\/timezones|\\/launch-checklist)?$/);
   const code = match?.[1]?.toUpperCase();
   const config = getCountryConfig(code);
   if (!config) return json({ ok: false, error: "COUNTRY_NOT_FOUND" }, 404);
@@ -53,6 +115,9 @@ export function handleGlobalCountryRoute(request, pathname) {
       defaultTimezone: config.timezone,
       timezones: getCountryTimezones(config.code),
     });
+  }
+  if (pathname.endsWith("/launch-checklist")) {
+    return json(publicLaunchChecklist(config));
   }
   return json({ ok: true, country: publicCountry(config) });
 }
