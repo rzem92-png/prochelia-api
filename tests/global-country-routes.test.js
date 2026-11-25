@@ -65,6 +65,34 @@ test("launch checklist rejects unknown country and all non-GET requests", async 
   assert.equal(response.headers.get("allow"), "GET");
 });
 
+
+test("global launch summary covers all configured countries and remains fail-closed", async () => {
+  const response = handleGlobalCountryRoute(get("/api/global/countries/launch-summary"), "/api/global/countries/launch-summary");
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get("cache-control"), "no-store");
+  const body = await response.json();
+  assert.equal(body.summary.countryCount, 14);
+  assert.equal(body.summary.marketEnabledCount, 0);
+  assert.equal(body.summary.requiredGateCount, 84);
+  assert.equal(body.summary.assessedGateCount, 0);
+  assert.equal(body.summary.approvedGateCount, 0);
+  assert.equal(body.summary.status, "not_assessed");
+  assert.equal(body.summary.launchEligible, false);
+  assert.equal(body.summary.activationAllowed, false);
+  assert.deepEqual(body.countries.map((country) => country.code), [...body.countries.map((country) => country.code)].sort());
+  assert.ok(body.countries.every((country) => country.requiredCount === 6 && country.assessedCount === 0 && country.approvedCount === 0));
+  assert.ok(body.countries.every((country) => country.status === "not_assessed" && country.launchEligible === false && country.activationAllowed === false));
+  assert.ok(body.countries.every((country) => country.gates.length === 6 && country.gates.every((gate) => gate.status === "not_assessed" && gate.approvalRecorded === false)));
+  assert.match(body.note, /aucun pays n'est activé|no country is enabled/i);
+});
+
+test("global launch summary is GET-only and unrelated paths remain unhandled", async () => {
+  const response = handleGlobalCountryRoute(new Request("https://api.example.test/api/global/countries/launch-summary", { method: "POST" }), "/api/global/countries/launch-summary");
+  assert.equal(response.status, 405);
+  assert.equal(response.headers.get("allow"), "GET");
+  assert.equal(handleGlobalCountryRoute(get("/api/global/countries/launch-summary/extra"), "/api/global/countries/launch-summary/extra"), null);
+});
+
 test("unknown country returns 404", async () => {
   const response = handleGlobalCountryRoute(get("/api/global/countries/zz"), "/api/global/countries/zz");
   assert.equal(response.status, 404);
