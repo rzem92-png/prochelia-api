@@ -1,0 +1,125 @@
+name: Deploy isolated Pages-proxy Worker Preview
+
+on:
+  push:
+    branches:
+      - fix/pages-proxy-preview-cors-2026-11-23
+    paths:
+      - "src/**"
+      - "wrangler.jsonc"
+      - "tests/preview-cors-origin-config.test.mjs"
+      - "tests/preview-wrangler-generator.test.mjs"
+      - "tests/production-safety-rate-limit.test.mjs"
+      - "scripts/generate-preview-wrangler-config.mjs"
+      - ".github/workflows/deploy-pages-proxy-preview.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: prochelia-pages-proxy-worker-preview
+  cancel-in-progress: false
+
+jobs:
+  deploy-isolated-preview:
+    if: github.ref == 'refs/heads/fix/pages-proxy-preview-cors-2026-11-23' && github.actor == 'rzem92-png'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: "22"
+          package-manager-cache: false
+
+      - name: Generate and validate isolated Preview configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/generate-preview-wrangler-config.mjs
+          test -s wrangler.preview.generated.json
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const preview = JSON.parse(fs.readFileSync('wrangler.preview.generated.json', 'utf8'));
+          const productionId = '04f52830-ef5a-4f17-a640-42bbc2381bba';
+          const previewId = 'e3cf167c-37e1-4d72-9ac6-b3e27c14b97f';
+          const db = preview.d1_databases?.find((item) => item.binding === 'DB');
+          if (preview.name !== 'fix-pages-proxy-preview-cors-2026-11-23') throw new Error('Unexpected Preview Worker name');
+          if (preview.vars?.APP_ENV !== 'preview') throw new Error('APP_ENV must be preview');
+          if (preview.vars?.PROCHELIA_COMMIT_SHA !== process.env.GITHUB_SHA) throw new Error('Preview source SHA must equal this exact workflow commit');
+          if (db?.database_id !== previewId) throw new Error('Preview D1 identity mismatch');
+          if (JSON.stringify(preview).includes(productionId)) throw new Error('Production D1 identifier leaked into generated Preview config');
+          if (preview.r2_buckets?.length) throw new Error('R2 must remain unbound until EU bucket inventory and attestation are independently verified');
+          if (preview.triggers?.crons?.length) throw new Error('Cron triggers are not allowed in this Preview deployment');
+          if (preview.observability?.enabled !== true || preview.observability?.redact_query_string !== true) throw new Error('Preview observability must be enabled with query-string redaction');
+          if (preview.observability?.logs?.invocation_logs !== false) throw new Error('Invocation logs must remain disabled to avoid recording request URLs');
+          console.log('Preview D1, exact origin allowlist, redacted observability, no R2 binding and no Cron verified.');
+          NODE
+          node --experimental-default-type=module --test tests/preview-cors-origin-config.test.mjs tests/preview-wrangler-generator.test.mjs tests/production-safety-rate-limit.test.mjs
+          echo "PREVIEW_WRANGLER_CONFIG=$GITHUB_WORKSPACE/wrangler.preview.generated.json" >> "$GITHUB_ENV"
+
+      - name: Validate Worker bundle without deployment
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx --yes wrangler@4 deploy --dry-run --config "$PREVIEW_WRANGLER_CONFIG" --outdir "$RUNNER_TEMP/prochelia-pages-proxy-worker-dry-run" 2>&1 | tee "$RUNNER_TEMP/preview-worker-dry-run.log"
+          grep -F "env.DB (prochelia-preview-eu-2026-11-17)" "$RUNNER_TEMP/preview-worker-dry-run.log" >/dev/null
+          if grep -F "04f52830-ef5a-4f17-a640-42bbc2381bba" "$RUNNER_TEMP/preview-worker-dry-run.log" >/dev/null; then
+            echo "::error::Production D1 identifier appeared in the Preview Worker dry-run."
+            exit 1
+          fi
+
+      - name: Verify Cloudflare credentials and deploy this branch Preview only
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${CLOUDFLARE_API_TOKEN:-}" || { echo "::error::CLOUDFLARE_API_TOKEN is missing"; exit 1; }
+          test "$CLOUDFLARE_ACCOUNT_ID" = "f2a79e9fa41566a8ec80fb24c02c60eb" || {
+            echo "::error::Cloudflare account mismatch"; exit 1;
+          }
+          npx --yes wrangler@4 deploy --config "$PREVIEW_WRANGLER_CONFIG" --message "Persistent isolated Preview for Pages proxy ${GITHUB_SHA}"
+
+
+      - name: Verify persistent isolated Worker Preview HTTP
+        env:
+          PREVIEW_WORKER_URL: https://fix-pages-proxy-preview-cors-2026-11-23.rzem92.workers.dev
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in {1..10}; do
+            health_status="$(curl --silent --show-error --output "$RUNNER_TEMP/preview-health.json" --write-out '%{http_code}' "$PREVIEW_WORKER_URL/api/health" || true)"
+            if [ "$health_status" = "200" ]; then break; fi
+            sleep 3
+          done
+          test "$health_status" = "200" || { echo "::error::Persistent Preview Worker health endpoint failed (HTTP $health_status)."; exit 1; }
+          jq -e '.ok == true' "$RUNNER_TEMP/preview-health.json" >/dev/null
+
+          auth_status="$(curl --silent --show-error --output "$RUNNER_TEMP/preview-tenant-context.json" --write-out '%{http_code}' "$PREVIEW_WORKER_URL/api/tenant/context" || true)"
+          test "$auth_status" = "401" || { echo "::error::Unauthenticated tenant context must fail closed with HTTP 401 (received $auth_status)."; exit 1; }
+
+          for origin in \
+            'https://fix-frontend-finance-confirm.prochelia.pages.dev' \
+            'https://fix-frontend-accounting-read.prochelia.pages.dev'; do
+            preflight_status="$(curl --silent --show-error --dump-header "$RUNNER_TEMP/preview-preflight.headers" --output /dev/null --write-out '%{http_code}' --request OPTIONS \
+              --header "Origin: $origin" \
+              --header 'Access-Control-Request-Method: GET' \
+              --header 'Access-Control-Request-Headers: content-type' \
+              "$PREVIEW_WORKER_URL/api/health")"
+            test "$preflight_status" = "204" || { echo "::error::Preview CORS preflight failed for $origin (HTTP $preflight_status)."; exit 1; }
+            grep -Fqi "access-control-allow-origin: $origin" "$RUNNER_TEMP/preview-preflight.headers"
+          done
+          echo "PASS: persistent Worker Preview health, unauthenticated tenant guard and both exact Pages CORS origins."
+
+      - name: Record Preview-only deployment guardrails
+        run: |
+          {
+            echo 'Persistent Worker Preview only: https://fix-pages-proxy-preview-cors-2026-11-23.rzem92.workers.dev.'
+            echo 'D1 binding is pinned to Preview database e3cf167c-37e1-4d72-9ac6-b3e27c14b97f.'
+            echo "Preview Worker source SHA: $GITHUB_SHA."
+            echo 'No D1 migrations, no R2 writes, no Cron, no production Worker deployment, and no payment operations.'
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -4,9 +4,11 @@ import { readFile } from "node:fs/promises";
 
 const workflow = await readFile(new URL("../.github/workflows/backup-preview-d1-to-r2-eu.yml", import.meta.url), "utf8");
 
-test("Preview R2 backup is manually gated to main only and pinned to the reviewed EU Preview D1 config", () => {
-  assert.match(workflow, /github\.ref == 'refs\/heads\/main'/);
+test("Preview R2 backup is manually gated to the reviewed Preview branch and pinned to the EU Preview D1 config", () => {
+  assert.match(workflow, /github\.ref == 'refs\/heads\/fix\/pages-proxy-preview-cors-2026-11-23'/);
   assert.match(workflow, /inputs\.confirm_preview_backup == 'BACKUP_PREVIEW_TO_R2_EU'/);
+  assert.match(workflow, /github\.actor == 'rzem92-png'/);
+  assert.match(workflow, /test "\$GITHUB_ACTOR" = "rzem92-png"/);
   assert.match(workflow, /ref: 1fc258c9c8d25e5e7b89241504218bf102afbf27/);
   assert.match(workflow, /clean="\\n"\.join/);
   assert.ok(workflow.includes("grep -Fq \"$EXPECTED_ACCOUNT_ID\""));
@@ -37,7 +39,7 @@ test("Preview R2 backup verifies both exact resources are EU before export", () 
   assert.match(workflow, /\.result\.jurisdiction == "eu"/);
   assert.match(workflow, /\.result\.uuid == \$id and \.result\.name == \$name and \.result\.jurisdiction == "eu"/);
   assert.match(workflow, /prochelia-preview-backups-eu-v2/);
-  assert.ok(workflow.includes('.provenance.ref == "refs/heads/main"'));
+  assert.ok(workflow.includes('.provenance.ref == "refs/heads/fix/pages-proxy-preview-cors-2026-11-23"'));
   assert.match(workflow, /f2a79e9fa41566a8ec80fb24c02c60eb\.eu\.r2\.cloudflarestorage\.com/);
 });
 

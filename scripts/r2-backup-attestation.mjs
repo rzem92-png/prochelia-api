@@ -48,7 +48,7 @@ export function validateManifest(manifest) {
       typeof provenance.workflow !== "string" || !provenance.workflow ||
       !/^\d+$/.test(String(provenance.run_id || "")) ||
       !SHA_40.test(provenance.commit_sha || "") ||
-      provenance.ref !== "refs/heads/main" ||
+      provenance.ref !== "refs/heads/fix/pages-proxy-preview-cors-2026-11-23" ||
       !SHA_40.test(provenance.migration_source_sha || "")) {
     throw new Error("ATTESTATION_PROVENANCE_INVALID");
   }

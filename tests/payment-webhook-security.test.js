@@ -94,6 +94,26 @@ test("bounded webhook reader rejects an oversized body before parsing", async ()
   assert.equal(result.reason, "too_large");
 });
 
+test("disabled PSP rejects before consuming the webhook request body", async () => {
+  const body = new ReadableStream({
+    start(controller) {
+      controller.enqueue(new TextEncoder().encode(stripePayload));
+      controller.close();
+    }
+  });
+  const request = new Request("https://example.test/api/payments/webhook", {
+    method: "POST",
+    body,
+    duplex: "half"
+  });
+  const response = await paymentWebhook(request, {});
+  assert.equal(response.status, 503);
+  assert.equal(request.bodyUsed, false);
+  const result = await response.json();
+  assert.equal(result.error, "PAYMENT_PROVIDER_NOT_CONFIGURED");
+  assert.equal(result.write_enabled, false);
+});
+
 test("validly signed Stripe events remain blocked before any financial write without a PSP adapter", async () => {
   const timestamp = Math.floor(Date.now() / 1000);
   const response = await paymentWebhook(stripeRequest(stripePayload, timestamp), { STRIPE_WEBHOOK_SECRET: stripeSecret });

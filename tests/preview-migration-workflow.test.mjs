@@ -4,11 +4,13 @@ import { readFile, readdir } from "node:fs/promises";
 
 const workflow = await readFile(new URL("../.github/workflows/apply-preview-d1-migrations.yml", import.meta.url), "utf8");
 
-test("Preview migration is manually gated on main only", () => {
-  assert.match(workflow, /github\.ref == 'refs\/heads\/main'/);
-  assert.doesNotMatch(workflow, /github\.ref == 'refs\/heads\/fix\//);
+test("Preview migration is manually gated to the reviewed Preview branch and repository owner", () => {
+  assert.match(workflow, /github\.ref == 'refs\/heads\/fix\/pages-proxy-preview-cors-2026-11-23'/);
+  assert.match(workflow, /github\.actor == 'rzem92-png'/);
+  assert.doesNotMatch(workflow, /github\.ref == 'refs\/heads\/main'/);
   assert.match(workflow, /inputs\.confirm_preview == 'APPLY_PREVIEW_ONLY'/);
   assert.match(workflow, /EXPECTED_DB_ID:\s*e3cf167c-37e1-4d72-9ac6-b3e27c14b97f/);
+  assert.match(workflow, /\.provenance\.ref == "refs\/heads\/fix\/pages-proxy-preview-cors-2026-11-23"/);
 });
 test("Preview migration restores the exact encrypted R2 backup into a distinct EU D1 before applying migrations", () => {
   const targetGate = workflow.indexOf("Verify dedicated isolated restore D1 identity and EU jurisdiction");
@@ -107,7 +109,8 @@ test("Preview migration workflow validates the full canonical migration chain", 
     "0041_tenant_invitation_onboarding.sql",
     "0042_financial_tenant_scope.sql",
     "0043_finance_workspace_tenant_scope.sql",
-    "0044_security_records_tenant_scope.sql"
+    "0044_security_records_tenant_scope.sql",
+    "0045_master_complement_seed_data.sql"
   ];
   for (const migration of expected) assert.ok(workflow.includes(`"${migration}"`), `missing canonical migration ${migration}`);
 });
@@ -201,13 +204,15 @@ test("Preview post-migration verification checks identity, mission-security and 
   ]) assert.ok(workflow.includes(name), `missing post-migration verification for ${name}`);
 });
 
-test("Preview migration workflow accepts only an empty EU D1, the exact 23-entry reviewed baseline or the exact 45-entry target", () => {
+test("Preview migration workflow accepts only an empty EU D1, the exact 23-entry reviewed baseline or the exact 46-entry target", () => {
   assert.match(workflow, /SELECT type, name FROM sqlite_master ORDER BY type, name/);
   assert.match(workflow, /registry_present/);
   assert.match(workflow, /non_internal/);
-  assert.ok(workflow.includes("if len(local) != 45:"), "workflow must enforce the exact 45-entry chain");
+  assert.ok(workflow.includes("if len(local) != 46:"), "workflow must enforce the exact 46-entry chain");
+  assert.ok(workflow.includes("if: ${{ false &&"), "superseded branch must remain disabled");
+  assert.ok(workflow.includes('"0045_master_complement_seed_data.sql"'), "workflow must register master seed migration 0045");
   assert.match(workflow, /remote == base/);
-  assert.match(workflow, /differs from the exact reviewed 23-entry baseline and 45-entry target/);
+  assert.match(workflow, /differs from the exact reviewed 23-entry baseline and 46-entry target/);
   assert.doesNotMatch(workflow, /legacy=/);
   assert.doesNotMatch(workflow, /baseline=\(local-pending\)\|legacy/);
 });

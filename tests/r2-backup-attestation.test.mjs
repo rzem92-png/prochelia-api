@@ -30,7 +30,7 @@ const manifest = () => ({
     workflow: "PROCHÉLIA — sauvegarde D1 preview chiffrée vers R2 EU",
     run_id: "123456789",
     commit_sha: "74bd23b3d88e0acea62d1c58f30187ddce2011be",
-    ref: "refs/heads/main",
+    ref: "refs/heads/fix/pages-proxy-preview-cors-2026-11-23",
     migration_source_sha: "1fc258c9c8d25e5e7b89241504218bf102afbf27"
   },
   validation: {
@@ -77,12 +77,13 @@ test("R2 backup attestation refuses short keys and non-EU or malformed provenanc
   assert.throws(() => validateManifest(value), /ATTESTATION_SOURCE_INVALID/);
 });
 
-test("R2 backup attestation accepts only main provenance and rejects every non-main ref", () => {
+test("R2 backup attestation accepts only the reviewed Preview branch and rejects main or untrusted refs", () => {
   const value = manifest();
   const signature = signManifest(value, key);
   assert.equal(verifyManifest(value, "0".repeat(63), key), false);
   assert.equal(verifyManifest(value, signature, key), true);
   for (const ref of [
+    "refs/heads/main",
     "refs/heads/fix/r2-preview-backup-signed-attestation-2026-11-18",
     "refs/heads/attacker-controlled-branch",
     "refs/pull/288/merge"

@@ -1140,6 +1140,10 @@ export async function paymentWebhook(request, env) {
   if (request.method !== "POST") {
     return json({ ok: false, error: "METHOD_NOT_ALLOWED", version: VERSION }, 405, { allow: "POST" });
   }
+  // No PSP adapter is operational: reject before reading untrusted input or touching D1.
+  if (!paymentsConfigured(env)) {
+    return json({ ok: false, error: "PAYMENT_PROVIDER_NOT_CONFIGURED", version: VERSION, write_enabled: false }, 503);
+  }
   const bodyResult = await readBoundedWebhookBody(request);
   if (!bodyResult.ok) {
     const tooLarge = bodyResult.reason === "too_large";
@@ -1161,12 +1165,8 @@ export async function paymentWebhook(request, env) {
   if (!provider || !eventId || !type) {
     return json({ ok: false, error: "INVALID_WEBHOOK_EVENT", version: VERSION }, 400);
   }
-  // The receiver remains fail-closed until a reviewed PSP adapter, atomic
-  // settlement ledger and Sandbox acceptance are available. No D1 writes,
-  // wallet changes, refunds or payouts occur in this state.
-  if (!paymentsConfigured(env)) {
-    return json({ ok: false, error: "PAYMENT_PROVIDER_NOT_CONFIGURED", version: VERSION, provider, write_enabled: false }, 503);
-  }
+  // Financial settlement remains blocked until the atomic ledger and Sandbox
+  // acceptance gates are satisfied; no wallet, refund or payout writes occur here.
   if (requiresAtomicFinancialSettlement(type)) {
     return json({ ok: false, error: "ATOMIC_SETTLEMENT_LEDGER_REQUIRED", version: VERSION, retryable: true, write_enabled: false }, 503);
   }
@@ -1241,7 +1241,17 @@ export async function directoryList(
   resolveSession = getSessionUser,
   resolveTenant = resolveTenantContext
 ) {
-  const auth = await resolveSession(request, env);
+  let auth;
+  try {
+    auth = await resolveSession(request, env);
+  } catch {
+    return json({
+      ok:false,
+      error:'AUTHENTICATION_SCHEMA_UNAVAILABLE',
+      version:VERSION,
+      write_enabled:false
+    },503);
+  }
   if (!auth) return json({ok:false,error:'UNAUTHENTICATED',version:VERSION},401);
   if (auth.user.role !== 'gerante') return json({ok:false,error:'FORBIDDEN',version:VERSION},403);
   if (!env?.DB) return json({ok:false,database:false,error:'DATABASE_UNAVAILABLE',version:VERSION},503);
@@ -1529,6 +1539,37 @@ const SENSITIVE_CASES = new Set([
   'decision_contractuelle','conflit_reglementaire'
 ]);
 
+async function assertVersionedSchema(env, statements, domain) {
+  if (!env.DB) throw new Error('DATABASE_REQUIRED');
+  const missing = [];
+  for (const statement of statements) {
+    const tableMatch = statement.match(/^\s*CREATE\s+TABLE\s+IF\s+NOT\s+EXISTS\s+["'`]?([^\s(`"']+)["'`]?\s*\(([\s\S]*)\)\s*;?\s*$/i);
+    if (tableMatch) {
+      const table = tableMatch[1];
+      const definitions = tableMatch[2];
+      const expected = [...definitions.matchAll(/(?:^|,)\s*["'`]?([A-Za-z_][\w]*)["'`]?\s+(?:TEXT|INTEGER|REAL|BLOB|NUMERIC)\b/gi)].map(match => match[1]);
+      const info = await env.DB.prepare(`PRAGMA table_info("${table}")`).all();
+      const actual = new Set((info.results || []).map(row => String(row.name)));
+      if (!info.results?.length) missing.push(`${table}:TABLE`);
+      else for (const column of expected) if (!actual.has(column)) missing.push(`${table}.${column}`);
+      continue;
+    }
+    const indexMatch = statement.match(/^\s*CREATE\s+(?:UNIQUE\s+)?INDEX\s+IF\s+NOT\s+EXISTS\s+["'`]?([\w]+)["'`]?\s+ON\s+["'`]?([\w]+)["'`]?/i);
+    if (indexMatch) {
+      const [, index, table] = indexMatch;
+      const info = await env.DB.prepare(`PRAGMA index_list("${table}")`).all();
+      if (!(info.results || []).some(row => String(row.name) === index)) missing.push(`INDEX:${index}`);
+    }
+  }
+  if (missing.length) {
+    console.error('PROCHELIA_SCHEMA_NOT_READY', JSON.stringify({ domain, missing }));
+    const error = new Error('SCHEMA_NOT_READY');
+    error.code = 'SCHEMA_NOT_READY';
+    error.status = 503;
+    error.details = { domain, missing };
+    throw error;
+  }
+}
 async function ensureConsolidatedSchema(env) {
   if (!env.DB) throw new Error('DATABASE_REQUIRED');
   const statements = [
@@ -1552,19 +1593,8 @@ async function ensureConsolidatedSchema(env) {
     `CREATE TABLE IF NOT EXISTS notification_outbox (id TEXT PRIMARY KEY, channel TEXT NOT NULL, recipient_ref TEXT NOT NULL, template TEXT NOT NULL, payload_json TEXT NOT NULL DEFAULT '{}', status TEXT NOT NULL DEFAULT 'PENDING', attempts INTEGER NOT NULL DEFAULT 0, last_error TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, sent_at TEXT)`,
     `CREATE TABLE IF NOT EXISTS compliance_events (id TEXT PRIMARY KEY, type TEXT NOT NULL, severity TEXT NOT NULL, entity_type TEXT, entity_id TEXT, status TEXT NOT NULL DEFAULT 'OPEN', details_json TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, closed_at TEXT)`
   ];
-  for (const sql of statements) await env.DB.prepare(sql).run();
-  const defaults = {
-    project_phase:'TEST',
-    fuel_cost_per_km_cents:'20',
-    default_margin_percent:'15',
-    software_monthly_cost_cents:'0',
-    automation_policy:'simple_low_impact_auto_sensitive_manager',
-    b2b_model:'company_pays_intervenant_platform_bills_commission',
-    b2c_model:'client_pays_platform_platform_pays_intervenant'
-  };
-  for (const [key,value] of Object.entries(defaults)) {
-    await env.DB.prepare(`INSERT OR IGNORE INTO platform_settings(key,value_json) VALUES(?,?)`).bind(key, JSON.stringify(value)).run();
-  }
+  await assertVersionedSchema(env, statements, 'ensureConsolidatedSchema');
+  // Default platform settings are seeded by canonical migration 0018; request handlers remain read-only.
 }
 
 async function getSetting(env,key,fallback=null) {
@@ -2122,7 +2152,7 @@ async function ensureStrategicSchema(env) {
       closed_at TEXT
     )`
   ];
-  for (const sql of statements) await env.DB.prepare(sql).run();
+  await assertVersionedSchema(env, statements, 'ensureStrategicSchema');
 }
 
 function promotionCandidate(input) {
@@ -2452,11 +2482,8 @@ async function ensureOperationalSchema(env) {
       details_json TEXT NOT NULL DEFAULT '{}', checked_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     )`
   ];
-  for (const sql of statements) await env.DB.prepare(sql).run();
-  const actionInfo = await env.DB.prepare('PRAGMA table_info(action_outbox)').all();
-  const actionColumns = (actionInfo.results || []).map(x => String(x.name));
-  if (!actionColumns.includes('case_id')) await env.DB.prepare('ALTER TABLE action_outbox ADD COLUMN case_id TEXT').run();
-  if (!actionColumns.includes('processed_at')) await env.DB.prepare('ALTER TABLE action_outbox ADD COLUMN processed_at TEXT').run();
+  await assertVersionedSchema(env, statements, 'ensureOperationalSchema');
+  // action_outbox columns are required from migration 0014; never alter schema in a request.
 }
 
 async function tableExists(env, table) {
@@ -2803,7 +2830,7 @@ async function ensureFinalHardeningSchema(env) {
       capabilities_json TEXT NOT NULL DEFAULT '[]', last_checked_at TEXT, details_json TEXT NOT NULL DEFAULT '{}'
     )`
   ];
-  for (const sql of statements) await env.DB.prepare(sql).run();
+  await assertVersionedSchema(env, statements, 'ensureFinalHardeningSchema');
 }
 
 function finalSecretConfigured(env, key) {
@@ -3043,7 +3070,7 @@ async function ensureCommercialRecruitmentSchema(env){
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     )`
   ];
-  for(const q of sql) await env.DB.prepare(q).run();
+  await assertVersionedSchema(env, sql, 'ensureCommercialRecruitmentSchema');
 }
 
 function commercialStageGuide(stage){
@@ -4341,29 +4368,17 @@ async function ensureProcheliaMasterComplementSchema(env){
     `CREATE INDEX IF NOT EXISTS idx_brand_assets_type ON brand_assets(asset_type,status)`,
     `CREATE INDEX IF NOT EXISTS idx_clearance_term ON brand_clearance_log(term,checked_at)`
   ];
-  for(const q of sqls) await env.DB.prepare(q).run();
-  await env.DB.prepare(`INSERT OR IGNORE INTO brand_identity(id,brand_key,name,visual_json,uniqueness_policy_json) VALUES(?,?,?,?,?)`)
-    .bind(crypto.randomUUID(),'PROCHELIA',PROCHELIA_BRAND.name,JSON.stringify(PROCHELIA_BRAND.visual),JSON.stringify(PROCHELIA_BRAND.uniqueness_policy)).run();
-  for(const [role,config] of Object.entries(PROCHELIA_UI)){
-    await env.DB.prepare(`INSERT OR IGNORE INTO interface_profiles(id,role,config_json,version) VALUES(?,?,?,?)`)
-      .bind(crypto.randomUUID(),role,JSON.stringify(config),VERSION).run();
+  await assertVersionedSchema(env, sqls, 'ensureProcheliaMasterComplementSchema');
+  const supportColumns = await env.DB.prepare('PRAGMA table_info("support_cases")').all();
+  if (!(supportColumns.results || []).some(column => String(column.name) === 'tenant_id')) {
+    const error = new Error('SCHEMA_NOT_READY');
+    error.code = 'SCHEMA_NOT_READY';
+    error.status = 503;
+    error.details = { domain: 'ensureProcheliaMasterComplementSchema', missing: ['support_cases.tenant_id (migration 0037 required)'] };
+    throw error;
   }
-  const rules={
-    DELAY_LIGHT:{category:'DELAY',severity:'LOW',auto:1,manager:0,steps:['verify_mission','recalculate_eta','notify_client','journal','close_if_resolved']},
-    NOTIFICATION_FAILED:{category:'TECHNICAL',severity:'LOW',auto:1,manager:0,steps:['retry_notification','verify_delivery','fallback_channel','journal','close_if_resolved']},
-    DOCUMENT_REMINDER:{category:'DOCUMENT',severity:'LOW',auto:1,manager:0,steps:['identify_missing_document','notify_owner','create_follow_up','journal']},
-    SIMPLE_REFUND_CHECK:{category:'PAYMENT',severity:'LOW',auto:1,manager:0,steps:['reconcile_transaction','verify_refund_eligibility','prepare_or_execute_allowed_action','notify','journal']},
-    DUPLICATE_PAYMENT:{category:'PAYMENT',severity:'HIGH',auto:0,manager:1,steps:['freeze_duplicate_action','reconcile_psp','calculate_exposure','propose_resolution','manager_approval','notify','journal']},
-    IDENTITY_SECURITY:{category:'SECURITY',severity:'CRITICAL',auto:0,manager:1,steps:['lock_sensitive_action','preserve_evidence','risk_assessment','manager_approval','notify_if_required','journal']},
-    DATA_INCIDENT:{category:'RGPD_SECURITY',severity:'CRITICAL',auto:0,manager:1,steps:['contain','preserve_evidence','classify','compliance_review','manager_approval','journal']},
-    LEGAL_DISPUTE:{category:'LEGAL',severity:'CRITICAL',auto:0,manager:1,steps:['collect_evidence','freeze_irreversible_action','legal_review','manager_approval','notify','journal']},
-    INTERVENANT_ABSENT:{category:'REPLACEMENT',severity:'HIGH',auto:0,manager:1,steps:['verify_absence','check_available_intervenants','propose_replacement','manager_approval','notify','journal']},
-    CLIENT_COMPLAINT:{category:'COMPLAINT',severity:'MEDIUM',auto:1,manager:0,steps:['acknowledge','collect_evidence','reconcile_mission','reconcile_finance','propose_resolution','notify','journal','close_if_resolved']}
-  };
-  for(const [k,v] of Object.entries(rules)){
-    await env.DB.prepare(`INSERT OR IGNORE INTO copilot_resolution_rules(id,scenario_key,category,severity,auto_allowed,manager_approval_required,steps_json) VALUES(?,?,?,?,?,?,?)`)
-      .bind(crypto.randomUUID(),k,v.category,v.severity,v.auto,v.manager,JSON.stringify(v.steps)).run();
-  }
+  // Brand, interface and Copilot defaults are versioned in migration 0045.
+  // Request handlers perform schema readiness checks only; they never seed runtime data.
 }
 
 function supportRoleAllowed(role){return ['CLIENT','SOCIETE','INTERVENANT','GERANTE','ADMIN'].includes(String(role||'').toUpperCase())}
@@ -4441,7 +4456,8 @@ async function supportCreate(request,env){
   const severity=String(b.severity||'LOW').toUpperCase();
   const scenario=supportScenarioFor(category,severity);
   const rule=await env.DB.prepare(`SELECT * FROM copilot_resolution_rules WHERE scenario_key=? LIMIT 1`).bind(scenario).first();
-  const auto=Number(rule?.auto_allowed||0)===1 && String(severity)!=='CRITICAL' && String(severity)!=='HIGH';
+  const safeAutoScenarios=['DELAY_LIGHT','NOTIFICATION_FAILED','DOCUMENT_REMINDER'];
+  const auto=Number(rule?.auto_allowed||0)===1 && safeAutoScenarios.includes(scenario) && String(severity)!=='CRITICAL' && String(severity)!=='HIGH';
   const requiresManager=Number(rule?.manager_approval_required||1)===1 || !auto;
   const id=crypto.randomUUID();
   const proposed=rule?JSON.parse(rule.steps_json||'[]'):{steps:['collect_evidence','copilot_analysis','notify','audit']};
@@ -4457,7 +4473,7 @@ async function supportCreate(request,env){
 }
 
 async function supportAutoResolve(env,caseId,actorId,actorRole,scenario,context={}){
-  const safeAuto=['DELAY_LIGHT','NOTIFICATION_FAILED','DOCUMENT_REMINDER','SIMPLE_REFUND_CHECK','CLIENT_COMPLAINT'];
+  const safeAuto=['DELAY_LIGHT','NOTIFICATION_FAILED','DOCUMENT_REMINDER'];
   if(!safeAuto.includes(scenario)) return {ok:false,status:'MANAGER_REQUIRED'};
   // Fail closed: context is supplied by the requester, so it is never proof
   // that a downstream action actually executed. No trusted execution receipt
@@ -4539,22 +4555,12 @@ handle = async function(request,env){
    - traçabilité des blocages de sécurité
    ============================================================================ */
 
-async function productionSafetySchema(env){
-  if(!env.DB) throw new Error('DATABASE_REQUIRED');
-  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS production_security_events (
-    id TEXT PRIMARY KEY, event_type TEXT NOT NULL, route TEXT, subject_hash TEXT,
-    decision TEXT NOT NULL, details_json TEXT NOT NULL DEFAULT '{}',
-    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-  )`).run();
-  await env.DB.prepare(`CREATE INDEX IF NOT EXISTS idx_prod_sec_events_date ON production_security_events(event_type,created_at)`).run();
-}
-
-async function productionSubjectHash(request, route){
+export async function productionSubjectHash(request, route){
   const ip=clean(request.headers.get('CF-Connecting-IP')) || clean(request.headers.get('X-Forwarded-For')) || 'unknown';
-  return sha256Hex(`${ip}|${route}`);
+  return sha256Base64url(`${ip}|${route}`);
 }
 
-async function productionRateLimit(request,env){
+export async function productionRateLimit(request,env){
   if(!isMutatingMethod(request.method)) return {ok:true};
   const path=new URL(request.url).pathname;
   const sensitive =
@@ -4568,10 +4574,21 @@ async function productionRateLimit(request,env){
   const limit=sensitive ? 20 : 120;
   const windowSeconds=60;
   const bucket=`${sensitive?'SENSITIVE':'GENERAL'}:${path}`;
+
+  // Runtime rate limiting is strictly DML-only. Schema must be provisioned
+  // by a reviewed migration; request handling must never create tables/indexes.
+  const rateColumns=await tableColumns(env,'security_rate_limits');
+  const auditColumns=await tableColumns(env,'production_security_events');
+  const requiredRate=['id','bucket','subject_hash','window_start','request_count'];
+  const requiredAudit=['id','event_type','route','subject_hash','decision','details_json'];
+  if(!requiredRate.every(x=>rateColumns.includes(x)) ||
+     !requiredAudit.every(x=>auditColumns.includes(x))){
+    return {ok:false,response:json({ok:false,error:'RATE_LIMIT_SCHEMA_UNAVAILABLE',version:VERSION},503)};
+  }
+
   const subject=await productionSubjectHash(request,path);
   const now=Math.floor(Date.now()/1000);
   const start=new Date(Math.floor(now/windowSeconds)*windowSeconds*1000).toISOString();
-  await ensureFinalHardeningSchema(env);
   const existing=await env.DB.prepare(`SELECT request_count FROM security_rate_limits WHERE bucket=? AND subject_hash=? AND window_start=? LIMIT 1`).bind(bucket,subject,start).first();
   const count=Number(existing?.request_count||0)+1;
   if(existing){
@@ -4580,7 +4597,6 @@ async function productionRateLimit(request,env){
     await env.DB.prepare(`INSERT INTO security_rate_limits(id,bucket,subject_hash,window_start,request_count) VALUES(?,?,?,?,1)`).bind(crypto.randomUUID(),bucket,subject,start).run();
   }
   if(count>limit){
-    await productionSafetySchema(env);
     await env.DB.prepare(`INSERT INTO production_security_events(id,event_type,route,subject_hash,decision,details_json) VALUES(?,?,?,?,?,?)`)
       .bind(crypto.randomUUID(),'RATE_LIMIT',path,subject,'BLOCKED',JSON.stringify({limit,windowSeconds})).run();
     return {ok:false,response:json({ok:false,error:'RATE_LIMITED',version:VERSION,retry_after_seconds:Math.max(1,windowSeconds-(now%windowSeconds))},429,{'retry-after':String(Math.max(1,windowSeconds-(now%windowSeconds)))})};
@@ -4641,6 +4657,14 @@ handle = async function(request,env){
       if (preflightMethod !== 'POST') return json({ok:false,error:'METHOD_NOT_ALLOWED',version:VERSION},405,{'allow':'POST'});
       return json({ok:false,error:'AUTHENTICATED_VALIDATION_REQUIRED',version:VERSION,write_enabled:false},403);
     }
+    // These mutation routes require an existing session. Reject anonymous
+    // requests before rate-limit DML so an unauthenticated caller cannot
+    // create rate-limit rows or trigger schema access on a tenant endpoint.
+    if (isMutatingMethod(preflightMethod) &&
+        (preflightPath === '/api/tenant/select' || preflightPath.startsWith('/api/intervenant/')) &&
+        !getCookie(request, SESSION_COOKIE)) {
+      return json({ok:false,error:'UNAUTHENTICATED',version:VERSION},401);
+    }
     if (getOnlyDiagnostics.has(preflightPath) && preflightMethod !== 'GET' && preflightMethod !== 'HEAD') {
       return json({ok:false,error:'METHOD_NOT_ALLOWED',version:VERSION},405,{'allow':'GET, HEAD'});
     }
@@ -4660,6 +4684,7 @@ handle = async function(request,env){
     if(u.pathname==='/api/system/production-check' && request.method==='GET') return strictProductionAudit(request,env);
     return __procheliaProductionSafetyHandle(request,env);
   }catch(e){
-    return json({ok:false,error:'PRODUCTION_SAFETY_ERROR',version:VERSION},500);
+    console.error('PRODUCTION_SAFETY_GUARD_FAILED',e?.name||'ERROR');
+    return json({ok:false,error:'SAFETY_GUARD_UNAVAILABLE',version:VERSION},503);
   }
 };

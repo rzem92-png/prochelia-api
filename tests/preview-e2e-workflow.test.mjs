@@ -4,28 +4,31 @@ import { readFile } from "node:fs/promises";
 
 const workflow = await readFile(new URL("../.github/workflows/preview-directory-e2e-acceptance.yml", import.meta.url), "utf8");
 
-test("Preview E2E is limited to the audited API candidate or accounting integration branch and explicit manual confirmation", () => {
+test("Preview E2E runs only on the reviewed Preview branch; manual runs require the owner and exact confirmation", () => {
   assert.match(workflow, /workflow_dispatch:/);
   assert.match(workflow, /RUN_PREVIEW_DIRECTORY_E2E/);
   assert.match(workflow, /github\.event_name == 'push'/);
-  assert.match(workflow, /github\.ref == 'refs\/heads\/feat\/supra-canonical-tenant-integration-2026-11-20'/);
-  assert.match(workflow, /github\.ref == 'refs\/heads\/fix\/tenant-accounting-api-readonly-gate-2026-11-22'/);
+  assert.match(workflow, /github\.event_name == 'push' &&\s*github\.actor == 'rzem92-png'/);
+  assert.match(workflow, /github\.ref == 'refs\/heads\/fix\/pages-proxy-preview-cors-2026-11-23'/);
   assert.match(workflow, /github\.event_name == 'workflow_dispatch'/);
-  assert.match(workflow, /github\.ref == 'refs\/heads\/main'/);
+  assert.match(workflow, /github\.actor == 'rzem92-png'/);
+  assert.doesNotMatch(workflow, /refs\/heads\/main/);
+  assert.doesNotMatch(workflow, /workflow_run:/);
 });
 
-test("Preview E2E pins the current private frontend branch and exact Pages commit", () => {
+test("Preview E2E pins the current Pages proxy branch and exact deployment commit", () => {
   assert.match(workflow, /PREVIEW_DB_ID: e3cf167c-37e1-4d72-9ac6-b3e27c14b97f/);
-  assert.match(workflow, /FRONTEND_BRANCH: feat\/intervenant-secure-pages-integration-2026-11-20/);
+  assert.ok(workflow.includes("FRONTEND_BRANCH: fix/frontend-accounting-readonly-proxy-2026-11-24"));
   assert.match(workflow, /FRONTEND_COMMIT_SHA: \$\{\{ inputs\.frontend_commit_sha/);
-  assert.match(workflow, /a916165be5fd3f431115e0a2e9d6ce67163c889d/);
-  assert.match(workflow, /FRONTEND_COMMIT_SHA: \$\{\{ inputs\.frontend_commit_sha \|\| 'a916165be5fd3f431115e0a2e9d6ce67163c889d'/);
-  assert.match(workflow, /FRONTEND_COMMIT_SHA: \\$\\{\\{ inputs\\.frontend_commit_sha \\|\\| 'a916165be5fd3f431115e0a2e9d6ce67163c889d'/);
+  assert.match(workflow, /24137dd2aeb83b76dd7b7584017c41ef545d9318/);
+  assert.match(workflow, /default: "24137dd2aeb83b76dd7b7584017c41ef545d9318"/);
+  assert.match(workflow, /API_PREVIEW_URL: https:\/\/fix-pages-proxy-preview-cors-2026-11-23\.rzem92\.workers\.dev/);
+  assert.match(workflow, /https:\/\/fix-frontend-accounting-read\.prochelia\.pages\.dev/);
   assert.match(workflow, /pages\/projects\/prochelia\/deployments\?env=preview&per_page=10/);
   assert.match(workflow, /deployment_trigger\.metadata\.branch/);
   assert.match(workflow, /deployment_trigger\.metadata\.commit_hash/);
-  assert.match(workflow, /prochelia-api-preview/);
-  assert.doesNotMatch(workflow, /api\.github\.com\/repos\/rzem92-png\/-prochelia\/branches/);
+  assert.match(workflow, /uses_functions == true/);
+  assert.doesNotMatch(workflow, /services\.PROCHELIA_API\.service == \$worker/);
   assert.doesNotMatch(workflow, /PREVIEW_DB_ID: 04f52830-ef5a-4f17-a640-42bbc2381bba/);
 });
 
@@ -61,7 +64,7 @@ test("Pages binding mismatch diagnostics expose only non-secret deployment metad
   const start = workflow.indexOf(marker);
   assert.notEqual(start, -1, "safe mismatch diagnostic must exist");
   const block = workflow.slice(start, workflow.indexOf("exit 1", start));
-  for (const field of ["environment", "uses_functions", "d1_database_id", "worker_service", "commit_hash"]) {
+  for (const field of ["environment", "uses_functions", "d1_database_id", "service_binding", "commit_hash"]) {
     assert.match(block, new RegExp(field));
   }
   assert.doesNotMatch(block, /CLOUDFLARE_API_TOKEN|Authorization|Bearer/);
@@ -79,21 +82,37 @@ test("Synthetic Preview E2E fixtures are cleaned up and cleanup is verified", ()
   assert.match(workflow, /all synthetic Preview test rows and sessions removed/);
 });
 
-test("Preview directory acceptance exercises the deployed Worker and deterministic synthetic ordering", () => {
-  assert.match(workflow, /https:\/\/prochelia-api-preview\.rzem92\.workers\.dev/);
+test("Preview directory acceptance exercises the real Worker and deterministic synthetic ordering", () => {
+  assert.match(workflow, /const base = process\.env\.API_PREVIEW_URL;/);
+  assert.doesNotMatch(workflow, /https:\/\/prochelia-api-preview\.rzem92\.workers\.dev/);
   assert.match(workflow, /created_at,updated_at/);
   assert.match(workflow, /9999-12-31 23:59:59/);
   assert.match(workflow, /offset=not-a-number/);
   assert.doesNotMatch(workflow, /offset=50001/);
 });
 
-test("Preview E2E exercises the real same-origin Pages-to-Worker proxy without session or data writes", () => {
+test("Pages proxy verifies unauthenticated workspace routes, exact Origin forwarding and preflight", () => {
   assert.match(workflow, /Exercise same-origin Pages-to-Worker proxy without a session/);
-  for (const route of ["workspace","opportunities","assignments","applications"]) {
+  for (const route of ["workspace", "opportunities", "assignments", "applications"]) {
     assert.match(workflow, new RegExp("/api/intervenant/" + route));
   }
   assert.match(workflow, /expected HTTP 401/);
-  assert.match(workflow, /options_status/);
+  assert.match(workflow, /api\/tenant\/select/);
+  assert.match(workflow, /tenant_select_status/);
+  assert.match(workflow, /Access-Control-Allow-Origin|access-control-allow-origin/);
   assert.match(workflow, /expected HTTP 204/);
-  assert.match(workflow, /service binding/);
+  assert.match(workflow, /pinned Worker branch Preview/);
+});
+test("authenticated directory fixtures are gated on tenant-scoped Preview schema before any write", () => {
+  assert.match(workflow, /Verify tenant-scoped directory schema before synthetic data writes/);
+  assert.match(workflow, /steps\.tenant_schema\.outputs\.ready == 'true'/);
+  assert.match(workflow, /TENANT_SCHEMA_NOT_READY/);
+  assert.match(workflow, /pragma_table_info/);
+  assert.match(workflow, /no synthetic fixture rows will be written/);
+});
+
+test("live Preview E2E reruns when the isolated Worker generator or deploy workflow changes", () => {
+  assert.match(workflow, /scripts\/generate-preview-wrangler-config\.mjs/);
+  assert.match(workflow, /\.github\/workflows\/deploy-pages-proxy-preview\.yml/);
+  assert.match(workflow, /tests\/preview-wrangler-generator\.test\.mjs/);
 });

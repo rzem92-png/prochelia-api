@@ -1,58 +1,127 @@
 import fs from "node:fs";
 
-const production = JSON.parse(fs.readFileSync("wrangler.jsonc", "utf8"));
+const source = JSON.parse(fs.readFileSync("wrangler.jsonc", "utf8"));
 const expectedPreviewId = "e3cf167c-37e1-4d72-9ac6-b3e27c14b97f";
 const expectedProductionId = "04f52830-ef5a-4f17-a640-42bbc2381bba";
-
-if (production.name !== "prochelia-api") {
-  throw new Error("Unexpected Production Worker config");
+const expectedPreviewName = "prochelia-preview-eu-2026-11-17";
+const expectedWorkerName = "fix-pages-proxy-preview-cors-2026-11-23";
+const commitSha = process.env.GITHUB_SHA || "local-unpinned";
+if (process.env.GITHUB_ACTIONS === "true" && !/^[0-9a-f]{40}$/i.test(commitSha)) {
+  throw new Error("GITHUB_SHA must be a full 40-character commit SHA for Preview deployment");
 }
-if (!production.d1_databases?.some((db) => db.binding === "DB" && db.database_id === expectedProductionId)) {
+
+if (source.name !== "prochelia-api") {
+  throw new Error("Unexpected source Worker config");
+}
+if (!source.d1_databases?.some((db) => db.binding === "DB" && db.database_id === expectedProductionId)) {
   throw new Error("Production D1 identity mismatch; refusing Preview configuration");
 }
 
+const sourcePreviewDb = source.previews?.d1_databases?.find((db) => db.binding === "DB");
+if (sourcePreviewDb?.database_id !== expectedPreviewId ||
+    sourcePreviewDb?.database_name !== expectedPreviewName) {
+  throw new Error("Dedicated Preview D1 identity mismatch; refusing deployment");
+}
+
+const origins = String(source.previews?.vars?.CORS_ORIGIN || "")
+  .split(",")
+  .map((value) => value.trim())
+  .filter(Boolean);
+const requiredOrigins = [
+  "https://pages-proxy-2026-11-23.prochelia.pages.dev",
+  "https://fix-frontend-finance-confirm.prochelia.pages.dev",
+  "https://fix-frontend-accounting-read.prochelia.pages.dev"
+];
+if (origins.includes("*") || origins.some((origin) => !origin.startsWith("https://")) ||
+    requiredOrigins.some((origin) => !origins.includes(origin))) {
+  throw new Error("Preview CORS allowlist is not exact and HTTPS-only");
+}
+
+const previewVars = {
+  APP_ENV: "preview",
+  CORS_ORIGIN: origins.join(","),
+  PROCHELIA_COMMIT_SHA: commitSha
+};
+const previewD1 = {
+  binding: "DB",
+  database_name: expectedPreviewName,
+  database_id: expectedPreviewId
+};
+
+const enablePreviewR2 = process.env.PROCHELIA_PREVIEW_R2_VERIFIED_BY_WORKFLOW === "true";
+const retentionVerified = process.env.PROCHELIA_PREVIEW_R2_RETENTION_VERIFIED_BY_WORKFLOW === "true";
+if (enablePreviewR2) {
+  const approvedWorkflowContext =
+    process.env.GITHUB_ACTIONS === "true" &&
+    process.env.GITHUB_EVENT_NAME === "workflow_dispatch" &&
+    process.env.GITHUB_REPOSITORY === "rzem92-png/prochelia-api" &&
+    process.env.GITHUB_REF === "refs/heads/fix/pages-proxy-preview-cors-2026-11-23" &&
+    process.env.GITHUB_ACTOR === "rzem92-png" &&
+    process.env.PROCHELIA_PREVIEW_DEPLOY_CONFIRMATION === "DEPLOY_PREVIEW_ONLY" &&
+    retentionVerified;
+  if (!approvedWorkflowContext) {
+    throw new Error("R2 binding requires the owner-confirmed manual Preview workflow after EU bucket and retention verification");
+  }
+}
+
 const preview = {
-  name: "prochelia-api-preview",
-  main: "src/index.js",
-  compatibility_date: "2026-09-25",
+  name: expectedWorkerName,
+  main: source.main || "src/index.js",
+  compatibility_date: source.compatibility_date || "2026-09-25",
+  compatibility_flags: source.compatibility_flags || [],
   workers_dev: true,
-  vars: {
-    APP_ENV: "preview",
-    CORS_ORIGIN: [
-      "https://83a36d32.prochelia.pages.dev",
-      "https://c3ceec86.prochelia.pages.dev",
-      "https://staging-prochelia-v14-restor.prochelia.pages.dev",
-      "https://feat-supra-control-center-v1.prochelia.pages.dev",
-      "https://db884f74.prochelia.pages.dev",
-      "https://repair-prochelia-frontend-xs.prochelia.pages.dev",
-      "https://feat-intervenant-secure-page.prochelia.pages.dev"
-    ].join(",")
+  vars: previewVars,
+  d1_databases: [previewD1],
+  previews: {
+    vars: previewVars,
+    d1_databases: [previewD1]
   },
-  d1_databases: [{
-    binding: "DB",
-    database_name: "prochelia-preview-eu-2026-11-17",
-    database_id: expectedPreviewId
-  }],
-  r2_buckets: [{
+  // No R2 binding until the EU bucket is independently inventoried and attested.
+  // No Cron until queue scope and job execution receive a separate review.
+  triggers: { crons: [] },
+  observability: {
+    enabled: true,
+    redact_query_string: true,
+    head_sampling_rate: 1,
+    logs: {
+      enabled: true,
+      invocation_logs: false,
+      head_sampling_rate: 1,
+      persist: true
+    },
+    traces: {
+      enabled: false,
+      persist: false
+    }
+  }
+};
+
+if (enablePreviewR2) {
+  preview.r2_buckets = [{
     binding: "BACKUP_BUCKET",
     bucket_name: "prochelia-preview-backups-eu-v2",
     jurisdiction: "eu"
-  }],
-  triggers: {
-    // Preview runs only the durable background queue processor.
-    // Backups are handled exclusively by the signed, manually approved
-    // GitHub Actions workflow; never by an unsigned Worker cron.
-    crons: ["*/1 * * * *"]
-  },
-  observability: { logs: { enabled: true, invocation_logs: true } }
-};
-
-if (preview.name === production.name ||
-    preview.d1_databases.some((db) => db.database_id === expectedProductionId) ||
-    preview.d1_databases[0].database_id !== expectedPreviewId ||
-    preview.r2_buckets[0].jurisdiction !== "eu") {
-  throw new Error("Preview resources are not isolated and explicitly EU-scoped");
+  }];
 }
 
-fs.writeFileSync("wrangler.preview.generated.json", JSON.stringify(preview, null, 2));
-console.log("Verified isolated Preview Worker, EU D1, EU R2 and scheduled triggers.");
+const serialized = JSON.stringify(preview);
+if (preview.name === source.name ||
+    preview.d1_databases[0].database_id !== expectedPreviewId ||
+    serialized.includes(expectedProductionId) ||
+    (enablePreviewR2 && !preview.r2_buckets?.some((bucket) =>
+      bucket.binding === "BACKUP_BUCKET" &&
+      bucket.bucket_name === "prochelia-preview-backups-eu-v2" &&
+      bucket.jurisdiction === "eu"
+    )) ||
+    (!enablePreviewR2 && preview.r2_buckets?.length) ||
+    preview.triggers.crons.length !== 0 ||
+    preview.observability.enabled !== true ||
+    preview.observability.redact_query_string !== true ||
+    preview.observability.logs.invocation_logs !== false) {
+  throw new Error("Generated Preview configuration violates isolation or observability guardrails");
+}
+
+fs.writeFileSync("wrangler.preview.generated.json", JSON.stringify(preview, null, 2) + "\n");
+console.log(enablePreviewR2
+  ? "Verified owner-confirmed manual Preview context, exact EU R2 binding, isolated D1, redacted observability and no Cron."
+  : "Verified isolated Preview D1, exact CORS, redacted observability, disabled invocation logs, no R2 binding and no Cron.");

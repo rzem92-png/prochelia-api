@@ -49,6 +49,7 @@ EXPECTED = [
     "0042_financial_tenant_scope.sql",
     "0043_finance_workspace_tenant_scope.sql",
     "0044_security_records_tenant_scope.sql",
+    "0045_master_complement_seed_data.sql",
 ]
 
 # Keep the manual Preview migration gate synchronized with the canonical chain.
@@ -60,20 +61,23 @@ assert '"0029_supra_append_only_audit_guards.sql"' in workflow_text, (
 assert '"0030_supra_audit_tenant_scope.sql"' in workflow_text, (
     "Preview migration workflow omits tenant-scoped SUPRA audit migration 0030"
 )
-assert "if len(local) != 45:" in workflow_text, (
+assert "if len(local) != 46:" in workflow_text, (
     "Preview migration workflow must require exactly 45 canonical migrations"
 )
-assert "exact 45-entry registry" in workflow_text, (
+assert "exact 46-entry registry" in workflow_text, (
     "Preview migration workflow target registry count is stale"
 )
-assert "all 45 canonical migrations are pending" in workflow_text, (
+assert "all 46 canonical migrations are pending" in workflow_text, (
     "Preview migration workflow empty-database inventory message is stale"
 )
-assert "only migrations 0023-0044 are pending" in workflow_text, (
+assert "only migrations 0023-0045 are pending" in workflow_text, (
     "Preview migration workflow baseline-to-target range is stale"
 )
 assert '"0044_security_records_tenant_scope.sql"' in workflow_text, (
     "Preview migration workflow omits tenant-scoped security migration 0044"
+)
+assert '"0045_master_complement_seed_data.sql"' in workflow_text, (
+    "Preview migration workflow omits versioned master seed migration 0045"
 )
 assert '"0038_identity_verification_tenant_scope.sql"' in workflow_text, (
     "Preview migration workflow omits tenant-scoped identity migration 0038"
@@ -95,7 +99,7 @@ db = sqlite3.connect(":memory:")
 db.execute("PRAGMA foreign_keys = ON")
 # Start from a truly empty D1 database, matching the newly created EU Preview target.
 # Apply the reviewed baseline and candidate migrations through 0043 first.
-for name in EXPECTED[:-1]:
+for name in EXPECTED[:-2]:
     db.executescript((MIGRATIONS / name).read_text(encoding="utf-8"))
 
 # Simulate pre-existing legacy security records before 0044. The migration must
@@ -113,6 +117,7 @@ db.execute(
     ("legacy-security-audit-1", "LEGACY_EVENT", "BLOCKED"),
 )
 
+db.executescript((MIGRATIONS / EXPECTED[-2]).read_text(encoding="utf-8"))
 db.executescript((MIGRATIONS / EXPECTED[-1]).read_text(encoding="utf-8"))
 
 violations = db.execute("PRAGMA foreign_key_check").fetchall()
@@ -124,6 +129,7 @@ assert "idx_disponibilites_tenant_intervenant_idempotency" in indexes, "Missing 
 assert "idx_support_cases_tenant_status_created" in indexes, "Missing tenant-scoped support status index"
 assert "idx_support_cases_tenant_requester_created" in indexes, "Missing tenant-scoped support requester index"
 assert "support_cases" in tables, "Missing tenant-scoped support case table"
+assert {"brand_identity", "interface_profiles", "copilot_resolution_rules"} <= tables, "Missing versioned brand/interface/Copilot seed tables"
 assert {"trusted_device_credentials", "device_auth_challenges"} <= tables, "Missing cryptographic device enrollment tables"
 assert {"idx_trusted_device_credentials_tenant_user_status", "idx_device_auth_challenges_session_expiry", "idx_device_auth_challenges_pending"} <= indexes, "Missing cryptographic device enrollment indexes"
 required = {
@@ -174,12 +180,46 @@ assert "tenants" in accounting_entity_fk_targets, "Accounting entities must refe
 # Tenant authority and membership lifecycle fixtures.
 tenant_tables = {"tenants", "tenant_memberships", "tenant_membership_events", "tenant_invitations", "tenant_invitation_events"}
 assert tenant_tables <= tables, f"Missing tenant authority tables: {sorted(tenant_tables-tables)}"
-for user_id, email in [("user-a", "user-a@example.test"), ("user-b", "user-b@example.test"), ("user-admin", "admin@example.test")]:
+for user_id, email in [("user-a", "user-a@example.test"), ("user-b", "user-b@example.test"), ("user-admin", "admin@example.test"), ("user-multi", "multi@example.test")]:
     db.execute("INSERT INTO users(id, role, email, first_name, last_name, password_hash) VALUES (?, 'client', ?, 'Synthetic', 'User', 'not-a-real-password-hash')", (user_id, email))
 db.execute("INSERT INTO tenants(id, slug, display_name) VALUES ('tenant-a', 'tenant-a', 'Tenant A')")
 db.execute("INSERT INTO tenants(id, slug, display_name) VALUES ('tenant-b', 'tenant-b', 'Tenant B')")
+# One synthetic user may legitimately hold active memberships in multiple companies.
+db.execute("""
+    INSERT INTO tenant_memberships(id, tenant_id, user_id, role, status, accepted_at)
+    VALUES ('membership-multi-a', 'tenant-a', 'user-multi', 'MEMBER', 'ACTIVE', CURRENT_TIMESTAMP)
+""")
+db.execute("""
+    INSERT INTO tenant_memberships(id, tenant_id, user_id, role, status, accepted_at)
+    VALUES ('membership-multi-b', 'tenant-b', 'user-multi', 'MEMBER', 'ACTIVE', CURRENT_TIMESTAMP)
+""")
 db.execute("INSERT INTO tenant_memberships(id, tenant_id, user_id, role, status, invited_by_user_id) VALUES ('membership-a', 'tenant-a', 'user-a', 'OWNER', 'INVITED', 'user-admin')")
 db.execute("UPDATE tenant_memberships SET status='ACTIVE', accepted_at=CURRENT_TIMESTAMP WHERE id='membership-a'")
+
+# A member with two active company memberships may have one PSP account per tenant.
+db.execute("""
+    INSERT INTO payment_accounts(id, user_id, provider, tenant_id)
+    VALUES ('payment-account-multi-a', 'user-multi', 'stripe', 'tenant-a')
+""")
+db.execute("""
+    INSERT INTO payment_accounts(id, user_id, provider, tenant_id)
+    VALUES ('payment-account-multi-b', 'user-multi', 'stripe', 'tenant-b')
+""")
+account_unique_indexes = []
+for index in db.execute("PRAGMA index_list(payment_accounts)").fetchall():
+    if index[2]:
+        columns = [row[2] for row in db.execute('PRAGMA index_info("%s")' % index[1]).fetchall()]
+        account_unique_indexes.append(columns)
+assert ["tenant_id", "user_id"] in account_unique_indexes, "PSP account uniqueness must be scoped to tenant and user"
+assert ["user_id"] not in account_unique_indexes, "Global user-only PSP account uniqueness breaks multi-tenant companies"
+try:
+    db.execute("""
+        INSERT INTO payment_accounts(id, user_id, provider, tenant_id)
+        VALUES ('payment-account-multi-a-duplicate', 'user-multi', 'stripe', 'tenant-a')
+    """)
+    raise AssertionError("Duplicate PSP account for the same user and tenant was incorrectly accepted")
+except sqlite3.IntegrityError as exc:
+    assert "payment_accounts.tenant_id" in str(exc) and "payment_accounts.user_id" in str(exc), str(exc)
 for sql in [
     "UPDATE tenant_memberships SET id='membership-a-mutated' WHERE id='membership-a'",
     "UPDATE tenant_memberships SET tenant_id='tenant-b' WHERE id='membership-a'",
@@ -1027,12 +1067,12 @@ db.execute("""
 db.execute("""
     INSERT INTO mission_opportunities(
       id, owner_tenant_id, mission_id, consent_id, category_code, public_summary,
-      city, start_at, end_at, provider_pay_cents, currency, published_by_user_id, expires_at
+      city, start_at, end_at, provider_pay_cents, currency, published_by_user_id, published_at, expires_at
     ) VALUES (
       'market-opportunity-revoke', 'market-tenant-a', 'market-mission-revoke',
       'market-consent-revoke', 'CLEANING', 'Nettoyage ponctuel d’un logement',
       'Aubergenville', '2026-11-24T09:00:00Z', '2026-11-24T11:00:00Z',
-      4000, 'EUR', 'market-client-a', '2026-11-23T23:00:00Z'
+      4000, 'EUR', 'market-client-a', '2026-11-23T22:00:00Z', '2026-11-23T23:00:00Z'
     )
 """)
 db.execute("UPDATE mission_opportunity_consents SET revoked_at=CURRENT_TIMESTAMP WHERE id='market-consent-revoke'")
@@ -1403,3 +1443,16 @@ for sql in [
         pass
 
 print("PASS: security records are tenant-scoped; legacy records remain unassigned; cross-tenant writes and audit tampering are rejected.")
+
+# Master seed migration is deterministic and idempotent.
+seed_roles = {row[0] for row in db.execute("SELECT role FROM interface_profiles")}
+assert {"CLIENT", "SOCIETE", "INTERVENANT", "GERANTE"} <= seed_roles, "Missing canonical interface profiles"
+assert db.execute("SELECT COUNT(*) FROM copilot_resolution_rules").fetchone()[0] == 10, "Canonical Copilot rule set must contain exactly ten scenarios"
+for scenario in ("SIMPLE_REFUND_CHECK", "CLIENT_COMPLAINT", "DUPLICATE_PAYMENT", "IDENTITY_SECURITY", "DATA_INCIDENT", "LEGAL_DISPUTE", "INTERVENANT_ABSENT"):
+    rule = db.execute("SELECT auto_allowed, manager_approval_required, steps_json FROM copilot_resolution_rules WHERE scenario_key=?", (scenario,)).fetchone()
+    assert rule is not None and rule[0] == 0 and rule[1] == 1, f"{scenario} must require manager approval"
+    assert "manager_approval" in rule[2], f"{scenario} resolution plan must include explicit approval"
+    assert "execute_allowed_action" not in rule[2], f"{scenario} must not execute sensitive action autonomously"
+assert db.execute("SELECT COUNT(*) FROM brand_identity WHERE brand_key='PROCHELIA'").fetchone()[0] == 1, "Missing canonical brand identity"
+db.executescript((MIGRATIONS / EXPECTED[-1]).read_text(encoding="utf-8"))
+assert db.execute("SELECT COUNT(*) FROM interface_profiles").fetchone()[0] == 4, "Master interface seed migration is not idempotent"

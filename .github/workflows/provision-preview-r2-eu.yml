@@ -17,16 +17,22 @@ concurrency:
 
 jobs:
   provision-preview-r2-eu:
+    if: >-
+      github.actor == 'rzem92-png' &&
+      github.ref == 'refs/heads/ops/provision-preview-r2-eu-jurisdiction-2026-11-16' &&
+      inputs.confirmation == 'CREATE_PREVIEW_R2_EU_ONLY'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - name: Enforce exact branch and Preview-only confirmation
         env:
           REQUESTED_REF: ${{ github.ref }}
+          REQUESTED_ACTOR: ${{ github.actor }}
           CONFIRMATION: ${{ inputs.confirmation }}
         run: |
           set -euo pipefail
           test "$REQUESTED_REF" = "refs/heads/ops/provision-preview-r2-eu-jurisdiction-2026-11-16"
+          test "$REQUESTED_ACTOR" = "rzem92-png"
           test "$CONFIRMATION" = "CREATE_PREVIEW_R2_EU_ONLY"
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -53,7 +59,7 @@ jobs:
         run: |
           set -euo pipefail
           export CLOUDFLARE_API_TOKEN="${CLOUDFLARE_API_TOKEN#Bearer }"
-          BUCKET="prochelia-preview-backups-eu-locked"
+          BUCKET="prochelia-preview-backups-eu-v2"
           # Never reuse or relabel the existing default-jurisdiction bucket.
           if npx --yes wrangler@4 r2 bucket info "$BUCKET" --jurisdiction eu --json > "$RUNNER_TEMP/existing.json" 2>/dev/null; then
             echo "The dedicated EU bucket already exists; skip creation and verify it."
@@ -64,7 +70,7 @@ jobs:
             "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/r2/buckets/$BUCKET" \
             -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -H "cf-r2-jurisdiction: eu")"
           test "$status" = "200"
-          jq -e '.success == true and .result.name == "prochelia-preview-backups-eu-locked" and .result.jurisdiction == "eu"' "$RUNNER_TEMP/bucket.json" >/dev/null
+          jq -e '.success == true and .result.name == "prochelia-preview-backups-eu-v2" and .result.jurisdiction == "eu"' "$RUNNER_TEMP/bucket.json" >/dev/null
           echo "Verified: new bucket jurisdiction is exactly eu."
           {
             echo "Created/verified Preview-only R2 bucket: $BUCKET."
