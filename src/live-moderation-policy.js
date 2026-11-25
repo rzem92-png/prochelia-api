@@ -90,6 +90,11 @@ function actionPlan(findings, { profile = "standard", recentViolations = 0 } = {
 
   if (findings.length === 0) return { decision: "allow", actions, severity: "none" };
 
+  const profanityOnly = categories.length === 1 && categories[0] === "profanity";
+  if (profile === "reinforced" && profanityOnly) {
+    return { decision: "mask", actions: ["mask_profanity"], severity: "low" };
+  }
+
   addUnique(actions, "block_message");
   if (personalData) {
     addUnique(actions, "redact_personal_data");
