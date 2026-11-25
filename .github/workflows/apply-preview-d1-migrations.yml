@@ -25,7 +25,7 @@ concurrency:
 
 jobs:
   migrate-preview:
-    if: ${{ github.ref == 'refs/heads/fix/pages-proxy-preview-cors-2026-11-23' && github.actor == 'rzem92-png' && inputs.confirm_preview == 'APPLY_PREVIEW_ONLY' }}
+    if: ${{ false && github.ref == 'refs/heads/fix/pages-proxy-preview-cors-2026-11-23' && github.actor == 'rzem92-png' && inputs.confirm_preview == 'APPLY_PREVIEW_ONLY' }} # Fail closed: superseded 46-file chain conflicts with canonical 47-file PR #359.
     runs-on: ubuntu-latest
     timeout-minutes: 25
     env:
