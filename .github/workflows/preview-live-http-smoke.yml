@@ -1,0 +1,116 @@
+name: PROCHÉLIA Preview live HTTP smoke
+
+on:
+  push:
+    branches:
+      - test/preview-live-http-smoke-2026-11-24
+  pull_request:
+    paths:
+      - ".github/workflows/preview-live-http-smoke.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: prochelia-preview-live-http-smoke
+  cancel-in-progress: false
+
+jobs:
+  preview-live-http:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Check the current Pages Preview document
+        shell: bash
+        run: |
+          set -euo pipefail
+          url="https://fix-frontend-accounting-read.prochelia.pages.dev/"
+          status="$(curl --silent --show-error --max-time 20 --output "$RUNNER_TEMP/pages.html" --write-out '%{http_code}' "$url")"
+          test "$status" = "200" || { echo "::error::Pages Preview returned HTTP $status"; exit 1; }
+          grep -Eiq '<!doctype html' "$RUNNER_TEMP/pages.html" || {
+            echo "::error::Pages Preview did not return an HTML5 document."
+            exit 1
+          }
+          echo "PASS: Pages Preview document returned HTTP 200."
+
+      - name: Check read-only API health through deployed Preview Workers and Pages proxy
+        shell: bash
+        run: |
+          set -euo pipefail
+          check_health() {
+            local label="$1" url="$2" output="$RUNNER_TEMP/health-$3.json" status
+            status="$(curl --silent --show-error --max-time 20 --output "$output" --write-out '%{http_code}' "$url")"
+            test "$status" = "200" || { echo "::error::$label returned HTTP $status"; exit 1; }
+            jq -e '.ok == true and .database == true' "$output" >/dev/null || {
+              echo "::error::$label did not confirm a successful read-only D1 health check."
+              jq -c '{ok, database, service, version, error}' "$output" || true
+              exit 1
+            }
+            echo "PASS: $label (HTTP 200, D1 SELECT 1)."
+          }
+          # Only deployed Preview scripts are tested. No branch-specific Worker alias is assumed.
+          check_health "Legacy API Preview Worker" "https://prochelia-api-preview.rzem92.workers.dev/api/health" "legacy-worker"
+          check_health "Current Pages proxy Worker" "https://fix-pages-proxy-preview-cors-2026-11-23.rzem92.workers.dev/api/health" "proxy-worker"
+          check_health "Pages same-origin API proxy" "https://fix-frontend-accounting-read.prochelia.pages.dev/api/health" "pages-proxy"
+
+      - name: Record the live financial test boundary without mutating Preview
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "::warning::The PSP is disabled, so live HMAC acceptance cannot be demonstrated. This read-only smoke deliberately sends no webhook POST: even a rejected synthetic POST can increment the Preview security_rate_limits table. Signature and body-limit behavior remains covered by isolated candidate tests; a live HMAC/PSP Sandbox acceptance requires a separately approved isolated fixture environment."
+          echo "PASS: no webhook, payment, refund, payout, wallet, accounting or rate-limit mutation was attempted."
+          
+      - name: Report tenant and Device Trust route readiness without masking missing endpoints
+        shell: bash
+        run: |
+          set -euo pipefail
+          report_route_state() {
+            local label="$1" url="$2" output="$RUNNER_TEMP/route-$3.json" status
+            status="$(curl --silent --show-error --max-time 20 --output "$output" --write-out '%{http_code}' "$url")"
+            case "$status" in
+              401|403)
+                echo "::warning::$label blocks unauthenticated access (HTTP $status), but route existence and tenant isolation are not proven without an authenticated synthetic E2E."
+                ;;
+              404)
+                echo "::warning::$label is not implemented on the deployed Preview Worker (HTTP 404)."
+                ;;
+              200)
+                echo "::error::$label returned HTTP 200 without a session; possible unauthenticated exposure."
+                exit 1
+                ;;
+              *)
+                echo "::error::$label returned unexpected HTTP $status."
+                jq -c '{ok,error,write_enabled}' "$output" 2>/dev/null || true
+                exit 1
+                ;;
+            esac
+          }
+          base="https://fix-frontend-accounting-read.prochelia.pages.dev"
+          report_route_state "Tenant context" "$base/api/tenant/context" "tenant"
+          report_route_state "Device Trust credential list" "$base/api/security/device/list" "device"
+
+      - name: Report accounting backend readiness without masking a missing route
+        shell: bash
+        run: |
+          set -euo pipefail
+          url="https://fix-frontend-accounting-read.prochelia.pages.dev/api/accounting/health"
+          status="$(curl --silent --show-error --max-time 20 --output "$RUNNER_TEMP/accounting-health.json" --write-out '%{http_code}' "$url")"
+          case "$status" in
+            401|403)
+              echo "::warning::Accounting path blocks unauthenticated access (HTTP $status), but implementation and tenant isolation are not proven until authenticated E2E runs against the migrated Preview schema."
+              ;;
+            404)
+              echo "::warning::Accounting backend route is not deployed. Pages proxy allowlisting alone is not implementation; keep frontend PR #51 blocked until backend PR #336 and tenant migrations are integrated and tested."
+              ;;
+            200)
+              echo "::error::Accounting health returned HTTP 200 without a session; possible unauthenticated exposure."
+              exit 1
+              ;;
+            *)
+              echo "::error::Accounting readiness returned unexpected HTTP $status."
+              jq -c '{ok,error,write_enabled}' "$RUNNER_TEMP/accounting-health.json" 2>/dev/null || true
+              exit 1
+              ;;
+          esac
+          echo "No cookies, credentials or mutating HTTP requests were sent. Health and unauthenticated route checks only; no D1 rate-limit, webhook, payment, wallet or accounting writes were requested."
