@@ -2,6 +2,16 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { handleV7Route } from "../src/v7-routes.js";
 import { directoryList } from "../src/index.js";
+import { readFile } from "node:fs/promises";
+
+test("production rate-limit subject hashing uses the defined SHA-256 helper", async () => {
+  const source = await readFile(new URL("../src/index.js", import.meta.url), "utf8");
+  const match = source.match(/async function productionSubjectHash\\(request, route\\)\\s*\\{([\\s\\S]*?)\\n\\}/);
+  assert.ok(match, "productionSubjectHash must remain defined");
+  assert.match(match[1], /return sha256Base64url\\(/);
+  assert.doesNotMatch(match[1], /sha256Hex\\(/);
+});
+
 
 const post = (path, body) => new Request("https://example.test" + path, {
   method: "POST",
