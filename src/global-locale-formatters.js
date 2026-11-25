@@ -1,4 +1,5 @@
 import { getCountryConfig, resolveLocale } from "./global-country-registry.js";
+import { resolveCountryTimezone } from "./global-timezone-registry.js";
 
 /**
  * Locale-aware presentation helpers. These are display helpers only; they do
@@ -26,9 +27,7 @@ export function formatDateTime(date, countryCode, requestedLocale, timezoneOverr
   const value = date instanceof Date ? date : new Date(date);
   if (!Number.isFinite(value.getTime())) throw new TypeError("Invalid date");
   const locale = resolveLocale(countryCode, requestedLocale);
-  const timezone = timezoneOverride ?? config.timezone;
-  if (!timezone) throw new RangeError("A timezone is required for this country or region");
-  // Intl validates timezone identifiers; intentionally do not silently fall back.
+  const timezone = resolveCountryTimezone(countryCode, timezoneOverride);
   return new Intl.DateTimeFormat(locale, { dateStyle: "medium", timeStyle: "short", timeZone: timezone }).format(value);
 }
 
