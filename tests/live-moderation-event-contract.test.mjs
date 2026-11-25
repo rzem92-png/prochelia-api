@@ -51,7 +51,7 @@ test("accepts a verified event and produces a plan-only threat response", () => 
   assert.equal(result.live_controls_connected, false);
   assert.equal(result.requires_host_review, true);
   assert.ok(result.action_plan.some((action) => action.type === "pause_live_for_review" && action.requiresHostApproval));
-  assert.ok(result.action_plan.some((action) => action.type === "temporary_timeout" && action.duration_minutes === 10);
+  assert.ok(result.action_plan.some((action) => action.type === "temporary_timeout" && action.duration_minutes === 10));
   assert.equal(result.permanent_account_suspension, false);
   assert.ok(!JSON.stringify(result).includes(event.text));
 });
