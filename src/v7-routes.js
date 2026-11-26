@@ -6,6 +6,7 @@
 // =====================================================
 
 import { procheliaV7 } from "./v7.js";
+import { MARKET_LOCALES } from "./market-localization.js";
 
 export async function handleV7Route(
   request,
@@ -18,6 +19,35 @@ export async function handleV7Route(
 
     const method =
       request.method.toUpperCase();
+
+    // =================================================
+    // PUBLIC MARKET REGISTRY — LAUNCH STATES FAIL-CLOSED
+    // =================================================
+    if (path === "/api/v7/markets") {
+      if (method !== "GET") {
+        return Response.json(
+          { ok: false, error: "METHOD_NOT_ALLOWED", allowed: ["GET"] },
+          { status: 405, headers: { allow: "GET" } }
+        );
+      }
+      const markets = Object.entries(MARKET_LOCALES)
+        .map(([countryCode, market]) => ({
+          countryCode,
+          name: market.name,
+          languages: [...market.languages],
+          locales: [...market.locales],
+          currency: market.currency,
+          timeZones: [...market.timeZones],
+          marketStatus: market.marketStatus,
+          launchEnabled: market.launchEnabled === true && market.marketStatus === "validated"
+        }))
+        .sort((a, b) => a.name.localeCompare(b.name));
+      return Response.json(
+        { ok: true, count: markets.length, markets },
+        { headers: { "cache-control": "public, max-age=300, stale-while-revalidate=60" } }
+      );
+    }
+
 
 
     // =================================================
