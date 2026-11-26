@@ -79,10 +79,6 @@ async function ownProvider(env, userId, tenantId) {
   return env.DB.prepare("SELECT id FROM intervenants WHERE user_id = ? AND tenant_id = ? LIMIT 1").bind(userId, tenantId).first();
 }
 
-function scopeProvider(context, env, requestedProviderId) {
-  return context.role === "PROVIDER" ? ownProvider(env, context.userId, context.tenantId) : Promise.resolve(requestedProviderId || null);
-}
-
 function dbError(error) {
   const message = String(error?.message || error || "");
   if (message.includes("PROVIDER_UNAVAILABILITY_OVERLAP")) return response({ ok: false, error: "UNAVAILABILITY_CONFLICT" }, 409);
@@ -109,6 +105,7 @@ export async function handleProviderUnavailabilityRoute(request, env, path, auth
   const method = request.method.toUpperCase();
   if (!["GET", "POST", "DELETE"].includes(method)) {
     return response({ ok: false, error: "METHOD_NOT_ALLOWED", allowed: ["GET", "POST", "DELETE"] }, 405);
+  }
   const resolved = await resolveTenant(request, env, auth);
   if (resolved.error) return resolved.error;
   const context = resolved.context;
