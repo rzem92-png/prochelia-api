@@ -42,7 +42,10 @@ test("Preview migration workflow validates the full canonical migration chain", 
     "0019_backup_verifications.sql",
     "0020_auth_login_rate_limits.sql",
     "0021_supra_audit_events.sql",
-    "0022_supra_persisted_approvals.sql"
+    "0022_supra_persisted_approvals.sql",
+    "0023_tenant_isolation_foundation.sql",
+    "0024_provider_unavailability.sql",
+    "0025_provider_unavailability_idempotency.sql"
   ];
   for (const migration of expected) assert.ok(workflow.includes(`"${migration}"`), `missing canonical migration ${migration}`);
 });
@@ -79,6 +82,7 @@ test("Preview post-migration verification checks identity, mission-security and 
     "idx_supra_audit_events_created_at",
     "idx_supra_audit_events_actor",
     "0022_supra_persisted_approvals.sql",
+    "0025_provider_unavailability_idempotency.sql", "idx_provider_unavailability_idempotency",
     "supra_approval_requests", "supra_approval_votes", "supra_approval_events",
     "idx_supra_approval_requests_status_expiry", "idx_supra_approval_requests_tenant_resource",
     "idx_supra_approval_votes_request", "idx_supra_approval_events_request",
@@ -89,7 +93,7 @@ test("Preview post-migration verification checks identity, mission-security and 
   ]) assert.ok(workflow.includes(name), `missing post-migration verification for ${name}`);
 });
 
-test("Preview migration workflow accepts only an empty EU D1 or the exact 23-entry canonical registry", () => {
+test("Preview migration workflow accepts only an empty EU D1 or the exact 26-entry canonical registry", () => {
   assert.match(workflow, /SELECT type, name FROM sqlite_master ORDER BY type, name/);
   assert.match(workflow, /registry_present/);
   assert.match(workflow, /non_internal/);
@@ -181,7 +185,9 @@ test("all canonical migrations required by the remote apply gate physically exis
     "0015_production_security_events.sql", "0016_security_identity_schema.sql",
     "0017_document_security_scans.sql", "0018_consolidated_business_schema.sql",
     "0019_backup_verifications.sql", "0020_auth_login_rate_limits.sql",
-    "0021_supra_audit_events.sql", "0022_supra_persisted_approvals.sql"
+    "0021_supra_audit_events.sql", "0022_supra_persisted_approvals.sql",
+    "0023_tenant_isolation_foundation.sql", "0024_provider_unavailability.sql",
+    "0025_provider_unavailability_idempotency.sql"
   ];
   const actual = new Set(await readdir(new URL("../migrations-preview-canonical/", import.meta.url)));
   const missing = expected.filter(name => !actual.has(name));
