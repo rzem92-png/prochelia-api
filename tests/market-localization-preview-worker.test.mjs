@@ -9,6 +9,8 @@ test("isolated Preview serves the 14 candidate markets with no launch activation
   assert.equal(response.status, 200);
   assert.equal(response.headers.get("cache-control"), "no-store");
   assert.equal(response.headers.get("x-content-type-options"), "nosniff");
+  assert.equal(response.headers.get("access-control-allow-origin"), "*");
+  assert.equal(response.headers.get("access-control-allow-methods"), "GET, OPTIONS");
   const body = await response.json();
   assert.equal(body.schemaVersion, 1);
   assert.equal(body.markets.length, 14);
@@ -50,6 +52,11 @@ test("unknown localization market is 404 and mutation methods are rejected", asy
   const post = await worker.fetch(request("/api/platform/markets", "POST"));
   assert.equal(post.status, 405);
   assert.equal(post.headers.get("allow"), "GET");
+  assert.equal(post.headers.get("access-control-allow-origin"), "*");
+  const options = await worker.fetch(request("/api/platform/markets", "OPTIONS"));
+  assert.equal(options.status, 204);
+  assert.equal(options.headers.get("access-control-allow-origin"), "*");
+  assert.equal(options.headers.get("allow"), "GET, OPTIONS");
   const postLocalization = await worker.fetch(request("/api/platform/markets/FR/localization", "POST"));
   assert.equal(postLocalization.status, 405);
   assert.equal(postLocalization.headers.get("allow"), "GET");
