@@ -6,6 +6,7 @@
 // =====================================================
 
 import { procheliaV7 } from "./v7.js";
+import { handleProviderUnavailabilityRoute } from "./provider-unavailability-api.js";
 
 export async function handleV7Route(
   request,
@@ -18,6 +19,9 @@ export async function handleV7Route(
 
     const method =
       request.method.toUpperCase();
+
+    const providerUnavailabilityResponse = await handleProviderUnavailabilityRoute(request, env, path, auth);
+    if (providerUnavailabilityResponse) return providerUnavailabilityResponse;
 
 
     // =================================================
