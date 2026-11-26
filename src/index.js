@@ -405,6 +405,7 @@ export async function tenantMembershipsRoute(request, env) {
   if (request.method !== "GET") {
     return json({ ok: false, error: "METHOD_NOT_ALLOWED", version: VERSION }, 405, { allow: "GET" });
   }
+  if (!env?.DB) return json({ ok: false, error: "TENANT_CONTEXT_UNAVAILABLE", version: VERSION }, 503);
   const auth = await getSessionUser(request, env).catch(() => null);
   if (!auth?.user) return json({ ok: false, error: "UNAUTHENTICATED", version: VERSION }, 401);
   const result = await listTenantMemberships(env, auth);
