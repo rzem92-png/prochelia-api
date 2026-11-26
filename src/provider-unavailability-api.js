@@ -195,7 +195,8 @@ export async function handleProviderUnavailabilityRoute(request, env, path, auth
       try {
         created = await env.DB.prepare(insert).bind(id, context.tenantId, providerId, startAt, endAt, timeZone, reason, context.userId, suppliedKey || null).first();
       } catch (error) {
-        if (suppliedKey && String(error?.message || error).includes("UNIQUE")) {
+        const message = String(error?.message || error);
+        if (suppliedKey && (message.includes("UNIQUE") || message.includes("PROVIDER_UNAVAILABILITY_OVERLAP"))) {
           const existing = await env.DB.prepare(selectByKey).bind(context.tenantId, providerId, suppliedKey).first();
           if (existing) {
             if (matchesRequest(existing)) return response({ ok: true, idempotent: true, unavailability: rowDto(existing) }, 200);
