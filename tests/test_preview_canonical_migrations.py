@@ -27,6 +27,7 @@ EXPECTED = [
     "0020_auth_login_rate_limits.sql",
     "0021_supra_audit_events.sql",
     "0022_supra_persisted_approvals.sql",
+    "0023_tenant_isolation_foundation.sql",
 ]
 
 actual = sorted(path.name for path in MIGRATIONS.glob("*.sql"))
@@ -53,3 +54,40 @@ required = {
 assert required <= tables, f"Canonical migration chain missing tables: {sorted(required-tables)}"
 
 print(f"PASS: all {len(EXPECTED)} canonical Preview migrations apply from an empty D1 database, creating users/sessions first; foreign_key_check=0.")
+
+# Tenant foundation: constrained roles/statuses, membership uniqueness, pending invite uniqueness,
+# FK integrity and tenant scope indexes must be present in the canonical Preview chain.
+tenant_columns = {
+    table: {row[1] for row in db.execute(f"PRAGMA table_info({table})")}
+    for table in ("clients", "intervenants", "missions")
+}
+assert all("tenant_id" in cols for cols in tenant_columns.values()), (
+    f"Tenant scope columns missing: {tenant_columns}"
+)
+tenant_tables = {"tenants", "tenant_memberships", "tenant_invitations"}
+assert tenant_tables <= tables, f"Tenant foundation missing: {sorted(tenant_tables-tables)}"
+tenant_indexes = {row[1] for row in db.execute("PRAGMA index_list(tenant_memberships)")}
+assert {"idx_tenant_memberships_user_status", "idx_tenant_memberships_tenant_role_status"} <= tenant_indexes
+invite_indexes = {row[1] for row in db.execute("PRAGMA index_list(tenant_invitations)")}
+assert {"idx_tenant_invitations_tenant_status_expiry", "idx_tenant_invitation_pending_email"} <= invite_indexes
+
+db.execute("INSERT INTO users (id, email, password_hash, role, status) VALUES ('tenant-test-user', 'tenant-test@example.test', 'hash', 'client', 'active')")
+db.execute("INSERT INTO tenants (id, slug, display_name) VALUES ('tenant-a', 'tenant-a', 'Tenant A')")
+db.execute("INSERT INTO tenant_memberships (id, tenant_id, user_id, role, status) VALUES ('membership-a', 'tenant-a', 'tenant-test-user', 'CLIENT', 'ACTIVE')")
+try:
+    db.execute("INSERT INTO tenant_memberships (id, tenant_id, user_id, role) VALUES ('membership-duplicate', 'tenant-a', 'tenant-test-user', 'ADMIN')")
+    raise AssertionError("Duplicate tenant membership unexpectedly accepted")
+except sqlite3.IntegrityError:
+    pass
+try:
+    db.execute("INSERT INTO tenant_memberships (id, tenant_id, user_id, role) VALUES ('membership-invalid-role', 'tenant-a', 'tenant-test-user', 'ROOT')")
+    raise AssertionError("Invalid tenant role unexpectedly accepted")
+except sqlite3.IntegrityError:
+    pass
+db.execute("INSERT INTO tenant_invitations (id, tenant_id, email_normalized, role, token_hash, invited_by_user_id, expires_at) VALUES ('invite-a', 'tenant-a', 'invite@example.test', 'PROVIDER', 'hash-a', 'tenant-test-user', '2099-01-01')")
+try:
+    db.execute("INSERT INTO tenant_invitations (id, tenant_id, email_normalized, role, token_hash, invited_by_user_id, expires_at) VALUES ('invite-b', 'tenant-a', 'invite@example.test', 'PROVIDER', 'hash-b', 'tenant-test-user', '2099-01-01')")
+    raise AssertionError("Duplicate pending tenant invitation unexpectedly accepted")
+except sqlite3.IntegrityError:
+    pass
+print("PASS: tenant membership, invitation, role/status constraints and tenant indexes validated.")
