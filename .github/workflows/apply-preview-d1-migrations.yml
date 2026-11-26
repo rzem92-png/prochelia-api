@@ -275,19 +275,27 @@ jobs:
           registry=json.loads(pathlib.Path(sys.argv[2]).read_text())["result"][0]["results"]
           registry_present=any(row["type"]=="table" and row["name"]=="d1_migrations" for row in objects)
           remote=set(row["name"] for row in registry)
-          local=set(p.name for p in pathlib.Path("migrations-preview-canonical").glob("*.sql"))
+          ordered=sorted(p.name for p in pathlib.Path("migrations-preview-canonical").glob("*.sql"))
+          local=set(ordered)
           if len(local) != 26:
               print(f"::error::Expected exactly 26 canonical migrations; found {len(local)}.")
               raise SystemExit(1)
+          # The isolated Preview DB is known to have the exact canonical prefix
+          # 0000–0022 applied. Only the three new tenant/unavailability migrations
+          # are pending. Never accept an arbitrary subset or divergent history.
+          prefix_23=set(ordered[:23])
           non_internal=[row for row in objects if row["name"] not in {"_cf_KV","d1_migrations"} and not row["name"].startswith("sqlite_")]
           if not remote and not non_internal:
-              print("PASS: new EU Preview D1 has no application schema or applied migrations; all 26 canonical migrations are pending.")
+              print("PASS: clean EU Preview D1; all 26 canonical migrations are pending.")
+          elif registry_present and remote == prefix_23 and non_internal:
+              print("PASS: exact canonical prefix 0000–0022 verified; migrations 0023–0025 are the only pending migrations.")
           elif registry_present and remote == local:
-              print("PASS: exact 23-entry canonical migration registry is already applied; rerun is idempotent.")
+              print("PASS: all 26 canonical migrations already applied; rerun is idempotent.")
           else:
-              print("::error::Preview migration registry differs from both reviewed safe states; no migration will run.")
+              print("::error::Preview migration registry differs from reviewed clean, 23-prefix, or 26-full states; no migration will run.")
               print("Unexpected remote names:", ", ".join(sorted(remote-local)) or "(none)")
               print("Missing expected names:", ", ".join(sorted(local-remote)) or "(none)")
+              print("Expected safe prefix names:", ", ".join(sorted(prefix_23)))
               raise SystemExit(1)
           PY
 
