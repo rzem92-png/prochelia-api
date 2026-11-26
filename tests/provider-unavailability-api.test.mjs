@@ -1,176 +1,235 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
 import { handleProviderUnavailabilityRoute } from "../src/provider-unavailability-api.js";
 
-const auth = { user: { id: "user-provider-a", role: "intervenant" }, session_id: "session-a" };
-const tenantRows = [{ tenant_id: "tenant-a", membership_role: "PROVIDER" }];
-const profile = { id: "provider-a" };
-const columns = [
-  "id", "tenant_id", "intervenant_id", "start_at", "end_at", "timezone_name",
-  "reason", "status", "created_by_user_id", "created_at", "updated_at", "idempotency_key"
-].map(name => ({ name }));
+const BASE = "/api/v7/provider-unavailability";
+const auth = (id = "user-1", role = "client") => ({ user: { id, role, email: id + "@example.test" } });
+const membership = (role = "PROVIDER", tenantId = "tenant-a") => ({ tenant_id: tenantId, role, status: "ACTIVE", tenant_status: "ACTIVE" });
+const provider = (id = "provider-1", userId = "user-1", tenantId = "tenant-a") => ({ id, user_id: userId, tenant_id: tenantId });
+const block = (id = "block-1", providerId = "provider-1", tenantId = "tenant-a", status = "ACTIVE") => ({
+  id, tenant_id: tenantId, intervenant_id: providerId,
+  start_at: "2027-01-01T09:00:00.000Z", end_at: "2027-01-01T10:00:00.000Z",
+  timezone_name: "Europe/Paris", reason: "", status,
+  created_at: "2026-11-26T00:00:00.000Z", updated_at: "2026-11-26T00:00:00.000Z", idempotency_key: null
+});
+const req = (method, path = BASE, body = null, headers = {}) => new Request("https://api.preview" + path, {
+  method, headers: { "content-type": "application/json", ...headers }, ...(body !== null ? { body: JSON.stringify(body) } : {})
+});
 
-function fakeDb(options = {}) {
+function mockDB({ memberships = [], providers = [], blocks = [], failSchema = false, insertError = null } = {}) {
   const calls = [];
-  const execute = (sql, values = []) => ({
-    async all() {
-      calls.push({ sql, values, method: "all" });
-      if (sql.includes("tenant_memberships")) return options.memberships ?? { success: true, results: tenantRows };
-      if (sql.includes("PRAGMA table_info")) return options.columns ?? { success: true, results: columns };
-      if (sql.includes("ORDER BY start_at ASC")) return options.list ?? { success: true, results: [] };
-      return { success: true, results: [] };
-    },
-    async first() {
-      calls.push({ sql, values, method: "first" });
-      if (sql.includes("FROM intervenants")) return Object.prototype.hasOwnProperty.call(options, "profile") ? options.profile : profile;
-      if (sql.includes("idempotency_key")) return options.previous ?? null;
-      if (sql.includes("FROM provider_unavailability")) return options.existing ?? null;
-      return null;
-    },
-    async run() {
-      calls.push({ sql, values, method: "run" });
-      if (sql.startsWith("INSERT")) {
-        if (options.insertError) throw options.insertError;
-        return options.insertResult ?? { meta: { changes: 1 } };
-      }
-      if (sql.startsWith("UPDATE")) return options.updateResult ?? { meta: { changes: 1 } };
-      return { meta: { changes: 0 } };
-    }
-  });
   const db = {
     prepare(sql) {
-      const statement = execute(sql);
+      if (failSchema && sql.includes("tenant_memberships")) throw new Error("no such table: tenant_memberships");
       return {
-        ...statement,
-        bind(...values) { return execute(sql, values); }
+        bind(...params) {
+          calls.push({ sql, params });
+          return {
+            async all() {
+              if (sql.includes("tenant_memberships")) {
+                const selectedTenant = sql.includes(" AND tm.tenant_id = ?") ? params[1] : null;
+                return { results: memberships.filter(m => !selectedTenant || m.tenant_id === selectedTenant) };
+              }
+              if (sql.includes("provider_unavailability")) {
+                let rows = blocks.filter(x => x.tenant_id === params[0]);
+                if (sql.includes("intervenant_id = ?")) rows = rows.filter(x => x.intervenant_id === params[1]);
+                if (sql.includes("status = 'ACTIVE'")) rows = rows.filter(x => x.status === "ACTIVE");
+                return { results: rows };
+              }
+              return { results: [] };
+            },
+            async first() {
+              if (sql.includes("intervenants")) {
+                if (sql.includes("user_id = ?")) return providers.find(x => x.user_id === params[0] && x.tenant_id === params[1]) || null;
+                return providers.find(x => x.id === params[0] && x.tenant_id === params[1]) || null;
+              }
+              if (sql.startsWith("SELECT") && sql.includes("idempotency_key")) return blocks.find(x => x.tenant_id === params[0] && x.intervenant_id === params[1] && x.idempotency_key === params[2]) || null;
+              if (sql.includes("INSERT INTO provider_unavailability")) {
+                if (insertError) throw insertError;
+                const [id, tenant_id, intervenant_id, start_at, end_at, timezone_name, reason, created_by_user_id, idempotency_key] = params;
+                if (blocks.some(x => x.id === id)) throw new Error("UNIQUE constraint failed: provider_unavailability.id");
+                if (idempotency_key && blocks.some(x => x.tenant_id === tenant_id && x.intervenant_id === intervenant_id && x.idempotency_key === idempotency_key)) throw new Error("UNIQUE constraint failed: provider_unavailability.idempotency_key");
+                const row = { id, tenant_id, intervenant_id, start_at, end_at, timezone_name, reason, status: "ACTIVE", created_by_user_id, idempotency_key, created_at: "2026-11-26T00:00:00.000Z", updated_at: "2026-11-26T00:00:00.000Z" };
+                blocks.push(row);
+                return row;
+              }
+              if (sql.includes("provider_unavailability") && sql.includes("WHERE id = ?")) return blocks.find(x => x.id === params[0] && x.tenant_id === params[1] && (!sql.includes("intervenant_id = ?") || x.intervenant_id === params[2])) || null;
+              return null;
+            },
+            async run() {
+              if (sql.includes("UPDATE provider_unavailability")) {
+                const providerScoped = sql.includes("intervenant_id = ?");
+                const [id, tenantId, providerId, now] = params;
+                const effectiveNow = providerScoped ? now : providerId;
+                const effectiveProvider = providerScoped ? providerId : null;
+                const row = blocks.find(x => x.id === id && x.tenant_id === tenantId && (!providerScoped || x.intervenant_id === effectiveProvider) && x.status === "ACTIVE" && Date.parse(x.start_at) > Date.parse(effectiveNow));
+                if (row) {
+                  row.status = "CANCELLED";
+                  row.updated_at = "2026-11-26T01:00:00.000Z";
+                  return { meta: { changes: 1 } };
+                }
+                return { meta: { changes: 0 } };
+              }
+              return { meta: { changes: 0 } };
+            }
+          };
+        }
       };
     }
   };
-  return { db, calls };
+  return { db, calls, blocks };
 }
 
-function request(method = "GET", path = "/api/intervenant/unavailability", body = null, headers = {}) {
-  return new Request("https://api.prochelia.test" + path, {
-    method,
-    headers: body ? { "content-type": "application/json", ...headers } : headers,
-    body: body ? JSON.stringify(body) : undefined
-  });
-}
-
-function futureInterval() {
-  const start = new Date(Date.now() + 60 * 60 * 1000);
-  const end = new Date(start.getTime() + 60 * 60 * 1000);
-  return { start_at: start.toISOString(), end_at: end.toISOString(), timezone_name: "Europe/Paris", reason: "Rendez-vous" };
-}
-
-test("unavailability endpoint is wired into the Worker handler", async () => {
-  const source = await readFile(new URL("../src/index.js", import.meta.url), "utf8");
-  assert.match(source, /handleProviderUnavailabilityRoute/);
-  assert.match(source, /\/api\/intervenant\/unavailability/);
+test("route is isolated, unauthenticated requests fail and missing tenant schema fails closed", async () => {
+  assert.equal(await handleProviderUnavailabilityRoute(req("GET", "/api/v7/other"), {}, "/api/v7/other", auth()), null);
+  const unauth = await handleProviderUnavailabilityRoute(req("GET"), { DB: mockDB().db }, BASE, null);
+  assert.equal(unauth.status, 401);
+  const missing = await handleProviderUnavailabilityRoute(req("GET"), { DB: mockDB({ failSchema: true }).db }, BASE, auth());
+  assert.equal(missing.status, 503);
+  assert.equal((await missing.json()).error, "TENANT_SCHEMA_UNAVAILABLE");
+  const noDb = await handleProviderUnavailabilityRoute(req("GET"), {}, BASE, auth());
+  assert.equal(noDb.status, 503);
 });
 
-test("unauthenticated, wrong-role and missing tenant membership fail closed", async () => {
-  const { db } = fakeDb();
-  assert.equal((await handleProviderUnavailabilityRoute(request(), { DB: db }, null)).status, 401);
-  assert.equal((await handleProviderUnavailabilityRoute(request(), { DB: db }, { ...auth, user: { ...auth.user, role: "client" } })).status, 403);
-  const noMembership = fakeDb({ memberships: { success: true, results: [] } });
-  assert.equal((await handleProviderUnavailabilityRoute(request(), { DB: noMembership.db }, auth)).status, 403);
+test("tenant membership is required and ambiguous membership requires explicit selection", async () => {
+  const noMembership = await handleProviderUnavailabilityRoute(req("GET"), { DB: mockDB().db }, BASE, auth());
+  assert.equal(noMembership.status, 403);
+  const multi = mockDB({ memberships: [membership("ADMIN"), membership("OPS", "tenant-b")] });
+  const ambiguous = await handleProviderUnavailabilityRoute(req("GET"), { DB: multi.db }, BASE, auth("user-1", "gerante"));
+  assert.equal(ambiguous.status, 409);
+  assert.equal((await ambiguous.json()).error, "TENANT_SELECTION_REQUIRED");
+  const wrongTenant = await handleProviderUnavailabilityRoute(req("GET", BASE, null, { "x-tenant-id": "tenant-c" }), { DB: multi.db }, BASE, auth());
+  assert.equal(wrongTenant.status, 403);
 });
 
-test("ambiguous tenant and non-provider membership fail closed", async () => {
-  const multi = fakeDb({ memberships: { success: true, results: [{ ...tenantRows[0] }, { tenant_id: "tenant-b", membership_role: "PROVIDER" }] } });
-  const otherRole = fakeDb({ memberships: { success: true, results: [{ tenant_id: "tenant-a", membership_role: "CLIENT" }] } });
-  assert.equal((await handleProviderUnavailabilityRoute(request(), { DB: multi.db }, auth)).status, 409);
-  assert.equal((await handleProviderUnavailabilityRoute(request(), { DB: otherRole.db }, auth)).status, 403);
+test("provider GET is scoped to own provider and tenant", async () => {
+  const db = mockDB({ memberships: [membership()], providers: [provider(), provider("provider-2", "user-2")], blocks: [block(), block("block-2", "provider-2"), block("block-3", "provider-3", "tenant-b")] });
+  const forbidden = await handleProviderUnavailabilityRoute(req("GET", BASE + "?providerId=provider-2"), { DB: db.db }, BASE, auth());
+  assert.equal(forbidden.status, 403);
+  const own = await handleProviderUnavailabilityRoute(req("GET"), { DB: db.db }, BASE, auth());
+  assert.equal(own.status, 200);
+  const data = await own.json();
+  assert.deepEqual(data.unavailability.map(x => x.providerId), ["provider-1"]);
+  assert.equal(data.tenantId, "tenant-a");
 });
 
-test("schema and provider profile are required before any operation", async () => {
-  const schemaMissing = fakeDb({ columns: { success: true, results: [{ name: "id" }] } });
-  assert.equal((await handleProviderUnavailabilityRoute(request(), { DB: schemaMissing.db }, auth)).status, 503);
-  const profileMissing = fakeDb({ profile: null });
-  assert.equal((await handleProviderUnavailabilityRoute(request(), { DB: profileMissing.db }, auth)).status, 404);
-});
-
-test("GET reads only the authenticated tenant and provider profile", async () => {
-  const { db, calls } = fakeDb({ list: { success: true, results: [{ id: "block-a", status: "ACTIVE" }] } });
-  const response = await handleProviderUnavailabilityRoute(request(), { DB: db }, auth);
-  const body = await response.json();
+test("tenant admin can filter within tenant and cross-tenant provider IDs are not disclosed", async () => {
+  const db = mockDB({ memberships: [membership("ADMIN")], providers: [provider(), provider("provider-2", "user-2")], blocks: [block(), block("block-2", "provider-2"), block("block-3", "provider-3", "tenant-b")] });
+  const response = await handleProviderUnavailabilityRoute(req("GET", BASE + "?providerId=provider-2"), { DB: db.db }, BASE, auth("user-1", "gerante"));
   assert.equal(response.status, 200);
-  assert.equal(body.read_only, true);
-  assert.deepEqual(body.unavailability, [{ id: "block-a", status: "ACTIVE" }]);
-  const list = calls.find(call => call.sql.includes("ORDER BY start_at ASC"));
-  assert.deepEqual(list.values, ["tenant-a", "provider-a", "ACTIVE"]);
+  assert.deepEqual((await response.json()).unavailability.map(x => x.providerId), ["provider-2"]);
+  const cross = await handleProviderUnavailabilityRoute(req("GET", BASE + "?providerId=provider-3"), { DB: db.db }, BASE, auth("user-1", "gerante"));
+  assert.equal(cross.status, 404);
 });
 
-test("GET rejects an invalid status filter", async () => {
-  const { db } = fakeDb();
-  assert.equal((await handleProviderUnavailabilityRoute(request("GET", "/api/intervenant/unavailability?status=HACK"), { DB: db }, auth)).status, 400);
-});
-
-test("POST validates UTC interval, IANA timezone, reason and idempotency key", async () => {
-  const { db, calls } = fakeDb();
-  const payload = futureInterval();
-  const invalidDate = { ...payload, start_at: "2026-02-30T12:00:00Z" };
-  const invalidZone = { ...payload, timezone_name: "Mars/Olympus" };
-  const tooLongReason = { ...payload, reason: "x".repeat(121) };
-  assert.equal((await handleProviderUnavailabilityRoute(request("POST", undefined, invalidDate, { "Idempotency-Key": "key-valid-123" }), { DB: db }, auth)).status, 400);
-  assert.equal((await handleProviderUnavailabilityRoute(request("POST", undefined, invalidZone, { "Idempotency-Key": "key-valid-123" }), { DB: db }, auth)).status, 400);
-  assert.equal((await handleProviderUnavailabilityRoute(request("POST", undefined, tooLongReason, { "Idempotency-Key": "key-valid-123" }), { DB: db }, auth)).status, 400);
-  assert.equal((await handleProviderUnavailabilityRoute(request("POST", undefined, payload), { DB: db }, auth)).status, 400);
-  assert.equal(calls.filter(call => call.method === "run").length, 0);
-});
-
-test("POST inserts with derived tenant/profile and authenticated creator", async () => {
-  const { db, calls } = fakeDb();
-  const payload = futureInterval();
-  const response = await handleProviderUnavailabilityRoute(request("POST", undefined, payload, { "Idempotency-Key": "key-valid-123" }), { DB: db }, auth);
-  const body = await response.json();
+test("provider self-service derives own profile; tenant and creator are server-bound", async () => {
+  const db = mockDB({ memberships: [membership()], providers: [provider()] });
+  // Frontend self-service may omit providerId: the authenticated profile is derived.
+  const response = await handleProviderUnavailabilityRoute(req("POST", BASE, { startAt: "2026-11-26T09:00:00Z", endAt: "2026-11-26T10:00:00Z", timeZone: "Europe/Paris", reason: "Congé" }, { "Idempotency-Key": "a6d5e6f7-1234-4234-8234-123456789012" }), { DB: db.db }, BASE, auth());
   assert.equal(response.status, 201);
-  assert.equal(body.unavailability.status, "ACTIVE");
-  const insert = calls.find(call => call.sql.startsWith("INSERT"));
-  assert.deepEqual(insert.values.slice(1, 3), ["tenant-a", "provider-a"]);
-  assert.equal(insert.values[7], auth.user.id);
-  assert.equal(insert.values[8], "key-valid-123");
-  assert.ok(!insert.values.includes("tenant-evil"));
+  const data = await response.json();
+  assert.equal(data.unavailability.providerId, "provider-1");
+  const insert = db.calls.find(x => x.sql.includes("INSERT INTO provider_unavailability"));
+  assert.equal(insert.params[1], "tenant-a");
+  assert.equal(insert.params[7], "user-1");
+  assert.equal(insert.params[8], "a6d5e6f7-1234-4234-8234-123456789012");
+  assert.equal(insert.params[6], "Congé");
+  assert.equal(data.unavailability.status, "ACTIVE");
+
+  // Supplying another profile is rejected, never used as a selector.
+  const forbidden = await handleProviderUnavailabilityRoute(req("POST", BASE, { providerId: "provider-other", startAt: "2026-11-26T11:00:00Z", endAt: "2026-11-26T12:00:00Z", timeZone: "Europe/Paris" }, { "Idempotency-Key": "b6d5e6f7-1234-4234-8234-123456789012" }), { DB: db.db }, BASE, auth());
+  assert.equal(forbidden.status, 403);
 });
 
-test("POST replay is idempotent and changed payload with the same key conflicts", async () => {
-  const payload = futureInterval();
-  const previous = { id: "block-existing", ...payload, status: "ACTIVE" };
-  const replay = fakeDb({ previous });
-  const replayResponse = await handleProviderUnavailabilityRoute(request("POST", undefined, payload, { "Idempotency-Key": "key-valid-123" }), { DB: replay.db }, auth);
-  assert.equal(replayResponse.status, 200);
-  assert.equal((await replayResponse.json()).idempotent_replay, true);
-  const conflict = fakeDb({ previous: { ...previous, reason: "other" } });
-  assert.equal((await handleProviderUnavailabilityRoute(request("POST", undefined, payload, { "Idempotency-Key": "key-valid-123" }), { DB: conflict.db }, auth)).status, 409);
+test("POST requires a UUID idempotency key", async () => {
+  const db = mockDB({ memberships: [membership()], providers: [provider()] });
+  const body = { startAt: "2027-01-01T09:00:00Z", endAt: "2027-01-01T10:00:00Z", timeZone: "Europe/Paris", reason: "" };
+  const missing = await handleProviderUnavailabilityRoute(req("POST", BASE, body), { DB: db.db }, BASE, auth());
+  assert.equal(missing.status, 400);
+  assert.equal((await missing.json()).error, "IDEMPOTENCY_KEY_REQUIRED");
+  const invalid = await handleProviderUnavailabilityRoute(req("POST", BASE, body, { "Idempotency-Key": "not-a-uuid" }), { DB: db.db }, BASE, auth());
+  assert.equal(invalid.status, 400);
+  assert.equal((await invalid.json()).error, "INVALID_IDEMPOTENCY_KEY");
 });
 
-test("POST maps server-side overlap trigger to a conflict", async () => {
-  const { db } = fakeDb({ insertError: new Error("PROVIDER_UNAVAILABILITY_OVERLAP") });
-  const payload = futureInterval();
-  const response = await handleProviderUnavailabilityRoute(request("POST", undefined, payload, { "Idempotency-Key": "key-valid-123" }), { DB: db }, auth);
+test("Idempotency-Key retries return the same row and reject key reuse for different payload", async () => {
+  const db = mockDB({ memberships: [membership()], providers: [provider()] });
+  const key = "d6d5e6f7-1234-4234-8234-123456789012";
+  const body = { providerId: "provider-1", startAt: "2026-11-26T09:00:00Z", endAt: "2026-11-26T10:00:00Z", timeZone: "Europe/Paris", reason: "Congé" };
+  const first = await handleProviderUnavailabilityRoute(req("POST", BASE, body, { "Idempotency-Key": key }), { DB: db.db }, BASE, auth());
+  assert.equal(first.status, 201);
+  const firstBody = await first.json();
+  assert.notEqual(firstBody.unavailability.id, key);
+  assert.equal(db.blocks[0].idempotency_key, key);
+  const retry = await handleProviderUnavailabilityRoute(req("POST", BASE, body, { "Idempotency-Key": key }), { DB: db.db }, BASE, auth());
+  assert.equal(retry.status, 200);
+  const retryBody = await retry.json();
+  assert.equal(retryBody.idempotent, true);
+  assert.equal(retryBody.unavailability.id, firstBody.unavailability.id);
+  assert.equal(db.calls.filter(x => x.sql.includes("INSERT INTO provider_unavailability")).length, 1);
+  const changed = await handleProviderUnavailabilityRoute(req("POST", BASE, { ...body, reason: "Autre" }, { "Idempotency-Key": key }), { DB: db.db }, BASE, auth());
+  assert.equal(changed.status, 409);
+  assert.equal((await changed.json()).error, "IDEMPOTENCY_KEY_REUSED");
+});
+
+test("invalid UTC, reversed interval, invalid IANA timezone and overlong reason are rejected", async () => {
+  const db = mockDB({ memberships: [membership()], providers: [provider()] });
+  const cases = [
+    { startAt: "2026-11-26T09:00:00", endAt: "2026-11-26T10:00:00Z", timeZone: "Europe/Paris" },
+    { startAt: "2026-11-26T10:00:00Z", endAt: "2026-11-26T09:00:00Z", timeZone: "Europe/Paris" },
+    { startAt: "2026-11-26T09:00:00Z", endAt: "2026-11-26T10:00:00Z", timeZone: "Not/AZone" },
+    { startAt: "2026-11-26T09:00:00Z", endAt: "2026-11-26T10:00:00Z", timeZone: "Europe/Paris", reason: "x".repeat(121) }
+  ];
+  for (const value of cases) {
+    const response = await handleProviderUnavailabilityRoute(req("POST", BASE, { providerId: "provider-1", ...value }, { "Idempotency-Key": "c6d5e6f7-1234-4234-8234-123456789012" }), { DB: db.db }, BASE, auth());
+    assert.equal(response.status, 400);
+  }
+});
+
+test("overlap database guard maps to conflict and not a generic failure", async () => {
+  const db = mockDB({ memberships: [membership()], providers: [provider()], insertError: new Error("PROVIDER_UNAVAILABILITY_OVERLAP") });
+  const response = await handleProviderUnavailabilityRoute(req("POST", BASE, { providerId: "provider-1", startAt: "2026-11-26T09:00:00Z", endAt: "2026-11-26T10:00:00Z", timeZone: "Europe/Paris" }, { "Idempotency-Key": "e6d5e6f7-1234-4234-8234-123456789012" }), { DB: db.db }, BASE, auth());
   assert.equal(response.status, 409);
-  assert.equal((await response.json()).error, "UNAVAILABILITY_OVERLAP");
+  assert.equal((await response.json()).error, "UNAVAILABILITY_CONFLICT");
 });
 
-test("DELETE is tenant/profile scoped, soft-cancels and supports replay", async () => {
-  const { db, calls } = fakeDb({ existing: { id: "block-existing", start_at: futureInterval().start_at, status: "ACTIVE" } });
-  const response = await handleProviderUnavailabilityRoute(request("DELETE", "/api/intervenant/unavailability?id=block-existing"), { DB: db }, auth);
+test("cancellation is future-only, soft, tenant/provider scoped and replay-safe", async () => {
+  const past = block("block-past");
+  past.start_at = "2025-01-01T09:00:00.000Z";
+  past.end_at = "2025-01-01T10:00:00.000Z";
+  const db = mockDB({ memberships: [membership()], providers: [provider()], blocks: [block(), block("block-2", "provider-2"), past] });
+  const response = await handleProviderUnavailabilityRoute(req("DELETE", BASE + "/block-1"), { DB: db.db }, BASE + "/block-1", auth());
   assert.equal(response.status, 200);
-  const update = calls.find(call => call.sql.startsWith("UPDATE"));
-  assert.deepEqual(update.values.slice(0, 3), ["block-existing", "tenant-a", "provider-a"]);
-  const replay = fakeDb({ existing: { id: "block-existing", start_at: futureInterval().start_at, status: "CANCELLED" } });
-  assert.equal((await handleProviderUnavailabilityRoute(request("DELETE", "/api/intervenant/unavailability?id=block-existing"), { DB: replay.db }, auth)).status, 200);
+  assert.equal((await response.json()).unavailability.status, "CANCELLED");
+  const update = db.calls.find(x => x.sql.includes("UPDATE provider_unavailability"));
+  assert.equal(update.params[1], "tenant-a");
+  assert.equal(update.params[2], "provider-1");
+  const replay = await handleProviderUnavailabilityRoute(req("DELETE", BASE + "/block-1"), { DB: db.db }, BASE + "/block-1", auth());
+  assert.equal(replay.status, 200);
+  assert.equal((await replay.json()).idempotent, true);
+  const pastCancel = await handleProviderUnavailabilityRoute(req("DELETE", BASE + "/block-past"), { DB: db.db }, BASE + "/block-past", auth());
+  assert.equal(pastCancel.status, 409);
+  assert.equal((await pastCancel.json()).error, "UNAVAILABILITY_NOT_CANCELLABLE");
+  const other = await handleProviderUnavailabilityRoute(req("DELETE", BASE + "/block-2"), { DB: db.db }, BASE + "/block-2", auth());
+  assert.equal(other.status, 404);
+  for (const invalidId of ["bad%20id", "bad%2Fid", "x".repeat(129)]) {
+    const invalidPath = BASE + "/" + invalidId;
+    const invalid = await handleProviderUnavailabilityRoute(req("DELETE", invalidPath), { DB: db.db }, invalidPath, auth());
+    assert.equal(invalid.status, 400);
+    assert.equal((await invalid.json()).error, "INVALID_ID");
+  }
 });
 
-test("DELETE refuses missing, invalid, expired or concurrently changed records", async () => {
-  const missing = fakeDb({ existing: null });
-  assert.equal((await handleProviderUnavailabilityRoute(request("DELETE", "/api/intervenant/unavailability?id=block-missing"), { DB: missing.db }, auth)).status, 404);
-  const invalid = fakeDb();
-  assert.equal((await handleProviderUnavailabilityRoute(request("DELETE", "/api/intervenant/unavailability?id=bad"), { DB: invalid.db }, auth)).status, 400);
-  const expired = fakeDb({ existing: { id: "block-existing", start_at: new Date(Date.now() - 1000).toISOString(), status: "ACTIVE" } });
-  assert.equal((await handleProviderUnavailabilityRoute(request("DELETE", "/api/intervenant/unavailability?id=block-existing"), { DB: expired.db }, auth)).status, 409);
-  const stale = fakeDb({ existing: { id: "block-existing", start_at: futureInterval().start_at, status: "ACTIVE" }, updateResult: { meta: { changes: 0 } } });
-  assert.equal((await handleProviderUnavailabilityRoute(request("DELETE", "/api/intervenant/unavailability?id=block-existing"), { DB: stale.db }, auth)).status, 409);
+test("read-only role cannot create or cancel and unknown methods are rejected", async () => {
+  const db = mockDB({ memberships: [membership("READ_ONLY")] });
+  const create = await handleProviderUnavailabilityRoute(req("POST", BASE, { providerId: "provider-1" }), { DB: db.db }, BASE, auth());
+  assert.equal(create.status, 403);
+  const cancel = await handleProviderUnavailabilityRoute(req("DELETE", BASE + "/block-1"), { DB: db.db }, BASE + "/block-1", auth());
+  assert.equal(cancel.status, 403);
+  const put = await handleProviderUnavailabilityRoute(req("PUT"), { DB: db.db }, BASE, auth());
+  assert.equal(put.status, 405);
+  const nestedGet = await handleProviderUnavailabilityRoute(req("GET", BASE + "/unexpected"), { DB: db.db }, BASE + "/unexpected", auth());
+  assert.equal(nestedGet.status, 404);
+  const nestedPost = await handleProviderUnavailabilityRoute(req("POST", BASE + "/unexpected", {}), { DB: db.db }, BASE + "/unexpected", auth());
+  assert.equal(nestedPost.status, 404);
 });
