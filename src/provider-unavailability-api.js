@@ -161,11 +161,24 @@ export async function handleProviderUnavailabilityRoute(request, env, path, auth
         const provider = await providerForTenant(env, providerId, context.tenantId);
         if (!provider) return response({ ok: false, error: "PROVIDER_NOT_FOUND" }, 404);
       }
-      const id = crypto.randomUUID();
-      await env.DB.prepare(`INSERT INTO provider_unavailability
+      const suppliedKey = (request.headers.get("idempotency-key") || "").trim();
+      if (suppliedKey && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(suppliedKey)) return response({ ok: false, error: "INVALID_IDEMPOTENCY_KEY" }, 400);
+      const id = suppliedKey || crypto.randomUUID();
+      const insert = `INSERT INTO provider_unavailability
         (id, tenant_id, intervenant_id, start_at, end_at, timezone_name, reason, status, created_by_user_id)
-        VALUES (?, ?, ?, ?, ?, ?, ?, 'ACTIVE', ?)`).bind(id, context.tenantId, providerId, startAt, endAt, timeZone, reason, context.userId).run();
-      const created = await env.DB.prepare("SELECT id, intervenant_id, start_at, end_at, timezone_name, reason, status, created_at, updated_at FROM provider_unavailability WHERE id = ? AND tenant_id = ? LIMIT 1").bind(id, context.tenantId).first();
+        VALUES (?, ?, ?, ?, ?, ?, ?, 'ACTIVE', ?)
+        RETURNING id, tenant_id, intervenant_id, start_at, end_at, timezone_name, reason, status, created_at, updated_at, created_by_user_id`;
+      let created;
+      try {
+        created = await env.DB.prepare(insert).bind(id, context.tenantId, providerId, startAt, endAt, timeZone, reason, context.userId).first();
+      } catch (error) {
+        if (suppliedKey && (String(error?.message || error).includes("UNIQUE") || String(error?.message || error).includes("PROVIDER_UNAVAILABILITY_OVERLAP"))) {
+          const existing = await env.DB.prepare("SELECT id, tenant_id, intervenant_id, start_at, end_at, timezone_name, reason, status, created_at, updated_at, created_by_user_id FROM provider_unavailability WHERE id = ? AND tenant_id = ? LIMIT 1").bind(id, context.tenantId).first();
+          if (existing && existing.created_by_user_id === context.userId && existing.intervenant_id === providerId && existing.start_at === startAt && existing.end_at === endAt && existing.timezone_name === timeZone && existing.reason === reason) return response({ ok: true, idempotent: true, unavailability: rowDto(existing) }, 200);
+          if (existing) return response({ ok: false, error: "IDEMPOTENCY_KEY_REUSED" }, 409);
+        }
+        throw error;
+      }
       if (!created) return response({ ok: false, error: "CREATION_NOT_CONFIRMED" }, 503);
       return response({ ok: true, unavailability: rowDto(created) }, 201);
     }
