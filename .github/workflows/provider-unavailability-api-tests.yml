@@ -38,4 +38,4 @@ jobs:
       - name: V7 authorization regressions
         run: node --experimental-default-type=module --test tests/v7-security.test.js
       - name: Canonical Preview migrations regression
-        run: python3 -m unittest tests/test_preview_canonical_migrations.py
+        run: python3 tests/test_preview_canonical_migrations.py
