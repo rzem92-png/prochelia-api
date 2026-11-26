@@ -167,7 +167,8 @@ export async function handleProviderUnavailabilityRoute(request, env, path, auth
         if (!provider) return response({ ok: false, error: "PROVIDER_NOT_FOUND" }, 404);
       }
       const suppliedKey = (request.headers.get("idempotency-key") || "").trim();
-      if (suppliedKey && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(suppliedKey)) return response({ ok: false, error: "INVALID_IDEMPOTENCY_KEY" }, 400);
+      if (!suppliedKey) return response({ ok: false, error: "IDEMPOTENCY_KEY_REQUIRED" }, 400);
+      if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(suppliedKey)) return response({ ok: false, error: "INVALID_IDEMPOTENCY_KEY" }, 400);
 
       const selectByKey = "SELECT id, tenant_id, intervenant_id, start_at, end_at, timezone_name, reason, status, created_at, updated_at, created_by_user_id, idempotency_key FROM provider_unavailability WHERE tenant_id = ? AND intervenant_id = ? AND idempotency_key = ? LIMIT 1";
       const matchesRequest = existing => existing &&
