@@ -1,0 +1,41 @@
+name: Provider unavailability API regression tests
+
+on:
+  pull_request:
+    paths:
+      - "src/provider-unavailability-api.js"
+      - "src/v7-routes.js"
+      - "migrations-preview-canonical/0024_provider_unavailability.sql"
+      - "tests/provider-unavailability-api.test.mjs"
+      - ".github/workflows/provider-unavailability-api-tests.yml"
+  push:
+    branches:
+      - "feat-tenant-scoped-provider-unavailability-api-20261126"
+    paths:
+      - "src/provider-unavailability-api.js"
+      - "src/v7-routes.js"
+      - "migrations-preview-canonical/0024_provider_unavailability.sql"
+      - "tests/provider-unavailability-api.test.mjs"
+      - ".github/workflows/provider-unavailability-api-tests.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  api-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Syntax validation
+        run: |
+          node --experimental-default-type=module --check src/provider-unavailability-api.js
+          node --experimental-default-type=module --check src/v7-routes.js
+      - name: Tenant-scoped availability tests
+        run: node --test tests/provider-unavailability-api.test.mjs
+      - name: V7 authorization regressions
+        run: node --experimental-default-type=module --test tests/v7-security.test.js
+      - name: Canonical Preview migrations regression
+        run: python3 -m unittest tests/test_preview_canonical_migrations.py
