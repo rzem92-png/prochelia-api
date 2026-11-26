@@ -4503,6 +4503,52 @@ async function supportList(request,env){
   return json({ok:true,version:VERSION,role:a.role,cases:r.results||[]});
 }
 
+// Tenant-scoped, privacy-minimized activity timeline. Never expose event details_json or actor IDs.
+export function normalizeSupportCaseEventRows(rows){
+  const source=Array.isArray(rows)?rows:[];
+  const hasMore=source.length>100;
+  const allowedRoles=new Set(['CLIENT','SOCIETE','INTERVENANT','GERANTE','ADMIN','OWNER','MANAGER']);
+  const events=source.slice(0,100).map(row=>{
+    const type=String(row?.event_type||'EVENT').toUpperCase().replace(/[^A-Z0-9_]/g,'').slice(0,60)||'EVENT';
+    const rawRole=String(row?.actor_role||'').toUpperCase().slice(0,30);
+    const actorRole=allowedRoles.has(rawRole)?rawRole:'TEAM';
+    const rawDate=typeof row?.created_at==='string'?row.created_at.slice(0,40):'';
+    const createdAt=rawDate&&Number.isFinite(Date.parse(rawDate))?rawDate:null;
+    return {type,actor_role:actorRole,created_at:createdAt};
+  }).reverse();
+  return {events,has_more:hasMore};
+}
+
+export async function supportCaseEventsRoute(request,env){
+  if(request.method!=='GET') return json({ok:false,error:'METHOD_NOT_ALLOWED',version:VERSION},405,{allow:'GET'});
+  const a=await supportAuth(request,env); if(a.response)return a.response;
+  const schemaGate=schemaColumnsReadinessResponse(env,{support_cases:['tenant_id','requester_id'],support_case_events:['case_id','event_type','actor_role','created_at']},'SUPPORT_SCHEMA_NOT_READY'); if(schemaGate)return schemaGate;
+  const path=new URL(request.url).pathname;
+  const match=path.match(/^\/api\/support\/cases\/([A-Za-z0-9._:-]{1,160})\/events$/);
+  if(!match) return json({ok:false,error:'CASE_ID_INVALID',version:VERSION},400);
+  const caseId=match[1];
+  const isManager=a.role==='GERANTE'||tenantRoleAllowed(a.tenantContext,['OWNER','ADMIN','MANAGER']);
+  let caseRow;
+  try{
+    caseRow=isManager
+      ? await env.DB.prepare('SELECT id,requester_id FROM support_cases WHERE id=? AND tenant_id=? LIMIT 1').bind(caseId,a.tenantId).first()
+      : await env.DB.prepare('SELECT id,requester_id FROM support_cases WHERE id=? AND tenant_id=? AND requester_id=? LIMIT 1').bind(caseId,a.tenantId,a.auth.user.id).first();
+  }catch{return json({ok:false,error:'SUPPORT_DATA_UNAVAILABLE',version:VERSION},503);}
+  if(!caseRow) return json({ok:false,error:'CASE_NOT_FOUND',version:VERSION},404);
+  try{
+    const base=`SELECT e.event_type,e.actor_role,e.created_at
+      FROM support_case_events e
+      JOIN support_cases c ON c.id=e.case_id
+     WHERE e.case_id=? AND c.tenant_id=?`;
+    const result=isManager
+      ? await env.DB.prepare(base+' ORDER BY e.created_at DESC,e.id DESC LIMIT 101').bind(caseId,a.tenantId).all()
+      : await env.DB.prepare(base+' AND c.requester_id=? ORDER BY e.created_at DESC,e.id DESC LIMIT 101').bind(caseId,a.tenantId,a.auth.user.id).all();
+    if(result?.success!==true||!Array.isArray(result.results)) return json({ok:false,error:'SUPPORT_DATA_UNAVAILABLE',version:VERSION},503);
+    const normalized=normalizeSupportCaseEventRows(result.results);
+    return json({ok:true,version:VERSION,case_id:caseId,events:normalized.events,has_more:normalized.has_more});
+  }catch{return json({ok:false,error:'SUPPORT_DATA_UNAVAILABLE',version:VERSION},503);}
+}
+
 async function supportResolve(request,env){
   const a=await supportAuth(request,env); if(a.response)return a.response;
   if(a.role!=='GERANTE'&&!tenantRoleAllowed(a.tenantContext,['OWNER','ADMIN','MANAGER'])) return json({ok:false,error:'MANAGER_APPROVAL_REQUIRED',version:VERSION},403);
@@ -4536,6 +4582,7 @@ handle = async function(request,env){
     if((u.pathname==='/api/ui/config')&&request.method==='GET') return interfaceConfigEndpoint(request,env);
     if((u.pathname==='/api/support/cases')&&request.method==='POST') return supportCreate(request,env);
     if((u.pathname==='/api/support/cases')&&request.method==='GET') return supportList(request,env);
+    if(/^\/api\/support\/cases\/[A-Za-z0-9._:-]{1,160}\/events$/.test(u.pathname)) return supportCaseEventsRoute(request,env);
     if((u.pathname==='/api/support/cases/resolve')&&request.method==='POST') return supportResolve(request,env);
     if((u.pathname==='/api/support/dashboard')&&request.method==='GET') return supportDashboard(request,env);
     return __procheliaComplementHandle(request,env);
