@@ -59,6 +59,17 @@ test("invalid query parameters fail closed with specific errors", () => {
   }
 });
 
+test("gate status is evaluated on the selected gate, not another gate on the same country", () => {
+  const summary = fixtureSummary();
+  summary.countries[0].gates.find(gate => gate.id === "legal_review").status = "approved";
+  const result = buildCountryReadinessMatrix(summary, new URLSearchParams("gate=tax_review&gateStatus=approved"));
+  assert.equal(result.ok, true);
+  assert.equal(result.summary.countryCount, 0);
+  const approvedLegal = buildCountryReadinessMatrix(summary, new URLSearchParams("gate=legal_review&gateStatus=approved"));
+  assert.equal(approvedLegal.summary.countryCount, 1);
+  assert.equal(approvedLegal.countries[0].code, "AE");
+});
+
 test("matrix summary is computed over all filtered countries, not the current page", () => {
   const result = buildCountryReadinessMatrix(fixtureSummary(), new URLSearchParams("q=fr&limit=1"));
   assert.equal(result.summary.countryCount, 1);
