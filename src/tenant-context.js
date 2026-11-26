@@ -69,3 +69,57 @@ export async function resolveTenantContext(_request, env, auth) {
 export function tenantRoleAllowed(context, allowedRoles) {
   return Boolean(context?.ok && Array.isArray(allowedRoles) && allowedRoles.includes(context.tenant?.role));
 }
+
+
+// Read-only directory of the authenticated user's active tenant memberships.
+// This intentionally exposes no invitation, inactive tenant, or cross-user data.
+export async function listTenantMemberships(env, auth) {
+  const userId = auth?.user?.id;
+  const sessionId = auth?.session_id;
+  if (!userId || !sessionId) return { ok: false, status: 401, error: "UNAUTHENTICATED" };
+  if (!env?.DB) return { ok: false, status: 503, error: "TENANT_CONTEXT_UNAVAILABLE" };
+
+  try {
+    const result = await env.DB.prepare(`
+      SELECT t.id AS tenant_id, t.slug AS tenant_slug, t.display_name AS tenant_name,
+             m.id AS membership_id, m.role AS membership_role,
+             s.active_tenant_id AS active_tenant_id
+        FROM sessions s
+        JOIN tenant_memberships m ON m.user_id = s.user_id
+        JOIN tenants t ON t.id = m.tenant_id
+       WHERE s.id = ?
+         AND s.user_id = ?
+         AND s.expires_at > CURRENT_TIMESTAMP
+         AND s.revoked_at IS NULL
+         AND m.status = 'ACTIVE'
+         AND t.status = 'ACTIVE'
+       ORDER BY t.display_name COLLATE NOCASE, t.id
+       LIMIT 51
+    `).bind(sessionId, userId).all();
+
+    // D1 may return partial rows when a query fails; never expose them.
+    if (result?.success !== true || !Array.isArray(result.results)) {
+      return { ok: false, status: 503, error: "TENANT_CONTEXT_UNAVAILABLE" };
+    }
+    const rows = result.results;
+    const truncated = rows.length > 50;
+    const memberships = rows.slice(0, 50).map(row => ({
+      id: row.tenant_id,
+      slug: row.tenant_slug,
+      name: row.tenant_name,
+      membership_id: row.membership_id,
+      role: row.membership_role
+    }));
+    const activeTenantId = auth.session_active_tenant_id || null;
+    const activeMembership = memberships.find(item => item.id === activeTenantId) || null;
+    return {
+      ok: true,
+      memberships,
+      active_tenant_id: activeMembership?.id || null,
+      selection_required: memberships.length > 0 && !activeMembership,
+      truncated
+    };
+  } catch {
+    return { ok: false, status: 503, error: "TENANT_CONTEXT_UNAVAILABLE" };
+  }
+}
