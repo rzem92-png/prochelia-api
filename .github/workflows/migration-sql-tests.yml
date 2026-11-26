@@ -16,6 +16,8 @@ on:
     branches: [main]
     paths:
       - "migrations/**"
+      - "migrations-preview-canonical/**"
+      - "tests/test_preview_canonical_migrations.py"
       - "tests/test_migrations_sqlite.py"
       - ".github/workflows/migration-sql-tests.yml"
 
