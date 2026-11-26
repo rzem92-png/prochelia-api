@@ -368,6 +368,9 @@ test("tenant memberships directory rejects unauthenticated and non-GET requests 
   const method = await tenantMembershipsRoute(new Request("https://api.example.test/api/tenant/memberships", { method: "POST" }), { DB });
   assert.equal(method.status, 405);
   assert.equal(calls, 0);
+  const noDatabase = await tenantMembershipsRoute(new Request("https://api.example.test/api/tenant/memberships"), {});
+  assert.equal(noDatabase.status, 503);
+  assert.equal((await noDatabase.json()).error, "TENANT_CONTEXT_UNAVAILABLE");
 });
 
 test("tenant memberships directory caps results and prioritizes the selected workspace", async () => {
