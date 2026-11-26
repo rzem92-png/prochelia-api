@@ -373,6 +373,17 @@ test("tenant memberships directory rejects unauthenticated and non-GET requests 
   assert.equal((await noDatabase.json()).error, "TENANT_CONTEXT_UNAVAILABLE");
 });
 
+test("tenant memberships directory returns 503 when session lookup fails", async () => {
+  const DB = { prepare() {
+    return { bind() { return { async first() { throw new Error("D1 temporarily unavailable"); } }; } };
+  }};
+  const response = await tenantMembershipsRoute(new Request("https://api.example.test/api/tenant/memberships", {
+    headers: { cookie: "prochelia_session=synthetic-session-token" }
+  }), { DB });
+  assert.equal(response.status, 503);
+  assert.equal((await response.json()).error, "TENANT_CONTEXT_UNAVAILABLE");
+});
+
 test("tenant memberships directory caps results and prioritizes the selected workspace", async () => {
   const rows = Array.from({length:51},(_,i)=>({
     tenant_id:"tenant-"+i, tenant_slug:"slug-"+i, tenant_name:"Workspace "+i,
