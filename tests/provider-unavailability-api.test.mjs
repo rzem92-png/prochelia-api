@@ -10,7 +10,7 @@ const block = (id = "block-1", providerId = "provider-1", tenantId = "tenant-a",
   id, tenant_id: tenantId, intervenant_id: providerId,
   start_at: "2026-11-26T09:00:00.000Z", end_at: "2026-11-26T10:00:00.000Z",
   timezone_name: "Europe/Paris", reason: "", status,
-  created_at: "2026-11-26T00:00:00.000Z", updated_at: "2026-11-26T00:00:00.000Z"
+  created_at: "2026-11-26T00:00:00.000Z", updated_at: "2026-11-26T00:00:00.000Z", idempotency_key: null
 });
 const req = (method, path = BASE, body = null, headers = {}) => new Request("https://api.preview" + path, {
   method, headers: { "content-type": "application/json", ...headers }, ...(body !== null ? { body: JSON.stringify(body) } : {})
@@ -43,11 +43,13 @@ function mockDB({ memberships = [], providers = [], blocks = [], failSchema = fa
                 if (sql.includes("user_id = ?")) return providers.find(x => x.user_id === params[0] && x.tenant_id === params[1]) || null;
                 return providers.find(x => x.id === params[0] && x.tenant_id === params[1]) || null;
               }
+              if (sql.startsWith("SELECT") && sql.includes("idempotency_key")) return blocks.find(x => x.tenant_id === params[0] && x.intervenant_id === params[1] && x.idempotency_key === params[2]) || null;
               if (sql.includes("INSERT INTO provider_unavailability")) {
                 if (insertError) throw insertError;
-                const [id, tenant_id, intervenant_id, start_at, end_at, timezone_name, reason, created_by_user_id] = params;
+                const [id, tenant_id, intervenant_id, start_at, end_at, timezone_name, reason, created_by_user_id, idempotency_key] = params;
                 if (blocks.some(x => x.id === id)) throw new Error("UNIQUE constraint failed: provider_unavailability.id");
-                const row = { id, tenant_id, intervenant_id, start_at, end_at, timezone_name, reason, status: "ACTIVE", created_by_user_id, created_at: "2026-11-26T00:00:00.000Z", updated_at: "2026-11-26T00:00:00.000Z" };
+                if (idempotency_key && blocks.some(x => x.tenant_id === tenant_id && x.intervenant_id === intervenant_id && x.idempotency_key === idempotency_key)) throw new Error("UNIQUE constraint failed: provider_unavailability.idempotency_key");
+                const row = { id, tenant_id, intervenant_id, start_at, end_at, timezone_name, reason, status: "ACTIVE", created_by_user_id, idempotency_key, created_at: "2026-11-26T00:00:00.000Z", updated_at: "2026-11-26T00:00:00.000Z" };
                 blocks.push(row);
                 return row;
               }
@@ -72,7 +74,7 @@ function mockDB({ memberships = [], providers = [], blocks = [], failSchema = fa
       };
     }
   };
-  return { db, calls };
+  return { db, calls, blocks };
 }
 
 test("route is isolated, unauthenticated requests fail and missing tenant schema fails closed", async () => {
@@ -141,13 +143,15 @@ test("Idempotency-Key retries return the same row and reject key reuse for diffe
   const body = { providerId: "provider-1", startAt: "2026-11-26T09:00:00Z", endAt: "2026-11-26T10:00:00Z", timeZone: "Europe/Paris", reason: "Congé" };
   const first = await handleProviderUnavailabilityRoute(req("POST", BASE, body, { "Idempotency-Key": key }), { DB: db.db }, BASE, auth());
   assert.equal(first.status, 201);
-  assert.equal((await first.json()).unavailability.id, key);
+  const firstBody = await first.json();
+  assert.notEqual(firstBody.unavailability.id, key);
+  assert.equal(db.blocks[0].idempotency_key, key);
   const retry = await handleProviderUnavailabilityRoute(req("POST", BASE, body, { "Idempotency-Key": key }), { DB: db.db }, BASE, auth());
   assert.equal(retry.status, 200);
   const retryBody = await retry.json();
   assert.equal(retryBody.idempotent, true);
-  assert.equal(retryBody.unavailability.id, key);
-  assert.equal(db.calls.filter(x => x.sql.includes("INSERT INTO provider_unavailability")).length, 2);
+  assert.equal(retryBody.unavailability.id, firstBody.unavailability.id);
+  assert.equal(db.calls.filter(x => x.sql.includes("INSERT INTO provider_unavailability")).length, 1);
   const changed = await handleProviderUnavailabilityRoute(req("POST", BASE, { ...body, reason: "Autre" }, { "Idempotency-Key": key }), { DB: db.db }, BASE, auth());
   assert.equal(changed.status, 409);
   assert.equal((await changed.json()).error, "IDEMPOTENCY_KEY_REUSED");
