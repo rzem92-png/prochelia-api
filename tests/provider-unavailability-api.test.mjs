@@ -173,4 +173,8 @@ test("read-only role cannot create or cancel and unknown methods are rejected", 
   assert.equal(cancel.status, 403);
   const put = await handleProviderUnavailabilityRoute(req("PUT"), { DB: db.db }, BASE, auth());
   assert.equal(put.status, 405);
+  const nestedGet = await handleProviderUnavailabilityRoute(req("GET", BASE + "/unexpected"), { DB: db.db }, BASE + "/unexpected", auth());
+  assert.equal(nestedGet.status, 404);
+  const nestedPost = await handleProviderUnavailabilityRoute(req("POST", BASE + "/unexpected", {}), { DB: db.db }, BASE + "/unexpected", auth());
+  assert.equal(nestedPost.status, 404);
 });
