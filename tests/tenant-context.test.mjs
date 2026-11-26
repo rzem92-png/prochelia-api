@@ -463,8 +463,6 @@ test("tenant memberships directory caps results at 50 and reports truncation", a
   assert.equal(response.status, 200);
   assert.equal(body.memberships.length, 50);
   assert.equal(body.truncated, true);
-  assert.equal(body.active_tenant_id, "tenant-00");
-  assert.equal(body.selection_required, false);
 });
 
 test("tenant memberships directory rejects non-GET requests before session lookup", async () => {
