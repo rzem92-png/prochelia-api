@@ -3725,35 +3725,6 @@ async function intervenantAssignmentsRoute(request, env) {
   }
 }
 
-export async function cancelIntervenantAvailabilitySlot(env, profileId, tenantId, availabilityId) {
-  if (!/^[A-Za-z0-9._:-]{8,180}$/.test(String(availabilityId || ''))) {
-    return json({ ok: false, error: 'AVAILABILITY_ID_REQUIRED' }, 400);
-  }
-  try {
-    const existing = await env.DB.prepare(
-      `SELECT id, start_at, end_at, status FROM disponibilites
-        WHERE id = ? AND intervenant_id = ? AND tenant_id = ? LIMIT 1`
-    ).bind(availabilityId, profileId, tenantId).first();
-    if (!existing) return json({ ok: false, error: 'AVAILABILITY_NOT_FOUND' }, 404);
-    if (existing.status === 'cancelled') {
-      return json({ ok: true, idempotent_replay: true, availability: { id: existing.id, status: 'cancelled' } });
-    }
-    if (existing.status !== 'available' || !Number.isFinite(Date.parse(existing.start_at)) || Date.parse(existing.start_at) <= Date.now()) {
-      return json({ ok: false, error: 'AVAILABILITY_NOT_CANCELLABLE' }, 409);
-    }
-    const changed = await env.DB.prepare(
-      `UPDATE disponibilites SET status = 'cancelled'
-        WHERE id = ? AND intervenant_id = ? AND tenant_id = ? AND status = 'available'
-          AND julianday(start_at) > julianday(?)`
-    ).bind(availabilityId, profileId, tenantId, new Date().toISOString()).run();
-    if (Number(changed?.meta?.changes || 0) !== 1) {
-      return json({ ok: false, error: 'AVAILABILITY_NOT_CANCELLABLE' }, 409);
-    }
-    return json({ ok: true, availability: { id: existing.id, status: 'cancelled' } });
-  } catch {
-    return json({ ok: false, error: 'AVAILABILITY_CANCEL_REJECTED' }, 503);
-  }
-}
 
 async function intervenantAvailabilityRoute(request, env, url) {
   if (url.pathname !== '/api/intervenant/availability') return null;
@@ -3876,6 +3847,36 @@ async function intervenantAvailabilityRoute(request, env, url) {
       return json({ ok: false, error: 'AVAILABILITY_OVERLAP' }, 409);
     }
     return json({ ok: false, error: 'AVAILABILITY_WRITE_REJECTED' }, 409);
+  }
+}
+
+export async function cancelIntervenantAvailabilitySlot(env, profileId, tenantId, availabilityId) {
+  if (!/^[A-Za-z0-9._:-]{8,180}$/.test(String(availabilityId || ''))) {
+    return json({ ok: false, error: 'AVAILABILITY_ID_REQUIRED' }, 400);
+  }
+  try {
+    const existing = await env.DB.prepare(
+      `SELECT id, start_at, end_at, status FROM disponibilites
+        WHERE id = ? AND intervenant_id = ? AND tenant_id = ? LIMIT 1`
+    ).bind(availabilityId, profileId, tenantId).first();
+    if (!existing) return json({ ok: false, error: 'AVAILABILITY_NOT_FOUND' }, 404);
+    if (existing.status === 'cancelled') {
+      return json({ ok: true, idempotent_replay: true, availability: { id: existing.id, status: 'cancelled' } });
+    }
+    if (existing.status !== 'available' || !Number.isFinite(Date.parse(existing.start_at)) || Date.parse(existing.start_at) <= Date.now()) {
+      return json({ ok: false, error: 'AVAILABILITY_NOT_CANCELLABLE' }, 409);
+    }
+    const changed = await env.DB.prepare(
+      `UPDATE disponibilites SET status = 'cancelled'
+        WHERE id = ? AND intervenant_id = ? AND tenant_id = ? AND status = 'available'
+          AND julianday(start_at) > julianday(?)`
+    ).bind(availabilityId, profileId, tenantId, new Date().toISOString()).run();
+    if (Number(changed?.meta?.changes || 0) !== 1) {
+      return json({ ok: false, error: 'AVAILABILITY_NOT_CANCELLABLE' }, 409);
+    }
+    return json({ ok: true, availability: { id: existing.id, status: 'cancelled' } });
+  } catch {
+    return json({ ok: false, error: 'AVAILABILITY_CANCEL_REJECTED' }, 503);
   }
 }
 
