@@ -1,0 +1,8 @@
+name = "feat-country-readiness-matrix-preview-2026-11-26-prochelia-api"
+main = "src/country-readiness-matrix-preview-worker.js"
+compatibility_date = "2026-11-25"
+workers_dev = true
+preview_urls = false
+
+[observability]
+enabled = false
