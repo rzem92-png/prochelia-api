@@ -133,7 +133,9 @@ test("availability writes reject invalid time windows and overlapping slots", ()
 });
 
 test("availability API is registered in the canonical Worker and fails closed on unsupported methods", () => {
-  assert.ok(availabilityHandler.includes("!['GET', 'POST'].includes(request.method)"));
+  assert.ok(availabilityHandler.includes("!['GET', 'POST', 'DELETE'].includes(request.method)"));
+  assert.ok(availabilityHandler.includes("cancelIntervenantAvailabilitySlot(env, profile.id, tenantId"));
+  assert.ok(source.includes("export async function cancelIntervenantAvailabilitySlot"));
   assert.ok(source.includes("url.pathname === '/api/intervenant/availability'"));
   assert.ok(source.includes("intervenantAvailabilityRoute(request, env, url)"));
 });
