@@ -71,7 +71,7 @@ assert {"idx_tenant_memberships_user_status", "idx_tenant_memberships_tenant_rol
 invite_indexes = {row[1] for row in db.execute("PRAGMA index_list(tenant_invitations)")}
 assert {"idx_tenant_invitations_tenant_status_expiry", "idx_tenant_invitation_pending_email"} <= invite_indexes
 
-db.execute("INSERT INTO users (id, email, password_hash, role, status) VALUES ('tenant-test-user', 'tenant-test@example.test', 'hash', 'client', 'active')")
+db.execute("INSERT INTO users (id, role, email, first_name, last_name, password_hash, status) VALUES ('tenant-test-user', 'client', 'tenant-test@example.test', 'Tenant', 'Test', 'hash', 'active')")
 db.execute("INSERT INTO tenants (id, slug, display_name) VALUES ('tenant-a', 'tenant-a', 'Tenant A')")
 db.execute("INSERT INTO tenant_memberships (id, tenant_id, user_id, role, status) VALUES ('membership-a', 'tenant-a', 'tenant-test-user', 'CLIENT', 'ACTIVE')")
 try:
