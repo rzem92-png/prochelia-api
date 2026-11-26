@@ -132,7 +132,7 @@ test("provider self-service derives own profile; tenant and creator are server-b
   const insert = db.calls.find(x => x.sql.includes("INSERT INTO provider_unavailability"));
   assert.equal(insert.params[1], "tenant-a");
   assert.equal(insert.params[7], "user-1");
-  assert.equal(insert.params[8], null);
+  assert.equal(insert.params[8], "a6d5e6f7-1234-4234-8234-123456789012");
   assert.equal(insert.params[6], "Congé");
   assert.equal(data.unavailability.status, "ACTIVE");
 
