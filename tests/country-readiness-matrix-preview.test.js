@@ -44,7 +44,7 @@ test("matrix supports gate filters, deterministic sorting and bounded pagination
 
 test("invalid query parameters fail closed with specific errors", () => {
   for (const [query,error] of [
-    ["marketStatus=enabled","INVALID_MARKET_STATUS"],
+    ["marketStatus=closed","INVALID_MARKET_STATUS"],
     ["gate=unknown","INVALID_LAUNCH_GATE"],
     ["gateStatus=done","INVALID_GATE_STATUS"],
     ["sort=unsafe","INVALID_SORT"],
