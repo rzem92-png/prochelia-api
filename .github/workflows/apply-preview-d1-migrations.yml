@@ -85,6 +85,9 @@ jobs:
             "0020_auth_login_rate_limits.sql",
             "0021_supra_audit_events.sql",
             "0022_supra_persisted_approvals.sql",
+            "0023_tenant_isolation_foundation.sql",
+            "0024_provider_unavailability.sql",
+            "0025_provider_unavailability_idempotency.sql",
           ]
           actual = sorted(p.name for p in Path("migrations-preview-canonical").glob("*.sql"))
           assert actual == sorted(expected), (
@@ -273,12 +276,12 @@ jobs:
           registry_present=any(row["type"]=="table" and row["name"]=="d1_migrations" for row in objects)
           remote=set(row["name"] for row in registry)
           local=set(p.name for p in pathlib.Path("migrations-preview-canonical").glob("*.sql"))
-          if len(local) != 23:
-              print(f"::error::Expected exactly 23 canonical migrations; found {len(local)}.")
+          if len(local) != 26:
+              print(f"::error::Expected exactly 26 canonical migrations; found {len(local)}.")
               raise SystemExit(1)
           non_internal=[row for row in objects if row["name"] not in {"_cf_KV","d1_migrations"} and not row["name"].startswith("sqlite_")]
           if not remote and not non_internal:
-              print("PASS: new EU Preview D1 has no application schema or applied migrations; all 23 canonical migrations are pending.")
+              print("PASS: new EU Preview D1 has no application schema or applied migrations; all 26 canonical migrations are pending.")
           elif registry_present and remote == local:
               print("PASS: exact 23-entry canonical migration registry is already applied; rerun is idempotent.")
           else:
