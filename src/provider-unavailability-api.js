@@ -9,9 +9,12 @@ function validId(value) {
 }
 
 function validUtc(value) {
-  return typeof value === "string" &&
-    /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?Z$/.test(value) &&
-    Number.isFinite(Date.parse(value));
+  if (typeof value !== "string" ||
+      !/^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}(?::\\d{2}(?:\\.\\d{1,3})?)?Z$/.test(value)) return false;
+  const milliseconds = Date.parse(value);
+  if (!Number.isFinite(milliseconds)) return false;
+  // Date.parse normalizes impossible calendar dates (e.g. Feb 30); reject those.
+  return new Date(milliseconds).toISOString().slice(0, 10) === value.slice(0, 10);
 }
 
 function validTimeZone(value) {
