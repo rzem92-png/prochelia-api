@@ -97,8 +97,38 @@ test("preview Worker returns the live configured 14-country matrix without persi
 test("Preview Worker route is GET-only and unknown routes remain 404", async () => {
   const post = await worker.fetch(request("/api/global/countries/readiness-matrix", "POST"));
   assert.equal(post.status, 405);
-  assert.equal(post.headers.get("allow"), "GET");
+  assert.equal(post.headers.get("allow"), "GET, OPTIONS");
   const missing = await worker.fetch(request("/api/unknown"));
   assert.equal(missing.status, 404);
   assert.equal(missing.headers.get("cache-control"), "no-store");
+});
+
+test("matrix Preview Worker allows only PROCHÉLIA Pages HTTPS origins and exposes no credentials", async () => {
+  const origin = "https://fix-wrangler-preview-config.prochelia.pages.dev";
+  const response = await worker.fetch(new Request("https://preview-matrix.example/api/global/countries/readiness-matrix", {
+    headers: { Origin: origin }
+  }));
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get("access-control-allow-origin"), origin);
+  assert.equal(response.headers.get("vary"), "Origin");
+  assert.equal(response.headers.get("access-control-allow-credentials"), null);
+
+  const denied = await worker.fetch(new Request("https://preview-matrix.example/api/global/countries/readiness-matrix", {
+    headers: { Origin: "https://evil.example" }
+  }));
+  assert.equal(denied.status, 200);
+  assert.equal(denied.headers.get("access-control-allow-origin"), null);
+});
+
+test("matrix Preview Worker handles CORS preflight without enabling writes", async () => {
+  const origin = "https://prochelia.pages.dev";
+  const response = await worker.fetch(new Request("https://preview-matrix.example/api/global/countries/readiness-matrix", {
+    method: "OPTIONS",
+    headers: { Origin: origin, "Access-Control-Request-Method": "GET", "Access-Control-Request-Headers": "accept" }
+  }));
+  assert.equal(response.status, 204);
+  assert.equal(response.headers.get("access-control-allow-origin"), origin);
+  assert.equal(response.headers.get("access-control-allow-methods"), "GET, OPTIONS");
+  assert.equal(response.headers.get("access-control-allow-headers"), "Accept");
+  assert.equal(response.headers.get("allow"), "GET, OPTIONS");
 });
