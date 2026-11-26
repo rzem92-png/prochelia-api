@@ -1,7 +1,7 @@
 import { evaluateSupraActionPolicy } from "./supra-action-policy.mjs";
 import { handleV7Route } from "./v7-routes.js";
 import { handleSupraRoute } from "./supra-api.js";
-import { resolveTenantContext, tenantRoleAllowed } from "./tenant-context.js";
+import { resolveTenantContext, tenantRoleAllowed, listTenantMemberships } from "./tenant-context.js";
 import { handleSupraApprovalRoute } from "./supra-approvals.js";
 import { handleDeviceTrustRoute } from "./device-trust.js";
 import { handleAccountingRoute } from "./accounting-api.js";
@@ -397,6 +397,33 @@ export async function logout(request, env) {
   }
   return json({ ok: true, version: VERSION, authenticated: false }, 200, {
     'set-cookie': sessionCookie('', 0)
+  });
+}
+
+
+export async function tenantMembershipsRoute(request, env) {
+  if (request.method !== "GET") {
+    return json({ ok: false, error: "METHOD_NOT_ALLOWED", version: VERSION }, 405, { allow: "GET" });
+  }
+  if (!env?.DB) return json({ ok: false, error: "TENANT_CONTEXT_UNAVAILABLE", version: VERSION }, 503);
+  let auth;
+  try {
+    auth = await getSessionUser(request, env);
+  } catch {
+    // Distinguish an authentication lookup outage from an invalid session.
+    // Do not convert a database failure into a misleading 401 response.
+    return json({ ok: false, error: "TENANT_CONTEXT_UNAVAILABLE", version: VERSION }, 503);
+  }
+  if (!auth?.user) return json({ ok: false, error: "UNAUTHENTICATED", version: VERSION }, 401);
+  const result = await listTenantMemberships(env, auth);
+  if (!result.ok) return json({ ok: false, error: result.error, version: VERSION }, result.status);
+  return json({
+    ok: true,
+    version: VERSION,
+    memberships: result.memberships,
+    active_tenant_id: result.active_tenant_id,
+    selection_required: result.selection_required,
+    truncated: result.truncated
   });
 }
 
@@ -1445,6 +1472,10 @@ async function handleBase(request, env) {
     return bootstrap(request, env);
   }
 
+  if (url.pathname === '/api/tenant/memberships') {
+    return tenantMembershipsRoute(request, env);
+  }
+
   if (url.pathname === '/api/tenant/context') {
     return tenantContextRoute(request, env);
   }
@@ -1511,7 +1542,7 @@ async function handleBase(request, env) {
         '/api/health','/api/prestations','/api/core/schema',
         '/api/missions/schema','/api/missions/validate','/api/missions',
         '/api/auth/status','/api/auth/login','/api/auth/logout','/api/auth/me',
-        '/api/auth/bootstrap','/api/tenant/context','/api/tenant/select','/api/security/device/enroll/challenge','/api/security/device/enroll/complete','/api/security/device/prove/challenge','/api/security/device/prove/complete','/api/security/device/list','/api/security/device/revoke','/api/security/identity/start','/api/security/identity/approve','/api/security/mission/prepare','/api/security/presence','/api/security/code/verify','/api/security/resend','/api/security/client-code','/api/security/status','/api/payments/onboard','/api/payments/status','/api/payments/mission/create','/api/payments/mission/finalize','/api/payments/payout','/api/payments/webhook','/api/payments/dispute','/api/payments/dispute/resolve','/api/readiness','/api/info'
+        '/api/auth/bootstrap','/api/tenant/context','/api/tenant/memberships','/api/tenant/select','/api/security/device/enroll/challenge','/api/security/device/enroll/complete','/api/security/device/prove/challenge','/api/security/device/prove/complete','/api/security/device/list','/api/security/device/revoke','/api/security/identity/start','/api/security/identity/approve','/api/security/mission/prepare','/api/security/presence','/api/security/code/verify','/api/security/resend','/api/security/client-code','/api/security/status','/api/payments/onboard','/api/payments/status','/api/payments/mission/create','/api/payments/mission/finalize','/api/payments/payout','/api/payments/webhook','/api/payments/dispute','/api/payments/dispute/resolve','/api/readiness','/api/info'
       ],
       writes: { missions: false, bootstrap: true, tenant_selection: true },
       status: 'AUTH_RBAC_IDENTITY_PRESENCE_SECURITY_HARDENED_FOR_TEST'

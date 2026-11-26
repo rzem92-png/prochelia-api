@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { webcrypto } from "node:crypto";
-import { tenantContextRoute, selectTenantForSession, requireTenantAuthRole } from "../src/index.js";
+import { createHash, webcrypto } from "node:crypto";
+import { tenantContextRoute, tenantMembershipsRoute, selectTenantForSession, requireTenantAuthRole } from "../src/index.js";
 globalThis.crypto ??= webcrypto;
 
 function makeEnv({ authenticated = true, membership = true, activeTenant = "tenant-a" } = {}) {
@@ -269,4 +269,209 @@ test("tenant selection enforces the byte limit even when Content-Length is absen
   assert.equal(response.status, 413);
   assert.equal((await response.json()).error, "BODY_TOO_LARGE");
   assert.equal(mock.statements.length, 1, "streaming size enforcement must happen before tenant update");
+});
+
+
+test("tenant memberships directory returns only active memberships from the authenticated session", async () => {
+  const statements = [];
+  const DB = { prepare(sql) {
+    statements.push(sql);
+    return { bind(...args) {
+      if (sql.includes("JOIN users u")) return { async first() {
+        assert.deepEqual(args, [createHash("sha256").update("synthetic-session-token").digest("base64url")]);
+        return { id: "user-verified-by-session", role: "client", status: "active",
+          session_id: "session-a", session_active_tenant_id: null };
+      }};
+      assert.deepEqual(args, ["session-a", "user-verified-by-session"]);
+      return { async all() { return { success: true, results: [
+        { tenant_id: "tenant-a", tenant_slug: "a", tenant_name: "Alpha",
+          membership_id: "membership-a", membership_role: "OWNER", active_tenant_id: null },
+        { tenant_id: "tenant-b", tenant_slug: "b", tenant_name: "Beta",
+          membership_id: "membership-b", membership_role: "MEMBER", active_tenant_id: null }
+      ]}; }};
+    }};
+  }};
+  const req = new Request("https://api.example.test/api/tenant/memberships", {
+    headers: { cookie: "prochelia_session=synthetic-session-token", "x-prochelia-tenant-id": "forged" }
+  });
+  const response = await tenantMembershipsRoute(req, { DB });
+  assert.equal(response.status, 200);
+  const body = await response.json();
+  assert.deepEqual(body.memberships.map(item => [item.id, item.role]), [["tenant-a","OWNER"],["tenant-b","MEMBER"]]);
+  assert.equal(body.active_tenant_id, null);
+  assert.equal(body.selection_required, true);
+  assert.equal(body.truncated, false);
+  assert.match(statements[1], /s\.user_id = \?/);
+  assert.match(statements[1], /s\.expires_at > CURRENT_TIMESTAMP/);
+  assert.match(statements[1], /s\.revoked_at IS NULL/);
+  assert.match(statements[1], /m\.status = 'ACTIVE'/);
+  assert.match(statements[1], /t\.status = 'ACTIVE'/);
+  assert.match(statements[1], /LIMIT 51/);
+});
+
+test("tenant memberships directory reports the selected active membership", async () => {
+  const DB = { prepare(sql) {
+    return { bind(...args) {
+      if (sql.includes("JOIN users u")) return { async first() {
+        return { id: "user-verified-by-session", role: "client", status: "active",
+          session_id: "session-a", session_active_tenant_id: null };
+      }};
+      assert.deepEqual(args, ["session-a", "user-verified-by-session"]);
+      return { async all() { return { success: true, results: [
+        { tenant_id: "tenant-a", tenant_slug: "a", tenant_name: "Alpha",
+          membership_id: "membership-a", membership_role: "OWNER", active_tenant_id: "tenant-b" },
+        { tenant_id: "tenant-b", tenant_slug: "b", tenant_name: "Beta",
+          membership_id: "membership-b", membership_role: "MEMBER", active_tenant_id: "tenant-b" }
+      ]}; }};
+    }};
+  }};
+  const response = await tenantMembershipsRoute(new Request("https://api.example.test/api/tenant/memberships", {
+    headers: { cookie: "prochelia_session=synthetic-session-token" }
+  }), { DB });
+  const body = await response.json();
+  assert.equal(response.status, 200);
+  assert.equal(body.active_tenant_id, "tenant-b");
+  assert.equal(body.selection_required, false);
+  assert.equal(body.memberships.find(item => item.id === "tenant-b").name, "Beta");
+});
+
+test("tenant memberships directory fails closed on incomplete D1 result", async () => {
+  const DB = { prepare(sql) {
+    return { bind() {
+      if (sql.includes("JOIN users u")) return { async first() {
+        return { id: "user-verified-by-session", role: "client", status: "active",
+          session_id: "session-a", session_active_tenant_id: null };
+      }};
+      return { async all() { return { success: false, results: [
+        { tenant_id: "tenant-attacker", tenant_slug: "attacker", tenant_name: "Untrusted",
+          membership_id: "m", membership_role: "OWNER" }
+      ]}; }};
+    }};
+  }};
+  const response = await tenantMembershipsRoute(new Request("https://api.example.test/api/tenant/memberships", {
+    headers: { cookie: "prochelia_session=synthetic-session-token" }
+  }), { DB });
+  assert.equal(response.status, 503);
+  assert.equal((await response.json()).error, "TENANT_CONTEXT_UNAVAILABLE");
+});
+
+test("tenant memberships directory rejects unauthenticated and non-GET requests before membership query", async () => {
+  let calls = 0;
+  const DB = { prepare(sql) {
+    calls++;
+    return { bind() { return { async first() { return null; } }; }};
+  }};
+  const unauth = await tenantMembershipsRoute(new Request("https://api.example.test/api/tenant/memberships"), { DB });
+  assert.equal(unauth.status, 401);
+  assert.equal(calls, 0);
+  calls = 0;
+  const method = await tenantMembershipsRoute(new Request("https://api.example.test/api/tenant/memberships", { method: "POST" }), { DB });
+  assert.equal(method.status, 405);
+  assert.equal(calls, 0);
+  const noDatabase = await tenantMembershipsRoute(new Request("https://api.example.test/api/tenant/memberships"), {});
+  assert.equal(noDatabase.status, 503);
+  assert.equal((await noDatabase.json()).error, "TENANT_CONTEXT_UNAVAILABLE");
+});
+
+test("tenant memberships directory returns 503 when session lookup fails", async () => {
+  const DB = { prepare() {
+    return { bind() { return { async first() { throw new Error("D1 temporarily unavailable"); } }; } };
+  }};
+  const response = await tenantMembershipsRoute(new Request("https://api.example.test/api/tenant/memberships", {
+    headers: { cookie: "prochelia_session=synthetic-session-token" }
+  }), { DB });
+  assert.equal(response.status, 503);
+  assert.equal((await response.json()).error, "TENANT_CONTEXT_UNAVAILABLE");
+});
+
+test("tenant memberships directory caps results and prioritizes the selected workspace", async () => {
+  const rows = Array.from({length:51},(_,i)=>({
+    tenant_id:"tenant-"+i, tenant_slug:"slug-"+i, tenant_name:"Workspace "+i,
+    membership_id:"membership-"+i, membership_role:"MEMBER", active_tenant_id:"tenant-50"
+  }));
+  const DB = { prepare(sql) {
+    return { bind(...args) {
+      if (sql.includes("JOIN users u")) return { async first() {
+        return { id:"user-verified-by-session",role:"client",status:"active",
+          session_id:"session-a",session_active_tenant_id:"tenant-50" };
+      }};
+      assert.deepEqual(args,["session-a","user-verified-by-session"]);
+      assert.match(sql,/ORDER BY CASE WHEN t\.id = s\.active_tenant_id THEN 0 ELSE 1 END/);
+      return { async all() { return { success:true,results:[rows[50],...rows.slice(0,50)] }; }};
+    }};
+  }};
+  const response = await tenantMembershipsRoute(new Request("https://api.example.test/api/tenant/memberships", {
+    headers:{cookie:"prochelia_session=synthetic-session-token"}
+  }),{DB});
+  const body=await response.json();
+  assert.equal(response.status,200);
+  assert.equal(body.memberships.length,50);
+  assert.equal(body.truncated,true);
+  assert.equal(body.active_tenant_id,"tenant-50");
+  assert.equal(body.selection_required,false);
+  assert.equal(body.memberships[0].id,"tenant-50");
+});
+
+
+test("tenant memberships directory trusts the query snapshot when auth lookup is stale", async () => {
+  const DB = { prepare(sql) {
+    return { bind(...args) {
+      if (sql.includes("JOIN users u")) return { async first() {
+        return { id: "user-verified-by-session", role: "client", status: "active",
+          session_id: "session-a", session_active_tenant_id: null };
+      }};
+      assert.deepEqual(args, ["session-a", "user-verified-by-session"]);
+      return { async all() { return { success: true, results: [
+        { tenant_id: "tenant-b", tenant_slug: "b", tenant_name: "Beta",
+          membership_id: "membership-b", membership_role: "MEMBER", active_tenant_id: "tenant-b" },
+        { tenant_id: "tenant-a", tenant_slug: "a", tenant_name: "Alpha",
+          membership_id: "membership-a", membership_role: "OWNER", active_tenant_id: "tenant-b" }
+      ]}; }};
+    }};
+  }};
+  const response = await tenantMembershipsRoute(new Request("https://api.example.test/api/tenant/memberships", {
+    headers: { cookie: "prochelia_session=synthetic-session-token" }
+  }), { DB });
+  const body = await response.json();
+  assert.equal(response.status, 200);
+  assert.equal(body.active_tenant_id, "tenant-b");
+  assert.equal(body.selection_required, false);
+});
+
+test("tenant memberships directory caps results at 50 and reports truncation", async () => {
+  const rows = Array.from({ length: 51 }, (_, i) => ({
+    tenant_id: `tenant-${i.toString().padStart(2, "2")}`,
+    tenant_slug: `tenant-${i}`,
+    tenant_name: `Tenant ${i}`,
+    membership_id: `membership-${i}`,
+    membership_role: "MEMBER",
+    active_tenant_id: "tenant-00"
+  }));
+  const DB = { prepare(sql) {
+    return { bind() {
+      if (sql.includes("JOIN users u")) return { async first() {
+        return { id: "user-verified-by-session", role: "client", status: "active",
+          session_id: "session-a", session_active_tenant_id: "tenant-00" };
+      }};
+      return { async all() { return { success: true, results: rows }; }};
+    }};
+  }};
+  const response = await tenantMembershipsRoute(new Request("https://api.example.test/api/tenant/memberships", {
+    headers: { cookie: "prochelia_session=synthetic-session-token" }
+  }), { DB });
+  const body = await response.json();
+  assert.equal(response.status, 200);
+  assert.equal(body.memberships.length, 50);
+  assert.equal(body.truncated, true);
+});
+
+test("tenant memberships directory rejects non-GET requests before session lookup", async () => {
+  let called = false;
+  const DB = { prepare() { called = true; throw new Error("unexpected DB call"); } };
+  const response = await tenantMembershipsRoute(new Request("https://api.example.test/api/tenant/memberships", {
+    method: "POST"
+  }), { DB });
+  assert.equal(response.status, 405);
+  assert.equal(response.headers.get("allow"), "GET");
+  assert.equal(called, false);
 });
