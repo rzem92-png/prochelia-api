@@ -168,19 +168,39 @@ export async function handleProviderUnavailabilityRoute(request, env, path, auth
       }
       const suppliedKey = (request.headers.get("idempotency-key") || "").trim();
       if (suppliedKey && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(suppliedKey)) return response({ ok: false, error: "INVALID_IDEMPOTENCY_KEY" }, 400);
-      const id = suppliedKey || crypto.randomUUID();
+
+      const selectByKey = "SELECT id, tenant_id, intervenant_id, start_at, end_at, timezone_name, reason, status, created_at, updated_at, created_by_user_id, idempotency_key FROM provider_unavailability WHERE tenant_id = ? AND intervenant_id = ? AND idempotency_key = ? LIMIT 1";
+      const matchesRequest = existing => existing &&
+        existing.created_by_user_id === context.userId &&
+        existing.intervenant_id === providerId &&
+        existing.start_at === startAt &&
+        existing.end_at === endAt &&
+        existing.timezone_name === timeZone &&
+        (existing.reason || "") === reason;
+
+      if (suppliedKey) {
+        const existing = await env.DB.prepare(selectByKey).bind(context.tenantId, providerId, suppliedKey).first();
+        if (existing) {
+          if (matchesRequest(existing)) return response({ ok: true, idempotent: true, unavailability: rowDto(existing) }, 200);
+          return response({ ok: false, error: "IDEMPOTENCY_KEY_REUSED" }, 409);
+        }
+      }
+
+      const id = crypto.randomUUID();
       const insert = `INSERT INTO provider_unavailability
-        (id, tenant_id, intervenant_id, start_at, end_at, timezone_name, reason, status, created_by_user_id)
-        VALUES (?, ?, ?, ?, ?, ?, ?, 'ACTIVE', ?)
-        RETURNING id, tenant_id, intervenant_id, start_at, end_at, timezone_name, reason, status, created_at, updated_at, created_by_user_id`;
+        (id, tenant_id, intervenant_id, start_at, end_at, timezone_name, reason, status, created_by_user_id, idempotency_key)
+        VALUES (?, ?, ?, ?, ?, ?, ?, 'ACTIVE', ?, ?)
+        RETURNING id, tenant_id, intervenant_id, start_at, end_at, timezone_name, reason, status, created_at, updated_at, created_by_user_id, idempotency_key`;
       let created;
       try {
-        created = await env.DB.prepare(insert).bind(id, context.tenantId, providerId, startAt, endAt, timeZone, reason, context.userId).first();
+        created = await env.DB.prepare(insert).bind(id, context.tenantId, providerId, startAt, endAt, timeZone, reason, context.userId, suppliedKey || null).first();
       } catch (error) {
-        if (suppliedKey && (String(error?.message || error).includes("UNIQUE") || String(error?.message || error).includes("PROVIDER_UNAVAILABILITY_OVERLAP"))) {
-          const existing = await env.DB.prepare("SELECT id, tenant_id, intervenant_id, start_at, end_at, timezone_name, reason, status, created_at, updated_at, created_by_user_id FROM provider_unavailability WHERE id = ? AND tenant_id = ? LIMIT 1").bind(id, context.tenantId).first();
-          if (existing && existing.created_by_user_id === context.userId && existing.intervenant_id === providerId && existing.start_at === startAt && existing.end_at === endAt && existing.timezone_name === timeZone && existing.reason === reason) return response({ ok: true, idempotent: true, unavailability: rowDto(existing) }, 200);
-          if (existing) return response({ ok: false, error: "IDEMPOTENCY_KEY_REUSED" }, 409);
+        if (suppliedKey && String(error?.message || error).includes("UNIQUE")) {
+          const existing = await env.DB.prepare(selectByKey).bind(context.tenantId, providerId, suppliedKey).first();
+          if (existing) {
+            if (matchesRequest(existing)) return response({ ok: true, idempotent: true, unavailability: rowDto(existing) }, 200);
+            return response({ ok: false, error: "IDEMPOTENCY_KEY_REUSED" }, 409);
+          }
         }
         throw error;
       }
