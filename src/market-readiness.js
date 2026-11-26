@@ -68,7 +68,7 @@ export function handleMarketReadinessRoute(request){
   if(country&&payload.markets.length===0)return new Response(JSON.stringify({ok:false,error:"MARKET_NOT_FOUND",country:country.toUpperCase()}),{status:404,headers:{"content-type":"application/json; charset=utf-8","cache-control":"no-store"}});
   return new Response(JSON.stringify({ok:true,...payload}),{status:200,headers:{"content-type":"application/json; charset=utf-8","cache-control":"no-store","x-content-type-options":"nosniff"}});
  }
- const localizationMatch=url.pathname.match(/^\\/api\\/platform\\/markets\\/([a-z]{2})\\/localization$/i);
+ const localizationMatch=url.pathname.match(/^\/api\/platform\/markets\/([a-z]{2})\/localization$/i);
  if(!localizationMatch)return null;
  if(request.method!=="GET")return new Response(JSON.stringify({ok:false,error:"METHOD_NOT_ALLOWED"}),{status:405,headers:{"content-type":"application/json; charset=utf-8","allow":"GET","cache-control":"no-store"}});
  const localization=marketLocalizationPayload(localizationMatch[1]);
