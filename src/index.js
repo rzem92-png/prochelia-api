@@ -406,7 +406,14 @@ export async function tenantMembershipsRoute(request, env) {
     return json({ ok: false, error: "METHOD_NOT_ALLOWED", version: VERSION }, 405, { allow: "GET" });
   }
   if (!env?.DB) return json({ ok: false, error: "TENANT_CONTEXT_UNAVAILABLE", version: VERSION }, 503);
-  const auth = await getSessionUser(request, env).catch(() => null);
+  let auth;
+  try {
+    auth = await getSessionUser(request, env);
+  } catch {
+    // Distinguish an authentication lookup outage from an invalid session.
+    // Do not convert a database failure into a misleading 401 response.
+    return json({ ok: false, error: "TENANT_CONTEXT_UNAVAILABLE", version: VERSION }, 503);
+  }
   if (!auth?.user) return json({ ok: false, error: "UNAUTHENTICATED", version: VERSION }, 401);
   const result = await listTenantMemberships(env, auth);
   if (!result.ok) return json({ ok: false, error: result.error, version: VERSION }, result.status);
