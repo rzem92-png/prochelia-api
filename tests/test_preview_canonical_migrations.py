@@ -29,6 +29,7 @@ EXPECTED = [
     "0022_supra_persisted_approvals.sql",
     "0023_tenant_isolation_foundation.sql",
     "0024_provider_unavailability.sql",
+    "0025_provider_unavailability_idempotency.sql",
 ]
 
 actual = sorted(path.name for path in MIGRATIONS.glob("*.sql"))
@@ -98,11 +99,20 @@ print("PASS: tenant membership, invitation, role/status constraints and tenant i
 assert "provider_unavailability" in tables
 provider_indexes = {row[1] for row in db.execute("PRAGMA index_list(provider_unavailability)")}
 assert {"idx_provider_unavailability_tenant_provider_time", "idx_provider_unavailability_tenant_range"} <= provider_indexes
+provider_columns = {row[1] for row in db.execute("PRAGMA table_info(provider_unavailability)")}
+assert "idempotency_key" in provider_columns
+provider_idempotency_indexes = {row[1] for row in db.execute("PRAGMA index_list(provider_unavailability)")}
+assert "idx_provider_unavailability_idempotency" in provider_idempotency_indexes
 db.execute("INSERT INTO tenants (id, slug, display_name) VALUES ('tenant-b', 'tenant-b', 'Tenant B')")
 db.execute("INSERT INTO users (id, role, email, first_name, last_name, password_hash, status) VALUES ('tenant-test-user-b', 'provider', 'tenant-test-b@example.test', 'Tenant', 'Provider', 'hash', 'active')")
 db.execute("INSERT INTO intervenants (id, user_id, tenant_id) VALUES ('provider-a', 'tenant-test-user', 'tenant-a')")
 db.execute("INSERT INTO intervenants (id, user_id, tenant_id) VALUES ('provider-b', 'tenant-test-user-b', 'tenant-b')")
-db.execute("INSERT INTO provider_unavailability (id, tenant_id, intervenant_id, start_at, end_at, timezone_name, reason, created_by_user_id) VALUES ('block-a', 'tenant-a', 'provider-a', '2026-11-26T09:00:00Z', '2026-11-26T10:00:00Z', 'Europe/Paris', 'Test', 'tenant-test-user')")
+db.execute("INSERT INTO provider_unavailability (id, tenant_id, intervenant_id, start_at, end_at, timezone_name, reason, created_by_user_id) VALUES ('block-a', 'tenant-a', 'provider-a', '2026-11-26T09:00:00Z', '2026-11-26T10:00:00Z', 'Europe/Paris', 'Test', 'tenant-test-user', 'block-a-key-0001')")
+try:
+    db.execute("INSERT INTO provider_unavailability (id, tenant_id, intervenant_id, start_at, end_at, timezone_name, created_by_user_id, idempotency_key) VALUES ('block-duplicate-key', 'tenant-a', 'provider-a', '2026-11-26T12:00:00Z', '2026-11-26T13:00:00Z', 'Europe/Paris', 'tenant-test-user', 'block-a-key-0001')")
+    raise AssertionError("Duplicate provider idempotency key unexpectedly accepted")
+except sqlite3.IntegrityError:
+    pass
 try:
     db.execute("INSERT INTO provider_unavailability (id, tenant_id, intervenant_id, start_at, end_at, timezone_name, created_by_user_id) VALUES ('block-cross-tenant', 'tenant-b', 'provider-a', '2026-11-26T10:00:00Z', '2026-11-26T11:00:00Z', 'Europe/Paris', 'tenant-test-user')")
     raise AssertionError("Cross-tenant provider unavailability unexpectedly accepted")
