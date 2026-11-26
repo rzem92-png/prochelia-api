@@ -125,7 +125,7 @@ test("tenant admin can filter within tenant and cross-tenant provider IDs are no
 test("provider self-service derives own profile; tenant and creator are server-bound", async () => {
   const db = mockDB({ memberships: [membership()], providers: [provider()] });
   // Frontend self-service may omit providerId: the authenticated profile is derived.
-  const response = await handleProviderUnavailabilityRoute(req("POST", BASE, { startAt: "2026-11-26T09:00:00Z", endAt: "2026-11-26T10:00:00Z", timeZone: "Europe/Paris", reason: "Congé" }), { DB: db.db }, BASE, auth());
+  const response = await handleProviderUnavailabilityRoute(req("POST", BASE, { startAt: "2026-11-26T09:00:00Z", endAt: "2026-11-26T10:00:00Z", timeZone: "Europe/Paris", reason: "Congé" }, { "Idempotency-Key": "a6d5e6f7-1234-4234-8234-123456789012" }), { DB: db.db }, BASE, auth());
   assert.equal(response.status, 201);
   const data = await response.json();
   assert.equal(data.unavailability.providerId, "provider-1");
@@ -137,8 +137,19 @@ test("provider self-service derives own profile; tenant and creator are server-b
   assert.equal(data.unavailability.status, "ACTIVE");
 
   // Supplying another profile is rejected, never used as a selector.
-  const forbidden = await handleProviderUnavailabilityRoute(req("POST", BASE, { providerId: "provider-other", startAt: "2026-11-26T11:00:00Z", endAt: "2026-11-26T12:00:00Z", timeZone: "Europe/Paris" }), { DB: db.db }, BASE, auth());
+  const forbidden = await handleProviderUnavailabilityRoute(req("POST", BASE, { providerId: "provider-other", startAt: "2026-11-26T11:00:00Z", endAt: "2026-11-26T12:00:00Z", timeZone: "Europe/Paris" }, { "Idempotency-Key": "b6d5e6f7-1234-4234-8234-123456789012" }), { DB: db.db }, BASE, auth());
   assert.equal(forbidden.status, 403);
+});
+
+test("POST requires a UUID idempotency key", async () => {
+  const db = mockDB({ memberships: [membership()], providers: [provider()] });
+  const body = { startAt: "2027-01-01T09:00:00Z", endAt: "2027-01-01T10:00:00Z", timeZone: "Europe/Paris", reason: "" };
+  const missing = await handleProviderUnavailabilityRoute(req("POST", BASE, body), { DB: db.db }, BASE, auth());
+  assert.equal(missing.status, 400);
+  assert.equal((await missing.json()).error, "IDEMPOTENCY_KEY_REQUIRED");
+  const invalid = await handleProviderUnavailabilityRoute(req("POST", BASE, body, { "Idempotency-Key": "not-a-uuid" }), { DB: db.db }, BASE, auth());
+  assert.equal(invalid.status, 400);
+  assert.equal((await invalid.json()).error, "INVALID_IDEMPOTENCY_KEY");
 });
 
 test("Idempotency-Key retries return the same row and reject key reuse for different payload", async () => {
@@ -170,14 +181,14 @@ test("invalid UTC, reversed interval, invalid IANA timezone and overlong reason 
     { startAt: "2026-11-26T09:00:00Z", endAt: "2026-11-26T10:00:00Z", timeZone: "Europe/Paris", reason: "x".repeat(121) }
   ];
   for (const value of cases) {
-    const response = await handleProviderUnavailabilityRoute(req("POST", BASE, { providerId: "provider-1", ...value }), { DB: db.db }, BASE, auth());
+    const response = await handleProviderUnavailabilityRoute(req("POST", BASE, { providerId: "provider-1", ...value }, { "Idempotency-Key": "c6d5e6f7-1234-4234-8234-123456789012" }), { DB: db.db }, BASE, auth());
     assert.equal(response.status, 400);
   }
 });
 
 test("overlap database guard maps to conflict and not a generic failure", async () => {
   const db = mockDB({ memberships: [membership()], providers: [provider()], insertError: new Error("PROVIDER_UNAVAILABILITY_OVERLAP") });
-  const response = await handleProviderUnavailabilityRoute(req("POST", BASE, { providerId: "provider-1", startAt: "2026-11-26T09:00:00Z", endAt: "2026-11-26T10:00:00Z", timeZone: "Europe/Paris" }), { DB: db.db }, BASE, auth());
+  const response = await handleProviderUnavailabilityRoute(req("POST", BASE, { providerId: "provider-1", startAt: "2026-11-26T09:00:00Z", endAt: "2026-11-26T10:00:00Z", timeZone: "Europe/Paris" }, { "Idempotency-Key": "e6d5e6f7-1234-4234-8234-123456789012" }), { DB: db.db }, BASE, auth());
   assert.equal(response.status, 409);
   assert.equal((await response.json()).error, "UNAVAILABILITY_CONFLICT");
 });
