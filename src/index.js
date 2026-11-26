@@ -4504,11 +4504,33 @@ async function supportList(request,env){
 }
 
 // Tenant-scoped, privacy-minimized activity timeline. Never expose event details_json or actor IDs.
+export function encodeSupportCaseEventCursor(row){
+  const createdAt=typeof row?.created_at==='string'?row.created_at:'';
+  const id=typeof row?.id==='string'?row.id:'';
+  if(!createdAt||!Number.isFinite(Date.parse(createdAt))||!id||id.length>160) return null;
+  return base64url(new TextEncoder().encode(JSON.stringify({created_at:createdAt,id})));
+}
+
+export function decodeSupportCaseEventCursor(value){
+  if(typeof value!=='string'||!value||value.length>512||!/^[A-Za-z0-9_-]+$/.test(value)) return null;
+  try{
+    const decoded=JSON.parse(new TextDecoder().decode(fromBase64url(value)));
+    const createdAt=typeof decoded?.created_at==='string'?decoded.created_at:'';
+    const id=typeof decoded?.id==='string'?decoded.id:'';
+    if(!createdAt||!Number.isFinite(Date.parse(createdAt))||createdAt.length>40||!id||id.length>160) return null;
+    return {created_at:createdAt,id};
+  }catch{return null;}
+}
+
+// Tenant-scoped, privacy-minimized activity timeline. Never expose event details_json or actor IDs.
 export function normalizeSupportCaseEventRows(rows){
   const source=Array.isArray(rows)?rows:[];
-  const hasMore=source.length>100;
+  const rawHasMore=source.length>100;
+  const pageRows=source.slice(0,100);
+  const nextCursor=rawHasMore?encodeSupportCaseEventCursor(pageRows.at(-1)):null;
+  const hasMore=rawHasMore&&Boolean(nextCursor);
   const allowedRoles=new Set(['CLIENT','SOCIETE','INTERVENANT','GERANTE','ADMIN','OWNER','MANAGER']);
-  const events=source.slice(0,100).map(row=>{
+  const events=pageRows.map(row=>{
     const type=String(row?.event_type||'EVENT').toUpperCase().replace(/[^A-Z0-9_]/g,'').slice(0,60)||'EVENT';
     const rawRole=String(row?.actor_role||'').toUpperCase().slice(0,30);
     const actorRole=allowedRoles.has(rawRole)?rawRole:'TEAM';
@@ -4516,16 +4538,19 @@ export function normalizeSupportCaseEventRows(rows){
     const createdAt=rawDate&&Number.isFinite(Date.parse(rawDate))?rawDate:null;
     return {type,actor_role:actorRole,created_at:createdAt};
   }).reverse();
-  return {events,has_more:hasMore};
+  return {events,has_more:hasMore,next_cursor:hasMore?nextCursor:null};
 }
 
 export async function supportCaseEventsRoute(request,env){
   if(request.method!=='GET') return json({ok:false,error:'METHOD_NOT_ALLOWED',version:VERSION},405,{allow:'GET'});
   const a=await supportAuth(request,env); if(a.response)return a.response;
-  const schemaGate=schemaColumnsReadinessResponse(env,{support_cases:['tenant_id','requester_id'],support_case_events:['case_id','event_type','actor_role','created_at']},'SUPPORT_SCHEMA_NOT_READY'); if(schemaGate)return schemaGate;
+  const schemaGate=schemaColumnsReadinessResponse(env,{support_cases:['tenant_id','requester_id'],support_case_events:['case_id','event_type','actor_role','created_at','id']},'SUPPORT_SCHEMA_NOT_READY'); if(schemaGate)return schemaGate;
   const path=new URL(request.url).pathname;
   const match=path.match(/^\/api\/support\/cases\/([A-Za-z0-9._:-]{1,160})\/events$/);
   if(!match) return json({ok:false,error:'CASE_ID_INVALID',version:VERSION},400);
+  const cursorValue=new URL(request.url).searchParams.get('cursor')||'';
+  const cursor=cursorValue?decodeSupportCaseEventCursor(cursorValue):null;
+  if(cursorValue&&!cursor) return json({ok:false,error:'CURSOR_INVALID',version:VERSION},400);
   const caseId=match[1];
   const isManager=a.role==='GERANTE'||tenantRoleAllowed(a.tenantContext,['OWNER','ADMIN','MANAGER']);
   let caseRow;
@@ -4536,16 +4561,21 @@ export async function supportCaseEventsRoute(request,env){
   }catch{return json({ok:false,error:'SUPPORT_DATA_UNAVAILABLE',version:VERSION},503);}
   if(!caseRow) return json({ok:false,error:'CASE_NOT_FOUND',version:VERSION},404);
   try{
-    const base=`SELECT e.event_type,e.actor_role,e.created_at
+    const base=`SELECT e.id,e.event_type,e.actor_role,e.created_at
       FROM support_case_events e
       JOIN support_cases c ON c.id=e.case_id
      WHERE e.case_id=? AND c.tenant_id=?`;
+    const pageClause=cursor?' AND (e.created_at < ? OR (e.created_at = ? AND e.id < ?))':'';
+    const managerQuery=base+pageClause+' ORDER BY e.created_at DESC,e.id DESC LIMIT 101';
+    const requesterQuery=base+' AND c.requester_id=?'+pageClause+' ORDER BY e.created_at DESC,e.id DESC LIMIT 101';
+    const managerBindings=cursor?[caseId,a.tenantId,cursor.created_at,cursor.created_at,cursor.id]:[caseId,a.tenantId];
+    const requesterBindings=cursor?[caseId,a.tenantId,a.auth.user.id,cursor.created_at,cursor.created_at,cursor.id]:[caseId,a.tenantId,a.auth.user.id];
     const result=isManager
-      ? await env.DB.prepare(base+' ORDER BY e.created_at DESC,e.id DESC LIMIT 101').bind(caseId,a.tenantId).all()
-      : await env.DB.prepare(base+' AND c.requester_id=? ORDER BY e.created_at DESC,e.id DESC LIMIT 101').bind(caseId,a.tenantId,a.auth.user.id).all();
+      ? await env.DB.prepare(managerQuery).bind(...managerBindings).all()
+      : await env.DB.prepare(requesterQuery).bind(...requesterBindings).all();
     if(result?.success!==true||!Array.isArray(result.results)) return json({ok:false,error:'SUPPORT_DATA_UNAVAILABLE',version:VERSION},503);
     const normalized=normalizeSupportCaseEventRows(result.results);
-    return json({ok:true,version:VERSION,case_id:caseId,events:normalized.events,has_more:normalized.has_more});
+    return json({ok:true,version:VERSION,case_id:caseId,events:normalized.events,has_more:normalized.has_more,next_cursor:normalized.next_cursor});
   }catch{return json({ok:false,error:'SUPPORT_DATA_UNAVAILABLE',version:VERSION},503);}
 }
 
