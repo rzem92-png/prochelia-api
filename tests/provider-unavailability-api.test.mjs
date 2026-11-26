@@ -176,6 +176,8 @@ test("invalid UTC, reversed interval, invalid IANA timezone and overlong reason 
   const db = mockDB({ memberships: [membership()], providers: [provider()] });
   const cases = [
     { startAt: "2026-11-26T09:00:00", endAt: "2026-11-26T10:00:00Z", timeZone: "Europe/Paris" },
+    { startAt: "2026-02-30T09:00:00Z", endAt: "2026-03-02T10:00:00Z", timeZone: "Europe/Paris" },
+    { startAt: "2026-11-26T09:00:00Z", endAt: "2026-11-26T09:00:00Z", timeZone: "Europe/Paris" },
     { startAt: "2026-11-26T10:00:00Z", endAt: "2026-11-26T09:00:00Z", timeZone: "Europe/Paris" },
     { startAt: "2026-11-26T09:00:00Z", endAt: "2026-11-26T10:00:00Z", timeZone: "Not/AZone" },
     { startAt: "2026-11-26T09:00:00Z", endAt: "2026-11-26T10:00:00Z", timeZone: "Europe/Paris", reason: "x".repeat(121) }
