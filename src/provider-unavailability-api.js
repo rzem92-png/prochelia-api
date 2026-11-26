@@ -19,7 +19,13 @@ function parseUtc(value) {
   if (typeof value !== "string" || !UTC_ISO.test(value)) return null;
   const time = Date.parse(value);
   if (!Number.isFinite(time)) return null;
-  return new Date(time).toISOString();
+  const normalized = new Date(time).toISOString();
+  // Reject Date.parse normalization (e.g. February 30 -> March 2) rather
+  // than silently accepting an impossible calendar date.
+  if (normalized.slice(0, 10) !== value.slice(0, 10)) return null;
+  const timePart = value.slice(11, 19);
+  if (normalized.slice(11, 19) !== timePart) return null;
+  return normalized;
 }
 
 function validTimeZone(value) {
