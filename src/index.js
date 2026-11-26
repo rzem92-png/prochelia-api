@@ -1,4 +1,5 @@
 import { handleV7Route } from "./v7-routes.js";
+import { handleProviderUnavailabilityRoute } from "./provider-unavailability-api.js";
 // PROCHÉLIA — INDEX BACKEND CONSOLIDÉ UNIQUE
 // Référence de consolidation : V14.1 Finance + sécurité/RBAC existants.
 // Généré le 19/10/2026. À déployer uniquement après recette avec la vraie base D1.
@@ -3166,6 +3167,17 @@ async function handle(request,env){
     if(url.pathname==='/api/copilot/next-actions' && request.method==='GET') return copilotNextActions(request,env);
     if(url.pathname==='/api/jobs/process' && request.method==='POST') return processBackgroundJobs(request,env);
     if(url.pathname==='/api/system/production-check' && request.method==='GET') return finalProductionAudit(request,env);
+    if (url.pathname === '/api/intervenant/unavailability') {
+      let providerAuth;
+      try {
+        providerAuth = await getSessionUser(request, env);
+      } catch {
+        return json({ ok: false, error: 'AUTHENTICATION_SCHEMA_UNAVAILABLE', version: VERSION }, 503);
+      }
+      if (!providerAuth?.user) return json({ ok: false, error: 'UNAUTHENTICATED', version: VERSION }, 401);
+      const unavailabilityResponse = await handleProviderUnavailabilityRoute(request, env, providerAuth);
+      if (unavailabilityResponse) return unavailabilityResponse;
+    }
     const response=await handleV139(request,env);
     const headers=new Headers(response.headers);
     headers.set('x-content-type-options','nosniff');
