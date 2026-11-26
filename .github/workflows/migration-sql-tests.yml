@@ -13,6 +13,10 @@ on:
       - ".github/workflows/apply-preview-d1-migrations.yml"
       - ".github/workflows/backup-preview-d1-to-r2-eu.yml"
       - ".github/workflows/provision-preview-r2-eu.yml"
+      - ".github/workflows/restore-preview-r2-backup-isolated-test.yml"
+      - "tests/backup-preview-r2-eu-workflow.test.mjs"
+      - "tests/provision-preview-r2-eu-workflow.test.mjs"
+      - "tests/restore-preview-r2-backup-workflow.test.mjs"
       - "wrangler.preview-migrations.jsonc"
       - ".github/workflows/preview-directory-e2e-acceptance.yml"
       - ".github/workflows/restore-production-backup-isolated-test.yml"
@@ -47,7 +51,7 @@ jobs:
         with:
           node-version: 22
       - name: Validate guarded Preview migration workflow state and gates
-        run: node --experimental-default-type=module --test tests/preview-migration-workflow.test.mjs
+        run: node --experimental-default-type=module --test tests/preview-migration-workflow.test.mjs tests/backup-preview-r2-eu-workflow.test.mjs tests/provision-preview-r2-eu-workflow.test.mjs tests/restore-preview-r2-backup-workflow.test.mjs
       - name: Validate migration SQL and payment ledger invariants in isolated SQLite
         run: |
           python3 tests/test_migrations_sqlite.py
