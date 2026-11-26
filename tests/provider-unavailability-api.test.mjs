@@ -152,7 +152,8 @@ test("Idempotency-Key retries return the same row and reject key reuse for diffe
   assert.equal(changed.status, 409);
   assert.equal((await changed.json()).error, "IDEMPOTENCY_KEY_REUSED");
 });
-\ntest("invalid UTC, reversed interval, invalid IANA timezone and overlong reason are rejected", async () => {
+
+test("invalid UTC, reversed interval, invalid IANA timezone and overlong reason are rejected", async () => {
   const db = mockDB({ memberships: [membership()], providers: [provider()] });
   const cases = [
     { startAt: "2026-11-26T09:00:00", endAt: "2026-11-26T10:00:00Z", timeZone: "Europe/Paris" },
