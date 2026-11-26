@@ -93,7 +93,8 @@ export async function listTenantMemberships(env, auth) {
          AND s.revoked_at IS NULL
          AND m.status = 'ACTIVE'
          AND t.status = 'ACTIVE'
-       ORDER BY t.display_name COLLATE NOCASE, t.id
+       ORDER BY CASE WHEN t.id = s.active_tenant_id THEN 0 ELSE 1 END,
+                t.display_name COLLATE NOCASE, t.id
        LIMIT 51
     `).bind(sessionId, userId).all();
 
