@@ -211,17 +211,37 @@ export async function handleProviderUnavailabilityRoute(request, env, path, auth
 
     const id = path.slice(BASE.length + 1).trim();
     if (!id || id.includes("/")) return response({ ok: false, error: "INVALID_ID" }, 400);
+    const now = new Date().toISOString();
+    let providerId = null;
     if (context.role === "PROVIDER") {
       const own = await ownProvider(env, context.userId, context.tenantId);
       if (!own) return response({ ok: false, error: "PROVIDER_PROFILE_REQUIRED" }, 403);
-      const result = await env.DB.prepare("UPDATE provider_unavailability SET status = 'CANCELLED', updated_at = CURRENT_TIMESTAMP WHERE id = ? AND tenant_id = ? AND intervenant_id = ? AND status = 'ACTIVE'").bind(id, context.tenantId, own.id).run();
-      if (!Number(result?.meta?.changes || 0)) return response({ ok: false, error: "UNAVAILABILITY_NOT_FOUND" }, 404);
-    } else {
-      const result = await env.DB.prepare("UPDATE provider_unavailability SET status = 'CANCELLED', updated_at = CURRENT_TIMESTAMP WHERE id = ? AND tenant_id = ? AND status = 'ACTIVE'").bind(id, context.tenantId).run();
-      if (!Number(result?.meta?.changes || 0)) return response({ ok: false, error: "UNAVAILABILITY_NOT_FOUND" }, 404);
+      providerId = own.id;
     }
-    const cancelled = await env.DB.prepare("SELECT id, intervenant_id, start_at, end_at, timezone_name, reason, status, created_at, updated_at FROM provider_unavailability WHERE id = ? AND tenant_id = ? LIMIT 1").bind(id, context.tenantId).first();
-    return response({ ok: true, unavailability: cancelled ? rowDto(cancelled) : null });
+
+    const update = providerId
+      ? "UPDATE provider_unavailability SET status = 'CANCELLED', updated_at = CURRENT_TIMESTAMP WHERE id = ? AND tenant_id = ? AND intervenant_id = ? AND status = 'ACTIVE' AND start_at > ?"
+      : "UPDATE provider_unavailability SET status = 'CANCELLED', updated_at = CURRENT_TIMESTAMP WHERE id = ? AND tenant_id = ? AND status = 'ACTIVE' AND start_at > ?";
+    const updateStatement = env.DB.prepare(update);
+    const updateResult = await (providerId
+      ? updateStatement.bind(id, context.tenantId, providerId, now)
+      : updateStatement.bind(id, context.tenantId, now)).run();
+
+    const select = providerId
+      ? "SELECT id, tenant_id, intervenant_id, start_at, end_at, timezone_name, reason, status, created_at, updated_at, created_by_user_id FROM provider_unavailability WHERE id = ? AND tenant_id = ? AND intervenant_id = ? LIMIT 1"
+      : "SELECT id, tenant_id, intervenant_id, start_at, end_at, timezone_name, reason, status, created_at, updated_at, created_by_user_id FROM provider_unavailability WHERE id = ? AND tenant_id = ? LIMIT 1";
+    const selectStatement = env.DB.prepare(select);
+    const existing = await (providerId
+      ? selectStatement.bind(id, context.tenantId, providerId)
+      : selectStatement.bind(id, context.tenantId)).first();
+
+    if (Number(updateResult?.meta?.changes || 0)) {
+      return response({ ok: true, unavailability: existing ? rowDto(existing) : null });
+    }
+    if (!existing) return response({ ok: false, error: "UNAVAILABILITY_NOT_FOUND" }, 404);
+    if (existing.status === "CANCELLED") return response({ ok: true, idempotent: true, unavailability: rowDto(existing) }, 200);
+    if (existing.status === "ACTIVE" && Date.parse(existing.start_at) <= Date.parse(now)) return response({ ok: false, error: "UNAVAILABILITY_NOT_CANCELLABLE" }, 409);
+    return response({ ok: false, error: "UNAVAILABILITY_NOT_FOUND" }, 404);
   } catch (error) {
     return dbError(error);
   }
