@@ -1,235 +1,249 @@
-const VERSION = "PROCHÉLIA-UNAVAILABILITY-API-1";
+const BASE = "/api/v7/provider-unavailability";
+const READ_ROLES = new Set(["OWNER", "ADMIN", "OPS", "PROVIDER", "SUPPORT", "READ_ONLY"]);
+const WRITE_ROLES = new Set(["OWNER", "ADMIN", "OPS", "PROVIDER"]);
+const UTC_ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z$/;
 
-function response(body, status = 200) {
-  return Response.json(body, { status, headers: { "cache-control": "no-store" } });
+function response(data, status = 200) {
+  return Response.json(data, {
+    status,
+    headers: {
+      "cache-control": "no-store",
+      "x-content-type-options": "nosniff",
+      "x-frame-options": "DENY",
+      "referrer-policy": "no-referrer",
+    },
+  });
 }
 
-function validId(value) {
-  return typeof value === "string" && /^[A-Za-z0-9._:-]{8,180}$/.test(value);
-}
-
-function validUtc(value) {
-  if (typeof value !== "string" ||
-      !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?Z$/.test(value)) return false;
-  const milliseconds = Date.parse(value);
-  if (!Number.isFinite(milliseconds)) return false;
-  // Date.parse normalizes impossible calendar dates (e.g. Feb 30); reject those.
-  return new Date(milliseconds).toISOString().slice(0, 10) === value.slice(0, 10);
+function parseUtc(value) {
+  if (typeof value !== "string" || !UTC_ISO.test(value)) return null;
+  const time = Date.parse(value);
+  if (!Number.isFinite(time)) return null;
+  return new Date(time).toISOString();
 }
 
 function validTimeZone(value) {
-  if (typeof value !== "string" || value.length > 80) return false;
+  if (typeof value !== "string" || value.length < 1 || value.length > 80) return false;
   try {
-    new Intl.DateTimeFormat("en", { timeZone: value }).format(new Date(0));
+    new Intl.DateTimeFormat("en-US", { timeZone: value }).format(new Date(0));
     return true;
   } catch {
     return false;
   }
 }
 
-async function readJsonLimited(request, limit = 4096) {
-  const declared = Number(request.headers.get("content-length") || 0);
-  if (Number.isFinite(declared) && declared > limit) return { ok: false, tooLarge: true };
+function normalizeReason(value) {
+  if (value == null) return "";
+  if (typeof value !== "string") return null;
+  const reason = value.trim();
+  return reason.length <= 120 ? reason : null;
+}
+
+async function tenantMemberships(env, userId, requestedTenantId) {
+  const sql = `SELECT tm.tenant_id, tm.role, tm.status, t.status AS tenant_status
+    FROM tenant_memberships tm
+    JOIN tenants t ON t.id = tm.tenant_id
+    WHERE tm.user_id = ? AND tm.status = 'ACTIVE' AND t.status = 'ACTIVE'${requestedTenantId ? " AND tm.tenant_id = ?" : ""}
+    ORDER BY tm.tenant_id`;
+  const statement = env.DB.prepare(sql);
+  const result = await (requestedTenantId ? statement.bind(userId, requestedTenantId) : statement.bind(userId)).all();
+  return result?.results || [];
+}
+
+async function resolveTenant(request, env, auth) {
+  const userId = auth?.user?.id;
+  if (!userId) return { error: response({ ok: false, error: "UNAUTHENTICATED" }, 401) };
+  if (!env?.DB) return { error: response({ ok: false, error: "DATABASE_UNAVAILABLE" }, 503) };
+  const requested = (request.headers.get("x-tenant-id") || "").trim();
+  if (requested && requested.length > 128) return { error: response({ ok: false, error: "INVALID_TENANT_ID" }, 400) };
+  let memberships;
   try {
-    const text = await request.text();
-    if (text.length > limit) return { ok: false, tooLarge: true };
-    return { ok: true, value: JSON.parse(text) };
+    memberships = await tenantMemberships(env, userId, requested || null);
   } catch {
-    return { ok: false };
+    return { error: response({ ok: false, error: "TENANT_SCHEMA_UNAVAILABLE" }, 503) };
   }
+  if (requested) {
+    if (!memberships.length) return { error: response({ ok: false, error: "TENANT_MEMBERSHIP_REQUIRED" }, 403) };
+    return { context: { tenantId: memberships[0].tenant_id, role: memberships[0].role, userId } };
+  }
+  if (!memberships.length) return { error: response({ ok: false, error: "TENANT_MEMBERSHIP_REQUIRED" }, 403) };
+  if (memberships.length > 1) return { error: response({ ok: false, error: "TENANT_SELECTION_REQUIRED" }, 409) };
+  return { context: { tenantId: memberships[0].tenant_id, role: memberships[0].role, userId } };
 }
 
-async function resolveProviderTenant(env, auth) {
-  if (!env?.DB || !auth?.user?.id || !auth?.session_id) {
-    return { ok: false, status: 503, error: "TENANT_CONTEXT_UNAVAILABLE" };
+async function providerForTenant(env, providerId, tenantId) {
+  return env.DB.prepare("SELECT id FROM intervenants WHERE id = ? AND tenant_id = ? LIMIT 1").bind(providerId, tenantId).first();
+}
+
+async function ownProvider(env, userId, tenantId) {
+  return env.DB.prepare("SELECT id FROM intervenants WHERE user_id = ? AND tenant_id = ? LIMIT 1").bind(userId, tenantId).first();
+}
+
+function dbError(error) {
+  const message = String(error?.message || error || "");
+  if (message.includes("PROVIDER_UNAVAILABILITY_OVERLAP")) return response({ ok: false, error: "UNAVAILABILITY_CONFLICT" }, 409);
+  if (message.includes("PROVIDER_TENANT_MISMATCH")) return response({ ok: false, error: "PROVIDER_TENANT_MISMATCH" }, 403);
+  return response({ ok: false, error: "DATABASE_OPERATION_UNAVAILABLE" }, 503);
+}
+
+function rowDto(row) {
+  return {
+    id: row.id,
+    providerId: row.intervenant_id,
+    startAt: row.start_at,
+    endAt: row.end_at,
+    timeZone: row.timezone_name,
+    reason: row.reason || "",
+    status: row.status,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+export async function handleProviderUnavailabilityRoute(request, env, path, auth = null) {
+  if (path !== BASE && !path.startsWith(BASE + "/")) return null;
+  const method = request.method.toUpperCase();
+  const suffix = path.slice(BASE.length);
+  if (path !== BASE && (method !== "DELETE" || !suffix.startsWith("/") || suffix.length < 2 || suffix.slice(1).includes("/"))) return response({ ok: false, error: "NOT_FOUND" }, 404);
+  if (!["GET", "POST", "DELETE"].includes(method)) {
+    return response({ ok: false, error: "METHOD_NOT_ALLOWED", allowed: ["GET", "POST", "DELETE"] }, 405);
   }
+  const resolved = await resolveTenant(request, env, auth);
+  if (resolved.error) return resolved.error;
+  const context = resolved.context;
+  if (method === "GET" && !READ_ROLES.has(context.role)) return response({ ok: false, error: "FORBIDDEN" }, 403);
+  if (method !== "GET" && !WRITE_ROLES.has(context.role)) return response({ ok: false, error: "FORBIDDEN" }, 403);
+
   try {
-    const result = await env.DB.prepare(`
-      SELECT t.id AS tenant_id, m.role AS membership_role
-        FROM sessions s
-        JOIN tenant_memberships m ON m.user_id = s.user_id
-        JOIN tenants t ON t.id = m.tenant_id
-       WHERE s.id = ?
-         AND s.user_id = ?
-         AND s.expires_at > CURRENT_TIMESTAMP
-         AND m.status = 'ACTIVE'
-         AND t.status = 'ACTIVE'
-       ORDER BY t.id
-       LIMIT 2
-    `).bind(auth.session_id, auth.user.id).all();
-    if (result?.success !== true || !Array.isArray(result.results)) {
-      return { ok: false, status: 503, error: "TENANT_CONTEXT_UNAVAILABLE" };
-    }
-    if (result.results.length === 0) return { ok: false, status: 403, error: "TENANT_MEMBERSHIP_REQUIRED" };
-    if (result.results.length > 1) return { ok: false, status: 409, error: "TENANT_SELECTION_REQUIRED" };
-    const row = result.results[0];
-    if (row.membership_role !== "PROVIDER") return { ok: false, status: 403, error: "PROVIDER_MEMBERSHIP_REQUIRED" };
-    return { ok: true, tenant_id: row.tenant_id };
-  } catch {
-    return { ok: false, status: 503, error: "TENANT_CONTEXT_UNAVAILABLE" };
-  }
-}
-
-async function resolveProviderProfile(env, auth, tenantId) {
-  try {
-    const row = await env.DB.prepare(
-      "SELECT id FROM intervenants WHERE user_id = ? AND tenant_id = ? LIMIT 1"
-    ).bind(auth.user.id, tenantId).first();
-    if (!row?.id) return { ok: false, status: 404, error: "INTERVENANT_PROFILE_NOT_FOUND" };
-    return { ok: true, profile_id: row.id };
-  } catch {
-    return { ok: false, status: 503, error: "INTERVENANT_PROFILE_SCHEMA_UNAVAILABLE" };
-  }
-}
-
-async function schemaReady(env) {
-  try {
-    const result = await env.DB.prepare("PRAGMA table_info(provider_unavailability)").all();
-    if (result?.success !== true || !Array.isArray(result.results)) return false;
-    const names = result.results.map(column => column.name);
-    return [
-      "id", "tenant_id", "intervenant_id", "start_at", "end_at", "timezone_name",
-      "reason", "status", "created_by_user_id", "created_at", "updated_at", "idempotency_key"
-    ].every(name => names.includes(name));
-  } catch {
-    return false;
-  }
-}
-
-function normalizeInterval(body) {
-  if (!validUtc(body?.start_at) || !validUtc(body?.end_at)) return null;
-  const startMs = Date.parse(body.start_at);
-  const endMs = Date.parse(body.end_at);
-  const now = Date.now();
-  if (startMs < now + 5 * 60 * 1000 || endMs <= startMs ||
-      endMs - startMs > 366 * 24 * 60 * 60 * 1000 ||
-      startMs > now + 366 * 24 * 60 * 60 * 1000) return null;
-  return { start_at: new Date(startMs).toISOString(), end_at: new Date(endMs).toISOString() };
-}
-
-function samePayload(existing, payload) {
-  return Date.parse(existing.start_at) === Date.parse(payload.start_at) &&
-    Date.parse(existing.end_at) === Date.parse(payload.end_at) &&
-    existing.timezone_name === payload.timezone_name &&
-    (existing.reason || "") === payload.reason;
-}
-
-export async function handleProviderUnavailabilityRoute(request, env, auth) {
-  const url = new URL(request.url);
-  if (url.pathname !== "/api/intervenant/unavailability") return null;
-  if (!["GET", "POST", "DELETE"].includes(request.method)) {
-    return response({ ok: false, error: "METHOD_NOT_ALLOWED", version: VERSION }, 405);
-  }
-  if (!auth?.user || !auth.session_id) return response({ ok: false, error: "UNAUTHENTICATED", version: VERSION }, 401);
-  if (auth.user.role !== "intervenant") return response({ ok: false, error: "FORBIDDEN", version: VERSION }, 403);
-  if (!env?.DB) return response({ ok: false, error: "DATABASE_UNAVAILABLE", version: VERSION }, 503);
-
-  const tenant = await resolveProviderTenant(env, auth);
-  if (!tenant.ok) return response({ ok: false, error: tenant.error, version: VERSION }, tenant.status);
-  const profile = await resolveProviderProfile(env, auth, tenant.tenant_id);
-  if (!profile.ok) return response({ ok: false, error: profile.error, version: VERSION }, profile.status);
-  if (!(await schemaReady(env))) {
-    return response({ ok: false, error: "PROVIDER_UNAVAILABILITY_SCHEMA_UNAVAILABLE", version: VERSION, write_enabled: false }, 503);
-  }
-
-  if (request.method === "GET") {
-    const status = url.searchParams.get("status") || "ACTIVE";
-    if (!["ACTIVE", "CANCELLED", "ALL"].includes(status)) {
-      return response({ ok: false, error: "INVALID_STATUS", version: VERSION }, 400);
-    }
-    try {
-      const query = status === "ALL"
-        ? `SELECT id, start_at, end_at, timezone_name, reason, status, created_at, updated_at
-             FROM provider_unavailability
-            WHERE tenant_id = ? AND intervenant_id = ?
-            ORDER BY start_at ASC LIMIT 100`
-        : `SELECT id, start_at, end_at, timezone_name, reason, status, created_at, updated_at
-             FROM provider_unavailability
-            WHERE tenant_id = ? AND intervenant_id = ? AND status = ?
-            ORDER BY start_at ASC LIMIT 100`;
-      const result = status === "ALL"
-        ? await env.DB.prepare(query).bind(tenant.tenant_id, profile.profile_id).all()
-        : await env.DB.prepare(query).bind(tenant.tenant_id, profile.profile_id, status).all();
-      if (result?.success !== true || !Array.isArray(result.results)) throw new Error("READ_FAILED");
-      return response({ ok: true, read_only: true, version: VERSION, unavailability: result.results });
-    } catch {
-      return response({ ok: false, error: "PROVIDER_UNAVAILABILITY_READ_REJECTED", version: VERSION }, 503);
-    }
-  }
-
-  if (request.method === "POST") {
-    if (!(request.headers.get("content-type") || "").toLowerCase().startsWith("application/json")) {
-      return response({ ok: false, error: "JSON_REQUIRED", version: VERSION }, 415);
-    }
-    const parsed = await readJsonLimited(request);
-    if (!parsed.ok) return response({ ok: false, error: parsed.tooLarge ? "REQUEST_TOO_LARGE" : "INVALID_JSON", version: VERSION }, parsed.tooLarge ? 413 : 400);
-    const interval = normalizeInterval(parsed.value);
-    const timezone = parsed.value?.timezone_name;
-    const reason = typeof parsed.value?.reason === "string" ? parsed.value.reason.trim() : "";
-    if (!interval || !validTimeZone(timezone) || reason.length > 120) {
-      return response({ ok: false, error: "INVALID_UNAVAILABILITY_INPUT", version: VERSION }, 400);
-    }
-    const key = String(request.headers.get("Idempotency-Key") || request.headers.get("X-Idempotency-Key") || "").trim();
-    if (!validId(key)) return response({ ok: false, error: "IDEMPOTENCY_KEY_REQUIRED", version: VERSION }, 400);
-    const payload = { ...interval, timezone_name: timezone, reason };
-    try {
-      const previous = await env.DB.prepare(
-        `SELECT id, start_at, end_at, timezone_name, reason, status
-           FROM provider_unavailability
-          WHERE tenant_id = ? AND intervenant_id = ? AND idempotency_key = ? LIMIT 1`
-      ).bind(tenant.tenant_id, profile.profile_id, key).first();
-      if (previous) {
-        if (!samePayload(previous, payload)) return response({ ok: false, error: "IDEMPOTENCY_KEY_CONFLICT", version: VERSION }, 409);
-        return response({ ok: true, idempotent_replay: true, version: VERSION, unavailability: previous }, 200);
+    if (method === "GET") {
+      const url = new URL(request.url);
+      const requestedProvider = (url.searchParams.get("providerId") || "").trim();
+      let providerId = requestedProvider || null;
+      if (context.role === "PROVIDER") {
+        const own = await ownProvider(env, context.userId, context.tenantId);
+        if (!own) return response({ ok: false, error: "PROVIDER_PROFILE_REQUIRED" }, 403);
+        if (requestedProvider && requestedProvider !== own.id) return response({ ok: false, error: "FORBIDDEN" }, 403);
+        providerId = own.id;
+      } else if (providerId) {
+        const provider = await providerForTenant(env, providerId, context.tenantId);
+        if (!provider) return response({ ok: false, error: "PROVIDER_NOT_FOUND" }, 404);
       }
-      const id = "unavailability-" + crypto.randomUUID();
-      await env.DB.prepare(
-        `INSERT INTO provider_unavailability
-          (id, tenant_id, intervenant_id, start_at, end_at, timezone_name, reason, status, created_by_user_id, idempotency_key)
-         VALUES (?, ?, ?, ?, ?, ?, ?, 'ACTIVE', ?, ?)`
-      ).bind(id, tenant.tenant_id, profile.profile_id, payload.start_at, payload.end_at,
-        payload.timezone_name, payload.reason, auth.user.id, key).run();
-      return response({ ok: true, version: VERSION, unavailability: { id, ...payload, status: "ACTIVE" } }, 201);
-    } catch (error) {
-      if (String(error?.message || error).includes("PROVIDER_UNAVAILABILITY_OVERLAP")) {
-        return response({ ok: false, error: "UNAVAILABILITY_OVERLAP", version: VERSION }, 409);
+      const includeCancelled = url.searchParams.get("includeCancelled") === "true";
+      if (includeCancelled && !["OWNER", "ADMIN", "OPS"].includes(context.role)) return response({ ok: false, error: "FORBIDDEN" }, 403);
+      const from = url.searchParams.get("from") ? parseUtc(url.searchParams.get("from")) : null;
+      const to = url.searchParams.get("to") ? parseUtc(url.searchParams.get("to")) : null;
+      if ((url.searchParams.has("from") && !from) || (url.searchParams.has("to") && !to) || (from && to && from >= to)) return response({ ok: false, error: "INVALID_RANGE" }, 400);
+      let sql = "SELECT id, intervenant_id, start_at, end_at, timezone_name, reason, status, created_at, updated_at FROM provider_unavailability WHERE tenant_id = ?";
+      const params = [context.tenantId];
+      if (!includeCancelled) sql += " AND status = 'ACTIVE'";
+      if (providerId) { sql += " AND intervenant_id = ?"; params.push(providerId); }
+      if (to) { sql += " AND start_at < ?"; params.push(to); }
+      if (from) { sql += " AND end_at > ?"; params.push(from); }
+      sql += " ORDER BY start_at LIMIT 200";
+      const result = await env.DB.prepare(sql).bind(...params).all();
+      return response({ ok: true, tenantId: context.tenantId, unavailability: (result?.results || []).map(rowDto), limit: 200 });
+    }
+
+    if (method === "POST") {
+      const body = await request.json().catch(() => null);
+      if (!body || typeof body !== "object" || Array.isArray(body)) return response({ ok: false, error: "INVALID_BODY" }, 400);
+      const requestedProviderId = typeof body.providerId === "string" ? body.providerId.trim() : "";
+      const startAt = parseUtc(body.startAt);
+      const endAt = parseUtc(body.endAt);
+      const timeZone = typeof body.timeZone === "string" ? body.timeZone.trim() : "";
+      const reason = normalizeReason(body.reason);
+      if (!startAt || !endAt || startAt >= endAt || !validTimeZone(timeZone) || reason === null) return response({ ok: false, error: "INVALID_UNAVAILABILITY" }, 400);
+      let providerId = requestedProviderId;
+      if (context.role === "PROVIDER") {
+        const own = await ownProvider(env, context.userId, context.tenantId);
+        if (!own) return response({ ok: false, error: "PROVIDER_PROFILE_REQUIRED" }, 403);
+        if (requestedProviderId && requestedProviderId !== own.id) return response({ ok: false, error: "FORBIDDEN" }, 403);
+        // Provider self-service binds the profile from authenticated identity;
+        // the client may omit providerId and cannot select another profile.
+        providerId = own.id;
+      } else {
+        if (!providerId) return response({ ok: false, error: "PROVIDER_ID_REQUIRED" }, 400);
+        const provider = await providerForTenant(env, providerId, context.tenantId);
+        if (!provider) return response({ ok: false, error: "PROVIDER_NOT_FOUND" }, 404);
       }
-      // Resolve a concurrent idempotent replay if the unique index rejected it.
-      try {
-        const replay = await env.DB.prepare(
-          `SELECT id, start_at, end_at, timezone_name, reason, status
-             FROM provider_unavailability
-            WHERE tenant_id = ? AND intervenant_id = ? AND idempotency_key = ? LIMIT 1`
-        ).bind(tenant.tenant_id, profile.profile_id, key).first();
-        if (replay) {
-          if (samePayload(replay, payload)) return response({ ok: true, idempotent_replay: true, version: VERSION, unavailability: replay }, 200);
-          return response({ ok: false, error: "IDEMPOTENCY_KEY_CONFLICT", version: VERSION }, 409);
+      const suppliedKey = (request.headers.get("idempotency-key") || "").trim();
+      if (!suppliedKey) return response({ ok: false, error: "IDEMPOTENCY_KEY_REQUIRED" }, 400);
+      if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(suppliedKey)) return response({ ok: false, error: "INVALID_IDEMPOTENCY_KEY" }, 400);
+
+      const selectByKey = "SELECT id, tenant_id, intervenant_id, start_at, end_at, timezone_name, reason, status, created_at, updated_at, created_by_user_id, idempotency_key FROM provider_unavailability WHERE tenant_id = ? AND intervenant_id = ? AND idempotency_key = ? LIMIT 1";
+      const matchesRequest = existing => existing &&
+        existing.created_by_user_id === context.userId &&
+        existing.intervenant_id === providerId &&
+        existing.start_at === startAt &&
+        existing.end_at === endAt &&
+        existing.timezone_name === timeZone &&
+        (existing.reason || "") === reason;
+
+      if (suppliedKey) {
+        const existing = await env.DB.prepare(selectByKey).bind(context.tenantId, providerId, suppliedKey).first();
+        if (existing) {
+          if (matchesRequest(existing)) return response({ ok: true, idempotent: true, unavailability: rowDto(existing) }, 200);
+          return response({ ok: false, error: "IDEMPOTENCY_KEY_REUSED" }, 409);
         }
-      } catch {}
-      return response({ ok: false, error: "PROVIDER_UNAVAILABILITY_WRITE_REJECTED", version: VERSION }, 503);
-    }
-  }
+      }
 
-  const id = String(url.searchParams.get("id") || "").trim();
-  if (!validId(id)) return response({ ok: false, error: "UNAVAILABILITY_ID_REQUIRED", version: VERSION }, 400);
-  try {
-    const existing = await env.DB.prepare(
-      `SELECT id, start_at, status FROM provider_unavailability
-        WHERE id = ? AND tenant_id = ? AND intervenant_id = ? LIMIT 1`
-    ).bind(id, tenant.tenant_id, profile.profile_id).first();
-    if (!existing) return response({ ok: false, error: "UNAVAILABILITY_NOT_FOUND", version: VERSION }, 404);
-    if (existing.status === "CANCELLED") return response({ ok: true, idempotent_replay: true, version: VERSION, unavailability: { id, status: "CANCELLED" } });
-    if (existing.status !== "ACTIVE" || Date.parse(existing.start_at) <= Date.now()) {
-      return response({ ok: false, error: "UNAVAILABILITY_NOT_CANCELLABLE", version: VERSION }, 409);
+      const id = crypto.randomUUID();
+      const insert = `INSERT INTO provider_unavailability
+        (id, tenant_id, intervenant_id, start_at, end_at, timezone_name, reason, status, created_by_user_id, idempotency_key)
+        VALUES (?, ?, ?, ?, ?, ?, ?, 'ACTIVE', ?, ?)
+        RETURNING id, tenant_id, intervenant_id, start_at, end_at, timezone_name, reason, status, created_at, updated_at, created_by_user_id, idempotency_key`;
+      let created;
+      try {
+        created = await env.DB.prepare(insert).bind(id, context.tenantId, providerId, startAt, endAt, timeZone, reason, context.userId, suppliedKey || null).first();
+      } catch (error) {
+        const message = String(error?.message || error);
+        if (suppliedKey && (message.includes("UNIQUE") || message.includes("PROVIDER_UNAVAILABILITY_OVERLAP"))) {
+          const existing = await env.DB.prepare(selectByKey).bind(context.tenantId, providerId, suppliedKey).first();
+          if (existing) {
+            if (matchesRequest(existing)) return response({ ok: true, idempotent: true, unavailability: rowDto(existing) }, 200);
+            return response({ ok: false, error: "IDEMPOTENCY_KEY_REUSED" }, 409);
+          }
+        }
+        throw error;
+      }
+      if (!created) return response({ ok: false, error: "CREATION_NOT_CONFIRMED" }, 503);
+      return response({ ok: true, unavailability: rowDto(created) }, 201);
     }
-    const result = await env.DB.prepare(
-      `UPDATE provider_unavailability SET status = 'CANCELLED', updated_at = CURRENT_TIMESTAMP
-        WHERE id = ? AND tenant_id = ? AND intervenant_id = ? AND status = 'ACTIVE'
-          AND start_at > ?`
-    ).bind(id, tenant.tenant_id, profile.profile_id, new Date().toISOString()).run();
-    if (Number(result?.meta?.changes || 0) !== 1) return response({ ok: false, error: "UNAVAILABILITY_NOT_CANCELLABLE", version: VERSION }, 409);
-    return response({ ok: true, version: VERSION, unavailability: { id, status: "CANCELLED" } });
-  } catch {
-    return response({ ok: false, error: "PROVIDER_UNAVAILABILITY_CANCEL_REJECTED", version: VERSION }, 503);
+
+    const id = path.slice(BASE.length + 1);
+    if (!/^[A-Za-z0-9_-]{1,128}$/.test(id)) return response({ ok: false, error: "INVALID_ID" }, 400);
+    const now = new Date().toISOString();
+    let providerId = null;
+    if (context.role === "PROVIDER") {
+      const own = await ownProvider(env, context.userId, context.tenantId);
+      if (!own) return response({ ok: false, error: "PROVIDER_PROFILE_REQUIRED" }, 403);
+      providerId = own.id;
+    }
+
+    const update = providerId
+      ? "UPDATE provider_unavailability SET status = 'CANCELLED', updated_at = CURRENT_TIMESTAMP WHERE id = ? AND tenant_id = ? AND intervenant_id = ? AND status = 'ACTIVE' AND start_at > ?"
+      : "UPDATE provider_unavailability SET status = 'CANCELLED', updated_at = CURRENT_TIMESTAMP WHERE id = ? AND tenant_id = ? AND status = 'ACTIVE' AND start_at > ?";
+    const updateStatement = env.DB.prepare(update);
+    const updateResult = await (providerId
+      ? updateStatement.bind(id, context.tenantId, providerId, now)
+      : updateStatement.bind(id, context.tenantId, now)).run();
+
+    const select = providerId
+      ? "SELECT id, tenant_id, intervenant_id, start_at, end_at, timezone_name, reason, status, created_at, updated_at, created_by_user_id FROM provider_unavailability WHERE id = ? AND tenant_id = ? AND intervenant_id = ? LIMIT 1"
+      : "SELECT id, tenant_id, intervenant_id, start_at, end_at, timezone_name, reason, status, created_at, updated_at, created_by_user_id FROM provider_unavailability WHERE id = ? AND tenant_id = ? LIMIT 1";
+    const selectStatement = env.DB.prepare(select);
+    const existing = await (providerId
+      ? selectStatement.bind(id, context.tenantId, providerId)
+      : selectStatement.bind(id, context.tenantId)).first();
+
+    if (Number(updateResult?.meta?.changes || 0)) {
+      return response({ ok: true, unavailability: existing ? rowDto(existing) : null });
+    }
+    if (!existing) return response({ ok: false, error: "UNAVAILABILITY_NOT_FOUND" }, 404);
+    if (existing.status === "CANCELLED") return response({ ok: true, idempotent: true, unavailability: rowDto(existing) }, 200);
+    if (existing.status === "ACTIVE" && Date.parse(existing.start_at) <= Date.parse(now)) return response({ ok: false, error: "UNAVAILABILITY_NOT_CANCELLABLE" }, 409);
+    return response({ ok: false, error: "UNAVAILABILITY_NOT_FOUND" }, 404);
+  } catch (error) {
+    return dbError(error);
   }
 }
