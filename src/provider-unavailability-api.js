@@ -147,17 +147,22 @@ export async function handleProviderUnavailabilityRoute(request, env, path, auth
     if (method === "POST") {
       const body = await request.json().catch(() => null);
       if (!body || typeof body !== "object" || Array.isArray(body)) return response({ ok: false, error: "INVALID_BODY" }, 400);
-      const providerId = typeof body.providerId === "string" ? body.providerId.trim() : "";
+      const requestedProviderId = typeof body.providerId === "string" ? body.providerId.trim() : "";
       const startAt = parseUtc(body.startAt);
       const endAt = parseUtc(body.endAt);
       const timeZone = typeof body.timeZone === "string" ? body.timeZone.trim() : "";
       const reason = normalizeReason(body.reason);
-      if (!providerId || !startAt || !endAt || startAt >= endAt || !validTimeZone(timeZone) || reason === null) return response({ ok: false, error: "INVALID_UNAVAILABILITY" }, 400);
+      if (!startAt || !endAt || startAt >= endAt || !validTimeZone(timeZone) || reason === null) return response({ ok: false, error: "INVALID_UNAVAILABILITY" }, 400);
+      let providerId = requestedProviderId;
       if (context.role === "PROVIDER") {
         const own = await ownProvider(env, context.userId, context.tenantId);
         if (!own) return response({ ok: false, error: "PROVIDER_PROFILE_REQUIRED" }, 403);
-        if (providerId !== own.id) return response({ ok: false, error: "FORBIDDEN" }, 403);
+        if (requestedProviderId && requestedProviderId !== own.id) return response({ ok: false, error: "FORBIDDEN" }, 403);
+        // Provider self-service binds the profile from authenticated identity;
+        // the client may omit providerId and cannot select another profile.
+        providerId = own.id;
       } else {
+        if (!providerId) return response({ ok: false, error: "PROVIDER_ID_REQUIRED" }, 400);
         const provider = await providerForTenant(env, providerId, context.tenantId);
         if (!provider) return response({ ok: false, error: "PROVIDER_NOT_FOUND" }, 404);
       }
