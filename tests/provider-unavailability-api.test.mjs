@@ -8,7 +8,7 @@ const membership = (role = "PROVIDER", tenantId = "tenant-a") => ({ tenant_id: t
 const provider = (id = "provider-1", userId = "user-1", tenantId = "tenant-a") => ({ id, user_id: userId, tenant_id: tenantId });
 const block = (id = "block-1", providerId = "provider-1", tenantId = "tenant-a", status = "ACTIVE") => ({
   id, tenant_id: tenantId, intervenant_id: providerId,
-  start_at: "2026-11-26T09:00:00.000Z", end_at: "2026-11-26T10:00:00.000Z",
+  start_at: "2027-01-01T09:00:00.000Z", end_at: "2027-01-01T10:00:00.000Z",
   timezone_name: "Europe/Paris", reason: "", status,
   created_at: "2026-11-26T00:00:00.000Z", updated_at: "2026-11-26T00:00:00.000Z", idempotency_key: null
 });
@@ -53,13 +53,16 @@ function mockDB({ memberships = [], providers = [], blocks = [], failSchema = fa
                 blocks.push(row);
                 return row;
               }
-              if (sql.includes("provider_unavailability") && sql.includes("WHERE id = ?")) return blocks.find(x => x.id === params[0] && x.tenant_id === params[1]) || null;
+              if (sql.includes("provider_unavailability") && sql.includes("WHERE id = ?")) return blocks.find(x => x.id === params[0] && x.tenant_id === params[1] && (!sql.includes("intervenant_id = ?") || x.intervenant_id === params[2])) || null;
               return null;
             },
             async run() {
               if (sql.includes("UPDATE provider_unavailability")) {
-                const [id, tenantId, providerId] = params;
-                const row = blocks.find(x => x.id === id && x.tenant_id === tenantId && (!sql.includes("intervenant_id = ?") || x.intervenant_id === providerId) && x.status === "ACTIVE");
+                const providerScoped = sql.includes("intervenant_id = ?");
+                const [id, tenantId, providerId, now] = params;
+                const effectiveNow = providerScoped ? now : providerId;
+                const effectiveProvider = providerScoped ? providerId : null;
+                const row = blocks.find(x => x.id === id && x.tenant_id === tenantId && (!providerScoped || x.intervenant_id === effectiveProvider) && x.status === "ACTIVE" && Date.parse(x.start_at) > Date.parse(effectiveNow));
                 if (row) {
                   row.status = "CANCELLED";
                   row.updated_at = "2026-11-26T01:00:00.000Z";
@@ -179,13 +182,23 @@ test("overlap database guard maps to conflict and not a generic failure", async 
   assert.equal((await response.json()).error, "UNAVAILABILITY_CONFLICT");
 });
 
-test("cancellation is a soft status change scoped by tenant and provider", async () => {
-  const db = mockDB({ memberships: [membership()], providers: [provider()], blocks: [block(), block("block-2", "provider-2")] });
+test("cancellation is future-only, soft, tenant/provider scoped and replay-safe", async () => {
+  const past = block("block-past");
+  past.start_at = "2025-01-01T09:00:00.000Z";
+  past.end_at = "2025-01-01T10:00:00.000Z";
+  const db = mockDB({ memberships: [membership()], providers: [provider()], blocks: [block(), block("block-2", "provider-2"), past] });
   const response = await handleProviderUnavailabilityRoute(req("DELETE", BASE + "/block-1"), { DB: db.db }, BASE + "/block-1", auth());
   assert.equal(response.status, 200);
   assert.equal((await response.json()).unavailability.status, "CANCELLED");
   const update = db.calls.find(x => x.sql.includes("UPDATE provider_unavailability"));
   assert.equal(update.params[1], "tenant-a");
+  assert.equal(update.params[2], "provider-1");
+  const replay = await handleProviderUnavailabilityRoute(req("DELETE", BASE + "/block-1"), { DB: db.db }, BASE + "/block-1", auth());
+  assert.equal(replay.status, 200);
+  assert.equal((await replay.json()).idempotent, true);
+  const pastCancel = await handleProviderUnavailabilityRoute(req("DELETE", BASE + "/block-past"), { DB: db.db }, BASE + "/block-past", auth());
+  assert.equal(pastCancel.status, 409);
+  assert.equal((await pastCancel.json()).error, "UNAVAILABILITY_NOT_CANCELLABLE");
   const other = await handleProviderUnavailabilityRoute(req("DELETE", BASE + "/block-2"), { DB: db.db }, BASE + "/block-2", auth());
   assert.equal(other.status, 404);
 });
