@@ -1,0 +1,8 @@
+name = "prochelia-market-localization-preview-2026-11-26"
+main = "src/market-localization-preview-worker.js"
+compatibility_date = "2026-11-26"
+workers_dev = true
+preview_urls = false
+
+[observability]
+enabled = false
