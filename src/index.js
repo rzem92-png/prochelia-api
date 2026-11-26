@@ -4582,6 +4582,7 @@ handle = async function(request,env){
     if((u.pathname==='/api/ui/config')&&request.method==='GET') return interfaceConfigEndpoint(request,env);
     if((u.pathname==='/api/support/cases')&&request.method==='POST') return supportCreate(request,env);
     if((u.pathname==='/api/support/cases')&&request.method==='GET') return supportList(request,env);
+    if(/^\/api\/support\/cases\/[A-Za-z0-9._:-]{1,160}\/events$/.test(u.pathname)) return supportCaseEventsRoute(request,env);
     if((u.pathname==='/api/support/cases/resolve')&&request.method==='POST') return supportResolve(request,env);
     if((u.pathname==='/api/support/dashboard')&&request.method==='GET') return supportDashboard(request,env);
     return __procheliaComplementHandle(request,env);
