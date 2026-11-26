@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { webcrypto } from "node:crypto";
-import { tenantContextRoute, selectTenantForSession, requireTenantAuthRole } from "../src/index.js";
+import { createHash, webcrypto } from "node:crypto";
+import { tenantContextRoute, tenantMembershipsRoute, selectTenantForSession, requireTenantAuthRole } from "../src/index.js";
 globalThis.crypto ??= webcrypto;
 
 function makeEnv({ authenticated = true, membership = true, activeTenant = "tenant-a" } = {}) {
