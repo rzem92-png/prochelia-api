@@ -104,7 +104,7 @@ export async function handleProviderUnavailabilityRoute(request, env, path, auth
   if (path !== BASE && !path.startsWith(BASE + "/")) return null;
   const method = request.method.toUpperCase();
   const suffix = path.slice(BASE.length);
-  if (path !== BASE && (method !== "DELETE" || !/^\\/[^/]+$/.test(suffix))) return response({ ok: false, error: "NOT_FOUND" }, 404);
+  if (path !== BASE && (method !== "DELETE" || !suffix.startsWith("/") || suffix.length < 2 || suffix.slice(1).includes("/"))) return response({ ok: false, error: "NOT_FOUND" }, 404);
   if (!["GET", "POST", "DELETE"].includes(method)) {
     return response({ ok: false, error: "METHOD_NOT_ALLOWED", allowed: ["GET", "POST", "DELETE"] }, 405);
   }
