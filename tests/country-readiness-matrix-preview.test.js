@@ -97,7 +97,7 @@ test("preview Worker returns the live configured 14-country matrix without persi
 test("Preview Worker route is GET-only and unknown routes remain 404", async () => {
   const post = await worker.fetch(request("/api/global/countries/readiness-matrix", "POST"));
   assert.equal(post.status, 405);
-  assert.equal(post.headers.get("allow"), "GET");
+  assert.equal(post.headers.get("allow"), "GET, OPTIONS");
   const missing = await worker.fetch(request("/api/unknown"));
   assert.equal(missing.status, 404);
   assert.equal(missing.headers.get("cache-control"), "no-store");
