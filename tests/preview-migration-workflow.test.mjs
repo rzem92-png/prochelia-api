@@ -246,3 +246,12 @@ test("restore workflows recognize the new EU Preview backup and never target Pre
     assert.ok(workflow.includes(previewId), "restore/verification target guard must forbid EU Preview D1");
   }
 });
+
+test("migration and backup workflows target the provisioned private EU bucket consistently",async()=>{
+  const backup=await readFile(new URL("../.github/workflows/backup-preview-d1-to-r2-eu.yml",import.meta.url),"utf8");
+  const provision=await readFile(new URL("../.github/workflows/provision-preview-r2-eu.yml",import.meta.url),"utf8");
+  const bucket="prochelia-preview-backups-eu-locked";
+  assert.ok(workflow.includes("R2_BUCKET: "+bucket),"migration workflow bucket must be the provisioned bucket");
+  assert.ok(backup.includes("R2_BUCKET: "+bucket),"backup workflow bucket must be the provisioned bucket");
+  assert.ok(provision.includes('BUCKET="'+bucket+'"'),"provision workflow must create/verify the same bucket");
+});
