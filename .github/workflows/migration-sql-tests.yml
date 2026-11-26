@@ -9,6 +9,15 @@ on:
       - "tests/test_preview_canonical_migrations.py"
       - "scripts/prepare-d1-restore.py"
       - "tests/test_prepare_d1_restore.py"
+      - "tests/preview-migration-workflow.test.mjs"
+      - ".github/workflows/apply-preview-d1-migrations.yml"
+      - ".github/workflows/backup-preview-d1-to-r2-eu.yml"
+      - ".github/workflows/provision-preview-r2-eu.yml"
+      - ".github/workflows/restore-preview-r2-backup-isolated-test.yml"
+      - "tests/backup-preview-r2-eu-workflow.test.mjs"
+      - "tests/provision-preview-r2-eu-workflow.test.mjs"
+      - "tests/restore-preview-r2-backup-workflow.test.mjs"
+      - "wrangler.preview-migrations.jsonc"
       - ".github/workflows/preview-directory-e2e-acceptance.yml"
       - ".github/workflows/restore-production-backup-isolated-test.yml"
       - ".github/workflows/migration-sql-tests.yml"
@@ -19,6 +28,9 @@ on:
       - "migrations-preview-canonical/**"
       - "tests/test_preview_canonical_migrations.py"
       - "tests/test_migrations_sqlite.py"
+      - "tests/preview-migration-workflow.test.mjs"
+      - ".github/workflows/apply-preview-d1-migrations.yml"
+      - "wrangler.preview-migrations.jsonc"
       - ".github/workflows/migration-sql-tests.yml"
 
 permissions:
@@ -35,6 +47,11 @@ jobs:
           "$HOME/go/bin/actionlint" .github/workflows/restore-production-backup-isolated-test.yml
           "$HOME/go/bin/actionlint" .github/workflows/preview-directory-e2e-acceptance.yml
           "$HOME/go/bin/actionlint" .github/workflows/restore-production-backup-isolated-test.yml
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Validate guarded Preview migration workflow state and gates
+        run: node --experimental-default-type=module --test tests/preview-migration-workflow.test.mjs tests/backup-preview-r2-eu-workflow.test.mjs tests/provision-preview-r2-eu-workflow.test.mjs tests/restore-preview-r2-backup-workflow.test.mjs
       - name: Validate migration SQL and payment ledger invariants in isolated SQLite
         run: |
           python3 tests/test_migrations_sqlite.py

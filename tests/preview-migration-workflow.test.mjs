@@ -42,7 +42,10 @@ test("Preview migration workflow validates the full canonical migration chain", 
     "0019_backup_verifications.sql",
     "0020_auth_login_rate_limits.sql",
     "0021_supra_audit_events.sql",
-    "0022_supra_persisted_approvals.sql"
+    "0022_supra_persisted_approvals.sql",
+    "0023_tenant_isolation_foundation.sql",
+    "0024_provider_unavailability.sql",
+    "0025_provider_unavailability_idempotency.sql"
   ];
   for (const migration of expected) assert.ok(workflow.includes(`"${migration}"`), `missing canonical migration ${migration}`);
 });
@@ -79,6 +82,12 @@ test("Preview post-migration verification checks identity, mission-security and 
     "idx_supra_audit_events_created_at",
     "idx_supra_audit_events_actor",
     "0022_supra_persisted_approvals.sql",
+    "0025_provider_unavailability_idempotency.sql", "idx_provider_unavailability_idempotency",
+    "idx_provider_unavailability_tenant_provider_time", "idx_provider_unavailability_tenant_range",
+    "idx_tenant_memberships_user_status", "idx_tenant_memberships_tenant_role_status",
+    "idx_tenant_invitations_tenant_status_expiry", "idx_tenant_invitation_pending_email",
+    "trg_provider_unavailability_tenant_match_insert", "trg_provider_unavailability_tenant_match_update",
+    "trg_provider_unavailability_no_overlap_insert", "trg_provider_unavailability_no_overlap_update",
     "supra_approval_requests", "supra_approval_votes", "supra_approval_events",
     "idx_supra_approval_requests_status_expiry", "idx_supra_approval_requests_tenant_resource",
     "idx_supra_approval_votes_request", "idx_supra_approval_events_request",
@@ -89,13 +98,17 @@ test("Preview post-migration verification checks identity, mission-security and 
   ]) assert.ok(workflow.includes(name), `missing post-migration verification for ${name}`);
 });
 
-test("Preview migration workflow accepts only an empty EU D1 or the exact 23-entry canonical registry", () => {
+test("Preview migration workflow accepts only clean, exact 23-prefix, or exact 26-full canonical states", () => {
   assert.match(workflow, /SELECT type, name FROM sqlite_master ORDER BY type, name/);
   assert.match(workflow, /registry_present/);
   assert.match(workflow, /non_internal/);
-  assert.match(workflow, /len\(local\) != 23/);
+  assert.match(workflow, /len\(local\) != 26/);
+  assert.match(workflow, /prefix_23=set\(ordered\[:23\]\)/);
+  assert.match(workflow, /remote == prefix_23/);
   assert.match(workflow, /remote == local/);
-  assert.match(workflow, /remote differs from both reviewed safe states|differs from both reviewed safe states/);
+  assert.match(workflow, /exact canonical prefix 0000–0022 verified/);
+  assert.match(workflow, /migrations 0023–0025 are the only pending migrations/);
+  assert.match(workflow, /reviewed clean, 23-prefix, or 26-full states/);
   assert.doesNotMatch(workflow, /legacy=/);
   assert.doesNotMatch(workflow, /baseline=\(local-pending\)\|legacy/);
 });
@@ -111,7 +124,7 @@ test("Preview migration workflow verifies the final registry exactly after apply
 test("Preview D1 migration requires an encrypted R2 EU backup round-trip before any schema write", () => {
   assert.match(workflow, /AWS_ACCESS_KEY_ID: \$\{\{ secrets\.R2_EU_ACCESS_KEY_ID \}\}/);
   assert.match(workflow, /AWS_SECRET_ACCESS_KEY: \$\{\{ secrets\.R2_EU_SECRET_ACCESS_KEY \}\}/);
-  assert.match(workflow, /R2_BUCKET: prochelia-preview-backups-eu-v2/);
+  assert.match(workflow, /R2_BUCKET: prochelia-preview-backups-eu-locked/);
   assert.match(workflow, /R2_ENDPOINT: https:\/\/f2a79e9fa41566a8ec80fb24c02c60eb\.eu\.r2\.cloudflarestorage\.com/);
   const upload = workflow.indexOf("Upload encrypted backup and manifest to private R2 EU bucket");
   const verify = workflow.indexOf("Download R2 backup and verify encrypted round-trip");
@@ -181,7 +194,9 @@ test("all canonical migrations required by the remote apply gate physically exis
     "0015_production_security_events.sql", "0016_security_identity_schema.sql",
     "0017_document_security_scans.sql", "0018_consolidated_business_schema.sql",
     "0019_backup_verifications.sql", "0020_auth_login_rate_limits.sql",
-    "0021_supra_audit_events.sql", "0022_supra_persisted_approvals.sql"
+    "0021_supra_audit_events.sql", "0022_supra_persisted_approvals.sql",
+    "0023_tenant_isolation_foundation.sql", "0024_provider_unavailability.sql",
+    "0025_provider_unavailability_idempotency.sql"
   ];
   const actual = new Set(await readdir(new URL("../migrations-preview-canonical/", import.meta.url)));
   const missing = expected.filter(name => !actual.has(name));
@@ -230,4 +245,15 @@ test("restore workflows recognize the new EU Preview backup and never target Pre
   for (const workflow of [restore, restoreV2, verify, verifyV2, productionRestore]) {
     assert.ok(workflow.includes(previewId), "restore/verification target guard must forbid EU Preview D1");
   }
+});
+
+test("migration and backup workflows target the provisioned private EU bucket consistently",async()=>{
+  const backup=await readFile(new URL("../.github/workflows/backup-preview-d1-to-r2-eu.yml",import.meta.url),"utf8");
+  const provision=await readFile(new URL("../.github/workflows/provision-preview-r2-eu.yml",import.meta.url),"utf8");
+  const restore=await readFile(new URL("../.github/workflows/restore-preview-r2-backup-isolated-test.yml",import.meta.url),"utf8");
+  const bucket="prochelia-preview-backups-eu-locked";
+  assert.ok(workflow.includes("R2_BUCKET: "+bucket),"migration workflow bucket must be the provisioned bucket");
+  assert.ok(backup.includes("R2_BUCKET: "+bucket),"backup workflow bucket must be the provisioned bucket");
+  assert.ok(restore.includes("R2_BUCKET: "+bucket),"isolated restore workflow bucket must be the provisioned bucket");
+  assert.ok(provision.includes('BUCKET="'+bucket+'"'),"provision workflow must create/verify the same bucket");
 });
