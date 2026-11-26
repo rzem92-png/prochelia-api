@@ -107,7 +107,7 @@ db.execute("INSERT INTO tenants (id, slug, display_name) VALUES ('tenant-b', 'te
 db.execute("INSERT INTO users (id, role, email, first_name, last_name, password_hash, status) VALUES ('tenant-test-user-b', 'provider', 'tenant-test-b@example.test', 'Tenant', 'Provider', 'hash', 'active')")
 db.execute("INSERT INTO intervenants (id, user_id, tenant_id) VALUES ('provider-a', 'tenant-test-user', 'tenant-a')")
 db.execute("INSERT INTO intervenants (id, user_id, tenant_id) VALUES ('provider-b', 'tenant-test-user-b', 'tenant-b')")
-db.execute("INSERT INTO provider_unavailability (id, tenant_id, intervenant_id, start_at, end_at, timezone_name, reason, created_by_user_id) VALUES ('block-a', 'tenant-a', 'provider-a', '2026-11-26T09:00:00Z', '2026-11-26T10:00:00Z', 'Europe/Paris', 'Test', 'tenant-test-user', 'block-a-key-0001')")
+db.execute("INSERT INTO provider_unavailability (id, tenant_id, intervenant_id, start_at, end_at, timezone_name, reason, created_by_user_id, idempotency_key) VALUES ('block-a', 'tenant-a', 'provider-a', '2026-11-26T09:00:00Z', '2026-11-26T10:00:00Z', 'Europe/Paris', 'Test', 'tenant-test-user', 'block-a-key-0001')")
 try:
     db.execute("INSERT INTO provider_unavailability (id, tenant_id, intervenant_id, start_at, end_at, timezone_name, created_by_user_id, idempotency_key) VALUES ('block-duplicate-key', 'tenant-a', 'provider-a', '2026-11-26T12:00:00Z', '2026-11-26T13:00:00Z', 'Europe/Paris', 'tenant-test-user', 'block-a-key-0001')")
     raise AssertionError("Duplicate provider idempotency key unexpectedly accepted")
