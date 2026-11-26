@@ -83,3 +83,13 @@ test("concurrent state change with zero affected rows fails closed", async () =>
   const r = await call(m);
   assert.equal(r.status, 409);
 });
+
+test("missing tenant-scoped schema fails closed without an UPDATE", async () => {
+  const calls = [];
+  const env = { DB: { prepare(sql) { calls.push(sql); return { bind() { return { async first() { throw new Error("no such column tenant_id"); }, async run() { throw new Error("unexpected mutation"); } }; } }; } } };
+  const r = await cancelIntervenantAvailabilitySlot(env, PROFILE, TENANT, ID);
+  assert.equal(r.status, 503);
+  assert.equal((await r.json()).error, "AVAILABILITY_CANCEL_REJECTED");
+  assert.equal(calls.length, 1);
+  assert.match(calls[0], /tenant_id/);
+});
