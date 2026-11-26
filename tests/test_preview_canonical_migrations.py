@@ -334,11 +334,7 @@ except sqlite3.IntegrityError:
 
 # Tenant invitation invariants: only an active tenant manager may invite a pre-provisioned pending member.
 db.execute("UPDATE tenant_memberships SET status='ACTIVE', accepted_at=CURRENT_TIMESTAMP WHERE id='membership-owner-a2'")
-# An active MEMBER may not create an invitation: database authority is limited to OWNER/ADMIN/MANAGER.
-db.execute("""
-    INSERT INTO tenant_memberships(id, tenant_id, user_id, role, status, accepted_at)
-    VALUES ('membership-member-inviter', 'tenant-a', 'user-multi', 'MEMBER', 'ACTIVE', CURRENT_TIMESTAMP)
-""")
+# The existing active MEMBER membership must not be permitted to issue invitations.
 try:
     db.execute("""
         INSERT INTO tenant_invitations(
