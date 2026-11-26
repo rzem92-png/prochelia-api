@@ -1,0 +1,28 @@
+name: Market localization registry tests
+
+on:
+  pull_request:
+    paths:
+      - 'src/market-localization.js'
+      - 'tests/market-localization.test.mjs'
+      - '.github/workflows/market-localization-tests.yml'
+  push:
+    branches:
+      - main
+    paths:
+      - 'src/market-localization.js'
+      - 'tests/market-localization.test.mjs'
+      - '.github/workflows/market-localization-tests.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  localization-tests:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: node --experimental-default-type=module --test tests/market-localization.test.mjs
