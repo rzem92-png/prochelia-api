@@ -27,7 +27,7 @@ function fakeDb(options = {}) {
             },
             async first() {
               calls.push({ sql, values, method: "first" });
-              if (sql.includes("FROM intervenants")) return options.profile ?? profile;
+              if (sql.includes("FROM intervenants")) return Object.prototype.hasOwnProperty.call(options, "profile") ? options.profile : profile;
               if (sql.includes("idempotency_key")) return options.previous ?? null;
               if (sql.includes("FROM provider_unavailability")) return options.existing ?? null;
               return null;
