@@ -212,6 +212,12 @@ test("cancellation is future-only, soft, tenant/provider scoped and replay-safe"
   assert.equal((await pastCancel.json()).error, "UNAVAILABILITY_NOT_CANCELLABLE");
   const other = await handleProviderUnavailabilityRoute(req("DELETE", BASE + "/block-2"), { DB: db.db }, BASE + "/block-2", auth());
   assert.equal(other.status, 404);
+  for (const invalidId of ["bad%20id", "bad%2Fid", "x".repeat(129)]) {
+    const invalidPath = BASE + "/" + invalidId;
+    const invalid = await handleProviderUnavailabilityRoute(req("DELETE", invalidPath), { DB: db.db }, invalidPath, auth());
+    assert.equal(invalid.status, 400);
+    assert.equal((await invalid.json()).error, "INVALID_ID");
+  }
 });
 
 test("read-only role cannot create or cancel and unknown methods are rejected", async () => {
