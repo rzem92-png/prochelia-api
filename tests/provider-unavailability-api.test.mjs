@@ -13,36 +13,37 @@ const columns = [
 
 function fakeDb(options = {}) {
   const calls = [];
+  const execute = (sql, values = []) => ({
+    async all() {
+      calls.push({ sql, values, method: "all" });
+      if (sql.includes("tenant_memberships")) return options.memberships ?? { success: true, results: tenantRows };
+      if (sql.includes("PRAGMA table_info")) return options.columns ?? { success: true, results: columns };
+      if (sql.includes("ORDER BY start_at ASC")) return options.list ?? { success: true, results: [] };
+      return { success: true, results: [] };
+    },
+    async first() {
+      calls.push({ sql, values, method: "first" });
+      if (sql.includes("FROM intervenants")) return Object.prototype.hasOwnProperty.call(options, "profile") ? options.profile : profile;
+      if (sql.includes("idempotency_key")) return options.previous ?? null;
+      if (sql.includes("FROM provider_unavailability")) return options.existing ?? null;
+      return null;
+    },
+    async run() {
+      calls.push({ sql, values, method: "run" });
+      if (sql.startsWith("INSERT")) {
+        if (options.insertError) throw options.insertError;
+        return options.insertResult ?? { meta: { changes: 1 } };
+      }
+      if (sql.startsWith("UPDATE")) return options.updateResult ?? { meta: { changes: 1 } };
+      return { meta: { changes: 0 } };
+    }
+  });
   const db = {
     prepare(sql) {
+      const statement = execute(sql);
       return {
-        bind(...values) {
-          return {
-            async all() {
-              calls.push({ sql, values, method: "all" });
-              if (sql.includes("tenant_memberships")) return options.memberships ?? { success: true, results: tenantRows };
-              if (sql.includes("PRAGMA table_info")) return options.columns ?? { success: true, results: columns };
-              if (sql.includes("ORDER BY start_at ASC")) return options.list ?? { success: true, results: [] };
-              return { success: true, results: [] };
-            },
-            async first() {
-              calls.push({ sql, values, method: "first" });
-              if (sql.includes("FROM intervenants")) return Object.prototype.hasOwnProperty.call(options, "profile") ? options.profile : profile;
-              if (sql.includes("idempotency_key")) return options.previous ?? null;
-              if (sql.includes("FROM provider_unavailability")) return options.existing ?? null;
-              return null;
-            },
-            async run() {
-              calls.push({ sql, values, method: "run" });
-              if (sql.startsWith("INSERT")) {
-                if (options.insertError) throw options.insertError;
-                return options.insertResult ?? { meta: { changes: 1 } };
-              }
-              if (sql.startsWith("UPDATE")) return options.updateResult ?? { meta: { changes: 1 } };
-              return { meta: { changes: 0 } };
-            }
-          };
-        }
+        ...statement,
+        bind(...values) { return execute(sql, values); }
       };
     }
   };
