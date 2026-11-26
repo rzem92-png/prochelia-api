@@ -111,7 +111,9 @@ export async function listTenantMemberships(env, auth) {
       membership_id: row.membership_id,
       role: row.membership_role
     }));
-    const activeTenantId = auth.session_active_tenant_id || null;
+    // Derive the selected tenant from this query's session snapshot, not the
+    // earlier authentication lookup (which may be stale after a workspace switch).
+    const activeTenantId = rows[0]?.active_tenant_id || null;
     const activeMembership = memberships.find(item => item.id === activeTenantId) || null;
     return {
       ok: true,
