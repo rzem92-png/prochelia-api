@@ -6,25 +6,14 @@ const SORTS = new Set(["code", "name", "status", "readiness"]);
 const MAX_PAGE_SIZE = 14;
 
 function normalizeSearch(value) {
-  return String(value || "").trim().normalize("NFD").replace(/[\\u0300-\\u036f]/g, "").toLocaleLowerCase("fr");
+  return String(value || "").trim().normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLocaleLowerCase("fr");
 }
 
 function integerParam(value, fallback, max) {
   if (value == null || value === "") return fallback;
-  if (!/^(0|[1-9]\\d*)$/.test(value)) return null;
+  if (!/^(0|[1-9]\d*)$/.test(value)) return null;
   const parsed = Number(value);
   return Number.isSafeInteger(parsed) && parsed <= max ? parsed : null;
-}
-
-function json(data, status = 200) {
-  return new Response(JSON.stringify(data), {
-    status,
-    headers: {
-      "content-type": "application/json; charset=utf-8",
-      "cache-control": "no-store",
-      "x-content-type-options": "nosniff",
-    },
-  });
 }
 
 export function buildCountryReadinessMatrix(summary, params = new URLSearchParams()) {
@@ -62,7 +51,7 @@ export function buildCountryReadinessMatrix(summary, params = new URLSearchParam
   const page = sorted.slice(offset, offset + limit);
   const requiredGateCount = sorted.reduce((sum, country) => sum + Number(country.requiredCount || 0), 0);
   const assessedGateCount = sorted.reduce((sum, country) => sum + Number(country.assessedCount || 0), 0);
-  const approvedGateCount = sorted.reduce((sum, country) => sum + Number(country.approvedCount || 0), 0;
+  const approvedGateCount = sorted.reduce((sum, country) => sum + Number(country.approvedCount || 0), 0);
 
   return {
     ok: true,
@@ -85,10 +74,4 @@ export function buildCountryReadinessMatrix(summary, params = new URLSearchParam
     countries: page,
     note: "Matrice de consultation uniquement. Aucun pays n'est activé et aucune preuve, réponse ou approbation n'est enregistrée.",
   };
-}
-
-export function handleCountryReadinessMatrixRoute(request, pathname) {
-  if (pathname !== "/api/global/countries/readiness-matrix") return null;
-  if (request.method !== "GET") return json({ ok: false, error: "METHOD_NOT_ALLOWED" }, 405);
-  return null;
 }
