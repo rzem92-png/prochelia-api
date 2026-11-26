@@ -22,7 +22,7 @@ test('locale resolution supports language selection and defaults', () => {
 
 test('currency formatter uses market currency and rejects unsafe inputs', () => {
   assert.match(formatMarketCurrency(1234.5, 'FR'), /1/);
-  assert.match(formatMarketCurrency(1234.5, 'DZ', 'ar'), /DZD|د\\.ج\\.|دج/);
+  assert.ok(formatMarketCurrency(1234.5, 'DZ', 'ar').includes('د.ج.'));
   assert.throws(() => formatMarketCurrency(NaN, 'FR'), /finite/);
   assert.throws(() => formatMarketCurrency(10, 'XX'), /unsupported/);
 });
