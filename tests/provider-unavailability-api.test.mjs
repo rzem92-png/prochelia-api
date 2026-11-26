@@ -117,9 +117,10 @@ test("tenant admin can filter within tenant and cross-tenant provider IDs are no
   assert.equal(cross.status, 404);
 });
 
-test("provider creates only own profile; tenant and creator are derived from session", async () => {
+test("provider self-service derives own profile; tenant and creator are server-bound", async () => {
   const db = mockDB({ memberships: [membership()], providers: [provider()] });
-  const response = await handleProviderUnavailabilityRoute(req("POST", BASE, { tenantId: "tenant-b", providerId: "provider-1", startAt: "2026-11-26T09:00:00Z", endAt: "2026-11-26T10:00:00Z", timeZone: "Europe/Paris", reason: "Congé" }), { DB: db.db }, BASE, auth());
+  // Frontend self-service may omit providerId: the authenticated profile is derived.
+  const response = await handleProviderUnavailabilityRoute(req("POST", BASE, { startAt: "2026-11-26T09:00:00Z", endAt: "2026-11-26T10:00:00Z", timeZone: "Europe/Paris", reason: "Congé" }), { DB: db.db }, BASE, auth());
   assert.equal(response.status, 201);
   const data = await response.json();
   assert.equal(data.unavailability.providerId, "provider-1");
@@ -128,6 +129,10 @@ test("provider creates only own profile; tenant and creator are derived from ses
   assert.equal(insert.params.at(-1), "user-1");
   assert.equal(insert.params[6], "Congé");
   assert.equal(data.unavailability.status, "ACTIVE");
+
+  // Supplying another profile is rejected, never used as a selector.
+  const forbidden = await handleProviderUnavailabilityRoute(req("POST", BASE, { providerId: "provider-other", startAt: "2026-11-26T11:00:00Z", endAt: "2026-11-26T12:00:00Z", timeZone: "Europe/Paris" }), { DB: db.db }, BASE, auth());
+  assert.equal(forbidden.status, 403);
 });
 
 test("Idempotency-Key retries return the same row and reject key reuse for different payload", async () => {
