@@ -98,13 +98,17 @@ test("Preview post-migration verification checks identity, mission-security and 
   ]) assert.ok(workflow.includes(name), `missing post-migration verification for ${name}`);
 });
 
-test("Preview migration workflow accepts only an empty EU D1 or the exact 26-entry canonical registry", () => {
+test("Preview migration workflow accepts only clean, exact 23-prefix, or exact 26-full canonical states", () => {
   assert.match(workflow, /SELECT type, name FROM sqlite_master ORDER BY type, name/);
   assert.match(workflow, /registry_present/);
   assert.match(workflow, /non_internal/);
   assert.match(workflow, /len\(local\) != 26/);
+  assert.match(workflow, /prefix_23=set\(ordered\[:23\]\)/);
+  assert.match(workflow, /remote == prefix_23/);
   assert.match(workflow, /remote == local/);
-  assert.match(workflow, /remote differs from both reviewed safe states|differs from both reviewed safe states/);
+  assert.match(workflow, /exact canonical prefix 0000–0022 verified/);
+  assert.match(workflow, /migrations 0023–0025 are the only pending migrations/);
+  assert.match(workflow, /reviewed clean, 23-prefix, or 26-full states/);
   assert.doesNotMatch(workflow, /legacy=/);
   assert.doesNotMatch(workflow, /baseline=\(local-pending\)\|legacy/);
 });
