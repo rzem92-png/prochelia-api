@@ -334,6 +334,22 @@ except sqlite3.IntegrityError:
 
 # Tenant invitation invariants: only an active tenant manager may invite a pre-provisioned pending member.
 db.execute("UPDATE tenant_memberships SET status='ACTIVE', accepted_at=CURRENT_TIMESTAMP WHERE id='membership-owner-a2'")
+# The existing active MEMBER membership must not be permitted to issue invitations.
+try:
+    db.execute("""
+        INSERT INTO tenant_invitations(
+          id, tenant_id, membership_id, email_normalized, token_sha256,
+          idempotency_key, invited_by_user_id, expires_at
+        ) VALUES (
+          'invitation-member-forbidden', 'tenant-a', 'membership-a-reinvite', 'user-a@example.test',
+          'cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc',
+          'invite-member-forbidden', 'user-multi', datetime('now', '+1 day')
+        )
+    """)
+    raise AssertionError("A tenant MEMBER was incorrectly allowed to issue an invitation")
+except sqlite3.IntegrityError as exc:
+    assert "TENANT_INVITATION_ACTOR_NOT_AUTHORIZED" in str(exc), str(exc)
+
 db.execute("""
     INSERT INTO tenant_invitations(
       id, tenant_id, membership_id, email_normalized, token_sha256,
