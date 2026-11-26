@@ -11,6 +11,10 @@ test('public market registry lists configured markets without enabling any launc
   assert.equal(body.markets.length, 14);
   assert.ok(body.markets.some(m => m.countryCode === 'DZ' && m.languages.includes('ar')));
   assert.ok(body.markets.some(m => m.countryCode === 'FR' && m.currency === 'EUR'));
+  assert.ok(body.markets.some(m => m.countryCode === 'FR' && m.currency === 'EUR' && m.defaultTimeZone === 'Europe/Paris' && m.timeZoneRequired === false));
+  assert.ok(body.markets.some(m => m.countryCode === 'CA' && m.timeZoneRequired === true && m.defaultTimeZone === null));
+  assert.ok(body.markets.some(m => m.countryCode === 'US' && m.timeZoneRequired === true && m.defaultTimeZone === null));
+  assert.ok(body.markets.some(m => m.countryCode === 'ES' && m.timeZoneRequired === true && m.defaultTimeZone === null));
   assert.ok(body.markets.every(m => m.marketStatus === 'evaluation' && m.launchEnabled === false));
   assert.equal(response.headers.get('cache-control'), 'public, max-age=300, stale-while-revalidate=60');
 });

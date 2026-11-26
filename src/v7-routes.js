@@ -38,6 +38,8 @@ export async function handleV7Route(
           locales: [...market.locales],
           currency: market.currency,
           timeZones: [...market.timeZones],
+          defaultTimeZone: market.timeZones.length === 1 ? market.timeZones[0] : null,
+          timeZoneRequired: market.timeZones.length > 1,
           marketStatus: market.marketStatus,
           launchEnabled: market.launchEnabled === true && market.marketStatus === "validated"
         }))
