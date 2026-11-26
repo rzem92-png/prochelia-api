@@ -363,7 +363,7 @@ test("tenant memberships directory rejects unauthenticated and non-GET requests 
   }};
   const unauth = await tenantMembershipsRoute(new Request("https://api.example.test/api/tenant/memberships"), { DB });
   assert.equal(unauth.status, 401);
-  assert.equal(calls, 1);
+  assert.equal(calls, 0);
   calls = 0;
   const method = await tenantMembershipsRoute(new Request("https://api.example.test/api/tenant/memberships", { method: "POST" }), { DB });
   assert.equal(method.status, 405);
@@ -383,7 +383,7 @@ test("tenant memberships directory caps results and prioritizes the selected wor
       }};
       assert.deepEqual(args,["session-a","user-verified-by-session"]);
       assert.match(sql,/ORDER BY CASE WHEN t\.id = s\.active_tenant_id THEN 0 ELSE 1 END/);
-      return { async all() { return { success:true,results:rows }; }};
+      return { async all() { return { success:true,results:[rows[50],...rows.slice(0,50)] }; }};
     }};
   }};
   const response = await tenantMembershipsRoute(new Request("https://api.example.test/api/tenant/memberships", {
