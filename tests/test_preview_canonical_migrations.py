@@ -99,8 +99,9 @@ assert "provider_unavailability" in tables
 provider_indexes = {row[1] for row in db.execute("PRAGMA index_list(provider_unavailability)")}
 assert {"idx_provider_unavailability_tenant_provider_time", "idx_provider_unavailability_tenant_range"} <= provider_indexes
 db.execute("INSERT INTO tenants (id, slug, display_name) VALUES ('tenant-b', 'tenant-b', 'Tenant B')")
+db.execute("INSERT INTO users (id, role, email, first_name, last_name, password_hash, status) VALUES ('tenant-test-user-b', 'provider', 'tenant-test-b@example.test', 'Tenant', 'Provider', 'hash', 'active')")
 db.execute("INSERT INTO intervenants (id, user_id, tenant_id) VALUES ('provider-a', 'tenant-test-user', 'tenant-a')")
-db.execute("INSERT INTO intervenants (id, user_id, tenant_id) VALUES ('provider-b', 'tenant-test-user', 'tenant-b')")
+db.execute("INSERT INTO intervenants (id, user_id, tenant_id) VALUES ('provider-b', 'tenant-test-user-b', 'tenant-b')")
 db.execute("INSERT INTO provider_unavailability (id, tenant_id, intervenant_id, start_at, end_at, timezone_name, reason, created_by_user_id) VALUES ('block-a', 'tenant-a', 'provider-a', '2026-11-26T09:00:00Z', '2026-11-26T10:00:00Z', 'Europe/Paris', 'Test', 'tenant-test-user')")
 try:
     db.execute("INSERT INTO provider_unavailability (id, tenant_id, intervenant_id, start_at, end_at, timezone_name, created_by_user_id) VALUES ('block-cross-tenant', 'tenant-b', 'provider-a', '2026-11-26T10:00:00Z', '2026-11-26T11:00:00Z', 'Europe/Paris', 'tenant-test-user')")
