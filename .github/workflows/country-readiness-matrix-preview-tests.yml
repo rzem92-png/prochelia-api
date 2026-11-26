@@ -30,4 +30,33 @@ jobs:
         with:
           node-version: "22"
       - run: node --experimental-default-type=module --test tests/country-readiness-matrix-preview.test.js
+      - name: Smoke the isolated Preview Worker over HTTPS (read-only)
+        run: |
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          const endpoint = 'https://feat-country-readiness-matrix-preview-2026-11-26-prochelia-api.rzem92.workers.dev/api/global/countries/readiness-matrix';
+          const origin = 'https://feat-country-readiness-matri.prochelia.pages.dev';
+          const get = await fetch(endpoint, { headers: { Origin: origin, Accept: 'application/json' }, cache: 'no-store' });
+          assert.equal(get.status, 200);
+          assert.equal(get.headers.get('access-control-allow-origin'), origin);
+          assert.match(get.headers.get('vary') || '', /Origin/i);
+          assert.equal(get.headers.get('access-control-allow-credentials'), null);
+          const body = await get.json();
+          assert.equal(body.ok, true);
+          assert.equal(body.summary.countryCount, 14);
+          assert.equal(body.summary.requiredGateCount, 84);
+          assert.equal(body.summary.assessedGateCount, 0);
+          assert.equal(body.summary.approvedGateCount, 0);
+          assert.equal(body.summary.activationAllowedCount, 0);
+          assert.ok(body.countries.every(c => c.launchEligible === false && c.activationAllowed === false));
+          const options = await fetch(endpoint, { method: 'OPTIONS', headers: { Origin: origin, 'Access-Control-Request-Method': 'GET', 'Access-Control-Request-Headers': 'accept' } });
+          assert.equal(options.status, 204);
+          assert.equal(options.headers.get('access-control-allow-origin'), origin);
+          assert.equal(options.headers.get('access-control-allow-methods'), 'GET, OPTIONS');
+          const post = await fetch(endpoint, { method: 'POST', headers: { Origin: origin } });
+          assert.equal(post.status, 405);
+          assert.equal(post.headers.get('allow'), 'GET, OPTIONS');
+          assert.equal(post.headers.get('access-control-allow-origin'), origin);
+          console.log('PASS: live Preview matrix GET/CORS, 14-country fail-closed summary, OPTIONS and POST guard.');
+          NODE
       - run: npx --yes wrangler@4 deploy --dry-run --config wrangler.country-readiness-matrix-preview.toml
