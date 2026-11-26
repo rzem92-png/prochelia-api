@@ -667,6 +667,36 @@ try:
 except sqlite3.IntegrityError as exc:
     assert "SESSION_ACTIVE_TENANT_MEMBERSHIP_REQUIRED" in str(exc), str(exc)
 
+# Expiry and inactive tenant context must fail closed at session creation/selection.
+try:
+    db.execute("""
+        INSERT INTO sessions(id, user_id, token_hash, expires_at, active_tenant_id)
+        VALUES ('session-expired', 'user-a', 'synthetic-token-hash-expired', '2000-01-01T00:00:00Z', 'tenant-a')
+    """)
+    raise AssertionError("Expired session with an active tenant was incorrectly accepted")
+except sqlite3.IntegrityError as exc:
+    assert "SESSION_ACTIVE_TENANT_MEMBERSHIP_REQUIRED" in str(exc), str(exc)
+
+db.execute("UPDATE tenant_memberships SET status='SUSPENDED' WHERE id='membership-a-reinvite'")
+try:
+    db.execute("UPDATE sessions SET active_tenant_id='tenant-a' WHERE id='session-a'")
+    raise AssertionError("Session selection with a suspended membership was incorrectly accepted")
+except sqlite3.IntegrityError as exc:
+    assert "SESSION_ACTIVE_TENANT_MEMBERSHIP_REQUIRED" in str(exc), str(exc)
+db.execute("UPDATE tenant_memberships SET status='ACTIVE' WHERE id='membership-a-reinvite'")
+
+db.execute("UPDATE tenants SET status='SUSPENDED' WHERE id='tenant-b'")
+try:
+    db.execute("""
+        INSERT INTO sessions(id, user_id, token_hash, expires_at, active_tenant_id)
+        VALUES ('session-suspended-tenant', 'user-multi', 'synthetic-token-hash-suspended', '2027-01-01T00:00:00Z', 'tenant-b')
+    """)
+    raise AssertionError("Session selection for a suspended tenant was incorrectly accepted")
+except sqlite3.IntegrityError as exc:
+    assert "SESSION_ACTIVE_TENANT_MEMBERSHIP_REQUIRED" in str(exc), str(exc)
+db.execute("UPDATE tenants SET status='ACTIVE' WHERE id='tenant-b'")
+print("PASS: expired sessions, suspended memberships, and suspended tenants cannot select an active tenant.")
+
 # Explicit session revocation is reasoned, immutable and cannot be reversed.
 try:
     db.execute("UPDATE sessions SET revoked_at=CURRENT_TIMESTAMP WHERE id='session-a'")
