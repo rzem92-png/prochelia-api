@@ -1,7 +1,7 @@
 import { evaluateSupraActionPolicy } from "./supra-action-policy.mjs";
 import { handleV7Route } from "./v7-routes.js";
 import { handleSupraRoute } from "./supra-api.js";
-import { resolveTenantContext, tenantRoleAllowed } from "./tenant-context.js";
+import { resolveTenantContext, tenantRoleAllowed, listTenantMemberships } from "./tenant-context.js";
 import { handleSupraApprovalRoute } from "./supra-approvals.js";
 import { handleDeviceTrustRoute } from "./device-trust.js";
 import { handleAccountingRoute } from "./accounting-api.js";
@@ -397,6 +397,25 @@ export async function logout(request, env) {
   }
   return json({ ok: true, version: VERSION, authenticated: false }, 200, {
     'set-cookie': sessionCookie('', 0)
+  });
+}
+
+
+export async function tenantMembershipsRoute(request, env) {
+  if (request.method !== "GET") {
+    return json({ ok: false, error: "METHOD_NOT_ALLOWED", version: VERSION }, 405, { allow: "GET" });
+  }
+  const auth = await getSessionUser(request, env).catch(() => null);
+  if (!auth?.user) return json({ ok: false, error: "UNAUTHENTICATED", version: VERSION }, 401);
+  const result = await listTenantMemberships(env, auth);
+  if (!result.ok) return json({ ok: false, error: result.error, version: VERSION }, result.status);
+  return json({
+    ok: true,
+    version: VERSION,
+    memberships: result.memberships,
+    active_tenant_id: result.active_tenant_id,
+    selection_required: result.selection_required,
+    truncated: result.truncated
   });
 }
 
@@ -1443,6 +1462,10 @@ async function handleBase(request, env) {
   if (url.pathname === '/api/auth/bootstrap') {
     if (request.method !== 'POST') return json({ ok: false, error: 'METHOD_NOT_ALLOWED', version: VERSION }, 405);
     return bootstrap(request, env);
+  }
+
+  if (url.pathname === '/api/tenant/memberships') {
+    return tenantMembershipsRoute(request, env);
   }
 
   if (url.pathname === '/api/tenant/context') {
