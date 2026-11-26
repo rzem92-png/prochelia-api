@@ -46,3 +46,12 @@ test("Worker routes market catalogue before any database dependency",async()=>{
  assert.equal(body.markets.length,14);
  assert.equal(body.launchEnabled,false);
 });
+test("Worker routes country localization before any database dependency",async()=>{
+ const response=await worker.fetch(new Request("https://api.prochelia.test/api/platform/markets/DZ/localization"),{});
+ assert.equal(response.status,200);
+ const body=await response.json();
+ assert.equal(body.ok,true);
+ assert.equal(body.localization.countryCode,"DZ");
+ assert.equal(body.localization.currency,"DZD");
+ assert.equal(body.localization.timeZone.default,null);
+});
