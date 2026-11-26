@@ -10,7 +10,7 @@ test("timeline normalizes only safe event fields and reverses newest-first resul
     {id:"event-001",event_type:"<script>",actor_role:"UNEXPECTED_ROLE",created_at:"not-a-date",details_json:"secret"}
   ];
   const result=normalizeSupportCaseEventRows(rows);
-  assert.deepEqual(result.events.map(e=>e.type),["EVENT","CREATED","MANAGER_RESOLVED"]);
+  assert.deepEqual(result.events.map(e=>e.type),["SCRIPT","CREATED","MANAGER_RESOLVED"]);
   assert.equal(result.events[0].actor_role,"TEAM");
   assert.equal(result.events[0].created_at,null);
   assert.equal(result.events[1].created_at,"2026-11-26T09:00:00Z");
@@ -45,7 +45,7 @@ test("support timeline endpoint is read-only, active-tenant and requester scoped
   assert.match(route,/JOIN support_cases c ON c\.id=e\.case_id/);
   assert.match(route,/c\.tenant_id=\?/);
   assert.match(route,/c\.requester_id=\?/);
-  assert.match(route,/SELECT e\.event_type,e\.actor_role,e\.created_at/);
+  assert.match(route,/SELECT e\.id,e\.event_type,e\.actor_role,e\.created_at/);
   assert.doesNotMatch(route,/details_json|actor_id/);
   assert.match(route,/LIMIT 101/);
   assert.match(route,/allow:'GET'/);
