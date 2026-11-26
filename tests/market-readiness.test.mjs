@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {GATES,MARKETS,handleMarketReadinessRoute,marketReadinessPayload} from "../src/market-readiness.js";
+import worker from "../src/index.js";
 test("catalogue includes the initial and planned expansion markets",()=>{
  const expected=["FR","DZ","BE","CH","LU","CA","MA","TN","ES","IT","DE","GB","US","AE"];
  assert.deepEqual(MARKETS.map(m=>m.code),expected);
@@ -21,4 +22,13 @@ test("unknown country returns 404 and remains disabled",async()=>{
 });
 test("route is read-only and rejects non-GET",async()=>{
  const r=handleMarketReadinessRoute(new Request("https://api.prochelia.test/api/platform/markets",{method:"POST"}));assert.equal(r.status,405);assert.equal(r.headers.get("allow"),"GET");assert.equal((await r.json()).error,"METHOD_NOT_ALLOWED");
+});
+
+test("Worker routes market catalogue before any database dependency",async()=>{
+ const response=await worker.fetch(new Request("https://api.prochelia.test/api/platform/markets"),{});
+ assert.equal(response.status,200);
+ const body=await response.json();
+ assert.equal(body.ok,true);
+ assert.equal(body.markets.length,14);
+ assert.equal(body.launchEnabled,false);
 });
