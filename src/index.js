@@ -1,5 +1,6 @@
 import { handleV7Route } from "./v7-routes.js";
 import { handleProviderUnavailabilityRoute } from "./provider-unavailability-api.js";
+import { handleMarketReadinessRoute } from "./market-readiness.js";
 // PROCHÉLIA — INDEX BACKEND CONSOLIDÉ UNIQUE
 // Référence de consolidation : V14.1 Finance + sécurité/RBAC existants.
 // Généré le 19/10/2026. À déployer uniquement après recette avec la vraie base D1.
@@ -3150,6 +3151,8 @@ async function handle(request,env){
   try {
     if(isMutatingMethod(request.method) && !securityOriginAllowed(request,env)) return json({ok:false,error:'ORIGIN_NOT_ALLOWED',version:VERSION},403);
     const url=new URL(request.url);
+    const marketReadinessResponse=handleMarketReadinessRoute(request);
+    if(marketReadinessResponse) return marketReadinessResponse;
     // Fail closed before any schema helper touches D1: unauthenticated callers
     // must not use mission validation as an existence oracle for private IDs.
     if (url.pathname === '/api/missions/validate') {
