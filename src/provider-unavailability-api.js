@@ -210,8 +210,8 @@ export async function handleProviderUnavailabilityRoute(request, env, path, auth
       return response({ ok: true, unavailability: rowDto(created) }, 201);
     }
 
-    const id = path.slice(BASE.length + 1).trim();
-    if (!id || id.includes("/")) return response({ ok: false, error: "INVALID_ID" }, 400);
+    const id = path.slice(BASE.length + 1);
+    if (!/^[A-Za-z0-9_-]{1,128}$/.test(id)) return response({ ok: false, error: "INVALID_ID" }, 400);
     const now = new Date().toISOString();
     let providerId = null;
     if (context.role === "PROVIDER") {
