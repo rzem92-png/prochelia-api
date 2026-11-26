@@ -43,21 +43,18 @@ function mockDB({ memberships = [], providers = [], blocks = [], failSchema = fa
                 if (sql.includes("user_id = ?")) return providers.find(x => x.user_id === params[0] && x.tenant_id === params[1]) || null;
                 return providers.find(x => x.id === params[0] && x.tenant_id === params[1]) || null;
               }
-              if (sql.includes("provider_unavailability") && sql.includes("WHERE id = ?")) {
-                return blocks.find(x => x.id === params[0] && x.tenant_id === params[1]) || null;
-              }
-              return null;
-            },
-            async run() {
               if (sql.includes("INSERT INTO provider_unavailability")) {
                 if (insertError) throw insertError;
                 const [id, tenant_id, intervenant_id, start_at, end_at, timezone_name, reason, created_by_user_id] = params;
-                blocks.push({
-                  id, tenant_id, intervenant_id, start_at, end_at, timezone_name, reason, status: "ACTIVE",
-                  created_by_user_id, created_at: "2026-11-26T00:00:00.000Z", updated_at: "2026-11-26T00:00:00.000Z"
-                });
-                return { meta: { changes: 1 } };
+                if (blocks.some(x => x.id === id)) throw new Error("UNIQUE constraint failed: provider_unavailability.id");
+                const row = { id, tenant_id, intervenant_id, start_at, end_at, timezone_name, reason, status: "ACTIVE", created_by_user_id, created_at: "2026-11-26T00:00:00.000Z", updated_at: "2026-11-26T00:00:00.000Z" };
+                blocks.push(row);
+                return row;
               }
+              if (sql.includes("provider_unavailability") && sql.includes("WHERE id = ?")) return blocks.find(x => x.id === params[0] && x.tenant_id === params[1]) || null;
+              return null;
+            },
+            async run() {
               if (sql.includes("UPDATE provider_unavailability")) {
                 const [id, tenantId, providerId] = params;
                 const row = blocks.find(x => x.id === id && x.tenant_id === tenantId && (!sql.includes("intervenant_id = ?") || x.intervenant_id === providerId) && x.status === "ACTIVE");
@@ -133,7 +130,24 @@ test("provider creates only own profile; tenant and creator are derived from ses
   assert.equal(data.unavailability.status, "ACTIVE");
 });
 
-test("invalid UTC, reversed interval, invalid IANA timezone and overlong reason are rejected", async () => {
+test("Idempotency-Key retries return the same row and reject key reuse for different payload", async () => {
+  const db = mockDB({ memberships: [membership()], providers: [provider()] });
+  const key = "d6d5e6f7-1234-4234-8234-123456789012";
+  const body = { providerId: "provider-1", startAt: "2026-11-26T09:00:00Z", endAt: "2026-11-26T10:00:00Z", timeZone: "Europe/Paris", reason: "Congé" };
+  const first = await handleProviderUnavailabilityRoute(req("POST", BASE, body, { "Idempotency-Key": key }), { DB: db.db }, BASE, auth());
+  assert.equal(first.status, 201);
+  assert.equal((await first.json()).unavailability.id, key);
+  const retry = await handleProviderUnavailabilityRoute(req("POST", BASE, body, { "Idempotency-Key": key }), { DB: db.db }, BASE, auth());
+  assert.equal(retry.status, 200);
+  const retryBody = await retry.json();
+  assert.equal(retryBody.idempotent, true);
+  assert.equal(retryBody.unavailability.id, key);
+  assert.equal(db.calls.filter(x => x.sql.includes("INSERT INTO provider_unavailability")).length, 2);
+  const changed = await handleProviderUnavailabilityRoute(req("POST", BASE, { ...body, reason: "Autre" }, { "Idempotency-Key": key }), { DB: db.db }, BASE, auth());
+  assert.equal(changed.status, 409);
+  assert.equal((await changed.json()).error, "IDEMPOTENCY_KEY_REUSED");
+});
+\ntest("invalid UTC, reversed interval, invalid IANA timezone and overlong reason are rejected", async () => {
   const db = mockDB({ memberships: [membership()], providers: [provider()] });
   const cases = [
     { startAt: "2026-11-26T09:00:00", endAt: "2026-11-26T10:00:00Z", timeZone: "Europe/Paris" },
