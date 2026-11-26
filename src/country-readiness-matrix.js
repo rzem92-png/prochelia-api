@@ -39,7 +39,7 @@ export function buildCountryReadinessMatrix(summary, params = new URLSearchParam
     const matchesSearch = !q || normalizeSearch(country.code + " " + country.name).includes(q);
     const matchesMarket = !marketStatus || country.marketStatus === marketStatus;
     const matchesGate = !gate || country.gates?.some(item => item.id === gate);
-    const matchesGateStatus = !gateStatus || country.gates?.some(item => item.status === gateStatus);
+    const matchesGateStatus = !gateStatus || country.gates?.some(item => (!gate || item.id === gate) && item.status === gateStatus);
     return matchesSearch && matchesMarket && matchesGate && matchesGateStatus;
   });
   const sorted = [...filtered].sort((a, b) => {
