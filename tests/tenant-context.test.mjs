@@ -369,3 +369,31 @@ test("tenant memberships directory rejects unauthenticated and non-GET requests 
   assert.equal(method.status, 405);
   assert.equal(calls, 0);
 });
+
+test("tenant memberships directory caps results and prioritizes the selected workspace", async () => {
+  const rows = Array.from({length:51},(_,i)=>({
+    tenant_id:"tenant-"+i, tenant_slug:"slug-"+i, tenant_name:"Workspace "+i,
+    membership_id:"membership-"+i, membership_role:"MEMBER", active_tenant_id:"tenant-50"
+  }));
+  const DB = { prepare(sql) {
+    return { bind(...args) {
+      if (sql.includes("JOIN users u")) return { async first() {
+        return { id:"user-verified-by-session",role:"client",status:"active",
+          session_id:"session-a",session_active_tenant_id:"tenant-50" };
+      }};
+      assert.deepEqual(args,["session-a","user-verified-by-session"]);
+      assert.match(sql,/ORDER BY CASE WHEN t\.id = s\.active_tenant_id THEN 0 ELSE 1 END/);
+      return { async all() { return { success:true,results:rows }; }};
+    }};
+  }};
+  const response = await tenantMembershipsRoute(new Request("https://api.example.test/api/tenant/memberships", {
+    headers:{cookie:"prochelia_session=synthetic-session-token"}
+  }),{DB});
+  const body=await response.json();
+  assert.equal(response.status,200);
+  assert.equal(body.memberships.length,50);
+  assert.equal(body.truncated,true);
+  assert.equal(body.active_tenant_id,"tenant-50");
+  assert.equal(body.selection_required,false);
+  assert.equal(body.memberships[0].id,"tenant-50");
+});
