@@ -26,6 +26,7 @@ on:
       - "src/v7-routes.js"
       - "src/index.js"
       - "src/nexus-d1-task-audit-scan.js"
+      - "src/nexus-d1-task-audit-alerts.js"
       - "tests/**"
       - ".github/workflows/v7-security-tests.yml"
       - ".github/workflows/deploy-preview-worker-manual.yml"
