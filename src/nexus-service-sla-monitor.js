@@ -1,0 +1,16 @@
+/* Nexus service SLA monitor. Evaluates response/completion signals only; no escalation delivery. */
+(function(root,factory){const api=factory();if(typeof module==="object"&&module.exports)module.exports=api;if(root)root.ProcheliaNexusSlaMonitor=api;})(typeof window!=="undefined"?window:globalThis,function(){
+"use strict";
+const ENV=new Set(["preview","development","test"]),ID=/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/,KINDS=new Set(["response","resolution","booking_confirmation","provider_arrival","service_completion","complaint_handling","refund_review"]),STATES=new Set(["open","in_progress","resolved","cancelled"]);
+function plain(v){return !!v&&typeof v==="object"&&!Array.isArray(v)&&(Object.getPrototypeOf(v)===Object.prototype||Object.getPrototypeOf(v)===null)&&Object.getOwnPropertySymbols(v).length===0&&Object.keys(Object.getOwnPropertyDescriptors(v)).every(k=>{const d=Object.getOwnPropertyDescriptor(v,k);return d.enumerable&&Object.hasOwn(d,"value")})}
+function deny(reason){return {ok:false,status:"UNKNOWN",mode:"SLA_HINTS_ONLY",executionAllowed:false,humanReviewRequired:true,reason,items:[]}}
+function evaluate(input={}){
+ if(!plain(input)||!ENV.has(input.environment)||!(input.tenantId===null||(typeof input.tenantId==="string"&&ID.test(input.tenantId)))||!Array.isArray(input.items)||input.items.length>200)return deny("INPUT_INVALID");
+ const seen=new Set();for(const x of input.items){if(!plain(x)||!ID.test(x.id)||seen.has(x.id)||!KINDS.has(x.kind)||!STATES.has(x.state)||!Number.isInteger(x.targetMinutes)||x.targetMinutes<1||x.targetMinutes>1000000||!Number.isInteger(x.elapsedMinutes)||x.elapsedMinutes<0||x.elapsedMinutes>10000000||typeof x.criticality!=="string"||!["low","normal","high","critical"].includes(x.criticality))return deny("SLA_ITEM_INVALID");seen.add(x.id);}
+ const items=input.items.map(x=>{const ratio=x.elapsedMinutes/x.targetMinutes,breached=ratio>=1&&x.state!=="cancelled",tier=breached?(ratio>=3||x.criticality==="critical"?"ESCALATION_P0":ratio>=2||x.criticality==="high"?"ESCALATION_P1":"ESCALATION_P2"):ratio>=.8?"WARNING_NEAR_SLA":"ON_TRACK";const status=x.state==="resolved"?(breached?"RESOLVED_LATE":"RESOLVED_ON_TIME"):x.state==="cancelled"?"CANCELLED":breached?"OVERDUE":ratio>=.8?"AT_RISK":"ON_TRACK";return {id:x.id,kind:x.kind,state:x.state,criticality:x.criticality,targetMinutes:x.targetMinutes,elapsedMinutes:x.elapsedMinutes,elapsedPercent:Math.round(ratio*10000)/100,slaBreached:breached,status,escalationRecommendation:tier,reviewRequired:breached||ratio>=.8};}).sort((a,b)=>(a.slaBreached?0:1)-(b.slaBreached?0:1)||b.elapsedPercent-a.elapsedPercent||a.id.localeCompare(b.id));
+ const counts={breached:items.filter(x=>x.slaBreached).length,atRisk:items.filter(x=>x.status==="AT_RISK").length,resolvedLate:items.filter(x=>x.status==="RESOLVED_LATE").length,onTrack:items.filter(x=>["ON_TRACK","RESOLVED_ON_TIME","CANCELLED"].includes(x.status)).length};
+ const status=counts.breached?"SLA_BREACH":counts.atRisk?"SLA_AT_RISK":items.length?"SLA_ON_TRACK":"NO_SLA_ITEMS";
+ return {ok:true,status,environment:input.environment,tenantId:input.tenantId,itemCount:items.length,items,summary:counts,executionAllowed:false,humanReviewRequired:counts.breached+counts.atRisk>0,mode:"SLA_HINTS_ONLY"};
+}
+return Object.freeze({evaluate});
+});
