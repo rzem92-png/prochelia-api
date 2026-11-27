@@ -30,3 +30,18 @@ test("actions below the action cap remain permitted",()=>{const result=evaluateA
 
 test("action class cannot be downgraded to READ to bypass approval",()=>{const result=evaluateAction(policy,{...financial,actionClass:"READ",scope:"finance:write"});assert.equal(result.code,"ACTION_CLASS_NOT_GRANTED")});
 test("persisted consumed approval IDs reject replay",()=>{const approvals=[approval("human-1"),approval("human-2")];const result=evaluateAction({...policy,consumedApprovalIds:["approval-human-1"]},{...financial,approvals});assert.equal(result.code,"APPROVAL_INVALID_OR_REPLAYED")});
+
+
+test("financial approval quorum policy cannot be weakened below two and rejects unknown classes",()=>{
+ const weakened={...policy,approvalQuorumByClass:{FINANCIAL:1}};
+ assert.equal(validatePolicy(weakened),false);
+ assert.equal(validatePolicy({...policy,approvalQuorumByClass:{UNKNOWN_CLASS:2}}),false);
+ assert.equal(validatePolicy({...policy,approvalQuorumByClass:{FINANCIAL:3}}),true);
+});
+test("financial quorum override may strengthen but never weaken the two-person floor",()=>{
+ const strengthened={...policy,approvalQuorumByClass:{FINANCIAL:3}};
+ const two=evaluateAction(strengthened,{...financial,approvals:[approval("human-1"),approval("human-2")]});
+ assert.equal(two.allowed,false);assert.equal(two.decision,"REQUIRES_APPROVAL");assert.match(two.reason,/2\\/3/);
+ const three=evaluateAction(strengthened,{...financial,approvals:[approval("human-1"),approval("human-2"),approval("human-3")]});
+ assert.equal(three.allowed,true);assert.equal(three.approvalIds.length,3);
+});
