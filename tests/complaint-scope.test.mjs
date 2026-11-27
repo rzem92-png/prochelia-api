@@ -131,6 +131,7 @@ test("route integration validates bounded input and uses derived scope before co
   assert.match(route, /resolveComplaintScope\(actor,value/);
   assert.match(route, /\.bind\(id,scope\.client_type,scope\.client_id,scope\.company_id,scope\.mission_id,value\.category,scope\.severity,value\.description\)/);
   assert.doesNotMatch(route, /\.bind\(id,String\(b\.client_type/);
+  assert.match(route, /const caseType='reclamation_client'/);
   assert.match(route, /case_link_status/);
   assert.match(route, /caseId\?201:202/);
   assert.match(route, /caseHeaders\.delete\('content-length'\)/);
