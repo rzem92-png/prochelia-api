@@ -54,6 +54,14 @@ The new binding preflight (#443) is **advisory only**. It cannot substitute for 
 - Unknown/expired mandatory controls block. Exceptions narrow, time-bound and human-approved.
 - Nexus Supra may recommend deterministic reversible remediation in Preview; it must not autonomously grant legal approval, move money, sanction/terminate users, delete/export personal data, change production, or launch a market.
 
+## Newly detected high-risk issue and Preview correction
+
+During deeper source inspection, the operational Copilot accepted caller-provided mission/context fields and could auto-resolve certain low-impact cases. Its business-action handler contained direct mission reassignment and reschedule writes. That path did not demonstrate complete resource ownership, availability, operation binding, idempotency, and transaction checks before mutation.
+
+**Corrective change now in this draft:** autonomous case execution is disabled; cases remain pending human review. The automatic execution function fails closed. Mission reassignment/rescheduling are queued rather than directly written, and queued provider actions remain non-executable pending an adapter with server-side revalidation. Regression tests and CI were added.
+
+This is a source-level safety improvement, not a proof that every route is safe. Human approval also must not be interpreted as permission to bypass ownership/state/transaction controls. The next required work is a server-side route integration and adversarial testing of case creation/approval, including cross-tenant IDs and malicious context.
+
 ## Conclusion
 
 This inventory identifies next integration targets but does **not** certify compliance, security, production readiness or legal adequacy. Mission and settlement gates remain closed. No merge, migration, deployment, real payment or market launch is authorized by this document.
