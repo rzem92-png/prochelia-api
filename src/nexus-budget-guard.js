@@ -1,0 +1,16 @@
+/* Nexus budget guard: forecast and alert recommendations only; no spend controls. */
+(function(root,factory){const api=factory();if(typeof module==="object"&&module.exports)module.exports=api;if(root)root.ProcheliaNexusBudgetGuard=api;})(typeof window!=="undefined"?window:globalThis,function(){
+"use strict";
+const ENV=new Set(["preview","development","test"]),ID=/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/,CAT=new Set(["cloud_infrastructure","ai_inference","storage","payments_fees","support_operations","marketing","other"]),PERIOD=new Set(["daily","weekly","monthly"]),MAX=1e12;
+function plain(v){return !!v&&typeof v==="object"&&!Array.isArray(v)&&(Object.getPrototypeOf(v)===Object.prototype||Object.getPrototypeOf(v)===null)&&Object.getOwnPropertySymbols(v).length===0&&Object.keys(Object.getOwnPropertyDescriptors(v)).every(k=>{const d=Object.getOwnPropertyDescriptor(v,k);return d.enumerable&&Object.hasOwn(d,"value")})}
+function deny(reason){return {ok:false,status:"UNKNOWN",mode:"BUDGET_ALERTS_ONLY",executionAllowed:false,humanReviewRequired:true,reason,items:[]}}
+function evaluate(input={}){
+ if(!plain(input)||!ENV.has(input.environment)||!(input.tenantId===null||(typeof input.tenantId==="string"&&ID.test(input.tenantId)))||!Array.isArray(input.budgets)||input.budgets.length>50)return deny("INPUT_INVALID");
+ const seen=new Set();for(const b of input.budgets){if(!plain(b)||!ID.test(b.id)||seen.has(b.id)||!CAT.has(b.category)||!PERIOD.has(b.period)||!Number.isSafeInteger(b.budgetMinor)||b.budgetMinor<1||b.budgetMinor>MAX||!Number.isSafeInteger(b.actualMinor)||b.actualMinor<0||b.actualMinor>MAX||!Number.isSafeInteger(b.forecastMinor)||b.forecastMinor<0||b.forecastMinor>MAX||! /^[A-Z]{3}$/.test(b.currency)||typeof b.forecastConfidence!=="number"||b.forecastConfidence<0||b.forecastConfidence>1)return deny("BUDGET_ITEM_INVALID");seen.add(b.id);}
+ const rank={CRITICAL:0,HIGH:1,WARNING:2,NORMAL:3};const items=input.budgets.map(b=>{const utilization=b.actualMinor/b.budgetMinor,forecastRatio=b.forecastMinor/b.budgetMinor;const level=utilization>=1||forecastRatio>=1.15?"CRITICAL":utilization>=.9||forecastRatio>=1?"HIGH":utilization>=.75||forecastRatio>=.9?"WARNING":"NORMAL";const action=level==="CRITICAL"?"HUMAN_FINANCIAL_REVIEW":level==="HIGH"?"URGENT_BUDGET_REVIEW":level==="WARNING"?"MONITOR_AND_REASSESS":"NO_ALERT";return {id:b.id,category:b.category,period:b.period,currency:b.currency,budgetMinor:b.budgetMinor,actualMinor:b.actualMinor,forecastMinor:b.forecastMinor,utilizationPercent:Math.round(utilization*10000)/100,forecastPercent:Math.round(forecastRatio*10000)/100,forecastConfidence:b.forecastConfidence,level,action,reviewRequired:level!=="NORMAL"};}).sort((a,b)=>rank[a.level]-rank[b.level]||a.id.localeCompare(b.id));
+ const counts={critical:items.filter(x=>x.level==="CRITICAL").length,high:items.filter(x=>x.level==="HIGH").length,warning:items.filter(x=>x.level==="WARNING").length,normal:items.filter(x=>x.level==="NORMAL").length};
+ const status=counts.critical?"CRITICAL":counts.high?"HIGH":counts.warning?"WARNING":items.length?"NORMAL":"NO_BUDGETS";
+ return {ok:true,status,environment:input.environment,tenantId:input.tenantId,itemCount:items.length,items,summary:counts,executionAllowed:false,humanReviewRequired:counts.critical+counts.high>0,mode:"BUDGET_ALERTS_ONLY"};
+}
+return Object.freeze({evaluate});
+});
