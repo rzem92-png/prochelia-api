@@ -1,0 +1,12 @@
+import test from "node:test";import assert from "node:assert/strict";import "../src/nexus-impact-estimate.js";
+const evaluate=globalThis.ProcheliaNexusImpactEstimate.evaluate;
+const item=(id="E1",amount=1200,currency="EUR",category="refund_estimate",minutes=15)=>({id,tenantId:"tenant-1",amountMinor:amount,currency,category,minutes,severity:"high",evidenceId:"EVID-1"});
+const base={environment:"preview",tenantId:"tenant-1",caseId:"CASE-1",incidentId:"INC-1",items:[item()]};
+test("aggregates estimate totals and minutes without financial authority",()=>{const r=evaluate(base);assert.equal(r.ok,true);assert.equal(r.totals[0].totalEstimateMinor,1200);assert.equal(r.estimatedAffectedMinutes,15);assert.equal(r.executionAllowed,false);assert.equal(r.humanReviewRequired,true);});
+test("separates currencies instead of converting or mixing",()=>{const r=evaluate({...base,items:[item("A",100,"EUR"),item("B",500,"USD")]});assert.equal(r.currencyCount,2);assert.equal(r.totals.length,2);});
+test("groups costs by category",()=>{const r=evaluate({...base,items:[item("A",100,"EUR","refund_estimate"),item("B",200,"EUR","service_credit_estimate")]});assert.deepEqual(r.totals[0].categoryTotals,{refund_estimate:100,service_credit_estimate:200});});
+test("rejects cross-tenant estimates and duplicate item identifiers",()=>{assert.equal(evaluate({...base,items:[{...item(),tenantId:"tenant-2"}]}).ok,false);assert.equal(evaluate({...base,items:[item("A"),item("A")]}).ok,false);});
+test("rejects malformed currency, amounts, and evidence references",()=>{for(const patch of [{currency:"EURO"},{amountMinor:-1},{amountMinor:1.2},{amountMinor:Number.MAX_SAFE_INTEGER},{evidenceId:""}])assert.equal(evaluate({...base,items:[{...item(),...patch}]}).ok,false);});
+test("production, missing identifiers, and excessive input fail closed",()=>{assert.equal(evaluate({...base,environment:"production"}).ok,false);assert.equal(evaluate({...base,caseId:null}).ok,false);assert.equal(evaluate({...base,items:Array(101).fill(item())}).ok,false);});
+test("empty inputs yield explicit no-estimate result",()=>{const r=evaluate({...base,items:[]});assert.equal(r.status,"NO_ESTIMATE");assert.equal(r.totals.length,0);});
+test("output is sanitized and disclaimer prevents accounting interpretation",()=>{const r=evaluate({...base,customerData:"private"});assert.doesNotMatch(JSON.stringify(r),/private|customerData/);assert.match(r.disclaimer,/not accounting entries/);});
