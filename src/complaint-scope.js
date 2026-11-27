@@ -9,7 +9,7 @@ const OUTCOMES = new Set(["clarification", "correction", "reschedule", "review",
 const HIGH_RISK_CATEGORIES = new Set(["property_damage", "safety_concern", "privacy_data", "discrimination",
   "fraude", "paiement_conteste", "remboursement_important", "litige_juridique", "incident_majeur",
   "violation_donnees", "decision_contractuelle", "conflit_reglementaire", "securite_domicile"]);
-const ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-_]{0,127}$/;
+const ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 const REFERENCE_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,79}$/;
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 const SEVERITIES = new Set(["LOW", "MEDIUM", "HIGH", "CRITICAL"]);
