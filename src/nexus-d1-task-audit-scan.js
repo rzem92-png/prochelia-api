@@ -11,6 +11,7 @@
   const ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
   const ENVS = new Set(["preview", "development", "test"]);
   const STATES = ["RECEIVED", "PLANNED", "AUTHORIZED", "QUEUED", "RUNNING", "VERIFYING", "RETRY_WAIT", "COMPLETED", "FAILED", "ESCALATED", "CANCELLED"];
+  const ERROR_CODES = new Set(["TASK_NOT_FOUND", "TASK_SCOPE_MISMATCH", "TASK_EVENT_LIMIT", "TASK_SNAPSHOT_INVALID", "TASK_EVENT_INTEGRITY_FAILED", "AUDIT_HEAD_NOT_FOUND", "AUDIT_HEAD_INVALID", "AUDIT_EVENT_LIMIT", "AUDIT_EVENT_INTEGRITY_FAILED", "AUDIT_HEAD_MISMATCH", "TASK_AUDIT_LINK_MISSING", "AUDIT_VERIFY_FAILED", "D1_READ_FAILED", "INPUT_INVALID", "AUDIT_API_UNAVAILABLE"]);
   const MAX_SCAN = 50;
   function fail(error, extra = {}) { return { ok: false, error, ...extra, executionAllowed: false }; }
   function plain(value) {
@@ -22,6 +23,10 @@
       Object.keys(descriptors).every(key => descriptors[key].enumerable && Object.hasOwn(descriptors[key], "value"));
   }
   function scopeKey(tenantId) { return tenantId ?? "__GLOBAL__"; }
+  function safeErrorCode(result) {
+    const code = plain(result) && typeof result.error === "string" ? result.error : "";
+    return ERROR_CODES.has(code) ? code : "PAIR_VERIFICATION_FAILED";
+  }
   async function scanTenantTaskAudit(input = {}) {
     if (!plain(input) || !input.DB || typeof input.DB.prepare !== "function" ||
         !Object.hasOwn(input, "tenantId") || input.tenantId === undefined || (input.tenantId !== null && !ID.test(input.tenantId)) ||
@@ -55,15 +60,25 @@
         findings.push({ taskId: typeof taskId === "string" ? taskId.slice(0, 128) : null, code: "SNAPSHOT_SCOPE_OR_ID_INVALID" });
         continue;
       }
+      if (!Object.hasOwn(byState, row.state)) {
+        failed++;
+        findings.push({ taskId, code: "SNAPSHOT_STATE_INVALID" });
+        continue;
+      }
+      if (!Number.isSafeInteger(Number(row.revision)) || Number(row.revision) < 1) {
+        failed++;
+        findings.push({ taskId, code: "SNAPSHOT_REVISION_INVALID" });
+        continue;
+      }
       let result;
       try {
         result = await readerApi.loadTaskAuditPair({ DB: input.DB, taskId, tenantId, environment, auditApi: input.auditApi });
       } catch { result = null; }
       if (!plain(result) || result.ok !== true || result.verified !== true || result.executionAllowed !== false ||
           !plain(result.task) || result.task.taskId !== taskId || result.task.tenantId !== tenantId || result.task.environment !== environment ||
-          result.task.state !== row.state || Number(result.task.revision) !== Number(row.revision)) {
+          !Object.hasOwn(byState, result.task.state) || result.task.state !== row.state || Number(result.task.revision) !== Number(row.revision)) {
         failed++;
-        findings.push({ taskId, code: plain(result) && typeof result.error === "string" ? result.error : "PAIR_VERIFICATION_FAILED" });
+        findings.push({ taskId, code: safeErrorCode(result) });
         continue;
       }
       verified++;
