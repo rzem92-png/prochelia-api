@@ -41,7 +41,7 @@ test("financial approval quorum policy cannot be weakened below two and rejects 
 test("financial quorum override may strengthen but never weaken the two-person floor",()=>{
  const strengthened={...policy,approvalQuorumByClass:{FINANCIAL:3}};
  const two=evaluateAction(strengthened,{...financial,approvals:[approval("human-1"),approval("human-2")]});
- assert.equal(two.allowed,false);assert.equal(two.decision,"REQUIRES_APPROVAL");assert.match(two.reason,/2\\/3/);
+ assert.equal(two.allowed,false);assert.equal(two.decision,"REQUIRES_APPROVAL");assert.ok(two.reason.includes("2/3"));
  const three=evaluateAction(strengthened,{...financial,approvals:[approval("human-1"),approval("human-2"),approval("human-3")]});
  assert.equal(three.allowed,true);assert.equal(three.approvalIds.length,3);
 });
