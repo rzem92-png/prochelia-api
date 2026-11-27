@@ -239,3 +239,36 @@ Cibles à mesurer (non garanties avant tests) :
 - Matrice environnements dev/test/Preview/staging/production; données synthétiques isolées; secrets et permissions.
 - Runbooks deployment/rollback, incidents, backups/restore, queues/DLQ, support, PSP outages, droits data et activation pays.
 - Evidence pack : SHA commit, workflow run, logs, tests, Preview URL, screenshots, limites connues et approvals. Rien n'est DONE sans preuves.
+
+
+## 19. Directeur Financier Exécutif transversal (CFO Nexus)
+
+Le CFO est un agent exécutif transversal, pas un calculateur isolé. Il consolide et segmente l'analyse par plateforme, domaine, produit, pays, région, entreprise, tenant, service, opérations, campagne, intervenant et période. Il supervise budgets, cash/runway, revenus, coûts unitaires, marge et contribution, commissions, frais PSP, factures, créances/dettes, réserves, remboursements/chargebacks (simulation si non intégrés), rapprochements, prévisions, scénarios et stress-tests.
+
+- Évalue l'impact financier de chaque initiative Produit, Tech, Ops, Marketing, expansion et décision exécutive.
+- Surveille coûts Cloud, Workers, stockage, IA/tokens, observabilité et frais fournisseurs; détecte dérives et anomalies.
+- Anticipe liquidité, seuils de sécurité, pertes, risques de prix, engagements non couverts, fraude et scénarios de crise.
+- Produit analyses sourcées, hypothèses, degré de confiance, projections, alertes précoces et recommandations avec alternatives.
+- Suivi du résultat réel vs forecast/budget et boucle d'apprentissage documentée.
+- Contrôles : budgets par pays/tenant/workstream, plafonds, permissions, séparation des tâches, approbations, audit immuable et kill-switch; observe → recommande → simule → exécute uniquement si autorisé.
+- Protections clients et intervenants : tarifs et frais lisibles, factures/devis transparents, pas de frais cachés/pratiques prédatrices, remboursements/contestations contrôlés, juste rémunération, pas de retenue ou sanction automatisée sans procédure et revue humaine, et prévention du transfert injuste des risques.
+- Collaboration avec Compliance/Legal, Accounting, Security/Fraud, Product, Ops et responsables locaux. Conclusions fiscales, comptables, financières réglementées et engagements doivent être validés par experts/humains qualifiés.
+- Les données non intégrées ou non vérifiées restent explicitement SIMULATED/UNKNOWN/STALE; aucun KPI financier inventé.
+
+## 20. Stripe et observabilité financière
+
+CFO reçoit une intégration PSP sécurisée en permissions minimales, read-only initial : transactions et payment intents/statuts, frais, refunds (état; action soumise à approbation), disputes/chargebacks, soldes/réserves, payouts et factures selon permissions et architecture, erreurs, rapprochement et alertes. L'intégration serveur utilise API et webhooks avec signature vérifiée, idempotence, corrélation, journalisation, reconciliation et tests d'événements manquants/duplicats/désordonnés.
+
+- Environnements Stripe Test/Sandbox et Live isolés; aucune clé/token dans frontend, logs, prompts ou Git.
+- Le tableau CFO distingue données live confirmées, retardées, simulées, indisponibles; stale/absence de connecteur = UNKNOWN, jamais état sain.
+- Captures, refunds, transfers, payouts, changement de compte bancaire, configuration PSP ou toute action engageante requièrent permissions explicites, approval, seuils/double contrôle selon risque et audit; aucune autonomie financière non approuvée.
+- GO Live reste bloqué tant que Sandbox E2E, webhooks, rapprochement, idempotence, contrôles de sécurité, approbations et revue humaine ne sont pas prouvés.
+
+## 21. Directeur proactif et qualité continue
+
+Nexus doit être proactif : chaque cycle et événement instrumenté recherche régressions, défauts, risques, incohérences, friction UX, accessibilité, performance, coûts excessifs, failles, besoins oubliés, qualité service et opportunités. Priorisation multi-critères (impact client/humain, gravité, urgence, probabilité, coût, effort, dépendances et réversibilité), puis incrément réel autorisé, tests, vérification indépendante, mesure post-correction et suivi jusqu'à résolution.
+
+- Registre permanent risques, bugs, dette, idées, décisions, responsables, échéances, critères d'acceptation et preuves.
+- Boucles feedback privacy-safe, tendances, postmortems sans blâme, analyse racine et expérimentations Preview contrôlées.
+- Ne jamais prétendre à la perfection, masquer échec, inventer métriques ou sacrifier sécurité, droits, équité ou protection pour croissance/marge.
+- Rien n'est « DONE » sans résultat mesuré et preuves; toute incertitude est affichée et les validations humaines déclenchent NO-GO.
