@@ -70,7 +70,7 @@ test("reconstructs scoped D1 task state and verifies the complete audit hash cha
   assert.equal(result.verified, true);
   assert.equal(result.executionAllowed, false);
   assert.deepEqual(result.task, JSON.parse(JSON.stringify(f.task)));
-  assert.deepEqual(result.ledger, f.ledger);
+  assert.deepEqual(result.ledger, JSON.parse(JSON.stringify(f.ledger)));
   assert.equal(result.proof.taskEvents, 1);
   assert.equal(result.proof.auditEvents, 1);
 });
