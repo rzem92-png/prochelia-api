@@ -1,0 +1,21 @@
+/* Nexus cross-functional incident impact assessment: bounded aggregate hints only.
+ * No financial/legal conclusions, persistence, mutations, or execution.
+ */
+(function(root,factory){const api=factory();if(typeof module==="object"&&module.exports)module.exports=api;if(root)root.ProcheliaNexusImpactAssessment=api;})(typeof window!=="undefined"?window:globalThis,function(){
+"use strict";
+const ENVS=new Set(["preview","development","test"]),ID=/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/,DOMAINS=new Set(["quality","customer_experience","provider_operations","scheduling","continuity","security","compliance","finance"]),LEVELS=new Set(["low","moderate","high","critical"]);
+function plain(v){return !!v&&typeof v==="object"&&!Array.isArray(v)&&(Object.getPrototypeOf(v)===Object.prototype||Object.getPrototypeOf(v)===null)&&Object.getOwnPropertySymbols(v).length===0&&Object.keys(Object.getOwnPropertyDescriptors(v)).every(k=>{const d=Object.getOwnPropertyDescriptor(v,k);return d.enumerable&&Object.hasOwn(d,"value")})}
+function invalid(){return {ok:false,status:"UNKNOWN",mode:"CROSS_FUNCTIONAL_IMPACT_HINTS",executionAllowed:false,humanReviewRequired:true,reason:"INPUT_INVALID",assessment:null}}
+function evaluate(input={}){
+ if(!plain(input)||!ENVS.has(input.environment)||!(input.tenantId===null||(typeof input.tenantId==="string"&&ID.test(input.tenantId)))||!Array.isArray(input.incidentIds)||input.incidentIds.length<1||input.incidentIds.length>50||input.incidentIds.some(x=>!ID.test(x))||new Set(input.incidentIds).size!==input.incidentIds.length||!Array.isArray(input.impacts)||input.impacts.length>100)return invalid();
+ const ids=new Set();for(const i of input.impacts){if(!plain(i)||!ID.test(i.id)||ids.has(i.id)||i.tenantId!==input.tenantId||!input.incidentIds.includes(i.incidentId)||!DOMAINS.has(i.domain)||!ID.test(i.impactCode)||!LEVELS.has(i.level)||!Number.isInteger(i.affectedCount)||i.affectedCount<0||i.affectedCount>10000000||!Array.isArray(i.evidenceIds)||i.evidenceIds.length>20||i.evidenceIds.some(x=>!ID.test(x))||new Set(i.evidenceIds).size!==i.evidenceIds.length||((i.amountMinor!==null)&&( !Number.isSafeInteger(i.amountMinor)||i.amountMinor<0||i.amountMinor>1000000000000))||((i.amountMinor===null)!==(i.currency===null))||(i.currency!==null&&!/^[A-Z]{3}$/.test(i.currency)))return invalid();ids.add(i.id);}
+ const byDomain=new Map(),byCurrency=new Map();for(const i of input.impacts){let d=byDomain.get(i.domain);if(!d){d={domain:i.domain,impactCount:0,affectedCount:0,levels:{low:0,moderate:0,high:0,critical:0},incidentSet:new Set(),evidenceCount:0};byDomain.set(i.domain,d);}d.impactCount++;d.affectedCount+=i.affectedCount;d.levels[i.level]++;d.incidentSet.add(i.incidentId);d.evidenceCount+=i.evidenceIds.length;
+ if(i.amountMinor!==null){let c=byCurrency.get(i.currency);if(!c){c={currency:i.currency,estimatedExposureMinor:0,impactCount:0};byCurrency.set(i.currency,c);}if(!Number.isSafeInteger(c.estimatedExposureMinor+i.amountMinor))return invalid();c.estimatedExposureMinor+=i.amountMinor;c.impactCount++;}
+ }
+ const domains=[...byDomain.values()].map(d=>({domain:d.domain,impactCount:d.impactCount,affectedCount:d.affectedCount,incidentCount:d.incidentSet.size,levels:d.levels,evidenceCount:d.evidenceCount,reviewRequired:true})).sort((a,b)=>b.levels.critical-a.levels.critical||b.levels.high-a.levels.high||b.affectedCount-a.affectedCount);
+ const financial=[...byCurrency.values()].map(c=>({...c,classification:"ESTIMATED_EXPOSURE_NOT_LOSS"})).sort((a,b)=>a.currency.localeCompare(b.currency));
+ const status=domains.some(d=>d.levels.critical)?"CRITICAL":domains.some(d=>d.levels.high)?"HIGH_IMPACT":domains.length?"ASSESSMENT_AVAILABLE":"NO_IMPACT_DATA";
+ return {ok:true,status,environment:input.environment,tenantId:input.tenantId,incidentCount:input.incidentIds.length,impactRecordCount:input.impacts.length,domains,financial,executionAllowed:false,humanReviewRequired:true,assessment:{crossFunctionalReviewRequired:domains.length>1,financialReviewRequired:financial.length>0,securityOrComplianceReviewRequired:domains.some(d=>["security","compliance"].includes(d.domain)),humanReviewRequired:true,executionAllowed:false},mode:"CROSS_FUNCTIONAL_IMPACT_HINTS"};
+}
+return Object.freeze({evaluate});
+});
