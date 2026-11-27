@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import "../src/nexus-compliance-gate.js";
 const evaluate=globalThis.ProcheliaNexusComplianceGate.evaluate;
 const now="2026-11-27T21:00:00.000Z";
-const validEvidence={evidenceId:"evidence-1",sourceId:"official-source-1",verifiedAt:"2026-11-27T20:00:00.000Z",expiresAt:"2027-01-01T00:00:00.000Z"};
+const validEvidence={evidenceId:"evidence-1",sourceId:"official-source-1",profileId:"FR-PLATFORM-SERVICES",controlId:"identity",sourceVersion:"sources-v1",verifiedAt:"2026-11-27T20:00:00.000Z",expiresAt:"2027-01-01T00:00:00.000Z"};
 const control=(id,status="PASS",mandatory=true,extra={})=>({controlId:id,status,mandatory,...(status==="PASS"?{evidence:structuredClone(validEvidence)}:{}),...extra});
 const base=()=>({profileId:"FR-PLATFORM-SERVICES",profileVersion:"v1",countryCode:"FR",activityCode:"home-services",marketRole:"intermediary",now,sourceVersion:"sources-v1",controls:[control("identity"),control("price-transparency")]});
 test("current evidenced controls remain blocked pending human/legal approval",()=>{const r=evaluate(base());assert.equal(r.ok,true);assert.equal(r.decision,"READY_FOR_HUMAN_REVIEW");assert.equal(r.launchAllowed,false);assert.equal(r.executionAllowed,false);assert.equal(r.counts.pass,2);});
@@ -19,3 +19,9 @@ test("expired or wrong-scope exception blocks",()=>{const i=base();i.controls[0]
 test("profile and transaction jurisdiction mismatch rejected",()=>{const i=base();i.target={countryCode:"DZ",activityCode:"home-services",marketRole:"intermediary"};assert.equal(evaluate(i).reason,"PROFILE_SCOPE_MISMATCH");});
 test("malformed controls and invalid clock fail closed",()=>{assert.equal(evaluate({...base(),controls:[{}]}).decision,"BLOCKED");assert.equal(evaluate({...base(),now:"invalid"}).decision,"BLOCKED");});
 test("no evidence details or sensitive data echoed in decision",()=>{const i=base();i.controls[0].evidence.privateDocument="secret";const r=evaluate(i);assert.equal(JSON.stringify(r).includes("secret"),false);});
+
+test("duplicate control IDs block to prevent ambiguous evidence",()=>{const i=base();i.controls[1].controlId=i.controls[0].controlId;assert.equal(evaluate(i).reason,"CONTROL_INVALID");});
+test("missing source version blocks",()=>{const i=base();delete i.sourceVersion;assert.equal(evaluate(i).reason,"INPUT_INVALID");});
+test("evidence cannot be reused across profiles or controls",()=>{const i=base();i.controls[0].evidence.profileId="DZ-PROFILE";assert.equal(evaluate(i).reason,"PASS_EVIDENCE_MISSING_STALE_OR_INVALID");const j=base();j.controls[0].evidence.controlId="other-control";assert.equal(evaluate(j).reason,"PASS_EVIDENCE_MISSING_STALE_OR_INVALID");});
+test("evidence expiry must be after verification",()=>{const i=base();i.controls[0].evidence.expiresAt=i.controls[0].evidence.verifiedAt;assert.equal(evaluate(i).reason,"PASS_EVIDENCE_MISSING_STALE_OR_INVALID");});
+test("evidence source version must match the evaluated policy",()=>{const i=base();i.controls[0].evidence.sourceVersion="old-policy";assert.equal(evaluate(i).reason,"PASS_EVIDENCE_MISSING_STALE_OR_INVALID");});
