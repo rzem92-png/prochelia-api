@@ -125,6 +125,18 @@ test("rejects omitted tenant scope before any D1 read", async () => {
   assert.equal(f.DB.calls.length, 0);
 });
 
+test("fails closed on a D1 read exception", async () => {
+  const f = await fixture();
+  f.DB.prepare = () => { throw new Error("db unavailable"); };
+  assert.equal((await reader(input(f))).error, "D1_READ_FAILED");
+});
+
+test("rejects malformed snapshot JSON", async () => {
+  const f = await fixture();
+  f.rows.snapshot = { ...f.rows.snapshot, snapshot_json: "{invalid" };
+  assert.equal((await reader(input(f))).error, "TASK_SNAPSHOT_INVALID");
+});
+
 test("supports explicitly scoped global tasks without permitting Production", async () => {
   const f = await fixture({ tenantId: null, taskId: "global-reader-task-01" });
   const result = await reader(input(f));
