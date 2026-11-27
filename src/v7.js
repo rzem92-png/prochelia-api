@@ -941,56 +941,16 @@ function v7CheckQr(
 // PAIEMENT
 // =====================================================
 
-function v7CheckPayment(
-  payment
-) {
-
-  if (!payment) {
-
-    return v7Result(
-      false,
-      {},
-      "Paiement absent"
-    );
-  }
-
-  const status =
-    String(
-      payment.status ||
-      ""
-    ).toUpperCase();
-
-  const confirmed = [
-    "PAID",
-    "SUCCEEDED",
-    "SUCCESS",
-    "COMPLETED"
-  ];
-
-  if (
-    !confirmed.includes(
-      status
-    )
-  ) {
-
-    return v7Result(
-      false,
-      {
-        status:
-          payment.status ||
-          "UNKNOWN"
-      },
-      "Paiement non confirmé par le prestataire"
-    );
-  }
-
-  return v7Result(
-    true,
-    {
-      paymentConfirmed:
-        true
-    }
-  );
+function v7CheckPayment(payment) {
+  if (!payment) return v7Result(false, {}, "Paiement absent");
+  const claimedStatus = String(payment.status || "UNKNOWN").toUpperCase();
+  // Caller-provided status is never settlement evidence.
+  return v7Result(false, {
+    claimedStatus,
+    paymentConfirmed: false,
+    authoritative: false,
+    verificationRequired: "PSP_WEBHOOK_OR_API_AND_LEDGER_RECONCILIATION"
+  }, "Statut déclaratif non fiable : confirmation requiert une preuve PSP vérifiée et une réconciliation du registre");
 }
 
 
