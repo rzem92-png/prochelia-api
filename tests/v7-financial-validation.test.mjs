@@ -52,3 +52,10 @@ test("payment validator never trusts caller-provided successful status", () => {
     assert.match(result.error, /preuve PSP vérifiée/);
   }
 });
+
+test("strict numeric validators reject booleans, arrays, and objects", () => {
+  for (const invalid of [true, false, [], {}, [10], { value: 10 }]) {
+    assert.equal(procheliaV7.checkPricing({ amount: invalid, minimum: 0 }).ok, false);
+    assert.equal(procheliaV7.calculateFinance({ clientAmount: invalid }).ok, false);
+  }
+});
