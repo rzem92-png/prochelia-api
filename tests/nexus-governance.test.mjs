@@ -73,6 +73,6 @@ test("verified-hash gateway rejects missing or mismatched hashes and accepts onl
  const valid={...action,actionHash:hash,approvals:[approval("human-1","approval-1",{actionHash:hash}),approval("human-2","approval-2",{actionHash:hash})]};
  const accepted=await evaluateActionWithVerifiedHash(policy,valid);
  assert.equal(accepted.allowed,true);assert.equal(accepted.code,"APPROVED_ACTION_ALLOWED");
- assert.equal((await evaluateActionWithVerifiedHash(policy,action)).code,"ACTION_HASH_REQUIRED");
+ assert.equal((await evaluateActionWithVerifiedHash(policy,{...action,actionHash:undefined})).code,"ACTION_HASH_REQUIRED");
  assert.equal((await evaluateActionWithVerifiedHash(policy,{...valid,payload:{amount:126,currency:"EUR"}})).code,"ACTION_HASH_MISMATCH");
 });
