@@ -11,12 +11,13 @@ function object(value){return !!value&&typeof value==="object"&&!Array.isArray(v
 function validatePolicy(policy){
  if(!object(policy)||!nonEmpty(policy.version)||!MODES.has(policy.mode)||!Array.isArray(policy.allowedEnvironments)||!policy.allowedEnvironments.length||
     !object(policy.killSwitch)||typeof policy.killSwitch.global!=="boolean"||!object(policy.killSwitch.agents)||!object(policy.killSwitch.tools)||!object(policy.killSwitch.tenants)||!object(policy.killSwitch.workflows)||
-    !object(policy.agents)||!Array.isArray(policy.approverIds))return false;
+    !object(policy.agents)||!Array.isArray(policy.approverIds)||(policy.consumedApprovalIds!==undefined&&(!Array.isArray(policy.consumedApprovalIds)||!policy.consumedApprovalIds.every(nonEmpty))))return false;
  if(policy.approvalRequiredActionClasses!==undefined&&(!Array.isArray(policy.approvalRequiredActionClasses)||!policy.approvalRequiredActionClasses.every(x=>ACTION_CLASSES.has(x))))return false;
  if(policy.approvalRequiredActions!==undefined&&(!Array.isArray(policy.approvalRequiredActions)||!policy.approvalRequiredActions.every(nonEmpty)))return false;
  if(policy.approvalQuorumByClass!==undefined&&(!object(policy.approvalQuorumByClass)||!Object.values(policy.approvalQuorumByClass).every(x=>Number.isSafeInteger(x)&&x>=1&&x<=5)))return false;
  for(const agent of Object.values(policy.agents)){
-  if(!object(agent)||typeof agent.enabled!=="boolean"||!Array.isArray(agent.allowedTools)||!Array.isArray(agent.allowedActions)||!Array.isArray(agent.allowedScopes)||!Array.isArray(agent.allowedTenants)||!Array.isArray(agent.allowedEnvironments)||typeof agent.globalTaskAllowed!=="boolean"||!object(agent.budget)||!BUDGET_KEYS.every(key=>isCounter(agent.budget[key])))return false;
+  if(!object(agent)||typeof agent.enabled!=="boolean"||!Array.isArray(agent.allowedTools)||!Array.isArray(agent.allowedActions)||!Array.isArray(agent.allowedScopes)||!Array.isArray(agent.allowedTenants)||!Array.isArray(agent.allowedEnvironments)||!object(agent.actionGrants)||typeof agent.globalTaskAllowed!=="boolean"||!object(agent.budget)||!BUDGET_KEYS.every(key=>isCounter(agent.budget[key])))return false;
+  for(const grant of Object.values(agent.actionGrants)){if(!object(grant)||!Array.isArray(grant.classes)||!grant.classes.length||!grant.classes.every(x=>ACTION_CLASSES.has(x))||!Array.isArray(grant.scopes)||!grant.scopes.length||!grant.scopes.every(nonEmpty))return false}
  }
  return true;
 }
@@ -33,7 +34,7 @@ function approvalQuorum(policy,actionClass){
 }
 function validApproval(item,policy,request,now){
  if(!object(item)||item.approved!==true||!nonEmpty(item.approvalId)||!nonEmpty(item.approverId)||
-    !policy.approverIds.includes(item.approverId)||item.actionHash!==request.actionHash||!nonEmpty(request.actionHash)||!/^[a-f0-9]{64}$/i.test(request.actionHash)||
+    !policy.approverIds.includes(item.approverId)||item.actionHash!==request.actionHash||!nonEmpty(request.actionHash)||!/^[a-f0-9]{64}$/i.test(request.actionHash)||(policy.consumedApprovalIds||[]).includes(item.approvalId)||
     item.taskId!==request.taskId||item.tenantId!==(request.tenantId??null)||item.environment!==request.environment||
     item.toolId!==request.toolId||item.action!==request.action||item.consumed===true||item.consumedAt!=null)return false;
  const expiresAt=expiry(item.expiresAt);
@@ -49,7 +50,9 @@ function evaluateAction(policy,request){
  const agent=policy.agents[request.agentId];
  if(!agent||agent.enabled!==true)return deny("AGENT_DISABLED_OR_UNKNOWN","Agent absent ou désactivé.",policy,request);
  if(!agent.allowedTools.includes(request.toolId)||!agent.allowedActions.includes(request.action))return deny("TOOL_OR_ACTION_NOT_GRANTED","Outil ou action non autorisé pour cet agent.",policy,request);
- if(!agent.allowedScopes.includes(request.scope))return deny("SCOPE_DENIED","Scope non autorisé pour cet agent.",policy,request);
+ const grant=agent.actionGrants[request.toolId+":"+request.action];
+ if(!grant||!grant.classes.includes(request.actionClass))return deny("ACTION_CLASS_NOT_GRANTED","Classe de risque non autorisée pour cet outil/action.",policy,request);
+ if(!agent.allowedScopes.includes(request.scope)||!grant.scopes.includes(request.scope))return deny("SCOPE_DENIED","Scope non autorisé pour cet agent et cette action.",policy,request);
  if(!agent.allowedEnvironments.includes(request.environment))return deny("AGENT_ENVIRONMENT_DENIED","Environnement non autorisé pour cet agent.",policy,request);
  if(request.tenantId==null){if(agent.globalTaskAllowed!==true||request.scope!=="global")return deny("GLOBAL_SCOPE_DENIED","Les tâches globales ne sont pas autorisées pour cet agent.",policy,request)}
  else if(!nonEmpty(request.tenantId)||!agent.allowedTenants.includes(request.tenantId))return deny("TENANT_SCOPE_DENIED","Tenant absent ou hors périmètre autorisé.",policy,request);
