@@ -51,7 +51,7 @@
 
   async function loadTaskAuditPair(input = {}) {
     if (!plain(input) || !input.DB || typeof input.DB.prepare !== "function" ||
-        !ID.test(input.taskId || "") || (input.tenantId !== null && input.tenantId !== undefined && !ID.test(input.tenantId)) ||
+        !ID.test(input.taskId || "") || !Object.hasOwn(input, "tenantId") || (input.tenantId !== null && input.tenantId !== undefined && !ID.test(input.tenantId)) ||
         !ENVS.has(input.environment)) return fail("INPUT_INVALID");
     const tenantId = input.tenantId ?? null, environment = input.environment, scope = tenantScope(tenantId);
     const auditApi = input.auditApi ?? globalThis.ProcheliaNexusAuditLedger;
