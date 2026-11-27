@@ -106,8 +106,14 @@
     if (!auditApi || typeof auditApi.appendAuditEvent !== "function") return fail("AUDIT_API_UNAVAILABLE");
     const mapped = mapTaskLifecycleEvent(task, event);
     if (!mapped.ok) return mapped;
-    const appended = await auditApi.appendAuditEvent(ledger, mapped.auditEvent);
-    if (!appended || appended.ok !== true) return fail("AUDIT_APPEND_FAILED", { cause: appended?.error ?? "UNKNOWN" });
+    let appended;
+    try {
+      appended = await auditApi.appendAuditEvent(ledger, mapped.auditEvent);
+    } catch (error) {
+      return fail("AUDIT_APPEND_FAILED", { cause: "THROWN_ERROR" });
+    }
+    if (!object(appended) || appended.ok !== true || !object(appended.ledger) ||
+        (appended.duplicate !== true && !object(appended.event))) return fail("AUDIT_APPEND_FAILED", { cause: appended?.error ?? "RESULT_INVALID" });
     return { ok: true, duplicate: appended.duplicate === true, ledger: appended.ledger, auditEvent: appended.event ?? mapped.auditEvent };
   }
   return Object.freeze({ mapTaskLifecycleEvent, appendTaskAuditEvent });
