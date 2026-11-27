@@ -1,0 +1,11 @@
+import test from "node:test";import assert from "node:assert/strict";import "../src/nexus-event-routing-policy.js";
+const evaluate=globalThis.ProcheliaNexusRoutePolicy.evaluate;
+const input=(eventType="incident.opened",requestedConsumers=[])=>({environment:"preview",tenantId:"tenant-1",eventId:"EV-1",traceId:"TR-1",eventType,requestedConsumers});
+test("proposes allowed bounded routes but never delivers",()=>{const r=evaluate(input());assert.equal(r.ok,true);assert.ok(r.routeCount<=5);assert.equal(r.deliveryAllowed,false);assert.equal(r.executionAllowed,false);assert.equal(r.tenantIsolationRequired,true);});
+test("explicit consumer subset accepted and deterministic sorted",()=>{const r=evaluate(input("incident.opened",["impact","incident"]));assert.deepEqual(r.routes.map(x=>x.consumer),["impact","incident"].sort());});
+test("rejects consumers not authorized for event type",()=>{assert.equal(evaluate(input("incident.opened",["finance"])).reason,"ROUTE_NOT_ALLOWED");});
+test("unknown event, invalid environment and tenant fail closed",()=>{assert.equal(evaluate(input("invented.event")).ok,false);assert.equal(evaluate({...input(),environment:"production"}).ok,false);assert.equal(evaluate({...input(),tenantId:""}).ok,false);});
+test("duplicate and excessive consumers rejected",()=>{assert.equal(evaluate(input("incident.opened",["incident","incident"])).ok,false);assert.equal(evaluate(input("incident.opened",["incident","correlation","root_cause","impact","case_linkage","operations"])).ok,false);});
+test("event and trace identifiers required",()=>{assert.equal(evaluate({...input(),eventId:""}).ok,false);assert.equal(evaluate({...input(),traceId:""}).ok,false);});
+test("no routes for empty consumer list when event has no registered routes",()=>{const r=evaluate(input("alert.created",["alerting"]));assert.equal(r.ok,true);assert.equal(r.routeCount,1);assert.equal(r.routes[0].deliveryAllowed,false);});
+test("route output only exposes safe IDs and routing metadata",()=>{const p=input();p.customerName="private";const r=evaluate(p);assert.doesNotMatch(JSON.stringify(r),/customerName|private/);});
