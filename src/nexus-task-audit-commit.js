@@ -46,7 +46,7 @@
     try { audited = await bridge.appendTaskAuditEvent(input.ledger, transition.task, event, audit); }
     catch { return fail("AUDIT_APPEND_FAILED", { cause: "THROWN_ERROR" }); }
     if (!plain(audited) || audited.ok !== true || !plain(audited.ledger) || !plain(audited.auditEvent))
-      return fail("AUDIT_APPEND_FAILED", { cause: audited?.error ?? "RESULT_INVALID" });
+      return fail("AUDIT_APPEND_FAILED", { cause: audited?.cause ?? audited?.error ?? "RESULT_INVALID" });
     const priorRevision = input.ledger.revision;
     const expectedRevision = audited.duplicate === true ? priorRevision : priorRevision + 1;
     if (audited.ledger.revision !== expectedRevision || (audited.duplicate === true ? audited.ledger.headHash !== input.ledger.headHash : audited.ledger.headHash === input.ledger.headHash) ||
