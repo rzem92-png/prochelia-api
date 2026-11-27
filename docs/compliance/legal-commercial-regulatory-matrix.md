@@ -197,6 +197,33 @@ Every gate is fail-closed if policy or evidence is unknown.
 - Localized terms/notices/support.
 - Limited pilot, monitoring and exit/kill switch.
 
+## 7. Algeria launch profile — first non-EU market (legal review required)
+
+### E-commerce provider eligibility and site requirements
+Before enabling an Algeria-facing offer or checkout, determine whether PROCHÉLIA or each provider qualifies as an e-provider under Law 18-05 and which party must meet registration/site obligations. The launch gate must verify, as applicable:
+- Commercial registration or artisan registration and activity scope.
+- National e-provider register / CNRC verification and required domain deposit.
+- Site/domain requirements (including .com.dz) and hosting requirements under the current law and implementing texts; validate current applicability with Algerian counsel and local authorities before selecting infrastructure.
+- Provider identity, NIF, RC/artisan identifier, physical and electronic contact, offer/service characteristics, TTC price, availability, fees/delivery, payment, warranty/after-sales, termination, complaint, refund/return and withdrawal information where applicable.
+- Electronic offer preceding the electronic contract; consumer review/correction of order details; explicit confirmation of contract; durable order/contract evidence.
+- Consumer data protection, marketing consent, advertising identification and promotion terms.
+- Local banking/payment-rail rules, currency controls and cross-border payment constraints. Do not assume Stripe or EU PSP flows can be used for Algerian transactions; obtain confirmation from licensed local banks/payment providers and counsel.
+- Jurisdiction, contracting-party role, tax/invoicing, dispute handling, language, insurance, service qualifications and worker classification.
+
+### Algeria release controls
+- Market profile remains **BLOCKED** until a local legal memorandum confirms the platform's role, registration/domain/hosting requirements, applicable payment methods, foreign exchange, tax, data protection, consumer and service-specific rules.
+- The law's electronic commerce restrictions are mapped to a service-category blocklist and human review; no automated legal interpretation may override the block.
+- Store the current official law, source version, review date and evidence; review amendments and implementing texts before each release and quarterly thereafter.
+- Start with a limited, monitored pilot and kill switch; no live funds or cross-border payment flow until validated.
+
+### AI governance — current EU AI Act milestones (27 November 2026)
+- AI literacy and prohibited-practice provisions have applied since 2 February 2025; general-purpose AI governance applies from 2 August 2025.
+- Article 50 transparency obligations apply from 2 August 2026: disclose AI interaction when required; label/detect AI-generated or manipulated content in scope; assess deepfake and public-interest text disclosure duties.
+- Certain systems already on the market before 2 August 2026 have a limited transition for Article 50(2) marking/detection until **2 December 2026**. Track this imminent deadline and assess whether PROCHÉLIA/Nexus Supra or any vendor system falls within it.
+- New prohibitions regarding non-consensual intimate content and child sexual-abuse material apply from 2 December 2026.
+- Annex III high-risk rules apply from 2 December 2027; Annex I regulated-product high-risk rules apply from 2 August 2028 under the amended timeline.
+- Nexus Supra must maintain a system/use-case inventory, risk classification, purpose, human oversight, transparency notices, vendor/model records, evaluation, incident process, data protection assessment and change log. Screening must consider worker/platform management, access to essential services, biometric/emotion inference and any other Annex III use; no high-risk use without formal review and required controls.
+
 ## 8. Official source register — verify current consolidated law
 France:
 - DGCCRF platform information: https://www.economie.gouv.fr/dgccrf/laction-de-la-dgccrf/les-enquetes-et-les-controles/les-obligations-dinformation-des-plateformes-numeriques
