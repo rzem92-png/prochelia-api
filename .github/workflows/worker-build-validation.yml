@@ -52,5 +52,5 @@ jobs:
           python tests/test_nexus_task_audit_store_schema.py
       - name: Wrangler bundle validation only (no deploy)
         run: |
-          npx --yes wrangler@4 deploy --dry-run --config wrangler.jsonc --outdir "$RUNNER_TEMP/prochelia-worker-dry-run"
+          # Preview-only bundle validation: avoid loading/logging production bindings in CI.
           npx --yes wrangler@4 deploy --dry-run --config wrangler.preview.generated.json --outdir "$RUNNER_TEMP/prochelia-preview-worker-dry-run"
