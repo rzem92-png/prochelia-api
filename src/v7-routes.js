@@ -675,6 +675,19 @@ export async function handleV7Route(
       method === "POST"
     ) {
 
+      if (!auth?.user) {
+        return Response.json(
+          { ok: false, version: procheliaV7.version, error: "UNAUTHENTICATED" },
+          { status: 401, headers: { "Cache-Control": "no-store" } }
+        );
+      }
+      if (auth.user.role !== "gerante") {
+        return Response.json(
+          { ok: false, version: procheliaV7.version, error: "FORBIDDEN" },
+          { status: 403, headers: { "Cache-Control": "no-store" } }
+        );
+      }
+
       const body =
         await request.json();
 
