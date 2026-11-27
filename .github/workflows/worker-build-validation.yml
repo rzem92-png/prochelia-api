@@ -57,6 +57,7 @@ jobs:
           node --experimental-default-type=module --check src/nexus-executive-priority.js
           node --experimental-default-type=module --check src/nexus-budget-guard.js
           node --experimental-default-type=module --check src/nexus-service-sla-monitor.js
+          node --experimental-default-type=module --check src/nexus-quality-signals.js
       - name: Lint guarded Preview deployment workflow
         run: |
           go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
