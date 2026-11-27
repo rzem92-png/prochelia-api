@@ -107,23 +107,27 @@
       return fail("REVISION_OR_CHAIN_INVALID");
 
     const previousLedgerHead = previousLedger.headHash;
-    const guardSql = `INSERT INTO nexus_task_commit_guards (commit_id, ok)
-      SELECT ?, CASE WHEN
-        ((? = 0 AND NOT EXISTS (SELECT 1 FROM nexus_task_snapshots WHERE task_id = ?))
-         OR (? > 0 AND EXISTS (SELECT 1 FROM nexus_task_snapshots WHERE task_id = ? AND scope_key = ? AND environment = ? AND revision = ? AND snapshot_json = ?)))
-        AND ((? = 0 AND NOT EXISTS (SELECT 1 FROM nexus_audit_ledger_heads WHERE scope_key = ? AND environment = ?))
-         OR (? > 0 AND EXISTS (SELECT 1 FROM nexus_audit_ledger_heads WHERE scope_key = ? AND environment = ? AND revision = ? AND head_hash = ?)))
+    const guardSql = `INSERT INTO nexus_task_commit_guards (commit_id, task_id, scope_key, environment, task_revision, audit_revision, ok)
+      SELECT ?, ?, ?, ?, ?, ?, CASE WHEN
+        ((? = 0 AND NOT EXISTS (SELECT 1 FROM nexus_task_snapshots WHERE task_id = ?)
+            AND NOT EXISTS (SELECT 1 FROM nexus_task_events WHERE task_id = ?))
+         OR (? > 0 AND EXISTS (SELECT 1 FROM nexus_task_snapshots WHERE task_id = ? AND scope_key = ? AND environment = ? AND revision = ? AND snapshot_json = ?)
+            AND (SELECT COUNT(*) FROM nexus_task_events WHERE task_id = ?) = ?))
+        AND ((? = 0 AND NOT EXISTS (SELECT 1 FROM nexus_audit_ledger_heads WHERE scope_key = ? AND environment = ?)
+            AND NOT EXISTS (SELECT 1 FROM nexus_audit_ledger_events WHERE scope_key = ? AND environment = ?))
+         OR (? > 0 AND EXISTS (SELECT 1 FROM nexus_audit_ledger_heads WHERE scope_key = ? AND environment = ? AND revision = ? AND head_hash = ?)
+            AND (SELECT COUNT(*) FROM nexus_audit_ledger_events WHERE scope_key = ? AND environment = ?) = ?)
         AND NOT EXISTS (SELECT 1 FROM nexus_task_events WHERE event_id = ?)
         AND NOT EXISTS (SELECT 1 FROM nexus_task_events WHERE task_id = ? AND revision = ?)
         AND NOT EXISTS (SELECT 1 FROM nexus_audit_ledger_events WHERE event_id = ?)
         AND NOT EXISTS (SELECT 1 FROM nexus_audit_ledger_events WHERE scope_key = ? AND environment = ? AND sequence = ?)
       THEN 1 ELSE 0 END`;
     const guardBindings = [
-      input.commitId,
-      previousTask.revision, task.taskId,
-      previousTask.revision, task.taskId, scope, env, previousTask.revision, previousTaskJson,
-      previousLedger.revision, scope, env,
-      previousLedger.revision, scope, env, previousLedger.revision, previousLedgerHead,
+      input.commitId, task.taskId, scope, env, task.revision, ledger.revision,
+      previousTask.revision, task.taskId, task.taskId,
+      previousTask.revision, task.taskId, scope, env, previousTask.revision, previousTaskJson, task.taskId, previousTask.revision,
+      previousLedger.revision, scope, env, scope, env,
+      previousLedger.revision, scope, env, previousLedger.revision, previousLedgerHead, scope, env, previousLedger.revision,
       taskEvent.eventId, task.taskId, taskEvent.revision,
       auditEvent.eventId, scope, env, auditEvent.sequence
     ];
@@ -136,13 +140,13 @@
       DB.prepare(`INSERT INTO nexus_task_events (event_id, task_id, tenant_id, scope_key, environment, revision, event_json)
         VALUES (?, ?, ?, ?, ?, ?, ?)`)
         .bind(taskEvent.eventId, task.taskId, task.tenantId ?? null, scope, env, taskEvent.revision, taskEventJson),
+      DB.prepare(`INSERT INTO nexus_audit_ledger_events (event_id, scope_key, tenant_id, environment, sequence, previous_hash, hash, event_json)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
+        .bind(auditEvent.eventId, scope, task.tenantId ?? null, env, auditEvent.sequence, auditEvent.previousHash, auditEvent.hash, auditEventJson),
       DB.prepare(`INSERT INTO nexus_audit_ledger_heads (scope_key, tenant_id, environment, revision, head_hash)
         VALUES (?, ?, ?, ?, ?)
         ON CONFLICT(scope_key, environment) DO UPDATE SET revision=excluded.revision, head_hash=excluded.head_hash, updated_at=CURRENT_TIMESTAMP`)
         .bind(scope, task.tenantId ?? null, env, ledger.revision, ledger.headHash),
-      DB.prepare(`INSERT INTO nexus_audit_ledger_events (event_id, scope_key, tenant_id, environment, sequence, previous_hash, hash, event_json)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
-        .bind(auditEvent.eventId, scope, task.tenantId ?? null, env, auditEvent.sequence, auditEvent.previousHash, auditEvent.hash, auditEventJson),
       DB.prepare("DELETE FROM nexus_task_commit_guards WHERE commit_id = ?").bind(input.commitId)
     ];
     let results;
