@@ -1,0 +1,12 @@
+import test from "node:test";import assert from "node:assert/strict";import "../src/nexus-incident-lifecycle.js";
+const evalI=globalThis.ProcheliaNexusIncidentLifecycle.evaluateIncident;
+const now="2026-11-27T20:00:00.000Z",created="2026-11-27T19:00:00.000Z";
+const incident={id:"INC-42",state:"OPEN",severity:"high",createdAt:created,ownerId:"ops-1"};
+const base={environment:"preview",now,incident,events:[{type:"OPENED",at:created,actorType:"system",reasonCode:"MONITOR_ALERT"}]};
+test("incident status and SLA breach are computed, with no action authority",()=>{const r=evalI(base);assert.equal(r.ok,true);assert.equal(r.sla.breached,true);assert.equal(r.executionAllowed,false);assert.equal(r.mode,"INCIDENT_POLICY_ONLY");});
+test("owner assignment and owned transition are permitted by policy",()=>{assert.equal(evalI({...base,request:{action:"ASSIGN_OWNER",ownerId:"operator-7",actorType:"human"}}).decision,"ALLOW");assert.equal(evalI({...base,request:{action:"TRANSITION",toState:"ACKNOWLEDGED",actorType:"human"}}).decision,"ALLOW");});
+test("unowned investigation denied",()=>{assert.equal(evalI({...base,incident:{...incident,ownerId:null},request:{action:"TRANSITION",toState:"INVESTIGATING",actorType:"human"}}).reason,"OWNER_REQUIRED");});
+test("resolution and closure require a human",()=>{const r=evalI({...base,incident:{...incident,state:"MITIGATED"},request:{action:"TRANSITION",toState:"RESOLVED",actorType:"system"}});assert.equal(r.decision,"DENY");assert.equal(r.reason,"HUMAN_APPROVAL_REQUIRED");});
+test("invalid transitions fail closed and human may reopen closed incident",()=>{assert.equal(evalI({...base,request:{action:"TRANSITION",toState:"CLOSED",actorType:"human"}}).decision,"DENY");const r=evalI({...base,incident:{...incident,state:"CLOSED"},request:{action:"REOPEN",toState:"INVESTIGATING",actorType:"human"}});assert.equal(r.decision,"ALLOW");});
+test("production, malformed dates, event injection and excessive history fail closed",()=>{assert.equal(evalI({...base,environment:"production"}).ok,false);assert.equal(evalI({...base,now:"2026-02-30T20:00:00.000Z"}).ok,false);assert.equal(evalI({...base,events:[{type:"bad text",at:now,actorType:"human"}]}).ok,false);assert.equal(evalI({...base,events:Array(101).fill(base.events[0])}).ok,false);});
+test("outputs sanitize event content to code-only fields",()=>{const r=evalI({...base,events:[{type:"OPENED",at:created,actorType:"system",reasonCode:"MONITOR_ALERT",payload:"secret"}]});assert.doesNotMatch(JSON.stringify(r),/secret|payload/);});
