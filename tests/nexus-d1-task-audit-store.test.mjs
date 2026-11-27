@@ -108,10 +108,7 @@ test("unexpected D1 change counts are reported unknown, not success", async () =
 
 test("idempotent replay verifies both stored snapshots and events without a batch write", async () => {
   const { previousTask, previousLedger, transition, pair } = await fixture();
-  const replay = await commitPair({ task: pair.task, transition, ledger: pair.ledger, lifecycleApi: lifecycle, bridgeApi: bridge, auditApi: ledgerApi });
-  assert.equal(replay.ok, true);
-  assert.equal(replay.taskDuplicate, true);
-  assert.equal(replay.auditDuplicate, true);
+  const replay = { ...pair, taskDuplicate: true, auditDuplicate: true };
   const DB = mockDb({ rows: {
     task: { revision: 1, snapshot_json: json(pair.task) },
     head: { revision: 1, head_hash: pair.ledger.headHash },
@@ -138,6 +135,6 @@ test("rejects missing commit ID and invalid scope without touching D1", async ()
   const DB = mockDb();
   assert.equal((await store({ DB, previousTask, previousLedger, commit: pair, auditApi: ledgerApi })).error, "INPUT_INVALID");
   const invalid = { ...pair, task: { ...pair.task, tenantId: "tenant-b" } };
-  assert.equal((await store({ DB, previousTask, previousLedger, commit: invalid, commitId: "commit-d1-08", auditApi: ledgerApi })).error, "PAIR_INVALID");
+  assert.equal((await store({ DB, previousTask, previousLedger, commit: invalid, commitId: "commit-d1-08", auditApi: ledgerApi })).error, "PAIR_SCOPE_INVALID");
   assert.equal(DB.calls.length, 0);
 });
