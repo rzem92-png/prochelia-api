@@ -49,6 +49,7 @@ jobs:
           node --experimental-default-type=module --check src/nexus-cross-functional-impact.js
           node --experimental-default-type=module --check src/nexus-incident-case-linkage.js
           node --experimental-default-type=module --check src/nexus-release-readiness.js
+          node --experimental-default-type=module --check src/nexus-event-contract.js
       - name: Lint guarded Preview deployment workflow
         run: |
           go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
