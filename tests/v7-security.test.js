@@ -206,3 +206,15 @@ test("QR validation route requires authentication", async () => {
   );
   assert.equal(response.status, 401);
 });
+
+test("malformed V7 JSON returns a controlled 400 without leaking details", async () => {
+  const request = new Request("https://example.test/api/v7/check/email", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: "{not-json"
+  });
+  const response = await handleV7Route(request, {}, "/api/v7/check/email", null);
+  assert.equal(response.status, 400);
+  assert.equal((await response.json()).error, "INVALID_JSON");
+  assert.equal(response.headers.get("Cache-Control"), "no-store");
+});
