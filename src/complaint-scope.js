@@ -59,6 +59,7 @@ export function validateComplaintDraft(input, actorRole, now = new Date()) {
   else if (desiredOutcome === "other" && desiredOutcomeDetails.length < 10) errors.desiredOutcomeDetails = "OUTCOME_DETAILS_REQUIRED";
   if (actorRole === "client" && input.privacyAcknowledged !== true && input.privacy_acknowledged !== true) errors.privacyAcknowledged = "PRIVACY_ACK_REQUIRED";
   if (input.attachments !== undefined && (!Array.isArray(input.attachments) || input.attachments.length !== 0)) errors.attachments = "ATTACHMENTS_NOT_ACCEPTED";
+  if (actorRole === "gerante" && input.severity !== undefined && !SEVERITIES.has(input.severity)) errors.severity = "SEVERITY_INVALID";
   const clientId = idValue(input.client_id ?? input.clientId);
   const companyId = idValue(input.company_id ?? input.companyId);
   const missionId = idValue(input.mission_id ?? input.missionId);
@@ -69,7 +70,7 @@ export function validateComplaintDraft(input, actorRole, now = new Date()) {
   return { ok: true, normalized: {
     category, description, incidentDate: incidentDate || null, requestReference: requestReference || null,
     desiredOutcome: desiredOutcome || null, desiredOutcomeDetails: desiredOutcomeDetails || null,
-    clientId, companyId, missionId
+    severity: actorRole === "gerante" ? (input.severity || null) : null, clientId, companyId, missionId
   }};
 }
 
