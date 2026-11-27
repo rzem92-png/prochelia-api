@@ -1448,17 +1448,48 @@ async function createOperationalCase(request, env) {
   const phase=String(await getSetting(env,'project_phase','TEST')).toUpperCase();
   const impact=String(body.impact_level||'LOW').toUpperCase();
   const priority=CASE_PRIORITIES[impact]||10;
-  const rec=await copilotRecommend(env,{caseType,impact,phase,context:body.context||{}});
+  const actor=gate.auth.user,manager=actor.role==='gerante';
+  let scoped={client_id:null,company_id:null,intervenant_id:null,mission_id:null};
+  const requestedMission=clean(body.mission_id);
+  if(!manager){
+    // Caller-supplied ownership fields are never trusted. Resolve profile and mission from authenticated identity.
+    if(actor.role==='entreprise') return json({ok:false,error:'COMPANY_CASE_SCOPE_NOT_VERIFIED',version:VERSION},403);
+    if(actor.role==='client'){
+      const profile=await env.DB.prepare('SELECT id FROM clients WHERE user_id=? LIMIT 1').bind(actor.id).first();
+      if(!profile)return json({ok:false,error:'CLIENT_PROFILE_NOT_FOUND',version:VERSION},403);
+      scoped.client_id=profile.id;
+    }else if(actor.role==='intervenant'){
+      const profile=await env.DB.prepare('SELECT id FROM intervenants WHERE user_id=? LIMIT 1').bind(actor.id).first();
+      if(!profile)return json({ok:false,error:'PROVIDER_PROFILE_NOT_FOUND',version:VERSION},403);
+      scoped.intervenant_id=profile.id;
+    }
+    const hasSensitiveContext=Object.keys(body.context||{}).some(k=>['replacement_intervenant_id','replacement_id','reschedule_start_at','refund_cents'].includes(k));
+    if(!requestedMission && (clean(body.client_id)||clean(body.company_id)||clean(body.intervenant_id)||hasSensitiveContext))
+      return json({ok:false,error:'MISSION_SCOPE_REQUIRED',version:VERSION},403);
+    if(requestedMission){
+      const mission=await env.DB.prepare('SELECT id,client_id,intervenant_id FROM missions WHERE id=? LIMIT 1').bind(requestedMission).first();
+      if(!mission)return json({ok:false,error:'MISSION_NOT_FOUND',version:VERSION},404);
+      if(actor.role==='client'&&mission.client_id!==scoped.client_id)return json({ok:false,error:'MISSION_OWNERSHIP_MISMATCH',version:VERSION},403);
+      if(actor.role==='intervenant'&&mission.intervenant_id!==scoped.intervenant_id)return json({ok:false,error:'MISSION_ASSIGNMENT_MISMATCH',version:VERSION},403);
+      scoped.mission_id=mission.id;scoped.client_id=mission.client_id;scoped.intervenant_id=mission.intervenant_id||scoped.intervenant_id;
+    }
+    for(const key of ['client_id','intervenant_id'])if(clean(body[key])&&clean(body[key])!==scoped[key])return json({ok:false,error:'CALLER_SCOPE_FIELD_MISMATCH',version:VERSION},403);
+    if(clean(body.company_id))return json({ok:false,error:'COMPANY_SCOPE_NOT_VERIFIED',version:VERSION},403);
+  }else{
+    scoped={client_id:clean(body.client_id)||null,company_id:clean(body.company_id)||null,intervenant_id:clean(body.intervenant_id)||null,mission_id:requestedMission||null};
+  }
+  const context=body.context&&typeof body.context==='object'&&!Array.isArray(body.context)?body.context:{};
+  const rec=await copilotRecommend(env,{caseType,impact,phase,context});
   const id=crypto.randomUUID();
-  const requiresManager=rec.mode==='MANAGER_APPROVAL' ? 1 : 0;
-  const status=rec.action==='AUTO_RESOLVE' ? 'AUTO_PENDING' : 'OPEN';
+  const requiresManager=1;
+  const status='OPEN';
   await env.DB.prepare(`INSERT INTO operational_cases(id,case_type,source,phase,priority,status,auto_mode,client_id,company_id,intervenant_id,mission_id,impact_level,description,context_json,proposed_solution_json,requires_manager) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
-    .bind(id,caseType,'API',phase,priority,status,rec.mode,clean(body.client_id)||null,clean(body.company_id)||null,clean(body.intervenant_id)||null,clean(body.mission_id)||null,impact,clean(body.description)||null,JSON.stringify(body.context||{}),JSON.stringify(rec),requiresManager).run();
+    .bind(id,caseType,'API',phase,priority,status,'MANAGER_APPROVAL',scoped.client_id,scoped.company_id,scoped.intervenant_id,scoped.mission_id,impact,clean(body.description)||null,JSON.stringify(context),JSON.stringify({...rec,mode:'MANAGER_APPROVAL',solution:{...rec.solution,automatic:false}}),requiresManager).run();
   await env.DB.prepare(`INSERT INTO copilot_log(id,case_id,action_type,recommendation,confidence,mode) VALUES(?,?,?,?,?,?)`)
     .bind(crypto.randomUUID(),id,rec.action,JSON.stringify(rec.solution),rec.confidence,rec.mode).run();
   await journal(env,'copilot',null,'CASE_CREATED','operational_case',id,'OK',{caseType,impact});
-  if(rec.action==='AUTO_RESOLVE') await executeOperationalCase(env,id,null,true);
-  return json({ok:true,version:VERSION,case_id:id,recommendation:rec,status:rec.action==='AUTO_RESOLVE'?'AUTO_EXECUTED':'WAITING_MANAGER'},201);
+  // Nexus Supra autonomy remains proposal-only: no case can execute business mutations automatically.
+  return json({ok:true,version:VERSION,case_id:id,recommendation:rec,status:rec.action==='AUTO_RESOLVE'?'AUTO_PENDING_HUMAN_REVIEW':'WAITING_MANAGER'},201);
 }
 
 
@@ -1495,13 +1526,9 @@ async function executeCaseBusinessAction(env, c, rec, actorId=null, automatic=fa
     const replacementId = clean(context.replacement_intervenant_id || context.replacement_id);
     if (replacementId && c.mission_id) {
       const cols = await getTableColumns(env,'missions');
-      if (cols.includes('intervenant_id')) {
-        await env.DB.prepare('UPDATE missions SET intervenant_id=? WHERE id=?').bind(replacementId,c.mission_id).run();
-        results.push({action:'ASSIGN_REPLACEMENT',mission_id:c.mission_id,intervenant_id:replacementId,status:'EXECUTED'});
-      } else {
-        const queued=await enqueueAction(env,c.id,'ASSIGN_REPLACEMENT',{mission_id:c.mission_id,intervenant_id:replacementId},`${c.id}:replacement:${replacementId}`);
-        results.push({action:'ASSIGN_REPLACEMENT',...queued,reason:'MISSION_SCHEMA_NEEDS_REVIEW'});
-      }
+      // Never mutate a mission assignment directly from Copilot context. Queue a reviewed provider-bound action.
+      const queued=await enqueueAction(env,c.id,'ASSIGN_REPLACEMENT',{mission_id:c.mission_id,intervenant_id:replacementId},`${c.id}:replacement:${replacementId}`);
+      results.push({action:'ASSIGN_REPLACEMENT',...queued,reason:'HUMAN_REVIEW_AND_OWNERSHIP_RECHECK_REQUIRED'});
     } else {
       const queued=await enqueueAction(env,c.id,'SEARCH_REPLACEMENT',{mission_id:c.mission_id||null,criteria:context.replacement_criteria||{},case_type:c.case_type},`${c.id}:search-replacement`);
       results.push({action:'SEARCH_REPLACEMENT',...queued});
@@ -1511,13 +1538,10 @@ async function executeCaseBusinessAction(env, c, rec, actorId=null, automatic=fa
   if (context.reschedule_start_at && c.mission_id) {
     const cols=await getTableColumns(env,'missions');
     const target = cols.includes('start_at') ? 'start_at' : (cols.includes('scheduled_at') ? 'scheduled_at' : null);
-    if (target) {
-      await env.DB.prepare(`UPDATE missions SET ${target}=? WHERE id=?`).bind(String(context.reschedule_start_at),c.mission_id).run();
-      results.push({action:'RESCHEDULE_MISSION',mission_id:c.mission_id,field:target,status:'EXECUTED'});
-    } else {
-      const queued=await enqueueAction(env,c.id,'RESCHEDULE_MISSION',{mission_id:c.mission_id,start_at:context.reschedule_start_at},`${c.id}:reschedule:${context.reschedule_start_at}`);
-      results.push({action:'RESCHEDULE_MISSION',...queued,reason:'MISSION_SCHEMA_NEEDS_REVIEW'});
-    }
+    // Do not mutate schedule directly: enqueue only; execution adapter must re-check
+    // mission ownership/status/availability, authorization and idempotency.
+    const queued=await enqueueAction(env,c.id,'RESCHEDULE_MISSION',{mission_id:c.mission_id,start_at:context.reschedule_start_at},`${c.id}:reschedule:${context.reschedule_start_at}`);
+    results.push({action:'RESCHEDULE_MISSION',...queued,reason:'HUMAN_REVIEW_AND_RUNTIME_VALIDATION_REQUIRED'});
   }
 
   if (context.client_notification || c.client_id || c.company_id) {
@@ -1542,15 +1566,11 @@ async function processActionOutbox(request, env) {
   const processed=[];
   for(const row of (rows.results||[])) {
     const payload=row.payload_json?JSON.parse(row.payload_json):{};
-    // Provider-dependent actions stay queued until the corresponding adapter/secret is configured.
-    const external = ['PSP_REFUND_REVIEW','NOTIFY_CLIENT','SEARCH_REPLACEMENT','RESCHEDULE_MISSION','ASSIGN_REPLACEMENT'].includes(String(row.action_type));
-    if(external) {
-      await env.DB.prepare(`UPDATE action_outbox SET status='WAITING_PROVIDER',last_error=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind('External adapter/provider required for final execution.',row.id).run();
-      processed.push({id:row.id,status:'WAITING_PROVIDER',action_type:row.action_type});
-      continue;
-    }
-    await env.DB.prepare(`UPDATE action_outbox SET status='COMPLETED',processed_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(row.id).run();
-    processed.push({id:row.id,status:'COMPLETED',action_type:row.action_type,payload});
+    // Fail closed: this endpoint has no verified action executor. Never mark an outbox
+    // item complete merely because it was read or acknowledged by the queue processor.
+    await env.DB.prepare(`UPDATE action_outbox SET status='WAITING_PROVIDER',last_error=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`)
+      .bind('No verified execution adapter is registered; awaiting implementation/review.',row.id).run();
+    processed.push({id:row.id,status:'WAITING_PROVIDER',action_type:row.action_type});
   }
   await journal(env,'gerante',gate.auth.user.id,'ACTION_OUTBOX_PROCESSED','system',null,'OK',{count:processed.length});
   return json({ok:true,version:VERSION,processed},200);
@@ -1560,13 +1580,17 @@ async function executeOperationalCase(env, caseId, approverId=null, automatic=fa
   const c=await env.DB.prepare('SELECT * FROM operational_cases WHERE id=? LIMIT 1').bind(caseId).first();
   if(!c)return {ok:false,error:'CASE_NOT_FOUND'};
   if(c.status==='RESOLVED')return {ok:true,already:true};
+  // Fail closed: automatic execution is disabled until authorization, ownership,
+  // idempotency, transactional action binding and rollback controls are proven.
+  if(automatic)return {ok:false,error:'AUTONOMOUS_BUSINESS_EXECUTION_DISABLED',human_review_required:true};
   const rec=c.proposed_solution_json?JSON.parse(c.proposed_solution_json):{};
-  if(c.requires_manager && !automatic && !approverId) return {ok:false,error:'MANAGER_APPROVAL_REQUIRED'};
+  if(!approverId)return {ok:false,error:'MANAGER_APPROVAL_REQUIRED'};
   const businessResults = await executeCaseBusinessAction(env,c,rec,approverId,automatic);
-  const resolution={executed:true,automatic,action:rec.action||'RESOLVE',steps:rec.solution?.steps||[],business_results:businessResults,executed_at:new Date().toISOString()};
+  const awaitingProvider = businessResults.some(r=>['PENDING','WAITING_PROVIDER'].includes(String(r.status||'')));
+  const resolution={executed:!awaitingProvider,automatic,action:rec.action||'RESOLVE',status:awaitingProvider?'WAITING_PROVIDER':'RESOLVED',steps:rec.solution?.steps||[],business_results:businessResults,executed_at:new Date().toISOString()};
   await env.DB.prepare(`INSERT INTO case_actions(id,case_id,action_code,mode,status,payload_json,result_json,completed_at) VALUES(?,?,?,?,?,?,?,CURRENT_TIMESTAMP)`)
-    .bind(crypto.randomUUID(),caseId,rec.action||'RESOLVE',automatic?'AUTO':'MANAGER','COMPLETED',JSON.stringify(rec),JSON.stringify(resolution)).run();
-  await env.DB.prepare(`UPDATE operational_cases SET status='RESOLVED',resolution_json=?,requires_manager=0,updated_at=CURRENT_TIMESTAMP,resolved_at=CURRENT_TIMESTAMP WHERE id=?`).bind(JSON.stringify(resolution),caseId).run();
+    .bind(crypto.randomUUID(),caseId,rec.action||'RESOLVE',automatic?'AUTO':'MANAGER',awaitingProvider?'WAITING_PROVIDER':'COMPLETED',JSON.stringify(rec),JSON.stringify(resolution)).run();
+  await env.DB.prepare(`UPDATE operational_cases SET status=?,resolution_json=?,requires_manager=0,updated_at=CURRENT_TIMESTAMP,resolved_at=CASE WHEN ?='RESOLVED' THEN CURRENT_TIMESTAMP ELSE NULL END WHERE id=?`).bind(awaitingProvider?'WAITING_PROVIDER':'RESOLVED',JSON.stringify(resolution),awaitingProvider?'WAITING_PROVIDER':'RESOLVED',caseId).run();
   await env.DB.prepare(`UPDATE copilot_log SET approved_by=COALESCE(?,approved_by),result=? WHERE case_id=? AND id=(SELECT id FROM copilot_log WHERE case_id=? ORDER BY created_at DESC LIMIT 1)`).bind(approverId,JSON.stringify(resolution),caseId,caseId).run();
   await journal(env,automatic?'copilot':'gerante',approverId,automatic?'AUTO_CASE_RESOLVED':'CASE_RESOLVED','operational_case',caseId,'OK',resolution);
   return {ok:true,case_id:caseId,resolution};
