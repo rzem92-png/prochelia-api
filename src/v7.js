@@ -851,51 +851,18 @@ function v7CheckPricing({
   minimum = 0,
   maximum = null
 } = {}) {
-
-  const value =
-    Number(amount);
-
-  if (
-    !Number.isFinite(value)
-  ) {
-
-    return v7Result(
-      false,
-      {},
-      "Tarif invalide"
-    );
+  const value = Number(amount);
+  const min = Number(minimum);
+  const max = maximum === null || maximum === undefined ? null : Number(maximum);
+  if (amount === null || amount === undefined || String(amount).trim() === "" || !Number.isFinite(value) ||
+      minimum === null || minimum === undefined || String(minimum).trim() === "" || !Number.isFinite(min) ||
+      min < 0 || (max !== null && (!Number.isFinite(max) || max < min))) {
+    return v7Result(false, {}, "Paramètres tarifaires invalides");
   }
-
-  if (
-    value < Number(minimum)
-  ) {
-
-    return v7Result(
-      false,
-      {},
-      "Tarif inférieur au minimum autorisé"
-    );
-  }
-
-  if (
-    maximum !== null &&
-    value > Number(maximum)
-  ) {
-
-    return v7Result(
-      false,
-      {},
-      "Tarif supérieur au maximum autorisé"
-    );
-  }
-
-  return v7Result(
-    true,
-    {
-      amount:
-        value
-    }
-  );
+  if (value < 0) return v7Result(false, {}, "Tarif négatif interdit");
+  if (value < min) return v7Result(false, {}, "Tarif inférieur au minimum autorisé");
+  if (max !== null && value > max) return v7Result(false, {}, "Tarif supérieur au maximum autorisé");
+  return v7Result(true, { amount: value });
 }
 
 
@@ -1037,67 +1004,30 @@ function v7CalculateFinance({
   paymentFees = 0,
   otherFees = 0
 } = {}) {
-
-  const client =
-    Number(
-      clientAmount
-    ) || 0;
-
-  const rate =
-    Number(
-      commissionRate
-    ) || 0;
-
-  const payment =
-    Number(
-      paymentFees
-    ) || 0;
-
-  const other =
-    Number(
-      otherFees
-    ) || 0;
-
-  const commission =
-    client *
-    rate /
-    100;
-
-  const intervenant =
-    client -
-    commission;
-
-  const margin =
-    commission -
-    payment -
-    other;
-
-  return v7Result(
-    true,
-    {
-
-      clientAmount:
-        client,
-
-      commissionRate:
-        rate,
-
-      commissionAmount:
-        commission,
-
-      intervenantAmount:
-        intervenant,
-
-      paymentFees:
-        payment,
-
-      otherFees:
-        other,
-
-      grossMargin:
-        margin
-    }
-  );
+  const client = Number(clientAmount);
+  const rate = Number(commissionRate);
+  const payment = Number(paymentFees);
+  const other = Number(otherFees);
+  const inputs = [clientAmount, commissionRate, paymentFees, otherFees];
+  if (inputs.some(v => v === null || v === undefined || String(v).trim() === "" || !Number.isFinite(Number(v))) ||
+      client < 0 || rate < 0 || rate > 100 || payment < 0 || other < 0) {
+    return v7Result(false, {}, "Paramètres financiers invalides");
+  }
+  const roundMoney = value => Math.round((value + Number.EPSILON) * 100) / 100;
+  const commission = roundMoney(client * rate / 100);
+  const intervenant = roundMoney(client - commission);
+  const margin = roundMoney(commission - payment - other);
+  return v7Result(true, {
+    clientAmount: roundMoney(client),
+    commissionRate: rate,
+    commissionAmount: commission,
+    intervenantAmount: intervenant,
+    paymentFees: roundMoney(payment),
+    otherFees: roundMoney(other),
+    grossMargin: margin,
+    roundingPolicy: "EUR-style 2 decimal places; currency must be supplied/validated by authoritative pricing layer",
+    authoritative: false
+  });
 }
 
 
