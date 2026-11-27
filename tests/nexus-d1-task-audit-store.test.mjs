@@ -68,8 +68,9 @@ test("persists task snapshot, event, ledger head and event in one D1 batch", asy
   assert.match(DB.calls[0][0].sql, /INSERT INTO nexus_task_commit_guards/);
   assert.match(DB.calls[0][0].sql, /nexus_task_snapshots/);
   assert.match(DB.calls[0][2].sql, /nexus_task_events/);
-  assert.match(DB.calls[0][3].sql, /nexus_audit_ledger_heads/);
-  assert.match(DB.calls[0][4].sql, /nexus_audit_ledger_events/);
+  assert.match(DB.calls[0][3].sql, /nexus_audit_ledger_events/);
+  assert.match(DB.calls[0][4].sql, /nexus_audit_ledger_heads/);
+  assert.equal((DB.calls[0][0].sql.match(/\\?/g) || []).length, DB.calls[0][0].bindings.length);
   assert.match(DB.calls[0][5].sql, /DELETE FROM nexus_task_commit_guards/);
 });
 
