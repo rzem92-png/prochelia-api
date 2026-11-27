@@ -58,7 +58,7 @@ function evaluateAction(policy,request){
  const usage=object(request.usage)?request.usage:{};
  if((request.usage!==undefined&&!object(request.usage))||!isCounter(usage.actionsUsed??0)||!isCounter(usage.costUnits??0)||!isCounter(request.estimatedCostUnits??0)||!isCounter(request.retryAttempt??0)||!isCounter(request.estimatedRuntimeMs??0)||(request.now!==undefined&&!isCounter(request.now)))return deny("INVALID_BUDGET_INPUT","Usage, estimation, retry ou horodatage mal formé; refus fail-closed.",policy,request);
  const budget=agent.budget;
- if(usage.actionsUsed??0>=budget.maxActionsPerTask)return deny("ACTION_BUDGET_EXCEEDED","Quota d'actions par tâche atteint.",policy,request);
+ if((usage.actionsUsed??0)>=budget.maxActionsPerTask)return deny("ACTION_BUDGET_EXCEEDED","Quota d'actions par tâche atteint.",policy,request);
  if((usage.costUnits??0)+(request.estimatedCostUnits??0)>budget.maxCostUnits)return deny("COST_BUDGET_EXCEEDED","Budget de coût dépassé.",policy,request);
  if((request.retryAttempt??0)>budget.maxRetries)return deny("RETRY_LIMIT_EXCEEDED","Nombre maximal de retries dépassé.",policy,request);
  if((request.estimatedRuntimeMs??0)>budget.maxRuntimeMs)return deny("RUNTIME_LIMIT_EXCEEDED","Durée d'exécution estimée supérieure au cap.",policy,request);
