@@ -43,6 +43,15 @@ Before commitment, disclose in clear language:
 - Order summary, explicit payment obligation, durable contract/order confirmation.
 - No preselected paid options, hidden charges, misleading price anchors, false countdowns, fake discounts or friction obstructing statutory rights.
 
+### Checkout and contract evidence — France
+Treat these as release tests, subject to service-specific legal review:
+- Checkout allows the consumer to review the order, total price and entered data, and correct errors before final commitment.
+- Final action clearly states the payment obligation (e.g. “commande avec obligation de paiement” or legally equivalent wording).
+- Optional paid services require explicit affirmative consent; never preselect paid add-ons.
+- Contract confirmation and legally required information are delivered on a durable medium and accessible for later retrieval.
+- Preserve versioned order summary, price breakdown, terms shown, provider identity/status, selected options, consent/acknowledgements, timestamp and confirmation delivery evidence.
+- Determine electronic contract archiving thresholds and duration from the current applicable rules; implement a legal-retention schedule rather than a universal retention period.
+
 ### Withdrawal, cancellation and refunds
 - Rules must be service-category-specific: withdrawal right, statutory exceptions, early-performance request/acknowledgment, refund amount and deadline, cancellation terms.
 - Capture legally required explicit consent/acknowledgments separately, timestamped, and retain evidence.
