@@ -118,7 +118,14 @@ test("requires each persisted task event to have a matching audit event", async 
   assert.equal((await reader(input(f))).error, "TASK_AUDIT_LINK_MISSING");
 });
 
-test("rejects omitted tenant scope before any D1 read", async () => {\n  const f = await fixture();\n  const { tenantId, ...missingScope } = input(f);\n  assert.equal((await reader(missingScope)).error, "INPUT_INVALID");\n  assert.equal(f.DB.calls.length, 0);\n});\n\ntest("supports explicitly scoped global tasks without permitting Production", async () => {
+test("rejects omitted tenant scope before any D1 read", async () => {
+  const f = await fixture();
+  const { tenantId, ...missingScope } = input(f);
+  assert.equal((await reader(missingScope)).error, "INPUT_INVALID");
+  assert.equal(f.DB.calls.length, 0);
+});
+
+test("supports explicitly scoped global tasks without permitting Production", async () => {
   const f = await fixture({ tenantId: null, taskId: "global-reader-task-01" });
   const result = await reader(input(f));
   assert.equal(result.ok, true);
