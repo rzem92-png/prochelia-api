@@ -5,7 +5,7 @@
 "use strict";
 const ENVS=new Set(["preview","development","test"]),SEV={info:1,warning:2,high:3,critical:4},ID=/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 function plain(v){return !!v&&typeof v==="object"&&!Array.isArray(v)&&(Object.getPrototypeOf(v)===Object.prototype||Object.getPrototypeOf(v)===null)&&Object.getOwnPropertySymbols(v).length===0&&Object.keys(Object.getOwnPropertyDescriptors(v)).every(k=>{const d=Object.getOwnPropertyDescriptor(v,k);return d.enumerable&&Object.hasOwn(d,"value")})}
-function validTime(v){if(typeof v!=="string"||!/^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z$/.test(v))return false;const n=Date.parse(v);return Number.isFinite(n)&&new Date(n).toISOString()===v}
+function validTime(v){if(typeof v!=="string"||!/^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{3}Z$/.test(v))return false;const n=Date.parse(v);return Number.isFinite(n)&&new Date(n).toISOString()===v}
 function invalid(){return {ok:false,status:"UNKNOWN",mode:"CORRELATION_HINTS_ONLY",executionAllowed:false,reason:"INPUT_INVALID",groups:[]}}
 function evaluate(input={}){
  if(!plain(input)||!ENVS.has(input.environment)||!(input.tenantId===null||(typeof input.tenantId==="string"&&ID.test(input.tenantId)))||!Array.isArray(input.signals)||input.signals.length>200||input.signals.some(s=>!plain(s)||!ID.test(s.code)||!ID.test(s.source)||!Object.hasOwn(SEV,s.severity)||!ID.test(s.category)||!validTime(s.occurredAt)))return invalid();
