@@ -36,6 +36,7 @@ jobs:
           node --experimental-default-type=module --check src/v7-routes.js
           node --experimental-default-type=module --check src/nexus-governance.js
           node --experimental-default-type=module --check src/nexus-task-lifecycle.js
+          node --experimental-default-type=module --check src/nexus-audit-ledger.js
       - name: Lint guarded Preview deployment workflow
         run: |
           go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
