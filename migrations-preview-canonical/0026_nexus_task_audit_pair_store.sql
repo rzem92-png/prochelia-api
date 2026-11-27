@@ -50,7 +50,7 @@ CREATE TABLE IF NOT EXISTS nexus_audit_ledger_events (
   sequence INTEGER NOT NULL CHECK (sequence >= 1),
   previous_hash TEXT NOT NULL CHECK (length(previous_hash) = 64 AND previous_hash NOT GLOB '*[^a-fA-F0-9]*'),
   hash TEXT NOT NULL CHECK (length(hash) = 64 AND hash NOT GLOB '*[^a-fA-F0-9]*'),
-  event_json TEXT NOT NULL CHECK (json_valid(event_json)),
+  event_json TEXT NOT NULL CHECK (json_valid(event_json) AND json_extract(event_json, '$.executionAllowed') = 0),
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   UNIQUE (scope_key, environment, sequence),
   CHECK (scope_key = COALESCE(tenant_id, '__GLOBAL__'))
