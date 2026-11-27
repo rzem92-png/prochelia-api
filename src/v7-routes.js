@@ -731,21 +731,16 @@ export async function handleV7Route(
 
   } catch (error) {
 
+    const isMalformedJson = error instanceof SyntaxError;
     return Response.json(
-
       {
         ok: false,
-
-        version:
-          procheliaV7.version,
-
-        error:
-          error?.message ||
-          "Erreur V7"
+        version: procheliaV7.version,
+        error: isMalformedJson ? "INVALID_JSON" : "INTERNAL_ERROR"
       },
-
       {
-        status: 500
+        status: isMalformedJson ? 400 : 500,
+        headers: { "Cache-Control": "no-store" }
       }
     );
   }
