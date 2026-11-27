@@ -41,3 +41,14 @@ test("finance calculation rounds money to two decimals and reports advisory", ()
   assert.equal(result.grossMargin, 10.75);
   assert.equal(result.authoritative, false);
 });
+
+test("payment validator never trusts caller-provided successful status", () => {
+  for (const status of ["PAID", "SUCCEEDED", "SUCCESS", "COMPLETED"]) {
+    const result = procheliaV7.checkPayment({ status });
+    assert.equal(result.ok, false);
+    assert.equal(result.paymentConfirmed, false);
+    assert.equal(result.authoritative, false);
+    assert.equal(result.claimedStatus, status);
+    assert.match(result.error, /preuve PSP vérifiée/);
+  }
+});
