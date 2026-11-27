@@ -50,24 +50,43 @@
       return fail("PAIR_INVALID");
 
     const task = commit.task, ledger = commit.ledger, taskEvent = commit.transitionEvent, auditEvent = commit.auditEvent;
-    if (!validScope(task, ledger) || task.taskId !== previousTask.taskId ||
-        task.environment !== previousTask.environment || (task.tenantId ?? null) !== (previousTask.tenantId ?? null) ||
-        task.revision !== previousTask.revision + (commit.taskDuplicate === true ? 0 : 1) ||
-        ledger.revision !== previousLedger.revision + (commit.auditDuplicate === true ? 0 : 1) ||
-        ledger.revision !== ledger.events?.length || task.history?.length !== task.revision ||
-        previousTask.revision !== previousTask.history?.length ||
-        previousLedger.revision !== previousLedger.events?.length ||
+    if (!validScope(task, ledger)) return fail("PAIR_SCOPE_INVALID");
+    const replay = commit.taskDuplicate === true && commit.auditDuplicate === true;
+    if ((commit.taskDuplicate === true) !== (commit.auditDuplicate === true)) return fail("REPLAY_PAIR_MISMATCH");
+    if (task.taskId !== previousTask.taskId || task.environment !== previousTask.environment ||
+        (task.tenantId ?? null) !== (previousTask.tenantId ?? null) ||
+        task.history?.length !== task.revision || previousTask.history?.length !== previousTask.revision ||
+        ledger.revision !== ledger.events?.length || previousLedger.revision !== previousLedger.events?.length ||
         !HASH.test(previousLedger.headHash || "") || !HASH.test(ledger.headHash || "") ||
         !ID.test(taskEvent.eventId || "") || taskEvent.taskId !== task.taskId ||
-        taskEvent.revision !== task.revision || taskEvent.to !== task.state ||
         (taskEvent.tenantId ?? null) !== (task.tenantId ?? null) || taskEvent.environment !== task.environment ||
-        !ID.test(auditEvent.eventId || "") || auditEvent.taskId !== task.taskId ||
-        auditEvent.sequence !== ledger.revision || auditEvent.previousHash !== previousLedger.headHash ||
-        auditEvent.hash !== ledger.headHash || auditEvent.environment !== task.environment ||
-        (auditEvent.tenantId ?? null) !== (task.tenantId ?? null) || auditEvent.executionAllowed !== false ||
-        ledger.events.at(-1)?.eventId !== auditEvent.eventId ||
-        task.history.at(-1)?.eventId !== taskEvent.eventId)
+        !Number.isSafeInteger(taskEvent.revision) || taskEvent.revision < 1 ||
+        taskEvent.sequence !== taskEvent.revision || !ID.test(auditEvent.eventId || "") ||
+        auditEvent.eventId !== taskEvent.eventId || auditEvent.taskId !== task.taskId ||
+        auditEvent.environment !== task.environment || (auditEvent.tenantId ?? null) !== (task.tenantId ?? null) ||
+        auditEvent.executionAllowed !== false || !Number.isSafeInteger(auditEvent.sequence) ||
+        auditEvent.sequence < 1 || !HASH.test(auditEvent.previousHash || "") || !HASH.test(auditEvent.hash || "") ||
+        task.history[taskEvent.revision - 1]?.eventId !== taskEvent.eventId ||
+        JSON.stringify(task.history[taskEvent.revision - 1]) !== JSON.stringify(taskEvent) ||
+        ledger.events[auditEvent.sequence - 1]?.eventId !== auditEvent.eventId ||
+        JSON.stringify(ledger.events[auditEvent.sequence - 1]) !== JSON.stringify(auditEvent))
       return fail("PAIR_CONTRACT_INVALID");
+
+    if (replay) {
+      if (task.revision !== previousTask.revision || ledger.revision !== previousLedger.revision ||
+          JSON.stringify(task) !== JSON.stringify(previousTask) || JSON.stringify(ledger) !== JSON.stringify(previousLedger))
+        return fail("REPLAY_PAIR_MISMATCH");
+      const priorAudit = auditEvent.sequence === 1 ? GENESIS : ledger.events[auditEvent.sequence - 2]?.hash;
+      if (auditEvent.previousHash !== priorAudit) return fail("REPLAY_CHAIN_INVALID");
+    } else {
+      if (task.revision !== previousTask.revision + 1 || taskEvent.revision !== task.revision ||
+          task.history.at(-1)?.eventId !== taskEvent.eventId ||
+          ledger.revision !== previousLedger.revision + 1 || auditEvent.sequence !== ledger.revision ||
+          ledger.events.at(-1)?.eventId !== auditEvent.eventId || auditEvent.previousHash !== previousLedger.headHash ||
+          auditEvent.hash !== ledger.headHash || taskEvent.sequence !== previousTask.revision + 1 ||
+          previousLedger.revision === 0 && previousLedger.headHash !== GENESIS)
+        return fail("REVISION_OR_CHAIN_INVALID");
+    }
 
     const auditApi = input.auditApi ?? globalThis.ProcheliaNexusAuditLedger;
     if (!auditApi || typeof auditApi.verifyLedger !== "function") return fail("AUDIT_API_UNAVAILABLE");
@@ -77,15 +96,11 @@
     if (!plain(verification) || verification.ok !== true || verification.revision !== ledger.revision ||
         verification.headHash !== ledger.headHash) return fail("AUDIT_VERIFY_FAILED");
 
-    const taskJson = safeJson(task), taskEventJson = safeJson(taskEvent), ledgerJson = safeJson(ledger);
-    const auditEventJson = safeJson(auditEvent), previousTaskJson = safeJson(previousTask);
+    const taskJson = safeJson(task), taskEventJson = safeJson(taskEvent), ledgerJson = safeJson(ledger), auditEventJson = safeJson(auditEvent), previousTaskJson = safeJson(previousTask);
     if (!taskJson || !taskEventJson || !ledgerJson || !auditEventJson || !previousTaskJson) return fail("SERIALIZATION_INVALID");
     const scope = scopeKey(task.tenantId), env = task.environment;
 
-    if (commit.taskDuplicate === true || commit.auditDuplicate === true) {
-      if (commit.taskDuplicate !== true || commit.auditDuplicate !== true ||
-          task.revision !== previousTask.revision || ledger.revision !== previousLedger.revision)
-        return fail("REPLAY_PAIR_MISMATCH");
+    if (replay) {
       try {
         const taskRow = await DB.prepare("SELECT revision, snapshot_json FROM nexus_task_snapshots WHERE task_id = ? AND scope_key = ? AND environment = ? LIMIT 1").bind(task.taskId, scope, env).first();
         const headRow = await DB.prepare("SELECT revision, head_hash FROM nexus_audit_ledger_heads WHERE scope_key = ? AND environment = ? LIMIT 1").bind(scope, env).first();
@@ -100,13 +115,6 @@
       } catch { return fail("D1_REPLAY_READ_FAILED"); }
     }
 
-    if (task.revision !== previousTask.revision + 1 || ledger.revision !== previousLedger.revision + 1 ||
-        auditEvent.sequence !== previousLedger.revision + 1 || auditEvent.previousHash !== previousLedger.headHash ||
-        taskEvent.revision !== previousTask.revision + 1 || taskEvent.sequence !== taskEvent.revision ||
-        !ID.test(input.commitId) || previousLedger.revision === 0 && previousLedger.headHash !== GENESIS)
-      return fail("REVISION_OR_CHAIN_INVALID");
-
-    const previousLedgerHead = previousLedger.headHash;
     const guardSql = `INSERT INTO nexus_task_commit_guards (commit_id, task_id, scope_key, environment, task_revision, audit_revision, ok)
       SELECT ?, ?, ?, ?, ?, ?, CASE WHEN
         ((? = 0 AND NOT EXISTS (SELECT 1 FROM nexus_task_snapshots WHERE task_id = ?)
