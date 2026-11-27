@@ -60,6 +60,9 @@ During deeper source inspection, the operational Copilot accepted caller-provide
 
 **Corrective change now in this draft:** autonomous case execution is disabled; cases remain pending human review. The automatic execution function fails closed. Mission reassignment/rescheduling are queued rather than directly written, and queued provider actions remain non-executable pending an adapter with server-side revalidation. Regression tests and CI were added.
 
+
+Additional correction: case approvals now preserve `WAITING_PROVIDER` when actions are queued and do not mark the case resolved prematurely. Regression coverage checks this state.
+
 This is a source-level safety improvement, not a proof that every route is safe. Human approval also must not be interpreted as permission to bypass ownership/state/transaction controls. The next required work is a server-side route integration and adversarial testing of case creation/approval, including cross-tenant IDs and malicious context.
 
 ## Conclusion
