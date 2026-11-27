@@ -11,24 +11,24 @@ function time(v){if(typeof v!=="string"||!/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.
 function fail(){return {ok:false,status:"UNKNOWN",executionAllowed:false,mode:"INCIDENT_POLICY_ONLY",decision:"DENY",reason:"INPUT_INVALID"}}
 function safeEvent(e){return {type:e.type,at:e.at,actorType:e.actorType,reasonCode:e.reasonCode??null}}
 function evaluateIncident(input={}){
- if(!plain(input)||!ENVS.has(input.environment)||!time(input.now)||!plain(input.incident)||!ID.test(input.incident.id)||!SEV.has(input.incident.severity)||!STATES.has(input.incident.state)||!time(input.incident.createdAt)||Date.parse(input.incident.createdAt)>Date.parse(input.now)||!Array.isArray(input.events)||input.events.length>100||input.events.some(e=>!plain(e)||!time(e.at)||!ID.test(e.type)||!["human","system"].includes(e.actorType)|| (e.reasonCode!==undefined&&!ID.test(e.reasonCode))))return fail();
+ if(!plain(input)||!ENVS.has(input.environment)||!time(input.now)||!plain(input.incident)||!ID.test(input.incident.id)||!SEV.has(input.incident.severity)||!STATES.has(input.incident.state)||!time(input.incident.createdAt)||Date.parse(input.incident.createdAt)>Date.parse(input.now)||!(input.incident.ownerId===null||input.incident.ownerId===undefined||ID.test(input.incident.ownerId))||!Array.isArray(input.events)||input.events.length>100||input.events.some(e=>!plain(e)||!time(e.at)||!ID.test(e.type)||!["human","system"].includes(e.actorType)||(e.reasonCode!==undefined&&!ID.test(e.reasonCode))))return fail();
  const i=input.incident, elapsed=Math.max(0,Math.floor((Date.parse(input.now)-Date.parse(i.createdAt))/60000)), sla=SLA[i.severity], slaBreached=elapsed>sla&& !["RESOLVED","CLOSED"].includes(i.state);
  const assigned=typeof i.ownerId==="string"&&ID.test(i.ownerId);
  const permitted={OPEN:["ACKNOWLEDGED","WAITING_HUMAN"],ACKNOWLEDGED:["INVESTIGATING","WAITING_HUMAN"],INVESTIGATING:["WAITING_HUMAN","MITIGATED"],WAITING_HUMAN:["ACKNOWLEDGED","INVESTIGATING","MITIGATED"],MITIGATED:["RESOLVED"],RESOLVED:["CLOSED","INVESTIGATING"],CLOSED:["INVESTIGATING"]};
  let decision="NO_CHANGE", reason="STATE_VALID", nextState=i.state;
  const req=input.request;
  if(req!==undefined){
-  if(!plain(req)||!ID.test(req.action)||!["human","system"].includes(req.actorType)|| (req.reasonCode!==undefined&&!ID.test(req.reasonCode)))return fail();
+  if(!plain(req)||!ID.test(req.action)||!["human","system"].includes(req.actorType)||(req.reasonCode!==undefined&&!ID.test(req.reasonCode)))return fail();
   const action=req.action;
-  if(action==="ASSIGN_OWNER"){if(!ID.test(req.ownerId))return fail();decision="ALLOW";reason="OWNER_ASSIGNMENT_ACCEPTED";}
+  if(action==="ASSIGN_OWNER"){if(req.actorType!=="human"||!ID.test(req.ownerId)){decision="DENY";reason="HUMAN_OWNER_ASSIGNMENT_REQUIRED";}else{decision="ALLOW";reason="OWNER_ASSIGNMENT_ACCEPTED";}}
   else if(action==="TRANSITION"&&STATES.has(req.toState)&&permitted[i.state].includes(req.toState)){
     if(["RESOLVED","CLOSED"].includes(req.toState)&&req.actorType!=="human"){decision="DENY";reason="HUMAN_APPROVAL_REQUIRED";}
     else if(["ACKNOWLEDGED","INVESTIGATING","MITIGATED"].includes(req.toState)&&!assigned){decision="DENY";reason="OWNER_REQUIRED";}
-    else {decision="ALLOW";reason="TRANSITION_ALLOWED";nextState=req.toState;}
-  } else if(action==="REOPEN"&&["RESOLVED","CLOSED"].includes(i.state)&&req.actorType==="human"&&req.toState==="INVESTIGATING"&&assigned){decision="ALLOW";reason="HUMAN_REOPEN_ALLOWED";nextState="INVESTIGATING";}
-  else {decision="DENY";reason="TRANSITION_NOT_ALLOWED";}
+    else{decision="ALLOW";reason="TRANSITION_ALLOWED";nextState=req.toState;}
+  }else if(action==="REOPEN"&&["RESOLVED","CLOSED"].includes(i.state)&&req.actorType==="human"&&req.toState==="INVESTIGATING"&&assigned){decision="ALLOW";reason="HUMAN_REOPEN_ALLOWED";nextState="INVESTIGATING";}
+  else{decision="DENY";reason="TRANSITION_NOT_ALLOWED";}
  }
- return {ok:true,environment:input.environment,mode:"INCIDENT_POLICY_ONLY",executionAllowed:false,incident:{id:i.id,state:i.state,nextState,severity:i.severity,ownerAssigned:assigned,createdAt:i.createdAt},sla:{targetMinutes:sla,elapsedMinutes:elapsed,breached:slaBreached,needsEscalation:slaBreached&&i.state!=="WAITING_HUMAN"},decision,reason,allowedTransitions:permitted[i.state],events:input.events.slice(-20).map(safeEvent)};
+ return {ok:true,environment:input.environment,mode:"INCIDENT_POLICY_ONLY",executionAllowed:false,incident:{id:i.id,state:i.state,nextState,severity:i.severity,ownerAssigned:assigned,createdAt:i.createdAt},sla:{targetMinutes:sla,elapsedMinutes:elapsed,breached:slaBreached,needsEscalation:slaBreached},decision,reason,allowedTransitions:permitted[i.state],events:input.events.slice(-20).map(safeEvent)};
 }
 return Object.freeze({evaluateIncident});
 });
