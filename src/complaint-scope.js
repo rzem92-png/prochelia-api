@@ -9,7 +9,7 @@ const OUTCOMES = new Set(["clarification", "correction", "reschedule", "review",
 const HIGH_RISK_CATEGORIES = new Set(["property_damage", "safety_concern", "privacy_data", "discrimination",
   "fraude", "paiement_conteste", "remboursement_important", "litige_juridique", "incident_majeur",
   "violation_donnees", "decision_contractuelle", "conflit_reglementaire", "securite_domicile"]);
-const ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
+const ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-_]{0,127}$/;
 const REFERENCE_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,79}$/;
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 const SEVERITIES = new Set(["LOW", "MEDIUM", "HIGH", "CRITICAL"]);
@@ -80,6 +80,7 @@ export function resolveComplaintScope(actor, draft, records = {}) {
   if (actor.role === "client") {
     const profile = records.clientProfile;
     if (!profile || !ID_PATTERN.test(String(profile.id || ""))) return { ok: false, status: 403, error: "CLIENT_PROFILE_NOT_FOUND" };
+    if (profile.user_id && profile.user_id !== actor.id) return { ok: false, status: 403, error: "CLIENT_PROFILE_ACTOR_MISMATCH" };
     if (draft.clientId && draft.clientId !== profile.id) return { ok: false, status: 403, error: "CLIENT_OWNERSHIP_MISMATCH" };
     if (draft.companyId) return { ok: false, status: 403, error: "COMPANY_SCOPE_NOT_ALLOWED" };
     if (draft.missionId && !records.mission) return { ok: false, status: 404, error: "MISSION_NOT_FOUND" };
