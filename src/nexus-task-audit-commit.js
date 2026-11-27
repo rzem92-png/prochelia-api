@@ -49,7 +49,7 @@
       return fail("AUDIT_APPEND_FAILED", { cause: audited?.error ?? "RESULT_INVALID" });
     const priorRevision = input.ledger.revision;
     const expectedRevision = audited.duplicate === true ? priorRevision : priorRevision + 1;
-    if (audited.ledger.revision !== expectedRevision || audited.ledger.headHash === input.ledger.headHash && audited.duplicate !== true ||
+    if (audited.ledger.revision !== expectedRevision || (audited.duplicate === true ? audited.ledger.headHash !== input.ledger.headHash : audited.ledger.headHash === input.ledger.headHash) ||
         audited.auditEvent.eventId !== event.eventId || audited.auditEvent.taskId !== input.task.taskId ||
         audited.auditEvent.environment !== input.task.environment ||
         (audited.auditEvent.tenantId ?? null) !== (input.task.tenantId ?? null) ||
