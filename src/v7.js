@@ -846,17 +846,30 @@ function v7CheckConflict({
 // TARIFICATION
 // =====================================================
 
+// Strict numeric parser: accepts numeric primitives and decimal strings only.
+function v7StrictNumber(value) {
+  if (typeof value === "number") return Number.isFinite(value) ? value : null;
+  if (typeof value !== "string") return null;
+  const normalized = value.trim();
+  if (!normalized || !/^[+-]?(?:\\d+(?:\\.\\d*)?|\\.\\d+)(?:[eE][+-]?\\d+)?$/.test(normalized)) return null;
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+
+// =====================================================
+// TARIFICATION
+// =====================================================
+
 function v7CheckPricing({
   amount,
   minimum = 0,
   maximum = null
 } = {}) {
-  const value = Number(amount);
-  const min = Number(minimum);
-  const max = maximum === null || maximum === undefined ? null : Number(maximum);
-  if (amount === null || amount === undefined || String(amount).trim() === "" || !Number.isFinite(value) ||
-      minimum === null || minimum === undefined || String(minimum).trim() === "" || !Number.isFinite(min) ||
-      min < 0 || (max !== null && (!Number.isFinite(max) || max < min))) {
+  const value = v7StrictNumber(amount);
+  const min = v7StrictNumber(minimum);
+  const max = maximum === null || maximum === undefined ? null : v7StrictNumber(maximum);
+  if (value === null || min === null || min < 0 || (maximum !== null && maximum !== undefined && (max === null || max < min))) {
     return v7Result(false, {}, "Paramètres tarifaires invalides");
   }
   if (value < 0) return v7Result(false, {}, "Tarif négatif interdit");
@@ -964,28 +977,28 @@ function v7CalculateFinance({
   paymentFees = 0,
   otherFees = 0
 } = {}) {
-  const client = Number(clientAmount);
-  const rate = Number(commissionRate);
-  const payment = Number(paymentFees);
-  const other = Number(otherFees);
-  const inputs = [clientAmount, commissionRate, paymentFees, otherFees];
-  if (inputs.some(v => v === null || v === undefined || String(v).trim() === "" || !Number.isFinite(Number(v))) ||
+  const client = v7StrictNumber(clientAmount);
+  const rate = v7StrictNumber(commissionRate);
+  const payment = v7StrictNumber(paymentFees);
+  const other = v7StrictNumber(otherFees);
+  if (client === null || rate === null || payment === null || other === null ||
       client < 0 || rate < 0 || rate > 100 || payment < 0 || other < 0) {
     return v7Result(false, {}, "Paramètres financiers invalides");
   }
   const roundMoney = value => Math.round((value + Number.EPSILON) * 100) / 100;
   const commission = roundMoney(client * rate / 100);
-  const intervenant = roundMoney(client - commission);
-  const margin = roundMoney(commission - payment - other);
+  const clientRounded = roundMoney(client);
+  const intervenant = roundMoney(clientRounded - commission);
+  const margin = roundMoney(commission - roundMoney(payment) - roundMoney(other));
   return v7Result(true, {
-    clientAmount: roundMoney(client),
+    clientAmount: clientRounded,
     commissionRate: rate,
     commissionAmount: commission,
     intervenantAmount: intervenant,
     paymentFees: roundMoney(payment),
     otherFees: roundMoney(other),
     grossMargin: margin,
-    roundingPolicy: "EUR-style 2 decimal places; currency must be supplied/validated by authoritative pricing layer",
+    roundingPolicy: "2 decimal places (provisional); currency must be supplied/validated by authoritative pricing layer",
     authoritative: false
   });
 }
