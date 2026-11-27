@@ -74,6 +74,7 @@ test("client scope is derived from authenticated profile, not body client id", (
 test("client profile absence, company scope and unowned mission fail closed", () => {
   const draft = validateComplaintDraft(validClientDraft, "client", NOW).normalized;
   assert.equal(resolveComplaintScope(client, draft, {}).error, "CLIENT_PROFILE_NOT_FOUND");
+  assert.equal(resolveComplaintScope(client, draft, { clientProfile: { id: "client-7", user_id: "different-user" } }).error, "CLIENT_PROFILE_ACTOR_MISMATCH");
   assert.equal(resolveComplaintScope(client, { ...draft, companyId: "company-1" }, { clientProfile: profile }).error, "COMPANY_SCOPE_NOT_ALLOWED");
   assert.equal(resolveComplaintScope(client, { ...draft, missionId: "mission-1" }, { clientProfile: profile }).error, "MISSION_NOT_FOUND");
   assert.equal(resolveComplaintScope(client, { ...draft, missionId: "mission-1" }, { clientProfile: profile, mission: { id: "mission-1", client_id: "other-client" } }).error, "MISSION_OWNERSHIP_MISMATCH");
