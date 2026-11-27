@@ -12,7 +12,7 @@ function fail(){return {ok:false,status:"UNKNOWN",executionAllowed:false,mode:"I
 function safeEvent(e){return {type:e.type,at:e.at,actorType:e.actorType,reasonCode:e.reasonCode??null}}
 function evaluateIncident(input={}){
  if(!plain(input)||!ENVS.has(input.environment)||!time(input.now)||!plain(input.incident)||!ID.test(input.incident.id)||!SEV.has(input.incident.severity)||!STATES.has(input.incident.state)||!time(input.incident.createdAt)||Date.parse(input.incident.createdAt)>Date.parse(input.now)||!Array.isArray(input.events)||input.events.length>100||input.events.some(e=>!plain(e)||!time(e.at)||!ID.test(e.type)||!["human","system"].includes(e.actorType)|| (e.reasonCode!==undefined&&!ID.test(e.reasonCode))))return fail();
- const i=input.incident, elapsed=Math.max(0,Math.floor((Date.parse(input.now)-Date.parse(i.createdAt))/60000)), sla=SLA[i.severity], slaBreached=elapsed>sla&& !["RESOLVED","CLOSED"].includes(i.state);
+ const i=input.incident, elapsed=Math.max(0,Math.floor((Date.parse(input.now)-Date.parse(i.createdAt))/60000)), sla=SLA[i.severity], slaBreached=elapsed>=sla&& !["RESOLVED","CLOSED"].includes(i.state);
  const assigned=typeof i.ownerId==="string"&&ID.test(i.ownerId);
  const permitted={OPEN:["ACKNOWLEDGED","WAITING_HUMAN"],ACKNOWLEDGED:["INVESTIGATING","WAITING_HUMAN"],INVESTIGATING:["WAITING_HUMAN","MITIGATED"],WAITING_HUMAN:["ACKNOWLEDGED","INVESTIGATING","MITIGATED"],MITIGATED:["RESOLVED"],RESOLVED:["CLOSED","INVESTIGATING"],CLOSED:["INVESTIGATING"]};
  let decision="NO_CHANGE", reason="STATE_VALID", nextState=i.state;
