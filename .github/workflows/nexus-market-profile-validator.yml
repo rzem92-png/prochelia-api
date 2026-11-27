@@ -1,0 +1,29 @@
+name: Nexus Supra market profile validation tests
+on:
+  pull_request:
+    paths:
+      - "src/nexus-market-profile-validator.js"
+      - "tests/nexus-market-profile-validator.test.mjs"
+      - ".github/workflows/nexus-market-profile-validator.yml"
+  push:
+    branches: [main]
+    paths:
+      - "src/nexus-market-profile-validator.js"
+      - "tests/nexus-market-profile-validator.test.mjs"
+      - ".github/workflows/nexus-market-profile-validator.yml"
+permissions:
+  contents: read
+jobs:
+  market-profile:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: 22
+          package-manager-cache: false
+      - name: Syntax check
+        run: node --experimental-default-type=module --check src/nexus-market-profile-validator.js
+      - name: Regression tests
+        run: node --experimental-default-type=module --test tests/nexus-market-profile-validator.test.mjs
