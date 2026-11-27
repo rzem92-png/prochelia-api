@@ -1566,15 +1566,11 @@ async function processActionOutbox(request, env) {
   const processed=[];
   for(const row of (rows.results||[])) {
     const payload=row.payload_json?JSON.parse(row.payload_json):{};
-    // Provider-dependent actions stay queued until the corresponding adapter/secret is configured.
-    const external = ['PSP_REFUND_REVIEW','NOTIFY_CLIENT','SEARCH_REPLACEMENT','RESCHEDULE_MISSION','ASSIGN_REPLACEMENT'].includes(String(row.action_type));
-    if(external) {
-      await env.DB.prepare(`UPDATE action_outbox SET status='WAITING_PROVIDER',last_error=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind('External adapter/provider required for final execution.',row.id).run();
-      processed.push({id:row.id,status:'WAITING_PROVIDER',action_type:row.action_type});
-      continue;
-    }
-    await env.DB.prepare(`UPDATE action_outbox SET status='COMPLETED',processed_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(row.id).run();
-    processed.push({id:row.id,status:'COMPLETED',action_type:row.action_type,payload});
+    // Fail closed: this endpoint has no verified action executor. Never mark an outbox
+    // item complete merely because it was read or acknowledged by the queue processor.
+    await env.DB.prepare(`UPDATE action_outbox SET status='WAITING_PROVIDER',last_error=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`)
+      .bind('No verified execution adapter is registered; awaiting implementation/review.',row.id).run();
+    processed.push({id:row.id,status:'WAITING_PROVIDER',action_type:row.action_type});
   }
   await journal(env,'gerante',gate.auth.user.id,'ACTION_OUTBOX_PROCESSED','system',null,'OK',{count:processed.length});
   return json({ok:true,version:VERSION,processed},200);
