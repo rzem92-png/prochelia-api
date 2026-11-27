@@ -117,3 +117,46 @@ test("intervenant directory returns the deterministic final-page contract", asyn
   assert.equal(body.next_offset,null);
   assert.match(query,/FROM intervenants i JOIN users u/);
 });
+
+
+test("payment verification route requires an authenticated session", async () => {
+  const response = await handleV7Route(
+    post("/api/v7/check/payment", { payment: { status: "PAID" } }),
+    {},
+    "/api/v7/check/payment",
+    null
+  );
+  assert.equal(response.status, 401);
+  assert.equal((await response.json()).error, "UNAUTHENTICATED");
+});
+
+test("finance calculation route is manager-only", async () => {
+  const denied = await handleV7Route(
+    post("/api/v7/finance/calculate", { clientAmount: 100, commissionRate: 10 }),
+    {},
+    "/api/v7/finance/calculate",
+    { user: { id: "client-1", role: "client" } }
+  );
+  assert.equal(denied.status, 403);
+  assert.equal((await denied.json()).error, "FORBIDDEN");
+
+  const allowed = await handleV7Route(
+    post("/api/v7/finance/calculate", { clientAmount: 100, commissionRate: 10 }),
+    {},
+    "/api/v7/finance/calculate",
+    { user: { id: "manager-1", role: "gerante" } }
+  );
+  assert.equal(allowed.status, 200);
+  assert.equal((await allowed.json()).authoritative, false);
+});
+
+test("pre-mission verification route rejects unauthenticated callers", async () => {
+  const response = await handleV7Route(
+    post("/api/v7/check/pre-mission", {}),
+    {},
+    "/api/v7/check/pre-mission",
+    null
+  );
+  assert.equal(response.status, 401);
+  assert.equal((await response.json()).error, "UNAUTHENTICATED");
+});
