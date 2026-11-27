@@ -73,3 +73,22 @@ test("D1 scan exception fails closed and does not claim health", async () => {
   const DB = { prepare() { throw new Error("unavailable"); } };
   const result = await scan(input(DB)); assert.equal(result.ok, false); assert.equal(result.error, "D1_SCAN_FAILED"); assert.equal(result.executionAllowed, false);
 });
+
+test("query limit is capped by the extra row and row snapshot mismatch is unhealthy", async () => {
+  const DB = makeDB([row("task-snapshot-mismatch")]);
+  const result = await scan(input(DB, { readerApi: { loadTaskAuditPair: async ({ taskId, tenantId, environment }) => ({ ok: true, verified: true, executionAllowed: false, task: { taskId, tenantId, environment, state: "FAILED", revision: 2 } }) } }));
+  assert.equal(DB.calls[0].bindings[4], 21);
+  assert.equal(result.failed, 1);
+  assert.equal(result.findings[0].code, "PAIR_VERIFICATION_FAILED");
+  assert.equal(result.healthy, false);
+});
+
+test("invalid task identifier blocks pagination rather than reporting healthy", async () => {
+  const DB = makeDB([{ ...row("task-invalid"), task_id: "bad id" }, row("task-next")]);
+  const result = await scan(input(DB, { limit: 1 }));
+  assert.equal(result.cursorBlocked, true);
+  assert.equal(result.truncated, true);
+  assert.equal(result.nextCursor, null);
+  assert.equal(result.healthy, false);
+  assert.equal(result.failed, 1);
+});
