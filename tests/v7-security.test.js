@@ -218,3 +218,15 @@ test("malformed V7 JSON returns a controlled 400 without leaking details", async
   assert.equal((await response.json()).error, "INVALID_JSON");
   assert.equal(response.headers.get("Cache-Control"), "no-store");
 });
+
+test("V7 POST payloads above the limit are rejected before route processing", async () => {
+  const request = new Request("https://example.test/api/v7/check/email", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ payload: "x".repeat(128 * 1024 + 10) })
+  });
+  const response = await handleV7Route(request, {}, "/api/v7/check/email", null);
+  assert.equal(response.status, 413);
+  assert.equal((await response.json()).error, "PAYLOAD_TOO_LARGE");
+  assert.equal(response.headers.get("Cache-Control"), "no-store");
+});
