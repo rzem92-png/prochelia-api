@@ -53,6 +53,7 @@ jobs:
           node --experimental-default-type=module --check src/nexus-event-routing-policy.js
           node --experimental-default-type=module --check src/nexus-event-idempotency.js
           node --experimental-default-type=module --check src/nexus-event-retry-quarantine.js
+          node --experimental-default-type=module --check src/nexus-module-health.js
       - name: Lint guarded Preview deployment workflow
         run: |
           go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
