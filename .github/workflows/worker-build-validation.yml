@@ -39,12 +39,17 @@ jobs:
           node --experimental-default-type=module --check src/nexus-audit-ledger.js
           node --experimental-default-type=module --check src/nexus-task-audit-bridge.js
           node --experimental-default-type=module --check src/nexus-task-audit-commit.js
+          node --experimental-default-type=module --check src/nexus-d1-task-audit-store.js
       - name: Lint guarded Preview deployment workflow
         run: |
           go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
           "$HOME/go/bin/actionlint" .github/workflows/deploy-preview-worker-manual.yml
       - name: Generate isolated Preview deployment config
         run: node scripts/generate-preview-wrangler-config.mjs
+      - name: Validate canonical Preview migrations and Nexus D1 invariants (SQLite local only)
+        run: |
+          python tests/test_preview_canonical_migrations.py
+          python tests/test_nexus_task_audit_store_schema.py
       - name: Wrangler bundle validation only (no deploy)
         run: |
           npx --yes wrangler@4 deploy --dry-run --config wrangler.jsonc --outdir "$RUNNER_TEMP/prochelia-worker-dry-run"
