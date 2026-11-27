@@ -142,7 +142,7 @@ test("bounded JSON reader enforces declared and streamed payload size", () => {
   const end = source.indexOf("\n}", start);
   assert.ok(start >= 0 && end > start);
   const reader = source.slice(start, end);
-  assert.match(reader, /Content-Length/); // policy is applied through the lower-case header name
+  assert.match(reader, /content-length/);
   assert.match(reader, /maxBytes/);
   assert.match(reader, /reader\.cancel/);
   assert.match(reader, /total > maxBytes/);
