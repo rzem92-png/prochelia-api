@@ -70,7 +70,7 @@ test("persists task snapshot, event, ledger head and event in one D1 batch", asy
   assert.match(DB.calls[0][2].sql, /nexus_task_events/);
   assert.match(DB.calls[0][3].sql, /nexus_audit_ledger_events/);
   assert.match(DB.calls[0][4].sql, /nexus_audit_ledger_heads/);
-  assert.equal((DB.calls[0][0].sql.match(/\\?/g) || []).length, DB.calls[0][0].bindings.length);
+  assert.equal((DB.calls[0][0].sql.match(/\?/g) || []).length, DB.calls[0][0].bindings.length);
   assert.match(DB.calls[0][5].sql, /DELETE FROM nexus_task_commit_guards/);
 });
 
@@ -85,7 +85,7 @@ test("rejects cross-tenant scope before preparing any writes", async () => {
 test("rechecks the candidate hash chain before persistence", async () => {
   const { previousTask, previousLedger, pair } = await fixture();
   const DB = mockDb();
-  const result = await store({ DB, previousTask, previousLedger, commit: { ...pair, ledger: { ...pair.ledger, headHash: "f".repeat(64) } }, commitId: "commit-d1-03", auditApi: { verifyLedger: async () => ({ ok: false }) } });
+  const result = await store({ DB, previousTask, previousLedger, commit: pair, commitId: "commit-d1-03", auditApi: { verifyLedger: async () => ({ ok: false }) } });
   assert.equal(result.error, "AUDIT_VERIFY_FAILED");
   assert.equal(DB.calls.length, 0);
 });
