@@ -63,7 +63,7 @@
       add(safeError(scan.error), "critical", 1, "Read-only scan unavailable: restore Preview/dev/test reader access and rerun; keep the scope marked UNKNOWN.");
     } else {
       if (scan.failed > 0) add("INTEGRITY_FAILURE", "critical", scan.failed,
-        "Pause automated execution for the affected scope and have an authorized operator inspect the task/audit evidence.");
+        "Recommendation: an authorized operator should pause automated execution for the affected scope and inspect the task/audit evidence.");
       if (scan.truncated || scan.cursorBlocked) add("SCAN_INCOMPLETE", "warning", 1,
         "Continue the bounded keyset scan from its returned cursor; do not mark the scope healthy until all pages verify.");
       if (scan.byState.ESCALATED > 0) add("HUMAN_ESCALATION_PENDING", "high", scan.byState.ESCALATED,
@@ -90,7 +90,7 @@
     }
     return { ok: true, status: "UNKNOWN", severity: "critical", alertRequired: true, humanReviewRequired: true,
       scope: { tenantId, scopeKey: scopeKey(tenantId), environment }, evaluatedAt: input.evaluatedAt,
-      summary: { scanned: 0, verified: 0, failed: 0, truncated: false, cursorBlocked: false, byState: Object.fromEntries(STATES.map(state => [state, 0])), findingCounts: {} },
+      summary: { scanned: null, verified: null, failed: null, truncated: null, cursorBlocked: null, byState: Object.fromEntries(STATES.map(state => [state, null])), findingCounts: {} },
       alerts, executionAllowed: false, mode: "READ_ONLY_ALERT_EVALUATION" };
   }
   return Object.freeze({ evaluateTaskAuditScanAlerts });
