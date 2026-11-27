@@ -98,7 +98,7 @@
 
     const taskJson = safeJson(task), taskEventJson = safeJson(taskEvent), ledgerJson = safeJson(ledger), auditEventJson = safeJson(auditEvent), previousTaskJson = safeJson(previousTask);
     if (!taskJson || !taskEventJson || !ledgerJson || !auditEventJson || !previousTaskJson) return fail("SERIALIZATION_INVALID");
-    const scope = scopeKey(task.tenantId), env = task.environment;
+    const scope = scopeKey(task.tenantId), env = task.environment, previousLedgerHead = previousLedger.headHash;
 
     if (replay) {
       try {
