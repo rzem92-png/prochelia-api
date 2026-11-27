@@ -65,6 +65,11 @@ Additional correction: case approvals now preserve `WAITING_PROVIDER` when actio
 
 This is a source-level safety improvement, not a proof that every route is safe. Human approval also must not be interpreted as permission to bypass ownership/state/transaction controls. The next required work is a server-side route integration and adversarial testing of case creation/approval, including cross-tenant IDs and malicious context.
 
+
+### Ownership/scope hardening added
+
+Operational case creation now derives client/provider profile IDs from the authenticated user, verifies mission ownership/assignment against D1, rejects caller-supplied mismatched IDs, and fails closed for company case scope until the company-to-mission relation is proven. Every case is forced to human review; caller context cannot request automatic business execution. Regression tests cover these guards.
+
 ## Conclusion
 
 This inventory identifies next integration targets but does **not** certify compliance, security, production readiness or legal adequacy. Mission and settlement gates remain closed. No merge, migration, deployment, real payment or market launch is authorized by this document.
