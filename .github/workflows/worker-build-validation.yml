@@ -47,6 +47,7 @@ jobs:
           node --experimental-default-type=module --check src/nexus-root-cause.js
           node --experimental-default-type=module --check src/nexus-improvement-triage.js
           node --experimental-default-type=module --check src/nexus-quality-case.js
+          node --experimental-default-type=module --check src/nexus-impact-estimate.js
       - name: Lint guarded Preview deployment workflow
         run: |
           go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
