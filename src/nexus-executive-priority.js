@@ -1,0 +1,15 @@
+/* Nexus executive priority scoring. Recommendation only; no decisions/actions. */
+(function(root,factory){const api=factory();if(typeof module==="object"&&module.exports)module.exports=api;if(root)root.ProcheliaNexusExecutivePriority=api;})(typeof window!=="undefined"?window:globalThis,function(){
+"use strict";
+const ENV=new Set(["preview","development","test"]),ID=/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/,SEV={critical:100,high:70,medium:40,low:20},DOMAINS=new Set(["security","compliance","finance","operations","quality","customer","provider","continuity","technology","privacy"]),MAX=100;
+function plain(v){return !!v&&typeof v==="object"&&!Array.isArray(v)&&(Object.getPrototypeOf(v)===Object.prototype||Object.getPrototypeOf(v)===null)&&Object.getOwnPropertySymbols(v).length===0&&Object.keys(Object.getOwnPropertyDescriptors(v)).every(k=>{const d=Object.getOwnPropertyDescriptor(v,k);return d.enumerable&&Object.hasOwn(d,"value")})}
+function denied(reason){return {ok:false,status:"UNKNOWN",mode:"PRIORITY_RECOMMENDATIONS_ONLY",executionAllowed:false,humanReviewRequired:true,reason,items:[]}}
+function evaluate(input={}){
+ if(!plain(input)||!ENV.has(input.environment)||!(input.tenantId===null||(typeof input.tenantId==="string"&&ID.test(input.tenantId)))||!Array.isArray(input.items)||input.items.length>100)return denied("INPUT_INVALID");
+ const seen=new Set();for(const x of input.items){if(!plain(x)||!ID.test(x.id)||seen.has(x.id)||!Object.hasOwn(SEV,x.severity)||!DOMAINS.has(x.domain)||!Number.isInteger(x.ageMinutes)||x.ageMinutes<0||x.ageMinutes>525600||typeof x.slaBreached!=="boolean"||!Array.isArray(x.affectedDomains)||x.affectedDomains.length>10||x.affectedDomains.some(d=>!DOMAINS.has(d))||new Set(x.affectedDomains).size!==x.affectedDomains.length)return denied("ITEM_INVALID");seen.add(x.id);}
+ const items=input.items.map(x=>{let score=SEV[x.severity];if(x.slaBreached)score+=15;if(["security","compliance","finance","privacy"].includes(x.domain))score+=15;if(x.affectedDomains.length>=3)score+=10;if(x.ageMinutes>=1440)score+=5;score=Math.min(MAX,score);const priority=score>=85?"P0":score>=65?"P1":score>=40?"P2":"P3";return {id:x.id,domain:x.domain,severity:x.severity,ageMinutes:x.ageMinutes,slaBreached:x.slaBreached,affectedDomains:x.affectedDomains,score,priority,reviewRequired:true,recommendation:priority==="P0"?"IMMEDIATE_HUMAN_REVIEW":priority==="P1"?"URGENT_REVIEW":"SCHEDULE_REVIEW"};}).sort((a,b)=>b.score-a.score||a.id.localeCompare(b.id));
+ const counts={p0:items.filter(x=>x.priority==="P0").length,p1:items.filter(x=>x.priority==="P1").length,p2:items.filter(x=>x.priority==="P2").length,p3:items.filter(x=>x.priority==="P3").length};
+ return {ok:true,status:counts.p0?"CRITICAL":counts.p1?"HIGH_PRIORITY":items.length?"PRIORITIES_AVAILABLE":"NO_ITEMS",environment:input.environment,tenantId:input.tenantId,itemCount:items.length,items,summary:counts,executionAllowed:false,humanReviewRequired:true,mode:"PRIORITY_RECOMMENDATIONS_ONLY"};
+}
+return Object.freeze({evaluate});
+});
