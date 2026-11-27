@@ -5,3 +5,4 @@ test("automatic execution path fails closed",()=>{assert.match(source,/if\(autom
 test("mission replacement is queued, not directly written",()=>{assert.match(source,/HUMAN_REVIEW_AND_OWNERSHIP_RECHECK_REQUIRED/);assert.doesNotMatch(source,/UPDATE missions SET intervenant_id=\?/);});
 test("rescheduling is queued for runtime revalidation",()=>{assert.match(source,/HUMAN_REVIEW_AND_RUNTIME_VALIDATION_REQUIRED/);assert.doesNotMatch(source,/UPDATE missions SET \$\{target\}=\?/);});
 test("financial review action remains queued and no money movement is implemented here",()=>{assert.match(source,/PSP_REFUND_REVIEW/);assert.match(source,/Financial actions are deliberately queued/);});
+test("case stays pending when external action is queued",()=>{assert.match(source,/awaitingProvider/);assert.match(source,/status:\s*awaitingProvider\?'WAITING_PROVIDER':'RESOLVED'/);assert.match(source,/awaitingProvider\?'WAITING_PROVIDER':'RESOLVED'/);});
