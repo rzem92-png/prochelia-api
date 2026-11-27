@@ -116,7 +116,7 @@
         AND ((? = 0 AND NOT EXISTS (SELECT 1 FROM nexus_audit_ledger_heads WHERE scope_key = ? AND environment = ?)
             AND NOT EXISTS (SELECT 1 FROM nexus_audit_ledger_events WHERE scope_key = ? AND environment = ?))
          OR (? > 0 AND EXISTS (SELECT 1 FROM nexus_audit_ledger_heads WHERE scope_key = ? AND environment = ? AND revision = ? AND head_hash = ?)
-            AND (SELECT COUNT(*) FROM nexus_audit_ledger_events WHERE scope_key = ? AND environment = ?) = ?)
+            AND (SELECT COUNT(*) FROM nexus_audit_ledger_events WHERE scope_key = ? AND environment = ?) = ?))
         AND NOT EXISTS (SELECT 1 FROM nexus_task_events WHERE event_id = ?)
         AND NOT EXISTS (SELECT 1 FROM nexus_task_events WHERE task_id = ? AND revision = ?)
         AND NOT EXISTS (SELECT 1 FROM nexus_audit_ledger_events WHERE event_id = ?)
