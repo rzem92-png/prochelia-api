@@ -14,7 +14,7 @@ function validatePolicy(policy){
     !object(policy.agents)||!Array.isArray(policy.approverIds)||(policy.consumedApprovalIds!==undefined&&(!Array.isArray(policy.consumedApprovalIds)||!policy.consumedApprovalIds.every(nonEmpty))))return false;
  if(policy.approvalRequiredActionClasses!==undefined&&(!Array.isArray(policy.approvalRequiredActionClasses)||!policy.approvalRequiredActionClasses.every(x=>ACTION_CLASSES.has(x))))return false;
  if(policy.approvalRequiredActions!==undefined&&(!Array.isArray(policy.approvalRequiredActions)||!policy.approvalRequiredActions.every(nonEmpty)))return false;
- if(policy.approvalQuorumByClass!==undefined&&(!object(policy.approvalQuorumByClass)||!Object.values(policy.approvalQuorumByClass).every(x=>Number.isSafeInteger(x)&&x>=1&&x<=5)))return false;
+ if(policy.approvalQuorumByClass!==undefined&&(!object(policy.approvalQuorumByClass)||!Object.entries(policy.approvalQuorumByClass).every(([key,value])=>ACTION_CLASSES.has(key)&&Number.isSafeInteger(value)&&value>=1&&value<=5&&(!MONEY_CLASSES.has(key)||value>=2))))return false;
  for(const agent of Object.values(policy.agents)){
   if(!object(agent)||typeof agent.enabled!=="boolean"||!Array.isArray(agent.allowedTools)||!Array.isArray(agent.allowedActions)||!Array.isArray(agent.allowedScopes)||!Array.isArray(agent.allowedTenants)||!Array.isArray(agent.allowedEnvironments)||!object(agent.actionGrants)||typeof agent.globalTaskAllowed!=="boolean"||!object(agent.budget)||!BUDGET_KEYS.every(key=>isCounter(agent.budget[key])))return false;
   for(const grant of Object.values(agent.actionGrants)){if(!object(grant)||!Array.isArray(grant.classes)||!grant.classes.length||!grant.classes.every(x=>ACTION_CLASSES.has(x))||!Array.isArray(grant.scopes)||!grant.scopes.length||!grant.scopes.every(nonEmpty))return false}
@@ -29,7 +29,7 @@ function allow(code,reason,policy,request,authorization,approvalIds=[]){
 }
 function approvalQuorum(policy,actionClass){
  const override=policy.approvalQuorumByClass?.[actionClass];
- if(Number.isSafeInteger(override)&&override>=1&&override<=5)return override;
+ if(Number.isSafeInteger(override)&&override>=1&&override<=5)return MONEY_CLASSES.has(actionClass)?Math.max(2,override):override;
  return MONEY_CLASSES.has(actionClass)?2:1;
 }
 function validApproval(item,policy,request,now){
