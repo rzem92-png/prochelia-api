@@ -40,6 +40,32 @@ function validApproval(item,policy,request,now){
  const expiresAt=expiry(item.expiresAt);
  return expiresAt!==null&&expiresAt>now;
 }
+function canonicalJSON(value,seen=new Set(),depth=0,nodes={count:0}){
+ if(depth>32||++nodes.count>10000)throw new Error("ACTION_PAYLOAD_LIMIT");
+ if(value===null)return "null";
+ if(typeof value==="string"||typeof value==="boolean")return JSON.stringify(value);
+ if(typeof value==="number"){if(!Number.isFinite(value))throw new Error("ACTION_PAYLOAD_NONFINITE_NUMBER");return JSON.stringify(Object.is(value,-0)?0:value)}
+ if(Array.isArray(value)){if(value.length>1000||seen.has(value))throw new Error("ACTION_PAYLOAD_INVALID_ARRAY");seen.add(value);const result="["+value.map(item=>canonicalJSON(item,seen,depth+1,nodes)).join(",")+"]";seen.delete(value);return result}
+ if(object(value)){const prototype=Object.getPrototypeOf(value);if(prototype!==Object.prototype&&prototype!==null)throw new Error("ACTION_PAYLOAD_NONPLAIN_OBJECT");const keys=Object.keys(value).sort();if(keys.length>1000||keys.some(key=>key==="__proto__"||key==="constructor"||key==="prototype")||seen.has(value))throw new Error("ACTION_PAYLOAD_INVALID_OBJECT");seen.add(value);const result="{"+keys.map(key=>JSON.stringify(key)+":"+canonicalJSON(value[key],seen,depth+1,nodes)).join(",")+"}";seen.delete(value);return result}
+ throw new Error("ACTION_PAYLOAD_UNSUPPORTED_VALUE");
+}
+function canonicalActionPayload(request){
+ if(!object(request)||!nonEmpty(request.agentId)||!nonEmpty(request.toolId)||!nonEmpty(request.action)||!ACTION_CLASSES.has(request.actionClass)||!nonEmpty(request.environment)||!nonEmpty(request.scope)||!nonEmpty(request.taskId))throw new Error("ACTION_CONTEXT_INVALID");
+ if(request.payload!==undefined&&!object(request.payload)&&!Array.isArray(request.payload)&&request.payload!==null)throw new Error("ACTION_PAYLOAD_INVALID");
+ return canonicalJSON({schemaVersion:1,agentId:request.agentId,toolId:request.toolId,action:request.action,actionClass:request.actionClass,environment:request.environment,tenantId:request.tenantId??null,scope:request.scope,taskId:request.taskId,workflowId:request.workflowId??null,idempotencyKey:request.idempotencyKey??null,payload:request.payload??null});
+}
+async function computeActionHash(request){
+ const cryptoApi=globalThis.crypto;
+ if(!cryptoApi||!cryptoApi.subtle||typeof TextEncoder!=="function")throw new Error("CRYPTO_UNAVAILABLE");
+ const bytes=new TextEncoder().encode(canonicalActionPayload(request));
+ const digest=await cryptoApi.subtle.digest("SHA-256",bytes);
+ return Array.from(new Uint8Array(digest),byte=>byte.toString(16).padStart(2,"0")).join("");
+}
+async function evaluateActionWithVerifiedHash(policy,request){
+ if(!object(request)||!nonEmpty(request.actionHash)||!/^[a-f0-9]{64}$/i.test(request.actionHash))return deny("ACTION_HASH_REQUIRED","Une empreinte SHA-256 de l'action est obligatoire pour la passerelle de vérification.",policy,request);
+ try{const actual=await computeActionHash(request);if(actual!==request.actionHash.toLowerCase())return deny("ACTION_HASH_MISMATCH","L'empreinte calculée ne correspond pas à l'action normalisée.",policy,request);return evaluateAction(policy,request)}
+ catch(error){return deny("ACTION_HASH_INPUT_INVALID","Le contexte ou payload ne peut pas être normalisé de façon sûre.",policy,request)}
+}
 function evaluateAction(policy,request){
  if(!object(policy)||!object(request))return deny("INVALID_INPUT","Policy et requête structurées sont requises.",policy,request);
  if(!validatePolicy(policy)||!nonEmpty(request.agentId)||!nonEmpty(request.toolId)||!nonEmpty(request.action)||!ACTION_CLASSES.has(request.actionClass)||!nonEmpty(request.environment)||!nonEmpty(request.scope))return deny("INVALID_POLICY_OR_REQUEST","Policy, identité, outil, action, classe de risque ou scope invalide.",policy,request);
@@ -79,5 +105,5 @@ function evaluateAction(policy,request){
  }
  return allow("EXECUTION_ALLOWED","Policy autorise une action Preview bornée; le moteur ne l'exécute pas.",policy,request,"EXECUTE");
 }
-return Object.freeze({MODES:Object.freeze(Array.from(MODES)),ACTION_CLASSES:Object.freeze(Array.from(ACTION_CLASSES)),validatePolicy,evaluateAction});
+return Object.freeze({MODES:Object.freeze(Array.from(MODES)),ACTION_CLASSES:Object.freeze(Array.from(ACTION_CLASSES)),validatePolicy,canonicalActionPayload,computeActionHash,evaluateAction,evaluateActionWithVerifiedHash});
 });
