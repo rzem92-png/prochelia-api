@@ -1841,7 +1841,8 @@ async function complaintCreate(request, env) {
   }catch{
     return json({ok:false,error:'COMPLAINT_STORAGE_UNAVAILABLE',version:VERSION},503);
   }
-  const caseType=SIMPLE_CASES.has(value.category)||SENSITIVE_CASES.has(value.category)?value.category:'reclamation_client';
+  // Complaints always create a human-review case; never route a complaint to a simple auto-resolution category.
+  const caseType='reclamation_client';
   const caseContext={complaint_id:id,category:value.category,incident_date:value.incidentDate,request_reference:value.requestReference,desired_outcome:value.desiredOutcome,desired_outcome_details:value.desiredOutcomeDetails};
   const caseBody={case_type:caseType,client_id:scope.client_id,company_id:scope.company_id,mission_id:scope.mission_id,description:value.description,impact_level:scope.severity,context:caseContext};
   const caseHeaders=new Headers(request.headers);caseHeaders.delete('content-length');caseHeaders.set('content-type','application/json');
