@@ -39,6 +39,7 @@ test("verified escalated tasks require human assignment; failed tasks generate w
 test("unavailable scanner returns UNKNOWN critical with sanitized error", () => {
   const result = evaluate({ ...base, scan: { ok: false, error: "database password: fake", executionAllowed: false } });
   assert.equal(result.status, "UNKNOWN"); assert.equal(result.alerts[0].code, "SCAN_UNAVAILABLE");
+  assert.equal(result.summary.scanned, null); assert.equal(result.summary.verified, null);
   assert.doesNotMatch(JSON.stringify(result), /database password/);
 });
 
