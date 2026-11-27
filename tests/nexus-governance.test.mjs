@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import "../src/nexus-governance.js";
-const {evaluateAction,validatePolicy}=globalThis.ProcheliaNexusGovernance;
+const {evaluateAction,validatePolicy,canonicalActionPayload,computeActionHash,evaluateActionWithVerifiedHash}=globalThis.ProcheliaNexusGovernance;
 const NOW=Date.parse("2026-11-27T08:00:00Z");
 const policy={version:"nexus-policy-v1",mode:"EXECUTE_APPROVED",allowedEnvironments:["preview"],approvalRequiredActionClasses:["COUNTRY_ACTIVATION"],approverIds:["human-1","human-2"],consumedApprovalIds:[],killSwitch:{global:false,agents:{},tools:{},tenants:{},workflows:{}},agents:{ops:{enabled:true,allowedTools:["catalog","payments"],allowedActions:["readMarkets","globalCheck","updateCatalog","transferFunds","activateCountry"],allowedScopes:["market:read","market:write","finance:read","finance:write","global"],actionGrants:{"catalog:readMarkets":{classes:["READ"],scopes:["market:read"]},"catalog:updateCatalog":{classes:["WRITE"],scopes:["market:write"]},"catalog:globalCheck":{classes:["READ"],scopes:["global"]},"payments:transferFunds":{classes:["FINANCIAL"],scopes:["finance:write"]},"catalog:activateCountry":{classes:["COUNTRY_ACTIVATION"],scopes:["market:write"]}},allowedEnvironments:["preview"],allowedTenants:["tenant-a"],globalTaskAllowed:true,budget:{maxActionsPerTask:5,maxCostUnits:100,maxRetries:2,maxRuntimeMs:30000}}}};
 const base={agentId:"ops",toolId:"catalog",action:"readMarkets",actionClass:"READ",environment:"preview",tenantId:"tenant-a",scope:"market:read",taskId:"task-01",now:NOW};
@@ -44,4 +44,35 @@ test("financial quorum override may strengthen but never weaken the two-person f
  assert.equal(two.allowed,false);assert.equal(two.decision,"REQUIRES_APPROVAL");assert.ok(two.reason.includes("2/3"));
  const three=evaluateAction(strengthened,{...financial,approvals:[approval("human-1"),approval("human-2"),approval("human-3")]});
  assert.equal(three.allowed,true);assert.equal(three.approvalIds.length,3);
+});
+
+test("canonical action payload ignores object-key order but binds context and payload",()=>{
+ const a={...financial,payload:{amount:125,currency:"EUR",details:{b:2,a:1}}};
+ const b={...financial,payload:{details:{a:1,b:2},currency:"EUR",amount:125}};
+ assert.equal(canonicalActionPayload(a),canonicalActionPayload(b));
+ assert.notEqual(canonicalActionPayload(a),canonicalActionPayload({...a,payload:{...a.payload,amount:126}}));
+ assert.notEqual(canonicalActionPayload(a),canonicalActionPayload({...a,tenantId:"tenant-b"}));
+});
+test("SHA-256 action hash is stable and changes when normalized payload changes",async()=>{
+ const request={...financial,payload:{amount:125,currency:"EUR",details:{b:2,a:1}}};
+ const hash=await computeActionHash(request);
+ assert.match(hash,/^[a-f0-9]{64}$/);
+ assert.equal(hash,await computeActionHash({...request,payload:{details:{a:1,b:2},currency:"EUR",amount:125}}));
+ assert.notEqual(hash,await computeActionHash({...request,payload:{...request.payload,amount:126}}));
+});
+test("canonical action payload rejects cycles and unsafe/non-JSON values",()=>{
+ const cyclic={};cyclic.self=cyclic;
+ assert.throws(()=>canonicalActionPayload({...financial,payload:cyclic}),/ACTION_PAYLOAD_INVALID_OBJECT/);
+ assert.throws(()=>canonicalActionPayload({...financial,payload:{value:NaN}}),/ACTION_PAYLOAD_NONFINITE_NUMBER/);
+ assert.throws(()=>canonicalActionPayload({...financial,payload:{value:undefined}}),/ACTION_PAYLOAD_UNSUPPORTED_VALUE/);
+ assert.throws(()=>canonicalActionPayload({...financial,payload:new Date()}),/ACTION_PAYLOAD_NONPLAIN_OBJECT/);
+});
+test("verified-hash gateway rejects missing or mismatched hashes and accepts only bound approvals",async()=>{
+ const action={...financial,payload:{amount:125,currency:"EUR"}};
+ const hash=await computeActionHash(action);
+ const valid={...action,actionHash:hash,approvals:[approval("human-1","approval-1",{actionHash:hash}),approval("human-2","approval-2",{actionHash:hash})]};
+ const accepted=await evaluateActionWithVerifiedHash(policy,valid);
+ assert.equal(accepted.allowed,true);assert.equal(accepted.code,"APPROVED_ACTION_ALLOWED");
+ assert.equal((await evaluateActionWithVerifiedHash(policy,action)).code,"ACTION_HASH_REQUIRED");
+ assert.equal((await evaluateActionWithVerifiedHash(policy,{...valid,payload:{amount:126,currency:"EUR"}})).code,"ACTION_HASH_MISMATCH");
 });
