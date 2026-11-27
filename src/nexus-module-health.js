@@ -1,0 +1,17 @@
+/* Nexus Supra module health aggregation. Observational evaluator only; no monitoring or remediation. */
+(function(root,factory){const api=factory();if(typeof module==="object"&&module.exports)module.exports=api;if(root)root.ProcheliaNexusModuleHealth=api;})(typeof window!=="undefined"?window:globalThis,function(){
+"use strict";
+const ENV=new Set(["preview","development","test"]),ID=/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/,ISO=/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/,MODULES=["auth","incidents","event_contract","routing","idempotency","retry_quarantine","alerting","correlation","root_cause","improvement","impact","case_linkage","release_readiness","operations","finance","security","compliance","customer","provider"];
+function plain(v){return !!v&&typeof v==="object"&&!Array.isArray(v)&&(Object.getPrototypeOf(v)===Object.prototype||Object.getPrototypeOf(v)===null)&&Object.getOwnPropertySymbols(v).length===0&&Object.keys(Object.getOwnPropertyDescriptors(v)).every(k=>{const d=Object.getOwnPropertyDescriptor(v,k);return d.enumerable&&Object.hasOwn(d,"value")})}
+function time(v){if(typeof v!=="string"||!ISO.test(v))return false;const n=Date.parse(v);return Number.isFinite(n)&&new Date(n).toISOString()===v}
+function invalid(){return {ok:false,status:"UNKNOWN",mode:"OBSERVABILITY_HINTS_ONLY",executionAllowed:false,humanReviewRequired:true,reason:"INPUT_INVALID",summary:null}}
+function evaluate(input={}){
+ if(!plain(input)||!ENV.has(input.environment)||!(input.tenantId===null||(typeof input.tenantId==="string"&&ID.test(input.tenantId)))||!time(input.asOf)||!Array.isArray(input.observations)||input.observations.length>MODULES.length)return invalid();
+ const map=new Map();for(const o of input.observations){if(!plain(o)||!MODULES.includes(o.module)||map.has(o.module)||!time(o.lastHeartbeat)||Date.parse(o.lastHeartbeat)>Date.parse(input.asOf)||!Number.isFinite(o.latencyMs)||o.latencyMs<0||o.latencyMs>600000||!Number.isFinite(o.errorRate)||o.errorRate<0||o.errorRate>1||!["operational","degraded","down"].includes(o.reportedStatus))return invalid();map.set(o.module,o);}
+ const out=MODULES.map(module=>{const o=map.get(module);if(!o)return {module,status:"UNKNOWN",reason:"NO_OBSERVATION",ageMs:null,reviewRequired:true};const ageMs=Date.parse(input.asOf)-Date.parse(o.lastHeartbeat);let status=o.reportedStatus==="down"||o.errorRate>=0.5?"CRITICAL":ageMs>300000?"STALE":o.reportedStatus==="degraded"||o.errorRate>=0.1||o.latencyMs>2000?"DEGRADED":"HEALTHY";return {module,status,reason:status==="CRITICAL"?"DOWN_OR_HIGH_ERROR":status==="STALE"?"HEARTBEAT_STALE":status==="DEGRADED"?"PERFORMANCE_OR_ERROR_THRESHOLD":"WITHIN_THRESHOLDS",ageMs,latencyMs:o.latencyMs,errorRate:o.errorRate,reviewRequired:status!=="HEALTHY"};});
+ const counts={healthy:out.filter(x=>x.status==="HEALTHY").length,degraded:out.filter(x=>x.status==="DEGRADED").length,critical:out.filter(x=>x.status==="CRITICAL").length,stale:out.filter(x=>x.status==="STALE").length,unknown:out.filter(x=>x.status==="UNKNOWN").length};
+ const status=counts.critical?"CRITICAL":counts.degraded||counts.stale?"DEGRADED":counts.unknown?"UNKNOWN":"HEALTHY";
+ return {ok:true,status,environment:input.environment,tenantId:input.tenantId,asOf:input.asOf,moduleCount:MODULES.length,observedCount:input.observations.length,modules:out,summary:counts,executionAllowed:false,humanReviewRequired:status!=="HEALTHY",mode:"OBSERVABILITY_HINTS_ONLY"};
+}
+return Object.freeze({evaluate,requiredModules:Object.freeze([...MODULES])});
+});
