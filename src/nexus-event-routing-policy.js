@@ -7,12 +7,12 @@ function plain(v){return !!v&&typeof v==="object"&&!Array.isArray(v)&&(Object.ge
 function deny(reason){return {ok:false,status:"DENIED",reason,routeCount:0,routes:[],deliveryAllowed:false,executionAllowed:false,humanReviewRequired:true,mode:"ROUTE_POLICY_ONLY"}}
 function evaluate(input={}){
  if(!plain(input)||!ENV.has(input.environment)||!ID.test(input.tenantId)||!ID.test(input.eventId)||!ID.test(input.traceId)||typeof input.eventType!=="string"||!Object.hasOwn(ROUTES,input.eventType)||!Array.isArray(input.requestedConsumers)||input.requestedConsumers.length>8||input.requestedConsumers.some(x=>!MODULES.has(x))||new Set(input.requestedConsumers).size!==input.requestedConsumers.length)return deny("INPUT_INVALID");
- const allowed=ROUTES[input.eventType], requested=input.requestedConsumers.length?input.requestedConsumers:allowed;
+ const allowed=ROUTES[input.eventType], requested=input.requestedConsumers.length?input.requestedConsumers:allowed.slice(0,5);
  const rejected=requested.filter(x=>!allowed.includes(x)), selected=requested.filter(x=>allowed.includes(x));
  if(rejected.length)return deny("ROUTE_NOT_ALLOWED");
  if(selected.length>5)return deny("FANOUT_LIMIT");
  const routes=selected.map(consumer=>({eventId:input.eventId,traceId:input.traceId,tenantId:input.tenantId,environment:input.environment,eventType:input.eventType,consumer,deliveryAllowed:false,authorizationRequired:true})).sort((a,b)=>a.consumer.localeCompare(b.consumer));
- return {ok:true,status:routes.length?"ROUTES_PROPOSED":"NO_ROUTE",routeCount:routes.length,routes,deliveryAllowed:false,executionAllowed:false,humanReviewRequired:true,tenantIsolationRequired:true,mode:"ROUTE_POLICY_ONLY"};
+ return {ok:true,status:routes.length?"ROUTES_PROPOSED":"NO_ROUTE",routeCount:routes.length,routes,routesTruncated:input.requestedConsumers.length===0&&allowed.length>5,deliveryAllowed:false,executionAllowed:false,humanReviewRequired:true,tenantIsolationRequired:true,mode:"ROUTE_POLICY_ONLY"};
 }
 return Object.freeze({evaluate,routeMatrix:ROUTES});
 });
