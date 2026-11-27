@@ -69,7 +69,7 @@ jobs:
         run: |
           python tests/test_preview_canonical_migrations.py
           python tests/test_nexus_task_audit_store_schema.py
-          node --experimental-default-type=module --test tests/nexus-event-intake-schema.test.mjs
+          node --experimental-sqlite --experimental-default-type=module --test tests/nexus-event-intake-schema.test.mjs
       - name: Wrangler bundle validation only (no deploy)
         run: |
           # Preview-only bundle validation: avoid loading/logging production bindings in CI.
