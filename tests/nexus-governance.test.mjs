@@ -25,3 +25,5 @@ test("expired, replayed, wrong-scope or duplicate approver records are denied",(
 test("a valid but insufficient quorum requests another approval",()=>{const result=evaluateAction(policy,{...financial,approvals:[approval("human-1")]});assert.equal(result.decision,"REQUIRES_APPROVAL");assert.match(result.reason,/1\/2/)});
 test("action hash must be a SHA-256-shaped value and bind approvals to the action",()=>{const result=evaluateAction(policy,{...financial,actionHash:"not-hash",approvals:[approval("human-1"),approval("human-2")]});assert.equal(result.code,"APPROVAL_INVALID_OR_REPLAYED")});
 test("malformed policy or request is rejected without side effects",()=>{assert.equal(evaluateAction(null,base).code,"INVALID_INPUT");assert.equal(evaluateAction({...policy,mode:"AUTO"},{...base}).code,"INVALID_POLICY_OR_REQUEST");const result=evaluateAction(policy,base);assert.equal(result.allowed,true);assert.equal(result.authorization,"READ_ONLY")});
+
+test("actions below the action cap remain permitted",()=>{const result=evaluateAction(policy,{...base,usage:{actionsUsed:1}});assert.equal(result.allowed,true);assert.equal(result.code,"READ_ONLY_ALLOWED")});
