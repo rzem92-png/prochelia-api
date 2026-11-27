@@ -4,7 +4,7 @@ import "../src/nexus-compliance-gate.js";
 const evaluate=globalThis.ProcheliaNexusComplianceGate.evaluate;
 const now="2026-11-27T21:00:00.000Z";
 const validEvidence={evidenceId:"evidence-1",sourceId:"official-source-1",profileId:"FR-PLATFORM-SERVICES",controlId:"identity",sourceVersion:"sources-v1",verifiedAt:"2026-11-27T20:00:00.000Z",expiresAt:"2027-01-01T00:00:00.000Z"};
-const control=(id,status="PASS",mandatory=true,extra={})=>({controlId:id,status,mandatory,...(status==="PASS"?{evidence:structuredClone(validEvidence)}:{}),...extra});
+const control=(id,status="PASS",mandatory=true,extra={})=>({controlId:id,status,mandatory,...(status==="PASS"?{evidence:{...structuredClone(validEvidence),controlId:id}}:{}),...extra});
 const base=()=>({profileId:"FR-PLATFORM-SERVICES",profileVersion:"v1",countryCode:"FR",activityCode:"home-services",marketRole:"intermediary",now,sourceVersion:"sources-v1",controls:[control("identity"),control("price-transparency")]});
 test("current evidenced controls remain blocked pending human/legal approval",()=>{const r=evaluate(base());assert.equal(r.ok,true);assert.equal(r.decision,"READY_FOR_HUMAN_REVIEW");assert.equal(r.launchAllowed,false);assert.equal(r.executionAllowed,false);assert.equal(r.counts.pass,2);});
 test("mandatory FAIL blocks",()=>{const i=base();i.controls[1]=control("price-transparency","FAIL");assert.equal(evaluate(i).decision,"BLOCKED");});
