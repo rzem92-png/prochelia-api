@@ -1,4 +1,5 @@
 import sqlite3
+import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -28,6 +29,25 @@ DB.execute("INSERT INTO nexus_audit_ledger_events(event_id,scope_key,tenant_id,e
 DB.execute("INSERT INTO nexus_audit_ledger_heads(scope_key,tenant_id,environment,revision,head_hash) VALUES(?,?,?,?,?)",
            ("tenant-a","tenant-a","preview",1,"a"*64))
 DB.execute("DELETE FROM nexus_task_commit_guards WHERE commit_id='commit-1'")
+
+
+# Execute the actual optimistic guard SQL from the JavaScript store against SQLite.
+STORE_SOURCE = (ROOT / "src" / "nexus-d1-task-audit-store.js").read_text(encoding="utf-8")
+match = re.search(r"const guardSql = \`([\\s\\S]*?)\`;", STORE_SOURCE)
+assert match, "D1 optimistic guard SQL not found in store module"
+guard_sql = match.group(1)
+guard_bindings = [
+    "sql-guard-1", "dummy-task", "__GLOBAL__", "preview", 1, 1,
+    0, "dummy-task", "dummy-task",
+    0, "dummy-task", "__GLOBAL__", "preview", 0, "{}",
+    "dummy-task", 0,
+    0, "__GLOBAL__", "preview", "__GLOBAL__", "preview",
+    0, "__GLOBAL__", "preview", 0, "0"*64, "__GLOBAL__", "preview", 0,
+    "task-event", "dummy-task", 1, "audit-event", "__GLOBAL__", "preview", 1
+]
+assert guard_sql.count("?") == len(guard_bindings), f"guard bind mismatch: {guard_sql.count('?')} vs {len(guard_bindings)}"
+DB.execute(guard_sql, guard_bindings)
+DB.execute("DELETE FROM nexus_task_commit_guards WHERE commit_id='sql-guard-1'")
 
 def must_fail(sql, params=()):
     try:
