@@ -58,6 +58,7 @@ jobs:
           node --experimental-default-type=module --check src/nexus-budget-guard.js
           node --experimental-default-type=module --check src/nexus-service-sla-monitor.js
           node --experimental-default-type=module --check src/nexus-quality-signals.js
+          node --experimental-default-type=module --check src/nexus-event-intake-coordinator.js
       - name: Lint guarded Preview deployment workflow
         run: |
           go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
@@ -68,6 +69,7 @@ jobs:
         run: |
           python tests/test_preview_canonical_migrations.py
           python tests/test_nexus_task_audit_store_schema.py
+          node --experimental-sqlite --experimental-default-type=module --test tests/nexus-event-intake-schema.test.mjs
       - name: Wrangler bundle validation only (no deploy)
         run: |
           # Preview-only bundle validation: avoid loading/logging production bindings in CI.

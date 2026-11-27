@@ -28,6 +28,7 @@ EXPECTED = [
     "0021_supra_audit_events.sql",
     "0022_supra_persisted_approvals.sql",
     "0026_nexus_task_audit_pair_store.sql",
+    "0027_nexus_event_intake_records.sql",
 ]
 
 actual = sorted(path.name for path in MIGRATIONS.glob("*.sql"))
@@ -51,7 +52,7 @@ required = {
     "auth_login_rate_limits", "supra_audit_events",
     "supra_approval_requests", "supra_approval_votes", "supra_approval_events",
     "nexus_task_snapshots", "nexus_task_events", "nexus_audit_ledger_heads",
-    "nexus_audit_ledger_events", "nexus_task_commit_guards",
+    "nexus_audit_ledger_events", "nexus_task_commit_guards", "nexus_event_intake_records",
 }
 assert required <= tables, f"Canonical migration chain missing tables: {sorted(required-tables)}"
 
