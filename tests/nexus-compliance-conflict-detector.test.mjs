@@ -1,0 +1,17 @@
+import test from "node:test";import assert from "node:assert/strict";import "../src/nexus-compliance-conflict-detector.js";
+const evaluate=globalThis.ProcheliaNexusComplianceConflicts.evaluate,now="2026-11-27T21:00:00.000Z";
+const rule=(over={})=>({ruleId:"r1",controlId:"consumer-price",countryCode:"FR",activityCode:"services",marketRole:"intermediary",effect:"REQUIRED",effectiveAt:"2026-01-01T00:00:00.000Z",expiresAt:"2027-01-01T00:00:00.000Z",sourceIds:["source-1"],...over});
+const input=(rules=[rule()])=>({profileId:"FR-profile",now,rules});
+test("no conflict detected for single rule",()=>{const r=evaluate(input());assert.equal(r.status,"NO_CONFLICTS_DETECTED");assert.equal(r.activationAllowed,false);});
+test("opposing effects same scope detected",()=>{const r=evaluate(input([rule(),rule({ruleId:"r2",effect:"PROHIBITED"})]));assert.equal(r.status,"CONFLICTS_FOUND");assert.equal(r.conflictCount,1);});
+test("wildcard jurisdiction overlaps specific scope",()=>assert.equal(evaluate(input([rule({countryCode:"*"}),rule({ruleId:"r2",effect:"PROHIBITED"})])).conflictCount,1));
+test("different activities do not conflict",()=>assert.equal(evaluate(input([rule(),rule({ruleId:"r2",activityCode:"cleaning",effect:"PROHIBITED"})])).conflictCount,0));
+test("different roles do not conflict",()=>assert.equal(evaluate(input([rule(),rule({ruleId:"r2",marketRole:"provider",effect:"PROHIBITED"})])).conflictCount,0));
+test("same effect is not contradiction",()=>assert.equal(evaluate(input([rule(),rule({ruleId:"r2"})])).conflictCount,0));
+test("invalid effect blocks",()=>assert.equal(evaluate(input([rule({effect:"MAYBE"})])).status,"BLOCKED"));
+test("expired rule blocks",()=>assert.equal(evaluate(input([rule({expiresAt:"2026-11-27T20:00:00.000Z"})])).status,"BLOCKED"));
+test("future effective rule blocks",()=>assert.equal(evaluate(input([rule({effectiveAt:"2026-12-01T00:00:00.000Z"})])).status,"BLOCKED"));
+test("missing provenance blocks",()=>assert.equal(evaluate(input([rule({sourceIds:[]})])).status,"BLOCKED"));
+test("duplicate ids block",()=>assert.equal(evaluate(input([rule(),rule()])).status,"BLOCKED"));
+test("malformed input fail closed",()=>assert.equal(evaluate({profileId:"x",now,rules:[{}]}).status,"BLOCKED"));
+test("never auto-resolves or authorizes activation",()=>{const r=evaluate(input([rule(),rule({ruleId:"r2",effect:"PROHIBITED"})]));assert.equal(r.autoResolution,false);assert.equal(r.activationAllowed,false);assert.equal(r.legalReviewRequired,true);});
