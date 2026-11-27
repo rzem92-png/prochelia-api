@@ -186,3 +186,23 @@ test("strategic indicators route is manager-only", async () => {
   );
   assert.equal(allowed.status, 200);
 });
+
+test("mission transition validator requires authentication", async () => {
+  const response = await handleV7Route(
+    post("/api/v7/check/mission-transition", { currentStatus: "pending", nextStatus: "accepted" }),
+    {},
+    "/api/v7/check/mission-transition",
+    null
+  );
+  assert.equal(response.status, 401);
+});
+
+test("QR validation route requires authentication", async () => {
+  const response = await handleV7Route(
+    post("/api/v7/check/qr", { mission: { id: "mission-1" }, qr: "anything" }),
+    {},
+    "/api/v7/check/qr",
+    null
+  );
+  assert.equal(response.status, 401);
+});
