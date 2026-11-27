@@ -1,0 +1,17 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import "../src/nexus-action-governance.js";
+const evaluate=globalThis.ProcheliaNexusActionGovernance.evaluate;
+const base={environment:"preview",mode:"execute",actionClass:"reversible",agentId:"nexus-ops",toolId:"preview-task",tenantId:"t-1",actionTenantId:"t-1",permissionGranted:true,toolPermissionGranted:true,killSwitch:false,agentKillSwitch:false,budgetApproved:true,idempotencyKey:"idem-001"};
+test("allows bounded reversible Preview action only with scoped permissions",()=>{const r=evaluate(base);assert.equal(r.executionAllowed,true);assert.equal(r.decision,"ALLOW_PREVIEW_REVERSIBLE");});
+test("observe and suggest modes never execute",()=>{for(const mode of ["observe","suggest"]){const r=evaluate({...base,mode});assert.equal(r.executionAllowed,false);}});
+test("unknown environment, mode and class fail closed",()=>{assert.equal(evaluate({...base,environment:"prod"}).reason,"UNKNOWN_ENVIRONMENT");assert.equal(evaluate({...base,mode:"autonomous"}).reason,"UNKNOWN_MODE");assert.equal(evaluate({...base,actionClass:"unknown"}).reason,"UNKNOWN_ACTION_CLASS");});
+test("kill switches deny even permitted action",()=>{assert.equal(evaluate({...base,killSwitch:true}).reason,"KILL_SWITCH_ACTIVE");assert.equal(evaluate({...base,agentKillSwitch:true}).reason,"KILL_SWITCH_ACTIVE");});
+test("missing agent or tool permission denies",()=>{assert.equal(evaluate({...base,permissionGranted:false}).reason,"PERMISSION_REQUIRED");assert.equal(evaluate({...base,toolPermissionGranted:false}).reason,"PERMISSION_REQUIRED");});
+test("tenant mismatch denies cross-tenant action",()=>{assert.equal(evaluate({...base,actionTenantId:"t-2"}).reason,"TENANT_SCOPE_MISMATCH");});
+test("production execution is blocked, including read-mode execute",()=>{assert.equal(evaluate({...base,environment:"production"}).reason,"PRODUCTION_EXECUTION_BLOCKED");});
+test("read action is allowed only after scoped permissions and execute mode",()=>{assert.equal(evaluate({...base,actionClass:"read"}).executionAllowed,true);assert.equal(evaluate({...base,actionClass:"read",mode:"suggest"}).executionAllowed,false);});
+test("reversible action requires budget and idempotency",()=>{assert.equal(evaluate({...base,budgetApproved:false}).reason,"BUDGET_OR_LIMIT_REQUIRED");assert.equal(evaluate({...base,idempotencyKey:""}).reason,"IDEMPOTENCY_REQUIRED");});
+test("sensitive and irreversible actions never execute autonomously",()=>{for(const actionClass of ["sensitive","irreversible"]){assert.equal(evaluate({...base,actionClass,humanApproval:true}).reason,"SENSITIVE_ACTION_NOT_AUTONOMOUS");assert.equal(evaluate({...base,actionClass,humanApproval:false}).reason,"HUMAN_APPROVAL_REQUIRED");}});
+test("dual approval and approval metadata are enforced before sensitive deny",()=>{assert.equal(evaluate({...base,actionClass:"sensitive",humanApproval:true,dualApprovalRequired:true,dualApproval:false}).reason,"DUAL_APPROVAL_REQUIRED");assert.equal(evaluate({...base,actionClass:"sensitive",humanApproval:true,budgetApproved:false}).reason,"BUDGET_OR_LIMIT_REQUIRED");});
+test("malformed input and missing scope deny",()=>{assert.equal(evaluate(null).reason,"INVALID_INPUT");assert.equal(evaluate({...base,tenantId:""}).reason,"TENANT_SCOPE_REQUIRED");});
