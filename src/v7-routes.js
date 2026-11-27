@@ -19,6 +19,23 @@ export async function handleV7Route(
     const method =
       request.method.toUpperCase();
 
+    // Bounded payload guard for all V7 POST validators/routes.
+    if (method === "POST") {
+      const raw = await request.clone().text();
+      const byteLength = new TextEncoder().encode(raw).byteLength;
+      if (byteLength > 128 * 1024) {
+        return Response.json(
+          { ok: false, version: procheliaV7.version, error: "PAYLOAD_TOO_LARGE" },
+          { status: 413, headers: { "Cache-Control": "no-store" } }
+        );
+      }
+      request = new Request(request.url, {
+        method: request.method,
+        headers: request.headers,
+        body: raw
+      });
+    }
+
 
     // =================================================
     // STATUT V7
