@@ -33,7 +33,7 @@ DB.execute("DELETE FROM nexus_task_commit_guards WHERE commit_id='commit-1'")
 
 # Execute the actual optimistic guard SQL from the JavaScript store against SQLite.
 STORE_SOURCE = (ROOT / "src" / "nexus-d1-task-audit-store.js").read_text(encoding="utf-8")
-match = re.search(r"const guardSql = \`([\\s\\S]*?)\`;", STORE_SOURCE)
+match = re.search(r"const guardSql = `([\\s\\S]*?)`;", STORE_SOURCE)
 assert match, "D1 optimistic guard SQL not found in store module"
 guard_sql = match.group(1)
 guard_bindings = [
