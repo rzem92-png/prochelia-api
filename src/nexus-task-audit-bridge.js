@@ -43,7 +43,7 @@
         !id(event.eventId) || !id(event.actorId) || !["SYSTEM", "AGENT", "HUMAN"].includes(event.actorType) ||
         !STATES.has(event.to) || !id(event.to) || (event.from !== null && event.from !== undefined && !STATES.has(event.from)) ||
         !Number.isSafeInteger(event.sequence) || event.sequence < 1 || !Number.isSafeInteger(event.revision) || event.revision < 1 ||
-        typeof event.occurredAt !== "string" || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\\.\d{3}Z$/.test(event.occurredAt) || !Number.isFinite(Date.parse(event.occurredAt)) || new Date(Date.parse(event.occurredAt)).toISOString() !== event.occurredAt) return fail("TASK_EVENT_INVALID");
+        typeof event.occurredAt !== "string" || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(event.occurredAt) || !Number.isFinite(Date.parse(event.occurredAt)) || new Date(Date.parse(event.occurredAt)).toISOString() !== event.occurredAt) return fail("TASK_EVENT_INVALID");
     if (metadata.authorization !== undefined && !object(metadata.authorization)) return fail("AUTHORIZATION_INVALID");
     const authorization = metadata.authorization ?? {};
     const approvals = metadata.approvalIds ?? authorization.approvalIds ?? [];
