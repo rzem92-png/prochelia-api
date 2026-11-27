@@ -1448,12 +1448,43 @@ async function createOperationalCase(request, env) {
   const phase=String(await getSetting(env,'project_phase','TEST')).toUpperCase();
   const impact=String(body.impact_level||'LOW').toUpperCase();
   const priority=CASE_PRIORITIES[impact]||10;
-  const rec=await copilotRecommend(env,{caseType,impact,phase,context:body.context||{}});
+  const actor=gate.auth.user,manager=actor.role==='gerante';
+  let scoped={client_id:null,company_id:null,intervenant_id:null,mission_id:null};
+  const requestedMission=clean(body.mission_id);
+  if(!manager){
+    // Caller-supplied ownership fields are never trusted. Resolve profile and mission from authenticated identity.
+    if(actor.role==='entreprise') return json({ok:false,error:'COMPANY_CASE_SCOPE_NOT_VERIFIED',version:VERSION},403);
+    if(actor.role==='client'){
+      const profile=await env.DB.prepare('SELECT id FROM clients WHERE user_id=? LIMIT 1').bind(actor.id).first();
+      if(!profile)return json({ok:false,error:'CLIENT_PROFILE_NOT_FOUND',version:VERSION},403);
+      scoped.client_id=profile.id;
+    }else if(actor.role==='intervenant'){
+      const profile=await env.DB.prepare('SELECT id FROM intervenants WHERE user_id=? LIMIT 1').bind(actor.id).first();
+      if(!profile)return json({ok:false,error:'PROVIDER_PROFILE_NOT_FOUND',version:VERSION},403);
+      scoped.intervenant_id=profile.id;
+    }
+    const hasSensitiveContext=Object.keys(body.context||{}).some(k=>['replacement_intervenant_id','replacement_id','reschedule_start_at','refund_cents'].includes(k));
+    if(!requestedMission && (clean(body.client_id)||clean(body.company_id)||clean(body.intervenant_id)||hasSensitiveContext))
+      return json({ok:false,error:'MISSION_SCOPE_REQUIRED',version:VERSION},403);
+    if(requestedMission){
+      const mission=await env.DB.prepare('SELECT id,client_id,intervenant_id FROM missions WHERE id=? LIMIT 1').bind(requestedMission).first();
+      if(!mission)return json({ok:false,error:'MISSION_NOT_FOUND',version:VERSION},404);
+      if(actor.role==='client'&&mission.client_id!==scoped.client_id)return json({ok:false,error:'MISSION_OWNERSHIP_MISMATCH',version:VERSION},403);
+      if(actor.role==='intervenant'&&mission.intervenant_id!==scoped.intervenant_id)return json({ok:false,error:'MISSION_ASSIGNMENT_MISMATCH',version:VERSION},403);
+      scoped.mission_id=mission.id;scoped.client_id=mission.client_id;scoped.intervenant_id=mission.intervenant_id||scoped.intervenant_id;
+    }
+    for(const key of ['client_id','intervenant_id'])if(clean(body[key])&&clean(body[key])!==scoped[key])return json({ok:false,error:'CALLER_SCOPE_FIELD_MISMATCH',version:VERSION},403);
+    if(clean(body.company_id))return json({ok:false,error:'COMPANY_SCOPE_NOT_VERIFIED',version:VERSION},403);
+  }else{
+    scoped={client_id:clean(body.client_id)||null,company_id:clean(body.company_id)||null,intervenant_id:clean(body.intervenant_id)||null,mission_id:requestedMission||null};
+  }
+  const context=body.context&&typeof body.context==='object'&&!Array.isArray(body.context)?body.context:{};
+  const rec=await copilotRecommend(env,{caseType,impact,phase,context});
   const id=crypto.randomUUID();
-  const requiresManager=rec.mode==='MANAGER_APPROVAL' ? 1 : 0;
-  const status=rec.action==='AUTO_RESOLVE' ? 'AUTO_PENDING' : 'OPEN';
+  const requiresManager=1;
+  const status='OPEN';
   await env.DB.prepare(`INSERT INTO operational_cases(id,case_type,source,phase,priority,status,auto_mode,client_id,company_id,intervenant_id,mission_id,impact_level,description,context_json,proposed_solution_json,requires_manager) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
-    .bind(id,caseType,'API',phase,priority,status,rec.mode,clean(body.client_id)||null,clean(body.company_id)||null,clean(body.intervenant_id)||null,clean(body.mission_id)||null,impact,clean(body.description)||null,JSON.stringify(body.context||{}),JSON.stringify(rec),requiresManager).run();
+    .bind(id,caseType,'API',phase,priority,status,'MANAGER_APPROVAL',scoped.client_id,scoped.company_id,scoped.intervenant_id,scoped.mission_id,impact,clean(body.description)||null,JSON.stringify(context),JSON.stringify({...rec,mode:'MANAGER_APPROVAL',solution:{...rec.solution,automatic:false}}),requiresManager).run();
   await env.DB.prepare(`INSERT INTO copilot_log(id,case_id,action_type,recommendation,confidence,mode) VALUES(?,?,?,?,?,?)`)
     .bind(crypto.randomUUID(),id,rec.action,JSON.stringify(rec.solution),rec.confidence,rec.mode).run();
   await journal(env,'copilot',null,'CASE_CREATED','operational_case',id,'OK',{caseType,impact});
