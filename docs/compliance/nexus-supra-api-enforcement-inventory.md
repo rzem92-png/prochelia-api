@@ -70,6 +70,11 @@ This is a source-level safety improvement, not a proof that every route is safe.
 
 Operational case creation now derives client/provider profile IDs from the authenticated user, verifies mission ownership/assignment against D1, rejects caller-supplied mismatched IDs, and fails closed for company case scope until the company-to-mission relation is proven. Every case is forced to human review; caller context cannot request automatic business execution. Regression tests cover these guards.
 
+
+### Outbox execution guard
+
+The outbox processor now fails closed for every queued action because no verified executor is registered: it marks items `WAITING_PROVIDER` and does not mark queue acknowledgement as successful business completion. The regression test verifies this guard.
+
 ## Conclusion
 
 This inventory identifies next integration targets but does **not** certify compliance, security, production readiness or legal adequacy. Mission and settlement gates remain closed. No merge, migration, deployment, real payment or market launch is authorized by this document.
