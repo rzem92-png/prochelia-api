@@ -98,7 +98,7 @@ export function resolveComplaintScope(actor, draft, records = {}) {
     const severity = draft.severity && SEVERITIES.has(draft.severity) ? draft.severity :
       (HIGH_RISK_CATEGORIES.has(draft.category) ? "HIGH" : "MEDIUM");
     return { ok: true, scope: {
-      client_type: draft.companyId ? "B2B" : (draft.clientId ? "B2C" : "INTERNAL"),
+      client_type: draft.companyId ? "B2B" : (draft.clientId || records.mission?.client_id ? "B2C" : "INTERNAL"),
       client_id: draft.clientId || records.mission?.client_id || null,
       company_id: draft.companyId || null, mission_id: records.mission?.id || null, severity
     }};
