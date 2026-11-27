@@ -1,0 +1,17 @@
+import test from "node:test";import assert from "node:assert/strict";import "../src/nexus-market-profile-validator.js";
+const evaluate=globalThis.ProcheliaNexusMarketProfile.evaluate;const now="2026-11-27T21:00:00.000Z";
+const profile=(o={})=>({profileId:"fr-services-v1",version:"1.0.0",jurisdiction:{countryCode:"FR",regionCode:"IDF"},activityCode:"home-services",marketRole:"INTERMEDIARY",reviewedBy:"legal-review-01",reviewedAt:"2026-10-01T00:00:00.000Z",effectiveAt:"2026-10-01T00:00:00.000Z",expiresAt:"2027-10-01T00:00:00.000Z",controlIds:["consumer-info","provider-eligibility"],sourceIds:["source-code-consumer"],now,...o});
+test("valid profile metadata accepted without launch authorization",()=>{const r=evaluate(profile());assert.equal(r.status,"PROFILE_METADATA_VALID");assert.equal(r.activationAllowed,false);});
+test("missing jurisdiction blocked",()=>assert.equal(evaluate(profile({jurisdiction:null})).status,"BLOCKED"));
+test("invalid country code blocked",()=>assert.equal(evaluate(profile({jurisdiction:{countryCode:"FRA"}})).status,"BLOCKED"));
+test("unknown role blocked",()=>assert.equal(evaluate(profile({marketRole:"UNKNOWN_ROLE"})).status,"BLOCKED"));
+test("reviewer missing blocked",()=>assert.equal(evaluate(profile({reviewedBy:""})).status,"BLOCKED"));
+test("empty control list blocked",()=>assert.equal(evaluate(profile({controlIds:[]})).status,"BLOCKED"));
+test("empty source list blocked",()=>assert.equal(evaluate(profile({sourceIds:[]})).status,"BLOCKED"));
+test("duplicate control IDs blocked",()=>assert.equal(evaluate(profile({controlIds:["x","x"]})).status,"BLOCKED"));
+test("future review blocked",()=>assert.equal(evaluate(profile({reviewedAt:"2027-01-01T00:00:00.000Z"})).status,"BLOCKED"));
+test("future effective date blocked",()=>assert.equal(evaluate(profile({effectiveAt:"2027-01-01T00:00:00.000Z"})).status,"BLOCKED"));
+test("expired profile blocked",()=>assert.equal(evaluate(profile({expiresAt:"2026-11-27T20:00:00.000Z"})).status,"BLOCKED"));
+test("review after effective date blocked",()=>assert.equal(evaluate(profile({reviewedAt:"2026-11-01T00:00:00.000Z",effectiveAt:"2026-10-01T00:00:00.000Z"})).status,"BLOCKED"));
+test("invalid evaluation clock blocked",()=>assert.equal(evaluate(profile({now:"bad"})).status,"BLOCKED"));
+test("does not grant activation",()=>assert.equal(evaluate(profile()).launchApprovalRequired,true));
