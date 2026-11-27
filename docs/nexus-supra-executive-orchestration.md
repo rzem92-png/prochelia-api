@@ -159,3 +159,83 @@ Cibles à mesurer (non garanties avant tests) :
 4. Créer tests de permissions, idempotence, retries et isolation tenant.
 5. Ajouter le premier dashboard Nexus (état réel, tâches, incidents, approbations).
 6. Construire progressivement les agents read-only, puis les actions Preview autorisées.
+
+
+## 12. Production LIVE — réclamations, incidents et supervision bout en bout
+
+### Live operations control room
+- Vue temps réel des demandes, prestations planifiées/en cours/terminées, retards, annulations, intervenants indisponibles, capacité par zone et alertes de service.
+- Event stream (SSE/WebSocket selon contraintes) avec reconnect, heartbeat, backpressure, déduplication et accès tenant-scoped.
+- Historique immutable des changements de statut, acteur, timestamps, reason codes, preuves, correlation IDs et notifications.
+- Détection : absence de confirmation, retard, no-show, conflit horaire, durée dépassée, incident, urgence et récurrence.
+- Alertes graduées, routage, accusé réception, escalade SLA et astreinte. Aucun service d'urgence médicale/sécurité n'est promis.
+- Actions autorisées : confirmation, notifications, ouverture incident, proposition replanification, assignation support, remboursement simulé. Actions engageantes soumises à approbation.
+
+### Réclamations et litiges
+- Formulaire multi-catégories : qualité, retard, absence, facturation, sécurité, dommage, comportement, accessibilité ou autre; priorité, chronologie, pièces sécurisées et consentements.
+- Case management avec états OPEN, ACKNOWLEDGED, TRIAGED, INVESTIGATING, WAITING_CUSTOMER/PROVIDER, PROPOSED_RESOLUTION, RESOLVED, CLOSED, REOPENED et ESCALATED; SLA pause/reprise explicites.
+- Accusé réception, responsable, délai cible, communication centralisée, notes internes séparées, minimisation PII et accès strict.
+- Nexus résume factuellement, détecte doublons/risques/récurrences, propose solutions et rassemble preuves; pas de décision autonome de culpabilité, sanction, remboursement, résiliation, assurance ou conclusion juridique.
+- Médiation/escalade, contestation, historique contradictoire, revue humaine et audit.
+- Analyse tendances par service, zone, entreprise/prestataire, motif et période; seuils prudents, biais contrôlés, pas de scoring opaque excluant automatiquement.
+- Dashboard dossiers/SLA, file priorisée, templates, timeline, pièces, approvals, satisfaction, root-cause et actions correctives.
+
+### Incident response
+- Lifecycle, severity, owner, impact, runbook, timeline, containment préapprouvé, status updates, recovery evidence, postmortem et tâches de prévention.
+- Nexus exécute uniquement mitigations préapprouvées et réversibles dans scope; rollback/production requiert approbation et permissions.
+
+## 13. Portail Client — outils essentiels
+- Recherche par besoin, zone, disponibilité, budget, compétences, contraintes, accessibilité et qualité.
+- Demande guidée, brouillon, clarifications, pièces minimisées, calendrier/fuseau, durée et fenêtres flexibles.
+- Estimation transparente, devis comparables, critères, frais et annulation clairs; non engageant jusqu'à confirmation.
+- Matching explicable, contraintes satisfaites, limites, choix et consentement; aucun faux badge de vérification.
+- Messagerie liée à prestation, pièces contrôlées, appels/visio si intégration validée et consentement.
+- Suivi des statuts, confirmation, ETA seulement si réelle, notifications réglables, calendrier, replanification/annulation selon règles.
+- Historique, documents, facture, paiements seulement PSP validé; aucun stockage de données carte.
+- Favoris, rebooking, préférences, support, réclamation, feedback, accessibilité, langues, privacy center, export/suppression selon obligations.
+- UX mobile-first, onboarding progressif, guest-to-account, aide, anti-fraude, consentement, WCAG, faible bande passante.
+
+## 14. Portail Intervenant — outils métier
+- Inscription progressive, vérification identité par prestataire adapté, qualifications/certificats avec expiration et état vérifié clair.
+- Profil, compétences, services, rayon, mobilité, langues, tarifs/règles, équipements et contraintes.
+- Disponibilités, calendrier, absences, buffers, limites charge, fuseau, anti-double-booking.
+- Missions : aperçu données minimisées, conditions, prix, zone, durée, exigences; accept/refus, expiration, motifs non discriminatoires.
+- Agenda, navigation via intégration autorisée, check-in/out avec consentement, suivi mission, checklist, messages, preuves limitées.
+- Sécurité sur site : signal incident, aide et consignes; ne remplace pas les services d'urgence.
+- Qualité : feedback, contestation, coaching, correction, historique équitable.
+- Revenus simulés, commissions transparentes, factures/exports; payout après PSP et validation.
+- Formation, checklist onboarding, support, notifications, pause activité, confidentialité, export/suppression.
+
+## 15. Live communications & notifications
+- Préférences/consentement par canal, templates localisés, transactional vs marketing, quiet hours, opt-out et redaction PII.
+- Outbox transactionnelle, idempotence, retries bornés, failover, receipts, bounce/suppression et DLQ.
+- Notifications confirmations, statuts, messages, échéances, incidents/réclamations sans divulgation inter-tenant.
+- État temps réel autoritatif côté serveur; UI signale stale/offline/reconnect et ne fabrique jamais ETA/position.
+
+## 16. Innovation et veille marché
+- Nexus Market Intelligence utilise sources publiques/licenciées et signaux autorisés : feedback agrégé, tendances, évolutions produits/concurrents, réglementation, innovations, saisonnalité et niches.
+- Registre source/date/confiance/biais/territoire/droits; provenance/citations.
+- Veille par marché et catégorie : besoins non satisfaits, différenciation, menaces/opportunités.
+- Pipeline signal → insight → hypothèse → impact/effort/risque → prototype Preview → test contrôlé/consentement → métriques → décision → roadmap.
+- Idées : matching explicable, prévision disponibilités, optimisation trajet/buffers sans tracking excessif, prévention no-show, onboarding adaptatif, devis transparent, accessibilité, parcours multi-services, continuité, outils pro et support augmenté.
+- Pas d'espionnage, scraping interdit, collecte excessive, manipulation, faux avis, dark patterns, discrimination ni promesse concurrentielle non démontrée.
+- Experiments registry : hypothèse, segment, metrics, guardrails, période, consentement, rollback et résultats; revue humaine si risque.
+
+## 17. GitHub + Cloudflare continuous engineering loop
+- Connecteurs scoped read-only par défaut pour repos, branches, PR, commits, CI, issues, releases et configurations Cloudflare autorisées.
+- Nexus surveille changements, CI, erreurs, drift, builds Preview, budgets, métriques et sécurité; crée tâches et propositions PR.
+- Agent Engineering peut créer branches/commits/PR dans scopes explicitement autorisés; tests, logs, changelog, risques et rollback requis.
+- Review et checks obligatoires; aucune auto-merge, Production deploy ou modification de secrets/bindings sensibles.
+- Cloudflare read-only initialement; Preview vérifié par identité ressource, environnement et binding DB. Mutations uniquement permission explicite + approval.
+- Veille dépendances/vulnérabilités/coûts/migrations/compatibilité; patch en PR, jamais appliqué directement.
+- Connecteur indisponible = UNKNOWN/STALE, retries limités et alerte, jamais « sain » par défaut.
+
+## 18. Developer handoff — prêt à développer
+- PRD/user stories/acceptance criteria, journeys et edge cases.
+- Architecture/domain boundaries, diagrammes, API OpenAPI, event schemas, modèle de données et migrations.
+- Design tokens, composants, accessibilité, breakpoints, états empty/loading/error/offline.
+- Backlog trié, dépendances, issue/PR templates, definition-of-done et risk register.
+- Tests unit/integration/API contract/E2E/accessibility/performance/isolation/security/resilience/localization/DST/notifications/reclamation SLA/live reconnect.
+- Matrice environnements dev/test/Preview/staging/production; données synthétiques isolées; secrets et permissions.
+- Runbooks deployment/rollback, incidents, backups/restore, queues/DLQ, support, PSP outages, droits data et activation pays.
+- Evidence pack : SHA commit, workflow run, logs, tests, Preview URL, screenshots, limites connues et approvals. Rien n'est DONE sans preuves.
