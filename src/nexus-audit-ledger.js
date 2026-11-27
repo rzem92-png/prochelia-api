@@ -84,7 +84,7 @@
     if (depth > 12) throw Error("AUDIT_VALUE_LIMIT");
     if (value && typeof value === "object") {
       for (const key of Object.keys(value)) {
-        if (/(?:secret|token|password|cookie|authorization|api[_-]?key|private[_-]?key)/i.test(key) {
+        if (/(?:secret|token|password|cookie|authorization|api[_-]?key|private[_-]?key)/i.test(key)) {
           throw Error("AUDIT_SENSITIVE_FIELD_REJECTED");
         }
         rejectSecrets(value[key], depth + 1);
