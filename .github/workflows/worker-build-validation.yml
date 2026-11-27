@@ -42,6 +42,7 @@ jobs:
           node --experimental-default-type=module --check src/nexus-d1-task-audit-store.js
           node --experimental-default-type=module --check src/nexus-d1-task-audit-alerts.js
           node --experimental-default-type=module --check src/nexus-alert-cooldown.js
+          node --experimental-default-type=module --check src/nexus-incident-lifecycle.js
       - name: Lint guarded Preview deployment workflow
         run: |
           go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
