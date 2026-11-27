@@ -160,3 +160,29 @@ test("pre-mission verification route rejects unauthenticated callers", async () 
   assert.equal(response.status, 401);
   assert.equal((await response.json()).error, "UNAUTHENTICATED");
 });
+
+test("strategic indicators route is manager-only", async () => {
+  const unauth = await handleV7Route(
+    post("/api/v7/strategy/indicators", { clients: 100, revenue: 999 }),
+    {},
+    "/api/v7/strategy/indicators",
+    null
+  );
+  assert.equal(unauth.status, 401);
+
+  const denied = await handleV7Route(
+    post("/api/v7/strategy/indicators", { clients: 100, revenue: 999 }),
+    {},
+    "/api/v7/strategy/indicators",
+    { user: { id: "provider-1", role: "intervenant" } }
+  );
+  assert.equal(denied.status, 403);
+
+  const allowed = await handleV7Route(
+    post("/api/v7/strategy/indicators", { clients: 100, revenue: 999 }),
+    {},
+    "/api/v7/strategy/indicators",
+    { user: { id: "manager-1", role: "gerante" } }
+  );
+  assert.equal(allowed.status, 200);
+});
