@@ -65,7 +65,7 @@ test("canonical action payload rejects cycles and unsafe/non-JSON values",()=>{
  assert.throws(()=>canonicalActionPayload({...financial,payload:cyclic}),/ACTION_PAYLOAD_INVALID_OBJECT/);
  assert.throws(()=>canonicalActionPayload({...financial,payload:{value:NaN}}),/ACTION_PAYLOAD_NONFINITE_NUMBER/);
  assert.throws(()=>canonicalActionPayload({...financial,payload:{value:undefined}}),/ACTION_PAYLOAD_UNSUPPORTED_VALUE/);
- assert.throws(()=>canonicalActionPayload({...financial,payload:new Date()}),/ACTION_PAYLOAD_NONPLAIN_OBJECT/);\n const accessor={};Object.defineProperty(accessor,"value",{enumerable:true,get(){throw new Error("getter must not run")}});assert.throws(()=>canonicalActionPayload({...financial,payload:accessor}),/ACTION_PAYLOAD_INVALID_OBJECT/);
+ assert.throws(()=>canonicalActionPayload({...financial,payload:new Date()}),/ACTION_PAYLOAD_NONPLAIN_OBJECT/);\n const accessor={};Object.defineProperty(accessor,"value",{enumerable:true,get(){throw new Error("getter must not run")}});assert.throws(()=>canonicalActionPayload({...financial,payload:accessor}),/ACTION_PAYLOAD_INVALID_OBJECT/);\n const array=[];Object.defineProperty(array,"0",{enumerable:true,get(){throw new Error("array getter must not run")}});array.length=1;assert.throws(()=>canonicalActionPayload({...financial,payload:array}),/ACTION_PAYLOAD_INVALID_ARRAY/);\n assert.throws(()=>canonicalActionPayload({...financial,payload:new Array(2)}),/ACTION_PAYLOAD_INVALID_ARRAY/);
 });
 test("verified-hash gateway rejects missing or mismatched hashes and accepts only bound approvals",async()=>{
  const action={...financial,payload:{amount:125,currency:"EUR"}};
