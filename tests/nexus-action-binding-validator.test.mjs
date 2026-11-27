@@ -1,0 +1,18 @@
+import test from "node:test";import assert from "node:assert/strict";import "../src/nexus-action-binding-validator.js";
+const evaluate=globalThis.ProcheliaNexusActionBinding.evaluate,now="2026-11-27T21:00:00.000Z";
+const base={bindingId:"bind-01",decisionId:"dec-01",gateRequestId:"req-01",decisionRequestId:"req-01",actorId:"actor-01",decisionActorId:"actor-01",tenantId:"tenant-01",decisionTenantId:"tenant-01",operationId:"op-01",operationType:"BOOKING_CREATE",operationFingerprint:"op-fp",decisionOperationFingerprint:"op-fp",decisionOperationType:"BOOKING_CREATE",contextFingerprint:"ctx-fp",decisionContextFingerprint:"ctx-fp",policyVersion:"v1",decisionPolicyVersion:"v1",profileId:"profile-fr",decisionProfileId:"profile-fr",countryCode:"FR",decisionCountryCode:"FR",activityCode:"service",decisionActivityCode:"service",marketRole:"INTERMEDIARY",decisionMarketRole:"INTERMEDIARY",gateStatus:"ALL_REQUIRED_GATES_PASS",issuedAt:"2026-11-27T20:59:00.000Z",expiresAt:"2026-11-27T21:02:00.000Z",now,atomicConsumeAvailable:true};
+test("valid binding preflight is never action authorization",()=>{const r=evaluate(base);assert.equal(r.status,"BINDING_PREFLIGHT_VALID");assert.equal(r.actionAuthorized,false);assert.equal(r.permitConsumed,false);});
+test("failed gate decision blocked",()=>assert.equal(evaluate({...base,gateStatus:"REVIEW_REQUIRED"}).status,"BLOCKED"));
+test("actor mismatch blocked",()=>assert.equal(evaluate({...base,decisionActorId:"other"}).reason,"DECISION_BINDING_MISMATCH"));
+test("tenant mismatch blocked",()=>assert.equal(evaluate({...base,decisionTenantId:"other"}).status,"BLOCKED"));
+test("operation mismatch blocked",()=>assert.equal(evaluate({...base,decisionOperationType:"REFUND"}).status,"BLOCKED"));
+test("operation fingerprint mismatch blocked",()=>assert.equal(evaluate({...base,decisionOperationFingerprint:"other"}).status,"BLOCKED"));
+test("context mismatch blocked",()=>assert.equal(evaluate({...base,decisionContextFingerprint:"other"}).status,"BLOCKED"));
+test("policy mismatch blocked",()=>assert.equal(evaluate({...base,decisionPolicyVersion:"v2"}).status,"BLOCKED"));
+test("expired permit blocked",()=>assert.equal(evaluate({...base,expiresAt:"2026-11-27T20:59:00.000Z"}).status,"BLOCKED"));
+test("future issue date blocked",()=>assert.equal(evaluate({...base,issuedAt:"2026-11-27T21:01:00.000Z"}).status,"BLOCKED"));
+test("long permit TTL blocked",()=>assert.equal(evaluate({...base,expiresAt:"2026-11-27T21:10:00.000Z"}).status,"BLOCKED"));
+test("atomic consume unavailable blocked",()=>assert.equal(evaluate({...base,atomicConsumeAvailable:false}).status,"BLOCKED"));
+test("sensitive action marked for human review",()=>assert.equal(evaluate(base).humanReviewRequired,true));
+test("invalid input fail closed",()=>assert.equal(evaluate({...base,operationFingerprint:""}).status,"BLOCKED"));
+test("replay prevention listed as required runtime control",()=>assert.ok(evaluate(base).requiredRuntimeControls.includes("ATOMIC_SINGLE_USE_CONSUMPTION")));
