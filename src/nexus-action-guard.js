@@ -8,10 +8,10 @@ function invalid(reason="INPUT_INVALID"){return {ok:false,status:"DENIED",reason
 function evaluate(input={}){
  if(!plain(input)||!ENVS.has(input.environment)||!validId(input.tenantId)||!validId(input.actionId)||!validId(input.actorId)||!CLASSES.has(input.actionClass)||!MODES.has(input.requestedMode)||!Array.isArray(input.approvals)||input.approvals.length>10)return invalid();
  const ids=new Set();for(const a of input.approvals){if(!plain(a)||!validId(a.approvalId)||ids.has(a.approvalId)||a.tenantId!==input.tenantId||a.actionId!==input.actionId||!validId(a.approverId)||a.approverId===input.actorId||!ROLES.has(a.role)||a.status!=="approved")return invalid("APPROVAL_INVALID");ids.add(a.approvalId);}
- const uniqueRoles=new Set(input.approvals.map(a=>a.role)),uniquePeople=new Set(input.approvals.map(a=>a.approverId));
+ const uniqueRoles=new Set(input.approvals.map(a=>a.role)),uniquePeople=new Set(input.approvals.map(a=>a.approverId)),rolePeople=new Map(input.approvals.map(a=>[a.role,a.approverId]));
  const dualRequired=["sensitive","financial","irreversible"].includes(input.actionClass),requiredRoles=input.actionClass==="financial"?["human_owner","finance_specialist"]:input.actionClass==="sensitive"?["human_owner","security_specialist"]:input.actionClass==="irreversible"?["human_owner","human_operator"]:input.actionClass==="production"?["human_owner","security_specialist","compliance_specialist"]:[];
  const required= input.actionClass==="read_only"?0:input.actionClass==="reversible"?1:2;
- const approvalsMet=requiredRoles.length?requiredRoles.every(r=>uniqueRoles.has(r)):uniquePeople.size>=required;
+ const approvalsMet=requiredRoles.length?requiredRoles.every(r=>uniqueRoles.has(r))&&new Set(requiredRoles.map(r=>rolePeople.get(r))).size===requiredRoles.length:uniquePeople.size>=required;
  const permittedMode=input.actionClass==="read_only"?"observe":input.actionClass==="reversible"?"suggest":"observe";
  const modeAllowed=input.requestedMode==="observe"||input.requestedMode==="suggest"&&(input.actionClass==="read_only"||input.actionClass==="reversible");
  const authorizedHint=approvalsMet&&modeAllowed&&input.actionClass!=="production";
