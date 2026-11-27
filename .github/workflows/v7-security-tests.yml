@@ -10,6 +10,8 @@ on:
       - "src/nexus-d1-task-audit-reader.js"
       - "src/nexus-d1-task-audit-scan.js"
       - "src/nexus-d1-task-audit-alerts.js"
+      - "src/nexus-alert-cooldown.js"
+      - "tests/nexus-alert-cooldown.test.mjs"
       - "migrations-preview-canonical/**"
       - "tests/**"
       - ".github/workflows/v7-security-tests.yml"
@@ -52,4 +54,4 @@ jobs:
           go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
           "$HOME/go/bin/actionlint" .github/workflows/deploy-preview-worker-manual.yml .github/workflows/apply-preview-d1-migrations.yml .github/workflows/preview-directory-e2e-acceptance.yml .github/workflows/provision-preview-r2-eu.yml .github/workflows/backup-preview-d1-to-r2-eu.yml .github/workflows/restore-preview-r2-backup-isolated-test.yml
       - name: Run V7 authorization regression tests
-        run: node --experimental-default-type=module --test tests/v7-security.test.js tests/deploy-preview-workflow.test.mjs tests/preview-e2e-workflow.test.mjs tests/payment-webhook-security.test.js tests/mission-security-atomic.test.js tests/payout-atomicity.test.js tests/payment-settlement-guard.test.js tests/payment-webhook-settlement-gate.test.js tests/payments-configured-guard.test.js tests/bootstrap-atomic.test.js tests/preview-migration-workflow.test.mjs tests/provision-preview-r2-eu-workflow.test.mjs tests/backup-preview-r2-eu-workflow.test.mjs tests/restore-preview-r2-backup-workflow.test.mjs tests/nexus-governance.test.mjs tests/nexus-task-lifecycle.test.mjs tests/nexus-audit-ledger.test.mjs tests/nexus-task-audit-bridge.test.mjs tests/nexus-task-audit-commit.test.mjs tests/nexus-d1-task-audit-store.test.mjs tests/nexus-d1-task-audit-reader.test.mjs tests/nexus-d1-task-audit-scan.test.mjs tests/nexus-d1-task-audit-alerts.test.mjs tests/worker-build-preview-only.test.mjs
+        run: node --experimental-default-type=module --test tests/v7-security.test.js tests/deploy-preview-workflow.test.mjs tests/preview-e2e-workflow.test.mjs tests/payment-webhook-security.test.js tests/mission-security-atomic.test.js tests/payout-atomicity.test.js tests/payment-settlement-guard.test.js tests/payment-webhook-settlement-gate.test.js tests/payments-configured-guard.test.js tests/bootstrap-atomic.test.js tests/preview-migration-workflow.test.mjs tests/provision-preview-r2-eu-workflow.test.mjs tests/backup-preview-r2-eu-workflow.test.mjs tests/restore-preview-r2-backup-workflow.test.mjs tests/nexus-governance.test.mjs tests/nexus-task-lifecycle.test.mjs tests/nexus-audit-ledger.test.mjs tests/nexus-task-audit-bridge.test.mjs tests/nexus-task-audit-commit.test.mjs tests/nexus-d1-task-audit-store.test.mjs tests/nexus-d1-task-audit-reader.test.mjs tests/nexus-d1-task-audit-scan.test.mjs tests/nexus-d1-task-audit-alerts.test.mjs tests/nexus-alert-cooldown.test.mjs tests/worker-build-preview-only.test.mjs
