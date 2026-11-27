@@ -1,0 +1,18 @@
+import test from "node:test";import assert from "node:assert/strict";import "../src/nexus-incident-risk-triage.js";
+const evaluate=globalThis.ProcheliaNexusIncidentTriage.evaluate;
+const base={incidentId:"inc-001",type:"SERVICE_QUALITY",impact:"LOW",detectedAt:"2026-11-27T20:00:00.000Z",affectedCount:1,recurrenceCount:0,evidenceComplete:true,containmentVerified:true};
+test("low impact receives P3",()=>assert.equal(evaluate(base).priority,"P3"));
+test("critical impact receives P0",()=>assert.equal(evaluate({...base,impact:"CRITICAL"}).priority,"P0"));
+test("high payment impact escalates P0",()=>assert.equal(evaluate({...base,type:"PAYMENT",impact:"HIGH"}).priority,"P0"));
+test("high privacy impact escalates P0",()=>assert.equal(evaluate({...base,type:"PRIVACY",impact:"HIGH"}).priority,"P0"));
+test("high legal compliance impact P1",()=>assert.equal(evaluate({...base,type:"LEGAL_COMPLIANCE",impact:"HIGH"}).priority,"P1"));
+test("critical domain uncertainty is P0",()=>assert.equal(evaluate({...base,type:"SECURITY",impact:"UNKNOWN"}).priority,"P0"));
+test("evidence gap on critical domain at least P1",()=>assert.equal(evaluate({...base,type:"PAYMENT",evidenceComplete:false}).priority,"P1"));
+test("moderate impact P2",()=>assert.equal(evaluate({...base,impact:"MODERATE"}).priority,"P2"));
+test("recurrence threshold P2",()=>assert.equal(evaluate({...base,recurrenceCount:3}).priority,"P2"));
+test("broad affected scope P2",()=>assert.equal(evaluate({...base,affectedCount:10}).priority,"P2"));
+test("unverified containment raises low case to P2",()=>assert.equal(evaluate({...base,containmentVerified:false}).priority,"P2"));
+test("malformed context fails closed",()=>assert.equal(evaluate({...base,affectedCount:-1}).status,"BLOCKED"));
+test("future timestamps rejected",()=>assert.equal(evaluate({...base,detectedAt:"2099-01-01T00:00:00.000Z"}).status,"BLOCKED"));
+test("unknown incident type rejected",()=>assert.equal(evaluate({...base,type:"SECRET"}).status,"BLOCKED"));
+test("does not execute remediation or decisions",()=>{const r=evaluate({...base,type:"PAYMENT",impact:"CRITICAL"});assert.equal(r.automaticAction,false);assert.ok(r.neverAutonomously.includes("REFUND_OR_PAYOUT"));});
