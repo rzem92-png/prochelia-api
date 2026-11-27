@@ -237,8 +237,15 @@ EU:
 - Unfair Commercial Practices Directive 2005/29/EC: https://eur-lex.europa.eu/eli/dir/2005/29
 - Consumer Rights Directive 2011/83/EU: https://eur-lex.europa.eu/eli/dir/2011/83
 - GDPR Regulation 2016/679: https://eur-lex.europa.eu/eli/reg/2016/679
-- AI Act Regulation 2024/1689: https://eur-lex.europa.eu/eli/reg/2024/1689
+- AI Act Regulation 2024/1689 (consolidated): https://eur-lex.europa.eu/eli/reg/2024/1689
+- AI Act Digital Omnibus amendment Regulation (EU) 2026/1744: https://eur-lex.europa.eu/eli/reg/2026/1744/oj
+- Commission AI Act Article 50 transparency guidance: https://digital-strategy.ec.europa.eu/en/policies/guidelines-ai-transparency-obligations
 - DAC7 Directive 2021/514: https://eur-lex.europa.eu/eli/dir/2021/514
+
+Algeria:
+- Ministry of Commerce — Law 18-05: https://commerce.gov.dz/fr/reglementation/loi-n-deg-18-05
+- Ministry of Posts and Telecommunications — e-commerce guidance: https://www.mpt.gov.dz/e-commerce/
+- Ministry of Posts and Telecommunications — laws and ordinances: https://www.mpt.gov.dz/lois-et-ordonnances/
 
 ## 9. Acceptance and release
 This matrix is an engineering baseline, not proof of compliance. Check current consolidated texts, national implementation and local rules with qualified counsel before launch. Change control and periodic source review are mandatory.
