@@ -1,0 +1,12 @@
+import test from "node:test";import assert from "node:assert/strict";import "../src/nexus-quality-case.js";
+const evaluate=globalThis.ProcheliaNexusQualityCase.evaluate;
+const base={environment:"preview",tenantId:"tenant-1",caseId:"CASE-1",currentState:"OPEN",requestedState:"TRIAGED",category:"service_quality",relatedIncidentIds:["INC-1"],evidenceIds:[],humanActor:false,ownerId:"agent-1"};
+test("valid triage transition requires accountable owner",()=>{const r=evaluate(base);assert.equal(r.ok,true);assert.equal(r.ownerAssigned,true);assert.equal(r.executionAllowed,false);});
+test("missing owner fails closed",()=>assert.equal(evaluate({...base,ownerId:null}).reason,"OWNER_REQUIRED"));
+test("safety and conduct require human review",()=>{for(const category of ["safety","provider_conduct","customer_conduct"])assert.equal(evaluate({...base,category}).reason,"HUMAN_REVIEW_REQUIRED");});
+test("resolved requires human gate and evidence",()=>{const i={...base,currentState:"INVESTIGATING",requestedState:"RESOLVED",humanActor:true};assert.equal(evaluate(i).reason,"EVIDENCE_REQUIRED");assert.equal(evaluate({...i,evidenceIds:["E1"]}).ok,true);});
+test("closed requires resolved state and evidence",()=>{const i={...base,currentState:"RESOLVED",requestedState:"CLOSED",humanActor:true,evidenceIds:["E1"]};assert.equal(evaluate(i).ok,true);assert.equal(evaluate({...i,currentState:"INVESTIGATING"}).ok,false);});
+test("reopening closed case requires human review",()=>{const i={...base,currentState:"CLOSED",requestedState:"REOPENED"};assert.equal(evaluate(i).reason,"HUMAN_REVIEW_REQUIRED");assert.equal(evaluate({...i,humanActor:true}).ok,true);});
+test("invalid state/category/tenant and duplicate refs fail closed",()=>{assert.equal(evaluate({...base,currentState:"UNKNOWN"}).ok,false);assert.equal(evaluate({...base,category:"medical"}).ok,false);assert.equal(evaluate({...base,tenantId:5}).ok,false);assert.equal(evaluate({...base,relatedIncidentIds:["INC-1","INC-1"]}).ok,false);});
+test("production, no-op, and unsupported transitions fail closed",()=>{assert.equal(evaluate({...base,environment:"production"}).ok,false);assert.equal(evaluate({...base,requestedState:"OPEN"}).reason,"NO_OP");assert.equal(evaluate({...base,requestedState:"CLOSED"}).ok,false);});
+test("output is sanitized",()=>{const r=evaluate({...base,customerMessage:"private"});assert.doesNotMatch(JSON.stringify(r),/private|customerMessage/);});
