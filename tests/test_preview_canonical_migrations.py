@@ -27,6 +27,7 @@ EXPECTED = [
     "0020_auth_login_rate_limits.sql",
     "0021_supra_audit_events.sql",
     "0022_supra_persisted_approvals.sql",
+    "0026_nexus_task_audit_pair_store.sql",
 ]
 
 actual = sorted(path.name for path in MIGRATIONS.glob("*.sql"))
@@ -49,7 +50,9 @@ required = {
     "users", "sessions", "clients", "intervenants", "missions",
     "auth_login_rate_limits", "supra_audit_events",
     "supra_approval_requests", "supra_approval_votes", "supra_approval_events",
+    "nexus_task_snapshots", "nexus_task_events", "nexus_audit_ledger_heads",
+    "nexus_audit_ledger_events", "nexus_task_commit_guards",
 }
 assert required <= tables, f"Canonical migration chain missing tables: {sorted(required-tables)}"
 
-print(f"PASS: all {len(EXPECTED)} canonical Preview migrations apply from an empty D1 database, creating users/sessions first; foreign_key_check=0.")
+print(f"PASS: all {len(EXPECTED)} canonical Preview migrations apply from an empty D1 database, including Nexus D1 pair-store schema; foreign_key_check=0.")
