@@ -92,3 +92,33 @@ test("invalid task identifier blocks pagination rather than reporting healthy", 
   assert.equal(result.healthy, false);
   assert.equal(result.failed, 1);
 });
+
+
+test("unknown snapshot state is rejected before invoking the pair reader", async () => {
+  const DB = makeDB([row("task-state-invalid", "tenant-a", "preview", "PAUSED")]); let called = false;
+  const result = await scan(input(DB, { readerApi: { loadTaskAuditPair: async () => { called = true; return { ok: true }; } } }));
+  assert.equal(result.healthy, false); assert.equal(result.failed, 1);
+  assert.equal(result.findings[0].code, "SNAPSHOT_STATE_INVALID"); assert.equal(called, false);
+});
+
+test("invalid revision is rejected without passing malformed snapshot to reader", async () => {
+  const DB = makeDB([row("task-revision-invalid", "tenant-a", "preview", "COMPLETED", 0)]); let called = false;
+  const result = await scan(input(DB, { readerApi: { loadTaskAuditPair: async () => { called = true; return { ok: true }; } } }));
+  assert.equal(result.healthy, false); assert.equal(result.failed, 1);
+  assert.equal(result.findings[0].code, "SNAPSHOT_REVISION_INVALID"); assert.equal(called, false);
+});
+
+test("untrusted reader error strings are normalized to safe codes", async () => {
+  const DB = makeDB([row("task-reader-error")]);
+  const secretLike = "arbitrary error contains customer data and tokens";
+  const result = await scan(input(DB, { readerApi: { loadTaskAuditPair: async () => ({ ok: false, error: secretLike, payload: secretLike }) } }));
+  assert.equal(result.healthy, false); assert.equal(result.findings[0].code, "PAIR_VERIFICATION_FAILED");
+  assert.equal(JSON.stringify(result).includes(secretLike), false);
+});
+
+test("verified reader cannot introduce an unknown lifecycle state", async () => {
+  const DB = makeDB([row("task-result-state")]);
+  const result = await scan(input(DB, { readerApi: { loadTaskAuditPair: async ({ taskId, tenantId, environment }) => ({ ok: true, verified: true, executionAllowed: false, task: { taskId, tenantId, environment, state: "UNKNOWN", revision: 3 } }) } }));
+  assert.equal(result.healthy, false); assert.equal(result.failed, 1);
+  assert.equal(result.findings[0].code, "PAIR_VERIFICATION_FAILED");
+});
