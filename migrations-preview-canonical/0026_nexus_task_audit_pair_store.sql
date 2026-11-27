@@ -102,7 +102,7 @@ WHEN NOT EXISTS (SELECT 1 FROM nexus_task_commit_guards
   OR json_extract(NEW.event_json,'$.taskId') IS NOT NEW.task_id
   OR json_extract(NEW.event_json,'$.tenantId') IS NOT NEW.tenant_id
   OR json_extract(NEW.event_json,'$.environment') IS NOT NEW.environment
-  OR json_extract(NEW.event_json,'$.revision') IS NOT NOT NEW.revision
+  OR json_extract(NEW.event_json,'$.revision') IS NOT NEW.revision
 BEGIN
   SELECT RAISE(ABORT, 'NEXUS_TASK_EVENT_CONTRACT_INVALID');
 END;
@@ -130,7 +130,7 @@ WHEN NOT EXISTS (SELECT 1 FROM nexus_task_commit_guards
       WHERE scope_key=NEW.scope_key AND environment=NEW.environment AND revision=NEW.sequence-1 AND head_hash=NEW.previous_hash)
   )
   OR json_extract(NEW.event_json,'$.eventId') IS NOT NEW.event_id
-  OR json_extract(NEW.event_json,'$.sequence') IS NOT NOT NEW.sequence
+  OR json_extract(NEW.event_json,'$.sequence') IS NOT NEW.sequence
   OR json_extract(NEW.event_json,'$.previousHash') IS NOT NEW.previous_hash
   OR json_extract(NEW.event_json,'$.hash') IS NOT NEW.hash
   OR json_extract(NEW.event_json,'$.environment') IS NOT NEW.environment
