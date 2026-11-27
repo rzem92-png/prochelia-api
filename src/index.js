@@ -1457,8 +1457,8 @@ async function createOperationalCase(request, env) {
   await env.DB.prepare(`INSERT INTO copilot_log(id,case_id,action_type,recommendation,confidence,mode) VALUES(?,?,?,?,?,?)`)
     .bind(crypto.randomUUID(),id,rec.action,JSON.stringify(rec.solution),rec.confidence,rec.mode).run();
   await journal(env,'copilot',null,'CASE_CREATED','operational_case',id,'OK',{caseType,impact});
-  if(rec.action==='AUTO_RESOLVE') await executeOperationalCase(env,id,null,true);
-  return json({ok:true,version:VERSION,case_id:id,recommendation:rec,status:rec.action==='AUTO_RESOLVE'?'AUTO_EXECUTED':'WAITING_MANAGER'},201);
+  // Nexus Supra autonomy remains proposal-only: no case can execute business mutations automatically.
+  return json({ok:true,version:VERSION,case_id:id,recommendation:rec,status:rec.action==='AUTO_RESOLVE'?'AUTO_PENDING_HUMAN_REVIEW':'WAITING_MANAGER'},201);
 }
 
 
@@ -1495,13 +1495,9 @@ async function executeCaseBusinessAction(env, c, rec, actorId=null, automatic=fa
     const replacementId = clean(context.replacement_intervenant_id || context.replacement_id);
     if (replacementId && c.mission_id) {
       const cols = await getTableColumns(env,'missions');
-      if (cols.includes('intervenant_id')) {
-        await env.DB.prepare('UPDATE missions SET intervenant_id=? WHERE id=?').bind(replacementId,c.mission_id).run();
-        results.push({action:'ASSIGN_REPLACEMENT',mission_id:c.mission_id,intervenant_id:replacementId,status:'EXECUTED'});
-      } else {
-        const queued=await enqueueAction(env,c.id,'ASSIGN_REPLACEMENT',{mission_id:c.mission_id,intervenant_id:replacementId},`${c.id}:replacement:${replacementId}`);
-        results.push({action:'ASSIGN_REPLACEMENT',...queued,reason:'MISSION_SCHEMA_NEEDS_REVIEW'});
-      }
+      // Never mutate a mission assignment directly from Copilot context. Queue a reviewed provider-bound action.
+      const queued=await enqueueAction(env,c.id,'ASSIGN_REPLACEMENT',{mission_id:c.mission_id,intervenant_id:replacementId},`${c.id}:replacement:${replacementId}`);
+      results.push({action:'ASSIGN_REPLACEMENT',...queued,reason:'HUMAN_REVIEW_AND_OWNERSHIP_RECHECK_REQUIRED'});
     } else {
       const queued=await enqueueAction(env,c.id,'SEARCH_REPLACEMENT',{mission_id:c.mission_id||null,criteria:context.replacement_criteria||{},case_type:c.case_type},`${c.id}:search-replacement`);
       results.push({action:'SEARCH_REPLACEMENT',...queued});
@@ -1511,13 +1507,10 @@ async function executeCaseBusinessAction(env, c, rec, actorId=null, automatic=fa
   if (context.reschedule_start_at && c.mission_id) {
     const cols=await getTableColumns(env,'missions');
     const target = cols.includes('start_at') ? 'start_at' : (cols.includes('scheduled_at') ? 'scheduled_at' : null);
-    if (target) {
-      await env.DB.prepare(`UPDATE missions SET ${target}=? WHERE id=?`).bind(String(context.reschedule_start_at),c.mission_id).run();
-      results.push({action:'RESCHEDULE_MISSION',mission_id:c.mission_id,field:target,status:'EXECUTED'});
-    } else {
-      const queued=await enqueueAction(env,c.id,'RESCHEDULE_MISSION',{mission_id:c.mission_id,start_at:context.reschedule_start_at},`${c.id}:reschedule:${context.reschedule_start_at}`);
-      results.push({action:'RESCHEDULE_MISSION',...queued,reason:'MISSION_SCHEMA_NEEDS_REVIEW'});
-    }
+    // Do not mutate schedule directly: enqueue only; execution adapter must re-check
+    // mission ownership/status/availability, authorization and idempotency.
+    const queued=await enqueueAction(env,c.id,'RESCHEDULE_MISSION',{mission_id:c.mission_id,start_at:context.reschedule_start_at},`${c.id}:reschedule:${context.reschedule_start_at}`);
+    results.push({action:'RESCHEDULE_MISSION',...queued,reason:'HUMAN_REVIEW_AND_RUNTIME_VALIDATION_REQUIRED'});
   }
 
   if (context.client_notification || c.client_id || c.company_id) {
@@ -1560,8 +1553,11 @@ async function executeOperationalCase(env, caseId, approverId=null, automatic=fa
   const c=await env.DB.prepare('SELECT * FROM operational_cases WHERE id=? LIMIT 1').bind(caseId).first();
   if(!c)return {ok:false,error:'CASE_NOT_FOUND'};
   if(c.status==='RESOLVED')return {ok:true,already:true};
+  // Fail closed: automatic execution is disabled until authorization, ownership,
+  // idempotency, transactional action binding and rollback controls are proven.
+  if(automatic)return {ok:false,error:'AUTONOMOUS_BUSINESS_EXECUTION_DISABLED',human_review_required:true};
   const rec=c.proposed_solution_json?JSON.parse(c.proposed_solution_json):{};
-  if(c.requires_manager && !automatic && !approverId) return {ok:false,error:'MANAGER_APPROVAL_REQUIRED'};
+  if(!approverId)return {ok:false,error:'MANAGER_APPROVAL_REQUIRED'};
   const businessResults = await executeCaseBusinessAction(env,c,rec,approverId,automatic);
   const resolution={executed:true,automatic,action:rec.action||'RESOLVE',steps:rec.solution?.steps||[],business_results:businessResults,executed_at:new Date().toISOString()};
   await env.DB.prepare(`INSERT INTO case_actions(id,case_id,action_code,mode,status,payload_json,result_json,completed_at) VALUES(?,?,?,?,?,?,?,CURRENT_TIMESTAMP)`)
