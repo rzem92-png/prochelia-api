@@ -1,0 +1,16 @@
+import test from "node:test";import assert from "node:assert/strict";import "../src/nexus-compliance-source-freshness.js";
+const evaluate=globalThis.ProcheliaNexusComplianceSources.evaluate,now="2026-11-27T21:00:00.000Z";
+const src=(over={})=>({sourceId:"src-1",url:"https://www.service-public.fr/example",jurisdiction:"FR",activityCode:"home-services",reviewStatus:"VERIFIED",reviewerId:"reviewer-1",reviewedAt:"2026-11-20T12:00:00.000Z",effectiveAt:"2026-01-01T00:00:00.000Z",expiresAt:"2027-01-01T00:00:00.000Z",...over});
+const input=(sources=[src()])=>({profileId:"FR-SERVICES",countryCode:"FR",activityCode:"home-services",now,trustedDomains:["service-public.fr","gouv.fr","europa.eu"],sources});
+test("valid metadata is accepted but not legal approval",()=>{const r=evaluate(input());assert.equal(r.status,"SOURCES_CURRENT_METADATA_VALIDATED");assert.equal(r.profileReady,false);assert.equal(r.legalApprovalRequired,true);});
+test("expired review validity blocks",()=>assert.equal(evaluate(input([src({expiresAt:"2026-11-27T20:00:00.000Z"})])).status,"BLOCKED"));
+test("future review date blocks",()=>assert.equal(evaluate(input([src({reviewedAt:"2026-12-01T00:00:00.000Z"})])).status,"BLOCKED"));
+test("jurisdiction mismatch blocks",()=>assert.equal(evaluate(input([src({jurisdiction:"DZ"})])).status,"BLOCKED"));
+test("non-HTTPS blocks",()=>assert.equal(evaluate(input([src({url:"http://service-public.fr"})])).reason,"SOURCE_DOMAIN_UNTRUSTED"));
+test("lookalike domain blocks",()=>assert.equal(evaluate(input([src({url:"https://service-public.fr.evil.example"})])).reason,"SOURCE_DOMAIN_UNTRUSTED"));
+test("untrusted host blocks",()=>assert.equal(evaluate(input([src({url:"https://example.com"})])).reason,"SOURCE_DOMAIN_UNTRUSTED"));
+test("not verified blocks",()=>assert.equal(evaluate(input([src({reviewStatus:"UNVERIFIED"})])).status,"BLOCKED"));
+test("duplicate ids block",()=>assert.equal(evaluate(input([src(),src()])).status,"BLOCKED"));
+test("missing metadata blocks",()=>assert.equal(evaluate(input([src({reviewerId:null})])).status,"BLOCKED"));
+test("malformed date blocks",()=>assert.equal(evaluate(input([src({expiresAt:"not-a-date"})])).status,"BLOCKED"));
+test("query/path secrets not echoed",()=>{const r=evaluate(input([src({url:"https://www.service-public.fr/private?token=secret"})]));assert.equal(JSON.stringify(r).includes("secret"),false);});
