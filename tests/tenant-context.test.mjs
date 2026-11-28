@@ -130,6 +130,30 @@ test("tenant context returns unavailable rather than falling back when schema is
   assert.equal((await response.json()).error, "TENANT_CONTEXT_UNAVAILABLE");
 });
 
+test("tenant selection accepts a valid numeric Content-Length header", async () => {
+  const { d1, sqlite } = makeD1();
+  const body = JSON.stringify({ tenantId: "t2" });
+  const response = await worker.fetch(new Request("https://preview.example/api/tenant/context/select", {
+    method: "POST",
+    headers: { cookie: `prochelia_session=${sessionToken}`, "content-type": "application/json", "content-length": String(new TextEncoder().encode(body).length) },
+    body
+  }), { DB: d1 });
+  assert.equal(response.status, 200);
+  assert.equal((await response.json()).selectedTenantId, "t2");
+  assert.equal(sqlite.prepare("SELECT tenant_id FROM tenant_session_context WHERE session_id='s1'").get().tenant_id, "t2");
+});
+
+test("tenant selection rejects a malformed declared Content-Length without mutation", async () => {
+  const { d1, sqlite } = makeD1();
+  const response = await worker.fetch(new Request("https://preview.example/api/tenant/context/select", {
+    method: "POST",
+    headers: { cookie: `prochelia_session=${sessionToken}`, "content-type": "application/json", "content-length": "not-a-number" },
+    body: JSON.stringify({ tenantId: "t2" })
+  }), { DB: d1 });
+  assert.equal(response.status, 413);
+  assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM tenant_session_context").get().n, 0);
+});
+
 test("tenant selection rejects malformed JSON and oversized payloads before D1 mutation", async () => {
   const { d1, sqlite } = makeD1();
   const malformed = await worker.fetch(new Request("https://preview.example/api/tenant/context/select", {
