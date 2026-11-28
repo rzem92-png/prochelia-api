@@ -1,4 +1,6 @@
 import { handleV7Route } from "./v7-routes.js";
+import { validateComplaintDraft, resolveComplaintScope } from "./complaint-scope.js";
+import { normalizeComplaintIdempotencyKey, buildComplaintIdempotencyIdentity, reserveComplaintIntake, persistComplaintCaseLink } from "./complaint-idempotency.js";
 // PROCHÉLIA — INDEX BACKEND CONSOLIDÉ UNIQUE
 // Référence de consolidation : V14.1 Finance + sécurité/RBAC existants.
 // Généré le 19/10/2026. À déployer uniquement après recette avec la vraie base D1.
@@ -28,6 +30,38 @@ function json(data, status = 200, extraHeaders = {}) {
 async function readJson(request) {
   try { return await request.json(); }
   catch { return null; }
+}
+
+async function readBoundedJson(request, maxBytes = 8192) {
+  const declared = request.headers.get('content-length');
+  if (declared !== null) {
+    if (!/^\d+$/.test(declared)) return { ok: false, status: 400, error: 'CONTENT_LENGTH_INVALID' };
+    if (Number(declared) > maxBytes) return { ok: false, status: 413, error: 'PAYLOAD_TOO_LARGE' };
+  }
+  const reader = request.body?.getReader();
+  if (!reader) return { ok: false, status: 400, error: 'JSON_BODY_REQUIRED' };
+  const chunks = [];
+  let total = 0;
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > maxBytes) {
+        try { await reader.cancel(); } catch {}
+        return { ok: false, status: 413, error: 'PAYLOAD_TOO_LARGE' };
+      }
+      chunks.push(value);
+    }
+    const bytes = new Uint8Array(total);
+    let offset = 0;
+    for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
+    const value = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes));
+    return { ok: true, value };
+  } catch {
+    try { await reader.cancel(); } catch {}
+    return { ok: false, status: 400, error: 'INVALID_JSON' };
+  }
 }
 
 function clean(value) {
@@ -1781,13 +1815,72 @@ async function financeSummary(request, env) {
 
 async function complaintCreate(request, env) {
   const gate=await requireAuthRole(request,env,['gerante','client','entreprise']); if(gate.error)return gate.error;
-  const b=await readJson(request)||{};if(!b.category)return json({ok:false,error:'CATEGORY_REQUIRED',version:VERSION},400);
-  const id=crypto.randomUUID();await env.DB.prepare(`INSERT INTO complaints(id,client_type,client_id,company_id,mission_id,category,severity,description) VALUES(?,?,?,?,?,?,?,?)`).bind(id,String(b.client_type||'B2C'),b.client_id||null,b.company_id||null,b.mission_id||null,b.category,String(b.severity||'LOW'),b.description||null).run();
-  const caseType=SIMPLE_CASES.has(b.category)?b.category:'reclamation_client';
-  const fakeReq=new Request(request.url,{method:'POST',headers:request.headers,body:JSON.stringify({case_type:caseType,client_id:b.client_id,company_id:b.company_id,mission_id:b.mission_id,description:b.description,impact_level:b.severity||'LOW',context:{complaint_id:id}})});
-  const caseResponse=await createOperationalCase(fakeReq,env);const caseJson=await caseResponse.json();
-  if(caseJson.case_id)await env.DB.prepare('UPDATE complaints SET resolution_case_id=? WHERE id=?').bind(caseJson.case_id,id).run();
-  return json({ok:true,version:VERSION,complaint_id:id,resolution_case_id:caseJson.case_id||null,copilot:caseJson.recommendation||null},201);
+  const contentType=request.headers.get('content-type')||'';
+  if(!/^application\/json(?:\\s*;|$)/i.test(contentType))return json({ok:false,error:'JSON_CONTENT_TYPE_REQUIRED',version:VERSION},415);
+  const parsed=await readBoundedJson(request,8192);
+  if(!parsed.ok)return json({ok:false,error:parsed.error,version:VERSION},parsed.status);
+  const actor=gate.auth.user;
+  const draft=validateComplaintDraft(parsed.value,actor.role,new Date());
+  if(!draft.ok)return json({ok:false,error:'COMPLAINT_VALIDATION_ERROR',fields:draft.errors,version:VERSION},400);
+  const value=draft.normalized;
+  let clientProfile=null,companyProfile=null,mission=null;
+  if(actor.role==='client'){
+    clientProfile=await env.DB.prepare('SELECT id,user_id FROM clients WHERE user_id=? LIMIT 1').bind(actor.id).first();
+    if(value.missionId)mission=await env.DB.prepare('SELECT id,client_id,intervenant_id FROM missions WHERE id=? LIMIT 1').bind(value.missionId).first();
+  }else if(actor.role==='gerante'){
+    if(value.clientId)clientProfile=await env.DB.prepare('SELECT id FROM clients WHERE id=? LIMIT 1').bind(value.clientId).first();
+    if(value.companyId)companyProfile=await env.DB.prepare('SELECT id,kind,status FROM business_profiles WHERE id=? AND status=? LIMIT 1').bind(value.companyId,'active').first();
+    if(value.missionId)mission=await env.DB.prepare('SELECT id,client_id,intervenant_id FROM missions WHERE id=? LIMIT 1').bind(value.missionId).first();
+    if(mission&&!clientProfile)clientProfile=await env.DB.prepare('SELECT id FROM clients WHERE id=? LIMIT 1').bind(mission.client_id).first();
+  }
+  const scopeResult=resolveComplaintScope(actor,value,{clientProfile,companyProfile,mission});
+  if(!scopeResult.ok)return json({ok:false,error:scopeResult.error,version:VERSION},scopeResult.status);
+  const scope=scopeResult.scope;
+  const idempotencyKey=normalizeComplaintIdempotencyKey(request.headers.get('Idempotency-Key'));
+  if(!idempotencyKey)return json({ok:false,error:'IDEMPOTENCY_KEY_REQUIRED_OR_INVALID',version:VERSION},400);
+  let identity;
+  try{identity=await buildComplaintIdempotencyIdentity(actor,idempotencyKey,value,scope);}catch{
+    return json({ok:false,error:'IDEMPOTENCY_HASH_UNAVAILABLE',version:VERSION},503);
+  }
+  if(!identity)return json({ok:false,error:'IDEMPOTENCY_KEY_REQUIRED_OR_INVALID',version:VERSION},400);
+  const candidateId=crypto.randomUUID();
+  const reservation=await reserveComplaintIntake(env.DB,identity,candidateId,{
+    client_type:scope.client_type,client_id:scope.client_id,company_id:scope.company_id,
+    mission_id:scope.mission_id,category:value.category,severity:scope.severity,description:value.description
+  });
+  if(!reservation.ok){
+    const conflict=reservation.error==='IDEMPOTENCY_KEY_REUSED';
+    return json({ok:false,error:reservation.error,version:VERSION},conflict?409:503);
+  }
+  const complaintId=reservation.complaintId;
+  if(!reservation.created){
+    const linked=!!reservation.resolutionCaseId;
+    return json({
+      ok:true,version:VERSION,complaint_id:complaintId,
+      resolution_case_id:reservation.resolutionCaseId,
+      case_link_status:linked?'LINKED':'PENDING_MANUAL_REVIEW',
+      human_review_required:true,autonomous_resolution:false,idempotent_replay:true
+    },linked?200:202);
+  }
+  // Complaints always create a human-review case; never route to auto-resolution.
+  const caseType='reclamation_client';
+  const caseContext={complaint_id:complaintId,category:value.category,incident_date:value.incidentDate,request_reference:value.requestReference,desired_outcome:value.desiredOutcome,desired_outcome_details:value.desiredOutcomeDetails};
+  const caseBody={case_type:caseType,client_id:scope.client_id,company_id:scope.company_id,mission_id:scope.mission_id,description:value.description,impact_level:scope.severity,context:caseContext};
+  const caseHeaders=new Headers(request.headers);caseHeaders.delete('content-length');caseHeaders.delete('idempotency-key');caseHeaders.set('content-type','application/json');
+  let caseId=null,linkStatus='PENDING_MANUAL_REVIEW';
+  try{
+    const fakeReq=new Request(request.url,{method:'POST',headers:caseHeaders,body:JSON.stringify(caseBody)});
+    const caseResponse=await createOperationalCase(fakeReq,env);
+    const caseJson=await caseResponse.json();
+    if(caseResponse.ok&&caseJson?.case_id&&await persistComplaintCaseLink(env.DB,identity,complaintId,caseJson.case_id)){
+      caseId=caseJson.case_id;linkStatus='LINKED';
+    }
+  }catch{
+    // Persisted complaint remains PENDING_MANUAL_REVIEW; a human must reconcile.
+  }
+  try{await journal(env,actor.role,actor.id,'COMPLAINT_CREATED','complaint',complaintId,'OK',{category:value.category,case_link_status:linkStatus});}catch{}
+  const response={ok:true,version:VERSION,complaint_id:complaintId,resolution_case_id:caseId,case_link_status:linkStatus,human_review_required:true,autonomous_resolution:false,idempotent_replay:false};
+  return json(response,caseId?201:202);
 }
 
 async function setPhase(request, env) {

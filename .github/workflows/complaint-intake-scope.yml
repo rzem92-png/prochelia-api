@@ -1,0 +1,36 @@
+name: Complaint intake scope and payload tests
+on:
+  pull_request:
+    paths:
+      - "src/index.js"
+      - "src/complaint-scope.js"
+      - "src/complaint-idempotency.js"
+      - "tests/complaint-scope.test.mjs"
+      - "tests/complaint-idempotency.test.mjs"
+      - ".github/workflows/complaint-intake-scope.yml"
+  push:
+    branches: [main]
+    paths:
+      - "src/index.js"
+      - "src/complaint-scope.js"
+      - "tests/complaint-scope.test.mjs"
+      - ".github/workflows/complaint-intake-scope.yml"
+permissions:
+  contents: read
+jobs:
+  complaint-intake:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: 22
+          package-manager-cache: false
+      - name: Source syntax
+        run: |
+          node --experimental-default-type=module --check src/index.js
+          node --experimental-default-type=module --check src/complaint-scope.js
+          node --experimental-default-type=module --check src/complaint-idempotency.js
+      - name: Complaint intake regression suite
+        run: node --experimental-default-type=module --test tests/complaint-scope.test.mjs tests/complaint-idempotency.test.mjs
