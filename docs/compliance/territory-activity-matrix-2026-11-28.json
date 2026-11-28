@@ -1,0 +1,4298 @@
+{
+  "matrixVersion": "2026-11-28.1",
+  "checkedAt": "2026-11-28",
+  "reviewDueAt": "2027-02-25",
+  "owner": "LEGAL_COMPLIANCE",
+  "reviewer": "AUTOMATED_SOURCE_DISCOVERY",
+  "legalReviewStatus": "PENDING_COUNSEL",
+  "controlImplementationStatus": "UNVERIFIED",
+  "marketActivationAllowed": false,
+  "sourceRegisterVersion": "2026-11-28.1",
+  "activityModels": [
+    "SERVICE_MARKETPLACE_INTERMEDIATION",
+    "DIRECT_SERVICE_PROVIDER",
+    "B2B_SERVICE_CONTRACT",
+    "PAYMENTS_PSP_PAYOUTS",
+    "DIGITAL_PLATFORM"
+  ],
+  "requiredCategories": [
+    "consumer_platform",
+    "precontract",
+    "pricing_fees",
+    "cancellation_refund",
+    "complaints_mediation",
+    "reviews_fair_practices",
+    "DSA",
+    "trader_traceability",
+    "tax_DAC7",
+    "privacy",
+    "retention_rights",
+    "processor_contracts_transfers",
+    "DPIA",
+    "professional_qualifications_insurance",
+    "payments_PSP",
+    "security",
+    "AI_governance",
+    "local_licensing",
+    "labor_platform_work",
+    "advertising_competition"
+  ],
+  "territoriesNotResearched": [
+    "BE",
+    "CH",
+    "LU",
+    "CA",
+    "MA",
+    "TN",
+    "ES",
+    "IT",
+    "DE",
+    "GB",
+    "US",
+    "AE",
+    "OTHER"
+  ],
+  "territories": [
+    {
+      "code": "FR",
+      "name": "France",
+      "coverageStatus": "PARTIAL_SOURCE_REGISTER",
+      "legalReviewStatus": "PENDING_COUNSEL",
+      "controlImplementationStatus": "UNVERIFIED",
+      "marketActivationAllowed": false,
+      "sourceIds": [
+        "FR_DGCCRF_PLATFORM_INFORMATION",
+        "FR_DGCCRF_ECOMMERCE_B2C",
+        "FR_DGCCRF_PRECONTRACT_INFO",
+        "FR_DGCCRF_PRICE_INFO_2026",
+        "EU_DSA_2022_2065",
+        "EU_DSA_MARKETPLACE_GUIDANCE",
+        "FR_DAC7_DPI_PLATFORMS",
+        "EU_DAC7_COMMISSION",
+        "EU_GDPR_2016_679",
+        "CNIL_SUBPROCESSOR_SECURITY",
+        "CNIL_TRANSFER_REVIEW",
+        "CNIL_AIPD_HIGH_RISK"
+      ],
+      "categories": {
+        "consumer_platform": {
+          "status": "SOURCE_REGISTERED",
+          "sourceIds": [
+            "FR_DGCCRF_PLATFORM_INFORMATION",
+            "FR_DGCCRF_ECOMMERCE_B2C"
+          ],
+          "checkedAt": "2026-11-28",
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "PENDING_COUNSEL",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "Source register reference only; scope/applicability and implementation are not legally reviewed or verified."
+        },
+        "precontract": {
+          "status": "SOURCE_REGISTERED",
+          "sourceIds": [
+            "FR_DGCCRF_PRECONTRACT_INFO",
+            "FR_DGCCRF_ECOMMERCE_B2C"
+          ],
+          "checkedAt": "2026-11-28",
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "PENDING_COUNSEL",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "Source register reference only; scope/applicability and implementation are not legally reviewed or verified."
+        },
+        "pricing_fees": {
+          "status": "SOURCE_REGISTERED",
+          "sourceIds": [
+            "FR_DGCCRF_PRICE_INFO_2026"
+          ],
+          "checkedAt": "2026-11-28",
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "PENDING_COUNSEL",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "Source register reference only; scope/applicability and implementation are not legally reviewed or verified."
+        },
+        "cancellation_refund": {
+          "status": "SOURCE_REGISTERED",
+          "sourceIds": [
+            "FR_DGCCRF_ECOMMERCE_B2C"
+          ],
+          "checkedAt": "2026-11-28",
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "PENDING_COUNSEL",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "Source register reference only; scope/applicability and implementation are not legally reviewed or verified."
+        },
+        "complaints_mediation": {
+          "status": "SOURCE_REGISTERED",
+          "sourceIds": [
+            "FR_DGCCRF_PRECONTRACT_INFO"
+          ],
+          "checkedAt": "2026-11-28",
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "PENDING_COUNSEL",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "Source register reference only; scope/applicability and implementation are not legally reviewed or verified."
+        },
+        "reviews_fair_practices": {
+          "status": "SOURCE_REGISTERED",
+          "sourceIds": [
+            "FR_DGCCRF_PLATFORM_INFORMATION"
+          ],
+          "checkedAt": "2026-11-28",
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "PENDING_COUNSEL",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "Source register reference only; scope/applicability and implementation are not legally reviewed or verified."
+        },
+        "DSA": {
+          "status": "SOURCE_REGISTERED",
+          "sourceIds": [
+            "EU_DSA_2022_2065",
+            "EU_DSA_MARKETPLACE_GUIDANCE"
+          ],
+          "checkedAt": "2026-11-28",
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "PENDING_COUNSEL",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "Source register reference only; scope/applicability and implementation are not legally reviewed or verified."
+        },
+        "trader_traceability": {
+          "status": "SOURCE_REGISTERED",
+          "sourceIds": [
+            "EU_DSA_MARKETPLACE_GUIDANCE"
+          ],
+          "checkedAt": "2026-11-28",
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "PENDING_COUNSEL",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "Source register reference only; scope/applicability and implementation are not legally reviewed or verified."
+        },
+        "tax_DAC7": {
+          "status": "SOURCE_REGISTERED",
+          "sourceIds": [
+            "FR_DAC7_DPI_PLATFORMS",
+            "EU_DAC7_COMMISSION"
+          ],
+          "checkedAt": "2026-11-28",
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "PENDING_COUNSEL",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "Source register reference only; scope/applicability and implementation are not legally reviewed or verified."
+        },
+        "privacy": {
+          "status": "SOURCE_REGISTERED",
+          "sourceIds": [
+            "EU_GDPR_2016_679",
+            "CNIL_SUBPROCESSOR_SECURITY"
+          ],
+          "checkedAt": "2026-11-28",
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "PENDING_COUNSEL",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "Source register reference only; scope/applicability and implementation are not legally reviewed or verified."
+        },
+        "retention_rights": {
+          "status": "SOURCE_REGISTERED",
+          "sourceIds": [
+            "EU_GDPR_2016_679"
+          ],
+          "checkedAt": "2026-11-28",
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "PENDING_COUNSEL",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "Source register reference only; scope/applicability and implementation are not legally reviewed or verified."
+        },
+        "processor_contracts_transfers": {
+          "status": "SOURCE_REGISTERED",
+          "sourceIds": [
+            "CNIL_SUBPROCESSOR_SECURITY",
+            "CNIL_TRANSFER_REVIEW"
+          ],
+          "checkedAt": "2026-11-28",
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "PENDING_COUNSEL",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "Source register reference only; scope/applicability and implementation are not legally reviewed or verified."
+        },
+        "DPIA": {
+          "status": "SOURCE_REGISTERED",
+          "sourceIds": [
+            "CNIL_AIPD_HIGH_RISK"
+          ],
+          "checkedAt": "2026-11-28",
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "PENDING_COUNSEL",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "Source register reference only; scope/applicability and implementation are not legally reviewed or verified."
+        },
+        "professional_qualifications_insurance": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "payments_PSP": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "security": {
+          "status": "SOURCE_REGISTERED",
+          "sourceIds": [
+            "EU_GDPR_2016_679",
+            "CNIL_SUBPROCESSOR_SECURITY"
+          ],
+          "checkedAt": "2026-11-28",
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "PENDING_COUNSEL",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "Source register reference only; scope/applicability and implementation are not legally reviewed or verified."
+        },
+        "AI_governance": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "local_licensing": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "labor_platform_work": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "advertising_competition": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        }
+      },
+      "activityAssessments": {
+        "SERVICE_MARKETPLACE_INTERMEDIATION": {
+          "status": "UNVERIFIED",
+          "legalReviewStatus": "PENDING_COUNSEL",
+          "controlImplementationStatus": "UNVERIFIED",
+          "marketActivationAllowed": false,
+          "owner": "LEGAL_COMPLIANCE",
+          "reviewDueAt": "2027-02-25",
+          "evidenceReferences": []
+        },
+        "DIRECT_SERVICE_PROVIDER": {
+          "status": "UNVERIFIED",
+          "legalReviewStatus": "PENDING_COUNSEL",
+          "controlImplementationStatus": "UNVERIFIED",
+          "marketActivationAllowed": false,
+          "owner": "LEGAL_COMPLIANCE",
+          "reviewDueAt": "2027-02-25",
+          "evidenceReferences": []
+        },
+        "B2B_SERVICE_CONTRACT": {
+          "status": "UNVERIFIED",
+          "legalReviewStatus": "PENDING_COUNSEL",
+          "controlImplementationStatus": "UNVERIFIED",
+          "marketActivationAllowed": false,
+          "owner": "LEGAL_COMPLIANCE",
+          "reviewDueAt": "2027-02-25",
+          "evidenceReferences": []
+        },
+        "PAYMENTS_PSP_PAYOUTS": {
+          "status": "UNVERIFIED",
+          "legalReviewStatus": "PENDING_COUNSEL",
+          "controlImplementationStatus": "UNVERIFIED",
+          "marketActivationAllowed": false,
+          "owner": "LEGAL_COMPLIANCE",
+          "reviewDueAt": "2027-02-25",
+          "evidenceReferences": []
+        },
+        "DIGITAL_PLATFORM": {
+          "status": "UNVERIFIED",
+          "legalReviewStatus": "PENDING_COUNSEL",
+          "controlImplementationStatus": "UNVERIFIED",
+          "marketActivationAllowed": false,
+          "owner": "LEGAL_COMPLIANCE",
+          "reviewDueAt": "2027-02-25",
+          "evidenceReferences": []
+        }
+      },
+      "reviewDueAt": "2027-02-25"
+    },
+    {
+      "code": "EU",
+      "name": "Union européenne / EEE (baseline; national implementation required)",
+      "coverageStatus": "PARTIAL_SOURCE_REGISTER",
+      "legalReviewStatus": "PENDING_COUNSEL",
+      "controlImplementationStatus": "UNVERIFIED",
+      "marketActivationAllowed": false,
+      "sourceIds": [
+        "EU_DSA_2022_2065",
+        "EU_DSA_MARKETPLACE_GUIDANCE",
+        "EU_DAC7_COMMISSION",
+        "EU_GDPR_2016_679",
+        "CNIL_TRANSFER_REVIEW",
+        "CNIL_AIPD_HIGH_RISK",
+        "CNIL_SUBPROCESSOR_SECURITY"
+      ],
+      "categories": {
+        "consumer_platform": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "precontract": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "pricing_fees": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "cancellation_refund": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "complaints_mediation": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "reviews_fair_practices": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "DSA": {
+          "status": "SOURCE_REGISTERED",
+          "sourceIds": [
+            "EU_DSA_2022_2065",
+            "EU_DSA_MARKETPLACE_GUIDANCE"
+          ],
+          "checkedAt": "2026-11-28",
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "PENDING_COUNSEL",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "Source register reference only; scope/applicability and implementation are not legally reviewed or verified."
+        },
+        "trader_traceability": {
+          "status": "SOURCE_REGISTERED",
+          "sourceIds": [
+            "EU_DSA_MARKETPLACE_GUIDANCE"
+          ],
+          "checkedAt": "2026-11-28",
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "PENDING_COUNSEL",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "Source register reference only; scope/applicability and implementation are not legally reviewed or verified."
+        },
+        "tax_DAC7": {
+          "status": "SOURCE_REGISTERED",
+          "sourceIds": [
+            "EU_DAC7_COMMISSION"
+          ],
+          "checkedAt": "2026-11-28",
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "PENDING_COUNSEL",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "Source register reference only; scope/applicability and implementation are not legally reviewed or verified."
+        },
+        "privacy": {
+          "status": "SOURCE_REGISTERED",
+          "sourceIds": [
+            "EU_GDPR_2016_679"
+          ],
+          "checkedAt": "2026-11-28",
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "PENDING_COUNSEL",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "Source register reference only; scope/applicability and implementation are not legally reviewed or verified."
+        },
+        "retention_rights": {
+          "status": "SOURCE_REGISTERED",
+          "sourceIds": [
+            "EU_GDPR_2016_679"
+          ],
+          "checkedAt": "2026-11-28",
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "PENDING_COUNSEL",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "Source register reference only; scope/applicability and implementation are not legally reviewed or verified."
+        },
+        "processor_contracts_transfers": {
+          "status": "SOURCE_REGISTERED",
+          "sourceIds": [
+            "CNIL_TRANSFER_REVIEW"
+          ],
+          "checkedAt": "2026-11-28",
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "PENDING_COUNSEL",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "Source register reference only; scope/applicability and implementation are not legally reviewed or verified."
+        },
+        "DPIA": {
+          "status": "SOURCE_REGISTERED",
+          "sourceIds": [
+            "CNIL_AIPD_HIGH_RISK"
+          ],
+          "checkedAt": "2026-11-28",
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "PENDING_COUNSEL",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "Source register reference only; scope/applicability and implementation are not legally reviewed or verified."
+        },
+        "professional_qualifications_insurance": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "payments_PSP": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "security": {
+          "status": "SOURCE_REGISTERED",
+          "sourceIds": [
+            "EU_GDPR_2016_679",
+            "CNIL_SUBPROCESSOR_SECURITY"
+          ],
+          "checkedAt": "2026-11-28",
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "PENDING_COUNSEL",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "Source register reference only; scope/applicability and implementation are not legally reviewed or verified."
+        },
+        "AI_governance": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "local_licensing": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "labor_platform_work": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "advertising_competition": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        }
+      },
+      "activityAssessments": {
+        "SERVICE_MARKETPLACE_INTERMEDIATION": {
+          "status": "UNVERIFIED",
+          "legalReviewStatus": "PENDING_COUNSEL",
+          "controlImplementationStatus": "UNVERIFIED",
+          "marketActivationAllowed": false,
+          "owner": "LEGAL_COMPLIANCE",
+          "reviewDueAt": "2027-02-25",
+          "evidenceReferences": []
+        },
+        "DIRECT_SERVICE_PROVIDER": {
+          "status": "UNVERIFIED",
+          "legalReviewStatus": "PENDING_COUNSEL",
+          "controlImplementationStatus": "UNVERIFIED",
+          "marketActivationAllowed": false,
+          "owner": "LEGAL_COMPLIANCE",
+          "reviewDueAt": "2027-02-25",
+          "evidenceReferences": []
+        },
+        "B2B_SERVICE_CONTRACT": {
+          "status": "UNVERIFIED",
+          "legalReviewStatus": "PENDING_COUNSEL",
+          "controlImplementationStatus": "UNVERIFIED",
+          "marketActivationAllowed": false,
+          "owner": "LEGAL_COMPLIANCE",
+          "reviewDueAt": "2027-02-25",
+          "evidenceReferences": []
+        },
+        "PAYMENTS_PSP_PAYOUTS": {
+          "status": "UNVERIFIED",
+          "legalReviewStatus": "PENDING_COUNSEL",
+          "controlImplementationStatus": "UNVERIFIED",
+          "marketActivationAllowed": false,
+          "owner": "LEGAL_COMPLIANCE",
+          "reviewDueAt": "2027-02-25",
+          "evidenceReferences": []
+        },
+        "DIGITAL_PLATFORM": {
+          "status": "UNVERIFIED",
+          "legalReviewStatus": "PENDING_COUNSEL",
+          "controlImplementationStatus": "UNVERIFIED",
+          "marketActivationAllowed": false,
+          "owner": "LEGAL_COMPLIANCE",
+          "reviewDueAt": "2027-02-25",
+          "evidenceReferences": []
+        }
+      },
+      "reviewDueAt": "2027-02-25"
+    },
+    {
+      "code": "DZ",
+      "name": "Algérie",
+      "coverageStatus": "PARTIAL_SOURCE_REGISTER",
+      "legalReviewStatus": "PENDING_LOCAL_COUNSEL",
+      "controlImplementationStatus": "UNVERIFIED",
+      "marketActivationAllowed": false,
+      "sourceIds": [
+        "DZ_ECOMMERCE_LAW_18_05",
+        "DZ_CONSUMER_LAW_09_03_AND_18_09",
+        "DZ_DATA_PROTECTION_LAW_18_07"
+      ],
+      "categories": {
+        "consumer_platform": {
+          "status": "SOURCE_REGISTERED",
+          "sourceIds": [
+            "DZ_ECOMMERCE_LAW_18_05",
+            "DZ_CONSUMER_LAW_09_03_AND_18_09"
+          ],
+          "checkedAt": "2026-11-28",
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "PENDING_LOCAL_COUNSEL",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "Source register reference only; scope/applicability and implementation are not legally reviewed or verified."
+        },
+        "precontract": {
+          "status": "SOURCE_REGISTERED",
+          "sourceIds": [
+            "DZ_ECOMMERCE_LAW_18_05"
+          ],
+          "checkedAt": "2026-11-28",
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "PENDING_LOCAL_COUNSEL",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "Source register reference only; scope/applicability and implementation are not legally reviewed or verified."
+        },
+        "pricing_fees": {
+          "status": "SOURCE_REGISTERED",
+          "sourceIds": [
+            "DZ_ECOMMERCE_LAW_18_05"
+          ],
+          "checkedAt": "2026-11-28",
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "PENDING_LOCAL_COUNSEL",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "Source register reference only; scope/applicability and implementation are not legally reviewed or verified."
+        },
+        "cancellation_refund": {
+          "status": "SOURCE_REGISTERED",
+          "sourceIds": [
+            "DZ_ECOMMERCE_LAW_18_05"
+          ],
+          "checkedAt": "2026-11-28",
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "PENDING_LOCAL_COUNSEL",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "Source register reference only; scope/applicability and implementation are not legally reviewed or verified."
+        },
+        "complaints_mediation": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "reviews_fair_practices": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "DSA": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "trader_traceability": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "tax_DAC7": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "privacy": {
+          "status": "SOURCE_REGISTERED",
+          "sourceIds": [
+            "DZ_DATA_PROTECTION_LAW_18_07"
+          ],
+          "checkedAt": "2026-11-28",
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE_LOCAL_COUNSEL",
+          "legalReviewStatus": "PENDING_LOCAL_COUNSEL",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "Official law reference covers personal-data rules and prior processing formalities; processing-specific applicability, current amendments and controls need local counsel."
+        },
+        "retention_rights": {
+          "status": "SOURCE_REGISTERED",
+          "sourceIds": [
+            "DZ_DATA_PROTECTION_LAW_18_07"
+          ],
+          "checkedAt": "2026-11-28",
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE_LOCAL_COUNSEL",
+          "legalReviewStatus": "PENDING_LOCAL_COUNSEL",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "Articles 14 and 32–36 are references for retention disclosures and data-subject rights; exact duties, deadlines and implementation need local counsel."
+        },
+        "processor_contracts_transfers": {
+          "status": "SOURCE_REGISTERED",
+          "sourceIds": [
+            "DZ_DATA_PROTECTION_LAW_18_07"
+          ],
+          "checkedAt": "2026-11-28",
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE_LOCAL_COUNSEL",
+          "legalReviewStatus": "PENDING_LOCAL_COUNSEL",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "Articles 14, 39 and 44–45 are references for subcontracting and foreign transfers; current authorization/exception requirements and PROCHÉLIA data flows need local counsel."
+        },
+        "DPIA": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "professional_qualifications_insurance": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "payments_PSP": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "security": {
+          "status": "SOURCE_REGISTERED",
+          "sourceIds": [
+            "DZ_DATA_PROTECTION_LAW_18_07"
+          ],
+          "checkedAt": "2026-11-28",
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE_LOCAL_COUNSEL",
+          "legalReviewStatus": "PENDING_LOCAL_COUNSEL",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "Articles 38–39 are references for security and processor safeguards; no implementation evidence or legal review is asserted."
+        },
+        "AI_governance": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "local_licensing": {
+          "status": "SOURCE_REGISTERED",
+          "sourceIds": [
+            "DZ_ECOMMERCE_LAW_18_05"
+          ],
+          "checkedAt": "2026-11-28",
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "PENDING_LOCAL_COUNSEL",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "Source register reference only; scope/applicability and implementation are not legally reviewed or verified."
+        },
+        "labor_platform_work": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "advertising_competition": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        }
+      },
+      "activityAssessments": {
+        "SERVICE_MARKETPLACE_INTERMEDIATION": {
+          "status": "UNVERIFIED",
+          "legalReviewStatus": "PENDING_LOCAL_COUNSEL",
+          "controlImplementationStatus": "UNVERIFIED",
+          "marketActivationAllowed": false,
+          "owner": "LEGAL_COMPLIANCE",
+          "reviewDueAt": "2027-02-25",
+          "evidenceReferences": []
+        },
+        "DIRECT_SERVICE_PROVIDER": {
+          "status": "UNVERIFIED",
+          "legalReviewStatus": "PENDING_LOCAL_COUNSEL",
+          "controlImplementationStatus": "UNVERIFIED",
+          "marketActivationAllowed": false,
+          "owner": "LEGAL_COMPLIANCE",
+          "reviewDueAt": "2027-02-25",
+          "evidenceReferences": []
+        },
+        "B2B_SERVICE_CONTRACT": {
+          "status": "UNVERIFIED",
+          "legalReviewStatus": "PENDING_LOCAL_COUNSEL",
+          "controlImplementationStatus": "UNVERIFIED",
+          "marketActivationAllowed": false,
+          "owner": "LEGAL_COMPLIANCE",
+          "reviewDueAt": "2027-02-25",
+          "evidenceReferences": []
+        },
+        "PAYMENTS_PSP_PAYOUTS": {
+          "status": "UNVERIFIED",
+          "legalReviewStatus": "PENDING_LOCAL_COUNSEL",
+          "controlImplementationStatus": "UNVERIFIED",
+          "marketActivationAllowed": false,
+          "owner": "LEGAL_COMPLIANCE",
+          "reviewDueAt": "2027-02-25",
+          "evidenceReferences": []
+        },
+        "DIGITAL_PLATFORM": {
+          "status": "UNVERIFIED",
+          "legalReviewStatus": "PENDING_LOCAL_COUNSEL",
+          "controlImplementationStatus": "UNVERIFIED",
+          "marketActivationAllowed": false,
+          "owner": "LEGAL_COMPLIANCE",
+          "reviewDueAt": "2027-02-25",
+          "evidenceReferences": []
+        }
+      },
+      "reviewDueAt": "2027-02-25"
+    },
+    {
+      "code": "BE",
+      "name": "Belgique",
+      "coverageStatus": "NOT_RESEARCHED",
+      "legalReviewStatus": "NOT_RESEARCHED",
+      "controlImplementationStatus": "UNVERIFIED",
+      "marketActivationAllowed": false,
+      "sourceIds": [],
+      "categories": {
+        "consumer_platform": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "precontract": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "pricing_fees": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "cancellation_refund": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "complaints_mediation": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "reviews_fair_practices": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "DSA": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "trader_traceability": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "tax_DAC7": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "privacy": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "retention_rights": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "processor_contracts_transfers": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "DPIA": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "professional_qualifications_insurance": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "payments_PSP": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "security": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "AI_governance": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "local_licensing": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "labor_platform_work": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "advertising_competition": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        }
+      },
+      "activityAssessments": {
+        "SERVICE_MARKETPLACE_INTERMEDIATION": {
+          "status": "UNVERIFIED",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "marketActivationAllowed": false,
+          "owner": "LEGAL_COMPLIANCE",
+          "reviewDueAt": "2027-02-25",
+          "evidenceReferences": []
+        },
+        "DIRECT_SERVICE_PROVIDER": {
+          "status": "UNVERIFIED",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "marketActivationAllowed": false,
+          "owner": "LEGAL_COMPLIANCE",
+          "reviewDueAt": "2027-02-25",
+          "evidenceReferences": []
+        },
+        "B2B_SERVICE_CONTRACT": {
+          "status": "UNVERIFIED",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "marketActivationAllowed": false,
+          "owner": "LEGAL_COMPLIANCE",
+          "reviewDueAt": "2027-02-25",
+          "evidenceReferences": []
+        },
+        "PAYMENTS_PSP_PAYOUTS": {
+          "status": "UNVERIFIED",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "marketActivationAllowed": false,
+          "owner": "LEGAL_COMPLIANCE",
+          "reviewDueAt": "2027-02-25",
+          "evidenceReferences": []
+        },
+        "DIGITAL_PLATFORM": {
+          "status": "UNVERIFIED",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "marketActivationAllowed": false,
+          "owner": "LEGAL_COMPLIANCE",
+          "reviewDueAt": "2027-02-25",
+          "evidenceReferences": []
+        }
+      },
+      "reviewDueAt": "2027-02-25"
+    },
+    {
+      "code": "CH",
+      "name": "Suisse",
+      "coverageStatus": "NOT_RESEARCHED",
+      "legalReviewStatus": "NOT_RESEARCHED",
+      "controlImplementationStatus": "UNVERIFIED",
+      "marketActivationAllowed": false,
+      "sourceIds": [],
+      "categories": {
+        "consumer_platform": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "precontract": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "pricing_fees": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "cancellation_refund": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "complaints_mediation": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "reviews_fair_practices": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "DSA": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "trader_traceability": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "tax_DAC7": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "privacy": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "retention_rights": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "processor_contracts_transfers": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "DPIA": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "professional_qualifications_insurance": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "payments_PSP": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "security": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "AI_governance": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "local_licensing": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "labor_platform_work": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "advertising_competition": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        }
+      },
+      "activityAssessments": {
+        "SERVICE_MARKETPLACE_INTERMEDIATION": {
+          "status": "UNVERIFIED",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "marketActivationAllowed": false,
+          "owner": "LEGAL_COMPLIANCE",
+          "reviewDueAt": "2027-02-25",
+          "evidenceReferences": []
+        },
+        "DIRECT_SERVICE_PROVIDER": {
+          "status": "UNVERIFIED",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "marketActivationAllowed": false,
+          "owner": "LEGAL_COMPLIANCE",
+          "reviewDueAt": "2027-02-25",
+          "evidenceReferences": []
+        },
+        "B2B_SERVICE_CONTRACT": {
+          "status": "UNVERIFIED",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "marketActivationAllowed": false,
+          "owner": "LEGAL_COMPLIANCE",
+          "reviewDueAt": "2027-02-25",
+          "evidenceReferences": []
+        },
+        "PAYMENTS_PSP_PAYOUTS": {
+          "status": "UNVERIFIED",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "marketActivationAllowed": false,
+          "owner": "LEGAL_COMPLIANCE",
+          "reviewDueAt": "2027-02-25",
+          "evidenceReferences": []
+        },
+        "DIGITAL_PLATFORM": {
+          "status": "UNVERIFIED",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "marketActivationAllowed": false,
+          "owner": "LEGAL_COMPLIANCE",
+          "reviewDueAt": "2027-02-25",
+          "evidenceReferences": []
+        }
+      },
+      "reviewDueAt": "2027-02-25"
+    },
+    {
+      "code": "LU",
+      "name": "Luxembourg",
+      "coverageStatus": "NOT_RESEARCHED",
+      "legalReviewStatus": "NOT_RESEARCHED",
+      "controlImplementationStatus": "UNVERIFIED",
+      "marketActivationAllowed": false,
+      "sourceIds": [],
+      "categories": {
+        "consumer_platform": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "precontract": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "pricing_fees": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "cancellation_refund": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "complaints_mediation": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "reviews_fair_practices": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "DSA": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "trader_traceability": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "tax_DAC7": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "privacy": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "retention_rights": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "processor_contracts_transfers": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "DPIA": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "professional_qualifications_insurance": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "payments_PSP": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "security": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "AI_governance": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "local_licensing": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "labor_platform_work": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "advertising_competition": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        }
+      },
+      "activityAssessments": {
+        "SERVICE_MARKETPLACE_INTERMEDIATION": {
+          "status": "UNVERIFIED",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "marketActivationAllowed": false,
+          "owner": "LEGAL_COMPLIANCE",
+          "reviewDueAt": "2027-02-25",
+          "evidenceReferences": []
+        },
+        "DIRECT_SERVICE_PROVIDER": {
+          "status": "UNVERIFIED",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "marketActivationAllowed": false,
+          "owner": "LEGAL_COMPLIANCE",
+          "reviewDueAt": "2027-02-25",
+          "evidenceReferences": []
+        },
+        "B2B_SERVICE_CONTRACT": {
+          "status": "UNVERIFIED",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "marketActivationAllowed": false,
+          "owner": "LEGAL_COMPLIANCE",
+          "reviewDueAt": "2027-02-25",
+          "evidenceReferences": []
+        },
+        "PAYMENTS_PSP_PAYOUTS": {
+          "status": "UNVERIFIED",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "marketActivationAllowed": false,
+          "owner": "LEGAL_COMPLIANCE",
+          "reviewDueAt": "2027-02-25",
+          "evidenceReferences": []
+        },
+        "DIGITAL_PLATFORM": {
+          "status": "UNVERIFIED",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "marketActivationAllowed": false,
+          "owner": "LEGAL_COMPLIANCE",
+          "reviewDueAt": "2027-02-25",
+          "evidenceReferences": []
+        }
+      },
+      "reviewDueAt": "2027-02-25"
+    },
+    {
+      "code": "CA",
+      "name": "Canada",
+      "coverageStatus": "NOT_RESEARCHED",
+      "legalReviewStatus": "NOT_RESEARCHED",
+      "controlImplementationStatus": "UNVERIFIED",
+      "marketActivationAllowed": false,
+      "sourceIds": [],
+      "categories": {
+        "consumer_platform": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "precontract": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "pricing_fees": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "cancellation_refund": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "complaints_mediation": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "reviews_fair_practices": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "DSA": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "trader_traceability": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "tax_DAC7": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "privacy": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "retention_rights": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "processor_contracts_transfers": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "DPIA": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "professional_qualifications_insurance": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "payments_PSP": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "security": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "AI_governance": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "local_licensing": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "labor_platform_work": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "advertising_competition": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        }
+      },
+      "activityAssessments": {
+        "SERVICE_MARKETPLACE_INTERMEDIATION": {
+          "status": "UNVERIFIED",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "marketActivationAllowed": false,
+          "owner": "LEGAL_COMPLIANCE",
+          "reviewDueAt": "2027-02-25",
+          "evidenceReferences": []
+        },
+        "DIRECT_SERVICE_PROVIDER": {
+          "status": "UNVERIFIED",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "marketActivationAllowed": false,
+          "owner": "LEGAL_COMPLIANCE",
+          "reviewDueAt": "2027-02-25",
+          "evidenceReferences": []
+        },
+        "B2B_SERVICE_CONTRACT": {
+          "status": "UNVERIFIED",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "marketActivationAllowed": false,
+          "owner": "LEGAL_COMPLIANCE",
+          "reviewDueAt": "2027-02-25",
+          "evidenceReferences": []
+        },
+        "PAYMENTS_PSP_PAYOUTS": {
+          "status": "UNVERIFIED",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "marketActivationAllowed": false,
+          "owner": "LEGAL_COMPLIANCE",
+          "reviewDueAt": "2027-02-25",
+          "evidenceReferences": []
+        },
+        "DIGITAL_PLATFORM": {
+          "status": "UNVERIFIED",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "marketActivationAllowed": false,
+          "owner": "LEGAL_COMPLIANCE",
+          "reviewDueAt": "2027-02-25",
+          "evidenceReferences": []
+        }
+      },
+      "reviewDueAt": "2027-02-25"
+    },
+    {
+      "code": "MA",
+      "name": "Maroc",
+      "coverageStatus": "NOT_RESEARCHED",
+      "legalReviewStatus": "NOT_RESEARCHED",
+      "controlImplementationStatus": "UNVERIFIED",
+      "marketActivationAllowed": false,
+      "sourceIds": [],
+      "categories": {
+        "consumer_platform": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "precontract": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "pricing_fees": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "cancellation_refund": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "complaints_mediation": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "reviews_fair_practices": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "DSA": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "trader_traceability": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "tax_DAC7": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "privacy": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "retention_rights": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "processor_contracts_transfers": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "DPIA": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "professional_qualifications_insurance": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "payments_PSP": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "security": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "AI_governance": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "local_licensing": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "labor_platform_work": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "advertising_competition": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        }
+      },
+      "activityAssessments": {
+        "SERVICE_MARKETPLACE_INTERMEDIATION": {
+          "status": "UNVERIFIED",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "marketActivationAllowed": false,
+          "owner": "LEGAL_COMPLIANCE",
+          "reviewDueAt": "2027-02-25",
+          "evidenceReferences": []
+        },
+        "DIRECT_SERVICE_PROVIDER": {
+          "status": "UNVERIFIED",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "marketActivationAllowed": false,
+          "owner": "LEGAL_COMPLIANCE",
+          "reviewDueAt": "2027-02-25",
+          "evidenceReferences": []
+        },
+        "B2B_SERVICE_CONTRACT": {
+          "status": "UNVERIFIED",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "marketActivationAllowed": false,
+          "owner": "LEGAL_COMPLIANCE",
+          "reviewDueAt": "2027-02-25",
+          "evidenceReferences": []
+        },
+        "PAYMENTS_PSP_PAYOUTS": {
+          "status": "UNVERIFIED",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "marketActivationAllowed": false,
+          "owner": "LEGAL_COMPLIANCE",
+          "reviewDueAt": "2027-02-25",
+          "evidenceReferences": []
+        },
+        "DIGITAL_PLATFORM": {
+          "status": "UNVERIFIED",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "marketActivationAllowed": false,
+          "owner": "LEGAL_COMPLIANCE",
+          "reviewDueAt": "2027-02-25",
+          "evidenceReferences": []
+        }
+      },
+      "reviewDueAt": "2027-02-25"
+    },
+    {
+      "code": "TN",
+      "name": "Tunisie",
+      "coverageStatus": "NOT_RESEARCHED",
+      "legalReviewStatus": "NOT_RESEARCHED",
+      "controlImplementationStatus": "UNVERIFIED",
+      "marketActivationAllowed": false,
+      "sourceIds": [],
+      "categories": {
+        "consumer_platform": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "precontract": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "pricing_fees": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "cancellation_refund": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "complaints_mediation": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "reviews_fair_practices": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "DSA": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "trader_traceability": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "tax_DAC7": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "privacy": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "retention_rights": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "processor_contracts_transfers": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "DPIA": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "professional_qualifications_insurance": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "payments_PSP": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "security": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "AI_governance": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "local_licensing": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "labor_platform_work": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "advertising_competition": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        }
+      },
+      "activityAssessments": {
+        "SERVICE_MARKETPLACE_INTERMEDIATION": {
+          "status": "UNVERIFIED",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "marketActivationAllowed": false,
+          "owner": "LEGAL_COMPLIANCE",
+          "reviewDueAt": "2027-02-25",
+          "evidenceReferences": []
+        },
+        "DIRECT_SERVICE_PROVIDER": {
+          "status": "UNVERIFIED",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "marketActivationAllowed": false,
+          "owner": "LEGAL_COMPLIANCE",
+          "reviewDueAt": "2027-02-25",
+          "evidenceReferences": []
+        },
+        "B2B_SERVICE_CONTRACT": {
+          "status": "UNVERIFIED",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "marketActivationAllowed": false,
+          "owner": "LEGAL_COMPLIANCE",
+          "reviewDueAt": "2027-02-25",
+          "evidenceReferences": []
+        },
+        "PAYMENTS_PSP_PAYOUTS": {
+          "status": "UNVERIFIED",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "marketActivationAllowed": false,
+          "owner": "LEGAL_COMPLIANCE",
+          "reviewDueAt": "2027-02-25",
+          "evidenceReferences": []
+        },
+        "DIGITAL_PLATFORM": {
+          "status": "UNVERIFIED",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "marketActivationAllowed": false,
+          "owner": "LEGAL_COMPLIANCE",
+          "reviewDueAt": "2027-02-25",
+          "evidenceReferences": []
+        }
+      },
+      "reviewDueAt": "2027-02-25"
+    },
+    {
+      "code": "ES",
+      "name": "Espagne",
+      "coverageStatus": "NOT_RESEARCHED",
+      "legalReviewStatus": "NOT_RESEARCHED",
+      "controlImplementationStatus": "UNVERIFIED",
+      "marketActivationAllowed": false,
+      "sourceIds": [],
+      "categories": {
+        "consumer_platform": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "precontract": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "pricing_fees": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "cancellation_refund": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "complaints_mediation": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "reviews_fair_practices": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "DSA": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "trader_traceability": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "tax_DAC7": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "privacy": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "retention_rights": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "processor_contracts_transfers": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "DPIA": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "professional_qualifications_insurance": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "payments_PSP": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "security": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "AI_governance": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "local_licensing": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "labor_platform_work": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "advertising_competition": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        }
+      },
+      "activityAssessments": {
+        "SERVICE_MARKETPLACE_INTERMEDIATION": {
+          "status": "UNVERIFIED",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "marketActivationAllowed": false,
+          "owner": "LEGAL_COMPLIANCE",
+          "reviewDueAt": "2027-02-25",
+          "evidenceReferences": []
+        },
+        "DIRECT_SERVICE_PROVIDER": {
+          "status": "UNVERIFIED",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "marketActivationAllowed": false,
+          "owner": "LEGAL_COMPLIANCE",
+          "reviewDueAt": "2027-02-25",
+          "evidenceReferences": []
+        },
+        "B2B_SERVICE_CONTRACT": {
+          "status": "UNVERIFIED",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "marketActivationAllowed": false,
+          "owner": "LEGAL_COMPLIANCE",
+          "reviewDueAt": "2027-02-25",
+          "evidenceReferences": []
+        },
+        "PAYMENTS_PSP_PAYOUTS": {
+          "status": "UNVERIFIED",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "marketActivationAllowed": false,
+          "owner": "LEGAL_COMPLIANCE",
+          "reviewDueAt": "2027-02-25",
+          "evidenceReferences": []
+        },
+        "DIGITAL_PLATFORM": {
+          "status": "UNVERIFIED",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "marketActivationAllowed": false,
+          "owner": "LEGAL_COMPLIANCE",
+          "reviewDueAt": "2027-02-25",
+          "evidenceReferences": []
+        }
+      },
+      "reviewDueAt": "2027-02-25"
+    },
+    {
+      "code": "IT",
+      "name": "Italie",
+      "coverageStatus": "NOT_RESEARCHED",
+      "legalReviewStatus": "NOT_RESEARCHED",
+      "controlImplementationStatus": "UNVERIFIED",
+      "marketActivationAllowed": false,
+      "sourceIds": [],
+      "categories": {
+        "consumer_platform": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "precontract": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "pricing_fees": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "cancellation_refund": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "complaints_mediation": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "reviews_fair_practices": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "DSA": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "trader_traceability": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "tax_DAC7": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "privacy": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "retention_rights": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "processor_contracts_transfers": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "DPIA": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "professional_qualifications_insurance": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "payments_PSP": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "security": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "AI_governance": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "local_licensing": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "labor_platform_work": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "advertising_competition": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        }
+      },
+      "activityAssessments": {
+        "SERVICE_MARKETPLACE_INTERMEDIATION": {
+          "status": "UNVERIFIED",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "marketActivationAllowed": false,
+          "owner": "LEGAL_COMPLIANCE",
+          "reviewDueAt": "2027-02-25",
+          "evidenceReferences": []
+        },
+        "DIRECT_SERVICE_PROVIDER": {
+          "status": "UNVERIFIED",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "marketActivationAllowed": false,
+          "owner": "LEGAL_COMPLIANCE",
+          "reviewDueAt": "2027-02-25",
+          "evidenceReferences": []
+        },
+        "B2B_SERVICE_CONTRACT": {
+          "status": "UNVERIFIED",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "marketActivationAllowed": false,
+          "owner": "LEGAL_COMPLIANCE",
+          "reviewDueAt": "2027-02-25",
+          "evidenceReferences": []
+        },
+        "PAYMENTS_PSP_PAYOUTS": {
+          "status": "UNVERIFIED",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "marketActivationAllowed": false,
+          "owner": "LEGAL_COMPLIANCE",
+          "reviewDueAt": "2027-02-25",
+          "evidenceReferences": []
+        },
+        "DIGITAL_PLATFORM": {
+          "status": "UNVERIFIED",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "marketActivationAllowed": false,
+          "owner": "LEGAL_COMPLIANCE",
+          "reviewDueAt": "2027-02-25",
+          "evidenceReferences": []
+        }
+      },
+      "reviewDueAt": "2027-02-25"
+    },
+    {
+      "code": "DE",
+      "name": "Allemagne",
+      "coverageStatus": "NOT_RESEARCHED",
+      "legalReviewStatus": "NOT_RESEARCHED",
+      "controlImplementationStatus": "UNVERIFIED",
+      "marketActivationAllowed": false,
+      "sourceIds": [],
+      "categories": {
+        "consumer_platform": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "precontract": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "pricing_fees": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "cancellation_refund": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "complaints_mediation": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "reviews_fair_practices": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "DSA": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "trader_traceability": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "tax_DAC7": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "privacy": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "retention_rights": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "processor_contracts_transfers": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "DPIA": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "professional_qualifications_insurance": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "payments_PSP": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "security": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "AI_governance": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "local_licensing": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "labor_platform_work": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "advertising_competition": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        }
+      },
+      "activityAssessments": {
+        "SERVICE_MARKETPLACE_INTERMEDIATION": {
+          "status": "UNVERIFIED",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "marketActivationAllowed": false,
+          "owner": "LEGAL_COMPLIANCE",
+          "reviewDueAt": "2027-02-25",
+          "evidenceReferences": []
+        },
+        "DIRECT_SERVICE_PROVIDER": {
+          "status": "UNVERIFIED",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "marketActivationAllowed": false,
+          "owner": "LEGAL_COMPLIANCE",
+          "reviewDueAt": "2027-02-25",
+          "evidenceReferences": []
+        },
+        "B2B_SERVICE_CONTRACT": {
+          "status": "UNVERIFIED",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "marketActivationAllowed": false,
+          "owner": "LEGAL_COMPLIANCE",
+          "reviewDueAt": "2027-02-25",
+          "evidenceReferences": []
+        },
+        "PAYMENTS_PSP_PAYOUTS": {
+          "status": "UNVERIFIED",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "marketActivationAllowed": false,
+          "owner": "LEGAL_COMPLIANCE",
+          "reviewDueAt": "2027-02-25",
+          "evidenceReferences": []
+        },
+        "DIGITAL_PLATFORM": {
+          "status": "UNVERIFIED",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "marketActivationAllowed": false,
+          "owner": "LEGAL_COMPLIANCE",
+          "reviewDueAt": "2027-02-25",
+          "evidenceReferences": []
+        }
+      },
+      "reviewDueAt": "2027-02-25"
+    },
+    {
+      "code": "GB",
+      "name": "Royaume-Uni",
+      "coverageStatus": "NOT_RESEARCHED",
+      "legalReviewStatus": "NOT_RESEARCHED",
+      "controlImplementationStatus": "UNVERIFIED",
+      "marketActivationAllowed": false,
+      "sourceIds": [],
+      "categories": {
+        "consumer_platform": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "precontract": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "pricing_fees": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "cancellation_refund": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "complaints_mediation": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "reviews_fair_practices": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "DSA": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "trader_traceability": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "tax_DAC7": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "privacy": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "retention_rights": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "processor_contracts_transfers": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "DPIA": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "professional_qualifications_insurance": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "payments_PSP": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "security": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "AI_governance": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "local_licensing": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "labor_platform_work": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "advertising_competition": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        }
+      },
+      "activityAssessments": {
+        "SERVICE_MARKETPLACE_INTERMEDIATION": {
+          "status": "UNVERIFIED",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "marketActivationAllowed": false,
+          "owner": "LEGAL_COMPLIANCE",
+          "reviewDueAt": "2027-02-25",
+          "evidenceReferences": []
+        },
+        "DIRECT_SERVICE_PROVIDER": {
+          "status": "UNVERIFIED",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "marketActivationAllowed": false,
+          "owner": "LEGAL_COMPLIANCE",
+          "reviewDueAt": "2027-02-25",
+          "evidenceReferences": []
+        },
+        "B2B_SERVICE_CONTRACT": {
+          "status": "UNVERIFIED",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "marketActivationAllowed": false,
+          "owner": "LEGAL_COMPLIANCE",
+          "reviewDueAt": "2027-02-25",
+          "evidenceReferences": []
+        },
+        "PAYMENTS_PSP_PAYOUTS": {
+          "status": "UNVERIFIED",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "marketActivationAllowed": false,
+          "owner": "LEGAL_COMPLIANCE",
+          "reviewDueAt": "2027-02-25",
+          "evidenceReferences": []
+        },
+        "DIGITAL_PLATFORM": {
+          "status": "UNVERIFIED",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "marketActivationAllowed": false,
+          "owner": "LEGAL_COMPLIANCE",
+          "reviewDueAt": "2027-02-25",
+          "evidenceReferences": []
+        }
+      },
+      "reviewDueAt": "2027-02-25"
+    },
+    {
+      "code": "US",
+      "name": "États-Unis",
+      "coverageStatus": "NOT_RESEARCHED",
+      "legalReviewStatus": "NOT_RESEARCHED",
+      "controlImplementationStatus": "UNVERIFIED",
+      "marketActivationAllowed": false,
+      "sourceIds": [],
+      "categories": {
+        "consumer_platform": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "precontract": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "pricing_fees": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "cancellation_refund": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "complaints_mediation": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "reviews_fair_practices": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "DSA": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "trader_traceability": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "tax_DAC7": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "privacy": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "retention_rights": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "processor_contracts_transfers": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "DPIA": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "professional_qualifications_insurance": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "payments_PSP": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "security": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "AI_governance": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "local_licensing": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "labor_platform_work": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "advertising_competition": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        }
+      },
+      "activityAssessments": {
+        "SERVICE_MARKETPLACE_INTERMEDIATION": {
+          "status": "UNVERIFIED",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "marketActivationAllowed": false,
+          "owner": "LEGAL_COMPLIANCE",
+          "reviewDueAt": "2027-02-25",
+          "evidenceReferences": []
+        },
+        "DIRECT_SERVICE_PROVIDER": {
+          "status": "UNVERIFIED",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "marketActivationAllowed": false,
+          "owner": "LEGAL_COMPLIANCE",
+          "reviewDueAt": "2027-02-25",
+          "evidenceReferences": []
+        },
+        "B2B_SERVICE_CONTRACT": {
+          "status": "UNVERIFIED",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "marketActivationAllowed": false,
+          "owner": "LEGAL_COMPLIANCE",
+          "reviewDueAt": "2027-02-25",
+          "evidenceReferences": []
+        },
+        "PAYMENTS_PSP_PAYOUTS": {
+          "status": "UNVERIFIED",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "marketActivationAllowed": false,
+          "owner": "LEGAL_COMPLIANCE",
+          "reviewDueAt": "2027-02-25",
+          "evidenceReferences": []
+        },
+        "DIGITAL_PLATFORM": {
+          "status": "UNVERIFIED",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "marketActivationAllowed": false,
+          "owner": "LEGAL_COMPLIANCE",
+          "reviewDueAt": "2027-02-25",
+          "evidenceReferences": []
+        }
+      },
+      "reviewDueAt": "2027-02-25"
+    },
+    {
+      "code": "AE",
+      "name": "Émirats arabes unis",
+      "coverageStatus": "NOT_RESEARCHED",
+      "legalReviewStatus": "NOT_RESEARCHED",
+      "controlImplementationStatus": "UNVERIFIED",
+      "marketActivationAllowed": false,
+      "sourceIds": [],
+      "categories": {
+        "consumer_platform": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "precontract": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "pricing_fees": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "cancellation_refund": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "complaints_mediation": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "reviews_fair_practices": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "DSA": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "trader_traceability": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "tax_DAC7": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "privacy": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "retention_rights": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "processor_contracts_transfers": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "DPIA": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "professional_qualifications_insurance": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "payments_PSP": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "security": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "AI_governance": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "local_licensing": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "labor_platform_work": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "advertising_competition": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        }
+      },
+      "activityAssessments": {
+        "SERVICE_MARKETPLACE_INTERMEDIATION": {
+          "status": "UNVERIFIED",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "marketActivationAllowed": false,
+          "owner": "LEGAL_COMPLIANCE",
+          "reviewDueAt": "2027-02-25",
+          "evidenceReferences": []
+        },
+        "DIRECT_SERVICE_PROVIDER": {
+          "status": "UNVERIFIED",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "marketActivationAllowed": false,
+          "owner": "LEGAL_COMPLIANCE",
+          "reviewDueAt": "2027-02-25",
+          "evidenceReferences": []
+        },
+        "B2B_SERVICE_CONTRACT": {
+          "status": "UNVERIFIED",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "marketActivationAllowed": false,
+          "owner": "LEGAL_COMPLIANCE",
+          "reviewDueAt": "2027-02-25",
+          "evidenceReferences": []
+        },
+        "PAYMENTS_PSP_PAYOUTS": {
+          "status": "UNVERIFIED",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "marketActivationAllowed": false,
+          "owner": "LEGAL_COMPLIANCE",
+          "reviewDueAt": "2027-02-25",
+          "evidenceReferences": []
+        },
+        "DIGITAL_PLATFORM": {
+          "status": "UNVERIFIED",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "marketActivationAllowed": false,
+          "owner": "LEGAL_COMPLIANCE",
+          "reviewDueAt": "2027-02-25",
+          "evidenceReferences": []
+        }
+      },
+      "reviewDueAt": "2027-02-25"
+    },
+    {
+      "code": "OTHER",
+      "name": "Autres territoires",
+      "coverageStatus": "NOT_RESEARCHED",
+      "legalReviewStatus": "NOT_RESEARCHED",
+      "controlImplementationStatus": "UNVERIFIED",
+      "marketActivationAllowed": false,
+      "sourceIds": [],
+      "categories": {
+        "consumer_platform": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "precontract": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "pricing_fees": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "cancellation_refund": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "complaints_mediation": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "reviews_fair_practices": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "DSA": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "trader_traceability": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "tax_DAC7": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "privacy": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "retention_rights": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "processor_contracts_transfers": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "DPIA": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "professional_qualifications_insurance": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "payments_PSP": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "security": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "AI_governance": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "local_licensing": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "labor_platform_work": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        },
+        "advertising_competition": {
+          "status": "NOT_RESEARCHED",
+          "sourceIds": [],
+          "checkedAt": null,
+          "reviewDueAt": "2027-02-25",
+          "owner": "LEGAL_COMPLIANCE",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+        }
+      },
+      "activityAssessments": {
+        "SERVICE_MARKETPLACE_INTERMEDIATION": {
+          "status": "UNVERIFIED",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "marketActivationAllowed": false,
+          "owner": "LEGAL_COMPLIANCE",
+          "reviewDueAt": "2027-02-25",
+          "evidenceReferences": []
+        },
+        "DIRECT_SERVICE_PROVIDER": {
+          "status": "UNVERIFIED",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "marketActivationAllowed": false,
+          "owner": "LEGAL_COMPLIANCE",
+          "reviewDueAt": "2027-02-25",
+          "evidenceReferences": []
+        },
+        "B2B_SERVICE_CONTRACT": {
+          "status": "UNVERIFIED",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "marketActivationAllowed": false,
+          "owner": "LEGAL_COMPLIANCE",
+          "reviewDueAt": "2027-02-25",
+          "evidenceReferences": []
+        },
+        "PAYMENTS_PSP_PAYOUTS": {
+          "status": "UNVERIFIED",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "marketActivationAllowed": false,
+          "owner": "LEGAL_COMPLIANCE",
+          "reviewDueAt": "2027-02-25",
+          "evidenceReferences": []
+        },
+        "DIGITAL_PLATFORM": {
+          "status": "UNVERIFIED",
+          "legalReviewStatus": "NOT_RESEARCHED",
+          "controlImplementationStatus": "UNVERIFIED",
+          "marketActivationAllowed": false,
+          "owner": "LEGAL_COMPLIANCE",
+          "reviewDueAt": "2027-02-25",
+          "evidenceReferences": []
+        }
+      },
+      "reviewDueAt": "2027-02-25"
+    }
+  ]
+}

@@ -210,6 +210,11 @@ Before enabling an Algeria-facing offer or checkout, determine whether PROCHÉLI
 - Local banking/payment-rail rules, currency controls and cross-border payment constraints. Do not assume Stripe or EU PSP flows can be used for Algerian transactions; obtain confirmation from licensed local banks/payment providers and counsel.
 - Jurisdiction, contracting-party role, tax/invoicing, dispute handling, language, insurance, service qualifications and worker classification.
 
+### Algeria data protection — primary-source reference only
+- JORADP Official Gazette No. 34, Law 18-07 (10 June 2018): primary source opened; articles 12–14 (prior processing formalities and declaration information), 32–36 (information/access/rectification/opposition), 38–39 (security and processor contract), 43 (breach notification), and 44–45 (foreign transfers) mapped as reference points.
+- This does **not** determine which declaration/authorization, transfer, or other obligations apply to PROCHÉLIA, nor verify implementation. Current amendments, implementing texts, authority practice, and actual processing facts require Algerian counsel before processing or launch.
+- Official source: https://www.joradp.dz/FTP/JO-FRANCAIS/2018/F2018034.pdf
+
 ### Algeria release controls
 - Market profile remains **BLOCKED** until a local legal memorandum confirms the platform's role, registration/domain/hosting requirements, applicable payment methods, foreign exchange, tax, data protection, consumer and service-specific rules.
 - The law's electronic commerce restrictions are mapped to a service-category blocklist and human review; no automated legal interpretation may override the block.
@@ -244,10 +249,38 @@ EU:
 
 Algeria:
 - Ministry of Commerce — Law 18-05: https://commerce.gov.dz/fr/reglementation/loi-n-deg-18-05
+- JORADP — Law 18-07 (personal-data protection): https://www.joradp.dz/FTP/JO-FRANCAIS/2018/F2018034.pdf
 - Ministry of Posts and Telecommunications — e-commerce guidance: https://www.mpt.gov.dz/e-commerce/
-- Ministry of Posts and Telecommunications — laws and ordinances: https://www.mpt.gov.dz/lois-et-ordonnances/
+- Ministry of Posts and Telecommunications — laws and ordinances: https://www.mpt.gov.dz/lois-et-ordonnances/\n- JORADP Law 18-07 (personal data): https://www.joradp.dz/FTP/JO-FRANCAIS/2018/F2018034.pdf
 
 ## 9. Acceptance and release
 This matrix is an engineering baseline, not proof of compliance. Check current consolidated texts, national implementation and local rules with qualified counsel before launch. Change control and periodic source review are mandatory.
 
 Production/public-market release remains NO-GO until applicable controls are implemented, tested, evidence is recorded, and authorized reviewers approve. This PR does not authorize deployment, remote migrations, live payments or launch.
+
+## 10. Territory × activity coverage register (28 Nov 2026)
+
+Machine-readable companion: `docs/compliance/territory-activity-matrix-2026-11-28.json`. It tracks 20 control categories against five activity models for each territory. **SOURCE_REGISTERED means an official reference exists in the source register only; it does not mean applicability, law, or implementation is verified.** All market flags remain false and all control implementation states remain UNVERIFIED.
+
+| Territory | Coverage | Legal review | Market activation |
+|---|---|---|---|
+| France (FR) | Partial source register | Pending counsel | BLOCKED |
+| EU/EEA (EU) | Partial source register; national implementation still required | Pending counsel | BLOCKED |
+| Algeria (DZ) | Partial source register | Pending local counsel | BLOCKED |
+| Belgium (BE) | NOT RESEARCHED | NOT RESEARCHED | BLOCKED |
+| Switzerland (CH) | NOT RESEARCHED | NOT RESEARCHED | BLOCKED |
+| Luxembourg (LU) | NOT RESEARCHED | NOT RESEARCHED | BLOCKED |
+| Canada (CA) | NOT RESEARCHED | NOT RESEARCHED | BLOCKED |
+| Morocco (MA) | NOT RESEARCHED | NOT RESEARCHED | BLOCKED |
+| Tunisia (TN) | NOT RESEARCHED | NOT RESEARCHED | BLOCKED |
+| Spain (ES) | NOT RESEARCHED | NOT RESEARCHED | BLOCKED |
+| Italy (IT) | NOT RESEARCHED | NOT RESEARCHED | BLOCKED |
+| Germany (DE) | NOT RESEARCHED | NOT RESEARCHED | BLOCKED |
+| United Kingdom (GB) | NOT RESEARCHED | NOT RESEARCHED | BLOCKED |
+| United States (US) | NOT RESEARCHED | NOT RESEARCHED | BLOCKED |
+| UAE (AE) | NOT RESEARCHED | NOT RESEARCHED | BLOCKED |
+| Other (OTHER) | NOT RESEARCHED | NOT RESEARCHED | BLOCKED |
+
+Activity models tracked for every territory: service marketplace/intermediation; direct provider; B2B contract; payments/PSP/payouts; digital platform. Categories include consumer/platform rules, pre-contract, pricing/fees, cancellation/refunds, complaints/mediation, reviews/fair practices, DSA/trader traceability, DAC7/tax, privacy, retention/rights, processors/transfers, DPIA, professional qualification/insurance, PSP, security, AI governance, licensing, labor/platform work and advertising/competition.
+
+The validator rejects missing territory/category/activity coverage, invented source references, stale review dates, `COMPLIANT` claims, or any market-activation flag. It reports metadata coverage only; qualified counsel and implementation evidence remain required.

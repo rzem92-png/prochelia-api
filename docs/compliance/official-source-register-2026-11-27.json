@@ -404,6 +404,35 @@
       "reviewDueAt": "2027-02-25",
       "evidenceNote": "Official CNIL page opened 2026-11-28; publication date verified. Actual Cloudflare, AI, support, backup and PSP flows/contracts not audited; transfer legality not determined.",
       "launchImpact": "BLOCKED_PENDING_HUMAN_REVIEW"
+    },
+    {
+      "sourceId": "DZ_DATA_PROTECTION_LAW_18_07",
+      "jurisdiction": "DZ",
+      "activityCode": "PERSONAL_DATA_PROCESSING",
+      "scope": "Algerian personal-data processing rules: prior declaration/authorization, information and rights, retention, security, processor arrangements and transfers abroad. The precise current requirements and applicability to PROCHÉLIA require local counsel.",
+      "title": "Loi n° 18-07 du 10 juin 2018 relative à la protection des personnes physiques dans le traitement des données à caractère personnel",
+      "publisher": "Journal Officiel de la République Algérienne Démocratique et Populaire (JORADP)",
+      "officialUrl": "https://www.joradp.dz/FTP/JO-FRANCAIS/2018/F2018034.pdf",
+      "publicationDate": "2018-06-10",
+      "checkedAt": "2026-11-28",
+      "accessLevel": "PAGE_OPENED",
+      "sourceStatus": "REFERENCE_CHECKED",
+      "legalReviewStatus": "PENDING_LOCAL_COUNSEL",
+      "controlImplementationStatus": "UNVERIFIED",
+      "controlIds": [
+        "DZ_DATA_DECLARATION_AUTHORIZATION",
+        "DZ_DATA_MINIMIZATION",
+        "DZ_DATA_SUBJECT_RIGHTS",
+        "DZ_DATA_RETENTION",
+        "DZ_DATA_SECURITY",
+        "DZ_DATA_PROCESSOR_CONTRACT",
+        "DZ_DATA_TRANSFER"
+      ],
+      "owner": "LEGAL_COMPLIANCE_LOCAL_COUNSEL",
+      "reviewer": "AUTOMATED_SOURCE_DISCOVERY",
+      "reviewDueAt": "2027-02-25",
+      "evidenceNote": "JORADP Official Gazette No. 34 opened; law title/date and Articles 12–14, 32–39, 43–45 checked for source discovery. Current amendments, implementing texts, authority practice, processing-specific requirements and PROCHÉLIA controls remain unverified; Algerian counsel required.",
+      "launchImpact": "BLOCKED_PENDING_HUMAN_REVIEW"
     }
   ]
 }
