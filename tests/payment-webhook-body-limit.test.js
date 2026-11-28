@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readBoundedWebhookBody } from "../src/index.js";
+import worker from "../src/index.js";
 
 const url = "https://example.test/api/payments/webhook";
 const streamRequest = (chunks, headers = {}) => new Request(url, {
@@ -38,7 +39,7 @@ test("accepts a body exactly at the configured byte cap", async () => {
 });
 
 test("rejects malformed Content-Length values", async () => {
-  for (const value of ["-1", "1.5", "1e2", "01", "abc"]) {
+  for (const value of ["-1", "1.5", "1e2", "abc"]) {
     const request = streamRequest([bytes("x")], { "content-length": value });
     assert.equal((await readBoundedWebhookBody(request, 10)).error, "INVALID_WEBHOOK_CONTENT_LENGTH");
   }
@@ -68,8 +69,6 @@ test("rejects invalid byte-cap configuration", async () => {
   await assert.rejects(readBoundedWebhookBody(request, 0), TypeError);
 });
 
-import worker from "../src/index.js";
-
 test("unconfigured webhook endpoint fails closed before D1 access", async () => {
   const response = await worker.fetch(new Request(url, { method: "POST", body: "ignored" }), {});
   assert.equal(response.status, 503);
@@ -80,4 +79,11 @@ test("webhook endpoint rejects methods other than POST", async () => {
   const response = await worker.fetch(new Request(url, { method: "GET" }), {});
   assert.equal(response.status, 405);
   assert.equal(response.headers.get("allow"), "POST");
+});
+
+test("accepts leading zeroes in a valid decimal Content-Length", async () => {
+  const request = streamRequest([bytes("x")], { "content-length": "01" });
+  assert.deepEqual(await readBoundedWebhookBody(request, 10), {
+    ok: true, body: "x", byteLength: 1
+  });
 });
