@@ -654,7 +654,8 @@
       "marketActivationAllowed": false,
       "sourceIds": [
         "DZ_ECOMMERCE_LAW_18_05",
-        "DZ_CONSUMER_LAW_09_03_AND_18_09"
+        "DZ_CONSUMER_LAW_09_03_AND_18_09",
+        "DZ_DATA_PROTECTION_LAW_18_07"
       ],
       "categories": {
         "consumer_platform": {
@@ -757,34 +758,40 @@
           "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
         },
         "privacy": {
-          "status": "NOT_RESEARCHED",
-          "sourceIds": [],
-          "checkedAt": null,
+          "status": "SOURCE_REGISTERED",
+          "sourceIds": [
+            "DZ_DATA_PROTECTION_LAW_18_07"
+          ],
+          "checkedAt": "2026-11-28",
           "reviewDueAt": "2027-02-25",
-          "owner": "LEGAL_COMPLIANCE",
-          "legalReviewStatus": "NOT_RESEARCHED",
+          "owner": "LEGAL_COMPLIANCE_LOCAL_COUNSEL",
+          "legalReviewStatus": "PENDING_LOCAL_COUNSEL",
           "controlImplementationStatus": "UNVERIFIED",
-          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+          "evidenceNote": "Official law reference covers personal-data rules and prior processing formalities; processing-specific applicability, current amendments and controls need local counsel."
         },
         "retention_rights": {
-          "status": "NOT_RESEARCHED",
-          "sourceIds": [],
-          "checkedAt": null,
+          "status": "SOURCE_REGISTERED",
+          "sourceIds": [
+            "DZ_DATA_PROTECTION_LAW_18_07"
+          ],
+          "checkedAt": "2026-11-28",
           "reviewDueAt": "2027-02-25",
-          "owner": "LEGAL_COMPLIANCE",
-          "legalReviewStatus": "NOT_RESEARCHED",
+          "owner": "LEGAL_COMPLIANCE_LOCAL_COUNSEL",
+          "legalReviewStatus": "PENDING_LOCAL_COUNSEL",
           "controlImplementationStatus": "UNVERIFIED",
-          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+          "evidenceNote": "Articles 14 and 32–36 are references for retention disclosures and data-subject rights; exact duties, deadlines and implementation need local counsel."
         },
         "processor_contracts_transfers": {
-          "status": "NOT_RESEARCHED",
-          "sourceIds": [],
-          "checkedAt": null,
+          "status": "SOURCE_REGISTERED",
+          "sourceIds": [
+            "DZ_DATA_PROTECTION_LAW_18_07"
+          ],
+          "checkedAt": "2026-11-28",
           "reviewDueAt": "2027-02-25",
-          "owner": "LEGAL_COMPLIANCE",
-          "legalReviewStatus": "NOT_RESEARCHED",
+          "owner": "LEGAL_COMPLIANCE_LOCAL_COUNSEL",
+          "legalReviewStatus": "PENDING_LOCAL_COUNSEL",
           "controlImplementationStatus": "UNVERIFIED",
-          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+          "evidenceNote": "Articles 14, 39 and 44–45 are references for subcontracting and foreign transfers; current authorization/exception requirements and PROCHÉLIA data flows need local counsel."
         },
         "DPIA": {
           "status": "NOT_RESEARCHED",
@@ -817,14 +824,16 @@
           "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
         },
         "security": {
-          "status": "NOT_RESEARCHED",
-          "sourceIds": [],
-          "checkedAt": null,
+          "status": "SOURCE_REGISTERED",
+          "sourceIds": [
+            "DZ_DATA_PROTECTION_LAW_18_07"
+          ],
+          "checkedAt": "2026-11-28",
           "reviewDueAt": "2027-02-25",
-          "owner": "LEGAL_COMPLIANCE",
-          "legalReviewStatus": "NOT_RESEARCHED",
+          "owner": "LEGAL_COMPLIANCE_LOCAL_COUNSEL",
+          "legalReviewStatus": "PENDING_LOCAL_COUNSEL",
           "controlImplementationStatus": "UNVERIFIED",
-          "evidenceNote": "No territory/activity-specific source review recorded in this matrix."
+          "evidenceNote": "Articles 38–39 are references for security and processor safeguards; no implementation evidence or legal review is asserted."
         },
         "AI_governance": {
           "status": "NOT_RESEARCHED",
