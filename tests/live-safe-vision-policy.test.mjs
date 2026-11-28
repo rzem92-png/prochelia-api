@@ -21,8 +21,11 @@ test("critical or imminent risk pauses LIVE", () => {
   assert.equal(decideSafeVisionAction({ ...healthy, severity: "critical" }).action, "pause_live");
   assert.equal(decideSafeVisionAction({ ...healthy, imminentDanger: true }).action, "pause_live");
 });
-test("context does not automatically bypass protection", () => {
+test("context does not automatically bypass protection when localization is reliable", () => {
   assert.equal(decideSafeVisionAction({ ...healthy, context: "journalism", severity: "medium" }).action, "targeted_blur");
+});
+test("context with uncertain localization receives expanded blur", () => {
+  assert.equal(decideSafeVisionAction({ ...healthy, context: "journalism", severity: "medium", targetTrackReliable: false }).action, "expanded_blur");
 });
 test("low-confidence low-risk signal does not over-enforce", () => {
   assert.equal(decideSafeVisionAction({ ...healthy, confidence: 0.3, severity: "low" }).action, "allow");
