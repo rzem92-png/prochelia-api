@@ -1,5 +1,6 @@
 import { handleV7Route } from "./v7-routes.js";
 import { validateComplaintDraft, resolveComplaintScope } from "./complaint-scope.js";
+import { normalizeComplaintIdempotencyKey, buildComplaintIdempotencyIdentity, reserveComplaintIntake, persistComplaintCaseLink } from "./complaint-idempotency.js";
 // PROCHÉLIA — INDEX BACKEND CONSOLIDÉ UNIQUE
 // Référence de consolidation : V14.1 Finance + sécurité/RBAC existants.
 // Généré le 19/10/2026. À déployer uniquement après recette avec la vraie base D1.
@@ -1815,7 +1816,7 @@ async function financeSummary(request, env) {
 async function complaintCreate(request, env) {
   const gate=await requireAuthRole(request,env,['gerante','client','entreprise']); if(gate.error)return gate.error;
   const contentType=request.headers.get('content-type')||'';
-  if(!/^application\/json(?:\s*;|$)/i.test(contentType))return json({ok:false,error:'JSON_CONTENT_TYPE_REQUIRED',version:VERSION},415);
+  if(!/^application\\/json(?:\\s*;|$)/i.test(contentType))return json({ok:false,error:'JSON_CONTENT_TYPE_REQUIRED',version:VERSION},415);
   const parsed=await readBoundedJson(request,8192);
   if(!parsed.ok)return json({ok:false,error:parsed.error,version:VERSION},parsed.status);
   const actor=gate.auth.user;
@@ -1835,32 +1836,50 @@ async function complaintCreate(request, env) {
   const scopeResult=resolveComplaintScope(actor,value,{clientProfile,companyProfile,mission});
   if(!scopeResult.ok)return json({ok:false,error:scopeResult.error,version:VERSION},scopeResult.status);
   const scope=scopeResult.scope;
-  const id=crypto.randomUUID();
-  try{
-    await env.DB.prepare(`INSERT INTO complaints(id,client_type,client_id,company_id,mission_id,category,severity,description) VALUES(?,?,?,?,?,?,?,?)`)
-      .bind(id,scope.client_type,scope.client_id,scope.company_id,scope.mission_id,value.category,scope.severity,value.description).run();
-  }catch{
-    return json({ok:false,error:'COMPLAINT_STORAGE_UNAVAILABLE',version:VERSION},503);
+  const idempotencyKey=normalizeComplaintIdempotencyKey(request.headers.get('Idempotency-Key'));
+  if(!idempotencyKey)return json({ok:false,error:'IDEMPOTENCY_KEY_REQUIRED_OR_INVALID',version:VERSION},400);
+  let identity;
+  try{identity=await buildComplaintIdempotencyIdentity(actor,idempotencyKey,value,scope);}catch{
+    return json({ok:false,error:'IDEMPOTENCY_HASH_UNAVAILABLE',version:VERSION},503);
   }
-  // Complaints always create a human-review case; never route a complaint to a simple auto-resolution category.
+  if(!identity)return json({ok:false,error:'IDEMPOTENCY_KEY_REQUIRED_OR_INVALID',version:VERSION},400);
+  const candidateId=crypto.randomUUID();
+  const reservation=await reserveComplaintIntake(env.DB,identity,candidateId,{
+    client_type:scope.client_type,client_id:scope.client_id,company_id:scope.company_id,
+    mission_id:scope.mission_id,category:value.category,severity:scope.severity,description:value.description
+  });
+  if(!reservation.ok){
+    const conflict=reservation.error==='IDEMPOTENCY_KEY_REUSED';
+    return json({ok:false,error:reservation.error,version:VERSION},conflict?409:503);
+  }
+  const complaintId=reservation.complaintId;
+  if(!reservation.created){
+    const linked=!!reservation.resolutionCaseId;
+    return json({
+      ok:true,version:VERSION,complaint_id:complaintId,
+      resolution_case_id:reservation.resolutionCaseId,
+      case_link_status:linked?'LINKED':'PENDING_MANUAL_REVIEW',
+      human_review_required:true,autonomous_resolution:false,idempotent_replay:true
+    },linked?200:202);
+  }
+  // Complaints always create a human-review case; never route to auto-resolution.
   const caseType='reclamation_client';
-  const caseContext={complaint_id:id,category:value.category,incident_date:value.incidentDate,request_reference:value.requestReference,desired_outcome:value.desiredOutcome,desired_outcome_details:value.desiredOutcomeDetails};
+  const caseContext={complaint_id:complaintId,category:value.category,incident_date:value.incidentDate,request_reference:value.requestReference,desired_outcome:value.desiredOutcome,desired_outcome_details:value.desiredOutcomeDetails};
   const caseBody={case_type:caseType,client_id:scope.client_id,company_id:scope.company_id,mission_id:scope.mission_id,description:value.description,impact_level:scope.severity,context:caseContext};
-  const caseHeaders=new Headers(request.headers);caseHeaders.delete('content-length');caseHeaders.set('content-type','application/json');
+  const caseHeaders=new Headers(request.headers);caseHeaders.delete('content-length');caseHeaders.delete('idempotency-key');caseHeaders.set('content-type','application/json');
   let caseId=null,linkStatus='PENDING_MANUAL_REVIEW';
   try{
     const fakeReq=new Request(request.url,{method:'POST',headers:caseHeaders,body:JSON.stringify(caseBody)});
     const caseResponse=await createOperationalCase(fakeReq,env);
     const caseJson=await caseResponse.json();
-    if(caseResponse.ok&&caseJson?.case_id){
-      await env.DB.prepare('UPDATE complaints SET resolution_case_id=? WHERE id=?').bind(caseJson.case_id,id).run();
+    if(caseResponse.ok&&caseJson?.case_id&&await persistComplaintCaseLink(env.DB,identity,complaintId,caseJson.case_id)){
       caseId=caseJson.case_id;linkStatus='LINKED';
     }
   }catch{
-    // Complaint is already persisted; never claim linkage. A human must reconcile it.
+    // Persisted complaint remains PENDING_MANUAL_REVIEW; a human must reconcile.
   }
-  try{await journal(env,actor.role,actor.id,'COMPLAINT_CREATED','complaint',id,'OK',{category:value.category,case_link_status:linkStatus});}catch{}
-  const response={ok:true,version:VERSION,complaint_id:id,resolution_case_id:caseId,case_link_status:linkStatus,human_review_required:true,autonomous_resolution:false};
+  try{await journal(env,actor.role,actor.id,'COMPLAINT_CREATED','complaint',complaintId,'OK',{category:value.category,case_link_status:linkStatus});}catch{}
+  const response={ok:true,version:VERSION,complaint_id:complaintId,resolution_case_id:caseId,case_link_status:linkStatus,human_review_required:true,autonomous_resolution:false,idempotent_replay:false};
   return json(response,caseId?201:202);
 }
 
