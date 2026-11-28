@@ -78,6 +78,17 @@ jobs:
           JSON
           echo "Cloudflare token active; isolated restore target identity confirmed and pinned by Wrangler config."
 
+      - name: Verify production R2 bucket and EU jurisdiction before restore download
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          status="$(curl --silent --show-error --output "$RUNNER_TEMP/restore-r2-eu.json" --write-out '%{http_code}' "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/r2/buckets/$R2_BUCKET" -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -H 'cf-r2-jurisdiction: eu')"
+          test "$status" = "200" || { echo "::error::Restore R2 bucket lookup failed (HTTP $status); no download/restore performed."; exit 1; }
+          jq -e --arg bucket "$R2_BUCKET" '.success == true and .result.name == $bucket and .result.jurisdiction == "eu"' "$RUNNER_TEMP/restore-r2-eu.json" >/dev/null || { echo "::error::Restore bucket is not explicitly verified as EU jurisdiction."; exit 1; }
+          echo "PASS: exact production backup bucket verified as EU jurisdiction before restore."
+
       - name: Authenticate backup run and recover exact R2 object key
         shell: bash
         env:
