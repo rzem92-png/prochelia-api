@@ -27,14 +27,14 @@ class SQLiteD1 {
 
 test("summarizes queue counts and flags stale, failed, exhausted and due work without exposing records",async()=>{
   const db=new SQLiteD1();
-  db.insert("due","PENDING");
-  db.insert("future","PENDING",{runAfter:"2099-01-01 00:00:00"});
-  db.insert("exhausted","PENDING",{attempts:5,maxAttempts:5});
-  db.insert("stale","RUNNING",{lockedAt:"2000-01-01 00:00:00"});
-  db.insert("unlocked","RUNNING");
-  db.insert("provider","WAITING_PROVIDER");
-  db.insert("failed","FAILED");
-  db.insert("done","DONE");
+  db.insert("queue-id-due","PENDING");
+  db.insert("queue-id-future","PENDING",{runAfter:"2099-01-01 00:00:00"});
+  db.insert("queue-id-exhausted","PENDING",{attempts:5,maxAttempts:5});
+  db.insert("queue-id-stale","RUNNING",{lockedAt:"2000-01-01 00:00:00"});
+  db.insert("queue-id-unlocked","RUNNING");
+  db.insert("queue-id-provider","WAITING_PROVIDER");
+  db.insert("queue-id-failed","FAILED");
+  db.insert("queue-id-done","DONE");
   const r=await getBackgroundJobHealth(db);
   assert.equal(r.ok,true);
   assert.equal(r.readOnly,true);
@@ -53,7 +53,7 @@ test("summarizes queue counts and flags stale, failed, exhausted and due work wi
   assert.ok(r.attention.includes("STALE_RUNNING_JOBS"));
   assert.ok(r.attention.includes("FAILED_JOBS"));
   const serialized=JSON.stringify(r);
-  for(const id of ["due","future","exhausted","stale","unlocked","provider","failed","done"]) assert.equal(serialized.includes(JSON.stringify(id)),false);
+  for(const id of ["queue-id-due","queue-id-future","queue-id-exhausted","queue-id-stale","queue-id-unlocked","queue-id-provider","queue-id-failed","queue-id-done"]) assert.equal(serialized.includes(id),false);
   for(const secret of ["never expose","payload_json","last_error","job_type"]) assert.equal(serialized.includes(secret),false);
 });
 
