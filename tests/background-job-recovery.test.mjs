@@ -26,7 +26,7 @@ class SQLiteD1 {
       sql,
       params: [],
       bind(...params) { this.params = params; return this; },
-      async all() { return db.prepare(sql).all(...this.params); },
+      async all() { return { results: db.prepare(sql).all(...this.params) }; },
       async run() {
         const result = db.prepare(sql).run(...this.params);
         return { meta: { changes: Number(result.changes) } };
