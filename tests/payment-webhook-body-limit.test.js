@@ -67,3 +67,17 @@ test("rejects invalid byte-cap configuration", async () => {
   const request = streamRequest([bytes("x")]);
   await assert.rejects(readBoundedWebhookBody(request, 0), TypeError);
 });
+
+import worker from "../src/index.js";
+
+test("unconfigured webhook endpoint fails closed before D1 access", async () => {
+  const response = await worker.fetch(new Request(url, { method: "POST", body: "ignored" }), {});
+  assert.equal(response.status, 503);
+  assert.equal((await response.json()).error, "PAYMENT_WEBHOOK_NOT_CONFIGURED");
+});
+
+test("webhook endpoint rejects methods other than POST", async () => {
+  const response = await worker.fetch(new Request(url, { method: "GET" }), {});
+  assert.equal(response.status, 405);
+  assert.equal(response.headers.get("allow"), "POST");
+});
