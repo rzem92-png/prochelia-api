@@ -3156,7 +3156,7 @@ async function readTenantContextJson(request,maxBytes=2048) {
   const contentType=String(request.headers.get('content-type')||'').toLowerCase();
   if(!contentType.startsWith('application/json')) return {ok:false,error:'JSON_REQUIRED'};
   const declared=request.headers.get('content-length');
-  if(declared!==null&&(!/^\\d+$/.test(declared)||Number(declared)>maxBytes)) return {ok:false,error:'BODY_TOO_LARGE'};
+  if(declared!==null&&(!/^\d+$/.test(declared)||Number(declared)>maxBytes)) return {ok:false,error:'BODY_TOO_LARGE'};
   if(!request.body) return {ok:false,error:'JSON_REQUIRED'};
   try {
     const reader=request.body.getReader();
