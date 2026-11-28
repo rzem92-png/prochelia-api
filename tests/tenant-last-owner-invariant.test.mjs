@@ -30,7 +30,7 @@ test("last active owner cannot be revoked, suspended, downgraded, moved or delet
     "UPDATE tenant_memberships SET status='REVOKED', revoked_at=CURRENT_TIMESTAMP WHERE id='m1'",
     "UPDATE tenant_memberships SET status='SUSPENDED' WHERE id='m1'",
     "UPDATE tenant_memberships SET role='ADMIN' WHERE id='m1'",
-    "UPDATE tenant_memberships SET tenant_id='other' WHERE id='m1'",
+    "UPDATE tenant_memberships SET tenant_id='t2' WHERE id='m1'",
     "DELETE FROM tenant_memberships WHERE id='m1'"
   ]) db.exec(sql);
   assert.equal(db.prepare("SELECT COUNT(*) AS n FROM tenant_memberships WHERE tenant_id='t1' AND role='OWNER' AND status='ACTIVE'").get().n, 1);
