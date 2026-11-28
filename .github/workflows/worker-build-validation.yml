@@ -7,6 +7,7 @@ on:
       - "wrangler.jsonc"
       - ".github/workflows/deploy-preview-worker-manual.yml"
       - "scripts/generate-preview-wrangler-config.mjs"
+      - "tests/mutation-rate-limit-hash.test.mjs"
       - ".github/workflows/worker-build-validation.yml"
   push:
     branches: [main]
@@ -38,6 +39,8 @@ jobs:
         run: |
           go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
           "$HOME/go/bin/actionlint" .github/workflows/deploy-preview-worker-manual.yml
+      - name: Run mutation rate-limit hash regression tests
+        run: node --test tests/mutation-rate-limit-hash.test.mjs
       - name: Generate isolated Preview deployment config
         run: node scripts/generate-preview-wrangler-config.mjs
       - name: Wrangler bundle validation only (no deploy)
