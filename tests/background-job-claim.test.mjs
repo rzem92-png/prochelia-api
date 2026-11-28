@@ -21,8 +21,13 @@ class D1TestAdapter {
     }}};
   }
   add(id, options={}) {
-    this.db.prepare(`INSERT INTO background_jobs(id,status,run_after,attempts,max_attempts)
-      VALUES(?,?,?,?,?)`).run(id,options.status||"PENDING",options.runAfter||"CURRENT_TIMESTAMP",options.attempts||0,options.maxAttempts||5);
+    if (options.runAfter) {
+      this.db.prepare(`INSERT INTO background_jobs(id,status,run_after,attempts,max_attempts)
+        VALUES(?,?,?,?,?)`).run(id,options.status||"PENDING",options.runAfter,options.attempts||0,options.maxAttempts||5);
+    } else {
+      this.db.prepare(`INSERT INTO background_jobs(id,status,attempts,max_attempts)
+        VALUES(?,?,?,?)`).run(id,options.status||"PENDING",options.attempts||0,options.maxAttempts||5);
+    }
   }
   status(id) { return this.db.prepare("SELECT status FROM background_jobs WHERE id=?").get(id)?.status; }
 }
