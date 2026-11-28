@@ -29,6 +29,48 @@ async function readJson(request) {
   try { return await request.json(); }
   catch { return null; }
 }
+async function boundedJsonRequest(request, maxBytes = 65536) {
+  const contentType = String(request.headers.get('content-type') || '').toLowerCase();
+  if (!/^application\/(?:json|[a-z0-9.+-]+\+json)(?:\s*;|$)/.test(contentType)) {
+    return { ok: false, response: json({ ok: false, error: 'JSON_CONTENT_TYPE_REQUIRED', version: VERSION }, 415) };
+  }
+  const declared = request.headers.get('content-length');
+  if (declared && /^\d+$/.test(declared) && Number(declared) > maxBytes) {
+    return { ok: false, response: json({ ok: false, error: 'REQUEST_BODY_TOO_LARGE', version: VERSION }, 413) };
+  }
+  if (!request.body) return { ok: false, response: json({ ok: false, error: 'JSON_BODY_REQUIRED', version: VERSION }, 400) };
+  const reader = request.body.getReader();
+  const chunks = [];
+  let total = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > maxBytes) {
+        await reader.cancel();
+        return { ok: false, response: json({ ok: false, error: 'REQUEST_BODY_TOO_LARGE', version: VERSION }, 413) };
+      }
+      chunks.push(value);
+    }
+  } catch {
+    return { ok: false, response: json({ ok: false, error: 'REQUEST_BODY_READ_FAILED', version: VERSION }, 400) };
+  } finally {
+    try { reader.releaseLock(); } catch {}
+  }
+  const bytes = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
+  let parsed;
+  try { parsed = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes)); }
+  catch { return { ok: false, response: json({ ok: false, error: 'INVALID_JSON', version: VERSION }, 400) }; }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return { ok: false, response: json({ ok: false, error: 'JSON_OBJECT_REQUIRED', version: VERSION }, 400) };
+  }
+  return { ok: true, request: new Request(request.url, { method: request.method, headers: request.headers, body: bytes }) };
+}
+export { boundedJsonRequest };
+
 
 function clean(value) {
   return typeof value === 'string' ? value.trim() : value;
@@ -3156,8 +3198,14 @@ async function handle(request,env){
       return json({ ok: false, error: 'AUTHENTICATED_VALIDATION_REQUIRED', version: VERSION, write_enabled: false }, 403);
     }
     if (url.pathname.startsWith('/api/v7/')) {
+      let v7Request = request;
+      if (request.method.toUpperCase() === 'POST') {
+        const bounded = await boundedJsonRequest(request, 65536);
+        if (!bounded.ok) return bounded.response;
+        v7Request = bounded.request;
+      }
       const v7Auth = await getSessionUser(request, env).catch(() => null);
-      const v7Response = await handleV7Route(request, env, url.pathname, v7Auth);
+      const v7Response = await handleV7Route(v7Request, env, url.pathname, v7Auth);
       if (v7Response) return v7Response;
     }
     const fw=await handleFinanceWorkspace(request,env); if(fw) return fw;
