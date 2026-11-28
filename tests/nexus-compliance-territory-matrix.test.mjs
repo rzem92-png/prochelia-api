@@ -12,7 +12,7 @@ const activities=matrix.activityModels;
 
 test("territory/activity matrix validates as metadata only and keeps every market closed",()=>{
  const result=api.evaluate(matrix,register,now);
- assert.equal(result.ok,true);
+ assert.equal(result.ok,true,JSON.stringify(result));
  assert.equal(result.status,"MATRIX_METADATA_VALID");
  assert.equal(result.marketActivationAllowed,false);
  assert.equal(result.legalReviewRequired,true);
