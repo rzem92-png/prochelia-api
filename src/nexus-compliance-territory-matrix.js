@@ -28,7 +28,7 @@ function evaluate(matrix,register,now){
    if(c.sourceIds.some(id=>!t.sourceIds.includes(id)))return fail("CATEGORY_TERRITORY_SOURCE_MISMATCH");
    c.sourceIds.forEach(id=>referenced.add(id));
   }
-  if([...referenced].some(id=>!t.sourceIds.includes(id)))return fail("TERRITORY_SOURCE_SET_MISMATCH");
+  if([...referenced].sort().join("|")!==t.sourceIds.slice().sort().join("|"))return fail("TERRITORY_SOURCE_SET_MISMATCH");
   if(t.coverageStatus==="NOT_RESEARCHED"&&(t.sourceIds.length||expectedCategories.some(k=>t.categories[k].status!=="NOT_RESEARCHED")))return fail("UNRESEARCHED_TERRITORY_HAS_SOURCES");
   if(t.coverageStatus==="PARTIAL_SOURCE_REGISTER"&&t.legalReviewStatus!=="PENDING_COUNSEL"&&t.legalReviewStatus!=="PENDING_LOCAL_COUNSEL")return fail("LEGAL_REVIEW_STATUS_INVALID");
   if(Object.keys(t.activityAssessments).sort().join("|")!==expectedActivities.slice().sort().join("|"))return fail("ACTIVITY_COVERAGE_INVALID");
