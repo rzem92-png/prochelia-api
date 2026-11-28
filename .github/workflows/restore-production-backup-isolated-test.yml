@@ -244,3 +244,12 @@ jobs:
             echo "- Required tables present; table count: $table_count"
             echo "- No production or Preview D1 writes were performed."
           } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Cleanup sensitive local restore files
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          rm -rf "$RUNNER_TEMP/prochelia-prod-restore"
+          rm -f "$RUNNER_TEMP/restore-r2-eu.json" "$RUNNER_TEMP/backup-run.json" "$RUNNER_TEMP/backup-run.log" "$RUNNER_TEMP/pre-restore.json" "$RUNNER_TEMP/quick-check.json" "$RUNNER_TEMP/foreign-key-check.json" "$RUNNER_TEMP/tables.json" "$RUNNER_TEMP/token.json" "$RUNNER_TEMP/d1.json" "$RUNNER_TEMP/wrangler.restore.json"
+          echo "Sensitive local restore artifacts removed from runner temp."
