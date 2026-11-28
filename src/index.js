@@ -1,4 +1,5 @@
 import { handleV7Route } from "./v7-routes.js";
+import { claimBackgroundJob } from "./background-job-claim.js";
 // PROCHÉLIA — INDEX BACKEND CONSOLIDÉ UNIQUE
 // Référence de consolidation : V14.1 Finance + sécurité/RBAC existants.
 // Généré le 19/10/2026. À déployer uniquement après recette avec la vraie base D1.
@@ -2648,7 +2649,11 @@ async function processBackgroundJobs(request,env) {
   const results=[];
   for(const job of rows.results||[]) {
     try {
-      await env.DB.prepare(`UPDATE background_jobs SET status='RUNNING',locked_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='PENDING'`).bind(job.id).run();
+      const claimed=await claimBackgroundJob(env.DB,job.id);
+      if(!claimed){
+        results.push({id:job.id,status:'SKIPPED',reason:'JOB_NOT_CLAIMED'});
+        continue;
+      }
       let result={performed:false,reason:'JOB_TYPE_NOT_IMPLEMENTED'};
       const payload=JSON.parse(job.payload_json||'{}');
       if(job.job_type==='PROCESS_ACTION_OUTBOX') result={performed:true,delegation:'Use /api/ops/outbox/process'};
