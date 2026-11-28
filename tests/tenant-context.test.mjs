@@ -67,7 +67,7 @@ function request(path, method = "GET", body, cookie = sessionToken) {
 }
 
 test("tenant context listing is session/user scoped and minimizes returned fields", async () => {
-  const { d1 } = makeD1();
+  const { sqlite, d1 } = makeD1();
   const one = await listTenantContexts(d1, "s1", "u1");
   const two = await listTenantContexts(d1, "s2", "u2");
   const mismatchedIdentity = await listTenantContexts(d1, "s1", "u2");
