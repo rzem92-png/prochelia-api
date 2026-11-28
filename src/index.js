@@ -2677,11 +2677,7 @@ async function quarantineStaleJobs(request,env) {
     'permissions-policy':'geolocation=(self),camera=(),microphone=()'
   };
   if(request.url.startsWith('https://')) headers['strict-transport-security']='max-age=31536000; includeSubDomains';
-  if(gate.error){
-    const deniedHeaders=new Headers(gate.error.headers);
-    for(const [name,value] of Object.entries(headers)) deniedHeaders.set(name,value);
-    return new Response(gate.error.body,{status:gate.error.status,statusText:gate.error.statusText,headers:deniedHeaders});
-  }
+  if(gate.error) return gate.error;
   const parsed=await readBoundedJson(request,1024);
   if(!parsed.ok) return json({ok:false,error:parsed.error,version:VERSION},parsed.error==='BODY_TOO_LARGE'?413:400,headers);
   const body=parsed.value;
