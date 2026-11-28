@@ -99,3 +99,25 @@ test("database errors return generic 503 without leaking details", async () => {
   assert.equal(body.error, "STALE_JOB_QUARANTINE_UNAVAILABLE");
   assert.doesNotMatch(JSON.stringify(body), /private D1 error/);
 });
+
+test("invalid stale threshold is rejected before querying D1", async () => {
+  const db = makeDB();
+  const response = await worker.fetch(new Request("https://preview.example/api/jobs/reconcile-stale", {
+    method: "POST", headers: { cookie, "content-type": "application/json" },
+    body: JSON.stringify({ confirmation: "QUARANTINE_STALE_JOBS", staleMinutes: 30 })
+  }), { DB: db });
+  assert.equal(response.status, 400);
+  assert.equal(db.selectCalls, 0);
+  assert.equal(db.batchCalls, 0);
+});
+
+test("oversized JSON request is rejected before queue access", async () => {
+  const db = makeDB();
+  const response = await worker.fetch(new Request("https://preview.example/api/jobs/reconcile-stale", {
+    method: "POST", headers: { cookie, "content-type": "application/json" },
+    body: JSON.stringify({ confirmation: "QUARANTINE_STALE_JOBS", extra: "x".repeat(2048) })
+  }), { DB: db });
+  assert.equal(response.status, 413);
+  assert.equal(db.selectCalls, 0);
+  assert.equal(db.batchCalls, 0);
+});
