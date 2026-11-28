@@ -3210,7 +3210,7 @@ async function handle(request,env){
   try {
     if(isMutatingMethod(request.method) && !securityOriginAllowed(request,env)) return json({ok:false,error:'ORIGIN_NOT_ALLOWED',version:VERSION},403);
     const url=new URL(request.url);
-    if(url.pathname==='/api/jobs/reconcile-stale' && request.method==='POST') return quarantineStaleJobs(request,env);
+    if(url.pathname==='/api/jobs/reconcile-stale' && request.method==='POST') return await quarantineStaleJobs(request,env);
     // Fail closed before any schema helper touches D1: unauthenticated callers
     // must not use mission validation as an existence oracle for private IDs.
     if (url.pathname === '/api/missions/validate') {
