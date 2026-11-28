@@ -103,7 +103,7 @@ test("manager scope requires existing profiles and does not infer company-missio
   assert.equal(resolveComplaintScope({ id: "manager-1", role: "gerante" }, draft, {}).error, "CLIENT_NOT_FOUND");
   const companyDraft = validateComplaintDraft({ ...validClientDraft, company_id: "company-1" }, "gerante", NOW).normalized;
   assert.equal(resolveComplaintScope({ id: "manager-1", role: "gerante" }, companyDraft, { companyProfile: { id: "company-1", status: "active" } }).scope.client_type, "B2B");
-  assert.equal(resolveComplaintScope({ id: "manager-1", role: "gerante" }, { ...companyDraft, missionId: "mission-1" }, { companyProfile: { id: "company-1", status: "active" }, mission: { id: "mission-1" } }).error, "COMPANY_MISSION_SCOPE_UNVERIFIED");
+  assert.equal(resolveComplaintScope({ id: "manager-1", role: "gerante" }, { ...companyDraft, missionId: "mission-1" }, { companyProfile: { id: "company-1", status: "active" }, mission: { id: "mission-1", client_id: "client-7" }, clientProfile: profile }).error, "COMPANY_MISSION_SCOPE_UNVERIFIED");
 });
 
 test("company actor and unsupported roles are rejected until scope is verified", () => {
