@@ -1,3 +1,4 @@
+/* Selected workspace is request context only; business routes must enforce tenant ownership independently. */
 const LIST_SQL = `
   SELECT t.id, t.kind, t.display_name, t.country_code, m.role,
          c.selected_at
