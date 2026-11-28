@@ -72,10 +72,13 @@ test("tenant context listing is session/user scoped and minimizes returned field
   const two = await listTenantContexts(d1, "s2", "u2");
   const mismatchedIdentity = await listTenantContexts(d1, "s1", "u2");
   const unknownSession = await listTenantContexts(d1, "missing-session", "u1");
+  sqlite.prepare("INSERT INTO sessions(id,user_id,token_hash,expires_at) VALUES(?,?,?,?)").run("s-expired","u1","expired-hash","2000-01-01");
+  const expiredSession = await listTenantContexts(d1, "s-expired", "u1");
   assert.deepEqual(one.tenants.map(x => x.id), ["t1", "t2"]);
   assert.deepEqual(two.tenants.map(x => x.id), ["t3"]);
   assert.deepEqual(mismatchedIdentity.tenants, []);
   assert.deepEqual(unknownSession.tenants, []);
+  assert.deepEqual(expiredSession.tenants, []);
   assert.equal(one.selectedTenantId, null);
   assert.deepEqual(Object.keys(one.tenants[0]).sort(), ["countryCode", "id", "kind", "name", "role", "selected"]);
 });
