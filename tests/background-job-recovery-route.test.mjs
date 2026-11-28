@@ -65,7 +65,7 @@ test("invalid confirmation never reads or changes the queue", async () => {
   const response = await worker.fetch(new Request("https://preview.example/api/jobs/reconcile-stale", {
     method: "POST", headers: { cookie, "content-type": "application/json" },
     body: JSON.stringify({ confirmation: "YES" })
-  }), { DB: db });
+  }), testEnv(db));
   assert.equal(response.status, 400, response.headers.get("x-test-error-class") || "");
   assert.equal(db.selectCalls, 0);
   assert.equal(db.batchCalls, 0);
@@ -76,7 +76,7 @@ test("manager action quarantines only a summary and does not expose job IDs", as
   const response = await worker.fetch(new Request("https://preview.example/api/jobs/reconcile-stale", {
     method: "POST", headers: { cookie, "content-type": "application/json" },
     body: JSON.stringify({ confirmation: "QUARANTINE_STALE_JOBS", staleMinutes: 120 })
-  }), { DB: db });
+  }), testEnv(db));
   assert.equal(response.status, 200, response.headers.get("x-test-error-class") || "");
   assert.equal(response.headers.get("cache-control"), "no-store");
   assert.equal(response.headers.get("x-content-type-options"), "nosniff");
@@ -94,7 +94,7 @@ test("database errors return generic 503 without leaking details", async () => {
   const response = await worker.fetch(new Request("https://preview.example/api/jobs/reconcile-stale", {
     method: "POST", headers: { cookie, "content-type": "application/json" },
     body: JSON.stringify({ confirmation: "QUARANTINE_STALE_JOBS" })
-  }), { DB: db });
+  }), testEnv(db));
   assert.equal(response.status, 503, response.headers.get("x-test-error-class") || "");
   const body = await response.json();
   assert.equal(body.error, "STALE_JOB_QUARANTINE_UNAVAILABLE");
@@ -106,8 +106,8 @@ test("invalid stale threshold is rejected before querying D1", async () => {
   const response = await worker.fetch(new Request("https://preview.example/api/jobs/reconcile-stale", {
     method: "POST", headers: { cookie, "content-type": "application/json" },
     body: JSON.stringify({ confirmation: "QUARANTINE_STALE_JOBS", staleMinutes: 30 })
-  }), { DB: db });
-  assert.equal(response.status, 400);
+  }), testEnv(db));
+  assert.equal(response.status, 400, response.headers.get("x-test-error-class") || "");
   assert.equal(db.selectCalls, 0);
   assert.equal(db.batchCalls, 0);
 });
@@ -117,7 +117,7 @@ test("oversized JSON request is rejected before queue access", async () => {
   const response = await worker.fetch(new Request("https://preview.example/api/jobs/reconcile-stale", {
     method: "POST", headers: { cookie, "content-type": "application/json" },
     body: JSON.stringify({ confirmation: "QUARANTINE_STALE_JOBS", extra: "x".repeat(2048) })
-  }), { DB: db });
+  }), testEnv(db));
   assert.equal(response.status, 413, response.headers.get("x-test-error-class") || "");
   assert.equal(db.selectCalls, 0);
   assert.equal(db.batchCalls, 0);
