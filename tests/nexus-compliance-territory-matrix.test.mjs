@@ -95,3 +95,9 @@ test("territory-level review expiry is enforced",()=>{
  expired.territories[0].reviewDueAt="2026-11-27";
  assert.equal(api.evaluate(expired,register,now).ok,false);
 });
+
+test("matrix rejects orphan territory-level source references",()=>{
+ const orphan=structuredClone(matrix);
+ orphan.territories[0].sourceIds.push(register.sources[0].sourceId);
+ assert.equal(api.evaluate(orphan,register,now).ok,false);
+});
