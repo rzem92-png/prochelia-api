@@ -245,7 +245,7 @@ EU:
 Algeria:
 - Ministry of Commerce — Law 18-05: https://commerce.gov.dz/fr/reglementation/loi-n-deg-18-05
 - Ministry of Posts and Telecommunications — e-commerce guidance: https://www.mpt.gov.dz/e-commerce/
-- Ministry of Posts and Telecommunications — laws and ordinances: https://www.mpt.gov.dz/lois-et-ordonnances/
+- Ministry of Posts and Telecommunications — laws and ordinances: https://www.mpt.gov.dz/lois-et-ordonnances/\n- JORADP Law 18-07 (personal data): https://www.joradp.dz/FTP/JO-FRANCAIS/2018/F2018034.pdf
 
 ## 9. Acceptance and release
 This matrix is an engineering baseline, not proof of compliance. Check current consolidated texts, national implementation and local rules with qualified counsel before launch. Change control and periodic source review are mandatory.
