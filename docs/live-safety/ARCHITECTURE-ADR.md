@@ -87,3 +87,16 @@ A model score is not a legal conclusion. Thresholds must be calibrated by catego
 
 ## 11. Current status
 This ADR is a design decision proposal. It is not implementation evidence. Policy-only PR #479 remains draft and is not merged. Preview build/deployment is not production. LIVE stays NO-GO.
+
+
+## 12. Media adapter limitation discovered in official documentation (release blocker)
+The Cloudflare Realtime SFU WebSocket adapter is useful for server-side media processing, but its documented video egress is JPEG frames at **1 FPS by default**; higher frame rates require an Enterprise discussion. It also supports remote video egress, not video ingest over that adapter. Therefore **this adapter alone is not acceptable as the sole safety video detector** for fast events or continuous real-time moderation.
+
+Required design before implementation:
+- Audio: remote PCM adapter can be a candidate for streaming speech/acoustic analysis, subject to measured latency, queue health and consent/privacy review.
+- Video: implement a dedicated server-side WebRTC moderation subscriber or another provider-supported high-frame-rate/continuous video path. Measure effective frame coverage, motion sampling, end-to-end delay and false-negative risk. The SFU/transport must allow the moderation endpoint to subscribe without granting browser-controlled access.
+- If the only video safety path is 1 FPS, LIVE cannot be enabled for categories whose safety relies on timely video detection. A slower sampling path may be used for supplementary signals only.
+- The safety watchdog must report modality-specific coverage (audio/video/chat); a healthy audio pipeline cannot conceal an unhealthy video pipeline.
+- Require a measured target frame coverage and p95/p99 end-to-end protection latency before release. Do not claim a 2-second video-response target based on 1 FPS sampling.
+
+This constraint changes the architecture selection gate: validate a dedicated continuous/high-rate video moderation path in staging before selecting the transport stack as launch-ready.
