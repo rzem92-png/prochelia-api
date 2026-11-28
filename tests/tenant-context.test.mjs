@@ -2,12 +2,15 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
+import { createHash } from "node:crypto";
 import worker from "../src/index.js";
 import { listTenantContexts, selectTenantContext } from "../src/tenant-context.js";
 import { bootstrapPersonalTenant } from "../src/tenant-bootstrap.js";
 
 const migration = readFileSync(new URL("../migrations-preview-canonical/0023_tenant_workspace_foundation.sql", import.meta.url), "utf8");
 const sessionToken = "tenant-context-test-session";
+const sessionTokenU2 = "tenant-context-u2-session";
+const sessionHashU2 = createHash("sha256").update(sessionTokenU2).digest("base64url");
 
 function makeD1() {
   const sqlite = new DatabaseSync(":memory:");
@@ -29,7 +32,7 @@ function makeD1() {
            ('u2','client','u2@example.test','Two','User','active','2026-01-01','2026-01-01');
     INSERT INTO sessions(id,user_id,token_hash,expires_at)
     VALUES ('s1','u1','TQVEcD9psvMekhpwgMQj5fHUYSNGsCcRAyMM7zLCVTs','2099-01-01'),
-           ('s2','u2','hash-u2','2099-01-01');
+           ('s2','u2',sessionHashU2,'2099-01-01');
     INSERT INTO tenants(id,kind,display_name,country_code,created_by_user_id)
     VALUES ('t1','PERSONAL','Workspace One','FR','u1'),
            ('t2','ORGANIZATION','Company Two','BE','u1'),
@@ -221,7 +224,7 @@ test("personal tenant bootstrap does not reactivate a revoked membership", async
   const first = await bootstrapPersonalTenant(d1, "u2", "U2 workspace");
   assert.equal(first.ok, true);
   sqlite.prepare("UPDATE tenant_memberships SET status='REVOKED',revoked_at=CURRENT_TIMESTAMP WHERE tenant_id=? AND user_id='u2'").run(first.tenant.id);
-  const retry = await worker.fetch(request("/api/tenant/bootstrap", "POST", {}, "hash-u2"), { DB: d1 });
+  const retry = await worker.fetch(request("/api/tenant/bootstrap", "POST", {}, sessionTokenU2), { DB: d1 });
   assert.equal(retry.status, 409);
   assert.equal((await retry.json()).error, "PERSONAL_TENANT_ACCESS_REQUIRES_RECOVERY");
   assert.equal(sqlite.prepare("SELECT status FROM tenant_memberships WHERE tenant_id=? AND user_id='u2'").get(first.tenant.id).status, "REVOKED");
