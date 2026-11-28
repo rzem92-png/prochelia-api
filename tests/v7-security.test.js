@@ -117,3 +117,29 @@ test("intervenant directory returns the deterministic final-page contract", asyn
   assert.equal(body.next_offset,null);
   assert.match(query,/FROM intervenants i JOIN users u/);
 });
+
+test("V7 JSON body guard rejects wrong content type, malformed and non-object JSON", async () => {
+  const noType = await boundedJsonRequest(new Request("https://api.example.test/api/v7/check/email", {method:"POST",body:"{}"}));
+  assert.equal(noType.response.status,415);
+  const malformed = await boundedJsonRequest(new Request("https://api.example.test/api/v7/check/email", {method:"POST",headers:{"content-type":"application/json"},body:"{"}));
+  assert.equal(malformed.response.status,400);
+  assert.equal((await malformed.response.json()).error,"INVALID_JSON");
+  const array = await boundedJsonRequest(new Request("https://api.example.test/api/v7/check/email", {method:"POST",headers:{"content-type":"application/json"},body:"[]"}));
+  assert.equal(array.response.status,400);
+  assert.equal((await array.response.json()).error,"JSON_OBJECT_REQUIRED");
+});
+
+test("V7 JSON body guard rejects oversized payloads before route processing", async () => {
+  const payload = JSON.stringify({large:"x".repeat(65540)});
+  const response = await boundedJsonRequest(new Request("https://api.example.test/api/v7/check/email", {method:"POST",headers:{"content-type":"application/json"},body:payload}));
+  assert.equal(response.ok,false);
+  assert.equal(response.response.status,413);
+  assert.equal((await response.response.json()).error,"REQUEST_BODY_TOO_LARGE");
+});
+
+test("V7 bounded request accepts JSON and reconstructs request for existing handlers", async () => {
+  const original = new Request("https://api.example.test/api/v7/check/email", {method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({email:"user@example.com"})});
+  const bounded = await boundedJsonRequest(original);
+  assert.equal(bounded.ok,true);
+  assert.deepEqual(await bounded.request.json(),{email:"user@example.com"});
+});
