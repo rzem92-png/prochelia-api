@@ -101,3 +101,10 @@ test("matrix rejects orphan territory-level source references",()=>{
  orphan.territories[0].sourceIds.push(register.sources[0].sourceId);
  assert.equal(api.evaluate(orphan,register,now).ok,false);
 });
+
+test("malformed source register fails closed without throwing",()=>{
+ for(const badRegister of [{...register,sources:{}},{...register,sources:[null]},{...register,sources:[{sourceId:"X"},{sourceId:"X"}]}]){
+  assert.doesNotThrow(()=>api.evaluate(matrix,badRegister,now));
+  assert.equal(api.evaluate(matrix,badRegister,now).ok,false);
+ }
+});
