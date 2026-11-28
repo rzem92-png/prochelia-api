@@ -50,11 +50,13 @@ required = {
     "users", "sessions", "clients", "intervenants", "missions",
     "auth_login_rate_limits", "supra_audit_events",
     "supra_approval_requests", "supra_approval_votes", "supra_approval_events",
-    "tenants", "tenant_memberships", "tenant_invitations", "tenant_session_context",
+    "tenants", "tenant_memberships", "tenant_invitations", "tenant_session_context", "tenant_audit_events",
 }
 assert required <= tables, f"Canonical migration chain missing tables: {sorted(required-tables)}"
 
 # Tenant foundation invariants are tested against SQLite without any remote D1 writes.
+# Tenant audit events are append-only.
+
 db.execute(
     "INSERT INTO users(id,role,email,first_name,last_name,password_hash) VALUES(?,?,?,?,?,?)",
     ("u1", "client", "a@example.test", "A", "Test", "fixture"),
