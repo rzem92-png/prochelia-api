@@ -1,6 +1,6 @@
 /* Metadata-only source-register guard. It cannot certify law or authorize launch. */
 (function(root,factory){const api=factory();if(typeof module==="object"&&module.exports)module.exports=api;if(root)root.ProcheliaNexusComplianceSourceRegister=api;})(typeof window!=="undefined"?window:globalThis,function(){"use strict";
-const ID=/^[A-Z0-9][A-Z0-9._:-]{0,127}$/;const DATE=/^\d{4}-\d{2}-\d{2}$/;const TRUSTED=new Set(["economie.gouv.fr","eur-lex.europa.eu","cnil.fr","impots.gouv.fr","commerce.gov.dz"]);
+const ID=/^[A-Z0-9][A-Z0-9._:-]{0,127}$/;const DATE=/^\d{4}-\d{2}-\d{2}$/;const TRUSTED=new Set(["economie.gouv.fr","eur-lex.europa.eu","cnil.fr","impots.gouv.fr","commerce.gov.dz","digital-strategy.ec.europa.eu","taxation-customs.ec.europa.eu","joradp.dz"]);
 function plain(v){return !!v&&typeof v==="object"&&!Array.isArray(v)&&(Object.getPrototypeOf(v)===Object.prototype||Object.getPrototypeOf(v)===null)&&Object.getOwnPropertySymbols(v).length===0&&Object.keys(Object.getOwnPropertyDescriptors(v)).every(k=>{const d=Object.getOwnPropertyDescriptor(v,k);return d.enumerable&&Object.hasOwn(d,"value")})}
 function validDate(v){if(typeof v!=="string"||!DATE.test(v))return false;const d=new Date(v+"T00:00:00Z");return Number.isFinite(d.getTime())&&d.toISOString().slice(0,10)===v}
 function trustedUrl(v){try{const u=new URL(v);return u.protocol==="https:"&&!u.username&&!u.password&&[...TRUSTED].some(d=>u.hostname===d||u.hostname.endsWith("."+d))}catch{return false}}
