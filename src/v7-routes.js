@@ -19,6 +19,50 @@ export async function handleV7Route(
     const method =
       request.method.toUpperCase();
 
+    // Bounded payload guard for all V7 POST routes. Enforce Content-Length
+    // early when present and stream-count actual bytes (never buffer unbounded).
+    if (method === "POST") {
+      const MAX_V7_BODY = 128 * 1024;
+      const declaredLength = Number(request.headers.get("content-length"));
+      if (Number.isFinite(declaredLength) && declaredLength > MAX_V7_BODY) {
+        return Response.json(
+          { ok: false, version: procheliaV7.version, error: "PAYLOAD_TOO_LARGE" },
+          { status: 413, headers: { "Cache-Control": "no-store" } }
+        );
+      }
+      const reader = request.body?.getReader();
+      const chunks = [];
+      let total = 0;
+      if (reader) {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          total += value.byteLength;
+          if (total > MAX_V7_BODY) {
+            await reader.cancel().catch(() => {});
+            return Response.json(
+              { ok: false, version: procheliaV7.version, error: "PAYLOAD_TOO_LARGE" },
+              { status: 413, headers: { "Cache-Control": "no-store" } }
+            );
+          }
+          chunks.push(value);
+        }
+      }
+      const boundedBody = new Uint8Array(total);
+      let offset = 0;
+      for (const chunk of chunks) {
+        boundedBody.set(chunk, offset);
+        offset += chunk.byteLength;
+      }
+      const boundedHeaders = new Headers(request.headers);
+      boundedHeaders.delete("content-length");
+      request = new Request(request.url, {
+        method: request.method,
+        headers: boundedHeaders,
+        body: total ? boundedBody : null
+      });
+    }
+
 
     // =================================================
     // STATUT V7
@@ -327,6 +371,13 @@ export async function handleV7Route(
       method === "POST"
     ) {
 
+      if (!auth?.user) {
+        return Response.json(
+          { ok: false, version: procheliaV7.version, error: "UNAUTHENTICATED" },
+          { status: 401, headers: { "Cache-Control": "no-store" } }
+        );
+      }
+
       const body =
         await request.json();
 
@@ -455,6 +506,13 @@ export async function handleV7Route(
       method === "POST"
     ) {
 
+      if (!auth?.user) {
+        return Response.json(
+          { ok: false, version: procheliaV7.version, error: "UNAUTHENTICATED" },
+          { status: 401, headers: { "Cache-Control": "no-store" } }
+        );
+      }
+
       const body =
         await request.json();
 
@@ -490,6 +548,13 @@ export async function handleV7Route(
       method === "POST"
     ) {
 
+      if (!auth?.user) {
+        return Response.json(
+          { ok: false, version: procheliaV7.version, error: "UNAUTHENTICATED" },
+          { status: 401, headers: { "Cache-Control": "no-store" } }
+        );
+      }
+
       const body =
         await request.json();
 
@@ -521,6 +586,19 @@ export async function handleV7Route(
       method === "POST"
     ) {
 
+      if (!auth?.user) {
+        return Response.json(
+          { ok: false, version: procheliaV7.version, error: "UNAUTHENTICATED" },
+          { status: 401, headers: { "Cache-Control": "no-store" } }
+        );
+      }
+      if (auth.user.role !== "gerante") {
+        return Response.json(
+          { ok: false, version: procheliaV7.version, error: "FORBIDDEN" },
+          { status: 403, headers: { "Cache-Control": "no-store" } }
+        );
+      }
+
       const body =
         await request.json();
 
@@ -543,6 +621,13 @@ export async function handleV7Route(
       path === "/api/v7/check/pre-mission" &&
       method === "POST"
     ) {
+
+      if (!auth?.user) {
+        return Response.json(
+          { ok: false, version: procheliaV7.version, error: "UNAUTHENTICATED" },
+          { status: 401, headers: { "Cache-Control": "no-store" } }
+        );
+      }
 
       const body =
         await request.json();
@@ -648,6 +733,19 @@ export async function handleV7Route(
       method === "POST"
     ) {
 
+      if (!auth?.user) {
+        return Response.json(
+          { ok: false, version: procheliaV7.version, error: "UNAUTHENTICATED" },
+          { status: 401, headers: { "Cache-Control": "no-store" } }
+        );
+      }
+      if (auth.user.role !== "gerante") {
+        return Response.json(
+          { ok: false, version: procheliaV7.version, error: "FORBIDDEN" },
+          { status: 403, headers: { "Cache-Control": "no-store" } }
+        );
+      }
+
       const body =
         await request.json();
 
@@ -677,21 +775,16 @@ export async function handleV7Route(
 
   } catch (error) {
 
+    const isMalformedJson = error instanceof SyntaxError;
     return Response.json(
-
       {
         ok: false,
-
-        version:
-          procheliaV7.version,
-
-        error:
-          error?.message ||
-          "Erreur V7"
+        version: procheliaV7.version,
+        error: isMalformedJson ? "INVALID_JSON" : "INTERNAL_ERROR"
       },
-
       {
-        status: 500
+        status: isMalformedJson ? 400 : 500,
+        headers: { "Cache-Control": "no-store" }
       }
     );
   }

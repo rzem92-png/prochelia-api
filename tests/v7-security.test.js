@@ -117,3 +117,116 @@ test("intervenant directory returns the deterministic final-page contract", asyn
   assert.equal(body.next_offset,null);
   assert.match(query,/FROM intervenants i JOIN users u/);
 });
+
+
+test("payment verification route requires an authenticated session", async () => {
+  const response = await handleV7Route(
+    post("/api/v7/check/payment", { payment: { status: "PAID" } }),
+    {},
+    "/api/v7/check/payment",
+    null
+  );
+  assert.equal(response.status, 401);
+  assert.equal((await response.json()).error, "UNAUTHENTICATED");
+});
+
+test("finance calculation route is manager-only", async () => {
+  const denied = await handleV7Route(
+    post("/api/v7/finance/calculate", { clientAmount: 100, commissionRate: 10 }),
+    {},
+    "/api/v7/finance/calculate",
+    { user: { id: "client-1", role: "client" } }
+  );
+  assert.equal(denied.status, 403);
+  assert.equal((await denied.json()).error, "FORBIDDEN");
+
+  const allowed = await handleV7Route(
+    post("/api/v7/finance/calculate", { clientAmount: 100, commissionRate: 10 }),
+    {},
+    "/api/v7/finance/calculate",
+    { user: { id: "manager-1", role: "gerante" } }
+  );
+  assert.equal(allowed.status, 200);
+  assert.equal((await allowed.json()).authoritative, false);
+});
+
+test("pre-mission verification route rejects unauthenticated callers", async () => {
+  const response = await handleV7Route(
+    post("/api/v7/check/pre-mission", {}),
+    {},
+    "/api/v7/check/pre-mission",
+    null
+  );
+  assert.equal(response.status, 401);
+  assert.equal((await response.json()).error, "UNAUTHENTICATED");
+});
+
+test("strategic indicators route is manager-only", async () => {
+  const unauth = await handleV7Route(
+    post("/api/v7/strategy/indicators", { clients: 100, revenue: 999 }),
+    {},
+    "/api/v7/strategy/indicators",
+    null
+  );
+  assert.equal(unauth.status, 401);
+
+  const denied = await handleV7Route(
+    post("/api/v7/strategy/indicators", { clients: 100, revenue: 999 }),
+    {},
+    "/api/v7/strategy/indicators",
+    { user: { id: "provider-1", role: "intervenant" } }
+  );
+  assert.equal(denied.status, 403);
+
+  const allowed = await handleV7Route(
+    post("/api/v7/strategy/indicators", { clients: 100, revenue: 999 }),
+    {},
+    "/api/v7/strategy/indicators",
+    { user: { id: "manager-1", role: "gerante" } }
+  );
+  assert.equal(allowed.status, 200);
+});
+
+test("mission transition validator requires authentication", async () => {
+  const response = await handleV7Route(
+    post("/api/v7/check/mission-transition", { currentStatus: "pending", nextStatus: "accepted" }),
+    {},
+    "/api/v7/check/mission-transition",
+    null
+  );
+  assert.equal(response.status, 401);
+});
+
+test("QR validation route requires authentication", async () => {
+  const response = await handleV7Route(
+    post("/api/v7/check/qr", { mission: { id: "mission-1" }, qr: "anything" }),
+    {},
+    "/api/v7/check/qr",
+    null
+  );
+  assert.equal(response.status, 401);
+});
+
+test("malformed V7 JSON returns a controlled 400 without leaking details", async () => {
+  const request = new Request("https://example.test/api/v7/check/email", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: "{not-json"
+  });
+  const response = await handleV7Route(request, {}, "/api/v7/check/email", null);
+  assert.equal(response.status, 400);
+  assert.equal((await response.json()).error, "INVALID_JSON");
+  assert.equal(response.headers.get("Cache-Control"), "no-store");
+});
+
+test("V7 POST payloads above the limit are rejected before route processing", async () => {
+  const request = new Request("https://example.test/api/v7/check/email", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ payload: "x".repeat(128 * 1024 + 10) })
+  });
+  const response = await handleV7Route(request, {}, "/api/v7/check/email", null);
+  assert.equal(response.status, 413);
+  assert.equal((await response.json()).error, "PAYLOAD_TOO_LARGE");
+  assert.equal(response.headers.get("Cache-Control"), "no-store");
+});

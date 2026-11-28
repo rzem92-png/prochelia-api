@@ -846,56 +846,36 @@ function v7CheckConflict({
 // TARIFICATION
 // =====================================================
 
+// Strict numeric parser: accepts numeric primitives and decimal strings only.
+function v7StrictNumber(value) {
+  if (typeof value === "number") return Number.isFinite(value) ? value : null;
+  if (typeof value !== "string") return null;
+  const normalized = value.trim();
+  if (!normalized || !/^[+-]?(?:\\d+(?:\\.\\d*)?|\\.\\d+)(?:[eE][+-]?\\d+)?$/.test(normalized)) return null;
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+
+// =====================================================
+// TARIFICATION
+// =====================================================
+
 function v7CheckPricing({
   amount,
   minimum = 0,
   maximum = null
 } = {}) {
-
-  const value =
-    Number(amount);
-
-  if (
-    !Number.isFinite(value)
-  ) {
-
-    return v7Result(
-      false,
-      {},
-      "Tarif invalide"
-    );
+  const value = v7StrictNumber(amount);
+  const min = v7StrictNumber(minimum);
+  const max = maximum === null || maximum === undefined ? null : v7StrictNumber(maximum);
+  if (value === null || min === null || min < 0 || (maximum !== null && maximum !== undefined && (max === null || max < min))) {
+    return v7Result(false, {}, "Paramètres tarifaires invalides");
   }
-
-  if (
-    value < Number(minimum)
-  ) {
-
-    return v7Result(
-      false,
-      {},
-      "Tarif inférieur au minimum autorisé"
-    );
-  }
-
-  if (
-    maximum !== null &&
-    value > Number(maximum)
-  ) {
-
-    return v7Result(
-      false,
-      {},
-      "Tarif supérieur au maximum autorisé"
-    );
-  }
-
-  return v7Result(
-    true,
-    {
-      amount:
-        value
-    }
-  );
+  if (value < 0) return v7Result(false, {}, "Tarif négatif interdit");
+  if (value < min) return v7Result(false, {}, "Tarif inférieur au minimum autorisé");
+  if (max !== null && value > max) return v7Result(false, {}, "Tarif supérieur au maximum autorisé");
+  return v7Result(true, { amount: value });
 }
 
 
@@ -974,56 +954,16 @@ function v7CheckQr(
 // PAIEMENT
 // =====================================================
 
-function v7CheckPayment(
-  payment
-) {
-
-  if (!payment) {
-
-    return v7Result(
-      false,
-      {},
-      "Paiement absent"
-    );
-  }
-
-  const status =
-    String(
-      payment.status ||
-      ""
-    ).toUpperCase();
-
-  const confirmed = [
-    "PAID",
-    "SUCCEEDED",
-    "SUCCESS",
-    "COMPLETED"
-  ];
-
-  if (
-    !confirmed.includes(
-      status
-    )
-  ) {
-
-    return v7Result(
-      false,
-      {
-        status:
-          payment.status ||
-          "UNKNOWN"
-      },
-      "Paiement non confirmé par le prestataire"
-    );
-  }
-
-  return v7Result(
-    true,
-    {
-      paymentConfirmed:
-        true
-    }
-  );
+function v7CheckPayment(payment) {
+  if (!payment) return v7Result(false, {}, "Paiement absent");
+  const claimedStatus = String(payment.status || "UNKNOWN").toUpperCase();
+  // Caller-provided status is never settlement evidence.
+  return v7Result(false, {
+    claimedStatus,
+    paymentConfirmed: false,
+    authoritative: false,
+    verificationRequired: "PSP_WEBHOOK_OR_API_AND_LEDGER_RECONCILIATION"
+  }, "Statut déclaratif non fiable : confirmation requiert une preuve PSP vérifiée et une réconciliation du registre");
 }
 
 
@@ -1037,67 +977,30 @@ function v7CalculateFinance({
   paymentFees = 0,
   otherFees = 0
 } = {}) {
-
-  const client =
-    Number(
-      clientAmount
-    ) || 0;
-
-  const rate =
-    Number(
-      commissionRate
-    ) || 0;
-
-  const payment =
-    Number(
-      paymentFees
-    ) || 0;
-
-  const other =
-    Number(
-      otherFees
-    ) || 0;
-
-  const commission =
-    client *
-    rate /
-    100;
-
-  const intervenant =
-    client -
-    commission;
-
-  const margin =
-    commission -
-    payment -
-    other;
-
-  return v7Result(
-    true,
-    {
-
-      clientAmount:
-        client,
-
-      commissionRate:
-        rate,
-
-      commissionAmount:
-        commission,
-
-      intervenantAmount:
-        intervenant,
-
-      paymentFees:
-        payment,
-
-      otherFees:
-        other,
-
-      grossMargin:
-        margin
-    }
-  );
+  const client = v7StrictNumber(clientAmount);
+  const rate = v7StrictNumber(commissionRate);
+  const payment = v7StrictNumber(paymentFees);
+  const other = v7StrictNumber(otherFees);
+  if (client === null || rate === null || payment === null || other === null ||
+      client < 0 || rate < 0 || rate > 100 || payment < 0 || other < 0) {
+    return v7Result(false, {}, "Paramètres financiers invalides");
+  }
+  const roundMoney = value => Math.round((value + Number.EPSILON) * 100) / 100;
+  const commission = roundMoney(client * rate / 100);
+  const clientRounded = roundMoney(client);
+  const intervenant = roundMoney(clientRounded - commission);
+  const margin = roundMoney(commission - roundMoney(payment) - roundMoney(other));
+  return v7Result(true, {
+    clientAmount: clientRounded,
+    commissionRate: rate,
+    commissionAmount: commission,
+    intervenantAmount: intervenant,
+    paymentFees: roundMoney(payment),
+    otherFees: roundMoney(other),
+    grossMargin: margin,
+    roundingPolicy: "2 decimal places (provisional); currency must be supplied/validated by authoritative pricing layer",
+    authoritative: false
+  });
 }
 
 
