@@ -34,10 +34,13 @@ jobs:
           node --experimental-default-type=module --check src/index.js
           node --experimental-default-type=module --check src/v7.js
           node --experimental-default-type=module --check src/v7-routes.js
+          node --experimental-default-type=module --check src/tenant-context.js
       - name: Lint guarded Preview deployment workflow
         run: |
           go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
           "$HOME/go/bin/actionlint" .github/workflows/deploy-preview-worker-manual.yml
+      - name: Run tenant context API and SQLite isolation tests
+        run: node --test tests/tenant-context.test.mjs
       - name: Generate isolated Preview deployment config
         run: node scripts/generate-preview-wrangler-config.mjs
       - name: Wrangler bundle validation only (no deploy)
