@@ -2677,7 +2677,11 @@ async function quarantineStaleJobs(request,env) {
     'permissions-policy':'geolocation=(self),camera=(),microphone=()'
   };
   if(request.url.startsWith('https://')) headers['strict-transport-security']='max-age=31536000; includeSubDomains';
-  if(gate.error){ for(const [name,value] of Object.entries(headers)) gate.error.headers.set(name,value); return gate.error; }
+  if(gate.error){
+    const deniedHeaders=new Headers(gate.error.headers);
+    for(const [name,value] of Object.entries(headers)) deniedHeaders.set(name,value);
+    return new Response(gate.error.body,{status:gate.error.status,statusText:gate.error.statusText,headers:deniedHeaders});
+  }
   const parsed=await readBoundedJson(request,1024);
   if(!parsed.ok) return json({ok:false,error:parsed.error,version:VERSION},parsed.error==='BODY_TOO_LARGE'?413:400,headers);
   const body=parsed.value;
@@ -3210,6 +3214,7 @@ async function handle(request,env){
   try {
     if(isMutatingMethod(request.method) && !securityOriginAllowed(request,env)) return json({ok:false,error:'ORIGIN_NOT_ALLOWED',version:VERSION},403);
     const url=new URL(request.url);
+    if(url.pathname==='/api/jobs/reconcile-stale' && request.method==='POST') return quarantineStaleJobs(request,env);
     // Fail closed before any schema helper touches D1: unauthenticated callers
     // must not use mission validation as an existence oracle for private IDs.
     if (url.pathname === '/api/missions/validate') {
@@ -3225,7 +3230,6 @@ async function handle(request,env){
     const cr=await handleCommercialRecruitment(request,env); if(cr) return cr;
     if(url.pathname==='/api/system/final-audit' && request.method==='GET') return finalProductionAudit(request,env);
     if(url.pathname==='/api/copilot/next-actions' && request.method==='GET') return copilotNextActions(request,env);
-    if(url.pathname==='/api/jobs/reconcile-stale' && request.method==='POST') return quarantineStaleJobs(request,env);
     if(url.pathname==='/api/jobs/process' && request.method==='POST') return processBackgroundJobs(request,env);
     if(url.pathname==='/api/system/production-check' && request.method==='GET') return finalProductionAudit(request,env);
     const response=await handleV139(request,env);
