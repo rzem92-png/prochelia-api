@@ -251,3 +251,30 @@ Algeria:
 This matrix is an engineering baseline, not proof of compliance. Check current consolidated texts, national implementation and local rules with qualified counsel before launch. Change control and periodic source review are mandatory.
 
 Production/public-market release remains NO-GO until applicable controls are implemented, tested, evidence is recorded, and authorized reviewers approve. This PR does not authorize deployment, remote migrations, live payments or launch.
+
+## 10. Territory × activity coverage register (28 Nov 2026)
+
+Machine-readable companion: `docs/compliance/territory-activity-matrix-2026-11-28.json`. It tracks 20 control categories against five activity models for each territory. **SOURCE_REGISTERED means an official reference exists in the source register only; it does not mean applicability, law, or implementation is verified.** All market flags remain false and all control implementation states remain UNVERIFIED.
+
+| Territory | Coverage | Legal review | Market activation |
+|---|---|---|---|
+| France (FR) | Partial source register | Pending counsel | BLOCKED |
+| EU/EEA (EU) | Partial source register; national implementation still required | Pending counsel | BLOCKED |
+| Algeria (DZ) | Partial source register | Pending local counsel | BLOCKED |
+| Belgium (BE) | NOT RESEARCHED | NOT RESEARCHED | BLOCKED |
+| Switzerland (CH) | NOT RESEARCHED | NOT RESEARCHED | BLOCKED |
+| Luxembourg (LU) | NOT RESEARCHED | NOT RESEARCHED | BLOCKED |
+| Canada (CA) | NOT RESEARCHED | NOT RESEARCHED | BLOCKED |
+| Morocco (MA) | NOT RESEARCHED | NOT RESEARCHED | BLOCKED |
+| Tunisia (TN) | NOT RESEARCHED | NOT RESEARCHED | BLOCKED |
+| Spain (ES) | NOT RESEARCHED | NOT RESEARCHED | BLOCKED |
+| Italy (IT) | NOT RESEARCHED | NOT RESEARCHED | BLOCKED |
+| Germany (DE) | NOT RESEARCHED | NOT RESEARCHED | BLOCKED |
+| United Kingdom (GB) | NOT RESEARCHED | NOT RESEARCHED | BLOCKED |
+| United States (US) | NOT RESEARCHED | NOT RESEARCHED | BLOCKED |
+| UAE (AE) | NOT RESEARCHED | NOT RESEARCHED | BLOCKED |
+| Other (OTHER) | NOT RESEARCHED | NOT RESEARCHED | BLOCKED |
+
+Activity models tracked for every territory: service marketplace/intermediation; direct provider; B2B contract; payments/PSP/payouts; digital platform. Categories include consumer/platform rules, pre-contract, pricing/fees, cancellation/refunds, complaints/mediation, reviews/fair practices, DSA/trader traceability, DAC7/tax, privacy, retention/rights, processors/transfers, DPIA, professional qualification/insurance, PSP, security, AI governance, licensing, labor/platform work and advertising/competition.
+
+The validator rejects missing territory/category/activity coverage, invented source references, stale review dates, `COMPLIANT` claims, or any market-activation flag. It reports metadata coverage only; qualified counsel and implementation evidence remain required.
