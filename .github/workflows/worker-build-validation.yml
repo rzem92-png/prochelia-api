@@ -10,6 +10,7 @@ on:
       - "wrangler.jsonc"
       - ".github/workflows/deploy-preview-worker-manual.yml"
       - "scripts/generate-preview-wrangler-config.mjs"
+      - "tests/background-job-recovery-route.test.mjs"
       - ".github/workflows/worker-build-validation.yml"
   push:
     branches: [main]
