@@ -80,7 +80,7 @@ export function resolveComplaintScope(actor, draft, records = {}) {
   if (actor.role === "client") {
     const profile = records.clientProfile;
     if (!profile || !ID_PATTERN.test(String(profile.id || ""))) return { ok: false, status: 403, error: "CLIENT_PROFILE_NOT_FOUND" };
-    if (profile.user_id && profile.user_id !== actor.id) return { ok: false, status: 403, error: "CLIENT_PROFILE_ACTOR_MISMATCH" };
+    if (typeof actor.id !== "string" || !actor.id || profile.user_id !== actor.id) return { ok: false, status: 403, error: "CLIENT_PROFILE_ACTOR_MISMATCH" };
     if (draft.clientId && draft.clientId !== profile.id) return { ok: false, status: 403, error: "CLIENT_OWNERSHIP_MISMATCH" };
     if (draft.companyId) return { ok: false, status: 403, error: "COMPANY_SCOPE_NOT_ALLOWED" };
     if (draft.missionId && !records.mission) return { ok: false, status: 404, error: "MISSION_NOT_FOUND" };
@@ -92,9 +92,11 @@ export function resolveComplaintScope(actor, draft, records = {}) {
   }
   if (actor.role === "gerante") {
     if (draft.clientId && !records.clientProfile) return { ok: false, status: 404, error: "CLIENT_NOT_FOUND" };
-    if (draft.companyId && !records.companyProfile) return { ok: false, status: 404, error: "COMPANY_NOT_FOUND" };
+    if (draft.companyId && (!records.companyProfile || records.companyProfile.status !== "active")) return { ok: false, status: 403, error: "COMPANY_PROFILE_NOT_ACTIVE" };
+    if (draft.clientId && draft.companyId) return { ok: false, status: 400, error: "COMPLAINT_SCOPE_CONFLICT" };
     if (draft.missionId && !records.mission) return { ok: false, status: 404, error: "MISSION_NOT_FOUND" };
-    if (records.mission && draft.clientId && records.mission.client_id !== draft.clientId) return { ok: false, status: 409, error: "MISSION_CLIENT_SCOPE_MISMATCH" };
+    if (draft.missionId && !records.clientProfile) return { ok: false, status: 404, error: "MISSION_CLIENT_PROFILE_NOT_FOUND" };
+    if (records.mission && records.clientProfile && records.mission.client_id !== records.clientProfile.id) return { ok: false, status: 409, error: "MISSION_CLIENT_SCOPE_MISMATCH" };
     if (records.mission && draft.companyId) return { ok: false, status: 409, error: "COMPANY_MISSION_SCOPE_UNVERIFIED" };
     const severity = draft.severity && SEVERITIES.has(draft.severity) ? draft.severity :
       (HIGH_RISK_CATEGORIES.has(draft.category) ? "HIGH" : "MEDIUM");
