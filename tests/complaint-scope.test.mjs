@@ -170,3 +170,14 @@ test("manager mission scope requires a verified client profile and matches missi
   assert.equal(resolveComplaintScope({ id: "manager-1", role: "gerante" }, missionDraft, { mission: { id: "mission-1", client_id: "client-7" }, clientProfile: { id: "other-client" } }).error, "MISSION_CLIENT_SCOPE_MISMATCH");
   assert.equal(resolveComplaintScope({ id: "manager-1", role: "gerante" }, missionDraft, { mission: { id: "mission-1", client_id: "client-7" }, clientProfile: profile }).ok, true);
 });
+
+test("scope resolver rejects mismatched loaded record ids instead of trusting supplied records", () => {
+  const clientMissionDraft = validateComplaintDraft({ ...validClientDraft, mission_id: "mission-requested" }, "client", NOW).normalized;
+  assert.equal(resolveComplaintScope(client, clientMissionDraft, { clientProfile: profile, mission: { id: "different-mission", client_id: "client-7" } }).error, "MISSION_ID_MISMATCH");
+  const managerClientDraft = validateComplaintDraft({ ...validClientDraft, client_id: "client-7" }, "gerante", NOW).normalized;
+  assert.equal(resolveComplaintScope({ id: "manager-1", role: "gerante" }, managerClientDraft, { clientProfile: { id: "other-client" } }).error, "CLIENT_PROFILE_ID_MISMATCH");
+  const managerCompanyDraft = validateComplaintDraft({ ...validClientDraft, company_id: "company-7" }, "gerante", NOW).normalized;
+  assert.equal(resolveComplaintScope({ id: "manager-1", role: "gerante" }, managerCompanyDraft, { companyProfile: { id: "other-company", status: "active" } }).error, "COMPANY_PROFILE_ID_MISMATCH");
+  const managerMissionDraft = validateComplaintDraft({ ...validClientDraft, mission_id: "mission-7" }, "gerante", NOW).normalized;
+  assert.equal(resolveComplaintScope({ id: "manager-1", role: "gerante" }, managerMissionDraft, { mission: { id: "other-mission", client_id: "client-7" }, clientProfile: profile }).error, "MISSION_ID_MISMATCH");
+});
