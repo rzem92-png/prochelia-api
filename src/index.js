@@ -12,6 +12,57 @@ const SECURITY_LOCK_SECONDS = 15 * 60;
 const SECURITY_DEVICE_TTL_SECONDS = 60 * 60 * 24 * 30;
 const SESSION_COOKIE = 'prochelia_session';
 const PBKDF2_ITERATIONS = 100000;
+const PAYMENT_WEBHOOK_MAX_BYTES = 64 * 1024;
+
+export async function readBoundedWebhookBody(request, maxBytes = PAYMENT_WEBHOOK_MAX_BYTES) {
+  if (!Number.isSafeInteger(maxBytes) || maxBytes < 1) throw new TypeError('maxBytes must be a positive safe integer');
+  const declared = request.headers.get('content-length');
+  let declaredLength = null;
+  if (declared !== null) {
+    if (!/^\d+$/.test(declared)) return { ok: false, status: 400, error: 'INVALID_WEBHOOK_CONTENT_LENGTH' };
+    declaredLength = Number(declared);
+    if (!Number.isSafeInteger(declaredLength)) return { ok: false, status: 400, error: 'INVALID_WEBHOOK_CONTENT_LENGTH' };
+    if (declaredLength > maxBytes) return { ok: false, status: 413, error: 'WEBHOOK_BODY_TOO_LARGE' };
+  }
+
+  const reader = request.body?.getReader();
+  if (!reader) return { ok: true, body: '', byteLength: 0 };
+  const chunks = [];
+  let total = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!(value instanceof Uint8Array)) return { ok: false, status: 400, error: 'WEBHOOK_BODY_READ_FAILED' };
+      total += value.byteLength;
+      if (total > maxBytes) {
+        try { await reader.cancel(); } catch {}
+        return { ok: false, status: 413, error: 'WEBHOOK_BODY_TOO_LARGE' };
+      }
+      chunks.push(value);
+    }
+  } catch {
+    return { ok: false, status: 400, error: 'WEBHOOK_BODY_READ_FAILED' };
+  } finally {
+    try { reader.releaseLock(); } catch {}
+  }
+
+  if (declaredLength !== null && declaredLength !== total) {
+    return { ok: false, status: 400, error: 'WEBHOOK_CONTENT_LENGTH_MISMATCH' };
+  }
+  const bytes = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  try {
+    const body = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes);
+    return { ok: true, body, byteLength: total };
+  } catch {
+    return { ok: false, status: 400, error: 'INVALID_WEBHOOK_UTF8' };
+  }
+}
 const SESSION_TTL_SECONDS = 60 * 60 * 24 * 7; // 7 days
 
 function json(data, status = 200, extraHeaders = {}) {
@@ -1026,7 +1077,9 @@ export function requiresAtomicFinancialSettlement(eventType) {
 async function paymentWebhook(request, env) {
   // Reject unauthenticated and malformed events before any D1 schema access.
   // This prevents arbitrary callers from triggering CREATE TABLE/INDEX writes.
-  const raw = await request.text();
+  const boundedBody = await readBoundedWebhookBody(request);
+  if (!boundedBody.ok) return json({ok:false,error:boundedBody.error,version:VERSION},boundedBody.status);
+  const raw = boundedBody.body;
   if (!(await verifyWebhookSignature(request, env, raw))) return json({ok:false,error:'INVALID_WEBHOOK_SIGNATURE',version:VERSION},401);
   let event;
   try { event = JSON.parse(raw); } catch { return json({ok:false,error:'INVALID_WEBHOOK_JSON',version:VERSION},400); }
@@ -3678,6 +3731,12 @@ handle = async function(request,env){
     if (getOnlyDiagnostics.has(preflightPath) && preflightMethod === 'HEAD') {
       const response = await __procheliaProductionSafetyHandle(new Request(request.url,{method:'GET',headers:request.headers}),env);
       return new Response(null,{status:response.status,headers:response.headers});
+    }
+    // Payment webhook processing is not an active PSP integration. Keep this
+    // public endpoint explicit and fail closed before rate-limit/D1 side effects.
+    if (preflightPath === '/api/payments/webhook') {
+      if (preflightMethod !== 'POST') return json({ok:false,error:'METHOD_NOT_ALLOWED',version:VERSION},405,{'allow':'POST'});
+      return json({ok:false,error:'PAYMENT_WEBHOOK_NOT_CONFIGURED',version:VERSION,retryable:true},503);
     }
     // Fail closed with a truthful service-unavailable response when a write
     // needs the persistent rate limiter but D1 is not bound.

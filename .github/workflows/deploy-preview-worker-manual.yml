@@ -42,6 +42,7 @@ jobs:
             tests/v7-security.test.js \
             tests/deploy-preview-workflow.test.mjs \
             tests/payment-webhook-security.test.js \
+            tests/payment-webhook-body-limit.test.js \
             tests/mission-security-atomic.test.js \
             tests/payout-atomicity.test.js \
             tests/payment-settlement-guard.test.js \
