@@ -1,4 +1,5 @@
 import { handleV7Route } from "./v7-routes.js";
+import { getBackgroundJobHealth } from "./background-job-health.js";
 // PROCHÉLIA — INDEX BACKEND CONSOLIDÉ UNIQUE
 // Référence de consolidation : V14.1 Finance + sécurité/RBAC existants.
 // Généré le 19/10/2026. À déployer uniquement après recette avec la vraie base D1.
@@ -2641,6 +2642,13 @@ async function enqueueBackgroundJob(env, jobType, payload={}, maxAttempts=5) {
   return id;
 }
 
+async function backgroundJobHealth(request,env) {
+  const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
+  const health=await getBackgroundJobHealth(env?.DB);
+  if(!health.ok) return json({ok:false,error:health.error,version:VERSION},503,{'cache-control':'no-store'});
+  return json({ok:true,version:VERSION,monitoring:'READ_ONLY',...health},200,{'cache-control':'no-store'});
+}
+
 async function processBackgroundJobs(request,env) {
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
   await ensureFinalHardeningSchema(env); await ensureOperationalSchema(env);
@@ -3164,6 +3172,7 @@ async function handle(request,env){
     const cr=await handleCommercialRecruitment(request,env); if(cr) return cr;
     if(url.pathname==='/api/system/final-audit' && request.method==='GET') return finalProductionAudit(request,env);
     if(url.pathname==='/api/copilot/next-actions' && request.method==='GET') return copilotNextActions(request,env);
+    if(url.pathname==='/api/jobs/health' && request.method==='GET') return backgroundJobHealth(request,env);
     if(url.pathname==='/api/jobs/process' && request.method==='POST') return processBackgroundJobs(request,env);
     if(url.pathname==='/api/system/production-check' && request.method==='GET') return finalProductionAudit(request,env);
     const response=await handleV139(request,env);
@@ -3595,6 +3604,7 @@ async function productionRateLimit(request,env){
     path.startsWith('/api/support/') ||
     path==='/api/complaints' ||
     path==='/api/jobs/process' ||
+    path==='/api/jobs/health' ||
     path==='/api/system/backup/run';
   const limit=sensitive ? 20 : 120;
   const windowSeconds=60;
