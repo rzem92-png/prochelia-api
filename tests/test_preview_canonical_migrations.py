@@ -79,6 +79,22 @@ db.execute(
 )
 db.execute("INSERT INTO tenant_session_context(session_id,tenant_id) VALUES(?,?)", ("s1", "t1"))
 
+# Tenant audit records are append-only.
+db.execute(
+    "INSERT INTO tenant_audit_events(id,tenant_id,actor_user_id,event_type,details_json) VALUES(?,?,?,?,?)",
+    ("audit-1", "t1", "u1", "PERSONAL_TENANT_BOOTSTRAP_REQUESTED", '{"source":"test"}'),
+)
+try:
+    db.execute("UPDATE tenant_audit_events SET details_json='{}' WHERE id='audit-1'")
+    raise AssertionError("tenant audit update unexpectedly allowed")
+except sqlite3.IntegrityError as error:
+    assert "TENANT_AUDIT_EVENTS_APPEND_ONLY" in str(error)
+try:
+    db.execute("DELETE FROM tenant_audit_events WHERE id='audit-1'")
+    raise AssertionError("tenant audit delete unexpectedly allowed")
+except sqlite3.IntegrityError as error:
+    assert "TENANT_AUDIT_EVENTS_APPEND_ONLY" in str(error)
+
 # A session cannot select a tenant without an active membership.
 db.execute(
     "INSERT INTO tenants(id,kind,display_name,created_by_user_id) VALUES(?,?,?,?)",
