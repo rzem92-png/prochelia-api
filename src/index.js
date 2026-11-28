@@ -3732,6 +3732,12 @@ handle = async function(request,env){
       const response = await __procheliaProductionSafetyHandle(new Request(request.url,{method:'GET',headers:request.headers}),env);
       return new Response(null,{status:response.status,headers:response.headers});
     }
+    // Payment webhook processing is not an active PSP integration. Keep this
+    // public endpoint explicit and fail closed before rate-limit/D1 side effects.
+    if (preflightPath === '/api/payments/webhook') {
+      if (preflightMethod !== 'POST') return json({ok:false,error:'METHOD_NOT_ALLOWED',version:VERSION},405,{'allow':'POST'});
+      return json({ok:false,error:'PAYMENT_WEBHOOK_NOT_CONFIGURED',version:VERSION,retryable:true},503);
+    }
     // Fail closed with a truthful service-unavailable response when a write
     // needs the persistent rate limiter but D1 is not bound.
     if (isMutatingMethod(preflightMethod) && !env?.DB) {
