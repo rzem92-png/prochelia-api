@@ -141,7 +141,21 @@ try:
 except sqlite3.IntegrityError:
     pass
 
-# Revocation and tenant suspension invalidate any selected context for affected sessions.
+# The final active OWNER cannot be revoked; selected context remains intact.
+try:
+    db.execute(
+        "UPDATE tenant_memberships SET status='REVOKED',revoked_at=CURRENT_TIMESTAMP WHERE id='m1'"
+    )
+    raise AssertionError("last active owner revocation unexpectedly allowed")
+except sqlite3.IntegrityError as error:
+    assert "TENANT_LAST_ACTIVE_OWNER_REQUIRED" in str(error)
+assert db.execute("SELECT COUNT(*) FROM tenant_session_context WHERE session_id='s1'").fetchone()[0] == 1
+
+# Once a second active owner exists, revocation is allowed and clears that user's context.
+db.execute(
+    "INSERT INTO tenant_memberships(id,tenant_id,user_id,role,status,accepted_at) VALUES(?,?,?,?,?,CURRENT_TIMESTAMP)",
+    ("m4", "t1", "u2", "OWNER", "ACTIVE"),
+)
 db.execute(
     "UPDATE tenant_memberships SET status='REVOKED',revoked_at=CURRENT_TIMESTAMP WHERE id='m1'"
 )
