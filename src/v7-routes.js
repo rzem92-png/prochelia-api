@@ -19,6 +19,25 @@ export async function handleV7Route(
     const method =
       request.method.toUpperCase();
 
+    // V7 access boundary: only the pure email syntax check is public.
+    // All other POST validators accept context/policy data and require a session.
+    // Validation is advisory and never authorizes a business mutation.
+    const publicPostRoutes = new Set([
+      "/api/v7/check/email"
+    ]);
+    if (method === "POST" && !publicPostRoutes.has(path) && !auth?.user) {
+      return Response.json(
+        { ok: false, version: procheliaV7.version, error: "UNAUTHENTICATED" },
+        { status: 401, headers: { "cache-control": "no-store" } }
+      );
+    }
+    // Strategic indicators disclose internal business/operational information.
+    if (path === "/api/v7/strategy/indicators" && method === "POST" && auth?.user?.role !== "gerante") {
+      return Response.json(
+        { ok: false, version: procheliaV7.version, error: auth?.user ? "FORBIDDEN" : "UNAUTHENTICATED" },
+        { status: auth?.user ? 403 : 401, headers: { "cache-control": "no-store" } }
+      );
+    }
 
     // =================================================
     // STATUT V7

@@ -117,3 +117,44 @@ test("intervenant directory returns the deterministic final-page contract", asyn
   assert.equal(body.next_offset,null);
   assert.match(query,/FROM intervenants i JOIN users u/);
 });
+
+
+test("V7 context-bearing validators require an authenticated session", async () => {
+  const routes = [
+    "/api/v7/check/account",
+    "/api/v7/check/intervenant",
+    "/api/v7/check/document",
+    "/api/v7/check/expiration",
+    "/api/v7/check/transport",
+    "/api/v7/check/mission",
+    "/api/v7/check/mission-transition",
+    "/api/v7/check/availability",
+    "/api/v7/check/conflict",
+    "/api/v7/check/pricing",
+    "/api/v7/check/qr",
+    "/api/v7/check/payment",
+    "/api/v7/finance/calculate",
+    "/api/v7/check/pre-mission",
+    "/api/v7/security/idempotency"
+  ];
+  for (const path of routes) {
+    const response = await handleV7Route(post(path, { forged: true }), {}, path, null);
+    assert.equal(response.status, 401, path);
+    assert.equal((await response.json()).error, "UNAUTHENTICATED", path);
+  }
+});
+
+test("V7 email syntax check remains public and does not query account existence", async () => {
+  const valid = await handleV7Route(post("/api/v7/check/email", { email: "test@example.org" }), {}, "/api/v7/check/email", null);
+  assert.equal(valid.status, 200);
+  const invalid = await handleV7Route(post("/api/v7/check/email", { email: "not-an-email" }), {}, "/api/v7/check/email", null);
+  assert.equal(invalid.status, 400);
+});
+
+test("V7 strategic indicators require manager role", async () => {
+  const path = "/api/v7/strategy/indicators";
+  const denied = await handleV7Route(post(path, {}), {}, path, { user: { id: "client", role: "client" } });
+  assert.equal(denied.status, 403);
+  const unauth = await handleV7Route(post(path, {}), {}, path, null);
+  assert.equal(unauth.status, 401);
+});
