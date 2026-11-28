@@ -3238,6 +3238,8 @@ async function handle(request,env){
     if(request.url.startsWith('https://')) headers.set('strict-transport-security','max-age=31536000; includeSubDomains');
     return new Response(response.body,{status:response.status,statusText:response.statusText,headers});
   } catch(error) {
+    // Minimal, privacy-safe diagnostic: never log exception text, request body, cookie or user identifiers.
+    console.error('PROCHELIA_REQUEST_FAILURE', { method: request.method, errorName: error?.name || 'Error' });
     return json({ok:false,error:'INTERNAL_ERROR',version:VERSION},500);
   }
 }
