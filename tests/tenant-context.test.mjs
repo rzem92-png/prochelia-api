@@ -195,7 +195,7 @@ test("personal tenant bootstrap is idempotent and never trusts a caller tenant I
   const { sqlite, d1 } = makeD1();
   const first = await worker.fetch(request("/api/tenant/bootstrap", "POST", {
     tenantId: "t1", displayName: "  Espace   Deux  "
-  }, "tenant-context-test-session"), { DB: d1 });
+  }, sessionTokenU2), { DB: d1 });
   assert.equal(first.status, 200);
   const firstBody = await first.json();
   assert.equal(firstBody.ok, true);
@@ -208,7 +208,7 @@ test("personal tenant bootstrap is idempotent and never trusts a caller tenant I
 
   const second = await worker.fetch(request("/api/tenant/bootstrap", "POST", {
     displayName: "Renamed Workspace"
-  }, "tenant-context-test-session"), { DB: d1 });
+  }, sessionTokenU2), { DB: d1 });
   assert.equal(second.status, 200);
   const secondBody = await second.json();
   assert.equal(secondBody.created, false);
@@ -216,7 +216,7 @@ test("personal tenant bootstrap is idempotent and never trusts a caller tenant I
   assert.equal(secondBody.tenant.name, "Espace Deux");
 
   const owner = sqlite.prepare("SELECT user_id FROM tenant_memberships WHERE tenant_id=? AND role='OWNER'").get(firstBody.tenant.id);
-  assert.equal(owner.user_id, "u1");
+  assert.equal(owner.user_id, "u2");
 });
 
 test("personal tenant bootstrap does not reactivate a revoked membership", async () => {
