@@ -30,3 +30,12 @@ This is a scoped source-tree finding, not proof that every route is vulnerable o
 
 ## Release decision
 **NO-GO for tenant-scoped business release until the shared resolver and route-by-route ownership controls are proven.** This audit note does not change runtime code, data, secrets, deployments or migrations.
+
+
+## Additional wiring check — accounting API
+
+- `src/accounting-api.js` exports `handleAccountingRoute` and requires `auth.user.id` plus `auth.tenant.role` for role authorization.
+- The current `src/index.js` main handler does **not** import or call `handleAccountingRoute`; the module is therefore not shown as wired into the active Worker route path.
+- The module's unit tests invoke `handleAccountingRoute` directly with synthetic auth objects. These tests validate the module's local gates, not the real session-to-tenant context resolver or deployed route integration.
+
+**Interpretation:** This is an integration/readiness gap, not a claim that an exposed accounting endpoint is currently exploitable. Before wiring it, require a trusted server-side tenant resolver from session + active membership, bind tenant ID to all entity/account/journal queries and writes, and run end-to-end cross-tenant negative tests through the actual Worker entry point.
