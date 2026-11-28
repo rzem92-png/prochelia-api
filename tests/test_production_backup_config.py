@@ -17,6 +17,12 @@ def env_value(name: str) -> str:
     assert match, f"Missing workflow constant: {name}"
     return match.group(1)
 
+restore_workflow = (ROOT / ".github/workflows/restore-production-backup-isolated-test.yml").read_text()
+assert "https://f2a79e9fa41566a8ec80fb24c02c60eb.eu.r2.cloudflarestorage.com" in workflow, "Production backup must use the EU jurisdiction endpoint"
+assert "https://f2a79e9fa41566a8ec80fb24c02c60eb.r2.cloudflarestorage.com" not in workflow, "Global endpoint must not be used for EU bucket"
+assert "https://f2a79e9fa41566a8ec80fb24c02c60eb.eu.r2.cloudflarestorage.com" in restore_workflow, "Restore must use the EU jurisdiction endpoint"
+assert "https://f2a79e9fa41566a8ec80fb24c02c60eb.r2.cloudflarestorage.com" not in restore_workflow, "Restore must not use global endpoint for EU bucket"
+
 databases = config.get("d1_databases")
 assert isinstance(databases, list) and len(databases) == 1, "Exactly one D1 target must be pinned"
 database = databases[0]
