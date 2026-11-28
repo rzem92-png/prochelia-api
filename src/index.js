@@ -1,5 +1,6 @@
 import { handleV7Route } from "./v7-routes.js";
 import { claimBackgroundJob } from "./background-job-claim.js";
+import { quarantineStaleBackgroundJobs } from "./background-job-recovery.js";
 // PROCHÉLIA — INDEX BACKEND CONSOLIDÉ UNIQUE
 // Référence de consolidation : V14.1 Finance + sécurité/RBAC existants.
 // Généré le 19/10/2026. À déployer uniquement après recette avec la vraie base D1.
@@ -78,6 +79,12 @@ function randomBytes(length = 32) {
   const bytes = new Uint8Array(length);
   crypto.getRandomValues(bytes);
   return bytes;
+}
+
+async function sha256Hex(value) {
+  const data=new TextEncoder().encode(value);
+  const digest=await crypto.subtle.digest('SHA-256',data);
+  return Array.from(new Uint8Array(digest),byte=>byte.toString(16).padStart(2,'0')).join('');
 }
 
 async function sha256Base64url(value) {
@@ -2642,6 +2649,59 @@ async function enqueueBackgroundJob(env, jobType, payload={}, maxAttempts=5) {
   return id;
 }
 
+async function readBoundedJson(request, maxBytes=1024) {
+  const contentType=String(request.headers.get('content-type')||'').toLowerCase();
+  if(!contentType.startsWith('application/json')) return {ok:false,error:'JSON_REQUIRED'};
+  const declared=request.headers.get('content-length');
+  if(declared!==null && (!/^\d+$/.test(declared) || Number(declared)>maxBytes)) return {ok:false,error:'BODY_TOO_LARGE'};
+  if(!request.body) return {ok:false,error:'JSON_REQUIRED'};
+  try {
+    const reader=request.body.getReader();
+    const decoder=new TextDecoder();
+    let text='',total=0;
+    while(true){
+      const chunk=await reader.read();
+      if(chunk.done) break;
+      total+=chunk.value.byteLength;
+      if(total>maxBytes){ await reader.cancel(); return {ok:false,error:'BODY_TOO_LARGE'}; }
+      text+=decoder.decode(chunk.value,{stream:true});
+    }
+    text+=decoder.decode();
+    return {ok:true,value:JSON.parse(text)};
+  } catch {
+    return {ok:false,error:'JSON_INVALID'};
+  }
+}
+
+async function quarantineStaleJobs(request,env) {
+  const gate=await requireAuthRole(request,env,['gerante']);
+  const headers={
+    'cache-control':'no-store',
+    'x-content-type-options':'nosniff',
+    'x-frame-options':'DENY',
+    'referrer-policy':'no-referrer',
+    'permissions-policy':'geolocation=(self),camera=(),microphone=()'
+  };
+  if(request.url.startsWith('https://')) headers['strict-transport-security']='max-age=31536000; includeSubDomains';
+  if(gate.error) return gate.error;
+  const parsed=await readBoundedJson(request,1024);
+  if(!parsed.ok) return json({ok:false,error:parsed.error,version:VERSION},parsed.error==='BODY_TOO_LARGE'?413:400,headers);
+  const body=parsed.value;
+  if(!body || typeof body!=='object' || Array.isArray(body) || body.confirmation!=='QUARANTINE_STALE_JOBS') {
+    return json({ok:false,error:'CONFIRMATION_REQUIRED',version:VERSION},400,headers);
+  }
+  const staleMinutes=body.staleMinutes===undefined?120:body.staleMinutes;
+  if(!Number.isInteger(staleMinutes) || staleMinutes<60 || staleMinutes>1440) {
+    return json({ok:false,error:'STALE_THRESHOLD_INVALID',version:VERSION},400,headers);
+  }
+  const result=await quarantineStaleBackgroundJobs(env?.DB,{
+    staleMinutes,limit:25,
+    audit:{actorType:gate.auth.user.role,actorId:String(gate.auth.user.id)}
+  });
+  if(!result.ok) return json({ok:false,error:result.error,version:VERSION},503,headers);
+  return json({ok:true,version:VERSION,action:'MANUAL_STALE_JOB_QUARANTINE',...result},200,headers);
+}
+
 async function processBackgroundJobs(request,env) {
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
   await ensureFinalHardeningSchema(env); await ensureOperationalSchema(env);
@@ -2660,14 +2720,16 @@ async function processBackgroundJobs(request,env) {
       else if(job.job_type==='PRODUCTION_AUDIT') result=await productionConfigCheck(env,{persist:true});
       else if(job.job_type==='COPILOT_BRIEFING') result={performed:true,delegation:'Use /api/copilot/briefing'};
       const done=result.performed===true || result.overall===true;
-      await env.DB.prepare(`UPDATE background_jobs SET status=?,result_json=?,attempts=attempts+1,updated_at=CURRENT_TIMESTAMP,completed_at=? WHERE id=?`)
+      const finalized=await env.DB.prepare(`UPDATE background_jobs SET status=?,result_json=?,attempts=attempts+1,updated_at=CURRENT_TIMESTAMP,completed_at=? WHERE id=? AND status='RUNNING'`)
         .bind(done?'DONE':'WAITING_PROVIDER',JSON.stringify(result),done?new Date().toISOString():null,job.id).run();
-      results.push({id:job.id,status:done?'DONE':'WAITING_PROVIDER',result});
+      const stateChanged=Number(finalized?.meta?.changes)!==1;
+      results.push({id:job.id,status:stateChanged?'SKIPPED':done?'DONE':'WAITING_PROVIDER',reason:stateChanged?'JOB_STATE_CHANGED':undefined,result:stateChanged?undefined:result});
     } catch(e) {
       const attempts=Number(job.attempts||0)+1;
       const status=attempts>=Number(job.max_attempts||5)?'FAILED':'PENDING';
-      await env.DB.prepare(`UPDATE background_jobs SET status=?,attempts=?,last_error=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(status,attempts,String(e.message||e),job.id).run();
-      results.push({id:job.id,status,error:String(e.message||e)});
+      const failure=await env.DB.prepare(`UPDATE background_jobs SET status=?,attempts=?,last_error='JOB_PROCESSING_FAILED',updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='RUNNING'`).bind(status,attempts,job.id).run();
+      const stateChanged=Number(failure?.meta?.changes)!==1;
+      results.push({id:job.id,status:stateChanged?'SKIPPED':status,reason:stateChanged?'JOB_STATE_CHANGED':undefined,error:stateChanged?undefined:'JOB_PROCESSING_FAILED'});
     }
   }
   await journal(env,'gerante',gate.auth.user.id,'BACKGROUND_JOBS_PROCESSED','system',null,'OK',{count:results.length});
@@ -3154,6 +3216,7 @@ async function handle(request,env){
   try {
     if(isMutatingMethod(request.method) && !securityOriginAllowed(request,env)) return json({ok:false,error:'ORIGIN_NOT_ALLOWED',version:VERSION},403);
     const url=new URL(request.url);
+    if(url.pathname==='/api/jobs/reconcile-stale' && request.method==='POST') return await quarantineStaleJobs(request,env);
     // Fail closed before any schema helper touches D1: unauthenticated callers
     // must not use mission validation as an existence oracle for private IDs.
     if (url.pathname === '/api/missions/validate') {
@@ -3181,7 +3244,10 @@ async function handle(request,env){
     if(request.url.startsWith('https://')) headers.set('strict-transport-security','max-age=31536000; includeSubDomains');
     return new Response(response.body,{status:response.status,statusText:response.statusText,headers});
   } catch(error) {
-    return json({ok:false,error:'INTERNAL_ERROR',version:VERSION},500);
+    // Minimal, privacy-safe diagnostic: never log exception text, request body, cookie or user identifiers.
+    console.error('PROCHELIA_REQUEST_FAILURE', { method: request.method, errorName: error?.name || 'Error' });
+    const testErrorClass=env?.TEST_DIAGNOSTICS===true ? String(error?.name || 'Error') : null;
+    return json({ok:false,error:'INTERNAL_ERROR',version:VERSION},500,testErrorClass?{'x-test-error-class':testErrorClass}:{});
   }
 }
 
