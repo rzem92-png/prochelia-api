@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
+import { DatabaseSync } from "node:sqlite";
 import {
   normalizeComplaintIdempotencyKey,
   buildComplaintIdempotencyIdentity,
@@ -12,6 +13,44 @@ const actor={id:"user-7",role:"client"};
 const scope={client_type:"B2C",client_id:"client-7",company_id:null,mission_id:"mission-9",severity:"MEDIUM"};
 const draft={category:"service_quality",description:"La prestation n'a pas correspondu à la description initiale.",incidentDate:"2026-11-27",requestReference:"REQ-42",desiredOutcome:"clarification",desiredOutcomeDetails:null,clientId:"client-7",companyId:null,missionId:"mission-9"};
 const complaint={client_type:"B2C",client_id:"client-7",company_id:null,mission_id:"mission-9",category:"service_quality",severity:"MEDIUM",description:draft.description};
+
+
+class SqliteD1 {
+  constructor(){
+    this.db=new DatabaseSync(":memory:");
+    this.db.exec(`CREATE TABLE idempotency_records (
+      id TEXT PRIMARY KEY, scope TEXT NOT NULL, idem_key TEXT NOT NULL, request_hash TEXT,
+      response_json TEXT, status_code INTEGER, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(scope,idem_key)
+    );
+    CREATE TABLE complaints (
+      id TEXT PRIMARY KEY, client_type TEXT NOT NULL, client_id TEXT, company_id TEXT,
+      mission_id TEXT, category TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'OPEN',
+      severity TEXT NOT NULL DEFAULT 'LOW', description TEXT, resolution_case_id TEXT,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, resolved_at TEXT
+    );`);
+  }
+  prepare(sql){
+    const db=this.db;
+    return {bind(...params){
+      return {
+        first(){return db.prepare(sql).get(...params)||null;},
+        run(){return db.prepare(sql).run(...params);}
+      };
+    }};
+  }
+  async batch(statements){
+    this.db.exec("BEGIN");
+    try{
+      const results=statements.map(statement=>statement.run());
+      this.db.exec("COMMIT");
+      return results;
+    }catch(error){
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+}
 
 class FakeStatement {
   constructor(db,sql){this.db=db;this.sql=sql;this.params=[];}
@@ -140,4 +179,19 @@ test("case link is persisted and later retries return the linked complaint witho
 test("missing idempotency storage fails closed",async()=>{
   const identity=await buildComplaintIdempotencyIdentity(actor,randomUUID(),draft,scope);
   assert.deepEqual(await reserveComplaintIntake({},identity,"complaint-a",complaint),{ok:false,error:"IDEMPOTENCY_STORAGE_UNAVAILABLE"});
+});
+
+test("actual SQLite D1 batch SQL atomically claims one key and persists a case link",async()=>{
+  const db=new SqliteD1(), key=randomUUID(), identity=await buildComplaintIdempotencyIdentity(actor,key,draft,scope);
+  const first=await reserveComplaintIntake(db,identity,"complaint-sql-a",complaint);
+  const replay=await reserveComplaintIntake(db,identity,"complaint-sql-b",complaint);
+  assert.equal(first.ok,true);assert.equal(first.created,true);
+  assert.equal(replay.ok,true);assert.equal(replay.created,false);
+  assert.equal(replay.complaintId,"complaint-sql-a");
+  assert.equal(db.db.prepare("SELECT COUNT(*) AS n FROM complaints").get().n,1);
+  assert.equal(await persistComplaintCaseLink(db,identity,"complaint-sql-a","case-sql-1"),true);
+  const linked=await reserveComplaintIntake(db,identity,"complaint-sql-c",complaint);
+  assert.equal(linked.resolutionCaseId,"case-sql-1");
+  assert.equal(db.db.prepare("SELECT COUNT(*) AS n FROM complaints").get().n,1);
+  db.db.close();
 });
