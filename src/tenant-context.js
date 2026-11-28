@@ -2,11 +2,13 @@
 const LIST_SQL = `
   SELECT t.id, t.kind, t.display_name, t.country_code, m.role,
          c.selected_at
-    FROM tenant_memberships m
+    FROM sessions s
+    JOIN tenant_memberships m ON m.user_id = s.user_id AND m.user_id = ?
     JOIN tenants t ON t.id = m.tenant_id
     LEFT JOIN tenant_session_context c
-      ON c.session_id = ? AND c.tenant_id = t.id
-   WHERE m.user_id = ?
+      ON c.session_id = s.id AND c.tenant_id = t.id
+   WHERE s.id = ?
+     AND s.expires_at > CURRENT_TIMESTAMP
      AND m.status = 'ACTIVE'
      AND t.status = 'ACTIVE'
    ORDER BY CASE m.role
