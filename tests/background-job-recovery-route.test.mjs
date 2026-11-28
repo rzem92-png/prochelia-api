@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import worker from "../src/index.js";
 
 const cookie = "prochelia_session=test-session";
+const testEnv = db => ({ DB: db, TEST_DIAGNOSTICS: true });
 function makeDB(role = "gerante", failSelect = false) {
   let selectCalls = 0;
   let batchCalls = 0;
@@ -49,14 +50,14 @@ test("stale-job quarantine requires authenticated manager role", async () => {
   const noSession = await worker.fetch(new Request("https://preview.example/api/jobs/reconcile-stale", {
     method: "POST", headers: { "content-type": "application/json" },
     body: JSON.stringify({ confirmation: "QUARANTINE_STALE_JOBS" })
-  }), { DB: db });
-  assert.equal(noSession.status, 401);
+  }), testEnv(db));
+  assert.equal(noSession.status, 401, noSession.headers.get("x-test-error-class") || "");
   assert.equal(db.selectCalls, 0);
   const client = await worker.fetch(new Request("https://preview.example/api/jobs/reconcile-stale", {
     method: "POST", headers: { cookie, "content-type": "application/json" },
     body: JSON.stringify({ confirmation: "QUARANTINE_STALE_JOBS" })
-  }), { DB: makeDB("client") });
-  assert.equal(client.status, 403);
+  }), testEnv(makeDB("client")));
+  assert.equal(client.status, 403, client.headers.get("x-test-error-class") || "");
 });
 
 test("invalid confirmation never reads or changes the queue", async () => {
@@ -65,7 +66,7 @@ test("invalid confirmation never reads or changes the queue", async () => {
     method: "POST", headers: { cookie, "content-type": "application/json" },
     body: JSON.stringify({ confirmation: "YES" })
   }), { DB: db });
-  assert.equal(response.status, 400);
+  assert.equal(response.status, 400, response.headers.get("x-test-error-class") || "");
   assert.equal(db.selectCalls, 0);
   assert.equal(db.batchCalls, 0);
 });
@@ -76,7 +77,7 @@ test("manager action quarantines only a summary and does not expose job IDs", as
     method: "POST", headers: { cookie, "content-type": "application/json" },
     body: JSON.stringify({ confirmation: "QUARANTINE_STALE_JOBS", staleMinutes: 120 })
   }), { DB: db });
-  assert.equal(response.status, 200);
+  assert.equal(response.status, 200, response.headers.get("x-test-error-class") || "");
   assert.equal(response.headers.get("cache-control"), "no-store");
   assert.equal(response.headers.get("x-content-type-options"), "nosniff");
   const body = await response.json();
@@ -94,7 +95,7 @@ test("database errors return generic 503 without leaking details", async () => {
     method: "POST", headers: { cookie, "content-type": "application/json" },
     body: JSON.stringify({ confirmation: "QUARANTINE_STALE_JOBS" })
   }), { DB: db });
-  assert.equal(response.status, 503);
+  assert.equal(response.status, 503, response.headers.get("x-test-error-class") || "");
   const body = await response.json();
   assert.equal(body.error, "STALE_JOB_QUARANTINE_UNAVAILABLE");
   assert.doesNotMatch(JSON.stringify(body), /private D1 error/);
@@ -117,7 +118,7 @@ test("oversized JSON request is rejected before queue access", async () => {
     method: "POST", headers: { cookie, "content-type": "application/json" },
     body: JSON.stringify({ confirmation: "QUARANTINE_STALE_JOBS", extra: "x".repeat(2048) })
   }), { DB: db });
-  assert.equal(response.status, 413);
+  assert.equal(response.status, 413, response.headers.get("x-test-error-class") || "");
   assert.equal(db.selectCalls, 0);
   assert.equal(db.batchCalls, 0);
 });
