@@ -76,3 +76,9 @@ test("matrix fails closed when review date expires or a source reference is inve
  invalid.territories[0].sourceIds.push("FAKE_SOURCE");
  assert.equal(api.evaluate(invalid,register,now).ok,false);
 });
+
+test("matrix validator rejects a missing unresearched-territory index instead of throwing",()=>{
+ const malformed=structuredClone(matrix);
+ delete malformed.territoriesNotResearched;
+ assert.equal(api.evaluate(malformed,register,now).ok,false);
+});
