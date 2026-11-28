@@ -32,7 +32,7 @@ function makeD1() {
            ('u2','client','u2@example.test','Two','User','active','2026-01-01','2026-01-01');
     INSERT INTO sessions(id,user_id,token_hash,expires_at)
     VALUES ('s1','u1','TQVEcD9psvMekhpwgMQj5fHUYSNGsCcRAyMM7zLCVTs','2099-01-01'),
-           ('s2','u2',sessionHashU2,'2099-01-01');
+           ('s2','u2','${sessionHashU2}','2099-01-01');
     INSERT INTO tenants(id,kind,display_name,country_code,created_by_user_id)
     VALUES ('t1','PERSONAL','Workspace One','FR','u1'),
            ('t2','ORGANIZATION','Company Two','BE','u1'),
