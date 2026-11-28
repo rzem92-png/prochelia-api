@@ -9,9 +9,9 @@ function dbFixture() {
   const db = new DatabaseSync(":memory:");
   db.exec("PRAGMA foreign_keys=ON");
   db.exec(`
-    CREATE TABLE users(id TEXT PRIMARY KEY, role TEXT NOT NULL);
+    CREATE TABLE users(id TEXT PRIMARY KEY, role TEXT NOT NULL, email TEXT NOT NULL);
     CREATE TABLE sessions(id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id));
-    INSERT INTO users(id,role) VALUES ('u1','client'),('u2','client'),('u3','client');
+    INSERT INTO users(id,role,email) VALUES ('u1','client','owner@example.test'),('u2','client','owner2@example.test'),('u3','client','admin@example.test');
   `);
   db.exec(migration);
   db.exec(`
@@ -49,4 +49,25 @@ test("last-owner protection allows removal when another active owner remains", (
   assert.equal(db.prepare("SELECT COUNT(*) AS n FROM tenant_memberships WHERE tenant_id='t1' AND role='OWNER' AND status='ACTIVE'").get().n, 1);
   db.exec("UPDATE tenant_memberships SET role='ADMIN' WHERE id='m1'");
   assert.equal(db.prepare("SELECT COUNT(*) AS n FROM tenant_memberships WHERE tenant_id='t1' AND role='OWNER' AND status='ACTIVE'").get().n, 1);
+});
+
+test("invitation acceptance is restricted to the matching normalized email identity", () => {
+  const db = dbFixture();
+  db.exec(`
+    INSERT INTO tenant_invitations(
+      id,tenant_id,invitee_email,token_hash,role,invited_by_user_id,expires_at
+    ) VALUES ('i1','t1','admin@example.test','${"a".repeat(64)}','MEMBER','u1','2099-01-01T00:00:00Z');
+  `);
+  assert.throws(() => db.exec(`
+    UPDATE tenant_invitations
+       SET status='ACCEPTED', accepted_by_user_id='u2', accepted_at=CURRENT_TIMESTAMP
+     WHERE id='i1'
+  `), /TENANT_INVITATION_ACCEPTOR_EMAIL_MISMATCH/);
+  db.exec(`
+    UPDATE tenant_invitations
+       SET status='ACCEPTED', accepted_by_user_id='u3', accepted_at=CURRENT_TIMESTAMP
+     WHERE id='i1'
+  `);
+  assert.equal(db.prepare("SELECT status,accepted_by_user_id FROM tenant_invitations WHERE id='i1'").get().status, "ACCEPTED");
+  assert.equal(db.prepare("SELECT accepted_by_user_id FROM tenant_invitations WHERE id='i1'").get().accepted_by_user_id, "u3");
 });
