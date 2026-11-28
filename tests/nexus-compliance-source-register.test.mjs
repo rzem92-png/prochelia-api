@@ -17,7 +17,7 @@ test("unresearched countries remain explicitly blocked and are not silently prom
 test("fresh official-source additions remain reference-only and block market activation",()=>{
  const ids=new Set(register.sources.map(s=>s.sourceId));
  for(const id of ["FR_DGCCRF_PRICE_INFO_2026","EU_DSA_MARKETPLACE_GUIDANCE","EU_DAC7_COMMISSION","CNIL_AIPD_HIGH_RISK","CNIL_TRANSFER_REVIEW","DZ_ECOMMERCE_LAW_18_05","DZ_DATA_PROTECTION_LAW_18_07"])assert.ok(ids.has(id),`missing source ${id}`);
- for(const id of ["FR_DGCCRF_PRICE_INFO_2026","EU_DSA_MARKETPLACE_GUIDANCE","EU_DAC7_COMMISSION","CNIL_AIPD_HIGH_RISK","CNIL_TRANSFER_REVIEW","DZ_ECOMMERCE_LAW_18_05","DZ_DATA_PROTECTION_LAW_18_07"]){const s=register.sources.find(x=>x.sourceId===id);assert.equal(s.accessLevel,"PAGE_OPENED");assert.equal(s.sourceStatus,"REFERENCE_CHECKED");assert.equal(s.legalReviewStatus,id==="DZ_ECOMMERCE_LAW_18_05"?"PENDING_LOCAL_COUNSEL":"PENDING_COUNSEL");assert.equal(s.controlImplementationStatus,"UNVERIFIED");assert.equal(s.launchImpact,"BLOCKED_PENDING_HUMAN_REVIEW");}
+ for(const id of ["FR_DGCCRF_PRICE_INFO_2026","EU_DSA_MARKETPLACE_GUIDANCE","EU_DAC7_COMMISSION","CNIL_AIPD_HIGH_RISK","CNIL_TRANSFER_REVIEW","DZ_ECOMMERCE_LAW_18_05","DZ_DATA_PROTECTION_LAW_18_07"]){const s=register.sources.find(x=>x.sourceId===id);assert.equal(s.accessLevel,"PAGE_OPENED");assert.equal(s.sourceStatus,"REFERENCE_CHECKED");assert.equal(s.legalReviewStatus,["DZ_ECOMMERCE_LAW_18_05","DZ_DATA_PROTECTION_LAW_18_07"].includes(id)?"PENDING_LOCAL_COUNSEL":"PENDING_COUNSEL");assert.equal(s.controlImplementationStatus,"UNVERIFIED");assert.equal(s.launchImpact,"BLOCKED_PENDING_HUMAN_REVIEW");}
  assert.equal(register.marketActivationAllowed,false);
 });
 
