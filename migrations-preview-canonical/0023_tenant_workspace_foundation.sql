@@ -157,3 +157,34 @@ WHEN NEW.status <> 'ACTIVE'
 BEGIN
   DELETE FROM tenant_session_context WHERE tenant_id = NEW.id;
 END;
+
+-- Prevent a workspace from losing its final active owner.
+-- Provisioning must create the tenant and initial OWNER membership atomically.
+CREATE TRIGGER IF NOT EXISTS trg_tenant_membership_last_owner_update
+BEFORE UPDATE OF tenant_id, role, status ON tenant_memberships
+WHEN OLD.status = 'ACTIVE' AND OLD.role = 'OWNER'
+  AND (NEW.tenant_id <> OLD.tenant_id OR NEW.role <> 'OWNER' OR NEW.status <> 'ACTIVE')
+  AND NOT EXISTS (
+    SELECT 1 FROM tenant_memberships other
+    WHERE other.tenant_id = OLD.tenant_id
+      AND other.user_id <> OLD.user_id
+      AND other.role = 'OWNER'
+      AND other.status = 'ACTIVE'
+  )
+BEGIN
+  SELECT RAISE(ABORT, 'TENANT_LAST_ACTIVE_OWNER_REQUIRED');
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_tenant_membership_last_owner_delete
+BEFORE DELETE ON tenant_memberships
+WHEN OLD.status = 'ACTIVE' AND OLD.role = 'OWNER'
+  AND NOT EXISTS (
+    SELECT 1 FROM tenant_memberships other
+    WHERE other.tenant_id = OLD.tenant_id
+      AND other.user_id <> OLD.user_id
+      AND other.role = 'OWNER'
+      AND other.status = 'ACTIVE'
+  )
+BEGIN
+  SELECT RAISE(ABORT, 'TENANT_LAST_ACTIVE_OWNER_REQUIRED');
+END;
