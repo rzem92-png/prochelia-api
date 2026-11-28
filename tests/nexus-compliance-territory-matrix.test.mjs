@@ -47,6 +47,9 @@ test("France, EU and Algeria reference only source-register entries and remain p
  assert.equal(matrix.territories.find(x=>x.code==="FR").categories.pricing_fees.status,"SOURCE_REGISTERED");
  assert.equal(matrix.territories.find(x=>x.code==="EU").categories.DSA.status,"SOURCE_REGISTERED");
  assert.equal(matrix.territories.find(x=>x.code==="DZ").categories.local_licensing.status,"SOURCE_REGISTERED");
+ const dz=matrix.territories.find(x=>x.code==="DZ");
+ for(const category of ["privacy","retention_rights","processor_contracts_transfers","security"]){assert.equal(dz.categories[category].status,"SOURCE_REGISTERED");assert.deepEqual(dz.categories[category].sourceIds,["DZ_DATA_PROTECTION_LAW_18_07"]);assert.equal(dz.categories[category].legalReviewStatus,"PENDING_LOCAL_COUNSEL");assert.equal(dz.categories[category].controlImplementationStatus,"UNVERIFIED");}
+ assert.ok(dz.sourceIds.includes("DZ_DATA_PROTECTION_LAW_18_07"));
 });
 
 test("future markets are explicitly NOT_RESEARCHED with no source or control claim",()=>{
