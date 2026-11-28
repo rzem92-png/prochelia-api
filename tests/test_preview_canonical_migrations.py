@@ -50,11 +50,13 @@ required = {
     "users", "sessions", "clients", "intervenants", "missions",
     "auth_login_rate_limits", "supra_audit_events",
     "supra_approval_requests", "supra_approval_votes", "supra_approval_events",
-    "tenants", "tenant_memberships", "tenant_invitations", "tenant_session_context",
+    "tenants", "tenant_memberships", "tenant_invitations", "tenant_session_context", "tenant_audit_events",
 }
 assert required <= tables, f"Canonical migration chain missing tables: {sorted(required-tables)}"
 
 # Tenant foundation invariants are tested against SQLite without any remote D1 writes.
+# Tenant audit events are append-only.
+
 db.execute(
     "INSERT INTO users(id,role,email,first_name,last_name,password_hash) VALUES(?,?,?,?,?,?)",
     ("u1", "client", "a@example.test", "A", "Test", "fixture"),
@@ -76,6 +78,22 @@ db.execute(
     ("s1", "u1", "session-hash-1", "2099-01-01"),
 )
 db.execute("INSERT INTO tenant_session_context(session_id,tenant_id) VALUES(?,?)", ("s1", "t1"))
+
+# Tenant audit records are append-only.
+db.execute(
+    "INSERT INTO tenant_audit_events(id,tenant_id,actor_user_id,event_type,details_json) VALUES(?,?,?,?,?)",
+    ("audit-1", "t1", "u1", "PERSONAL_TENANT_BOOTSTRAP_REQUESTED", '{"source":"test"}'),
+)
+try:
+    db.execute("UPDATE tenant_audit_events SET details_json='{}' WHERE id='audit-1'")
+    raise AssertionError("tenant audit update unexpectedly allowed")
+except sqlite3.IntegrityError as error:
+    assert "TENANT_AUDIT_EVENTS_APPEND_ONLY" in str(error)
+try:
+    db.execute("DELETE FROM tenant_audit_events WHERE id='audit-1'")
+    raise AssertionError("tenant audit delete unexpectedly allowed")
+except sqlite3.IntegrityError as error:
+    assert "TENANT_AUDIT_EVENTS_APPEND_ONLY" in str(error)
 
 # A session cannot select a tenant without an active membership.
 db.execute(

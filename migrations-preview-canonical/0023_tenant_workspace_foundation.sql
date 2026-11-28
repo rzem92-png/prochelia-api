@@ -157,3 +157,39 @@ WHEN NEW.status <> 'ACTIVE'
 BEGIN
   DELETE FROM tenant_session_context WHERE tenant_id = NEW.id;
 END;
+
+-- Tenant lifecycle audit is append-only and records actor + event without secrets.
+CREATE TABLE IF NOT EXISTS tenant_audit_events (
+  id TEXT PRIMARY KEY NOT NULL,
+  tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE RESTRICT,
+  actor_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+  event_type TEXT NOT NULL CHECK (event_type IN (
+    'PERSONAL_TENANT_BOOTSTRAP_REQUESTED',
+    'MEMBERSHIP_INVITATION_CREATED',
+    'MEMBERSHIP_INVITATION_ACCEPTED',
+    'MEMBERSHIP_REVOKED',
+    'TENANT_SUSPENDED',
+    'TENANT_REACTIVATED',
+    'OWNER_TRANSFER_REQUESTED',
+    'OWNER_TRANSFER_COMPLETED'
+  )),
+  details_json TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(details_json)),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_tenant_audit_events_tenant_time
+  ON tenant_audit_events(tenant_id, created_at, id);
+CREATE INDEX IF NOT EXISTS idx_tenant_audit_events_actor_time
+  ON tenant_audit_events(actor_user_id, created_at, id);
+
+CREATE TRIGGER IF NOT EXISTS trg_tenant_audit_events_no_update
+BEFORE UPDATE ON tenant_audit_events
+BEGIN
+  SELECT RAISE(ABORT, 'TENANT_AUDIT_EVENTS_APPEND_ONLY');
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_tenant_audit_events_no_delete
+BEFORE DELETE ON tenant_audit_events
+BEGIN
+  SELECT RAISE(ABORT, 'TENANT_AUDIT_EVENTS_APPEND_ONLY');
+END;

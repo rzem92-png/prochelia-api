@@ -1,5 +1,6 @@
 import { handleV7Route } from "./v7-routes.js";
 import { listTenantContexts, selectTenantContext } from "./tenant-context.js";
+import { bootstrapPersonalTenant } from "./tenant-bootstrap.js";
 // PROCHÉLIA — INDEX BACKEND CONSOLIDÉ UNIQUE
 // Référence de consolidation : V14.1 Finance + sécurité/RBAC existants.
 // Généré le 19/10/2026. À déployer uniquement après recette avec la vraie base D1.
@@ -3180,7 +3181,8 @@ async function handleTenantContext(request,env) {
   const url=new URL(request.url);
   const isList=url.pathname==='/api/tenant/context';
   const isSelect=url.pathname==='/api/tenant/context/select';
-  if(!isList&&!isSelect) return null;
+  const isBootstrap=url.pathname==='/api/tenant/bootstrap';
+  if(!isList&&!isSelect&&!isBootstrap) return null;
   const headers={
     'cache-control':'no-store',
     'x-content-type-options':'nosniff',
@@ -3189,7 +3191,7 @@ async function handleTenantContext(request,env) {
     'permissions-policy':'geolocation=(self),camera=(),microphone=()'
   };
   if(request.url.startsWith('https://')) headers['strict-transport-security']='max-age=31536000; includeSubDomains';
-  if((isList&&request.method!=='GET')||(isSelect&&request.method!=='POST')) {
+  if((isList&&request.method!=='GET')||((isSelect||isBootstrap)&&request.method!=='POST')) {
     return json({ok:false,error:'METHOD_NOT_ALLOWED',version:VERSION},405,headers);
   }
   if(!env?.DB) return json({ok:false,error:'TENANT_CONTEXT_UNAVAILABLE',version:VERSION},503,headers);
@@ -3204,6 +3206,18 @@ async function handleTenantContext(request,env) {
     }
     const parsed=await readTenantContextJson(request,2048);
     if(!parsed.ok) return json({ok:false,error:parsed.error,version:VERSION},parsed.error==='BODY_TOO_LARGE'?413:400,headers);
+    if(isBootstrap) {
+      if(!parsed.value || typeof parsed.value!=='object' || Array.isArray(parsed.value)) {
+        return json({ok:false,error:'JSON_OBJECT_REQUIRED',version:VERSION},400,headers);
+      }
+      const displayName=parsed.value?.displayName;
+      if(displayName!==undefined && (typeof displayName!=='string' || displayName.trim().length>160)) {
+        return json({ok:false,error:'TENANT_DISPLAY_NAME_INVALID',version:VERSION},400,headers);
+      }
+      const provisioned=await bootstrapPersonalTenant(env.DB,String(auth.user.id),displayName);
+      if(!provisioned.ok) return json({ok:false,error:provisioned.error,version:VERSION,tenant:provisioned.tenant||null},409,headers);
+      return json({ok:true,version:VERSION,created:provisioned.created,tenant:provisioned.tenant},200,headers);
+    }
     const tenantId=parsed.value?.tenantId;
     if(typeof tenantId!=='string'||!tenantId.trim()||tenantId.length>128) {
       return json({ok:false,error:'TENANT_ID_INVALID',version:VERSION},400,headers);
