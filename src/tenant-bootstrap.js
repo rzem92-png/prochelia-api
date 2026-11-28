@@ -13,6 +13,14 @@ const CREATE_OWNER_MEMBERSHIP_SQL = `
      AND t.status = 'ACTIVE'
 `;
 
+const AUDIT_BOOTSTRAP_SQL = `
+  INSERT INTO tenant_audit_events (id, tenant_id, actor_user_id, event_type, details_json)
+  SELECT ?, t.id, ?, 'PERSONAL_TENANT_BOOTSTRAP_REQUESTED', ?
+    FROM tenants t
+   WHERE t.kind = 'PERSONAL'
+     AND t.created_by_user_id = ?
+`;
+
 const READ_PERSONAL_TENANT_SQL = `
   SELECT t.id, t.display_name, t.status AS tenant_status,
          m.role, m.status AS membership_status
@@ -44,9 +52,11 @@ export async function bootstrapPersonalTenant(db, userId, displayName) {
 
   const tenantId = crypto.randomUUID();
   const membershipId = crypto.randomUUID();
+  const auditId = crypto.randomUUID();
   const statements = [
     db.prepare(CREATE_PERSONAL_TENANT_SQL).bind(tenantId, normalizeDisplayName(displayName), userId),
-    db.prepare(CREATE_OWNER_MEMBERSHIP_SQL).bind(membershipId, userId, userId)
+    db.prepare(CREATE_OWNER_MEMBERSHIP_SQL).bind(membershipId, userId, userId),
+    db.prepare(AUDIT_BOOTSTRAP_SQL).bind(auditId, userId, JSON.stringify({ source: 'tenant-bootstrap-api' }), userId)
   ];
 
   const batchResult = await db.batch(statements);
