@@ -15,7 +15,7 @@ function dbFixture() {
   `);
   db.exec(migration);
   db.exec(`
-    INSERT INTO tenants(id,kind,display_name,created_by_user_id) VALUES ('t1','ORGANIZATION','Org','u1');
+    INSERT INTO tenants(id,kind,display_name,created_by_user_id) VALUES ('t1','ORGANIZATION','Org','u1'), ('t2','ORGANIZATION','Other Org','u3');
     INSERT INTO tenant_memberships(id,tenant_id,user_id,role,status,accepted_at)
       VALUES ('m1','t1','u1','OWNER','ACTIVE','2026-01-01'),
              ('m2','t1','u2','OWNER','ACTIVE','2026-01-01'),
@@ -38,6 +38,7 @@ test("last active owner cannot be revoked, suspended, downgraded, moved or delet
     "UPDATE tenant_memberships SET status='REVOKED', revoked_at=CURRENT_TIMESTAMP WHERE id='m2'",
     "UPDATE tenant_memberships SET status='SUSPENDED' WHERE id='m2'",
     "UPDATE tenant_memberships SET role='ADMIN' WHERE id='m2'",
+    "UPDATE tenant_memberships SET tenant_id='t2' WHERE id='m2'",
     "DELETE FROM tenant_memberships WHERE id='m2'"
   ]) assert.throws(() => db.exec(sql), /TENANT_LAST_ACTIVE_OWNER_REQUIRED/);
 });
