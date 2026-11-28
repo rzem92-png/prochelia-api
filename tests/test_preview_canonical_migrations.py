@@ -88,6 +88,18 @@ try:
 except sqlite3.IntegrityError as error:
     assert "ACTIVE_TENANT_MEMBERSHIP_REQUIRED" in str(error)
 
+# Membership identity cannot be reassigned across tenants or users (invite/transfer flow required).
+try:
+    db.execute("UPDATE tenant_memberships SET tenant_id='t2' WHERE id='m1'")
+    raise AssertionError("membership tenant reassignment unexpectedly allowed")
+except sqlite3.IntegrityError as error:
+    assert "TENANT_MEMBERSHIP_IDENTITY_IMMUTABLE" in str(error)
+try:
+    db.execute("UPDATE tenant_memberships SET user_id='u2' WHERE id='m1'")
+    raise AssertionError("membership user reassignment unexpectedly allowed")
+except sqlite3.IntegrityError as error:
+    assert "TENANT_MEMBERSHIP_IDENTITY_IMMUTABLE" in str(error)
+
 # Personal workspaces are unique per creator; active membership needs acceptance evidence.
 try:
     db.execute(
