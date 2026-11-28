@@ -1,0 +1,14 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { validateMaskPlan } from "../src/live-safe-vision-mask-plan.js";
+const now=10000;
+const valid={frameId:"frame-abc",createdAtMs:now,expiresAtMs:now+500,mode:"targeted_blur",masks:[{rect:[0.2,0.2,0.25,0.3],trackId:"trk-1",confidence:0.91}]};
+test("accepts valid short-lived mask plan",()=>assert.equal(validateMaskPlan(valid,now).ok,true));
+test("expired plans fail closed",()=>assert.equal(validateMaskPlan({...valid,expiresAtMs:now},now).fallback,"full_frame_shield"));
+test("future plans rejected",()=>assert.equal(validateMaskPlan({...valid,createdAtMs:now+5000},now).ok,false));
+test("mask plan ttl bounded",()=>assert.equal(validateMaskPlan({...valid,expiresAtMs:now+5000},now).reason,"mask_ttl_too_long"));
+test("out of frame rectangle rejected",()=>assert.equal(validateMaskPlan({...valid,masks:[{...valid.masks[0],rect:[0.9,0.9,0.2,0.2]}]},now).ok,false));
+test("missing track id rejected",()=>assert.equal(validateMaskPlan({...valid,masks:[{rect:[0.2,0.2,0.25,0.3],confidence:0.91}]},now).ok,false));
+test("low confidence mask rejected",()=>assert.equal(validateMaskPlan({...valid,masks:[{...valid.masks[0],confidence:0.79}]},now).ok,false));
+test("mask count capped",()=>assert.equal(validateMaskPlan({...valid,masks:Array(33).fill(valid.masks[0])},now).reason,"too_many_masks"));
+test("full-frame shield plan needs no target boxes",()=>assert.equal(validateMaskPlan({...valid,mode:"full_frame_shield",masks:[]},now).ok,true));

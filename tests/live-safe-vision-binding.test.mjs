@@ -1,0 +1,18 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { validateMaskPlanBinding } from "../src/live-safe-vision-binding.js";
+const now=5000;
+const p={streamId:"s1",roomId:"r1",roomVersion:"v3",policyVersion:"p7",modelVersion:"m2",sequence:12,issuedAtMs:now,expiresAtMs:now+500,signatureVerified:true};
+const e={streamId:"s1",roomId:"r1",roomVersion:"v3",policyVersion:"p7",modelVersion:"m2",lastSequence:11};
+test("accepts verified current binding",()=>assert.equal(validateMaskPlanBinding(p,e,now).ok,true));
+test("sequence is monotonic and need not equal a fixed expected sequence",()=>assert.equal(validateMaskPlanBinding({...p,sequence:13},e,now).ok,true));
+test("sequence must be a positive safe integer",()=>assert.equal(validateMaskPlanBinding({...p,sequence:0},e,now).ok,false));
+test("cross-stream binding rejected",()=>assert.equal(validateMaskPlanBinding({...p,streamId:"s2"},e,now).reason,"binding_mismatch_streamId"));
+test("cross-room binding rejected",()=>assert.equal(validateMaskPlanBinding({...p,roomId:"r2"},e,now).ok,false));
+test("room version mismatch rejected",()=>assert.equal(validateMaskPlanBinding({...p,roomVersion:"v2"},e,now).ok,false));
+test("policy version mismatch rejected",()=>assert.equal(validateMaskPlanBinding({...p,policyVersion:"p6"},e,now).ok,false));
+test("model version mismatch rejected",()=>assert.equal(validateMaskPlanBinding({...p,modelVersion:"m1"},e,now).ok,false));
+test("out-of-order sequence rejected",()=>assert.equal(validateMaskPlanBinding({...p,sequence:11},e,now).reason,"replay_or_out_of_order"));
+test("signature not verified rejected",()=>assert.equal(validateMaskPlanBinding({...p,signatureVerified:false},e,now).ok,false));
+test("expired plan rejected",()=>assert.equal(validateMaskPlanBinding({...p,expiresAtMs:now},e,now).ok,false));
+test("stale issued plan rejected",()=>assert.equal(validateMaskPlanBinding({...p,issuedAtMs:now-3000},e,now).ok,false));

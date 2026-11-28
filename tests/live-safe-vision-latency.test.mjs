@@ -1,0 +1,13 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { evaluateSafeVisionLatency } from "../src/live-safe-vision-latency.js";
+const t={receivedAt:100,decisionAt:110,transformStartedAt:112,transformCompletedAt:130,verifiedAt:134,releasedAt:140};
+test("valid pipeline under latency budget",()=>assert.equal(evaluateSafeVisionLatency(t,60).ok,true));
+test("exceeding deadline blocks release",()=>assert.equal(evaluateSafeVisionLatency({...t,releasedAt:170},60).reason,"latency_budget_exceeded"));
+test("missing stage fails closed",()=>assert.equal(evaluateSafeVisionLatency({...t,verifiedAt:undefined},60).ok,false));
+test("non-monotonic clock stages fail closed",()=>assert.equal(evaluateSafeVisionLatency({...t,transformCompletedAt:111},60).reason,"non_monotonic_transformCompletedAt"));
+test("invalid budget fails closed",()=>assert.equal(evaluateSafeVisionLatency(t,0).ok,false));
+test("reports stage metrics",()=>assert.deepEqual(evaluateSafeVisionLatency(t,60).metrics,{total:40,decision:10,transform:18,verify:4,release:6,budgetMs:60}));
+test("deadline boundary is accepted",()=>assert.equal(evaluateSafeVisionLatency({...t,releasedAt:160},60).ok,true));
+test("large verification delay is counted",()=>assert.equal(evaluateSafeVisionLatency({...t,verifiedAt:159,releasedAt:160},60).metrics.verify,29));
+test("release cannot precede verification",()=>assert.equal(evaluateSafeVisionLatency({...t,releasedAt:133},60).ok,false));

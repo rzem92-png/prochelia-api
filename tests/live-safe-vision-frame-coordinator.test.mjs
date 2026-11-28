@@ -1,0 +1,17 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { evaluateSafeVisionFrame } from "../src/live-safe-vision-frame-coordinator.js";
+const signal={detectorHealthy:true,enforcementHealthy:true,confidence:0.9,severity:"high",targetTrackReliable:true,context:"other",repeated:false,imminentDanger:false,policyAllowsBlur:true};
+const now=20000;
+const mask={frameId:"f-2",createdAtMs:now,expiresAtMs:now+500,mode:"targeted_blur",masks:[{rect:[0.1,0.1,0.2,0.3],trackId:"t-9",confidence:0.9}]};
+const binding={plan:{streamId:"s1",roomId:"r1",roomVersion:"rv1",policyVersion:"pv1",modelVersion:"mv1",sequence:8,issuedAtMs:now,expiresAtMs:now+500,signatureVerified:true,frameId:"f-2"},expected:{streamId:"s1",roomId:"r1",roomVersion:"rv1",policyVersion:"pv1",modelVersion:"mv1",lastSequence:7}};
+test("allow decision bypasses transform",()=>assert.equal(evaluateSafeVisionFrame({signal:{...signal,severity:"low",confidence:0.2},nowMs:now}).action,"allow"));
+test("critical risk requests LIVE pause",()=>assert.equal(evaluateSafeVisionFrame({signal:{...signal,severity:"critical"},nowMs:now}).action,"pause_live"));
+test("low detector health shields",()=>assert.equal(evaluateSafeVisionFrame({signal:{...signal,detectorHealthy:false},nowMs:now}).action,"shield"));
+test("valid target plan reaches transform contract",()=>assert.equal(evaluateSafeVisionFrame({signal,maskPlan:mask,binding,nowMs:now}).action,"transform"));
+test("mode mismatch shields",()=>assert.equal(evaluateSafeVisionFrame({signal,maskPlan:{...mask,mode:"expanded_blur"},binding,nowMs:now}).reason,"mask_mode_mismatch"));
+test("invalid mask shields",()=>assert.equal(evaluateSafeVisionFrame({signal,maskPlan:{...mask,masks:[]},binding,nowMs:now}).action,"shield"));
+test("binding failure shields",()=>assert.equal(evaluateSafeVisionFrame({signal,maskPlan:mask,binding:{...binding,plan:{...binding.plan,roomId:"other"}},nowMs:now}).action,"shield"));
+test("frame mismatch shields",()=>assert.equal(evaluateSafeVisionFrame({signal,maskPlan:mask,binding:{...binding,plan:{...binding.plan,frameId:"other"}},nowMs:now}).reason,"frame_binding_mismatch"));
+test("uncertain tracking expanded blur accepts matching expanded plan",()=>assert.equal(evaluateSafeVisionFrame({signal:{...signal,targetTrackReliable:false,confidence:0.65},maskPlan:{...mask,mode:"expanded_blur",masks:[{...mask.masks[0],confidence:0.6}]},binding,nowMs:now}).action,"transform"));
+test("signature-unverified plan shields",()=>assert.equal(evaluateSafeVisionFrame({signal,maskPlan:mask,binding:{...binding,plan:{...binding.plan,signatureVerified:false}},nowMs:now}).action,"shield"));
