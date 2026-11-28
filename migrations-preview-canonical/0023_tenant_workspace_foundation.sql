@@ -188,3 +188,17 @@ WHEN OLD.status = 'ACTIVE' AND OLD.role = 'OWNER'
 BEGIN
   SELECT RAISE(ABORT, 'TENANT_LAST_ACTIVE_OWNER_REQUIRED');
 END;
+
+-- Acceptance must bind the invitation to the account whose normalized email matches.
+-- The application still validates token possession, expiry and atomic membership creation.
+CREATE TRIGGER IF NOT EXISTS trg_tenant_invitation_acceptance_identity
+BEFORE UPDATE OF status, accepted_by_user_id ON tenant_invitations
+WHEN NEW.status = 'ACCEPTED'
+  AND NOT EXISTS (
+    SELECT 1 FROM users u
+    WHERE u.id = NEW.accepted_by_user_id
+      AND lower(trim(u.email)) = NEW.invitee_email
+  )
+BEGIN
+  SELECT RAISE(ABORT, 'TENANT_INVITATION_ACCEPTOR_EMAIL_MISMATCH');
+END;
