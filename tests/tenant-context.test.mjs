@@ -79,6 +79,7 @@ test("tenant context listing is session/user scoped and minimizes returned field
   assert.deepEqual(mismatchedIdentity.tenants, []);
   assert.deepEqual(unknownSession.tenants, []);
   assert.deepEqual(expiredSession.tenants, []);
+  assert.equal(await selectTenantContext(d1, "s-expired", "u1", "t1"), false);
   assert.equal(one.selectedTenantId, null);
   assert.deepEqual(Object.keys(one.tenants[0]).sort(), ["countryCode", "id", "kind", "name", "role", "selected"]);
 });
