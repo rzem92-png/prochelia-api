@@ -242,7 +242,7 @@ test("tenant workspace foundation remains a local Preview candidate until the re
   assert.match(candidate, /ACTIVE_TENANT_MEMBERSHIP_REQUIRED/);
   assert.match(candidate, /trg_tenant_membership_invalidate_context/);
   assert.match(candidate, /trg_tenant_invalidate_context/);
-  assert.doesNotMatch(candidate, /^\\s*(INSERT|UPDATE|DROP)\\s/m, "candidate migration must not backfill, update, or drop existing data");
+  assert.doesNotMatch(candidate, /^\s*(INSERT|UPDATE|DROP)\s/m, "candidate migration must not backfill, update, or drop existing data");
   assert.match(workflow, /ref: 1fc258c9c8d25e5e7b89241504218bf102afbf27/);
-  assert.doesNotMatch(workflow, /0023_tenant_workspace_foundation\\.sql/, "remote migration gate must stay pinned to the previously reviewed baseline");
+  assert.doesNotMatch(workflow, /0023_tenant_workspace_foundation\.sql/, "remote migration gate must stay pinned to the previously reviewed baseline");
 });
