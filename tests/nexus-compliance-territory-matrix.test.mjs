@@ -82,3 +82,9 @@ test("matrix validator rejects a missing unresearched-territory index instead of
  delete malformed.territoriesNotResearched;
  assert.equal(api.evaluate(malformed,register,now).ok,false);
 });
+
+test("ISO date parser accepts real dates and rejects malformed dates",()=>{
+ assert.equal(api.date("2026-11-28"),true);
+ assert.equal(api.date("2026-02-30"),false);
+ assert.equal(api.date("not-a-date"),false);
+});
