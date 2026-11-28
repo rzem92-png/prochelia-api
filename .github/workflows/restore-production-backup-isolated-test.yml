@@ -249,7 +249,7 @@ jobs:
         if: always()
         shell: bash
         run: |
-          set +e
+          set -euo pipefail
           rm -rf "$RUNNER_TEMP/prochelia-prod-restore"
           rm -f "$RUNNER_TEMP/restore-r2-eu.json" "$RUNNER_TEMP/backup-run.json" "$RUNNER_TEMP/backup-run.log" "$RUNNER_TEMP/pre-restore.json" "$RUNNER_TEMP/quick-check.json" "$RUNNER_TEMP/foreign-key-check.json" "$RUNNER_TEMP/tables.json" "$RUNNER_TEMP/token.json" "$RUNNER_TEMP/d1.json" "$RUNNER_TEMP/wrangler.restore.json"
           echo "Sensitive local restore artifacts removed from runner temp."
