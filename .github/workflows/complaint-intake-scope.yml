@@ -4,7 +4,9 @@ on:
     paths:
       - "src/index.js"
       - "src/complaint-scope.js"
+      - "src/complaint-idempotency.js"
       - "tests/complaint-scope.test.mjs"
+      - "tests/complaint-idempotency.test.mjs"
       - ".github/workflows/complaint-intake-scope.yml"
   push:
     branches: [main]
@@ -29,5 +31,6 @@ jobs:
         run: |
           node --experimental-default-type=module --check src/index.js
           node --experimental-default-type=module --check src/complaint-scope.js
+          node --experimental-default-type=module --check src/complaint-idempotency.js
       - name: Complaint intake regression suite
-        run: node --experimental-default-type=module --test tests/complaint-scope.test.mjs
+        run: node --experimental-default-type=module --test tests/complaint-scope.test.mjs tests/complaint-idempotency.test.mjs
