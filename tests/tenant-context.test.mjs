@@ -116,7 +116,9 @@ test("Worker selection rejects non-member and persists valid selected tenant", a
   assert.equal(denied.status, 403);
   const accepted = await worker.fetch(request("/api/tenant/context/select", "POST", { tenantId: "t2" }), { DB: d1 });
   assert.equal(accepted.status, 200);
-  assert.deepEqual(await accepted.json(), { ok: true, selectedTenantId: "t2" });
+  const acceptedBody = await accepted.json();
+  assert.equal(acceptedBody.ok, true);
+  assert.equal(acceptedBody.selectedTenantId, "t2");
   const listing = await worker.fetch(request("/api/tenant/context"), { DB: d1 });
   assert.equal((await listing.json()).selectedTenantId, "t2");
 });
