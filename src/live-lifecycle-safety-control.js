@@ -131,6 +131,36 @@ export function transitionLiveSession(sessionInput, command) {
     return { session: next, outcome: "applied", actions };
   }
 
+  if (type === "review_release") {
+    if (session.state !== "review_required") fail("INVALID_TRANSITION", "Human review release requires review_required state.");
+    if (actorRole !== "moderator") fail("FORBIDDEN", "Only a human moderator can release a LIVE from review.");
+    if (!isPlainObject(command.reviewDecision) || !["clear", "confirmed_violation"].includes(command.reviewDecision.result)
+      || typeof command.reviewDecision.reviewerId !== "string" || !command.reviewDecision.reviewerId
+      || typeof command.reviewDecision.policyVersion !== "string" || !command.reviewDecision.policyVersion) {
+      fail("INVALID_REVIEW_DECISION", "A reviewer identity, result and policy version are required.");
+    }
+    if (command.reviewDecision.result === "confirmed_violation") {
+      const next = withEvent(session, command, "ended", {
+        publishEnabled: false, distributionEnabled: false, giftsEnabled: false, guestPublishingEnabled: false,
+      }, { reviewResult: "confirmed_violation", reviewerId: command.reviewDecision.reviewerId, policyVersion: command.reviewDecision.policyVersion });
+      actions.push("terminate_stream", "disable_publish", "disable_distribution", "disable_gifts", "disable_guest_publish", "finalize_incident", "notify_creator", "queue_sanction_review");
+      return { session: next, outcome: "applied", actions };
+    }
+    const checks = command.resumeChecks;
+    if (!isPlainObject(checks) || checks.allClear !== true || checks.detectorsHealthy !== true
+      || checks.policyCurrent !== true || checks.incidentAcknowledged !== true
+      || checks.identityVerified !== true || checks.ageEligible !== true
+      || checks.territoryAllowed !== true || checks.consentValid !== true
+      || checks.chatModerationReady !== true) {
+      fail("REVIEW_RELEASE_GATES_FAILED", "Human release blocked until all safety, identity, age, territory, consent and moderation checks clear.");
+    }
+    const next = withEvent(session, command, "live", {
+      publishEnabled: true, distributionEnabled: true, giftsEnabled: false, guestPublishingEnabled: false,
+    }, { reviewResult: "clear", reviewerId: command.reviewDecision.reviewerId, policyVersion: command.reviewDecision.policyVersion });
+    actions.push("enable_publish", "enable_distribution", "keep_gifts_disabled", "keep_guest_publish_disabled", "close_incident", "notify_creator");
+    return { session: next, outcome: "applied", actions };
+  }
+
   if (type === "resume") {
     if (!["paused_safety", "paused_technical"].includes(session.state)) fail("INVALID_TRANSITION", "Only a paused LIVE can resume.");
     if (!(actorRole === "creator" && creatorOwns) && !["moderator", "system"].includes(actorRole)) fail("FORBIDDEN", "Resume requires creator or authorized moderator.");
