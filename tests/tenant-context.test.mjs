@@ -127,3 +127,17 @@ test("tenant context returns unavailable rather than falling back when schema is
   assert.equal(response.status, 503);
   assert.equal((await response.json()).error, "TENANT_CONTEXT_UNAVAILABLE");
 });
+
+test("tenant selection rejects malformed JSON and oversized payloads before D1 mutation", async () => {
+  const { d1, sqlite } = makeD1();
+  const malformed = await worker.fetch(new Request("https://preview.example/api/tenant/context/select", {
+    method: "POST", headers: { cookie: `prochelia_session=${sessionToken}`, "content-type": "application/json" }, body: "{"
+  }), { DB: d1 });
+  assert.equal(malformed.status, 400);
+  const oversized = await worker.fetch(new Request("https://preview.example/api/tenant/context/select", {
+    method: "POST", headers: { cookie: `prochelia_session=${sessionToken}`, "content-type": "application/json" },
+    body: JSON.stringify({ tenantId: "t2", note: "x".repeat(3000) })
+  }), { DB: d1 });
+  assert.equal(oversized.status, 413);
+  assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM tenant_session_context").get().n, 0);
+});
