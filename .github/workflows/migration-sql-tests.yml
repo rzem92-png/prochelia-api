@@ -10,6 +10,7 @@ on:
       - "tests/preview-migration-workflow.test.mjs"
       - "scripts/prepare-d1-restore.py"
       - "tests/test_prepare_d1_restore.py"
+      - "tests/tenant-context.test.mjs"
       - ".github/workflows/preview-directory-e2e-acceptance.yml"
       - ".github/workflows/restore-production-backup-isolated-test.yml"
       - ".github/workflows/migration-sql-tests.yml"
@@ -45,3 +46,4 @@ jobs:
           python3 tests/test_preview_canonical_migrations.py
           python3 tests/test_prepare_d1_restore.py
           node --test tests/preview-migration-workflow.test.mjs
+          node --test tests/tenant-context.test.mjs

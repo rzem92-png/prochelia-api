@@ -1,4 +1,5 @@
 import { handleV7Route } from "./v7-routes.js";
+import { listTenantContexts, selectTenantContext } from "./tenant-context.js";
 // PROCHÉLIA — INDEX BACKEND CONSOLIDÉ UNIQUE
 // Référence de consolidation : V14.1 Finance + sécurité/RBAC existants.
 // Généré le 19/10/2026. À déployer uniquement après recette avec la vraie base D1.
@@ -77,6 +78,12 @@ function randomBytes(length = 32) {
   const bytes = new Uint8Array(length);
   crypto.getRandomValues(bytes);
   return bytes;
+}
+
+async function sha256Hex(value) {
+  const data=new TextEncoder().encode(value);
+  const digest=await crypto.subtle.digest('SHA-256',data);
+  return Array.from(new Uint8Array(digest),byte=>byte.toString(16).padStart(2,'0')).join('');
 }
 
 async function sha256Base64url(value) {
@@ -3145,10 +3152,75 @@ async function handleCommercialRecruitment(request,env){
   return null;
 }
 
+async function readTenantContextJson(request,maxBytes=2048) {
+  const contentType=String(request.headers.get('content-type')||'').toLowerCase();
+  if(!contentType.startsWith('application/json')) return {ok:false,error:'JSON_REQUIRED'};
+  const declared=request.headers.get('content-length');
+  if(declared!==null&&(!/^\d+$/.test(declared)||Number(declared)>maxBytes)) return {ok:false,error:'BODY_TOO_LARGE'};
+  if(!request.body) return {ok:false,error:'JSON_REQUIRED'};
+  try {
+    const reader=request.body.getReader();
+    const decoder=new TextDecoder();
+    let text='',total=0;
+    while(true) {
+      const chunk=await reader.read();
+      if(chunk.done) break;
+      total+=chunk.value.byteLength;
+      if(total>maxBytes) { await reader.cancel(); return {ok:false,error:'BODY_TOO_LARGE'}; }
+      text+=decoder.decode(chunk.value,{stream:true});
+    }
+    text+=decoder.decode();
+    return {ok:true,value:JSON.parse(text)};
+  } catch {
+    return {ok:false,error:'JSON_INVALID'};
+  }
+}
+
+async function handleTenantContext(request,env) {
+  const url=new URL(request.url);
+  const isList=url.pathname==='/api/tenant/context';
+  const isSelect=url.pathname==='/api/tenant/context/select';
+  if(!isList&&!isSelect) return null;
+  const headers={
+    'cache-control':'no-store',
+    'x-content-type-options':'nosniff',
+    'x-frame-options':'DENY',
+    'referrer-policy':'no-referrer',
+    'permissions-policy':'geolocation=(self),camera=(),microphone=()'
+  };
+  if(request.url.startsWith('https://')) headers['strict-transport-security']='max-age=31536000; includeSubDomains';
+  if((isList&&request.method!=='GET')||(isSelect&&request.method!=='POST')) {
+    return json({ok:false,error:'METHOD_NOT_ALLOWED',version:VERSION},405,headers);
+  }
+  if(!env?.DB) return json({ok:false,error:'TENANT_CONTEXT_UNAVAILABLE',version:VERSION},503,headers);
+  let auth;
+  try { auth=await getSessionUser(request,env); }
+  catch { return json({ok:false,error:'TENANT_CONTEXT_UNAVAILABLE',version:VERSION},503,headers); }
+  if(!auth) return json({ok:false,error:'UNAUTHENTICATED',version:VERSION},401,headers);
+  try {
+    if(isList) {
+      const context=await listTenantContexts(env.DB,auth.session_id,String(auth.user.id));
+      return json({ok:true,version:VERSION,...context},200,headers);
+    }
+    const parsed=await readTenantContextJson(request,2048);
+    if(!parsed.ok) return json({ok:false,error:parsed.error,version:VERSION},parsed.error==='BODY_TOO_LARGE'?413:400,headers);
+    const tenantId=parsed.value?.tenantId;
+    if(typeof tenantId!=='string'||!tenantId.trim()||tenantId.length>128) {
+      return json({ok:false,error:'TENANT_ID_INVALID',version:VERSION},400,headers);
+    }
+    const selected=await selectTenantContext(env.DB,auth.session_id,String(auth.user.id),tenantId);
+    if(!selected) return json({ok:false,error:'TENANT_MEMBERSHIP_REQUIRED',version:VERSION},403,headers);
+    return json({ok:true,version:VERSION,selectedTenantId:tenantId},200,headers);
+  } catch {
+    return json({ok:false,error:'TENANT_CONTEXT_UNAVAILABLE',version:VERSION},503,headers);
+  }
+}
+
 async function handle(request,env){
   try {
     if(isMutatingMethod(request.method) && !securityOriginAllowed(request,env)) return json({ok:false,error:'ORIGIN_NOT_ALLOWED',version:VERSION},403);
     const url=new URL(request.url);
+    const tenantContext=await handleTenantContext(request,env); if(tenantContext) return tenantContext;
     // Fail closed before any schema helper touches D1: unauthenticated callers
     // must not use mission validation as an existence oracle for private IDs.
     if (url.pathname === '/api/missions/validate') {
