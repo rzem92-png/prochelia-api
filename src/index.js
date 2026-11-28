@@ -3240,7 +3240,8 @@ async function handle(request,env){
   } catch(error) {
     // Minimal, privacy-safe diagnostic: never log exception text, request body, cookie or user identifiers.
     console.error('PROCHELIA_REQUEST_FAILURE', { method: request.method, errorName: error?.name || 'Error' });
-    return json({ok:false,error:'INTERNAL_ERROR',version:VERSION},500);
+    const testErrorClass=env?.TEST_DIAGNOSTICS===true ? String(error?.name || 'Error') : null;
+    return json({ok:false,error:'INTERNAL_ERROR',version:VERSION},500,testErrorClass?{'x-test-error-class':testErrorClass}:{});
   }
 }
 
