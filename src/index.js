@@ -1816,7 +1816,7 @@ async function financeSummary(request, env) {
 async function complaintCreate(request, env) {
   const gate=await requireAuthRole(request,env,['gerante','client','entreprise']); if(gate.error)return gate.error;
   const contentType=request.headers.get('content-type')||'';
-  if(!/^application\\/json(?:\\s*;|$)/i.test(contentType))return json({ok:false,error:'JSON_CONTENT_TYPE_REQUIRED',version:VERSION},415);
+  if(!/^application\/json(?:\\s*;|$)/i.test(contentType))return json({ok:false,error:'JSON_CONTENT_TYPE_REQUIRED',version:VERSION},415);
   const parsed=await readBoundedJson(request,8192);
   if(!parsed.ok)return json({ok:false,error:parsed.error,version:VERSION},parsed.status);
   const actor=gate.auth.user;
