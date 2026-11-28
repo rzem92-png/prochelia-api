@@ -44,4 +44,4 @@ jobs:
           python3 tests/test_migrations_sqlite.py
           python3 tests/test_preview_canonical_migrations.py
           python3 tests/test_prepare_d1_restore.py
-          node --experimental-default-type=module --test tests/preview-migration-workflow.test.mjs
+          node --test tests/preview-migration-workflow.test.mjs
