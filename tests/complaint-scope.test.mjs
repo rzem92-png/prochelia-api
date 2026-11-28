@@ -131,7 +131,11 @@ test("route integration validates bounded input and uses derived scope before co
   assert.match(route, /SELECT id,client_id,intervenant_id FROM missions WHERE id=\?/);
   assert.match(route, /if\(mission&&!clientProfile\)clientProfile=await env\.DB\.prepare\('SELECT id FROM clients WHERE id=\? LIMIT 1'\)/);
   assert.match(route, /resolveComplaintScope\(actor,value/);
-  assert.match(route, /\.bind\(id,scope\.client_type,scope\.client_id,scope\.company_id,scope\.mission_id,value\.category,scope\.severity,value\.description\)/);
+  assert.match(source, /import \{ normalizeComplaintIdempotencyKey, buildComplaintIdempotencyIdentity, reserveComplaintIntake, persistComplaintCaseLink \}/);
+  assert.match(route, /Idempotency-Key/);
+  assert.match(route, /reserveComplaintIntake\(env\.DB,identity,candidateId/);
+  assert.match(route, /persistComplaintCaseLink\(env\.DB,identity,complaintId/);
+  assert.match(route, /IDEMPOTENCY_KEY_REUSED/);
   assert.doesNotMatch(route, /\.bind\(id,String\(b\.client_type/);
   assert.match(route, /const caseType='reclamation_client'/);
   assert.match(route, /case_link_status/);
