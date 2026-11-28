@@ -2645,8 +2645,16 @@ async function enqueueBackgroundJob(env, jobType, payload={}, maxAttempts=5) {
 async function backgroundJobHealth(request,env) {
   const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
   const health=await getBackgroundJobHealth(env?.DB);
-  if(!health.ok) return json({ok:false,error:health.error,version:VERSION},503,{'cache-control':'no-store'});
-  return json({ok:true,version:VERSION,monitoring:'READ_ONLY',...health},200,{'cache-control':'no-store'});
+  const headers={
+    'cache-control':'no-store',
+    'x-content-type-options':'nosniff',
+    'x-frame-options':'DENY',
+    'referrer-policy':'no-referrer',
+    'permissions-policy':'geolocation=(self),camera=(),microphone=()'
+  };
+  if(request.url.startsWith('https://')) headers['strict-transport-security']='max-age=31536000; includeSubDomains';
+  if(!health.ok) return json({ok:false,error:health.error,version:VERSION},503,headers);
+  return json({ok:true,version:VERSION,monitoring:'READ_ONLY',...health},200,headers);
 }
 
 async function processBackgroundJobs(request,env) {
@@ -3604,7 +3612,6 @@ async function productionRateLimit(request,env){
     path.startsWith('/api/support/') ||
     path==='/api/complaints' ||
     path==='/api/jobs/process' ||
-    path==='/api/jobs/health' ||
     path==='/api/system/backup/run';
   const limit=sensitive ? 20 : 120;
   const windowSeconds=60;
