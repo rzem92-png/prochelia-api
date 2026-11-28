@@ -17,6 +17,17 @@ def env_value(name: str) -> str:
     assert match, f"Missing workflow constant: {name}"
     return match.group(1)
 
+restore_workflow = (ROOT / ".github/workflows/restore-production-backup-isolated-test.yml").read_text()
+assert "https://f2a79e9fa41566a8ec80fb24c02c60eb.eu.r2.cloudflarestorage.com" in workflow, "Production backup must use the EU jurisdiction endpoint"
+assert "https://f2a79e9fa41566a8ec80fb24c02c60eb.r2.cloudflarestorage.com" not in workflow, "Global endpoint must not be used for EU bucket"
+assert "https://f2a79e9fa41566a8ec80fb24c02c60eb.eu.r2.cloudflarestorage.com" in restore_workflow, "Restore must use the EU jurisdiction endpoint"
+assert "https://f2a79e9fa41566a8ec80fb24c02c60eb.r2.cloudflarestorage.com" not in restore_workflow, "Restore must not use global endpoint for EU bucket"
+assert "Verify production R2 bucket and EU jurisdiction before restore download" in restore_workflow, "Restore must verify EU bucket jurisdiction before download"
+assert "cf-r2-jurisdiction: eu" in restore_workflow, "Restore must query the EU jurisdiction"
+assert '.result.jurisdiction == "eu"' in restore_workflow, "Restore must fail closed unless bucket jurisdiction is EU"
+assert "Cleanup sensitive local restore files" in restore_workflow, "Restore must cleanup sensitive runner files"
+assert "rm -rf \"$RUNNER_TEMP/prochelia-prod-restore\"" in restore_workflow, "Restore cleanup must remove local decrypted artifacts"
+
 databases = config.get("d1_databases")
 assert isinstance(databases, list) and len(databases) == 1, "Exactly one D1 target must be pinned"
 database = databases[0]
@@ -35,9 +46,14 @@ required_guards = [
     "PRAGMA integrity_check;",
     "Verify live production D1 name and UUID through Cloudflare API",
     "api.cloudflare.com/client/v4/accounts/$EXPECTED_ACCOUNT_ID/d1/database/$EXPECTED_DB_ID",
+    "Verify production R2 bucket and EU jurisdiction before export",
+    "cf-r2-jurisdiction: eu",
+    '.result.jurisdiction == "eu"',
     "database[\"uuid\"] == sys.argv[2]",
     "--cipher-algo AES256",
     "roundtrip.sql.gpg",
+    "Cleanup sensitive local backup files",
+    "rm -rf \"$RUNNER_TEMP/prochelia-prod-backup\"",
     'test "$actual" = "$expected"',
 ]
 for guard in required_guards:
