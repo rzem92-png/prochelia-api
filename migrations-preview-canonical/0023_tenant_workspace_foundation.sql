@@ -202,3 +202,13 @@ WHEN NEW.status = 'ACCEPTED'
 BEGIN
   SELECT RAISE(ABORT, 'TENANT_INVITATION_ACCEPTOR_EMAIL_MISMATCH');
 END;
+
+-- Membership identity is immutable: changing tenant/user bypasses invitation
+-- and audited ownership-transfer flows. Move access by creating a new accepted
+-- membership and revoking the old one through the controlled lifecycle.
+CREATE TRIGGER IF NOT EXISTS trg_tenant_membership_identity_immutable
+BEFORE UPDATE OF tenant_id, user_id ON tenant_memberships
+WHEN NEW.tenant_id <> OLD.tenant_id OR NEW.user_id <> OLD.user_id
+BEGIN
+  SELECT RAISE(ABORT, 'TENANT_MEMBERSHIP_IDENTITY_IMMUTABLE');
+END;
