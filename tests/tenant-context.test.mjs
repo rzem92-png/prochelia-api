@@ -217,6 +217,12 @@ test("personal tenant bootstrap is idempotent and never trusts a caller tenant I
 
   const owner = sqlite.prepare("SELECT user_id FROM tenant_memberships WHERE tenant_id=? AND role='OWNER'").get(firstBody.tenant.id);
   assert.equal(owner.user_id, "u2");
+  const events = sqlite.prepare("SELECT event_type,actor_user_id,details_json FROM tenant_audit_events WHERE tenant_id=? ORDER BY created_at,id").all(firstBody.tenant.id);
+  assert.equal(events.length, 2);
+  assert.deepEqual(events.map(event => event.event_type), ["PERSONAL_TENANT_BOOTSTRAP_REQUESTED", "PERSONAL_TENANT_BOOTSTRAP_REQUESTED"]);
+  assert.ok(events.every(event => event.actor_user_id === "u2"));
+  assert.throws(() => sqlite.prepare("UPDATE tenant_audit_events SET details_json='{}' WHERE tenant_id=?").run(firstBody.tenant.id), /TENANT_AUDIT_EVENTS_APPEND_ONLY/);
+  assert.throws(() => sqlite.prepare("DELETE FROM tenant_audit_events WHERE tenant_id=?").run(firstBody.tenant.id), /TENANT_AUDIT_EVENTS_APPEND_ONLY/);
 });
 
 test("personal tenant bootstrap does not reactivate a revoked membership", async () => {
