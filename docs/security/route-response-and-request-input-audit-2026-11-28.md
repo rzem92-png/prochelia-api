@@ -31,5 +31,14 @@ The production wrapper invokes the persistent limiter for mutating requests. The
 - Use an atomic counter/lease primitive; review current D1 update/insert concurrency behavior.
 - Add burst, concurrent, spoofed-IP-header, and bucket-isolation tests. Prefer trusted Cloudflare connection metadata; never trust arbitrary forwarded IP without proxy boundary validation.
 
+## V7 route inventory (source-level)
+
+Public/stateless POST validators and calculators identified in the reviewed module:
+- email, account, intervenant profile, document, expiration, transport, mission, mission-transition, availability, conflict, pricing, QR, payment, finance calculation, pre-mission, idempotency, strategy indicators.
+- `GET /api/v7/status` is informational.
+- `POST /api/v7/check/permissions` requires authenticated `gerante`; request-supplied role/permission map is ignored.
+- `POST /api/v7/security/audit` requires authenticated `gerante`; actor identity is derived from session.
+This is route inventory only; stateless validators must not be treated as business authorization or proof that the corresponding operation is permitted.
+
 ## Status
 RSP-01 code fix and tests are in this draft branch. RSP-02/RSP-03 remain audit findings. Documentation only for the latter; no production deployment, secrets, migration, or data writes.
