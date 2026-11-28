@@ -2,11 +2,13 @@
 const LIST_SQL = `
   SELECT t.id, t.kind, t.display_name, t.country_code, m.role,
          c.selected_at
-    FROM tenant_memberships m
+    FROM sessions s
+    JOIN tenant_memberships m ON m.user_id = s.user_id AND m.user_id = ?
     JOIN tenants t ON t.id = m.tenant_id
     LEFT JOIN tenant_session_context c
-      ON c.session_id = ? AND c.tenant_id = t.id
-   WHERE m.user_id = ?
+      ON c.session_id = s.id AND c.tenant_id = t.id
+   WHERE s.id = ?
+     AND s.expires_at > CURRENT_TIMESTAMP
      AND m.status = 'ACTIVE'
      AND t.status = 'ACTIVE'
    ORDER BY CASE m.role
@@ -25,6 +27,7 @@ const SELECT_SQL = `
          ON m.user_id = s.user_id AND m.tenant_id = ?
        JOIN tenants t ON t.id = m.tenant_id
       WHERE s.id = ? AND s.user_id = ?
+        AND s.expires_at > CURRENT_TIMESTAMP
         AND m.status = 'ACTIVE' AND t.status = 'ACTIVE'
    )
   ON CONFLICT(session_id) DO UPDATE SET
@@ -41,7 +44,7 @@ export async function listTenantContexts(db, sessionId, userId) {
   if (typeof sessionId !== 'string' || !sessionId || typeof userId !== 'string' || !userId) {
     throw new Error('TENANT_CONTEXT_IDENTITY_REQUIRED');
   }
-  const result = await db.prepare(LIST_SQL).bind(sessionId, userId).all();
+  const result = await db.prepare(LIST_SQL).bind(userId, sessionId).all();
   if (!Array.isArray(result?.results)) throw new Error('TENANT_CONTEXT_QUERY_INVALID');
   const tenants = result.results.map(row => ({
     id: String(row.id),
