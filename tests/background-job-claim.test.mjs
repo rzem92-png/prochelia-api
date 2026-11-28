@@ -15,10 +15,16 @@ class D1TestAdapter {
   }
   prepare(sql) {
     const db = this.db;
-    return { bind(...params) { return { async run() {
-      const result = db.prepare(sql).run(...params);
-      return { meta: { changes: Number(result.changes) } };
-    }}};
+    return {
+      bind(...params) {
+        return {
+          async run() {
+            const result = db.prepare(sql).run(...params);
+            return { meta: { changes: Number(result.changes) } };
+          }
+        };
+      }
+    };
   }
   add(id, options={}) {
     if (options.runAfter) {
