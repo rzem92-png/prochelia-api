@@ -166,7 +166,7 @@ jobs:
         if: always()
         shell: bash
         run: |
-          set +e
+          set -euo pipefail
           rm -rf "$RUNNER_TEMP/prochelia-prod-backup"
           rm -f "$RUNNER_TEMP/production-r2-eu.json"
           echo "Sensitive local backup artifacts removed from runner temp."
