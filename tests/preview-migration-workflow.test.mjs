@@ -231,3 +231,18 @@ test("restore workflows recognize the new EU Preview backup and never target Pre
     assert.ok(workflow.includes(previewId), "restore/verification target guard must forbid EU Preview D1");
   }
 });
+
+
+test("tenant workspace foundation remains a local Preview candidate until the reviewed migration gate is updated", async () => {
+  const candidate = await readFile(new URL("../migrations-preview-canonical/0023_tenant_workspace_foundation.sql", import.meta.url), "utf8");
+  assert.match(candidate, /CREATE TABLE IF NOT EXISTS tenants/);
+  assert.match(candidate, /CREATE TABLE IF NOT EXISTS tenant_memberships/);
+  assert.match(candidate, /CREATE TABLE IF NOT EXISTS tenant_invitations/);
+  assert.match(candidate, /CREATE TABLE IF NOT EXISTS tenant_session_context/);
+  assert.match(candidate, /ACTIVE_TENANT_MEMBERSHIP_REQUIRED/);
+  assert.match(candidate, /trg_tenant_membership_invalidate_context/);
+  assert.match(candidate, /trg_tenant_invalidate_context/);
+  assert.doesNotMatch(candidate, /^\\s*(INSERT|UPDATE|DROP)\\s/m, "candidate migration must not backfill, update, or drop existing data");
+  assert.match(workflow, /ref: 1fc258c9c8d25e5e7b89241504218bf102afbf27/);
+  assert.doesNotMatch(workflow, /0023_tenant_workspace_foundation\\.sql/, "remote migration gate must stay pinned to the previously reviewed baseline");
+});
