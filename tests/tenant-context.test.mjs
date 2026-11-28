@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import worker from "../src/index.js";
 import { listTenantContexts, selectTenantContext } from "../src/tenant-context.js";
+import { bootstrapPersonalTenant } from "../src/tenant-bootstrap.js";
 
 const migration = readFileSync(new URL("../migrations-preview-canonical/0023_tenant_workspace_foundation.sql", import.meta.url), "utf8");
 const sessionToken = "tenant-context-test-session";
@@ -52,6 +53,17 @@ function makeD1() {
             return { meta: { changes: Number(result.changes) } };
           }
         };
+      },
+      async batch(statements) {
+        sqlite.exec("BEGIN");
+        try {
+          const results = statements.map(statement => statement.run());
+          sqlite.exec("COMMIT");
+          return results;
+        } catch (error) {
+          sqlite.exec("ROLLBACK");
+          throw error;
+        }
       }
     }
   };
@@ -174,4 +186,49 @@ test("tenant selection rejects malformed JSON and oversized payloads before D1 m
   }), { DB: d1 });
   assert.equal(oversized.status, 413);
   assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM tenant_session_context").get().n, 0);
+});
+
+test("personal tenant bootstrap is idempotent and never trusts a caller tenant ID", async () => {
+  const { sqlite, d1 } = makeD1();
+  const first = await worker.fetch(request("/api/tenant/bootstrap", "POST", {
+    tenantId: "t1", displayName: "  Espace   Deux  "
+  }, "tenant-context-test-session"), { DB: d1 });
+  assert.equal(first.status, 200);
+  const firstBody = await first.json();
+  assert.equal(firstBody.ok, true);
+  assert.equal(firstBody.created, true);
+  assert.equal(firstBody.tenant.kind, "PERSONAL");
+  assert.equal(firstBody.tenant.name, "Espace Deux");
+  assert.notEqual(firstBody.tenant.id, "t1");
+  assert.equal(firstBody.tenant.role, "OWNER");
+  assert.equal(firstBody.tenant.membershipStatus, "ACTIVE");
+
+  const second = await worker.fetch(request("/api/tenant/bootstrap", "POST", {
+    displayName: "Renamed Workspace"
+  }, "tenant-context-test-session"), { DB: d1 });
+  assert.equal(second.status, 200);
+  const secondBody = await second.json();
+  assert.equal(secondBody.created, false);
+  assert.equal(secondBody.tenant.id, firstBody.tenant.id);
+  assert.equal(secondBody.tenant.name, "Espace Deux");
+
+  const owner = sqlite.prepare("SELECT user_id FROM tenant_memberships WHERE tenant_id=? AND role='OWNER'").get(firstBody.tenant.id);
+  assert.equal(owner.user_id, "u1");
+});
+
+test("personal tenant bootstrap does not reactivate a revoked membership", async () => {
+  const { sqlite, d1 } = makeD1();
+  const first = await bootstrapPersonalTenant(d1, "u2", "U2 workspace");
+  assert.equal(first.ok, true);
+  sqlite.prepare("UPDATE tenant_memberships SET status='REVOKED',revoked_at=CURRENT_TIMESTAMP WHERE tenant_id=? AND user_id='u2'").run(first.tenant.id);
+  const retry = await worker.fetch(request("/api/tenant/bootstrap", "POST", {}, "hash-u2"), { DB: d1 });
+  assert.equal(retry.status, 409);
+  assert.equal((await retry.json()).error, "PERSONAL_TENANT_ACCESS_REQUIRES_RECOVERY");
+  assert.equal(sqlite.prepare("SELECT status FROM tenant_memberships WHERE tenant_id=? AND user_id='u2'").get(first.tenant.id).status, "REVOKED");
+});
+
+test("personal tenant bootstrap batch is atomic when the user does not exist", async () => {
+  const { sqlite, d1 } = makeD1();
+  await assert.rejects(() => bootstrapPersonalTenant(d1, "missing-user", "Workspace"));
+  assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM tenants WHERE kind='PERSONAL' AND created_by_user_id='missing-user'").get().n, 0);
 });
