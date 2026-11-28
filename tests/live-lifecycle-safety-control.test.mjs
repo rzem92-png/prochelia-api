@@ -80,3 +80,36 @@ test("creator can end; unauthorized cannot", () => {
 test("unknown command fails closed", () => {
   assert.throws(() => transitionLiveSession(make(), command("anything")), { code: "UNKNOWN_COMMAND" });
 });
+
+test("human review release is required after review state and disables monetization/guests", () => {
+  const s = start();
+  const paused = transitionLiveSession(s, command("safety_pause", "moderation_system", {
+    policyDecision: { action: "review", policyVersion: "p1", reasonCode: "uncertain_sensitive_content" },
+  })).session;
+  const checks = { allClear: true, detectorsHealthy: true, policyCurrent: true, incidentAcknowledged: true, identityVerified: true, ageEligible: true, territoryAllowed: true, consentValid: true, chatModerationReady: true };
+  const released = transitionLiveSession(paused, command("review_release", "moderator", {
+    reviewDecision: { result: "clear", reviewerId: "human-reviewer-1", policyVersion: "p2" }, resumeChecks: checks,
+  }));
+  assert.equal(released.session.state, "live");
+  assert.equal(released.session.controls.giftsEnabled, false);
+  assert.equal(released.session.controls.guestPublishingEnabled, false);
+  assert.ok(released.actions.includes("close_incident"));
+});
+test("review release cannot be automated or bypass safety gates", () => {
+  const paused = transitionLiveSession(start(), command("safety_pause", "moderation_system", {
+    policyDecision: { action: "review", policyVersion: "p1", reasonCode: "uncertain" },
+  })).session;
+  assert.throws(() => transitionLiveSession(paused, command("review_release", "system", {
+    reviewDecision: { result: "clear", reviewerId: "reviewer", policyVersion: "p2" }, resumeChecks: { allClear: true },
+  })), { code: "FORBIDDEN" });
+});
+test("human confirms violation: terminate and queue sanction review, not automatic permanent ban", () => {
+  const paused = transitionLiveSession(start(), command("safety_pause", "moderation_system", {
+    policyDecision: { action: "review", policyVersion: "p1", reasonCode: "suspicious" },
+  })).session;
+  const r = transitionLiveSession(paused, command("review_release", "moderator", {
+    reviewDecision: { result: "confirmed_violation", reviewerId: "reviewer-1", policyVersion: "p2" },
+  }));
+  assert.equal(r.session.state, "ended");
+  assert.ok(r.actions.includes("queue_sanction_review"));
+});
