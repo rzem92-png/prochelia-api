@@ -30,8 +30,11 @@ export function decideSafeVisionAction(input) {
 
   // Context is a signal for review, never an automatic exemption from safety policy.
   const contextual = ["education", "medical", "journalism", "documentary", "fiction"].includes(context);
-  if (contextual && severity !== "high" && repeated !== true)
-    return { action: "targeted_blur", reason: "contextual_review_with_viewer_protection" };
+  if (contextual && severity !== "high" && repeated !== true) {
+    if (targetTrackReliable === true && confidence >= 0.8)
+      return { action: "targeted_blur", reason: "contextual_review_with_reliable_localization" };
+    return { action: "expanded_blur", reason: "contextual_review_with_uncertain_localization" };
+  }
 
   if (policyAllowsBlur !== true)
     return { action: "pause_live", reason: "policy_requires_interruption" };
