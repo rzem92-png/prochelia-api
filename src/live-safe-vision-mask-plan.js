@@ -19,7 +19,8 @@ export function validateMaskPlan(plan, nowMs = Date.now()) {
     if (![x,y,w,h].every(Number.isFinite) || x < 0 || y < 0 || w <= 0 || h <= 0 || x+w > 1 || y+h > 1)
       return fail("rect_out_of_bounds");
     if (typeof mask.trackId !== "string" || !mask.trackId.trim()) return fail("missing_track_id");
-    if (!Number.isFinite(mask.confidence) || mask.confidence < 0.8 || mask.confidence > 1) return fail("low_mask_confidence");
+    const minimumConfidence = plan.mode === "targeted_blur" ? 0.8 : 0.55;
+    if (!Number.isFinite(mask.confidence) || mask.confidence < minimumConfidence || mask.confidence > 1) return fail("low_mask_confidence");
   }
   return { ok:true, mode:plan.mode, masks:plan.masks.length, reason:"validated_short_lived_mask_plan" };
 }
