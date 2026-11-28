@@ -47,3 +47,30 @@ for forbidden in ["d1 migrations apply", "wrangler deploy", "d1 database delete"
     assert forbidden not in workflow, f"Unexpected mutating production command: {forbidden}"
 
 print("PASS: production D1 backup target, account gates, encryption and R2 round-trip guards are consistent.")
+
+# Preview backup workflow: the scheduled artifact backup must checkout the pinned config.
+preview_workflow_path = ROOT / ".github/workflows/backup-preview-d1.yml"
+preview_workflow = preview_workflow_path.read_text()
+preview_config_text = (ROOT / "wrangler.preview-migrations.jsonc").read_text()
+preview_config = json.loads("\n".join(
+    line for line in preview_config_text.splitlines()
+    if not line.lstrip().startswith("//")
+))
+preview_databases = preview_config.get("d1_databases")
+assert isinstance(preview_databases, list) and len(preview_databases) == 1, "Preview backup must pin exactly one D1"
+preview_database = preview_databases[0]
+assert preview_database.get("binding") == "PREVIEW_DB"
+assert preview_database.get("database_name") == "prochelia-preview-eu-2026-11-17"
+assert preview_database.get("database_id") == "e3cf167c-37e1-4d72-9ac6-b3e27c14b97f"
+assert preview_database.get("migrations_dir") == "migrations-preview-canonical"
+checkout = preview_workflow.find("actions/checkout@")
+export = preview_workflow.find("wrangler@4 d1 export")
+assert checkout >= 0 and export > checkout, "Checkout must precede the D1 export/config read"
+assert "persist-credentials: false" in preview_workflow
+assert "--config wrangler.preview-migrations.jsonc" in preview_workflow
+assert "BACKUP_ENCRYPTION_KEY" in preview_workflow and "--cipher-algo AES256" in preview_workflow
+assert "actions/upload-artifact@" in preview_workflow and "retention-days: 7" in preview_workflow
+assert "04f52830-ef5a-4f17-a640-42bbc2381bba" not in preview_workflow
+for forbidden in ["d1 migrations apply", "wrangler deploy", "d1 database delete", "d1 execute"]:
+    assert forbidden not in preview_workflow, f"Unexpected mutating command in Preview backup: {forbidden}"
+print("PASS: scheduled Preview backup checks out config, pins Preview D1, encrypts and uploads a short-lived artifact; no production or mutating command.")

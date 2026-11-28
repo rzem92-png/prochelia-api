@@ -5,6 +5,8 @@ on:
     paths:
       - "wrangler.production-backup.jsonc"
       - ".github/workflows/backup-production-d1-to-r2.yml"
+      - ".github/workflows/backup-preview-d1.yml"
+      - "wrangler.preview-migrations.jsonc"
       - "tests/test_production_backup_config.py"
       - ".github/workflows/production-backup-config-tests.yml"
   push:
@@ -23,8 +25,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           persist-credentials: false
-      - name: Validate pinned production backup target and safety gates
+      - name: Validate production and Preview backup target/safety gates
         run: python3 tests/test_production_backup_config.py
