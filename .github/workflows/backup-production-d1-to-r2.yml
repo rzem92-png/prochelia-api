@@ -161,3 +161,12 @@ jobs:
           expected="$(cat "$RUNNER_TEMP/prochelia-prod-backup/manifest.sha256")"
           test "$actual" = "$expected" || { echo "::error::R2 backup checksum mismatch."; exit 1; }
           echo "PASS: encrypted production backup uploaded, downloaded, decrypted and checksum-verified."
+
+      - name: Cleanup sensitive local backup files
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          rm -rf "$RUNNER_TEMP/prochelia-prod-backup"
+          rm -f "$RUNNER_TEMP/production-r2-eu.json"
+          echo "Sensitive local backup artifacts removed from runner temp."
