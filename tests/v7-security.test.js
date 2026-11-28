@@ -1,7 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { handleV7Route } from "../src/v7-routes.js";
-import { directoryList } from "../src/index.js";
+import { directoryList, applySecurityHeaders } from "../src/index.js";
+import worker from "../src/index.js";
 
 const post = (path, body) => new Request("https://example.test" + path, {
   method: "POST",
@@ -116,4 +117,24 @@ test("intervenant directory returns the deterministic final-page contract", asyn
   assert.equal(body.has_more,false);
   assert.equal(body.next_offset,null);
   assert.match(query,/FROM intervenants i JOIN users u/);
+});
+
+test("worker V7 early-return routes receive uniform security headers", async () => {
+  const response = await worker.fetch(new Request("https://api.example.test/api/v7/status"), {});
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get("x-content-type-options"), "nosniff");
+  assert.equal(response.headers.get("x-frame-options"), "DENY");
+  assert.equal(response.headers.get("referrer-policy"), "no-referrer");
+  assert.equal(response.headers.get("permissions-policy"), "geolocation=(self),camera=(),microphone=()");
+  assert.equal(response.headers.get("cache-control"), "no-store");
+  assert.equal(response.headers.get("strict-transport-security"), "max-age=31536000; includeSubDomains");
+});
+
+test("security header wrapper preserves response status and application headers", () => {
+  const original = new Response("test", {status: 429, headers: {"retry-after":"10", "content-type":"text/plain"}});
+  const secured = applySecurityHeaders(original, new Request("https://api.example.test/"));
+  assert.equal(secured.status, 429);
+  assert.equal(secured.headers.get("retry-after"), "10");
+  assert.equal(secured.headers.get("content-type"), "text/plain");
+  assert.equal(secured.headers.get("x-content-type-options"), "nosniff");
 });
