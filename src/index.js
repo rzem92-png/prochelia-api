@@ -2647,7 +2647,7 @@ async function readBoundedJson(request, maxBytes=1024) {
   const contentType=String(request.headers.get('content-type')||'').toLowerCase();
   if(!contentType.startsWith('application/json')) return {ok:false,error:'JSON_REQUIRED'};
   const declared=request.headers.get('content-length');
-  if(declared!==null && (!/^\\d+$/.test(declared) || Number(declared)>maxBytes)) return {ok:false,error:'BODY_TOO_LARGE'};
+  if(declared!==null && (!/^\d+$/.test(declared) || Number(declared)>maxBytes)) return {ok:false,error:'BODY_TOO_LARGE'};
   if(!request.body) return {ok:false,error:'JSON_REQUIRED'};
   try {
     const reader=request.body.getReader();
@@ -2668,7 +2668,7 @@ async function readBoundedJson(request, maxBytes=1024) {
 }
 
 async function quarantineStaleJobs(request,env) {
-  const gate=await requireAuthRole(request,env,['gerante']); if(gate.error)return gate.error;
+  const gate=await requireAuthRole(request,env,['gerante']);
   const headers={
     'cache-control':'no-store',
     'x-content-type-options':'nosniff',
@@ -2677,6 +2677,7 @@ async function quarantineStaleJobs(request,env) {
     'permissions-policy':'geolocation=(self),camera=(),microphone=()'
   };
   if(request.url.startsWith('https://')) headers['strict-transport-security']='max-age=31536000; includeSubDomains';
+  if(gate.error){ for(const [name,value] of Object.entries(headers)) gate.error.headers.set(name,value); return gate.error; }
   const parsed=await readBoundedJson(request,1024);
   if(!parsed.ok) return json({ok:false,error:parsed.error,version:VERSION},parsed.error==='BODY_TOO_LARGE'?413:400,headers);
   const body=parsed.value;
