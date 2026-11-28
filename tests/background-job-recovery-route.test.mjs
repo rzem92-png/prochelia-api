@@ -7,6 +7,7 @@ const testEnv = db => ({ DB: db, TEST_DIAGNOSTICS: true });
 function makeDB(role = "gerante", failSelect = false) {
   let selectCalls = 0;
   let batchCalls = 0;
+  let rateCount = 0;
   const db = {
     prepare(sql) {
       return {
@@ -21,6 +22,7 @@ function makeDB(role = "gerante", failSelect = false) {
               session_id: "session-1"
             };
           }
+          if (sql.includes("FROM security_rate_limits")) return rateCount ? { request_count: rateCount } : null;
           throw new Error("unexpected query");
         },
         async all() {
@@ -30,6 +32,10 @@ function makeDB(role = "gerante", failSelect = false) {
             return { results: [{ id: "private-job-id", stale_marker: "2000-01-01 00:00:00" }] };
           }
           throw new Error("unexpected query");
+        },
+        async run() {
+          if (sql.includes("INSERT INTO security_rate_limits")) rateCount++;
+          return { meta: { changes: 1 } };
         }
       };
     },
