@@ -3651,6 +3651,18 @@ async function strictProductionAudit(request,env){
   return json({ok:true,version:VERSION,configuration_gate:configurationReady?'PASS':'BLOCKED',production_gate:overall?'OPEN':'CLOSED',ready_for_real_traffic:overall,checks,blocking:blocking.map(x=>x.code),note:overall?'All configuration and independently verified release-evidence gates passed.':'Production traffic remains blocked: configuration, independent acceptance evidence, and explicit human release approval are all required.'});
 }
 
+function applySecurityHeaders(response,request){
+  const headers=new Headers(response.headers);
+  headers.set('x-content-type-options','nosniff');
+  headers.set('x-frame-options','DENY');
+  headers.set('referrer-policy','no-referrer');
+  headers.set('permissions-policy','geolocation=(self),camera=(),microphone=()');
+  headers.set('cache-control','no-store');
+  if(request.url.startsWith('https://')) headers.set('strict-transport-security','max-age=31536000; includeSubDomains');
+  return new Response(response.body,{status:response.status,statusText:response.statusText,headers});
+}
+export { applySecurityHeaders };
+
 const __procheliaProductionSafetyHandle = handle;
 handle = async function(request,env){
   try{
@@ -3665,7 +3677,7 @@ handle = async function(request,env){
     // This keeps forbidden cross-origin writes a deterministic 403 even when
     // the database is unavailable, instead of masking them as a generic 500.
     if (isMutatingMethod(preflightMethod) && !securityOriginAllowed(request,env)) {
-      return json({ok:false,error:'ORIGIN_NOT_ALLOWED',version:VERSION},403);
+      return applySecurityHeaders(json({ok:false,error:'ORIGIN_NOT_ALLOWED',version:VERSION},403),request);
     }
     // Block anonymous mission validation before rate limiting touches D1.
     if (preflightPath === '/api/missions/validate') {
@@ -3673,24 +3685,24 @@ handle = async function(request,env){
       return json({ok:false,error:'AUTHENTICATED_VALIDATION_REQUIRED',version:VERSION,write_enabled:false},403);
     }
     if (getOnlyDiagnostics.has(preflightPath) && preflightMethod !== 'GET' && preflightMethod !== 'HEAD') {
-      return json({ok:false,error:'METHOD_NOT_ALLOWED',version:VERSION},405,{'allow':'GET, HEAD'});
+      return applySecurityHeaders(json({ok:false,error:'METHOD_NOT_ALLOWED',version:VERSION},405,{'allow':'GET, HEAD'}),request);
     }
     if (getOnlyDiagnostics.has(preflightPath) && preflightMethod === 'HEAD') {
       const response = await __procheliaProductionSafetyHandle(new Request(request.url,{method:'GET',headers:request.headers}),env);
-      return new Response(null,{status:response.status,headers:response.headers});
+      return applySecurityHeaders(new Response(null,{status:response.status,headers:response.headers}),request);
     }
     // Fail closed with a truthful service-unavailable response when a write
     // needs the persistent rate limiter but D1 is not bound.
     if (isMutatingMethod(preflightMethod) && !env?.DB) {
-      return json({ok:false,error:'DATABASE_UNAVAILABLE',database:false,version:VERSION},503);
+      return applySecurityHeaders(json({ok:false,error:'DATABASE_UNAVAILABLE',database:false,version:VERSION},503),request);
     }
     const rate=await productionRateLimit(request,env);
-    if(!rate.ok) return rate.response;
+    if(!rate.ok) return applySecurityHeaders(rate.response,request);
     const u=new URL(request.url);
-    if(u.pathname==='/api/system/final-audit' && request.method==='GET') return strictProductionAudit(request,env);
-    if(u.pathname==='/api/system/production-check' && request.method==='GET') return strictProductionAudit(request,env);
-    return __procheliaProductionSafetyHandle(request,env);
+    if(u.pathname==='/api/system/final-audit' && request.method==='GET') return applySecurityHeaders(await strictProductionAudit(request,env),request);
+    if(u.pathname==='/api/system/production-check' && request.method==='GET') return applySecurityHeaders(await strictProductionAudit(request,env),request);
+    return applySecurityHeaders(await __procheliaProductionSafetyHandle(request,env),request);
   }catch(e){
-    return json({ok:false,error:'PRODUCTION_SAFETY_ERROR',version:VERSION},500);
+    return applySecurityHeaders(json({ok:false,error:'PRODUCTION_SAFETY_ERROR',version:VERSION},500),request);
   }
 };
