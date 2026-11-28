@@ -92,6 +92,15 @@ jobs:
           print(f"PASS: live D1 identity verified: {database['name']} ({database['uuid']}).")
           PY
 
+      - name: Verify production R2 bucket and EU jurisdiction before export
+        shell: bash
+        run: |
+          set -euo pipefail
+          status="$(curl --silent --show-error --output "$RUNNER_TEMP/production-r2-eu.json" --write-out '%{http_code}' "https://api.cloudflare.com/client/v4/accounts/$EXPECTED_ACCOUNT_ID/r2/buckets/$R2_BUCKET" -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -H 'cf-r2-jurisdiction: eu')"
+          test "$status" = "200" || { echo "::error::Production R2 bucket lookup failed (HTTP $status); no export/upload performed."; exit 1; }
+          jq -e --arg bucket "$R2_BUCKET" '.success == true and .result.name == $bucket and .result.jurisdiction == "eu"' "$RUNNER_TEMP/production-r2-eu.json" >/dev/null || { echo "::error::Production backup bucket is not explicitly verified as EU jurisdiction."; exit 1; }
+          echo "PASS: exact production backup bucket verified as EU jurisdiction."
+
       - name: Install export integrity tools
         run: |
           sudo apt-get update
