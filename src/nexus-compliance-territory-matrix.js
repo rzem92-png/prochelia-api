@@ -1,6 +1,6 @@
 /* Machine-readable territory/activity matrix guard. Metadata validation only; never certifies law or enables launch. */
 (function(root,factory){const api=factory();if(typeof module==="object"&&module.exports)module.exports=api;if(root)root.ProcheliaNexusTerritoryActivityMatrix=api;})(typeof window!=="undefined"?window:globalThis,function(){"use strict";
-const DATE=/^\\d{4}-\\d{2}-\\d{2}$/;
+const DATE=/^\d{4}-\d{2}-\d{2}$/;
 const STATUS=new Set(["SOURCE_REGISTERED","NOT_RESEARCHED"]);
 const COVERAGE=new Set(["PARTIAL_SOURCE_REGISTER","NOT_RESEARCHED"]);
 function plain(v){return !!v&&typeof v==="object"&&!Array.isArray(v)&&(Object.getPrototypeOf(v)===Object.prototype||Object.getPrototypeOf(v)===null)&&Object.getOwnPropertySymbols(v).length===0&&Object.keys(Object.getOwnPropertyDescriptors(v)).every(k=>{const d=Object.getOwnPropertyDescriptor(v,k);return d.enumerable&&Object.hasOwn(d,"value")})}
