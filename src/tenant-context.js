@@ -27,6 +27,7 @@ const SELECT_SQL = `
          ON m.user_id = s.user_id AND m.tenant_id = ?
        JOIN tenants t ON t.id = m.tenant_id
       WHERE s.id = ? AND s.user_id = ?
+        AND s.expires_at > CURRENT_TIMESTAMP
         AND m.status = 'ACTIVE' AND t.status = 'ACTIVE'
    )
   ON CONFLICT(session_id) DO UPDATE SET
