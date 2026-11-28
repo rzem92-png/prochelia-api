@@ -3207,6 +3207,9 @@ async function handleTenantContext(request,env) {
     const parsed=await readTenantContextJson(request,2048);
     if(!parsed.ok) return json({ok:false,error:parsed.error,version:VERSION},parsed.error==='BODY_TOO_LARGE'?413:400,headers);
     if(isBootstrap) {
+      if(!parsed.value || typeof parsed.value!=='object' || Array.isArray(parsed.value)) {
+        return json({ok:false,error:'JSON_OBJECT_REQUIRED',version:VERSION},400,headers);
+      }
       const displayName=parsed.value?.displayName;
       if(displayName!==undefined && (typeof displayName!=='string' || displayName.trim().length>160)) {
         return json({ok:false,error:'TENANT_DISPLAY_NAME_INVALID',version:VERSION},400,headers);
