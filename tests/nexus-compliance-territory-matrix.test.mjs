@@ -29,6 +29,7 @@ test("matrix covers all required territories, categories and business models",()
   assert.deepEqual(Object.keys(territory.categories).sort(),categories.slice().sort());
   assert.deepEqual(Object.keys(territory.activityAssessments).sort(),activities.slice().sort());
   assert.equal(territory.marketActivationAllowed,false);
+  assert.ok(territory.reviewDueAt);
   for(const category of categories)assert.equal(territory.categories[category].controlImplementationStatus,"UNVERIFIED");
   for(const activity of activities){assert.equal(territory.activityAssessments[activity].status,"UNVERIFIED");assert.equal(territory.activityAssessments[activity].marketActivationAllowed,false);}
  }
@@ -87,4 +88,10 @@ test("ISO date parser accepts real dates and rejects malformed dates",()=>{
  assert.equal(api.date("2026-11-28"),true);
  assert.equal(api.date("2026-02-30"),false);
  assert.equal(api.date("not-a-date"),false);
+});
+
+test("territory-level review expiry is enforced",()=>{
+ const expired=structuredClone(matrix);
+ expired.territories[0].reviewDueAt="2026-11-27";
+ assert.equal(api.evaluate(expired,register,now).ok,false);
 });
