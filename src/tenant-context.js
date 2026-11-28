@@ -43,7 +43,7 @@ export async function listTenantContexts(db, sessionId, userId) {
   if (typeof sessionId !== 'string' || !sessionId || typeof userId !== 'string' || !userId) {
     throw new Error('TENANT_CONTEXT_IDENTITY_REQUIRED');
   }
-  const result = await db.prepare(LIST_SQL).bind(sessionId, userId).all();
+  const result = await db.prepare(LIST_SQL).bind(userId, sessionId).all();
   if (!Array.isArray(result?.results)) throw new Error('TENANT_CONTEXT_QUERY_INVALID');
   const tenants = result.results.map(row => ({
     id: String(row.id),
