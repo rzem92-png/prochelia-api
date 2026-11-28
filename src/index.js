@@ -3146,6 +3146,30 @@ async function handleCommercialRecruitment(request,env){
   return null;
 }
 
+async function readTenantContextJson(request,maxBytes=2048) {
+  const contentType=String(request.headers.get('content-type')||'').toLowerCase();
+  if(!contentType.startsWith('application/json')) return {ok:false,error:'JSON_REQUIRED'};
+  const declared=request.headers.get('content-length');
+  if(declared!==null&&(!/^\\d+$/.test(declared)||Number(declared)>maxBytes)) return {ok:false,error:'BODY_TOO_LARGE'};
+  if(!request.body) return {ok:false,error:'JSON_REQUIRED'};
+  try {
+    const reader=request.body.getReader();
+    const decoder=new TextDecoder();
+    let text='',total=0;
+    while(true) {
+      const chunk=await reader.read();
+      if(chunk.done) break;
+      total+=chunk.value.byteLength;
+      if(total>maxBytes) { await reader.cancel(); return {ok:false,error:'BODY_TOO_LARGE'}; }
+      text+=decoder.decode(chunk.value,{stream:true});
+    }
+    text+=decoder.decode();
+    return {ok:true,value:JSON.parse(text)};
+  } catch {
+    return {ok:false,error:'JSON_INVALID'};
+  }
+}
+
 async function handleTenantContext(request,env) {
   const url=new URL(request.url);
   const isList=url.pathname==='/api/tenant/context';
@@ -3172,7 +3196,7 @@ async function handleTenantContext(request,env) {
       const context=await listTenantContexts(env.DB,auth.session_id,String(auth.user.id));
       return json({ok:true,version:VERSION,...context},200,headers);
     }
-    const parsed=await readBoundedJson(request,2048);
+    const parsed=await readTenantContextJson(request,2048);
     if(!parsed.ok) return json({ok:false,error:parsed.error,version:VERSION},parsed.error==='BODY_TOO_LARGE'?413:400,headers);
     const tenantId=parsed.value?.tenantId;
     if(typeof tenantId!=='string'||!tenantId.trim()||tenantId.length>128) {
