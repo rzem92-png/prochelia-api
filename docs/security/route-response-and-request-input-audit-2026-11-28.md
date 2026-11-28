@@ -15,10 +15,11 @@ The core handler returns V7, finance-workspace, and commercial-recruitment respo
 ## Finding RSP-02 — Request payload size and schema limits are not uniformly enforced in the V7 route layer
 The inspected V7 routes parse JSON directly with `request.json()` and use route-specific validators; no shared request-body byte limit or strict schema layer was identified in this inspected route module. Cloudflare platform limits are not a substitute for application-level validation.
 
-### Required follow-up
-- Define endpoint-specific maximum body sizes (smaller for simple validators; larger only for explicitly supported upload/complex payload paths).
+### Required follow-up / status
+- **V7 POST routes:** a separate draft PR #492 now adds a 64 KiB bounded streamed body, JSON media-type check, deterministic 400/413/415 responses, and regression tests. CI passed on its current head. This is not merged/deployed.
+- **Other route families:** define endpoint-specific maximum body sizes (smaller for simple validators; larger only for explicitly supported upload/complex payload paths).
 - Reject oversized requests before parsing, with deterministic 413 response.
-- Validate JSON content type and schema; reject unknown fields where appropriate.
+- Validate strict route schemas and reject unknown fields where appropriate.
 - Add malformed JSON, oversize, deeply nested, and type-confusion tests.
 - Ensure document/file upload routes use streaming and explicit storage policy rather than JSON body exceptions.
 
