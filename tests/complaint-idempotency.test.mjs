@@ -62,6 +62,8 @@ class FakeD1 {
             if(this.complaints.has(p[0]))throw new Error("UNIQUE_COMPLAINT_ID");
             this.complaints.set(p[0],{id:p[0],client_type:p[1],client_id:p[2],company_id:p[3],mission_id:p[4],category:p[5],severity:p[6],description:p[7],resolution_case_id:null});
           }
+        }else if(sql.startsWith("UPDATE")){
+          this.run(sql,p);
         }else{
           throw new Error("Unexpected batch statement: "+sql);
         }
