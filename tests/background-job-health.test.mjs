@@ -53,7 +53,8 @@ test("summarizes queue counts and flags stale, failed, exhausted and due work wi
   assert.ok(r.attention.includes("STALE_RUNNING_JOBS"));
   assert.ok(r.attention.includes("FAILED_JOBS"));
   const serialized=JSON.stringify(r);
-  for(const secret of ["due","future","stale","unlocked","provider","failed","done","secret","payload_json","last_error"]) assert.equal(serialized.includes(secret),false);
+  for(const id of ["due","future","exhausted","stale","unlocked","provider","failed","done"]) assert.equal(serialized.includes(JSON.stringify(id)),false);
+  for(const secret of ["never expose","payload_json","last_error","job_type"]) assert.equal(serialized.includes(secret),false);
 });
 
 test("future pending work and completed jobs do not create backlog flags",async()=>{
