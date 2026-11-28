@@ -13,8 +13,11 @@ on:
     branches: [main]
     paths:
       - 'docs/compliance/official-source-register-*.json'
+      - 'docs/compliance/territory-activity-matrix-*.json'
       - 'src/nexus-compliance-source-register.js'
+      - 'src/nexus-compliance-territory-matrix.js'
       - 'tests/nexus-compliance-source-register.test.mjs'
+      - 'tests/nexus-compliance-territory-matrix.test.mjs'
 jobs:
   metadata-only-guard:
     runs-on: ubuntu-latest
