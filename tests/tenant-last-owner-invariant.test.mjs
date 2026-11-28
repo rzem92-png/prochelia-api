@@ -24,7 +24,7 @@ function dbFixture() {
   return db;
 }
 
-test("last active owner cannot be revoked, suspended, downgraded, moved or deleted", () => {
+test("last active owner cannot be revoked, suspended, downgraded or deleted", () => {
   const db = dbFixture();
   for (const sql of [
     "UPDATE tenant_memberships SET status='REVOKED', revoked_at=CURRENT_TIMESTAMP WHERE id='m1'",
@@ -40,9 +40,15 @@ test("last active owner cannot be revoked, suspended, downgraded, moved or delet
     "UPDATE tenant_memberships SET status='REVOKED', revoked_at=CURRENT_TIMESTAMP WHERE id='m2'",
     "UPDATE tenant_memberships SET status='SUSPENDED' WHERE id='m2'",
     "UPDATE tenant_memberships SET role='ADMIN' WHERE id='m2'",
-    "UPDATE tenant_memberships SET tenant_id='t2' WHERE id='m2'",
     "DELETE FROM tenant_memberships WHERE id='m2'"
   ]) assert.throws(() => db.exec(sql), /TENANT_LAST_ACTIVE_OWNER_REQUIRED/);
+});
+
+
+test("tenant membership identity cannot be reassigned to another tenant or user", () => {
+  const db = dbFixture();
+  assert.throws(() => db.exec("UPDATE tenant_memberships SET tenant_id='t2' WHERE id='m2'"), /TENANT_MEMBERSHIP_IDENTITY_IMMUTABLE/);
+  assert.throws(() => db.exec("UPDATE tenant_memberships SET user_id='u3' WHERE id='m2'"), /TENANT_MEMBERSHIP_IDENTITY_IMMUTABLE/);
 });
 
 test("last-owner protection allows removal when another active owner remains", () => {
