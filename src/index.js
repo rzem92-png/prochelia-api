@@ -1830,6 +1830,7 @@ async function complaintCreate(request, env) {
     if(value.clientId)clientProfile=await env.DB.prepare('SELECT id FROM clients WHERE id=? LIMIT 1').bind(value.clientId).first();
     if(value.companyId)companyProfile=await env.DB.prepare('SELECT id,kind,status FROM business_profiles WHERE id=? AND status=? LIMIT 1').bind(value.companyId,'active').first();
     if(value.missionId)mission=await env.DB.prepare('SELECT id,client_id,intervenant_id FROM missions WHERE id=? LIMIT 1').bind(value.missionId).first();
+    if(mission&&!clientProfile)clientProfile=await env.DB.prepare('SELECT id FROM clients WHERE id=? LIMIT 1').bind(mission.client_id).first();
   }
   const scopeResult=resolveComplaintScope(actor,value,{clientProfile,companyProfile,mission});
   if(!scopeResult.ok)return json({ok:false,error:scopeResult.error,version:VERSION},scopeResult.status);
