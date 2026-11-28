@@ -149,3 +149,23 @@ test("bounded JSON reader enforces declared and streamed payload size", () => {
   assert.match(reader, /reader\.cancel/);
   assert.match(reader, /total > maxBytes/);
 });
+
+test("client actor identity must exactly match the fetched profile user_id", () => {
+  const draft = validateComplaintDraft(validClientDraft, "client", NOW).normalized;
+  assert.equal(resolveComplaintScope(client, draft, { clientProfile: { id: "client-7", user_id: null } }).error, "CLIENT_PROFILE_ACTOR_MISMATCH");
+  assert.equal(resolveComplaintScope({ role: "client" }, draft, { clientProfile: profile }).error, "CLIENT_PROFILE_ACTOR_MISMATCH");
+});
+
+test("manager scope rejects mixed client/company identities and inactive company profiles", () => {
+  const mixed = validateComplaintDraft({ ...validClientDraft, client_id: "client-7", company_id: "company-1" }, "gerante", NOW).normalized;
+  assert.equal(resolveComplaintScope({ id: "manager-1", role: "gerante" }, mixed, { clientProfile: profile, companyProfile: { id: "company-1", status: "active" } }).error, "COMPLAINT_SCOPE_CONFLICT");
+  const companyOnly = validateComplaintDraft({ ...validClientDraft, company_id: "company-1" }, "gerante", NOW).normalized;
+  assert.equal(resolveComplaintScope({ id: "manager-1", role: "gerante" }, companyOnly, { companyProfile: { id: "company-1", status: "pending" } }).error, "COMPANY_PROFILE_NOT_ACTIVE");
+});
+
+test("manager mission scope requires a verified client profile and matches mission owner", () => {
+  const missionDraft = validateComplaintDraft({ ...validClientDraft, mission_id: "mission-1" }, "gerante", NOW).normalized;
+  assert.equal(resolveComplaintScope({ id: "manager-1", role: "gerante" }, missionDraft, { mission: { id: "mission-1", client_id: "client-7" } }).error, "MISSION_CLIENT_PROFILE_NOT_FOUND");
+  assert.equal(resolveComplaintScope({ id: "manager-1", role: "gerante" }, missionDraft, { mission: { id: "mission-1", client_id: "client-7" }, clientProfile: { id: "other-client" } }).error, "MISSION_CLIENT_SCOPE_MISMATCH");
+  assert.equal(resolveComplaintScope({ id: "manager-1", role: "gerante" }, missionDraft, { mission: { id: "mission-1", client_id: "client-7" }, clientProfile: profile }).ok, true);
+});
